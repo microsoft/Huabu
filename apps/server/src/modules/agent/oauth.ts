@@ -1,20 +1,15 @@
 /**
- * GitHub Copilot OAuth — thin wrapper around pi-ai's OAuth implementation.
- *
- * Delegates the device code flow, token refresh, and request-auth derivation
- * to pi-ai's public GitHub Copilot provider (`provider.auth.oauth`).
- * Credentials use the runtime SecretStore.
+ * GitHub Copilot OAuth — delegates login, token refresh, and logout to
+ * pi-ai's `Models` manager (see {@link getPiModels}), which owns the
+ * CredentialStore and runs OAuth refresh under a per-provider lock.
+ * Credentials live in the runtime SecretStore.
  */
 
 import { getModels } from '@earendil-works/pi-ai/compat';
-import { githubCopilotProvider } from '@earendil-works/pi-ai/providers/github-copilot';
 
+import { getPiModels } from './pi-models.js';
 import { SECRET_IDS } from '../../security/secret-ids.js';
-import {
-  getPersistedSecret,
-  getSecret,
-  setSecret,
-} from '../../security/secret-store.js';
+import { getPersistedSecret, getSecret } from '../../security/secret-store.js';
 import { getLogger } from '../../utils/logger.js';
 
 import type {
@@ -22,30 +17,12 @@ import type {
   AuthEvent,
   AuthInteraction,
   AuthPrompt,
+  Credential,
   Model,
-  OAuthAuth,
   OAuthCredential,
 } from '@earendil-works/pi-ai';
 
 const log = getLogger('oauth');
-
-/**
- * The GitHub Copilot OAuth flow, sourced from pi-ai's public provider factory.
- * `provider.auth.oauth` is a lazy wrapper that loads the real implementation on
- * first use, so building the provider here is cheap. Memoized so repeated
- * refresh/login calls reuse the same lazy loader.
- */
-let cachedCopilotOAuth: OAuthAuth | undefined;
-function copilotOAuth(): OAuthAuth {
-  if (!cachedCopilotOAuth) {
-    const oauth = githubCopilotProvider().auth.oauth;
-    if (!oauth) {
-      throw new Error('GitHub Copilot OAuth flow is unavailable in pi-ai.');
-    }
-    cachedCopilotOAuth = oauth;
-  }
-  return cachedCopilotOAuth;
-}
 
 /**
  * Enterprise GHE domain stored on the credential, normalized to a hostname.
@@ -96,18 +73,6 @@ export function loadCredentials(): OAuthCredential | null {
   return null;
 }
 
-export async function saveCredentials(creds: OAuthCredential): Promise<void> {
-  await setSecret(SECRET_IDS.copilotOAuth, JSON.stringify(creds));
-}
-
-async function clearCredentials(): Promise<void> {
-  // Nothing persisted (e.g. env-only headless mode) → logout is a no-op
-  // success. Otherwise a deletion failure must surface so the client is
-  // never told "logged out" while a valid refresh token remains on disk.
-  if (getPersistedSecret(SECRET_IDS.copilotOAuth) === null) return;
-  await setSecret(SECRET_IDS.copilotOAuth, null);
-}
-
 // ==================== Device Code Flow ====================
 
 interface PendingLoginSession {
@@ -115,7 +80,9 @@ interface PendingLoginSession {
   userCode: string | null;
   verificationUri: string | null;
   interval: number;
-  promise: Promise<OAuthCredential>;
+  promise: Promise<Credential>;
+  /** Diagnostic: wall-clock ms when the flow started. */
+  startedAt: number;
 }
 
 /** In-flight login state — captures the abort controller and auth info for the frontend. */
@@ -143,6 +110,7 @@ export async function startDeviceCodeFlow(): Promise<{
     verificationUri: null,
     interval: 5,
     promise: null!,
+    startedAt: Date.now(),
   };
 
   // Promise that resolves once onDeviceCode fires with the device code,
@@ -159,6 +127,16 @@ export async function startDeviceCodeFlow(): Promise<{
       // for the public github.com flow.
       prompt: async (_prompt: AuthPrompt) => '',
       notify: (event: AuthEvent) => {
+        // Diagnostic: log the full login timeline (device_code → progress
+        // "Enabling models..." → complete) so we can see where time goes.
+        log.debug(
+          {
+            event: event.type,
+            elapsedMs: Date.now() - session.startedAt,
+            ...(event.type === 'progress' ? { message: event.message } : {}),
+          },
+          'copilot login event',
+        );
         if (event.type !== 'device_code') return;
         codeReceived = true;
         session.userCode = event.userCode;
@@ -169,7 +147,11 @@ export async function startDeviceCodeFlow(): Promise<{
         resolveCode();
       },
     };
-    const loginPromise = copilotOAuth().login(interaction);
+    const loginPromise = getPiModels().login(
+      'github-copilot',
+      'oauth',
+      interaction,
+    );
 
     session.promise = loginPromise;
 
@@ -200,6 +182,10 @@ export async function startDeviceCodeFlow(): Promise<{
       ),
     ),
   ]).catch((err) => {
+    log.error(
+      { err },
+      'copilot device-code flow failed before code was issued',
+    );
     abortController.abort();
     pendingLogin = null;
     throw err;
@@ -237,8 +223,12 @@ export async function pollDeviceCode(): Promise<
   ]);
 
   if (result.status === 'complete') {
-    // Save credentials and clean up
-    await saveCredentials(result.creds);
+    // The credential was already persisted by Models.login via the
+    // CredentialStore; just clean up the pending session.
+    log.debug(
+      { elapsedMs: Date.now() - pendingLogin.startedAt },
+      'copilot login complete',
+    );
     pendingLogin = null;
     return 'complete';
   }
@@ -251,11 +241,10 @@ export async function pollDeviceCode(): Promise<
 /**
  * Get a valid Copilot API key, refreshing if expired.
  *
- * The new pi-ai `OAuthAuth` splits refresh (`refresh`) from request-auth
- * derivation (`toAuth`), so expiry detection lives here: an unexpired
- * credential is used as-is, otherwise its refresh token is exchanged and the
- * rotated credential persisted. The Copilot API key is the credential's
- * access token.
+ * Delegates to pi-ai's `Models.getAuth`, which resolves the provider's
+ * OAuth credential and runs a locked refresh when the access token has
+ * expired, persisting the rotated credential. The Copilot API key is the
+ * resolved access token.
  *
  * Errors (network failure, refresh-token expiry, malformed persisted creds,
  * etc.) are logged before being swallowed so the caller — which only knows
@@ -264,39 +253,29 @@ export async function pollDeviceCode(): Promise<
  * Settings." message.
  */
 export async function getCopilotApiKey(): Promise<string | null> {
-  const creds = loadCredentials();
-  if (!creds) {
-    log.warn('No persisted GitHub Copilot credentials found.');
-    return null;
-  }
-
+  const startedAt = Date.now();
   try {
-    const fresh = await ensureFreshCredentials(creds);
-    return fresh.access;
+    const result = await getPiModels().getAuth('github-copilot');
+    const elapsedMs = Date.now() - startedAt;
+    const key = result?.auth.apiKey ?? null;
+    if (!key) {
+      log.warn({ elapsedMs }, 'No usable GitHub Copilot credentials.');
+      return null;
+    }
+    // Diagnostic: per-call timing so a slow first-turn getAuth (lazy OAuth
+    // load / token refresh) is visible next to the SSE Connection error.
+    log.debug(
+      { elapsedMs, source: result?.source },
+      'Resolved Copilot API key',
+    );
+    return key;
   } catch (err) {
-    log.error({ err }, 'getCopilotApiKey failed');
+    log.error(
+      { err, elapsedMs: Date.now() - startedAt },
+      'getCopilotApiKey failed',
+    );
     return null;
   }
-}
-
-/**
- * Return `creds` when its access token is still valid, otherwise exchange the
- * refresh token via pi-ai and persist the rotated credential. A 60s skew
- * guards against using a token that expires mid-request.
- */
-async function ensureFreshCredentials(
-  creds: OAuthCredential,
-): Promise<OAuthCredential> {
-  const SKEW_MS = 60_000;
-  if (
-    typeof creds.expires === 'number' &&
-    creds.expires - SKEW_MS > Date.now()
-  ) {
-    return creds;
-  }
-  const refreshed = (await copilotOAuth().refresh(creds)) as OAuthCredential;
-  await saveCredentials(refreshed);
-  return refreshed;
 }
 
 /**
@@ -501,5 +480,8 @@ export async function logoutOAuth(): Promise<void> {
     pendingLogin.abortController.abort();
     pendingLogin = null;
   }
-  await clearCredentials();
+  // Nothing persisted (e.g. env-only headless / read-only store) → logout is a
+  // no-op success; skip the delete a non-writable store would reject.
+  if (getPersistedSecret(SECRET_IDS.copilotOAuth) === null) return;
+  await getPiModels().logout('github-copilot');
 }
