@@ -22,7 +22,7 @@ import {
   getModel,
   getModels,
   getProviders,
-} from '@earendil-works/pi-ai';
+} from '@earendil-works/pi-ai/compat';
 
 import {
   DEFAULT_AZURE_IMAGE_API_VERSION,
@@ -57,6 +57,7 @@ import type {
   Model,
   ProviderStreamOptions,
 } from '@earendil-works/pi-ai';
+import type { BuiltinProvider } from '@earendil-works/pi-ai/compat';
 import type {
   ImageModelFamily,
   LLMConfig,
@@ -86,7 +87,7 @@ const OPENAI_CODEX_MODEL_ADDITIONS = [
  * these entries only make its current public model IDs selectable in Huabu.
  */
 function getProviderModels(providerId: KnownProvider): Model<Api>[] {
-  const models = getModels(providerId) as Model<Api>[];
+  const models = getModels(providerId as BuiltinProvider) as Model<Api>[];
   if (providerId !== 'openai-codex') return models;
 
   const template = models.find((model) => model.id === 'gpt-5.5');
@@ -482,7 +483,7 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
       const builtIn =
         getProviderModels(cfg.provider as KnownProvider).find(
           (model) => model.id === cfg.model,
-        ) ?? getModel(cfg.provider as KnownProvider, cfg.model as never);
+        ) ?? getModel(cfg.provider as BuiltinProvider, cfg.model as never);
       if (builtIn) {
         let model = builtIn as Model<Api>;
         if (cfg.baseUrl) {

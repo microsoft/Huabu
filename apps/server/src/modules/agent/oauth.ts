@@ -1,16 +1,13 @@
 /**
  * GitHub Copilot OAuth — thin wrapper around pi-ai's OAuth implementation.
  *
- * Delegates the device code flow, token refresh, and model modification
- * to @earendil-works/pi-ai/oauth. Credentials use the runtime SecretStore.
+ * Delegates the device code flow, token refresh, and request-auth derivation
+ * to pi-ai's public GitHub Copilot provider (`provider.auth.oauth`).
+ * Credentials use the runtime SecretStore.
  */
 
-import { getModels } from '@earendil-works/pi-ai';
-import {
-  getOAuthApiKey,
-  getOAuthProvider,
-  loginGitHubCopilot,
-} from '@earendil-works/pi-ai/oauth';
+import { getModels } from '@earendil-works/pi-ai/compat';
+import { githubCopilotProvider } from '@earendil-works/pi-ai/providers/github-copilot';
 
 import { SECRET_IDS } from '../../security/secret-ids.js';
 import {
@@ -20,26 +17,86 @@ import {
 } from '../../security/secret-store.js';
 import { getLogger } from '../../utils/logger.js';
 
-import type { OAuthCredentials } from '@earendil-works/pi-ai';
-import type { Api, KnownProvider, Model } from '@earendil-works/pi-ai';
+import type {
+  Api,
+  AuthEvent,
+  AuthInteraction,
+  AuthPrompt,
+  Model,
+  OAuthAuth,
+  OAuthCredential,
+} from '@earendil-works/pi-ai';
 
 const log = getLogger('oauth');
 
+/**
+ * The GitHub Copilot OAuth flow, sourced from pi-ai's public provider factory.
+ * `provider.auth.oauth` is a lazy wrapper that loads the real implementation on
+ * first use, so building the provider here is cheap. Memoized so repeated
+ * refresh/login calls reuse the same lazy loader.
+ */
+let cachedCopilotOAuth: OAuthAuth | undefined;
+function copilotOAuth(): OAuthAuth {
+  if (!cachedCopilotOAuth) {
+    const oauth = githubCopilotProvider().auth.oauth;
+    if (!oauth) {
+      throw new Error('GitHub Copilot OAuth flow is unavailable in pi-ai.');
+    }
+    cachedCopilotOAuth = oauth;
+  }
+  return cachedCopilotOAuth;
+}
+
+/**
+ * Enterprise GHE domain stored on the credential, normalized to a hostname.
+ * `undefined` for the public github.com flow.
+ */
+function copilotEnterpriseDomain(creds: OAuthCredential): string | undefined {
+  const raw = (creds as { enterpriseUrl?: unknown }).enterpriseUrl;
+  if (typeof raw !== 'string' || !raw) return undefined;
+  try {
+    const url = raw.includes('://') ? new URL(raw) : new URL(`https://${raw}`);
+    return url.hostname;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Derive the credential-specific Copilot API base URL from an access token's
+ * `proxy-ep`. Mirrors pi-ai's internal `getBaseUrlFromToken` so the sync
+ * model-override path ({@link applyCopilotModelOverrides}) does not need to
+ * await the async `toAuth`. Phase C can replace this with `Models.getAuth`.
+ */
+function copilotBaseUrlFromToken(
+  token: string,
+  enterpriseDomain?: string,
+): string {
+  const match = token.match(/proxy-ep=([^;]+)/);
+  if (match) {
+    return `https://${match[1].replace(/^proxy\./, 'api.')}`;
+  }
+  if (enterpriseDomain) return `https://copilot-api.${enterpriseDomain}`;
+  return 'https://api.individual.githubcopilot.com';
+}
+
 // ==================== Persisted Credentials ====================
 
-export function loadCredentials(): OAuthCredentials | null {
+export function loadCredentials(): OAuthCredential | null {
   try {
     const raw = getSecret(SECRET_IDS.copilotOAuth);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as OAuthCredentials;
-    return parsed.refresh && parsed.access ? parsed : null;
+    const parsed = JSON.parse(raw) as Partial<OAuthCredential>;
+    if (!parsed.refresh || !parsed.access) return null;
+    // Persisted JSON predates the type-tagged credential shape; ensure the tag.
+    return { ...parsed, type: 'oauth' } as OAuthCredential;
   } catch {
     // Corrupted — fall through
   }
   return null;
 }
 
-export async function saveCredentials(creds: OAuthCredentials): Promise<void> {
+export async function saveCredentials(creds: OAuthCredential): Promise<void> {
   await setSecret(SECRET_IDS.copilotOAuth, JSON.stringify(creds));
 }
 
@@ -58,7 +115,7 @@ interface PendingLoginSession {
   userCode: string | null;
   verificationUri: string | null;
   interval: number;
-  promise: Promise<OAuthCredentials>;
+  promise: Promise<OAuthCredential>;
 }
 
 /** In-flight login state — captures the abort controller and auth info for the frontend. */
@@ -93,26 +150,26 @@ export async function startDeviceCodeFlow(): Promise<{
   // (e.g. github.com is unreachable — pi-ai will throw a fetch error).
   let codeReceived = false;
   const userCodeReady = new Promise<void>((resolveCode, rejectCode) => {
-    // loginGitHubCopilot is async and will call onDeviceCode when the device code is ready
-    const loginPromise = loginGitHubCopilot({
-      onDeviceCode: (info) => {
+    // login() is async and notifies a `device_code` event once the device
+    // code is ready. It resolves with the final credential after the user
+    // completes the flow (it polls internally).
+    const interaction: AuthInteraction = {
+      signal: abortController.signal,
+      // pi-ai's only prompt is the GitHub Enterprise domain — return empty
+      // for the public github.com flow.
+      prompt: async (_prompt: AuthPrompt) => '',
+      notify: (event: AuthEvent) => {
+        if (event.type !== 'device_code') return;
         codeReceived = true;
-        session.userCode = info.userCode;
-        session.verificationUri = info.verificationUri;
-        if (typeof info.intervalSeconds === 'number') {
-          session.interval = info.intervalSeconds;
+        session.userCode = event.userCode;
+        session.verificationUri = event.verificationUri;
+        if (typeof event.intervalSeconds === 'number') {
+          session.interval = event.intervalSeconds;
         }
         resolveCode();
       },
-      onPrompt: async () => {
-        // pi-ai asks for enterprise domain — return empty for github.com
-        return '';
-      },
-      onProgress: () => {
-        // Optional progress updates, ignored
-      },
-      signal: abortController.signal,
-    });
+    };
+    const loginPromise = copilotOAuth().login(interaction);
 
     session.promise = loginPromise;
 
@@ -193,13 +250,18 @@ export async function pollDeviceCode(): Promise<
 
 /**
  * Get a valid Copilot API key, refreshing if expired.
- * Delegates expiry detection and token refresh to pi-ai's getOAuthApiKey.
  *
- * Errors from pi-ai (network failure, refresh-token expiry, malformed
- * persisted creds, etc.) are logged before being swallowed so the caller
- * — which only knows about "got a key / didn't" — can still surface a
- * useful diagnostic via the server logs. Returning `null` then triggers
- * the upstream "Please log in via Settings." message.
+ * The new pi-ai `OAuthAuth` splits refresh (`refresh`) from request-auth
+ * derivation (`toAuth`), so expiry detection lives here: an unexpired
+ * credential is used as-is, otherwise its refresh token is exchanged and the
+ * rotated credential persisted. The Copilot API key is the credential's
+ * access token.
+ *
+ * Errors (network failure, refresh-token expiry, malformed persisted creds,
+ * etc.) are logged before being swallowed so the caller — which only knows
+ * about "got a key / didn't" — can still surface a useful diagnostic via the
+ * server logs. Returning `null` then triggers the upstream "Please log in via
+ * Settings." message.
  */
 export async function getCopilotApiKey(): Promise<string | null> {
   const creds = loadCredentials();
@@ -209,16 +271,8 @@ export async function getCopilotApiKey(): Promise<string | null> {
   }
 
   try {
-    const result = await getOAuthApiKey('github-copilot', {
-      'github-copilot': creds,
-    });
-    if (!result) {
-      log.warn('pi-ai getOAuthApiKey returned no result for github-copilot.');
-      return null;
-    }
-    // Persist potentially refreshed credentials
-    await saveCredentials(result.newCredentials);
-    return result.apiKey;
+    const fresh = await ensureFreshCredentials(creds);
+    return fresh.access;
   } catch (err) {
     log.error({ err }, 'getCopilotApiKey failed');
     return null;
@@ -226,15 +280,43 @@ export async function getCopilotApiKey(): Promise<string | null> {
 }
 
 /**
- * Apply pi-ai's modifyModels to set the correct baseUrl and headers on Copilot models.
- * Uses dynamic provider lookup to support future OAuth providers without hardcoding.
+ * Return `creds` when its access token is still valid, otherwise exchange the
+ * refresh token via pi-ai and persist the rotated credential. A 60s skew
+ * guards against using a token that expires mid-request.
+ */
+async function ensureFreshCredentials(
+  creds: OAuthCredential,
+): Promise<OAuthCredential> {
+  const SKEW_MS = 60_000;
+  if (
+    typeof creds.expires === 'number' &&
+    creds.expires - SKEW_MS > Date.now()
+  ) {
+    return creds;
+  }
+  const refreshed = (await copilotOAuth().refresh(creds)) as OAuthCredential;
+  await saveCredentials(refreshed);
+  return refreshed;
+}
+
+/**
+ * Set the credential-specific Copilot proxy `baseUrl` on each model.
+ *
+ * pi-ai's `OAuthAuth.toAuth` derives this baseUrl (plus the access-token api
+ * key) but is async; this sync path only needs the baseUrl, which is a pure
+ * function of the stored access token, so we derive it directly via
+ * {@link copilotBaseUrlFromToken}. Headers are applied separately from the
+ * static registry ({@link getCopilotStaticHeaders}), matching the previous
+ * `modifyModels` behavior which only rewrote `baseUrl`.
  */
 export function applyCopilotModelOverrides(models: Model<Api>[]): Model<Api>[] {
   const creds = loadCredentials();
-  if (!creds) return models;
-  const provider = getOAuthProvider('github-copilot');
-  if (!provider?.modifyModels) return models;
-  return provider.modifyModels(models, creds);
+  if (!creds?.access) return models;
+  const baseUrl = copilotBaseUrlFromToken(
+    creds.access,
+    copilotEnterpriseDomain(creds),
+  );
+  return models.map((model) => ({ ...model, baseUrl }));
 }
 
 /**
@@ -248,7 +330,7 @@ export function applyCopilotModelOverrides(models: Model<Api>[]): Model<Api>[] {
  * Returns an empty object if no static Copilot model is available.
  */
 export function getCopilotStaticHeaders(): Record<string, string> {
-  const seed = getModels('github-copilot' as KnownProvider)[0] as
+  const seed = getModels('github-copilot')[0] as
     | (Model<Api> & { headers?: Record<string, string> })
     | undefined;
   return seed?.headers ? { ...seed.headers } : {};
@@ -293,9 +375,7 @@ async function resolveCopilotRequestContext(): Promise<{
   const apiKey = await getCopilotApiKey();
   if (!apiKey) return null;
 
-  const seed = getModels('github-copilot' as KnownProvider)[0] as
-    | Model<Api>
-    | undefined;
+  const seed = getModels('github-copilot')[0] as Model<Api> | undefined;
   if (!seed) return null;
 
   const [resolved] = applyCopilotModelOverrides([seed]);
