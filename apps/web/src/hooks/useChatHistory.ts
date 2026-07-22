@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { createId } from '@sediment/shared';
 
 import { agentApi } from '@/api/agent';
+import { isActivelyViewingQuestion } from '@/hooks/useActivelyViewingQuestion';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 
@@ -275,12 +276,16 @@ export function useChatHistory(
             // finish, the originating `useQuestionRunner` callback may
             // never fire (its POST stream was superseded / dropped). Drive
             // the question node to `done` here so the status badge + chat
-            // affordance reappear. The user has this thread open, so the
-            // completion counts as viewed.
+            // affordance reappear. Count it as viewed only if the user is
+            // actively watching — this thread is open AND the chat panel is
+            // expanded; a collapsed panel leaves the answer unread.
+            const stillViewing = isActivelyViewingQuestion({
+              threadId: ownerThreadId,
+            });
             rescueQuestionNode(ownerThreadId, {
               status: 'done',
               errorMessage: undefined,
-              viewed: true,
+              ...(stillViewing ? { viewed: true } : {}),
             });
           },
         },

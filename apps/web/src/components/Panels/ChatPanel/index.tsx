@@ -3,6 +3,8 @@ import { ArrowLeft, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { getQuestionNodeStatus } from '@sediment/shared';
+
 import {
   setAcpSessionConfigOption,
   setAcpSessionMode,
@@ -80,11 +82,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // for legacy nodes that pre-date the `@` picker.
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
   const viewingQuestionNodeId = viewingQuestionThread?.nodeId;
-  // Compose = the initial authoring of a freshly-created question node:
-  // the binding is still mutable and the mode follows the user's inline
-  // pick (`lastAction`) rather than the node's not-yet-written
-  // `agentMode`. Replay (already-run node) keeps deriving from the node.
-  const isComposingQuestion = viewingQuestionThread?.compose === true;
+  // "Composing" = the viewed question node has never been authored/run yet
+  // (its status is still `idle`), so the binding is still mutable and the mode
+  // follows the user's inline pick (`lastAction`) rather than the node's
+  // not-yet-written `agentMode`. Derived from the node itself — the single
+  // source of truth — rather than a stored `compose` flag. Replay (already-run
+  // node) keeps deriving from the node.
+  const isComposingQuestion = useCanvasStore((s) => {
+    if (!viewingQuestionNodeId) return false;
+    const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
+    return node ? getQuestionNodeStatus(node.data) === 'idle' : false;
+  });
   const questionReplayMode = useCanvasStore((s) => {
     if (!viewingQuestionNodeId) return undefined;
     const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);

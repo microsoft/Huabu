@@ -79,17 +79,14 @@ export interface ChatState {
    * When set, the chat panel is viewing a question node's conversation thread
    * instead of the normal canvas chat.
    *
-   * `compose: true` marks the *initial* composition of a freshly-created
-   * question node: the thread is still empty, the agent binding is mutable
-   * (the inline agent selector is editable), and the first message the user
-   * sends authors the node's `content` + locks its binding. Without the flag
-   * the panel is in replay mode for an already-run node (binding locked,
-   * mode derived from the node).
+   * Whether this is the *initial* composition of a freshly-created node vs a
+   * replay of an already-run one is NOT stored here — it is derived from the
+   * node's own status (`idle` = composing). That keeps a single source of
+   * truth (the node) and avoids the stored flag drifting out of sync.
    */
   viewingQuestionThread: {
     nodeId: string;
     threadId: string;
-    compose?: boolean;
   } | null;
 
   questionReplayByCanvas: Record<
@@ -666,7 +663,7 @@ export const useChatStore = create<ChatState>()(
         const isAlreadyViewing = currentViewing !== null;
 
         set({
-          viewingQuestionThread: { nodeId, threadId, compose: true },
+          viewingQuestionThread: { nodeId, threadId },
           threadId,
           agentBinding: initialBinding,
           messagesByThread: messagesByThread[threadId]
