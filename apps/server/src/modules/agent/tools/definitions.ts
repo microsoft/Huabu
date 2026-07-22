@@ -2,28 +2,28 @@
  * Tool Definitions for the Unified Agent
  *
  * All tools the AI can call across ask, operate, and sketch
- * scopes. Each tool is a pi-ai Tool with a TypeBox schema for
- * validation.
+ * scopes. Each tool is a pi-ai Tool with a JSON Schema for validation.
  *
  * Definitions here are pure schema + description pairs. The runnable
  * `AgentTool` form (with `execute` closures bound to a request-scoped
  * `canvasId`) is built by `buildToolsForScope` in `./index.ts`.
  *
- * Building-block schemas (node / edge / command primitives) live under
- * `./schemas/`. This file only composes them into the per-tool
- * `*ParamsSchema` objects and pairs each with a description.
+ * Canvas query and command schemas come from the canonical Zod contracts in
+ * `@sediment/shared` and are adapted to pi-ai's TypeBox-compatible shape.
+ * Other tools continue to use TypeBox directly.
  */
 
 import { Type } from '@earendil-works/pi-ai';
 
-import { AGENT_CANVAS_COMMAND_TYPES } from '@sediment/shared';
-
-import { AgentCanvasCommandSchema } from './schemas/command.js';
 import {
-  EdgeDirectionSchema,
-  EdgeLineStyleSchema,
-  EdgeLineTypeSchema,
-} from './schemas/edge.js';
+  AGENT_CANVAS_COMMAND_TYPES,
+  agentCanvasCommandsParamsSchema,
+  getSpaceOutlineQueryParamsSchema,
+  inspectEdgesQueryParamsSchema,
+  inspectNodesQueryParamsSchema,
+} from '@sediment/shared';
+
+import { zodToToolSchema } from './zod-tool-schema.js';
 
 import type { ToolExecutionMode } from '@earendil-works/pi-agent-core';
 import type { Tool } from '@earendil-works/pi-ai';
@@ -104,20 +104,9 @@ export const webSearchTool: ToolDefinition = {
 // Every canvas tool is implicitly scoped to the current request's canvas
 // — there is no `canvasId` argument.
 
-export const getCanvasOutlineParamsSchema = Type.Object({
-  includePreviews: Type.Optional(
-    Type.Boolean({
-      description:
-        'Attach text scan hints to every node: `summary` (authored abstract, when present) and `preview` (first ~120 chars of the body). Default: false. Skip unless you need a quick overview of contents — for full text use read on "nodes/*.md".',
-    }),
-  ),
-  includeStyle: Type.Optional(
-    Type.Boolean({
-      description:
-        "Attach each node's visual style (accent color token + text styling). Default: false. Set true only for visual / styling tasks.",
-    }),
-  ),
-});
+export const getCanvasOutlineParamsSchema = zodToToolSchema(
+  getSpaceOutlineQueryParamsSchema,
+);
 
 export const getCanvasOutlineTool: ToolDefinition = {
   name: 'get_space_outline',
@@ -126,118 +115,9 @@ export const getCanvasOutlineTool: ToolDefinition = {
   parameters: getCanvasOutlineParamsSchema,
 };
 
-export const inspectNodesParamsSchema = Type.Object({
-  // ── Attribute predicates ──
-  ids: Type.Optional(
-    Type.Array(Type.String(), {
-      description:
-        'Match these node IDs explicitly. Combinable with other filters.',
-    }),
-  ),
-  byType: Type.Optional(
-    Type.Union([Type.String(), Type.Array(Type.String())], {
-      description:
-        'Filter by node type, e.g. "image" or ["image","pdf"]. Common types: note, text, image, pdf, web, video, frame, question.',
-    }),
-  ),
-  byParent: Type.Optional(
-    Type.Union([Type.String(), Type.Null()], {
-      description:
-        'Filter by parent (frame) ID. Pass null to match top-level nodes only.',
-    }),
-  ),
-  labelPattern: Type.Optional(
-    Type.String({
-      description:
-        'Regex matched against the node label (data.label). For full-text search inside node bodies use the grep tool instead.',
-    }),
-  ),
-  // ── Spatial predicates ──
-  inRect: Type.Optional(
-    Type.Object(
-      {
-        x: Type.Number(),
-        y: Type.Number(),
-        width: Type.Number(),
-        height: Type.Number(),
-      },
-      {
-        description:
-          'Match nodes whose center lies inside this rectangle (absolute coordinates).',
-      },
-    ),
-  ),
-  nearNode: Type.Optional(
-    Type.Object(
-      {
-        id: Type.String(),
-        maxDistance: Type.Optional(Type.Number()),
-        maxCount: Type.Optional(Type.Number()),
-        sameParent: Type.Optional(Type.Boolean()),
-      },
-      {
-        description:
-          "Find nodes near the given node by edge-to-edge distance. Each match carries derived `distance`, `centerDistance`, `direction`. `sameParent` restricts to the target's siblings.",
-      },
-    ),
-  ),
-  nearPoint: Type.Optional(
-    Type.Object(
-      {
-        x: Type.Number(),
-        y: Type.Number(),
-        maxDistance: Type.Optional(Type.Number()),
-        maxCount: Type.Optional(Type.Number()),
-      },
-      {
-        description:
-          'Find nodes near a point. Each match carries derived `distance`, `centerDistance`, `direction`.',
-      },
-    ),
-  ),
-  inSameClusterAs: Type.Optional(
-    Type.String({
-      description:
-        'Return the other nodes in the same spatial cluster as this node (excluding the node itself). Each match carries `clusterId`.',
-    }),
-  ),
-  // ── Topological predicates ──
-  connectedTo: Type.Optional(
-    Type.Object(
-      {
-        id: Type.String(),
-        depth: Type.Optional(
-          Type.Union([Type.Literal(1), Type.Literal(2)], {
-            description: 'Hop depth, 1 (direct neighbors) or 2. Default: 1.',
-          }),
-        ),
-      },
-      {
-        description:
-          "Find nodes connected to the given node via edges (the target node itself is excluded from results). Each match carries `edgeIds` and `hops`. To inspect an edge's direction / line style / stroke, pass those `edgeIds` to inspect_edges.",
-      },
-    ),
-  ),
-  // ── Output controls ──
-  sort: Type.Optional(
-    Type.Union(
-      [
-        Type.Literal('distance'),
-        Type.Literal('reading-order'),
-        Type.Literal('area'),
-      ],
-      {
-        description:
-          'Result ordering. Defaults to `distance` when nearNode/nearPoint is used, otherwise insertion order.',
-      },
-    ),
-  ),
-  limit: Type.Optional(
-    Type.Number({
-      description: 'Maximum number of nodes to return. Default: 50.',
-    }),
-  ),
-});
+export const inspectNodesParamsSchema = zodToToolSchema(
+  inspectNodesQueryParamsSchema,
+);
 
 export const inspectNodesTool: ToolDefinition = {
   name: 'inspect_nodes',
@@ -246,64 +126,9 @@ export const inspectNodesTool: ToolDefinition = {
   parameters: inspectNodesParamsSchema,
 };
 
-export const inspectEdgesParamsSchema = Type.Object({
-  // ── Identity / endpoint predicates ──
-  ids: Type.Optional(
-    Type.Array(Type.String(), {
-      description:
-        'Match these edge IDs explicitly. Pair with the `edgeIds` returned by `inspect_nodes({ connectedTo })` to fetch full styling for known edges.',
-    }),
-  ),
-  connectedTo: Type.Optional(
-    Type.String({
-      description: 'Match all edges incident to this node (source OR target).',
-    }),
-  ),
-  bySource: Type.Optional(
-    Type.String({ description: 'Match edges originating from this node.' }),
-  ),
-  byTarget: Type.Optional(
-    Type.String({ description: 'Match edges terminating at this node.' }),
-  ),
-  between: Type.Optional(
-    Type.Object(
-      { a: Type.String(), b: Type.String() },
-      {
-        description:
-          'Match edges connecting these two nodes (in either direction).',
-      },
-    ),
-  ),
-  // ── EdgeStyle predicates ──
-  byDirection: Type.Optional(
-    Type.Union([EdgeDirectionSchema, Type.Array(EdgeDirectionSchema)], {
-      description:
-        "Filter by arrow direction. Treats unset as 'none'. Use 'forward'/'backward'/'both' to find directed edges; 'none' for plain undirected lines.",
-    }),
-  ),
-  byLineStyle: Type.Optional(
-    Type.Union([EdgeLineStyleSchema, Type.Array(EdgeLineStyleSchema)], {
-      description:
-        "Filter by dash pattern. Treats unset as 'solid'. Useful for finding annotation edges (commonly dashed/dotted).",
-    }),
-  ),
-  byLineType: Type.Optional(
-    Type.Union([EdgeLineTypeSchema, Type.Array(EdgeLineTypeSchema)], {
-      description: "Filter by line shape. Treats unset as 'bezier'.",
-    }),
-  ),
-  byLabel: Type.Optional(
-    Type.String({
-      description:
-        'Case-insensitive substring match on the edge label. Edges with no label never match. Useful for finding e.g. all edges labelled "blocks" or "depends on".',
-    }),
-  ),
-  limit: Type.Optional(
-    Type.Number({
-      description: 'Maximum number of edges to return. Default: 50.',
-    }),
-  ),
-});
+export const inspectEdgesParamsSchema = zodToToolSchema(
+  inspectEdgesQueryParamsSchema,
+);
 
 export const inspectEdgesTool: ToolDefinition = {
   name: 'inspect_edges',
@@ -314,11 +139,9 @@ export const inspectEdgesTool: ToolDefinition = {
 
 // ==================== Canvas Commands ====================
 
-export const canvasCommandsParamsSchema = Type.Object({
-  commands: Type.Array(AgentCanvasCommandSchema, {
-    description: 'Array of Space commands to execute as a batch',
-  }),
-});
+export const canvasCommandsParamsSchema = zodToToolSchema(
+  agentCanvasCommandsParamsSchema,
+);
 
 export const canvasCommandsTool: ToolDefinition = {
   name: 'space_commands',

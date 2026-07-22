@@ -103,16 +103,7 @@ Design principles:
 4. **Truncation contract**: read tools return `count + truncated`, and add
    `total` only when the full set is cheap to obtain.
 
-`space_commands` covers 13 commands
-([schemas/command.ts](../../apps/server/src/modules/agent/tools/schemas/command.ts)):
-CREATE_NODES, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME,
-SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES,
-SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES,
-SET_FRAME_LAYOUT — the agent subset of
-[`CanvasCommand`](../../packages/shared/src/types/canvas/command.ts) (excluding
-the UI-only `SET_NODE_LOCKED / SET_NODE_SELECTION / CHANGE_NODE_TYPE`). Commands
-execute server-side, persist to disk, and return deltas; see
-[canvas-command-architecture.md](./canvas-command-architecture.md).
+`space_commands` covers 13 commands ([space-operations.ts](../../packages/shared/src/types/api/space-operations.ts)): CREATE_NODES, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES, SET_FRAME_LAYOUT — the agent subset of [`CanvasCommand`](../../packages/shared/src/types/canvas/command.ts) (excluding the UI-only `SET_NODE_LOCKED / SET_NODE_SELECTION / CHANGE_NODE_TYPE`). The canonical Zod contracts are converted to the JSON Schema shape expected by pi-ai in [zod-tool-schema.ts](../../apps/server/src/modules/agent/tools/zod-tool-schema.ts). Commands execute server-side, persist to disk, and return deltas; see [canvas-command-architecture.md](./canvas-command-architecture.md).
 
 ---
 
@@ -178,7 +169,7 @@ userInvokable`.
 
 To add / change a tool:
 
-1. Add the schema in `tools/schemas/` (skip if reusing existing atoms).
+1. Add canvas command/query contracts to `packages/shared/src/types/api/space-operations.ts`; add server-only tool schemas beside `tools/definitions.ts`.
 2. Add the def in `tools/definitions.ts` (schema + description + boundary
    notes), register it in `TOOL_REGISTRY`.
 3. Put the body in `tools/handlers/<name>.ts`; `throw` on failure.

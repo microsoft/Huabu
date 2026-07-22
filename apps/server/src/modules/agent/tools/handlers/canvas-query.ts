@@ -23,28 +23,24 @@ import {
 } from '../../../canvas/canvas-spatial.js';
 
 import type {
-  getCanvasOutlineParamsSchema,
-  inspectEdgesParamsSchema,
-  inspectNodesParamsSchema,
-} from '../definitions.js';
-import type { Static } from '@earendil-works/pi-ai';
+  GetSpaceOutlineQueryParams,
+  InspectEdgesQueryParams,
+  InspectNodesQueryParams,
+} from '@sediment/shared';
 
 // ---- Argument types ----
 //
-// Derived from the same TypeBox schemas we register with the LLM. The
-// schema marks `canvasId` Optional, but every handler runs after the
-// dispatcher's `resolveCanvasArgs` step, so we intersect a required
-// `canvasId` and skip a redundant nullish check inside the body.
+// Derived from the canonical shared Zod schemas registered with the LLM.
+// `canvasId` is host context rather than a tool argument, so handlers add it
+// after validation and skip a redundant nullish check inside the body.
 
-export type GetCanvasOutlineArgs = Static<
-  typeof getCanvasOutlineParamsSchema
-> & {
+export type GetCanvasOutlineArgs = GetSpaceOutlineQueryParams & {
   canvasId: string;
 };
-export type InspectNodesArgs = Static<typeof inspectNodesParamsSchema> & {
+export type InspectNodesArgs = InspectNodesQueryParams & {
   canvasId: string;
 };
-export type InspectEdgesArgs = Static<typeof inspectEdgesParamsSchema> & {
+export type InspectEdgesArgs = InspectEdgesQueryParams & {
   canvasId: string;
 };
 
