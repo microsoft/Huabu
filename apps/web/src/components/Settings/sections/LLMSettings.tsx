@@ -103,6 +103,20 @@ export const LLMSettings: React.FC = () => {
   const cancelOAuth = useLLMStore((s) => s.cancelOAuth);
   const llmLogoutOAuth = useLLMStore((s) => s.logoutOAuth);
 
+  // Brief "copied" confirmation for the device-code copy button — the copy
+  // itself is otherwise silent, so users can't tell it worked.
+  const [codeCopied, setCodeCopied] = useState(false);
+  const handleCopyCode = useCallback(async () => {
+    if (!oauthUserCode) return;
+    await copyToClipboard(oauthUserCode);
+    setCodeCopied(true);
+  }, [oauthUserCode]);
+  useEffect(() => {
+    if (!codeCopied) return;
+    const timer = setTimeout(() => setCodeCopied(false), 1600);
+    return () => clearTimeout(timer);
+  }, [codeCopied]);
+
   // ── Chat-provider form state ──
   // Azure needs deployment / API version fields that none of the other
   // providers expose, so those remain in a dedicated input cluster.
@@ -378,12 +392,14 @@ export const LLMSettings: React.FC = () => {
                 variant="ghost"
                 iconOnly
                 size="sm"
-                tone="info"
-                title={t('settings.copyCode')}
+                tone={codeCopied ? 'success' : 'info'}
+                title={
+                  codeCopied ? t('settings.copied') : t('settings.copyCode')
+                }
                 tooltipPlacement="bottom"
-                onClick={() => void copyToClipboard(oauthUserCode)}
+                onClick={() => void handleCopyCode()}
               >
-                <Copy />
+                {codeCopied ? <Check /> : <Copy />}
               </Button>
             </div>
             <div className="flex items-center justify-between gap-3">

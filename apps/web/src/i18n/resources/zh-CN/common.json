@@ -121,6 +121,7 @@
     "logout": "退出登录",
     "enterCodeAtOpenedPage": "在已打开的页面输入此代码：",
     "copyCode": "复制代码",
+    "copied": "已复制",
     "orVisit": "或访问：",
     "saving": "正在保存…",
     "saveChanges": "保存更改",
