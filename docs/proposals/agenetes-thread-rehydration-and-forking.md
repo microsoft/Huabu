@@ -2,7 +2,7 @@
 
 > Unify recovery-only replay and thread forking under one Agenetes-managed model for realizing live agent state from durable thread state.
 >
-> Status: **Completed** · Last updated 2026-07-11
+> Status: **Shipped** · Last updated 2026-07-11
 
 ---
 

@@ -2,7 +2,7 @@
 
 > A three-layer reference model for the Sediment / Huabu project: a **Human-AI Interface (HAI)** layer, an **Agent-as-a-Local-Service (AaaS)** layer, and a **Task Automation** layer. The goal is to name the seams that already exist in the code, tighten the contracts between them, and mark which parts of the middle layer can be extracted to serve other projects. The middle layer has a name — **Agenetes** — the agent control plane that will be extracted as a standalone repo, just as `agentlet` already was (see [§3](#3-layer-2--agenetes-agent-as-a-local-service--protocol-driven) and [§6](#6-extraction--what-becomes-reusable)).
 >
-> Status: **Implemented**, merged via [PR #273](https://github.com/hai-team/Sediment/pull/273) · Last updated 2026-07-10 · Tracks [#265](https://github.com/hai-team/Sediment/issues/265)
+> Status: **Shipped**, merged via [PR #273](https://github.com/hai-team/Sediment/pull/273) · Last updated 2026-07-10 · Tracks [#265](https://github.com/hai-team/Sediment/issues/265)
 
 ---
 

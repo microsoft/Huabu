@@ -141,7 +141,7 @@ Chat context uses an **envelope-first submission boundary** (see [agent-context.
 - Before a first turn, Chat hydrates session metadata from cache. A cache miss may prewarm command Profiles through the command-session endpoint, while manifest Profiles remain optimistically available until the first real turn compiles the Profile and opens its ACP session.
 - [profile-store.ts](../../apps/server/src/modules/agent/acp/profile-store.ts) now retains only unmigrated legacy `cliId=agent-team` records long enough to show migration guidance. Ordinary legacy command Profiles preserve their IDs and use the Huabu server working directory when an old record omitted `cwd`. [profiles.route.ts](../../apps/server/src/modules/agent/acp/profiles.route.ts) is the thin loopback-only HTTP adapter over the unified registry, [spawn-orchestrator.ts](../../external/agenetes/packages/acp-driver/src/spawn-orchestrator.ts) targets the selected daemon, and [daemon.route.ts](../../apps/server/src/modules/agent/acp/daemon.route.ts) exposes supervised-daemon status and restart controls.
 
-External agents can read/write the canvas through the **reachback** channel (see [agent-reachback.md](./agent-reachback.md)). The shipped ownership migration is recorded in [agenetes-agentlet-gateway-consolidation.md](../archive/agenetes-agentlet-gateway-consolidation.md).
+External agents can read/write the canvas through the **reachback** channel (see [agent-reachback.md](./agent-reachback.md)). The shipped ownership migration is recorded in [agenetes-agentlet-gateway-consolidation.md](../proposals/agenetes-agentlet-gateway-consolidation.md).
 
 ---
 

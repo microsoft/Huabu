@@ -5,7 +5,7 @@
 >
 > Status: **Superseded** · Last updated: 2026-07-14
 >
-> Superseded by [`agenetes-agentlet-gateway-consolidation.md`](./agenetes-agentlet-gateway-consolidation.md), which shipped the split hello protocol as part of the daemon/Gateway ownership migration.
+> Superseded by [`agenetes-agentlet-gateway-consolidation.md`](../proposals/agenetes-agentlet-gateway-consolidation.md), which shipped the split hello protocol as part of the daemon/Gateway ownership migration.
 
 ---
 
