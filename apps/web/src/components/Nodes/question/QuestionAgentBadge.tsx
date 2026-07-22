@@ -95,7 +95,7 @@ export function QuestionAgentBadge({
       onClick={onClick}
       disabled={!onClick}
       className={clsx(
-        'question-agent-badge relative h-10 w-10 p-0 disabled:cursor-default disabled:opacity-100',
+        'question-agent-badge relative h-8 w-8 p-0 disabled:cursor-default disabled:opacity-100',
         'bg-surface enabled:hover:bg-surface border-2 shadow-sm',
         isOpen && 'border-transparent bg-transparent shadow-none',
         isRunning &&
@@ -125,7 +125,7 @@ export function QuestionAgentBadge({
       {agent.kind === 'internal' ? (
         <BuiltInAgentAvatar
           mode={agent.mode}
-          size={32}
+          size={26}
           motion={isRunning ? 'working' : 'none'}
           className="question-agent-badge-icon relative z-10"
         />
@@ -133,7 +133,7 @@ export function QuestionAgentBadge({
         <AgentIcon
           shape={agent.icon.shape}
           color={agent.icon.color}
-          size={32}
+          size={26}
           withFace
           motion={isRunning ? 'working' : 'none'}
           className="question-agent-badge-icon relative z-10"
@@ -161,7 +161,9 @@ export function QuestionAgentBadge({
         transformOrigin: 'top left',
       }}
     >
-      <div className={onClick ? 'pointer-events-auto' : 'pointer-events-none'}>
+      <div
+        className={onClick ? 'question-agent-badge-hit' : 'pointer-events-none'}
+      >
         {tooltip ? <Tooltip content={tooltip}>{badge}</Tooltip> : badge}
       </div>
     </div>

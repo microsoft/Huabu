@@ -2,7 +2,7 @@
 .agent-icon-working-body {
   transform-box: fill-box;
   transform-origin: center;
-  animation: agent-icon-working-windmill 3.6s linear infinite;
+  animation: agent-icon-working-windmill 3s linear infinite;
 }
 
 .agent-icon-working-avatar {

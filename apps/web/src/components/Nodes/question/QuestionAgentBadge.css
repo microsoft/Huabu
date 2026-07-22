@@ -21,11 +21,17 @@
     var(--fg-subtle) 55%,
     var(--bg-surface)
   );
+  /* Cross-fade the state visuals (background, ring border, attention halo)
+     so switching status — e.g. open → running — eases instead of snapping. */
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    box-shadow 200ms ease;
 }
 
 .question-agent-badge-icon {
-  width: 2rem !important;
-  height: 2rem !important;
+  width: 1.625rem !important;
+  height: 1.625rem !important;
   flex: none;
 }
 
@@ -33,8 +39,22 @@
    `svg` sizing rule would otherwise shrink it. Force the intended 44×48
    box so the bubble wraps the avatar instead of collapsing to an icon. */
 .question-agent-badge-bubble {
-  width: 2.75rem !important;
-  height: 3rem !important;
+  width: 2.2rem !important;
+  height: 2.4rem !important;
+  animation: question-agent-fade-in 220ms ease;
+}
+
+/* Click target for opening the conversation. Inert by default so a stray
+   canvas click near the node's corner never opens the panel; only live while
+   the owning question node is hovered or selected (the badge overlaps the
+   node's top edge, so moving from body to badge keeps the hover contiguous). */
+.question-agent-badge-hit {
+  pointer-events: none;
+}
+
+.react-flow__node:hover .question-agent-badge-hit,
+.react-flow__node.selected .question-agent-badge-hit {
+  pointer-events: auto;
 }
 
 .question-agent-ring-running::before,
@@ -84,7 +104,9 @@
       )
       360deg
   );
-  animation: question-agent-ring-rotate 3.2s linear infinite;
+  animation:
+    question-agent-ring-rotate 3s linear infinite,
+    question-agent-fade-in 220ms ease;
 }
 
 .question-agent-ring-error::before {
@@ -92,6 +114,7 @@
     var(--danger) 0deg 24deg,
     transparent 24deg 42deg
   );
+  animation: question-agent-fade-in 220ms ease;
 }
 
 .question-agent-attention {
@@ -104,8 +127,19 @@
   }
 }
 
+@keyframes question-agent-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .question-agent-ring-running::before,
+  .question-agent-ring-error::before,
+  .question-agent-badge-bubble,
   .question-agent-attention {
     animation: none;
   }
