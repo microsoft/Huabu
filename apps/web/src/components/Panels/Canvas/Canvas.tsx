@@ -8,7 +8,6 @@ import {
   SelectionMode,
   useReactFlow,
   useStore,
-  useStoreApi,
   type ReactFlowInstance,
   type Connection,
   type Edge,
@@ -257,31 +256,26 @@ const ReactFlowUnlockIcon: React.FC = () => (
   </svg>
 );
 
-/** Mirrors React Flow's native interactivity toggle in a custom position. */
-const CanvasInteractivityControl: React.FC = () => {
+/**
+ * Mirrors React Flow's native interactivity toggle in a custom position.
+ *
+ * Driven by a single lifted `locked` state rather than mutating the React
+ * Flow store directly: `nodesDraggable` / `elementsSelectable` are controlled
+ * props on `<ReactFlow>`, so a direct store mutation would be re-applied (and
+ * silently reverted) on the next render whenever the tool-derived prop value
+ * changes. Gating both the props and this control from the same state keeps
+ * the lock authoritative.
+ */
+const CanvasInteractivityControl: React.FC<{
+  locked: boolean;
+  onToggle: () => void;
+}> = ({ locked, onToggle }) => {
   const { t } = useTranslation();
-  const store = useStoreApi();
-  const isInteractive = useStore(
-    (state) =>
-      state.nodesDraggable ||
-      state.nodesConnectable ||
-      state.elementsSelectable,
-  );
-  const label = isInteractive ? t('actions.lock') : t('actions.unlock');
+  const label = locked ? t('actions.unlock') : t('actions.lock');
 
   return (
-    <ControlButton
-      title={label}
-      aria-label={label}
-      onClick={() => {
-        store.setState({
-          nodesDraggable: !isInteractive,
-          nodesConnectable: !isInteractive,
-          elementsSelectable: !isInteractive,
-        });
-      }}
-    >
-      {isInteractive ? <ReactFlowUnlockIcon /> : <ReactFlowLockIcon />}
+    <ControlButton title={label} aria-label={label} onClick={onToggle}>
+      {locked ? <ReactFlowLockIcon /> : <ReactFlowUnlockIcon />}
     </ControlButton>
   );
 };
@@ -359,6 +353,12 @@ export const Canvas: React.FC<CanvasProps> = ({
     fitInitialViewport,
     isPending: isInitialViewportPending,
   } = useInitialCanvasViewport();
+
+  // When locked, the user can neither drag, connect, nor select elements.
+  // Gating the controlled `<ReactFlow>` props from this single state (rather
+  // than mutating the React Flow store) keeps the lock from being reverted
+  // when a tool-derived prop value changes.
+  const [interactivityLocked, setInteractivityLocked] = useState(false);
 
   // Keyboard shortcuts + paste handler (extracted to hook).
   // Also manages tool state (select/pan) and Space-key temporary pan.
@@ -1016,8 +1016,11 @@ export const Canvas: React.FC<CanvasProps> = ({
         selectionMode={SelectionMode.Partial}
         onSelectionStart={handleSelectionStart}
         onSelectionEnd={handleSelectionEnd}
-        nodesDraggable={!pendingNodeType && tool !== 'lasso'}
-        elementsSelectable={!pendingNodeType}
+        nodesDraggable={
+          !interactivityLocked && !pendingNodeType && tool !== 'lasso'
+        }
+        nodesConnectable={!interactivityLocked}
+        elementsSelectable={!interactivityLocked && !pendingNodeType}
         panOnScroll={!isNotMouse}
         zoomOnScroll={true}
         zoomOnPinch={true}
@@ -1057,7 +1060,10 @@ export const Canvas: React.FC<CanvasProps> = ({
 
         <Controls position="bottom-left" showInteractive={false}>
           <CanvasZoomLevel />
-          <CanvasInteractivityControl />
+          <CanvasInteractivityControl
+            locked={interactivityLocked}
+            onToggle={() => setInteractivityLocked((prev) => !prev)}
+          />
         </Controls>
         {minimapEnabled && (
           <MiniMap
