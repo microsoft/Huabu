@@ -45,7 +45,7 @@ SET_FRAME_LAYOUT { frameId: "<frame-id>", mode: "column", gridCount: 3 }
 - `column` — N columns, children stack top-to-bottom inside each column, left-aligned. Column width adapts to the widest child.
 - `row` — mirror on the other axis: N rows, children stack left-to-right inside each row, top-aligned. Row height adapts to the tallest child.
 - The engine assigns each child to a track automatically (least-full track wins) and writes the slot back to `data.frameSlot`. To pin a child to a specific track, pass `MERGE_NODE_DATA` with `patch: { frameSlot: <0..N-1> }` after the layout switch. To control vertical (column mode) or horizontal (row mode) order within a track, set initial child positions; the engine sorts by that axis.
-- The frame size is content-driven and the engine re-sizes the frame after every child change — do **not** pass `size` for structured frames; it will be overwritten on the next batch.
+- Structured frames default to `sizing: "hug"`: the engine re-sizes the frame after every child change, so do not pass an explicit frame size in this mode. Use `sizing: "manual"` to preserve a pinned frame size while children still reflow; children that do not fit may overflow along the main axis.
 - Switch back to free positioning with `SET_FRAME_LAYOUT { frameId, mode: "free" }`.
 
 Use structured frames for: stacked column lists, kanban-style boards, row tracks where each lane represents a theme, deterministic comparison tables.

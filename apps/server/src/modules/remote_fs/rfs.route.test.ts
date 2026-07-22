@@ -17,11 +17,13 @@ import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  AGENT_CANVAS_COMMAND_TYPES,
   rfsCapabilitiesResponseSchema,
   rfsExecuteResponseSchema,
   rfsOperationCapabilityResponseSchema,
   spaceQueryResponseSchema,
 } from '@sediment/shared';
+import { getNodeDefaultSize } from '@sediment/shared/canvas-engine';
 
 const agentMocks = vi.hoisted(() => ({
   runAgent: vi.fn(),
@@ -111,6 +113,20 @@ describe('GET /api/rfs/:canvasId/skill', () => {
       expect(res.body).toMatch(/Accessing this Huabu Space/i);
       expect(res.body).toMatch(/POST execute/);
       expect(res.body).toMatch(/work without an internal model provider/i);
+      for (const command of AGENT_CANVAS_COMMAND_TYPES) {
+        expect(res.body).toMatch(
+          new RegExp(String.raw`\|\s+\`${command}\`\s+\|`),
+        );
+      }
+      expect(res.body).toContain('/capabilities/commands/$COMMAND');
+      expect(res.body).toContain('**parent-local**');
+      expect(res.body).toContain('read-only `absolutePosition`');
+      expect(res.body).toContain(
+        `${getNodeDefaultSize('web').width} × ${getNodeDefaultSize('web').height}px`,
+      );
+      expect(res.body).toContain(
+        `${getNodeDefaultSize('note').height}px nominal layout height`,
+      );
     } finally {
       await app.close();
     }

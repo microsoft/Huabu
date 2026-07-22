@@ -103,11 +103,59 @@ curl -fsS -X DELETE -H "$AUTH" \
   "$HUABU_RFS_URL/upload/diagram.png"
 ```
 
-## 5. Execute Space commands
+## 5. Huabu layout basics
+
+Coordinates use screen-style axes: x increases to the right and y increases downward. A node's `position` is its top-left corner in **parent-local** coordinates: relative to its direct parent frame, or absolute Space coordinates when it is at the root. Query results also expose read-only `absolutePosition`, which resolves the complete parent chain into world coordinates. For root nodes, `position` and `absolutePosition` are equal.
+
+Before placing or resizing relative to existing content, query the relevant nodes with `INSPECT_NODES`; selected-node metadata does not contain authoritative geometry. Use the returned `position` for sibling placement inside the same frame and `absolutePosition` for root-level placement. After a mutation, query again when exact final geometry matters because frame fitting, structured layout, text measurement, and image aspect-ratio normalization may adjust it.
+
+`CREATE_NODES.position` is always required. `size` is optional; when omitted, Huabu starts from these canonical defaults:
+
+| Node type              | Default geometry                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------ |
+| `text`                 | 200px wide; content-driven height                                                    |
+| `note`                 | 400px wide; content-driven height (56px nominal layout height)                       |
+| `web`, `pdf`, `office` | 400 × 400px                                                                          |
+| `video`                | 400 × 300px                                                                          |
+| `image`                | 400px wide; height follows the source aspect ratio (300px nominal before resolution) |
+| `frame`                | 400 × 300px                                                                          |
+| `question`             | 200px wide; content-driven height (80px nominal layout height)                       |
+
+Never pin top-level height for `text` or `question`; change rendered text scale with `data.style.fontSize`. Notes normally auto-size by content but may use an explicit fixed height. For free-form root or frame layouts, a useful starting heuristic is about 50px between nodes and 40px frame padding, adjusted to the actual queried sizes.
+
+Frames default to `free` layout, where child positions remain explicit and parent-local. `column` and `row` are structured layouts configured through `SET_FRAME_LAYOUT`; `gridCount` selects 1–12 tracks and defaults to 1. Structured frames choose final child slots, so child `position` is only an ordering hint. Their default `hug` sizing fits the frame to its content; `manual` preserves a pinned frame size while children still reflow and may overflow. Fetch the `SET_FRAME_LAYOUT` capability before using sizing or track options.
+
+## 6. Execute Space commands
 
 `POST execute` accepts `{ "runId"?: string, "commands": [...] }`. The server owns canvas scope, agent origin, authorship metadata, and generated node/edge IDs; do not send them.
 
-Load the command capability before composing unfamiliar fields. Confirm with the user before destructive, broad, or difficult-to-reverse changes.
+The accepted command set is:
+
+| Command             | Purpose                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------- |
+| `CREATE_NODES`      | Create one or more nodes; Huabu assigns node IDs.                                       |
+| `DELETE_NODES`      | Delete nodes and their incident edges.                                                  |
+| `MERGE_NODE_DATA`   | Patch node label, content, source, or visual style; content writes require `expectRev`. |
+| `SET_NODE_PARENT`   | Move nodes into a frame or back to the root.                                            |
+| `DISSOLVE_FRAME`    | Remove a frame while keeping its children in the Space.                                 |
+| `SET_NODE_GEOMETRY` | Change node position and/or size.                                                       |
+| `REORDER_NODES`     | Change node z-order.                                                                    |
+| `CONNECT_NODES`     | Create edges between existing nodes; Huabu assigns edge IDs.                            |
+| `DISCONNECT_EDGES`  | Remove edges by ID or endpoint pair.                                                    |
+| `SET_EDGE_STYLE`    | Patch edge direction, line shape, dash style, stroke, width, or label.                  |
+| `ALIGN_NODES`       | Align existing nodes along one axis.                                                    |
+| `DISTRIBUTE_NODES`  | Evenly space three or more existing nodes.                                              |
+| `SET_FRAME_LAYOUT`  | Configure a frame's free, column, or row layout.                                        |
+
+This table is only a navigation summary. For the complete contract of one command—including required fields, parameter types, enums, limits, semantic constraints, result description, and a valid example—fetch its capability:
+
+```bash
+COMMAND=SET_FRAME_LAYOUT
+curl -fsS -H "$AUTH" \
+  "$HUABU_RFS_URL/capabilities/commands/$COMMAND"
+```
+
+The response contains `schema`, `constraints`, `result`, and `examples`. Treat `schema` as authoritative rather than inferring parameters from the summary above. Confirm with the user before destructive, broad, or difficult-to-reverse changes.
 
 ```bash
 cat > /tmp/huabu-execute.json <<'JSON'
@@ -145,7 +193,7 @@ For a `MERGE_NODE_DATA` patch that changes `content`, first download the node an
 
 The response includes version transition, projected commands, command results, generated IDs, affected IDs, and new revisions. It intentionally excludes Web UI deltas and internal change-review records.
 
-## 6. Optional internal agent
+## 7. Optional internal agent
 
 `POST agent` is optional. Direct `query`, `download`, `upload`, and `execute` work without an internal model provider. Use the internal agent only for an intentionally open-ended task where model interpretation is valuable.
 
