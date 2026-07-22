@@ -61,6 +61,16 @@ describe('resolveQuestionAgentPresentation', () => {
         fallbackIcon: { shape: 'diamond', color: 'red' },
         profiles: [],
       }),
-    ).toEqual({ kind: 'internal', alias: 'Huabu' });
+    ).toEqual({ kind: 'internal', alias: 'Huabu', mode: 'ask' });
+  });
+
+  it('carries the built-in mode for the Agent (operate) face', () => {
+    expect(
+      resolveQuestionAgentPresentation({
+        binding: { kind: 'internal' },
+        profiles: [],
+        agentMode: 'operate',
+      }),
+    ).toEqual({ kind: 'internal', alias: 'Huabu', mode: 'operate' });
   });
 });

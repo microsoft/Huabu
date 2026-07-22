@@ -56,6 +56,15 @@ const COLOR_HEX: Record<AgentIconColor, string> = {
   green: '#7FBA00',
 };
 
+/**
+ * The fixed brand hex for an {@link AgentIconColor}. Exposed so surfaces that
+ * need to echo an agent's identity colour outside the SVG (e.g. a status ring
+ * tinted to match the avatar) stay in sync with the avatar art.
+ */
+export function agentIconColorHex(color: AgentIconColor): string {
+  return COLOR_HEX[color];
+}
+
 /** Ink used for the hand-drawn face strokes. */
 const FACE_INK = '#24221E';
 

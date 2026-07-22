@@ -53,14 +53,36 @@
 }
 
 .question-agent-ring-running::before {
+  /* `--question-agent-running-ring` lets a surface preview an alternative
+     running colour; the shipped badge falls back to the techy `--info` blue. */
   background: conic-gradient(
     from 0deg,
-    color-mix(in srgb, var(--info) 16%, transparent) 0deg,
-    color-mix(in srgb, var(--info) 16%, transparent) 70deg,
-    var(--info) 150deg,
-    var(--info) 210deg,
-    color-mix(in srgb, var(--info) 16%, transparent) 290deg,
-    color-mix(in srgb, var(--info) 16%, transparent) 360deg
+    color-mix(
+        in srgb,
+        var(--question-agent-running-ring, var(--info)) 16%,
+        transparent
+      )
+      0deg,
+    color-mix(
+        in srgb,
+        var(--question-agent-running-ring, var(--info)) 16%,
+        transparent
+      )
+      70deg,
+    var(--question-agent-running-ring, var(--info)) 150deg,
+    var(--question-agent-running-ring, var(--info)) 210deg,
+    color-mix(
+        in srgb,
+        var(--question-agent-running-ring, var(--info)) 16%,
+        transparent
+      )
+      290deg,
+    color-mix(
+        in srgb,
+        var(--question-agent-running-ring, var(--info)) 16%,
+        transparent
+      )
+      360deg
   );
   animation: question-agent-ring-rotate 3.2s linear infinite;
 }

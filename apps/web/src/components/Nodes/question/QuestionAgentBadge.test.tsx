@@ -30,7 +30,7 @@ describe('QuestionAgentBadge', () => {
       root?.render(
         <QuestionAgentBadge
           status="done"
-          agent={{ kind: 'internal', alias: 'Huabu' }}
+          agent={{ kind: 'internal', alias: 'Huabu', mode: 'ask' }}
           unread={false}
           conflictCount={0}
           offset={{ top: -22, left: -2 }}
@@ -42,12 +42,12 @@ describe('QuestionAgentBadge', () => {
       'button[aria-label="Huabu · Done · viewed"]',
     );
     const wrapper = badge?.parentElement?.parentElement;
-    const logo = badge?.querySelector('img');
+    const logo = badge?.querySelector('svg.question-agent-badge-icon');
 
     expect(wrapper?.style.transform).toBe('scale(0.5)');
     expect(wrapper?.style.top).toBe('-11px');
     expect(wrapper?.style.left).toBe('-1px');
-    expect(logo?.getAttribute('src')).toBe('/favicon.svg');
+    expect(logo).not.toBeNull();
   });
 
   it('keeps the Agent icon at 32px and shows the quiet viewed ring', () => {

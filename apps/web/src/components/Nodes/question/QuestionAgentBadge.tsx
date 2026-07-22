@@ -4,12 +4,16 @@ import { AlertTriangle } from 'lucide-react';
 
 import './QuestionAgentBadge.css';
 
-import { AgentIcon } from '@/components/Common/AgentIcon.tsx';
+import {
+  AgentIcon,
+  agentIconColorHex,
+} from '@/components/Common/AgentIcon.tsx';
+import { BuiltInAgentAvatar } from '@/components/Common/BuiltInAgentAvatar.tsx';
 import { Button } from '@/components/Common/Button.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 
 import type { QuestionAgentPresentation } from '@/utils/questionAgentPresentation.ts';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 export type QuestionAgentBadgeStatus = 'open' | 'running' | 'done' | 'error';
 
@@ -40,6 +44,9 @@ export function QuestionAgentBadge({
   const isRunning = status === 'running';
   const isError = status === 'error';
   const hasConflict = conflictCount > 0;
+  // Any unviewed terminal outcome wants attention: a done-unread answer, an
+  // (unviewed) error, or skipped-write conflicts.
+  const needsAttention = unread || hasConflict;
   const attentionColor = isError
     ? 'var(--danger)'
     : hasConflict
@@ -53,20 +60,31 @@ export function QuestionAgentBadge({
           unread ? ' · unread' : ' · viewed'
         }`;
 
-  // Border + shadow for the states that do NOT draw a `::before` ring.
-  // `running` and `error · unread` render their ring via the CSS classes
-  // below, so they stay transparent here.
+  // Running echoes the agent's own identity colour (external picked colour /
+  // built-in Huabu blue) so the sweeping ring reads as "this agent is working"
+  // rather than a generic system blue.
+  const runningRingColor =
+    agent.kind === 'external' ? agentIconColorHex(agent.icon.color) : '#00A4EF';
+
+  // Border + halo. `open` / `running` draw no halo (running uses its `::before`
+  // sweep). The three unviewed outcomes (done-unread, error, conflict) share
+  // ONE attention halo — a crisp inner ring + a wider outer glow — differing
+  // only by colour and, for error, the segmented `::before` ring geometry.
+  // A viewed answer (or viewed error) falls back to the quiet identity ring.
   let ringBorderColor = 'var(--question-agent-quiet-ring)';
   let ringBoxShadow = 'none';
   if (isOpen || isRunning) {
     ringBorderColor = 'transparent';
-  } else if (isError && unread) {
-    ringBorderColor = 'transparent';
-    ringBoxShadow = `0 0 9px color-mix(in srgb, ${attentionColor} 30%, transparent)`;
-  } else if (unread) {
-    ringBorderColor = attentionColor;
-    ringBoxShadow = `0 0 0 3px color-mix(in srgb, ${attentionColor} 25%, transparent), 0 2px 9px color-mix(in srgb, ${attentionColor} 32%, transparent)`;
+  } else if (needsAttention) {
+    ringBoxShadow = `0 0 0 3px color-mix(in srgb, ${attentionColor} 26%, transparent), 0 0 12px 2px color-mix(in srgb, ${attentionColor} 42%, transparent)`;
+    ringBorderColor = isError ? 'transparent' : attentionColor;
   }
+
+  const badgeStyle: CSSProperties = {
+    borderColor: ringBorderColor,
+    boxShadow: ringBoxShadow,
+    ['--question-agent-running-ring' as string]: runningRingColor,
+  };
 
   const badge = (
     <Button
@@ -82,10 +100,12 @@ export function QuestionAgentBadge({
         isOpen && 'border-transparent bg-transparent shadow-none',
         isRunning &&
           'question-agent-ring-running border-transparent shadow-none',
-        isError && unread && 'question-agent-ring-error border-transparent',
-        unread && 'question-agent-attention',
+        isError &&
+          needsAttention &&
+          'question-agent-ring-error border-transparent',
+        needsAttention && 'question-agent-attention',
       )}
-      style={{ borderColor: ringBorderColor, boxShadow: ringBoxShadow }}
+      style={badgeStyle}
     >
       {isOpen ? (
         <svg
@@ -103,13 +123,11 @@ export function QuestionAgentBadge({
         </svg>
       ) : null}
       {agent.kind === 'internal' ? (
-        <img
-          src="/favicon.svg"
-          alt=""
-          className={clsx(
-            'question-agent-badge-icon relative z-10 rounded-sm',
-            isOpen && 'translate-x-0.5 translate-y-0.5',
-          )}
+        <BuiltInAgentAvatar
+          mode={agent.mode}
+          size={32}
+          motion={isRunning ? 'working' : 'none'}
+          className="question-agent-badge-icon relative z-10"
         />
       ) : (
         <AgentIcon
@@ -118,10 +136,7 @@ export function QuestionAgentBadge({
           size={32}
           withFace
           motion={isRunning ? 'working' : 'none'}
-          className={clsx(
-            'question-agent-badge-icon relative z-10',
-            isOpen && 'translate-x-0.5 translate-y-0.5',
-          )}
+          className="question-agent-badge-icon relative z-10"
         />
       )}
       {hasConflict ? (

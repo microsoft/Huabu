@@ -1,4 +1,4 @@
-import { MapPin, MessageSquare } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -7,6 +7,7 @@ import { createId, getQuestionNodeStatus } from '@sediment/shared';
 import './QuestionNode.css';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
+import { useActivelyViewingQuestionNode } from '@/hooks/useActivelyViewingQuestion';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore.ts';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore.ts';
@@ -128,15 +129,21 @@ export const QuestionNode = memo(
     const showChatAnchor = useChatStore(
       (s) => s.viewingQuestionThread?.nodeId === id,
     );
-    const isOpenForQuestion = useChatStore(
-      (s) =>
-        s.viewingQuestionThread?.nodeId === id &&
-        s.viewingQuestionThread.compose === true,
-    );
+    // Composing = this node is the chat anchor AND it has never been
+    // authored/run yet (`idle`). Derived from the node's status, not a stored
+    // `compose` flag.
+    const isOpenForQuestion = showChatAnchor && status === 'idle';
     const composeAgentBinding = useChatStore((s) => s.agentBinding);
+    // While composing a brand-new question, the mode follows the user's inline
+    // Chat/Agent pick (`lastAction`) rather than the node's not-yet-written
+    // `agentMode` (mirrors ChatPanel's compose logic).
+    const composeAgentMode = useChatStore((s) => s.lastAction);
     const agentProfiles = useAcpProfilesStore((s) => s.profiles);
-    const isRightPanelCollapsed = usePanelStore((s) => s.isRightCollapsed);
     const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
+    // True only while this node's conversation is open AND the chat panel is
+    // expanded — the badge shows `open` only then; a collapsed panel falls
+    // back to the node's real status.
+    const isChatAnchorActive = useActivelyViewingQuestionNode(id);
     const canvasId = useCanvasStore((s) => s.canvasId);
 
     // ------------------------------------------------------------------
@@ -238,14 +245,19 @@ export const QuestionNode = memo(
       binding: effectiveBinding,
       fallbackIcon: data.agentIcon,
       profiles: agentProfiles,
+      agentMode: isOpenForQuestion
+        ? composeAgentMode
+        : (data.agentMode ?? 'ask'),
     });
-    // `open` is the highest-priority badge state: whenever this node's
-    // conversation is open in the chat panel (it is the anchor), the user
-    // can already watch the live result there, so the badge only needs to
-    // hint "this conversation is open" — it deliberately overrides
-    // running / done / error. `showChatAnchor` covers both the initial
-    // compose and re-opening an already-run node.
-    const badgeStatus: QuestionAgentBadgeStatus | null = showChatAnchor
+    // `open` is the highest-priority badge state, BUT only while the chat
+    // panel is actually visible: whenever this node's conversation is open in
+    // an expanded panel (it is the anchor), the user can already watch the
+    // live result there, so the badge only hints "this conversation is open"
+    // — it deliberately overrides running / done / error. Collapsing the right
+    // panel hides that live view, so the badge falls back to the node's real
+    // status. `showChatAnchor` covers both the initial compose and re-opening
+    // an already-run node.
+    const badgeStatus: QuestionAgentBadgeStatus | null = isChatAnchorActive
       ? 'open'
       : isForkPending
         ? 'running'
@@ -304,49 +316,7 @@ export const QuestionNode = memo(
             />
           )}
         </TextNodeBody>
-        {showChatAnchor && !isRightPanelCollapsed && <ChatAnchorOverlay />}
       </NodeWrapper>
     );
   },
 );
-
-function ChatAnchorOverlay() {
-  // A light "anchored" mask laid over the question node's content layer.
-  // Deliberately a content-layer overlay (not a floating corner badge and
-  // not a wraparound glow): it sits above the card body, so it never fights
-  // the sticky depth board's stacking and never competes with the run-status
-  // badge that floats above the node. A warm, low-alpha wash (not a grey
-  // scrim, which would read as "disabled") keeps the text readable while an
-  // anchor watermark makes the "this node anchors the open chat" state clear.
-  return (
-    <div
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg"
-      style={{
-        // Size container so the watermark can scale with the node via
-        // `cqh` (height) / `cqi` (width) units below.
-        containerType: 'size',
-        background:
-          'color-mix(in srgb, var(--question-border) 9%, transparent)',
-        boxShadow:
-          'inset 0 0 0 1.5px color-mix(in srgb, var(--question-border) 55%, transparent), inset 0 0 12px color-mix(in srgb, var(--question-border) 20%, transparent)',
-      }}
-    >
-      <MapPin
-        strokeWidth={1.5}
-        className="absolute"
-        style={{
-          // Adaptive size: ~60% of the node's shorter side (min of height
-          // `cqh` / width `cqi`), clamped so it never gets tiny or
-          // overwhelms the card. Tune the two percentages to taste.
-          height: 'clamp(20px, min(60cqh, 34cqi), 88px)',
-          width: 'auto',
-          right: -2,
-          bottom: -2,
-          color: 'var(--question-border)',
-          opacity: 0.32,
-        }}
-      />
-    </div>
-  );
-}

@@ -1,7 +1,12 @@
 import { getDefaultAgentIcon, readAgentIcon } from './agentIcon';
 
 import type { AgentIconValue } from '@/components/Common/AgentIcon';
-import type { AgentBinding, AgentIcon, CustomData } from '@sediment/shared';
+import type {
+  AgentBinding,
+  AgentIcon,
+  AgentMode,
+  CustomData,
+} from '@sediment/shared';
 
 export type QuestionAgentProfile = {
   id: string;
@@ -10,20 +15,26 @@ export type QuestionAgentProfile = {
 };
 
 export type QuestionAgentPresentation =
-  | { kind: 'internal'; alias: 'Huabu' }
+  | { kind: 'internal'; alias: 'Huabu'; mode: AgentMode }
   | { kind: 'external'; alias: string; icon: AgentIconValue };
 
 export function resolveQuestionAgentPresentation({
   binding,
   fallbackIcon,
   profiles,
+  agentMode = 'ask',
 }: {
   binding: AgentBinding;
   fallbackIcon?: AgentIcon;
   profiles: readonly QuestionAgentProfile[];
+  /**
+   * Built-in mode carried by the node/thread. Only meaningful for the
+   * internal agent (Chat vs Agent face); ignored for external bindings.
+   */
+  agentMode?: AgentMode;
 }): QuestionAgentPresentation {
   if (binding.kind === 'internal') {
-    return { kind: 'internal', alias: 'Huabu' };
+    return { kind: 'internal', alias: 'Huabu', mode: agentMode };
   }
 
   const profile = profiles.find(

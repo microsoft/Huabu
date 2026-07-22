@@ -15,10 +15,10 @@ import { Plus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { AgentIcon } from '@/components/Common/AgentIcon';
+import { BuiltInAgentAvatar } from '@/components/Common/BuiltInAgentAvatar';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
 import { readAgentIcon } from '@/utils/agentIcon';
 
-import { AgentModeIcon, ChatModeIcon } from './ModeIcon';
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
 
@@ -134,12 +134,12 @@ export function AgentMenuOptions({
     {
       mode: 'ask',
       label: t('chat.modeChat'),
-      icon: <ChatModeIcon size={14} />,
+      icon: <BuiltInAgentAvatar mode="ask" size={16} />,
     },
     {
       mode: 'operate',
       label: t('chat.modeAgent'),
-      icon: <AgentModeIcon size={14} />,
+      icon: <BuiltInAgentAvatar mode="operate" size={16} />,
     },
   ];
 
@@ -205,7 +205,8 @@ export function AgentMenuOptions({
                     <AgentIcon
                       shape={icon.shape}
                       color={icon.color}
-                      size={14}
+                      size={16}
+                      withFace
                     />
                   }
                   label={profile.alias}
