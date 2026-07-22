@@ -64,18 +64,54 @@ import { registerUpdaterIpc, startAutoUpdateChecks } from './updater.js';
 const IS_DEV = !app.isPackaged;
 
 /**
- * Force the user-facing Electron app name to "Huabu" regardless of whether
- * we're running packaged (where `productName` from electron-builder.yml is
- * already injected) or in dev via `electron .` (where `app.getName()` would
- * otherwise fall back to `package.json`'s npm name `@sediment/desktop`).
+ * Whether this is the full HMR dev orchestrator (`pnpm dev:desktop`, via
+ * `scripts/dev-desktop.mjs`), as opposed to `pnpm start:desktop` (an
+ * unpackaged run of the fully built production bundle) or a packaged
+ * install. `dev-desktop.mjs` is the only caller that sets
+ * `EXTERNAL_SERVER_URL` — see `resolveExternalServerUrl()` below — so its
+ * presence is a reliable signal distinct from `app.isPackaged`, which is
+ * false for BOTH `dev:desktop` and `start:desktop`.
+ */
+const IS_DEV_ORCHESTRATOR = Boolean(process.env.EXTERNAL_SERVER_URL?.trim());
+
+/**
+ * Set the user-facing Electron app name, which also anchors
+ * `app.getPath('logs' | 'userData' | 'sessionData')`.
  *
- * This single call keeps `app.getPath('logs' | 'userData' | 'sessionData')`
- * pointing at a clean `Huabu/` folder in both environments, so users don't
- * see a leaked internal package name in dialogs or filesystem paths.
+ * Only the HMR dev orchestrator (`pnpm dev:desktop`) gets a different name.
+ * Its tsx-watch server and Vite HMR are actively-changing code, so we keep
+ * its `workspace.json`, Chromium storage, and Electron logs / crash dumps
+ * isolated from a real install. (Its LLM/integration secrets are a separate
+ * concern that's ALSO isolated, but not by this name split: with
+ * `EXTERNAL_SERVER_URL` set we skip the `safeStorage`-backed
+ * `DesktopSecureSecretStore` below entirely, and the tsx-watch server
+ * persists secrets to `apps/server/data/encrypted-secrets.json` via
+ * `HUABU_SECRET_KEY` instead.)
+ *
+ * `pnpm start:desktop`, by contrast, runs the exact same bundled server /
+ * web build a packaged install would run — it's typically used as a final
+ * smoke test before shipping, so it intentionally shares `Huabu`'s on-disk
+ * state with the installed app: same workspace, and the same
+ * `safeStorage`-encrypted `<userData>/data/secure-secrets.json` (so secrets
+ * already configured in the installed app are reused) rather than starting
+ * from an empty slate.
+ *
+ * - Packaged install / `start:desktop` → `Huabu`     (e.g. `~/Library/Application Support/Huabu`)
+ * - `dev:desktop` (HMR orchestrator)   → `Huabu Dev` (e.g. `.../Huabu Dev`)
+ *
+ * Naming it explicitly here also stops dev from falling back to the npm
+ * package name `@sediment/desktop` (what `app.getName()` would otherwise
+ * report when running via `electron .`), which would leak into dialogs
+ * and filesystem paths.
+ *
+ * Note: this partitions the Electron-owned `userData` tree. The server's
+ * own data dir follows separately, already scoped the same way —
+ * `start:desktop` derives it from `<userData>/data` (inheriting `Huabu`),
+ * while `dev:desktop` overrides it to the in-repo `apps/server/data`.
  *
  * Must be invoked before `app.whenReady()` to take effect.
  */
-app.setName('Huabu');
+app.setName(IS_DEV_ORCHESTRATOR ? 'Huabu Dev' : 'Huabu');
 
 /**
  * Resolve the on-disk path to a runtime icon asset.
