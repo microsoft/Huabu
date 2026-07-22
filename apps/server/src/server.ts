@@ -2,6 +2,7 @@ import './load-env.js';
 import './setup-proxy.js';
 import { app } from './app.js';
 import { resolveBindHost } from './bind-host.js';
+import { prewarmOAuthCredentials } from './modules/agent/oauth.js';
 import { initializeSecretStore } from './security/secret-store.js';
 import { getLogger } from './utils/logger.js';
 
@@ -29,6 +30,10 @@ async function start(): Promise<void> {
         ? `localhost (bound on ${HOST})`
         : HOST;
     log.info(`Server running at http://${displayHost}:${PORT}`);
+
+    // Warm up OAuth tokens off the request path so the first chat/Settings
+    // action doesn't pay pi-ai's one-time lazy OAuth load + token refresh.
+    prewarmOAuthCredentials();
   } catch (err) {
     log.error({ err }, 'Failed to start server');
     // Let Node drain Pino's asynchronous SonicBoom destinations before

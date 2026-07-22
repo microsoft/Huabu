@@ -378,6 +378,7 @@ export const ChatInput = ({
     >
       <form onSubmit={handleSubmit} className="w-full">
         <div
+          data-chat-input-surface
           className={`border p-3 transition-colors ${connectedTop ? 'rounded-t-none rounded-b-2xl' : 'rounded-2xl'} ${isDragOver ? 'border-edge-default bg-info-bg' : 'border-edge-default bg-surface'}`}
         >
           {/* ── Pending attachment thumbnails ── */}

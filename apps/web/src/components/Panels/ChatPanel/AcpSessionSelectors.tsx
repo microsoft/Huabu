@@ -8,6 +8,13 @@
  * Selectors are hidden silently when their backing list is empty so
  * agents that publish nothing get no UI clutter.
  *
+ * The modern `configOptions` channel is the source of truth: when an
+ * agent publishes a `category: 'model'` / `'mode'` config option, its
+ * clean picker replaces the legacy `availableModels` / `availableModes`
+ * selector (which some agents, e.g. codex-acp, flatten into base × effort
+ * combinations — microsoft/Huabu#31). Legacy lists render only as a
+ * fallback for agents that publish no configOptions twin.
+ *
  * All `onChange` handlers fire optimistically: the parent merges the
  * value into the local snapshot via `applyEvent` before the server
  * round-trip resolves, so the dropdown reflects the new choice
@@ -15,10 +22,17 @@
  * parent can choose to revert on.
  */
 
-import { useMemo } from 'react';
+import { TriangleAlert } from 'lucide-react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import {
+  isModeConfigOption,
+  isModelConfigOption,
+} from './acpSessionConfigOption';
+import { Button } from '../../Common/Button';
 import { Loading } from '../../Common/Loading';
+import { Popover } from '../../Common/Popover';
 import { Select, type SelectOption } from '../../Common/Select';
 
 import type {
@@ -198,6 +212,20 @@ export const AcpSessionSelectors = ({
   onSelectConfigOption,
 }: AcpSessionSelectorsProps) => {
   const { t } = useTranslation();
+  const [pendingFullAccess, setPendingFullAccess] = useState<{
+    optionId: string;
+    value: string;
+    position: { x: number; y: number };
+  } | null>(null);
+  const selectorRowRef = useRef<HTMLDivElement>(null);
+  const fullAccessOriginRef = useRef<HTMLElement | null>(null);
+  const fullAccessTitleId = useId();
+  const fullAccessDescriptionId = useId();
+
+  const dismissFullAccess = () => {
+    setPendingFullAccess(null);
+    window.setTimeout(() => fullAccessOriginRef.current?.focus(), 0);
+  };
   // ── Mode selector ────────────────────────────────────────────────
   const modeOptions = useMemo<SelectOption<string>[]>(
     () =>
@@ -233,32 +261,37 @@ export const AcpSessionSelectors = ({
   const hasMode = modeOptions.length > 0;
   const hasModel = modelOptions.length > 0;
 
-  // Copilot CLI (and likely other agents) publish `mode` and `model`
-  // through BOTH `modes`/`models` AND `configOptions`. When the
-  // dedicated selector is visible, drop the config-option twin so the
-  // toolbar doesn't show two identical pills. We only suppress on
-  // exact id collision with the dedicated channel — agents that ship
-  // the value only via `configOptions` still get a pill.
-  const visibleConfigOptions = useMemo(
-    () =>
-      meta.configOptions.filter((opt) => {
-        const id = String((opt as { id?: unknown }).id ?? '')
-          .trim()
-          .toLowerCase();
-        if (hasMode && id === 'mode') return false;
-        if (hasModel && id === 'model') return false;
-        return true;
-      }),
-    [meta.configOptions, hasMode, hasModel],
+  // Prefer the modern `configOptions` channel over the legacy
+  // `availableModes` / `availableModels` lists. Agents such as codex-acp
+  // publish BOTH, but their legacy model list flattens every base model ×
+  // reasoning effort ("GPT-5.6 Sol (low)" … "(ultra)") and duplicates the
+  // reasoning control, whereas the configOptions channel exposes a clean
+  // base-model picker plus a separate `thought_level` (reasoning) control
+  // and the Plan / Fast knobs (microsoft/Huabu#31). So when a modern twin
+  // exists we hide the legacy selector and render the config option
+  // instead; the legacy list is used only as a fallback for agents that
+  // publish modes/models but no configOptions twin. Detection is by
+  // semantic `category` ('model' / 'mode') with an id fallback, so it
+  // works regardless of the agent's option-id naming.
+  const hasModelConfigOption = useMemo(
+    () => meta.configOptions.some(isModelConfigOption),
+    [meta.configOptions],
   );
-  const hasConfig = visibleConfigOptions.length > 0;
+  const hasModeConfigOption = useMemo(
+    () => meta.configOptions.some(isModeConfigOption),
+    [meta.configOptions],
+  );
+
+  const showLegacyMode = hasMode && !hasModeConfigOption;
+  const showLegacyModel = hasModel && !hasModelConfigOption;
+  const hasConfig = meta.configOptions.length > 0;
 
   // Initial fetch in-flight and no data merged yet — show a single
   // unobtrusive placeholder pill so the toolbar signals that the
   // agent's selectors are still loading instead of looking inert.
   // Once any selector is renderable we drop the placeholder, even if
   // a follow-up refresh is still pending, to avoid layout jitter.
-  if (!hasMode && !hasModel && !hasConfig) {
+  if (!showLegacyMode && !showLegacyModel && !hasConfig) {
     if (loading) {
       return (
         <span
@@ -276,39 +309,42 @@ export const AcpSessionSelectors = ({
   }
 
   return (
-    <div className="flex min-w-0 shrink items-center overflow-hidden">
-      {hasMode && (
-        <Select<string>
-          options={modeOptions}
-          value={meta.currentModeId ?? modeOptions[0].value}
-          onChange={(next) => void onSelectMode(next)}
-          disabled={disabled}
-          title={t('chat.agentMode')}
-          variant="ghost"
-          shape="pill"
-          tone="neutral"
-          size="sm"
-          align="top-left"
-          className={COMPACT_TRIGGER_CLASS}
-        />
-      )}
-      {hasModel && (
-        <Select<string>
-          options={modelOptions}
-          value={meta.currentModelId ?? modelOptions[0].value}
-          onChange={(next) => void onSelectModel(next)}
-          disabled={disabled}
-          title={t('chat.model')}
-          variant="ghost"
-          shape="pill"
-          tone="neutral"
-          size="sm"
-          align="top-left"
-          className={COMPACT_TRIGGER_CLASS}
-        />
-      )}
-      {meta.configOptions.length > 0 &&
-        visibleConfigOptions.map((opt) => {
+    <>
+      <div
+        ref={selectorRowRef}
+        className="flex min-w-0 shrink items-center overflow-hidden"
+      >
+        {showLegacyMode && (
+          <Select<string>
+            options={modeOptions}
+            value={meta.currentModeId ?? modeOptions[0].value}
+            onChange={(next) => void onSelectMode(next)}
+            disabled={disabled}
+            title={t('chat.agentMode')}
+            variant="ghost"
+            shape="pill"
+            tone="neutral"
+            size="sm"
+            align="top-left"
+            className={COMPACT_TRIGGER_CLASS}
+          />
+        )}
+        {showLegacyModel && (
+          <Select<string>
+            options={modelOptions}
+            value={meta.currentModelId ?? modelOptions[0].value}
+            onChange={(next) => void onSelectModel(next)}
+            disabled={disabled}
+            title={t('chat.model')}
+            variant="ghost"
+            shape="pill"
+            tone="neutral"
+            size="sm"
+            align="top-left"
+            className={COMPACT_TRIGGER_CLASS}
+          />
+        )}
+        {meta.configOptions.map((opt) => {
           const id = String((opt as { id?: unknown }).id ?? '');
           if (!id) return null;
           return (
@@ -316,10 +352,93 @@ export const AcpSessionSelectors = ({
               key={id}
               option={opt}
               disabled={disabled}
-              onSelect={(value) => onSelectConfigOption(id, value)}
+              onSelect={(value) => {
+                if (isModeConfigOption(opt) && value === 'agent-full-access') {
+                  const selectorRow = selectorRowRef.current;
+                  const chatInputSurface = selectorRow?.closest(
+                    '[data-chat-input-surface]',
+                  );
+                  const rect = (
+                    chatInputSurface ?? selectorRow
+                  )?.getBoundingClientRect();
+                  fullAccessOriginRef.current =
+                    document.activeElement instanceof HTMLElement
+                      ? document.activeElement
+                      : null;
+                  setPendingFullAccess({
+                    optionId: id,
+                    value,
+                    position: rect
+                      ? { x: rect.left, y: rect.top }
+                      : { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+                  });
+                  return;
+                }
+                return onSelectConfigOption(id, value);
+              }}
             />
           );
         })}
-    </div>
+      </div>
+      {pendingFullAccess && (
+        <Popover
+          position={pendingFullAccess.position}
+          anchor="bottom-left"
+          offset={{ x: 0, y: -8 }}
+          onDismiss={dismissFullAccess}
+          className="w-80 max-w-[calc(100vw-1.5rem)] p-4"
+        >
+          <div
+            role="alertdialog"
+            aria-labelledby={fullAccessTitleId}
+            aria-describedby={fullAccessDescriptionId}
+          >
+            <div className="flex items-start gap-2.5">
+              <TriangleAlert
+                aria-hidden="true"
+                className="text-warning mt-0.5 h-4 w-4 shrink-0"
+              />
+              <div className="min-w-0">
+                <h3
+                  id={fullAccessTitleId}
+                  className="text-fg-default text-sm font-semibold"
+                >
+                  {t('chat.fullAccessConfirmTitle')}
+                </h3>
+                <p
+                  id={fullAccessDescriptionId}
+                  className="text-fg-muted mt-1 text-xs leading-5"
+                >
+                  {t('chat.fullAccessConfirmDescription')}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 flex justify-end gap-2">
+              <Button
+                autoFocus
+                variant="ghost"
+                tone="neutral"
+                size="sm"
+                onClick={dismissFullAccess}
+              >
+                {t('actions.cancel')}
+              </Button>
+              <Button
+                variant="solid"
+                tone="danger"
+                size="sm"
+                onClick={() => {
+                  const { optionId, value } = pendingFullAccess;
+                  setPendingFullAccess(null);
+                  void onSelectConfigOption(optionId, value);
+                }}
+              >
+                {t('chat.enableFullAccess')}
+              </Button>
+            </div>
+          </div>
+        </Popover>
+      )}
+    </>
   );
 };

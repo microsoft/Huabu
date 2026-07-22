@@ -21,7 +21,7 @@ non-blocking; the LLM decides what to write.
 
 **Skills are dual-source**: system skills ship in `apps/server/src/prompt/skills/<id>/` (read-only); user/curator skills live in `<workspace>/setting/skills/<id>/`. Same id → merged "system first + user appended"; loader in [skills/loader.ts](../../apps/server/src/prompt/skills/loader.ts).
 
-Ordinary task Skills run on the Chat Model as part of the current Chat-backed Deployment. Only the explicit `/create-skill` and `/update-skill` authoring commands use the `skill` model role, which resolves through the Utility Model and falls back to Chat when Utility is not configured. Authoring turns are fresh Agenetes Jobs so their role is not frozen into an existing Deployment; before the Job, the live Deployment is closed, and the next normal Chat turn rehydrates the durable authoring turn before returning to the Chat Model. The `skill` role is vision-capable: when the Utility Model cannot accept required image input, model resolution falls back to the Chat Model.
+Ordinary task Skills run on the Chat Model as part of the current Chat-backed Deployment. Only the explicit `/create-skill` and `/update-skill` authoring commands use the `skill` model role, which resolves through the Utility Model and, when Utility is not configured, defaults to the cheapest eligible model in the chat provider (ultimately the Chat Model). Authoring turns are fresh Agenetes Jobs so their role is not frozen into an existing Deployment; before the Job, the live Deployment is closed, and the next normal Chat turn rehydrates the durable authoring turn before returning to the Chat Model. The `skill` role is vision-capable: when the resolved model cannot accept required image input, model resolution falls back to the Chat Model.
 
 ---
 
@@ -41,7 +41,7 @@ Two independent write paths:
 - `setImmediate` dispatch — the route responds to the client first; the curator starts on the next tick.
 - Failures only `warn`, never throw; the next trigger naturally retries.
 - The curator uses [agents/memory/AGENT.md](../../apps/server/src/prompt/agents/memory/AGENT.md), max 5 iterations, sequential tool calls.
-- The curator runs with the `memory` model role, which resolves through the Utility Model and falls back to the Chat Model when Utility is not configured.
+- The curator runs with the `memory` model role, which resolves through the Utility Model and, when Utility is not configured, defaults to the cheapest eligible model in the chat provider (ultimately the Chat Model).
 
 ### 2.2 Explicit requests in chat
 

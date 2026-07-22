@@ -3,6 +3,7 @@ import {
   llmImageConfigUpdateSchema,
   llmModelsQuerySchema,
   llmUtilityConfigUpdateSchema,
+  oauthProviderBodySchema,
   oauthStatusQuerySchema,
 } from '@sediment/shared';
 
@@ -38,6 +39,7 @@ import type {
   OAuthDeviceCodeResponse,
   OAuthLogoutResponse,
   OAuthPollResponse,
+  OAuthProviderBody,
   OAuthStatusQuery,
   OAuthStatusResponse,
 } from '@sediment/shared';
@@ -152,46 +154,60 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
     return { provider: parsed.data.provider, models };
   });
 
-  // ── OAuth (GitHub Copilot) ──
+  // ── OAuth (GitHub Copilot, OpenAI Codex) ──
 
   // POST /api/llm/oauth/device-code — start device code flow
-  app.post<{ Reply: ApiResult<OAuthDeviceCodeResponse> }>(
-    '/oauth/device-code',
-    async (request, reply) => {
-      if (!isLoopbackRequest(request)) {
-        return reply.status(403).send({ message: 'Forbidden' });
-      }
+  app.post<{
+    Body: OAuthProviderBody;
+    Reply: ApiResult<OAuthDeviceCodeResponse>;
+  }>('/oauth/device-code', async (request, reply) => {
+    if (!isLoopbackRequest(request)) {
+      return reply.status(403).send({ message: 'Forbidden' });
+    }
 
-      try {
-        const result = await startDeviceCodeFlow();
-        return reply.send(result);
-      } catch (err) {
-        return reply.status(500).send({
-          message: err instanceof Error ? err.message : 'OAuth flow failed',
-        });
-      }
-    },
-  );
+    const parsed = oauthProviderBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply
+        .status(400)
+        .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
+    }
+    const provider = parsed.data.provider;
+    try {
+      const result = await startDeviceCodeFlow(provider);
+      return reply.send(result);
+    } catch (err) {
+      return reply.status(500).send({
+        message: err instanceof Error ? err.message : 'OAuth flow failed',
+      });
+    }
+  });
 
   // POST /api/llm/oauth/poll — poll for authorization result
-  app.post<{ Reply: ApiResult<OAuthPollResponse> }>(
-    '/oauth/poll',
-    async (request, reply) => {
-      if (!isLoopbackRequest(request)) {
-        return reply.status(403).send({ message: 'Forbidden' });
-      }
+  app.post<{
+    Body: OAuthProviderBody;
+    Reply: ApiResult<OAuthPollResponse>;
+  }>('/oauth/poll', async (request, reply) => {
+    if (!isLoopbackRequest(request)) {
+      return reply.status(403).send({ message: 'Forbidden' });
+    }
 
-      try {
-        const status = await pollDeviceCode();
-        return reply.send({ status });
-      } catch (err) {
-        return reply.send({
-          status: 'error',
-          error: err instanceof Error ? err.message : 'Poll failed',
-        });
-      }
-    },
-  );
+    const parsed = oauthProviderBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply
+        .status(400)
+        .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
+    }
+    const provider = parsed.data.provider;
+    try {
+      const status = await pollDeviceCode(provider);
+      return reply.send({ status });
+    } catch (err) {
+      return reply.send({
+        status: 'error',
+        error: err instanceof Error ? err.message : 'Poll failed',
+      });
+    }
+  });
 
   // GET /api/llm/oauth/status — check if OAuth credentials exist AND are usable
   app.get<{
@@ -210,17 +226,24 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // POST /api/llm/oauth/logout — clear OAuth credentials
-  app.post<{ Reply: ApiResult<OAuthLogoutResponse> }>(
-    '/oauth/logout',
-    async (request, reply) => {
-      if (!isLoopbackRequest(request)) {
-        return reply.status(403).send({ message: 'Forbidden' });
-      }
+  app.post<{
+    Body: OAuthProviderBody;
+    Reply: ApiResult<OAuthLogoutResponse>;
+  }>('/oauth/logout', async (request, reply) => {
+    if (!isLoopbackRequest(request)) {
+      return reply.status(403).send({ message: 'Forbidden' });
+    }
 
-      await logoutOAuth();
-      return reply.send({ ok: true });
-    },
-  );
+    const parsed = oauthProviderBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply
+        .status(400)
+        .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
+    }
+    const provider = parsed.data.provider;
+    await logoutOAuth(provider);
+    return reply.send({ ok: true });
+  });
 };
 
 export default llmRoutes;

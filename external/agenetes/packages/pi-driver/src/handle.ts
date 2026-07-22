@@ -1,6 +1,7 @@
 import { resolveAgentInputs } from '@agenetes/protocol';
 import { HistoryLoadDeniedError } from '@agenetes/runtime';
 import { Agent, convertToLlm } from '@earendil-works/pi-agent-core';
+import { streamSimple } from '@earendil-works/pi-ai/compat';
 
 import type {
   PiDriverPorts,
@@ -224,6 +225,7 @@ export class PiAgentHandle<
           messages: initialMessages,
         },
         convertToLlm: (msgs) => msgs as Message[],
+        streamFn: streamSimple,
         getApiKey: () => this.ports.getApiKey(recipe.model, mCtx),
         toolExecution: recipe.runtime?.toolExecution ?? 'parallel',
       });

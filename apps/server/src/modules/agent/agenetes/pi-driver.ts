@@ -12,7 +12,7 @@
 
 import { MODEL_ROLES } from '@sediment/shared';
 
-import { ensureApiKeyForRole, getModelForRole } from '../llm.js';
+import { ensureApiKeyForRole, resolveModelForRoleAsync } from '../llm.js';
 import { getSessionReadSet } from '../session-read-set.js';
 import { buildAgentToolsByNames } from '../tools/index.js';
 
@@ -87,7 +87,7 @@ export const huabuPiDriverPorts = {
   async resolveModel(ref, ctx) {
     assertHostActiveModel(ref);
     const host = getHuabuHostContext(ctx);
-    return getModelForRole(host.modelRole ?? 'chat', {
+    return resolveModelForRoleAsync(host.modelRole ?? 'chat', {
       hasImage: host.hasImage,
     });
   },

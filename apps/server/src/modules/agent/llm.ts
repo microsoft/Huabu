@@ -22,7 +22,7 @@ import {
   getModel,
   getModels,
   getProviders,
-} from '@earendil-works/pi-ai';
+} from '@earendil-works/pi-ai/compat';
 
 import {
   DEFAULT_AZURE_IMAGE_API_VERSION,
@@ -32,12 +32,11 @@ import {
 } from '@sediment/shared';
 
 import {
-  getCopilotApiKey,
+  getOAuthApiKey,
   verifyOAuthCredentials,
-  applyCopilotModelOverrides,
   getCopilotStaticHeaders,
-  fetchEntitledCopilotModels,
 } from './oauth.js';
+import { getPiModels, isOAuthProvider } from './pi-models.js';
 import { getDataDir } from '../../data-dir.js';
 import {
   llmProviderApiKeySecretId,
@@ -57,6 +56,7 @@ import type {
   Model,
   ProviderStreamOptions,
 } from '@earendil-works/pi-ai';
+import type { BuiltinProvider } from '@earendil-works/pi-ai/compat';
 import type {
   ImageModelFamily,
   LLMConfig,
@@ -74,6 +74,26 @@ const log = getLogger('llm');
 
 // ==================== Provider Catalog ====================
 
+/** Read a built-in provider's model catalog from pi-ai's registry. */
+function getProviderModels(providerId: KnownProvider): Model<Api>[] {
+  return getModels(providerId as BuiltinProvider) as Model<Api>[];
+}
+
+/** Map a pi-ai catalog model to the wire `LLMModelInfo` shape. */
+function toModelInfo(m: Model<Api>, providerId: string): LLMModelInfo {
+  return {
+    id: m.id,
+    name: m.name || m.id,
+    provider: providerId,
+    reasoning: m.reasoning,
+    input: m.input as ('text' | 'image')[],
+    ...(m.cost ? { cost: { input: m.cost.input, output: m.cost.output } } : {}),
+    ...(typeof m.contextWindow === 'number'
+      ? { contextWindow: m.contextWindow }
+      : {}),
+  };
+}
+
 /** Provider-specific metadata not available from pi-ai's registry. */
 const PROVIDER_OVERRIDES: Record<string, Partial<LLMProviderInfo>> = {
   'azure-openai-responses': {
@@ -83,6 +103,10 @@ const PROVIDER_OVERRIDES: Record<string, Partial<LLMProviderInfo>> = {
     baseUrl: { overridable: true },
   },
   'github-copilot': {
+    authType: 'oauth',
+    baseUrl: { overridable: false },
+  },
+  'openai-codex': {
     authType: 'oauth',
     baseUrl: { overridable: false },
   },
@@ -101,6 +125,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   mistral: 'Mistral',
   'amazon-bedrock': 'Amazon Bedrock',
   'github-copilot': 'GitHub Copilot',
+  'openai-codex': 'OpenAI Codex',
 };
 
 /**
@@ -111,7 +136,7 @@ function buildProviderCatalog(): LLMProviderInfo[] {
   const knownProviders = getProviders();
   const catalog: LLMProviderInfo[] = knownProviders.map((id) => {
     const overrides = PROVIDER_OVERRIDES[id];
-    const models = getModels(id);
+    const models = getProviderModels(id);
     const api = models[0]?.api ?? 'openai-completions';
     const defaultBaseUrl = models[0]?.baseUrl;
     const baseUrl: LLMProviderInfo['baseUrl'] = {
@@ -434,9 +459,9 @@ async function resolveApiKeyAsync(
   providerId: string,
   explicitKey?: string,
 ): Promise<string | null> {
-  // OAuth providers
-  if (providerId === 'github-copilot') {
-    return getCopilotApiKey();
+  // OAuth providers (GitHub Copilot, OpenAI Codex) resolve an access token.
+  if (isOAuthProvider(providerId)) {
+    return getOAuthApiKey(providerId);
   }
   return resolveApiKey(providerId, explicitKey);
 }
@@ -448,20 +473,19 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
   // Try to get from pi-ai built-in registry first
   if (providerInfo?.builtIn) {
     try {
-      const builtIn = getModel(
-        cfg.provider as KnownProvider,
-        cfg.model as never,
-      );
+      const builtIn =
+        getProviderModels(cfg.provider as KnownProvider).find(
+          (model) => model.id === cfg.model,
+        ) ?? getModel(cfg.provider as BuiltinProvider, cfg.model as never);
       if (builtIn) {
         let model = builtIn as Model<Api>;
         if (cfg.baseUrl) {
           model = { ...model, baseUrl: cfg.baseUrl };
         }
-        // For Copilot, apply pi-ai's model overrides (baseUrl from token, headers)
-        if (cfg.provider === 'github-copilot') {
-          const [modified] = applyCopilotModelOverrides([model]);
-          if (modified) model = modified;
-        }
+        // Copilot's credential-specific gateway baseUrl + client headers are
+        // applied later, at request time, via applyCopilotAuthToModel
+        // (pi-ai Models.getAuth). The registry model already carries the
+        // client headers.
         return model;
       }
     } catch {
@@ -471,11 +495,12 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
 
   // Manual model construction (Azure, custom endpoints, etc.)
   //
-  // For github-copilot this path is hit by models newer than the bundled
-  // pi-ai registry. We deliberately ignore the provider's catalog `api`
-  // (which is derived from the first registry entry and happens to be
-  // `anthropic-messages`) and use the OpenAI-compatible `/chat/completions`
-  // endpoint, which Copilot's gateway accepts for every chat model.
+  // Copilot models present in pi-ai's catalog take the built-in path above
+  // with their correct per-model api. This manual path only handles
+  // github-copilot ids newer than the bundled catalog: their real api is
+  // unknown, so we request them over the universal openai-completions
+  // (`/chat/completions`) endpoint, which Copilot's gateway accepts for
+  // every chat model.
   const api =
     cfg.provider === 'github-copilot'
       ? 'openai-completions'
@@ -505,19 +530,16 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
     maxTokens: 16384,
   } as Model<Api>;
 
-  // For Copilot, apply pi-ai's model overrides (baseUrl from token).
-  //
-  // `modifyModels` only rewrites `baseUrl`, so we must seed the required
-  // Copilot client headers (`Editor-Version`, `Copilot-Integration-Id`, …)
-  // ourselves — otherwise newer ids built on this manual path are rejected
-  // with `400 missing Editor-Version header for IDE auth`.
+  // Copilot ids newer than the bundled catalog have no registry entry, so
+  // seed the required client headers (`Editor-Version`,
+  // `Copilot-Integration-Id`, …) here — otherwise the request is rejected
+  // with `400 missing Editor-Version header for IDE auth`. The
+  // credential-specific baseUrl is applied later via applyCopilotAuthToModel.
   if (cfg.provider === 'github-copilot') {
     model = {
       ...model,
       headers: getCopilotStaticHeaders(),
     } as Model<Api>;
-    const [modified] = applyCopilotModelOverrides([model]);
-    if (modified) model = modified;
   }
 
   return model;
@@ -582,14 +604,8 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
   // Built-in providers: get from pi-ai registry
   if (providerInfo.builtIn) {
     try {
-      const models = getModels(providerId as KnownProvider);
-      return models.map((m) => ({
-        id: m.id,
-        name: m.name || m.id,
-        provider: providerId,
-        reasoning: m.reasoning,
-        input: m.input as ('text' | 'image')[],
-      }));
+      const models = getProviderModels(providerId as KnownProvider);
+      return models.map((m) => toModelInfo(m, providerId));
     } catch {
       return [];
     }
@@ -630,45 +646,201 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
 }
 
 /**
- * Like {@link getModelsForProvider}, but for GitHub Copilot it returns the
- * models the *current account* is actually entitled to — queried live from
- * Copilot's `GET /models` endpoint (the same source VS Code's model picker
- * uses).
+ * Model-id substrings that are never chat/completion models on the OpenAI
+ * API. OpenAI's `/v1/models` list mixes in embedding, audio, image, and
+ * moderation models that Huabu's chat settings must not surface. Mirrors
+ * the filter Open WebUI and similar clients apply.
+ */
+const OPENAI_NON_CHAT_MODEL_MARKERS = [
+  'babbage',
+  'davinci',
+  'dall-e',
+  'embedding',
+  'tts',
+  'whisper',
+  'image',
+  'audio',
+  'realtime',
+  'transcribe',
+  'moderation',
+] as const;
+
+const OPENAI_MODEL_IDS_CACHE_TTL_MS = 5 * 60_000;
+let openAIModelIdsCache: { ids: string[]; expiresAt: number } | null = null;
+let openAIModelIdsRequest: Promise<string[] | null> | null = null;
+/**
+ * Bumped whenever the OpenAI key / baseUrl changes. An in-flight
+ * `/v1/models` fetch started under the previous credential captures the
+ * epoch at launch and, if it no longer matches on completion, neither
+ * repopulates the cache (stale-key ids) nor clears a newer in-flight
+ * request.
+ */
+let openAIModelIdsEpoch = 0;
+
+/** Whether an OpenAI `/v1/models` id is a chat/completion model. */
+export function isOpenAIChatModelId(id: string): boolean {
+  const lower = id.toLowerCase();
+  return !OPENAI_NON_CHAT_MODEL_MARKERS.some((marker) =>
+    lower.includes(marker),
+  );
+}
+
+/**
+ * Merge live OpenAI model ids with the static pi-ai catalogue:
+ *   - Known ids reuse the curated static entry (accurate reasoning flag,
+ *     input modalities, display name).
+ *   - Unknown ids (newer than the bundled registry) are surfaced with
+ *     conservative defaults: multimodal input (all current OpenAI chat
+ *     models accept text + image) and no reasoning flag until a pi-ai
+ *     upgrade supplies the real metadata.
  *
- * The returned list is the live entitlement, enriched per model:
- *   - If pi-ai's static registry knows the id, we reuse its curated entry
- *     (accurate reasoning flag, input modalities, display name, and — via
- *     {@link buildModel} — the optimal request protocol).
- *   - Otherwise the model is newer than the bundled registry; we surface it
- *     anyway using the live metadata. Such models are requested over the
- *     universal `openai-completions` endpoint (see {@link buildModel}),
- *     which Copilot's gateway accepts for every chat model, so they remain
- *     usable until a pi-ai upgrade restores the optimal protocol.
+ * The result preserves the live ordering so the account's own entitlement
+ * drives what the user sees. Falls back to the full static list when the
+ * live ids yield nothing selectable.
+ */
+export function mergeOpenAIModels(
+  liveIds: string[],
+  staticModels: LLMModelInfo[],
+): LLMModelInfo[] {
+  const staticById = new Map(staticModels.map((m) => [m.id.toLowerCase(), m]));
+  const seen = new Set<string>();
+  const merged: LLMModelInfo[] = [];
+  for (const id of liveIds) {
+    if (!isOpenAIChatModelId(id)) continue;
+    const key = id.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const known = staticById.get(key);
+    merged.push(
+      known ?? {
+        id,
+        name: id,
+        provider: 'openai',
+        reasoning: false,
+        input: ['text', 'image'],
+      },
+    );
+  }
+  return merged.length > 0 ? merged : staticModels;
+}
+
+/**
+ * Fetch the model ids the current OpenAI API key can access from
+ * `GET {baseUrl}/models`. Returns `null` when unauthenticated, unreachable,
+ * or the response is unusable — letting callers fall back to the static
+ * pi-ai catalogue instead of showing an empty list.
+ */
+async function fetchOpenAIModelIds(): Promise<string[] | null> {
+  if (openAIModelIdsCache && openAIModelIdsCache.expiresAt > Date.now()) {
+    return [...openAIModelIdsCache.ids];
+  }
+  if (openAIModelIdsRequest) return openAIModelIdsRequest;
+
+  const epoch = openAIModelIdsEpoch;
+  openAIModelIdsRequest = fetchOpenAIModelIdsUncached();
+  try {
+    const ids = await openAIModelIdsRequest;
+    // Drop the result if the credential changed mid-flight — a stale-key
+    // model list must not seed the cache for the new key.
+    if (ids && epoch === openAIModelIdsEpoch) {
+      openAIModelIdsCache = {
+        ids: [...ids],
+        expiresAt: Date.now() + OPENAI_MODEL_IDS_CACHE_TTL_MS,
+      };
+    }
+    return ids;
+  } finally {
+    // Only clear our own request slot; a config change may have already
+    // installed a fresh request for the new credential.
+    if (epoch === openAIModelIdsEpoch) openAIModelIdsRequest = null;
+  }
+}
+
+async function fetchOpenAIModelIdsUncached(): Promise<string[] | null> {
+  const apiKey = await resolveApiKeyAsync('openai');
+  if (!apiKey) return null;
+
+  const providerInfo = getProviderCatalog().find((p) => p.id === 'openai');
+  const persistedBaseUrl = loadPersistedStore().providers['openai']?.baseUrl;
+  const baseUrl = (
+    persistedBaseUrl ??
+    providerInfo?.baseUrl.default ??
+    'https://api.openai.com/v1'
+  ).replace(/\/+$/, '');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(`${baseUrl}/models`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      log.warn(
+        { status: res.status },
+        'OpenAI /v1/models returned non-OK HTTP status',
+      );
+      return null;
+    }
+    const json = (await res.json()) as { data?: Array<{ id?: string }> };
+    const ids = Array.isArray(json.data)
+      ? json.data
+          .map((entry) => entry.id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [];
+    return ids.length > 0 ? ids : null;
+  } catch (err) {
+    log.warn({ err }, 'Failed to fetch OpenAI /v1/models');
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Like {@link getModelsForProvider}, but resolves the *current account's*
+ * live entitlement for the providers that expose one:
+ *   - GitHub Copilot: pi-ai's `Models.getAvailable`, which filters the
+ *     bundled Copilot catalog by the `availableModelIds` captured on the
+ *     stored OAuth credential at login/refresh (no per-call network round
+ *     trip).
+ *   - OpenAI: queried from `GET {baseUrl}/models`, filtered to chat models
+ *     and merged with the static pi-ai metadata (see
+ *     {@link mergeOpenAIModels}).
  *
- * Falls back to the full static list when unauthenticated or the live fetch
- * fails, preserving the previous behavior.
+ * Falls back to the full static list when unauthenticated or the live
+ * lookup fails, preserving the previous behavior.
  */
 export async function getModelsForProviderLive(
   providerId: string,
 ): Promise<LLMModelInfo[]> {
   const staticModels = getModelsForProvider(providerId);
+
+  // OpenAI: prefer the account's live `/v1/models` entitlement, merged with
+  // the static pi-ai metadata; fall back to the static catalogue on failure.
+  if (providerId === 'openai') {
+    const liveIds = await fetchOpenAIModelIds();
+    return liveIds ? mergeOpenAIModels(liveIds, staticModels) : staticModels;
+  }
+
   if (providerId !== 'github-copilot') return staticModels;
 
-  const entitled = await fetchEntitledCopilotModels();
-  if (!entitled || entitled.length === 0) return staticModels;
-
-  const staticById = new Map(staticModels.map((m) => [m.id.toLowerCase(), m]));
-  return entitled.map((live) => {
-    const known = staticById.get(live.id.toLowerCase());
-    if (known) return known;
-    return {
-      id: live.id,
-      name: live.name,
-      provider: 'github-copilot',
-      reasoning: false,
-      input: live.vision ? ['text', 'image'] : ['text'],
-    } satisfies LLMModelInfo;
-  });
+  // Copilot: getAvailable() narrows the bundled catalog to the account's
+  // entitled `availableModelIds` (captured on the credential at login /
+  // token refresh). It returns [] when unauthenticated — fall back to the
+  // static catalog in that case.
+  try {
+    const available = await getPiModels().getAvailable('github-copilot');
+    if (available.length === 0) return staticModels;
+    return available.map((m) => toModelInfo(m, providerId));
+  } catch (err) {
+    log.warn({ err }, 'Copilot getAvailable failed; using static catalog');
+    return staticModels;
+  }
 }
 
 /**
@@ -809,6 +981,14 @@ export async function setLLMConfig(
   activeConfig = persisted;
   cachedModel = null;
   cachedApiKey = null;
+  if (
+    persisted.provider === 'openai' &&
+    (update.apiKey !== undefined || update.baseUrl !== undefined)
+  ) {
+    openAIModelIdsCache = null;
+    openAIModelIdsRequest = null;
+    openAIModelIdsEpoch += 1;
+  }
 
   const providerInfo = getProviderCatalog().find(
     (p) => p.id === persisted.provider,
@@ -1003,12 +1183,15 @@ function loadUtilityPersistedConfig(): PersistedConfig | null {
 
 /**
  * Get the saved utility-tier configuration. An empty `provider` (the
- * default) means "follow the chat model". `authenticated` reflects whether
- * the chosen provider is usable: for OAuth providers it performs an
- * authoritative credential check (shared with the chat config, so logging
- * in once covers both tiers); for API-key providers it checks the shared
- * per-provider store / env. This lets the Settings UI show whether an
- * inline key is still needed, and never asks OAuth providers for a key.
+ * default) means "auto": background roles run on the cheapest eligible
+ * model in the authenticated chat provider (resolved at call time by
+ * {@link resolveAutoCheapUtility}), falling back to the chat model.
+ * `authenticated` reflects whether the chosen provider is usable: for OAuth
+ * providers it performs an authoritative credential check (shared with the
+ * chat config, so logging in once covers both tiers); for API-key providers
+ * it checks the shared per-provider store / env. This lets the Settings UI
+ * show whether an inline key is still needed, and never asks OAuth
+ * providers for a key.
  */
 export async function getUtilityConfig(): Promise<LLMUtilityConfig> {
   const u = loadPersistedStore().utilityConfig;
@@ -1129,11 +1312,133 @@ export function shouldStepUpForVision(
 }
 
 /**
- * Resolve `(config, model)` for a role via the two-layer binding:
- * the role's default tier picks chat or utility; utility falls through to
- * chat when unconfigured. A **vision guard** steps a resolved model up to
- * chat when the role may carry an image (`hasImage`) but the model cannot
- * accept image input.
+ * Pick the cheapest known-priced model from a pi-ai model list, ranked by
+ * combined per-token input + output price. Entries without a positive
+ * input price are skipped so zero-priced or unpriced registry entries can't
+ * masquerade as "free" and win.
+ * Returns `null` when no priced model is available. Pure over its input so
+ * the ranking can be unit-tested without the registry.
+ */
+export function pickCheapestModel(models: Model<Api>[]): Model<Api> | null {
+  let best: Model<Api> | null = null;
+  let bestPrice = Infinity;
+  for (const m of models) {
+    const inputCost = m.cost?.input ?? 0;
+    const outputCost = m.cost?.output ?? 0;
+    if (inputCost <= 0) continue;
+    const price = inputCost + outputCost;
+    if (price < bestPrice) {
+      bestPrice = price;
+      best = m;
+    }
+  }
+  return best;
+}
+
+/** Pick the cheapest model whose id is present in the provider entitlement. */
+export function pickCheapestEligibleModel(
+  models: Model<Api>[],
+  eligibleModelIds: ReadonlySet<string>,
+): Model<Api> | null {
+  return pickCheapestModel(
+    models.filter((model) => eligibleModelIds.has(model.id)),
+  );
+}
+
+/**
+ * When the utility tier is following chat (no explicit utility config),
+ * resolve the cheapest known-priced model within the authenticated chat
+ * provider so lightweight background roles (labeling / summaries /
+ * keywords) don't burn the flagship chat model's per-token rate — the
+ * utility credential is the chat provider's, so this needs no extra auth.
+ *
+ * Returns `null` for non-built-in providers, for subscription OAuth providers
+ * without a reliable entitlement source (OpenAI Codex), when no priced model
+ * is available, or when the cheapest already is the active chat model, so the
+ * caller cleanly falls back to the (cached) chat model.
+ */
+async function resolveAutoCheapUtility(
+  chatCfg: PersistedConfig,
+): Promise<{ cfg: PersistedConfig; model: Model<Api> } | null> {
+  const providerInfo = getProviderCatalog().find(
+    (p) => p.id === chatCfg.provider,
+  );
+  if (!providerInfo?.builtIn) return null;
+
+  // Subscription-based OAuth providers other than GitHub Copilot (i.e. OpenAI
+  // Codex) expose no reliable per-account entitlement: pi-ai's `getAvailable`
+  // returns their full static catalog (no `filterModels`, no
+  // `availableModelIds` on the credential), and the "cheapest" ranking is
+  // meaningless for a flat-rate subscription. Picking by price would surface
+  // models the ChatGPT plan cannot use (e.g. `gpt-5.3-codex-spark`) and the
+  // request would fail server-side with no fallback. Stay on the chat model.
+  if (
+    isOAuthProvider(chatCfg.provider) &&
+    chatCfg.provider !== 'github-copilot'
+  )
+    return null;
+
+  let catalog: Model<Api>[];
+  try {
+    catalog = getProviderModels(chatCfg.provider as KnownProvider);
+  } catch (err) {
+    log.warn(
+      { err, provider: chatCfg.provider },
+      'Failed to load provider catalog for automatic utility selection',
+    );
+    return null;
+  }
+
+  let eligibleModelIds: Set<string>;
+  try {
+    // `Models.getAvailable` narrows a provider's catalog to the ids the
+    // stored credential is entitled to (Copilot's `availableModelIds`, an
+    // OAuth account's model list, …) — the same source
+    // getModelsForProviderLive uses — so background selection can never pick
+    // a model the account is not entitled to.
+    const available = await getPiModels().getAvailable(chatCfg.provider);
+    eligibleModelIds = new Set(available.map((model) => model.id));
+
+    // OpenAI's provider catalog is static, so additionally intersect it with
+    // the current API key's live /v1/models entitlement. A failed lookup is
+    // not permission to guess: fall back to the configured chat model.
+    if (chatCfg.provider === 'openai') {
+      const liveIds = await fetchOpenAIModelIds();
+      if (!liveIds) return null;
+      const liveIdSet = new Set(liveIds);
+      eligibleModelIds = new Set(
+        [...eligibleModelIds].filter((id) => liveIdSet.has(id)),
+      );
+    }
+  } catch (err) {
+    log.warn(
+      { err, provider: chatCfg.provider },
+      'Failed to resolve eligible models for automatic utility selection',
+    );
+    return null;
+  }
+
+  const cheapest = pickCheapestEligibleModel(catalog, eligibleModelIds);
+  if (!cheapest || cheapest.id === chatCfg.model) return null;
+
+  const cfg: PersistedConfig = { ...chatCfg, model: cheapest.id };
+  return { cfg, model: buildModel(cfg) };
+}
+
+/**
+ * Resolve `(config, model)` synchronously for callers that cannot consult
+ * account entitlements. An explicit utility model is safe to resolve here;
+ * automatic utility selection conservatively stays on the chat model and is
+ * applied by {@link resolveForRoleAsync} on runtime request paths.
+ *
+ * The two-layer binding is:
+ * the role's default tier picks chat or utility. Utility resolution order
+ * is **explicit utility model > auto-cheapest in the chat provider > chat
+ * model**: when no utility model is configured, background roles default to
+ * the cheapest eligible model in the authenticated chat provider (see
+ * {@link resolveAutoCheapUtility}) instead of the flagship chat model. A
+ * **vision guard** then steps a resolved model up to chat when the role may
+ * carry an image (`hasImage`) but the model cannot accept image input.
  */
 function resolveForRole(
   role: ModelRole,
@@ -1148,7 +1453,10 @@ function resolveForRole(
   let resolved = chat();
   if (info.defaultTier === 'utility') {
     const utilityCfg = loadUtilityPersistedConfig();
-    if (utilityCfg) resolved = { cfg: utilityCfg, model: getUtilityModel() };
+    if (utilityCfg) {
+      // Explicit utility model wins.
+      resolved = { cfg: utilityCfg, model: getUtilityModel() };
+    }
   }
 
   // Vision guard: only relevant when an image is actually being sent.
@@ -1159,12 +1467,69 @@ function resolveForRole(
   return resolved;
 }
 
-/** Resolve the configured model for a built-in agent workload role. */
-export function getModelForRole(
+/** Resolve a role for runtime use, including account-aware auto selection. */
+async function resolveForRoleAsync(
   role: ModelRole,
   opts?: { hasImage?: boolean },
-): Model<Api> {
-  return resolveForRole(role, opts).model;
+): Promise<{ cfg: PersistedConfig; model: Model<Api> }> {
+  let resolved = resolveForRole(role, opts);
+  const info = MODEL_ROLES[role];
+
+  if (info.defaultTier === 'utility' && loadUtilityPersistedConfig() === null) {
+    const autoCheap = await resolveAutoCheapUtility(ensureConfig());
+    if (autoCheap) resolved = autoCheap;
+  }
+
+  if (shouldStepUpForVision(role, resolved.model.input, opts?.hasImage)) {
+    resolved = { cfg: ensureConfig(), model: getLLMModel() };
+  }
+
+  return resolved;
+}
+
+/**
+ * Resolve GitHub Copilot's credential-specific request context onto a model:
+ * the gateway `baseUrl` (derived by pi-ai from the OAuth token's `proxy-ep`)
+ * and the client headers, both via `Models.getAuth(model)`. This retires the
+ * hand-rolled token→baseUrl derivation. Non-Copilot models pass through
+ * unchanged; an unauthenticated Copilot returns the model untouched (the
+ * caller's api-key resolution then surfaces the "please log in" error).
+ */
+async function applyCopilotAuthToModel(
+  cfg: PersistedConfig,
+  model: Model<Api>,
+): Promise<Model<Api>> {
+  if (cfg.provider !== 'github-copilot') return model;
+  const result = await getPiModels().getAuth(model);
+  if (!result) return model;
+  // pi-ai's ProviderHeaders allows null values; Model.headers is string-only,
+  // so drop any null-valued headers before applying.
+  const headers = result.auth.headers
+    ? Object.fromEntries(
+        Object.entries(result.auth.headers).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string',
+        ),
+      )
+    : undefined;
+  return {
+    ...model,
+    ...(result.auth.baseUrl ? { baseUrl: result.auth.baseUrl } : {}),
+    ...(headers ? { headers } : {}),
+  };
+}
+
+/**
+ * Resolve a role's model for runtime use, also resolving GitHub Copilot's
+ * credential-specific gateway baseUrl + client headers via pi-ai
+ * `Models.getAuth`. Streaming paths must use this so Copilot requests hit the
+ * correct per-account gateway with the required headers.
+ */
+export async function resolveModelForRoleAsync(
+  role: ModelRole,
+  opts?: { hasImage?: boolean },
+): Promise<Model<Api>> {
+  const { cfg, model } = await resolveForRoleAsync(role, opts);
+  return applyCopilotAuthToModel(cfg, model);
 }
 
 /** Resolve and authenticate the provider configured for a workload role. */
@@ -1172,6 +1537,9 @@ export async function ensureApiKeyForRole(
   role: ModelRole,
   opts?: { hasImage?: boolean },
 ): Promise<string> {
+  // Automatic utility selection stays within the chat provider, so resolving
+  // the provider synchronously avoids repeating its entitlement lookup after
+  // resolveModelForRoleAsync() has already selected the model.
   const { cfg } = resolveForRole(role, opts);
   return ensureApiKeyFor(cfg);
 }
@@ -1273,9 +1641,12 @@ export interface LLMCallOptions extends ProviderStreamOptions {
  */
 export async function llmStream(context: Context, options?: LLMCallOptions) {
   const { role = 'chat', hasImage, ...streamOptions } = options ?? {};
-  const { cfg, model } = resolveForRole(role, { hasImage });
-  const apiKey = await ensureApiKeyFor(cfg);
-  return piStream(model, context, {
+  const { cfg, model } = await resolveForRoleAsync(role, { hasImage });
+  const [resolvedModel, apiKey] = await Promise.all([
+    applyCopilotAuthToModel(cfg, model),
+    ensureApiKeyFor(cfg),
+  ]);
+  return piStream(resolvedModel, context, {
     apiKey,
     ...getProviderSpecificOptions(cfg),
     ...streamOptions,
@@ -1287,9 +1658,12 @@ export async function llmStream(context: Context, options?: LLMCallOptions) {
  */
 export async function llmComplete(context: Context, options?: LLMCallOptions) {
   const { role = 'chat', hasImage, ...streamOptions } = options ?? {};
-  const { cfg, model } = resolveForRole(role, { hasImage });
-  const apiKey = await ensureApiKeyFor(cfg);
-  return piComplete(model, context, {
+  const { cfg, model } = await resolveForRoleAsync(role, { hasImage });
+  const [resolvedModel, apiKey] = await Promise.all([
+    applyCopilotAuthToModel(cfg, model),
+    ensureApiKeyFor(cfg),
+  ]);
+  return piComplete(resolvedModel, context, {
     apiKey,
     ...getProviderSpecificOptions(cfg),
     ...streamOptions,

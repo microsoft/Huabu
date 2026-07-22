@@ -3,6 +3,7 @@ export const SECRET_IDS = {
   tavilyApiKey: 'integration:tavily:api-key',
   rapidApiKey: 'integration:rapidapi:api-key',
   copilotOAuth: 'oauth:github-copilot:credentials',
+  codexOAuth: 'oauth:openai-codex:credentials',
 } as const;
 
 export function llmProviderApiKeySecretId(provider: string): string {

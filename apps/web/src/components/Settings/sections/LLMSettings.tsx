@@ -103,6 +103,20 @@ export const LLMSettings: React.FC = () => {
   const cancelOAuth = useLLMStore((s) => s.cancelOAuth);
   const llmLogoutOAuth = useLLMStore((s) => s.logoutOAuth);
 
+  // Brief "copied" confirmation for the device-code copy button — the copy
+  // itself is otherwise silent, so users can't tell it worked.
+  const [codeCopied, setCodeCopied] = useState(false);
+  const handleCopyCode = useCallback(async () => {
+    if (!oauthUserCode) return;
+    await copyToClipboard(oauthUserCode);
+    setCodeCopied(true);
+  }, [oauthUserCode]);
+  useEffect(() => {
+    if (!codeCopied) return;
+    const timer = setTimeout(() => setCodeCopied(false), 1600);
+    return () => clearTimeout(timer);
+  }, [codeCopied]);
+
   // ── Chat-provider form state ──
   // Azure needs deployment / API version fields that none of the other
   // providers expose, so those remain in a dedicated input cluster.
@@ -147,10 +161,12 @@ export const LLMSettings: React.FC = () => {
     setAzureApiVersion(llmConfig?.apiVersion ?? '');
   }, [isAzure, llmConfig?.model, llmConfig?.apiVersion]);
 
-  // Surface store errors as transient toasts.
+  // Surface store errors as persistent toasts: a provider/login failure is
+  // actionable, so it must stay on screen with a × until the user
+  // dismisses it rather than fading after a few seconds.
   useEffect(() => {
     if (llmError) {
-      toast(llmError, { tone: 'danger' });
+      toast(llmError, { tone: 'danger', duration: 0 });
     }
   }, [llmError]);
 
@@ -223,6 +239,23 @@ export const LLMSettings: React.FC = () => {
     await llmUpdateConfig({ provider, model: modelId });
   };
 
+  // A saved key changes which models the account is entitled to (OpenAI
+  // `/v1/models`, Copilot entitlement), so refresh the list once the key
+  // persists — the model picker renders after the key row.
+  const handleSaveChatKey = async (key: string) => {
+    const provider = llmConfig?.provider ?? '';
+    if (!provider) return;
+    await llmUpdateConfig({ provider, apiKey: key });
+    await llmLoadModels(provider);
+  };
+
+  const handleSaveUtilityKey = async (key: string) => {
+    const provider = utilityConfig?.provider ?? '';
+    if (!provider) return;
+    await updateUtilityConfig({ provider, apiKey: key });
+    await loadUtilityModels(provider);
+  };
+
   return (
     <>
       <SettingSection title={t('settings.chatModel')} collapsible>
@@ -242,43 +275,6 @@ export const LLMSettings: React.FC = () => {
             />
           </SettingControl>
         </SettingRow>
-
-        {llmConfig?.provider && llmModels.length > 0 && !isAzure && (
-          <SettingRow title={t('settings.model')}>
-            <SettingControl>
-              <Select
-                options={llmModels.map((m) => ({
-                  value: m.id,
-                  label: m.name || m.id,
-                }))}
-                value={llmConfig?.model ?? ''}
-                onChange={(v) => void handleModelChange(v)}
-                disabled={llmSaving}
-                ariaLabel={t('settings.model')}
-                className="w-full"
-              />
-            </SettingControl>
-          </SettingRow>
-        )}
-
-        {llmConfig?.provider && llmModels.length === 0 && !isAzure && (
-          <SettingRow title={t('settings.model')}>
-            <SettingControl>
-              <TextInput
-                type="text"
-                aria-label={t('settings.model')}
-                placeholder="e.g. gpt-4o"
-                value={manualModel}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setManualModel(v);
-                  debouncedSaveChat({ model: v.trim() });
-                }}
-                className="w-full"
-              />
-            </SettingControl>
-          </SettingRow>
-        )}
 
         {canOverrideBaseUrl && (
           <BaseUrlRow
@@ -384,42 +380,54 @@ export const LLMSettings: React.FC = () => {
 
         {/* OAuth pending — full-width row */}
         {llmConfig && isOAuth && oauthPending && oauthUserCode && (
-          <div className="bg-info-bg px-3 py-2.5">
-            <p className="mb-1.5 text-xs">
+          <div className="bg-info-bg flex flex-col gap-2.5 px-3 py-3">
+            <p className="text-fg-default text-xs font-medium">
               {t('settings.enterCodeAtOpenedPage')}
             </p>
-            <div className="mb-1.5 flex items-center gap-2">
-              <code className="bg-surface rounded px-2 py-1 font-mono text-lg font-bold">
+            <div className="flex items-center gap-2">
+              <code className="bg-surface border-edge-default text-fg-default rounded-md border px-3 py-1.5 font-mono text-base font-semibold tracking-[0.25em] tabular-nums">
                 {oauthUserCode}
               </code>
               <Button
                 variant="ghost"
                 iconOnly
                 size="sm"
-                tone="info"
-                title={t('settings.copyCode')}
+                tone={codeCopied ? 'success' : 'info'}
+                title={
+                  codeCopied ? t('settings.copied') : t('settings.copyCode')
+                }
                 tooltipPlacement="bottom"
-                onClick={() => void copyToClipboard(oauthUserCode)}
+                onClick={() => void handleCopyCode()}
               >
-                <Copy />
+                {codeCopied ? <Check /> : <Copy />}
               </Button>
             </div>
-            {oauthVerificationUri && (
-              <p className="text-info mb-1.5 text-[11px]">
-                {t('settings.orVisit')}{' '}
-                <a
-                  href={oauthVerificationUri}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline"
-                >
-                  {oauthVerificationUri}
-                </a>
-              </p>
-            )}
-            <Button variant="ghost" tone="info" size="sm" onClick={cancelOAuth}>
-              {t('actions.cancel')}
-            </Button>
+            <div className="flex items-center justify-between gap-3">
+              {oauthVerificationUri ? (
+                <p className="text-fg-muted min-w-0 text-[11px] leading-snug">
+                  {t('settings.orVisit')}{' '}
+                  <a
+                    href={oauthVerificationUri}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-info underline underline-offset-2"
+                  >
+                    {oauthVerificationUri}
+                  </a>
+                </p>
+              ) : (
+                <span />
+              )}
+              <Button
+                variant="ghost"
+                tone="neutral"
+                size="sm"
+                onClick={cancelOAuth}
+                className="shrink-0"
+              >
+                {t('actions.cancel')}
+              </Button>
+            </div>
           </div>
         )}
 
@@ -435,8 +443,47 @@ export const LLMSettings: React.FC = () => {
             saved={llmConfig.authenticated}
             placeholder="sk-…"
             saving={llmSaving}
-            onSave={(key) => saveChat({ apiKey: key })}
+            onSave={handleSaveChatKey}
           />
+        )}
+
+        {/* Model picker comes last: for account-based providers the list is
+            only accurate once the key / login above is configured. */}
+        {llmConfig?.provider && llmModels.length > 0 && !isAzure && (
+          <SettingRow title={t('settings.model')}>
+            <SettingControl>
+              <Select
+                options={llmModels.map((m) => ({
+                  value: m.id,
+                  label: m.name || m.id,
+                }))}
+                value={llmConfig?.model ?? ''}
+                onChange={(v) => void handleModelChange(v)}
+                disabled={llmSaving}
+                ariaLabel={t('settings.model')}
+                className="w-full"
+              />
+            </SettingControl>
+          </SettingRow>
+        )}
+
+        {llmConfig?.provider && llmModels.length === 0 && !isAzure && (
+          <SettingRow title={t('settings.model')}>
+            <SettingControl>
+              <TextInput
+                type="text"
+                aria-label={t('settings.model')}
+                placeholder="e.g. gpt-4o"
+                value={manualModel}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setManualModel(v);
+                  debouncedSaveChat({ model: v.trim() });
+                }}
+                className="w-full"
+              />
+            </SettingControl>
+          </SettingRow>
         )}
       </SettingSection>
 
@@ -471,41 +518,6 @@ export const LLMSettings: React.FC = () => {
                 />
               </SettingControl>
             </SettingRow>
-
-            {utilityModels.length > 0 ? (
-              <SettingRow title={t('settings.model')}>
-                <SettingControl>
-                  <Select
-                    options={utilityModels.map((m) => ({
-                      value: m.id,
-                      label: m.name || m.id,
-                    }))}
-                    value={utilityConfig?.model ?? ''}
-                    onChange={(v) => void handleUtilityModelChange(v)}
-                    disabled={utilitySaving}
-                    ariaLabel={t('settings.model')}
-                    className="w-full"
-                  />
-                </SettingControl>
-              </SettingRow>
-            ) : (
-              <SettingRow title={t('settings.model')}>
-                <SettingControl>
-                  <TextInput
-                    type="text"
-                    aria-label={t('settings.model')}
-                    placeholder="e.g. gpt-4o-mini"
-                    value={utilityManualModel}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setUtilityManualModel(v);
-                      debouncedSaveUtility({ model: v.trim() });
-                    }}
-                    className="w-full"
-                  />
-                </SettingControl>
-              </SettingRow>
-            )}
 
             {canOverrideUtilityBaseUrl && (
               <BaseUrlRow
@@ -574,9 +586,46 @@ export const LLMSettings: React.FC = () => {
                   saved={utilityConfig.authenticated}
                   placeholder="sk-…"
                   saving={utilitySaving}
-                  onSave={(key) => saveUtility({ apiKey: key })}
+                  onSave={handleSaveUtilityKey}
                 />
               )
+            )}
+
+            {/* Model picker last — account-based lists need the key/login
+                above configured first. */}
+            {utilityModels.length > 0 ? (
+              <SettingRow title={t('settings.model')}>
+                <SettingControl>
+                  <Select
+                    options={utilityModels.map((m) => ({
+                      value: m.id,
+                      label: m.name || m.id,
+                    }))}
+                    value={utilityConfig?.model ?? ''}
+                    onChange={(v) => void handleUtilityModelChange(v)}
+                    disabled={utilitySaving}
+                    ariaLabel={t('settings.model')}
+                    className="w-full"
+                  />
+                </SettingControl>
+              </SettingRow>
+            ) : (
+              <SettingRow title={t('settings.model')}>
+                <SettingControl>
+                  <TextInput
+                    type="text"
+                    aria-label={t('settings.model')}
+                    placeholder="e.g. gpt-4o-mini"
+                    value={utilityManualModel}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setUtilityManualModel(v);
+                      debouncedSaveUtility({ model: v.trim() });
+                    }}
+                    className="w-full"
+                  />
+                </SettingControl>
+              </SettingRow>
             )}
           </>
         )}

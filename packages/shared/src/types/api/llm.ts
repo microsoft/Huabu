@@ -57,6 +57,19 @@ export interface LLMModelInfo {
   reasoning: boolean;
   /** Supported input types. */
   input: ('text' | 'image')[];
+  /**
+   * Per-token price in USD from pi-ai's registry, when known. Powers
+   * cost-aware selection (e.g. the utility tier's cheapest-eligible
+   * default) and price display in the model picker. Omitted for models
+   * whose price the registry does not carry (custom endpoints, freshly
+   * discovered ids).
+   */
+  cost?: { input: number; output: number };
+  /**
+   * Maximum context window in tokens from pi-ai's registry, when known.
+   * Omitted for models the registry does not describe.
+   */
+  contextWindow?: number;
 }
 
 // ==================== Active Configuration ====================
@@ -193,6 +206,16 @@ export const oauthStatusQuerySchema = z.object({
   provider: z.string().min(1),
 });
 export type OAuthStatusQuery = z.infer<typeof oauthStatusQuerySchema>;
+
+/**
+ * Body for `POST /api/llm/oauth/device-code`, `/oauth/poll`, and
+ * `/oauth/logout`. `provider` is the OAuth provider id (e.g. `github-copilot`,
+ * `openai-codex`); it defaults to `github-copilot` server-side when omitted.
+ */
+export const oauthProviderBodySchema = z.object({
+  provider: z.string().trim().min(1).optional(),
+});
+export type OAuthProviderBody = z.infer<typeof oauthProviderBodySchema>;
 
 /**
  * Response from GET /api/llm/providers

@@ -95,33 +95,43 @@ export async function getLLMModels(provider: string): Promise<LLMModelInfo[]> {
 
 // ==================== OAuth ====================
 
-/** Start a GitHub device code OAuth flow. */
-export async function startOAuthLogin(): Promise<OAuthDeviceCodeResponse> {
+/** Start a device-code OAuth flow for a provider (defaults to Copilot). */
+export async function startOAuthLogin(
+  provider?: string,
+): Promise<OAuthDeviceCodeResponse> {
   return apiFetch<OAuthDeviceCodeResponse>(routes.llmOAuthDeviceCode, {
     method: 'POST',
+    json: provider ? { provider } : {},
     fallbackMessage: 'Failed to start OAuth flow',
   });
 }
 
 /** Poll the OAuth device code flow for completion. */
-export async function pollOAuthLogin(): Promise<OAuthPollResponse> {
+export async function pollOAuthLogin(
+  provider?: string,
+): Promise<OAuthPollResponse> {
   return apiFetch<OAuthPollResponse>(routes.llmOAuthPoll, {
     method: 'POST',
+    json: provider ? { provider } : {},
     fallbackMessage: 'Failed to poll OAuth',
   });
 }
 
-/** Get the current OAuth authentication status. */
-export async function getOAuthStatus(): Promise<OAuthStatusResponse> {
-  return apiFetch<OAuthStatusResponse>(routes.llmOAuthStatus, {
+/** Get the current OAuth authentication status for a provider. */
+export async function getOAuthStatus(
+  provider = 'github-copilot',
+): Promise<OAuthStatusResponse> {
+  const url = `${routes.llmOAuthStatus}?provider=${encodeURIComponent(provider)}`;
+  return apiFetch<OAuthStatusResponse>(url, {
     fallbackMessage: 'Failed to get OAuth status',
   });
 }
 
-/** Logout from the OAuth provider. */
-export async function logoutOAuth(): Promise<void> {
+/** Logout from a provider's OAuth session (defaults to Copilot). */
+export async function logoutOAuth(provider?: string): Promise<void> {
   await apiFetch<void>(routes.llmOAuthLogout, {
     method: 'POST',
+    json: provider ? { provider } : {},
     fallbackMessage: 'Failed to logout',
     raw: true,
   });

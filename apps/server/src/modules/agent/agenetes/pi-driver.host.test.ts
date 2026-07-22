@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getModelForRole, ensureApiKeyForRole } = vi.hoisted(() => ({
-  getModelForRole: vi.fn(),
+const { resolveModelForRoleAsync, ensureApiKeyForRole } = vi.hoisted(() => ({
+  resolveModelForRoleAsync: vi.fn(),
   ensureApiKeyForRole: vi.fn(),
 }));
 
 vi.mock('../llm.js', () => ({
-  getModelForRole,
+  resolveModelForRoleAsync,
   ensureApiKeyForRole,
 }));
 
@@ -30,7 +30,7 @@ const baseContext = {
 describe('Huabu pi-driver model routing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getModelForRole.mockReturnValue({ id: 'resolved-model' });
+    resolveModelForRoleAsync.mockResolvedValue({ id: 'resolved-model' });
     ensureApiKeyForRole.mockResolvedValue('resolved-key');
   });
 
@@ -44,7 +44,7 @@ describe('Huabu pi-driver model routing', () => {
       hostContext: { modelRole: 'skill', hasImage: true },
     });
 
-    expect(getModelForRole).toHaveBeenCalledWith('memory', {
+    expect(resolveModelForRoleAsync).toHaveBeenCalledWith('memory', {
       hasImage: undefined,
     });
     expect(ensureApiKeyForRole).toHaveBeenCalledWith('skill', {
@@ -55,7 +55,7 @@ describe('Huabu pi-driver model routing', () => {
   it('defaults untagged workloads to Chat', async () => {
     await huabuPiDriverPorts.resolveModel(modelRef, baseContext);
 
-    expect(getModelForRole).toHaveBeenCalledWith('chat', {
+    expect(resolveModelForRoleAsync).toHaveBeenCalledWith('chat', {
       hasImage: undefined,
     });
   });

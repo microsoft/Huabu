@@ -98,7 +98,7 @@ Adding a future call site (e.g. `conversationTitle`, `compaction`, `router`) is 
 Storing a full provider/model config **per role** would explode the persisted store and the UI. Instead the config has two layers, resolved in priority order:
 
 ```
-utilityConfig                     // one utility-tier model (chat-shaped); empty provider = follow chat
+utilityConfig                     // one utility-tier model (chat-shaped); empty provider = auto (cheapest eligible in the chat provider)
 roleOverrides?: Partial<Record<ModelRole, ModelBinding>>   // optional per-role override, power users only
 ```
 
@@ -132,7 +132,8 @@ resolveModelForRole(role, opts?: { hasImage?: boolean }):
   1. roleOverrides[role]                    (explicit per-role override)
   2. tier config for MODEL_ROLES[role].defaultTier
        - 'chat'    → active chat config (getLLMModel today)
-       - 'utility' → utilityConfig, or fall through to chat when empty
+       - 'utility' → utilityConfig, or — when empty — the cheapest eligible
+                     model in the chat provider (SHIPPED), then chat
   3. fallback: chat config
   + vision guard: if MODEL_ROLES[role].vision && opts.hasImage
     && resolved model.input excludes 'image' → step up one level (ultimately chat)

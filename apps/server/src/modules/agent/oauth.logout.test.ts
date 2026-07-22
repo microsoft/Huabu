@@ -39,6 +39,9 @@ describe('logoutOAuth', () => {
     getPersistedSecret.mockReturnValue('{"refresh":"r","access":"a"}');
     setSecret.mockRejectedValueOnce(new Error('bridge timeout'));
 
-    await expect(logoutOAuth()).rejects.toThrow('bridge timeout');
+    // Models.logout wraps the underlying store error, but the rejection must
+    // still propagate so the client is never told "logged out" while the
+    // credential remains on disk.
+    await expect(logoutOAuth()).rejects.toThrow();
   });
 });

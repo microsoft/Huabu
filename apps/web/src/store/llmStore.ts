@@ -25,6 +25,21 @@ import type {
   LLMUtilityConfigUpdate,
 } from '@sediment/shared';
 
+/**
+ * Collapse a noisy provider error into a single readable line.
+ *
+ * GitHub's device-code token exchange can transiently fail with a 502 whose
+ * body is a full HTML error page ("Unicorn!"). Surfacing that raw blob in a
+ * toast is unreadable, so keep only the leading status text (everything
+ * before the first HTML tag) and cap the length.
+ */
+function summarizeOAuthError(raw: string | undefined): string | undefined {
+  if (!raw) return raw;
+  const beforeHtml = raw.split('<')[0].trim();
+  const concise = beforeHtml || raw.trim();
+  return concise.length > 200 ? `${concise.slice(0, 200)}…` : concise;
+}
+
 interface LLMState {
   /** Current LLM configuration from the server. */
   config: LLMConfig | null;
@@ -192,6 +207,9 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
   },
 
   startOAuth: async () => {
+    // Log into whichever provider is currently active/selected (e.g.
+    // github-copilot, openai-codex); the server defaults to Copilot if unset.
+    const provider = get().config?.provider || undefined;
     set({
       oauthPending: true,
       error: null,
@@ -199,7 +217,8 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
       oauthVerificationUri: null,
     });
     try {
-      const { userCode, verificationUri, interval } = await startOAuthLogin();
+      const { userCode, verificationUri, interval } =
+        await startOAuthLogin(provider);
       set({ oauthUserCode: userCode, oauthVerificationUri: verificationUri });
 
       // Open the verification URL in a new tab
@@ -223,16 +242,19 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
         }
 
         try {
-          const result = await pollOAuthLogin();
+          const result = await pollOAuthLogin(provider);
           if (result.status === 'complete') {
             set({
               oauthPending: false,
               oauthUserCode: null,
               oauthVerificationUri: null,
             });
-            // Refresh config to reflect authenticated state
+            // Refresh config to reflect authenticated state, then reload the
+            // model list: OAuth providers (e.g. Copilot) expose an account-
+            // specific entitlement that is only fetchable after login.
             const config = await getLLMConfig();
             set({ config });
+            if (config.provider) await get().loadModels(config.provider);
             return;
           }
           if (result.status === 'expired' || result.status === 'error') {
@@ -240,7 +262,9 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
               oauthPending: false,
               oauthUserCode: null,
               oauthVerificationUri: null,
-              error: result.error ?? 'OAuth flow expired. Please try again.',
+              error:
+                summarizeOAuthError(result.error) ??
+                'OAuth flow expired. Please try again.',
             });
             return;
           }
@@ -275,9 +299,10 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
   },
 
   logoutOAuth: async () => {
+    const provider = get().config?.provider || undefined;
     set({ error: null });
     try {
-      await logoutOAuth();
+      await logoutOAuth(provider);
       // Refresh config to reflect unauthenticated state
       const config = await getLLMConfig();
       set({ config });

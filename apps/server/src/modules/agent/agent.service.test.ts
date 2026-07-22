@@ -75,7 +75,7 @@ vi.mock('@earendil-works/pi-agent-core', () => {
 vi.mock('./llm.js', () => ({
   getLLMModel: () => ({ id: 'mock-model' }),
   ensureApiKey: () => 'mock-key',
-  getModelForRole: () => ({ id: 'mock-model' }),
+  resolveModelForRoleAsync: () => Promise.resolve({ id: 'mock-model' }),
   ensureApiKeyForRole: () => 'mock-key',
 }));
 
