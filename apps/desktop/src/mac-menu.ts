@@ -73,6 +73,7 @@ interface MenuLabels {
   import: string;
   switchWorkspace: string;
   settings: string;
+  checkForUpdates: string;
   userHandbook: string;
   keyboardShortcuts: string;
   troubleshooting: string;
@@ -84,6 +85,7 @@ interface MenuLabels {
 interface MenuConfig {
   labels: MenuLabels;
   canChangeWorkspace: boolean;
+  canCheckForUpdates: boolean;
 }
 
 /**
@@ -120,6 +122,7 @@ const DEFAULT_MENU_CONFIG: MenuConfig = {
     import: 'Import',
     switchWorkspace: 'Switch Home',
     settings: 'Settings',
+    checkForUpdates: 'Check for Updates',
     userHandbook: 'User Handbook',
     keyboardShortcuts: 'Keyboard Shortcuts',
     troubleshooting: 'Troubleshooting',
@@ -128,6 +131,7 @@ const DEFAULT_MENU_CONFIG: MenuConfig = {
     copySystemInfo: 'Copy System Information',
   },
   canChangeWorkspace: true,
+  canCheckForUpdates: true,
 };
 
 /**
@@ -189,6 +193,7 @@ function normalizeMenuConfig(raw: unknown): MenuConfig {
       import: pick('import'),
       switchWorkspace: pick('switchWorkspace'),
       settings: pick('settings'),
+      checkForUpdates: pick('checkForUpdates'),
       userHandbook: pick('userHandbook'),
       keyboardShortcuts: pick('keyboardShortcuts'),
       troubleshooting: pick('troubleshooting'),
@@ -199,6 +204,10 @@ function normalizeMenuConfig(raw: unknown): MenuConfig {
     canChangeWorkspace:
       typeof obj.canChangeWorkspace === 'boolean'
         ? obj.canChangeWorkspace
+        : true,
+    canCheckForUpdates:
+      typeof obj.canCheckForUpdates === 'boolean'
+        ? obj.canCheckForUpdates
         : true,
   };
 }
@@ -214,7 +223,7 @@ function normalizeMenuConfig(raw: unknown): MenuConfig {
  * would toggle the modal open then closed on a single press.
  */
 function buildMacMenu(config: MenuConfig): Menu {
-  const { labels, canChangeWorkspace } = config;
+  const { labels, canChangeWorkspace, canCheckForUpdates } = config;
   const template: Electron.MenuItemConstructorOptions[] = [
     {
       // The first submenu is always treated as the app menu by macOS
@@ -222,6 +231,11 @@ function buildMacMenu(config: MenuConfig): Menu {
       label: app.getName(),
       submenu: [
         { role: 'about', label: labels.about },
+        {
+          label: labels.checkForUpdates,
+          enabled: canCheckForUpdates,
+          click: () => sendMenuCommand('check-for-updates'),
+        },
         { type: 'separator' },
         {
           label: labels.settings,

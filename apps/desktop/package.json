@@ -9,13 +9,14 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run src",
     "icons:build": "node scripts/build-icons.mjs",
-    "dist": "pnpm run build && electron-builder",
-    "dist:mac": "pnpm run build && electron-builder --mac",
-    "dist:win": "pnpm run build && electron-builder --win",
-    "dist:linux": "pnpm run build && electron-builder --linux",
+    "dist": "pnpm run build && electron-builder --publish never",
+    "dist:mac": "pnpm run build && electron-builder --mac --publish never",
+    "dist:win": "pnpm run build && electron-builder --win --publish never",
+    "dist:linux": "pnpm run build && electron-builder --linux --publish never",
     "dev": "pnpm run build && node scripts/dev.mjs"
   },
   "dependencies": {
+    "electron-updater": "^6.3.9",
     "get-port": "^7.1.0"
   },
   "devDependencies": {

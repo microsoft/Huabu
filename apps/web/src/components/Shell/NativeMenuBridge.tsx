@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { APP_NAME } from '../../config/app';
 import { openUserHandbook } from '../../config/handbook';
+import { canCheckForUpdates, useAppUpdate } from '../../hooks/useAppUpdate';
 import { useCanvasActions } from '../../hooks/useCanvasActions';
 import {
   copySystemInfo,
@@ -53,6 +54,8 @@ export function NativeMenuBridge() {
   const openSettings = useSettingsUiStore((s) => s.open);
   const openShortcuts = useShortcutsUiStore((s) => s.open);
   const runDiagnostic = useRunDiagnostic();
+  const { status: updateStatus, check: checkForUpdates } = useAppUpdate();
+  const updateCheckEnabled = canCheckForUpdates(updateStatus);
 
   // Push localized labels + capability flags to the native menu. Re-runs
   // when the interface language or the workspace capability changes so
@@ -88,6 +91,7 @@ export function NativeMenuBridge() {
         import: t('actions.importCanvas'),
         switchWorkspace: t('navigation.switchWorkspace'),
         settings: t('settings.title'),
+        checkForUpdates: t('update.check'),
         userHandbook: t('navigation.userHandbook'),
         keyboardShortcuts: t('shortcuts.title'),
         troubleshooting: t('troubleshooting.title'),
@@ -96,10 +100,11 @@ export function NativeMenuBridge() {
         copySystemInfo: t('troubleshooting.copySystemInfo'),
       },
       canChangeWorkspace,
+      canCheckForUpdates: updateCheckEnabled,
     });
     // `i18n.language` is an explicit dependency so a language switch
     // re-pushes labels even though `t` is a stable reference.
-  }, [enabled, menu, t, i18n.language, canChangeWorkspace]);
+  }, [enabled, menu, t, i18n.language, canChangeWorkspace, updateCheckEnabled]);
 
   // Dispatch native menu commands to the matching in-app handler.
   useEffect(() => {
@@ -117,6 +122,9 @@ export function NativeMenuBridge() {
           break;
         case 'open-settings':
           openSettings();
+          break;
+        case 'check-for-updates':
+          checkForUpdates();
           break;
         case 'open-handbook':
           openUserHandbook();
@@ -144,6 +152,7 @@ export function NativeMenuBridge() {
     openImportDialog,
     navigate,
     openSettings,
+    checkForUpdates,
     openShortcuts,
     runDiagnostic,
     t,

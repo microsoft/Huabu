@@ -15,12 +15,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Compute the nightly version AND create the draft prerelease once, so
+  # the parallel platform build jobs can upload straight into it via
+  # `gh release upload` instead of round-tripping through the Actions
+  # artifact store (whose storage quota is exhausted and was failing the
+  # nightly). The git tag is only created when the draft is published.
   prepare:
-    name: Prepare nightly version
+    name: Prepare nightly version and draft release
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v7
 
@@ -41,6 +49,22 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "Nightly version: v$VERSION"
+
+      - name: Create draft prerelease
+        shell: bash
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if gh release view "$TAG" --json isDraft >/dev/null 2>&1; then
+            echo "Release $TAG already exists — reusing it."
+          else
+            gh release create "$TAG" --draft --prerelease --title "$TAG" \
+              --target "$GITHUB_SHA" --notes "$(cat <<'NOTES'
+          Automated nightly build.
+
+          This prerelease and its tag are automatically removed after 7 days.
+          NOTES
+          )"
+          fi
 
   cleanup:
     name: Remove expired nightlies
@@ -82,6 +106,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       NIGHTLY_VERSION: ${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
 
@@ -110,56 +137,69 @@ jobs:
         run: pnpm run build:agentlet
 
       - name: Build desktop installer
-        run: pnpm run ${{ matrix.script }}
+        shell: bash
+        env:
+          HUABU_UPDATE_OWNER: ${{ vars.HUABU_UPDATE_OWNER }}
+          HUABU_UPDATE_REPO: ${{ vars.HUABU_UPDATE_REPO }}
+        run: |
+          if [[ -z "$HUABU_UPDATE_OWNER" || -z "$HUABU_UPDATE_REPO" ]]; then
+            echo "HUABU_UPDATE_OWNER and HUABU_UPDATE_REPO repository variables are required" >&2
+            exit 1
+          fi
+          pnpm run ${{ matrix.script }}
 
-      - name: Stage nightly assets
+      # Upload straight into the draft prerelease instead of via the
+      # Actions artifact store (see the prepare job). electron-builder
+      # writes outside the repo (../huabu-electron-out/); each runner only
+      # produces its own platform's files, so a combined glob with
+      # nullglob is safe. --clobber keeps re-runs idempotent.
+      - name: Upload nightly assets to the release
         shell: bash
         run: |
-          mkdir -p ./release-assets
           shopt -s nullglob
-          for ext in dmg exe AppImage blockmap; do
-            for f in ../huabu-electron-out/*."$ext"; do
-              cp "$f" ./release-assets/
-            done
-          done
-          for f in ../huabu-electron-out/latest*.yml; do
-            cp "$f" ./release-assets/
-          done
-          ls -lh ./release-assets/
+          require_assets() {
+            local label="$1"
+            shift
+            if (( $# == 0 )); then
+              echo "Missing required nightly asset: $label" >&2
+              return 1
+            fi
+          }
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: huabu-nightly-${{ matrix.os }}
-          path: release-assets/
-          if-no-files-found: error
-          retention-days: 7
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            installers=(../huabu-electron-out/*.dmg)
+            archives=(../huabu-electron-out/*.zip)
+            blockmaps=(../huabu-electron-out/*.blockmap)
+            metadata=(../huabu-electron-out/latest-mac.yml)
+            require_assets "macOS dmg" "${installers[@]}"
+            require_assets "macOS zip" "${archives[@]}"
+            require_assets "macOS blockmap" "${blockmaps[@]}"
+            require_assets "latest-mac.yml" "${metadata[@]}"
+            files=("${installers[@]}" "${archives[@]}" "${blockmaps[@]}" "${metadata[@]}")
+          else
+            installers=(../huabu-electron-out/*.exe)
+            blockmaps=(../huabu-electron-out/*.exe.blockmap)
+            metadata=(../huabu-electron-out/latest.yml)
+            require_assets "Windows exe" "${installers[@]}"
+            require_assets "Windows exe.blockmap" "${blockmaps[@]}"
+            require_assets "latest.yml" "${metadata[@]}"
+            files=("${installers[@]}" "${blockmaps[@]}" "${metadata[@]}")
+          fi
 
-  release:
+          ls -lh "${files[@]}"
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+
+  # Flip the draft public once both platform builds have uploaded. This
+  # is also what creates the git tag (at the prepare job's --target
+  # commit). Kept a prerelease and never marked "latest".
+  publish:
     name: Publish nightly release
     needs: [prepare, build]
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
     steps:
-      - uses: actions/download-artifact@v8
-        with:
-          path: assets
-          merge-multiple: true
-
-      - name: List collected assets
-        run: ls -lh assets/
-
       - name: Publish prerelease
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.prepare.outputs.tag }}
-          name: ${{ needs.prepare.outputs.tag }}
-          body: |
-            Automated nightly build from `${{ github.sha }}`.
-
-            This prerelease and its tag are automatically removed after 7 days.
-          prerelease: true
-          make_latest: false
-          files: |
-            assets/*.dmg
-            assets/*.exe
-            assets/*.blockmap
-          fail_on_unmatched_files: true
+        run: gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false

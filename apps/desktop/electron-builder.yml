@@ -98,16 +98,37 @@ extraResources:
 
 afterPack: scripts/after-pack.mjs
 
-# Publishing is handled by `gh release upload` in the release workflow,
-# never by electron-builder itself. Without this, electron-builder's CI
-# detection sees GH_TOKEN in the environment and attempts an implicit
-# GitHub publish, which fails with "Cannot detect repository by
-# .git/config" because this package.json has no `repository` field.
-publish: null
+# Auto-update feed (electron-updater). electron-builder bakes these
+# values into the app's `app-update.yml` and generates the update
+# metadata (`latest-mac.yml` / `latest.yml` + blockmaps) next to the
+# installers. The publishing itself is still done by `gh release upload`
+# in the release workflow — never by electron-builder — which is why the
+# `dist:*` scripts pass `--publish never`.
+#
+# The owner/repo are intentionally NOT hardcoded here: they are supplied
+# at build time via the HUABU_UPDATE_OWNER / HUABU_UPDATE_REPO env vars
+# (set from GitHub Actions repository *Variables* in the release
+# workflow). This lets the public update feed point at the distribution
+# repository (where releases are published) independently of the build
+# source repository, without embedding either name in the codebase.
+# Local `pnpm dist` runs must provide both variables too. electron-builder
+# treats a missing `${env.*}` macro as an invalid configuration and stops
+# the build before producing an installer.
+publish:
+  provider: github
+  owner: ${env.HUABU_UPDATE_OWNER}
+  repo: ${env.HUABU_UPDATE_REPO}
 
 mac:
   target:
     - target: dmg
+      arch:
+        - arm64
+    # Squirrel.Mac (the macOS auto-update engine electron-updater drives)
+    # applies updates from a `.zip`, not the `.dmg`. `latest-mac.yml`
+    # references this zip; without it macOS auto-update cannot install a
+    # downloaded update. The dmg remains the human-facing first install.
+    - target: zip
       arch:
         - arm64
   category: public.app-category.productivity

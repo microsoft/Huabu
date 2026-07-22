@@ -11,6 +11,8 @@ import { Select } from '@/components/Common/Select';
 import { toast } from '@/components/Common/Toast';
 import { Toggle } from '@/components/Common/Toggle';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
+import { canCheckForUpdates, useAppUpdate } from '@/hooks/useAppUpdate';
+import { getElectronBridge } from '@/hooks/useElectron';
 import { supportedLngs, type SupportedLanguage } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
 
@@ -45,6 +47,8 @@ export const GeneralSettings: React.FC = () => {
   const [customMinutes, setCustomMinutes] = useState('10');
   const [idleTimeoutLoading, setIdleTimeoutLoading] = useState(true);
   const [idleTimeoutSaving, setIdleTimeoutSaving] = useState(false);
+  const { status: updateStatus, check: checkForUpdates } = useAppUpdate();
+  const updaterAvailable = !!getElectronBridge()?.updater;
 
   const current = (i18n.resolvedLanguage ?? i18n.language) as SupportedLanguage;
 
@@ -161,6 +165,28 @@ export const GeneralSettings: React.FC = () => {
           }
         />
       </SettingRow>
+      {updaterAvailable && (
+        <SettingRow
+          title={t('update.check')}
+          description={
+            updateStatus.state === 'not-available'
+              ? t('update.currentVersion', { version: updateStatus.version })
+              : t('update.settingsDescription')
+          }
+        >
+          <Button
+            variant="outline"
+            tone="neutral"
+            size="sm"
+            onClick={checkForUpdates}
+            disabled={!canCheckForUpdates(updateStatus)}
+          >
+            {updateStatus.state === 'checking'
+              ? t('update.checking')
+              : t('update.check')}
+          </Button>
+        </SettingRow>
+      )}
       <SettingRow
         title={t('settings.externalAgentIdleTimeout')}
         description={t('settings.externalAgentIdleTimeoutDescription')}

@@ -85,6 +85,7 @@ interface ElectronMenuLabels {
   import: string;
   switchWorkspace: string;
   settings: string;
+  checkForUpdates: string;
   userHandbook: string;
   keyboardShortcuts: string;
   troubleshooting: string;
@@ -109,6 +110,7 @@ interface ElectronMenuApi {
   configure: (config: {
     labels: ElectronMenuLabels;
     canChangeWorkspace: boolean;
+    canCheckForUpdates: boolean;
   }) => void;
   /**
    * Subscribe to native menu-item activations; returns an unsubscribe
@@ -135,6 +137,52 @@ interface ElectronDialogApi {
   pickFolder: (
     title?: string,
   ) => Promise<{ ok: true; path: string } | { ok: false; reason: 'cancelled' }>;
+}
+
+/**
+ * Snapshot of the desktop auto-update lifecycle. Kept in lockstep with
+ * the `UpdateStatus` type in `apps/desktop/src/updater.ts` (the main
+ * process emits exactly these shapes over the `update:status` channel).
+ */
+export type UpdateStatus =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | {
+      state: 'available';
+      version: string;
+      releaseNotes?: string;
+      releaseDate?: string;
+    }
+  | { state: 'not-available'; version: string }
+  | {
+      state: 'downloading';
+      percent: number;
+      transferred: number;
+      total: number;
+      bytesPerSecond: number;
+    }
+  | { state: 'downloaded'; version: string }
+  | { state: 'error'; message: string };
+
+type UpdateActionResult = { ok: true } | { ok: false; error: string };
+type UpdateCheckResult =
+  | { ok: true; status: UpdateStatus }
+  | { ok: false; error: string };
+
+/**
+ * Desktop auto-update bridge (electron-updater). Present only inside the
+ * packaged Electron shell; the whole `updater` field is absent in the
+ * browser. Actions map onto explicit user intent — `download` and
+ * `install` never fire without a click. `onStatus` streams every
+ * lifecycle transition; `getState` returns the latest snapshot for a
+ * freshly-mounted subscriber.
+ */
+interface ElectronUpdaterApi {
+  check: () => Promise<UpdateCheckResult>;
+  download: () => Promise<UpdateActionResult>;
+  install: () => Promise<UpdateActionResult>;
+  getState: () => Promise<UpdateStatus>;
+  onStatus: (cb: (status: UpdateStatus) => void) => () => void;
 }
 
 interface ElectronBridge {
@@ -166,8 +214,8 @@ interface ElectronBridge {
   diagnostics?: ElectronDiagnosticsApi;
   dialog?: ElectronDialogApi;
   menu?: ElectronMenuApi;
+  updater?: ElectronUpdaterApi;
 }
-
 declare global {
   interface Window {
     electronBridge?: ElectronBridge;
