@@ -147,10 +147,13 @@ export const LLMSettings: React.FC = () => {
     setAzureApiVersion(llmConfig?.apiVersion ?? '');
   }, [isAzure, llmConfig?.model, llmConfig?.apiVersion]);
 
-  // Surface store errors as transient toasts.
+  // Surface store errors as persistent toasts: a provider/login failure
+  // (e.g. a transient GitHub 502 during the OAuth token exchange) is
+  // actionable, so it must stay on screen with a × until the user
+  // dismisses it rather than fading after a few seconds.
   useEffect(() => {
     if (llmError) {
-      toast(llmError, { tone: 'danger' });
+      toast(llmError, { tone: 'danger', duration: 0 });
     }
   }, [llmError]);
 
@@ -364,12 +367,12 @@ export const LLMSettings: React.FC = () => {
 
         {/* OAuth pending — full-width row */}
         {llmConfig && isOAuth && oauthPending && oauthUserCode && (
-          <div className="bg-info-bg px-3 py-2.5">
-            <p className="mb-1.5 text-xs">
+          <div className="bg-info-bg flex flex-col gap-2.5 px-3 py-3">
+            <p className="text-fg-default text-xs font-medium">
               {t('settings.enterCodeAtOpenedPage')}
             </p>
-            <div className="mb-1.5 flex items-center gap-2">
-              <code className="bg-surface rounded px-2 py-1 font-mono text-lg font-bold">
+            <div className="flex items-center gap-2">
+              <code className="bg-surface border-edge-default text-fg-default rounded-md border px-3 py-1.5 font-mono text-base font-semibold tracking-[0.25em] tabular-nums">
                 {oauthUserCode}
               </code>
               <Button
@@ -385,21 +388,28 @@ export const LLMSettings: React.FC = () => {
               </Button>
             </div>
             {oauthVerificationUri && (
-              <p className="text-info mb-1.5 text-[11px]">
+              <p className="text-fg-muted text-[11px] leading-snug">
                 {t('settings.orVisit')}{' '}
                 <a
                   href={oauthVerificationUri}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="underline"
+                  className="text-info underline underline-offset-2"
                 >
                   {oauthVerificationUri}
                 </a>
               </p>
             )}
-            <Button variant="ghost" tone="info" size="sm" onClick={cancelOAuth}>
-              {t('actions.cancel')}
-            </Button>
+            <div className="flex justify-end">
+              <Button
+                variant="ghost"
+                tone="neutral"
+                size="sm"
+                onClick={cancelOAuth}
+              >
+                {t('actions.cancel')}
+              </Button>
+            </div>
           </div>
         )}
 
