@@ -25,6 +25,21 @@ import type {
   LLMUtilityConfigUpdate,
 } from '@sediment/shared';
 
+/**
+ * Collapse a noisy provider error into a single readable line.
+ *
+ * GitHub's device-code token exchange can transiently fail with a 502 whose
+ * body is a full HTML error page ("Unicorn!"). Surfacing that raw blob in a
+ * toast is unreadable, so keep only the leading status text (everything
+ * before the first HTML tag) and cap the length.
+ */
+function summarizeOAuthError(raw: string | undefined): string | undefined {
+  if (!raw) return raw;
+  const beforeHtml = raw.split('<')[0].trim();
+  const concise = beforeHtml || raw.trim();
+  return concise.length > 200 ? `${concise.slice(0, 200)}…` : concise;
+}
+
 interface LLMState {
   /** Current LLM configuration from the server. */
   config: LLMConfig | null;
@@ -243,7 +258,9 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
               oauthPending: false,
               oauthUserCode: null,
               oauthVerificationUri: null,
-              error: result.error ?? 'OAuth flow expired. Please try again.',
+              error:
+                summarizeOAuthError(result.error) ??
+                'OAuth flow expired. Please try again.',
             });
             return;
           }
