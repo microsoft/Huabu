@@ -74,6 +74,37 @@ const log = getLogger('llm');
 
 // ==================== Provider Catalog ====================
 
+const OPENAI_CODEX_MODEL_ADDITIONS = [
+  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
+  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
+] as const;
+
+/**
+ * Extend pi-ai's generated registry with Codex models released after the
+ * installed package. The Codex backend is authoritative for availability;
+ * these entries only make its current public model IDs selectable in Huabu.
+ */
+function getProviderModels(providerId: KnownProvider): Model<Api>[] {
+  const models = getModels(providerId) as Model<Api>[];
+  if (providerId !== 'openai-codex') return models;
+
+  const template = models.find((model) => model.id === 'gpt-5.5');
+  if (!template) return models;
+
+  const existingIds = new Set(models.map((model) => model.id));
+  const additions = OPENAI_CODEX_MODEL_ADDITIONS.filter(
+    ({ id }) => !existingIds.has(id),
+  ).map(({ id, name }) => ({
+    ...template,
+    id,
+    name,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  }));
+
+  return [...additions, ...models];
+}
+
 /** Provider-specific metadata not available from pi-ai's registry. */
 const PROVIDER_OVERRIDES: Record<string, Partial<LLMProviderInfo>> = {
   'azure-openai-responses': {
@@ -111,7 +142,7 @@ function buildProviderCatalog(): LLMProviderInfo[] {
   const knownProviders = getProviders();
   const catalog: LLMProviderInfo[] = knownProviders.map((id) => {
     const overrides = PROVIDER_OVERRIDES[id];
-    const models = getModels(id);
+    const models = getProviderModels(id);
     const api = models[0]?.api ?? 'openai-completions';
     const defaultBaseUrl = models[0]?.baseUrl;
     const baseUrl: LLMProviderInfo['baseUrl'] = {
@@ -448,10 +479,10 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
   // Try to get from pi-ai built-in registry first
   if (providerInfo?.builtIn) {
     try {
-      const builtIn = getModel(
-        cfg.provider as KnownProvider,
-        cfg.model as never,
-      );
+      const builtIn =
+        getProviderModels(cfg.provider as KnownProvider).find(
+          (model) => model.id === cfg.model,
+        ) ?? getModel(cfg.provider as KnownProvider, cfg.model as never);
       if (builtIn) {
         let model = builtIn as Model<Api>;
         if (cfg.baseUrl) {
@@ -582,7 +613,7 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
   // Built-in providers: get from pi-ai registry
   if (providerInfo.builtIn) {
     try {
-      const models = getModels(providerId as KnownProvider);
+      const models = getProviderModels(providerId as KnownProvider);
       return models.map((m) => ({
         id: m.id,
         name: m.name || m.id,
@@ -630,10 +661,131 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
 }
 
 /**
- * Like {@link getModelsForProvider}, but for GitHub Copilot it returns the
- * models the *current account* is actually entitled to — queried live from
- * Copilot's `GET /models` endpoint (the same source VS Code's model picker
- * uses).
+ * Model-id substrings that are never chat/completion models on the OpenAI
+ * API. OpenAI's `/v1/models` list mixes in embedding, audio, image, and
+ * moderation models that Huabu's chat settings must not surface. Mirrors
+ * the filter Open WebUI and similar clients apply.
+ */
+const OPENAI_NON_CHAT_MODEL_MARKERS = [
+  'babbage',
+  'davinci',
+  'dall-e',
+  'embedding',
+  'tts',
+  'whisper',
+  'image',
+  'audio',
+  'realtime',
+  'transcribe',
+  'moderation',
+] as const;
+
+/** Whether an OpenAI `/v1/models` id is a chat/completion model. */
+export function isOpenAIChatModelId(id: string): boolean {
+  const lower = id.toLowerCase();
+  return !OPENAI_NON_CHAT_MODEL_MARKERS.some((marker) =>
+    lower.includes(marker),
+  );
+}
+
+/**
+ * Merge live OpenAI model ids with the static pi-ai catalogue:
+ *   - Known ids reuse the curated static entry (accurate reasoning flag,
+ *     input modalities, display name).
+ *   - Unknown ids (newer than the bundled registry) are surfaced with
+ *     conservative defaults: multimodal input (all current OpenAI chat
+ *     models accept text + image) and no reasoning flag until a pi-ai
+ *     upgrade supplies the real metadata.
+ *
+ * The result preserves the live ordering so the account's own entitlement
+ * drives what the user sees. Falls back to the full static list when the
+ * live ids yield nothing selectable.
+ */
+export function mergeOpenAIModels(
+  liveIds: string[],
+  staticModels: LLMModelInfo[],
+): LLMModelInfo[] {
+  const staticById = new Map(staticModels.map((m) => [m.id.toLowerCase(), m]));
+  const seen = new Set<string>();
+  const merged: LLMModelInfo[] = [];
+  for (const id of liveIds) {
+    if (!isOpenAIChatModelId(id)) continue;
+    const key = id.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const known = staticById.get(key);
+    merged.push(
+      known ?? {
+        id,
+        name: id,
+        provider: 'openai',
+        reasoning: false,
+        input: ['text', 'image'],
+      },
+    );
+  }
+  return merged.length > 0 ? merged : staticModels;
+}
+
+/**
+ * Fetch the model ids the current OpenAI API key can access from
+ * `GET {baseUrl}/models`. Returns `null` when unauthenticated, unreachable,
+ * or the response is unusable — letting callers fall back to the static
+ * pi-ai catalogue instead of showing an empty list.
+ */
+async function fetchOpenAIModelIds(): Promise<string[] | null> {
+  const apiKey = await resolveApiKeyAsync('openai');
+  if (!apiKey) return null;
+
+  const providerInfo = getProviderCatalog().find((p) => p.id === 'openai');
+  const persistedBaseUrl = loadPersistedStore().providers['openai']?.baseUrl;
+  const baseUrl = (
+    persistedBaseUrl ??
+    providerInfo?.baseUrl.default ??
+    'https://api.openai.com/v1'
+  ).replace(/\/+$/, '');
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(`${baseUrl}/models`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      log.warn(
+        { status: res.status },
+        'OpenAI /v1/models returned non-OK HTTP status',
+      );
+      return null;
+    }
+    const json = (await res.json()) as { data?: Array<{ id?: string }> };
+    const ids = Array.isArray(json.data)
+      ? json.data
+          .map((entry) => entry.id)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      : [];
+    return ids.length > 0 ? ids : null;
+  } catch (err) {
+    log.warn({ err }, 'Failed to fetch OpenAI /v1/models');
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Like {@link getModelsForProvider}, but resolves the *current account's*
+ * live entitlement for the providers that expose one:
+ *   - GitHub Copilot: queried from Copilot's `GET /models` endpoint (the
+ *     same source VS Code's model picker uses).
+ *   - OpenAI: queried from `GET {baseUrl}/models`, filtered to chat models
+ *     and merged with the static pi-ai metadata (see
+ *     {@link mergeOpenAIModels}).
  *
  * The returned list is the live entitlement, enriched per model:
  *   - If pi-ai's static registry knows the id, we reuse its curated entry
@@ -652,6 +804,14 @@ export async function getModelsForProviderLive(
   providerId: string,
 ): Promise<LLMModelInfo[]> {
   const staticModels = getModelsForProvider(providerId);
+
+  // OpenAI: prefer the account's live `/v1/models` entitlement, merged with
+  // the static pi-ai metadata; fall back to the static catalogue on failure.
+  if (providerId === 'openai') {
+    const liveIds = await fetchOpenAIModelIds();
+    return liveIds ? mergeOpenAIModels(liveIds, staticModels) : staticModels;
+  }
+
   if (providerId !== 'github-copilot') return staticModels;
 
   const entitled = await fetchEntitledCopilotModels();
