@@ -66,7 +66,7 @@ The artifact validator compares generated pages with the source route registry, 
 
 The repository does not run a dedicated documentation deployment workflow because GitHub Pages is unavailable for its current private-repository plan. `pnpm build:docs` still produces a complete static artifact in [`apps/docs/dist`](../../apps/docs), with `DOCS_BASE_PATH` and `DOCS_CANONICAL_ORIGIN` available for an external hosting target.
 
-Both `pnpm dev` and `pnpm dev:desktop` dynamically select a free docs port, start the handbook alongside server and web, and inject its actual URL into the web build through `VITE_HANDBOOK_URL`. `DOCS_PORT` changes the preferred starting port; either orchestrator may advance to another free port when it is occupied.
+Both `pnpm dev` and `pnpm dev:desktop` dynamically select a free docs port, start the handbook alongside server and web, and inject its actual URL into the web build through `VITE_HANDBOOK_URL`. `DOCS_PORT` changes the preferred starting port; either orchestrator may advance to another free port when it is occupied. Every long-running development service runs behind an IPC-linked process supervisor, which terminates the complete service process group when the orchestrator exits or its IPC channel is lost so task-runner termination cannot orphan a Handbook Vite server.
 
 ## Commands
 
@@ -79,10 +79,11 @@ Both `pnpm dev` and `pnpm dev:desktop` dynamically select a free docs port, star
 
 ## Code entry points
 
-| File/dir                                                                             | Responsibility                                        |
-| ------------------------------------------------------------------------------------ | ----------------------------------------------------- |
-| [`apps/docs/src/navigation.ts`](../../apps/docs/src/navigation.ts)                   | Canonical article routes, lazy loaders, and metadata. |
-| [`apps/docs/src/main.tsx`](../../apps/docs/src/main.tsx)                             | Hydrate prerendered markup in the browser.            |
-| [`apps/docs/src/entry-server.tsx`](../../apps/docs/src/entry-server.tsx)             | Stream complete route markup at build time.           |
-| [`apps/docs/scripts/prerender.mjs`](../../apps/docs/scripts/prerender.mjs)           | Write route HTML and the artifact-root redirect.      |
-| [`apps/docs/scripts/validate-build.mjs`](../../apps/docs/scripts/validate-build.mjs) | Enforce the static artifact contract.                 |
+| File/dir                                                                             | Responsibility                                         |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| [`apps/docs/src/navigation.ts`](../../apps/docs/src/navigation.ts)                   | Canonical article routes, lazy loaders, and metadata.  |
+| [`apps/docs/src/main.tsx`](../../apps/docs/src/main.tsx)                             | Hydrate prerendered markup in the browser.             |
+| [`apps/docs/src/entry-server.tsx`](../../apps/docs/src/entry-server.tsx)             | Stream complete route markup at build time.            |
+| [`apps/docs/scripts/prerender.mjs`](../../apps/docs/scripts/prerender.mjs)           | Write route HTML and the artifact-root redirect.       |
+| [`apps/docs/scripts/validate-build.mjs`](../../apps/docs/scripts/validate-build.mjs) | Enforce the static artifact contract.                  |
+| [`scripts/dev-child-supervisor.mjs`](../../scripts/dev-child-supervisor.mjs)         | Reap development service process groups on owner exit. |

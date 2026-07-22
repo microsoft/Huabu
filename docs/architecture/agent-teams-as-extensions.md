@@ -57,7 +57,7 @@ The generic `agentlet.yaml` package contract and daemon execution operations are
 
 ### Prerequisites
 
-The locally supervised agentlet daemon scans and runs the bundled Agent Team packages through the Huabu server's Agenetes Gateway. In the Sediment monorepo, `pnpm install` provides the agentlet binaries used by development environments.
+The locally supervised agentlet daemon scans and runs the bundled Agent Team packages through the Huabu server's Agenetes Gateway. In the Sediment monorepo, `pnpm install` provides the agentlet binaries used by development environments. Production Server builds bundle the daemon and its isolated Agent Team setup worker as sibling JavaScript entry points so setup does not require a runtime `node_modules` tree.
 
 ```bash
 pnpm install

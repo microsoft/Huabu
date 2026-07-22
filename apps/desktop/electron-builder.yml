@@ -30,8 +30,8 @@ files:
 #                                 and skills/loader.ts). Without this entry,
 #                                 every LLM call 500s because no prompt can
 #                                 be assembled.
-#   resources/server/agentlet/  — agentlet daemon (index.js + sibling .js
-#                                 modules from external/agentlet/.../dist).
+#   resources/server/agentlet/  — agentlet daemon and isolated Agent Team
+#                                 setup worker (self-contained JS bundles).
 #                                 Forked by `DaemonSupervisor` at server
 #                                 startup; the supervisor resolves it as
 #                                 `<bundleDir>/agentlet/index.js` (see

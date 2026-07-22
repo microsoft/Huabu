@@ -53,6 +53,9 @@ import { fileURLToPath } from 'node:url';
 
 import dotenv from 'dotenv';
 
+import { spawnSupervisedDevChild } from './dev-child-supervisor.mjs';
+import { findAvailablePort } from './dev-ports.mjs';
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
 
@@ -80,7 +83,6 @@ const HOST = '127.0.0.1';
 const SERVER_PORT = Number.parseInt(env.SERVER_PORT || env.PORT || '3001', 10);
 const VITE_PORT = Number.parseInt(env.VITE_PORT || env.WEB_PORT || '5173', 10);
 const DOCS_PORT = Number.parseInt(env.DOCS_PORT || '5174', 10);
-const PORT_SCAN_RANGE = 50;
 // Cold starts (first tsx/esbuild compile, Windows Defender scanning a fresh
 // node_modules, or a loaded machine) can blow past a tight window, so the
 // default is generous and overridable via DEV_SERVER_READY_TIMEOUT_MS.
@@ -92,69 +94,6 @@ const POLL_INTERVAL_MS = 250;
 // Emit a "still waiting" heartbeat at this cadence so a slow boot is visible
 // instead of looking hung until the timeout fires.
 const WAIT_LOG_INTERVAL_MS = 10_000;
-
-/* ─── helpers ─────────────────────────────────────────────────────── */
-
-/**
- * Probe whether a single `host:port` binding is free. Used as a
- * building block by {@link isPortFree} \u2014 see that function for why we
- * have to probe BOTH `127.0.0.1` and `0.0.0.0` instead of just one.
- */
-function probeBind(host, port) {
-  return new Promise((resolve) => {
-    const srv = net.createServer();
-    srv.unref();
-    srv.once('error', () => resolve(false));
-    srv.once('listening', () => {
-      srv.close(() => resolve(true));
-    });
-    srv.listen(port, host);
-  });
-}
-
-/**
- * Whether the port is truly free for ANY binding mode.
- *
- * Windows has \"weak\" socket binding semantics by default: a server bound
- * to `0.0.0.0:N` (wildcard) does NOT conflict with a probe that does
- * `listen(N, '127.0.0.1')` (specific loopback). The probe returns true
- * (port appears free), the orchestrator picks N, then the downstream
- * child \u2014 Vite is the usual culprit, since `host: true` makes it bind
- * wildcard \u2014 tries `listen(N, '0.0.0.0')` and *that* hits EADDRINUSE
- * against the original holder. Vite then silently slides to N+1, but
- * the orchestrator already committed N to the URL it passes Electron \u2014
- * result: BrowserWindow loads a phantom / stale backend on the original
- * port (e.g. an orphan Vite from last week serving 5/28's `index.html`).
- *
- * Probing both addresses catches any holder regardless of which one
- * they're bound to, so the orchestrator's port choice always matches
- * what every downstream child can actually bind.
- *
- * TOCTOU caveat: between this check and the child's actual `listen()`
- * another process could grab the port. In a dev orchestrator that's
- * vanishingly rare and not worth a retry loop downstream.
- */
-async function isPortFree(port) {
-  if (!(await probeBind('127.0.0.1', port))) return false;
-  if (!(await probeBind('0.0.0.0', port))) return false;
-  return true;
-}
-
-/**
- * Find a free port starting at `startPort`, scanning at most
- * `PORT_SCAN_RANGE` consecutive ports. Used so a stale Electron / tsx
- * holding 3001 (or 5173) doesn't crash the whole orchestrator \u2014 we
- * just slide to 3002 / 5174 and propagate that everywhere.
- */
-async function findAvailablePort(startPort, excludedPorts = new Set()) {
-  for (let p = startPort; p < startPort + PORT_SCAN_RANGE; p += 1) {
-    if (excludedPorts.has(p)) continue;
-    if (await isPortFree(p)) return p;
-  }
-  throw new Error(
-    `No free port found in ${startPort}..${startPort + PORT_SCAN_RANGE - 1}`,
-  );
-}
 
 function waitForPort(host, port, timeoutMs) {
   const start = Date.now();
@@ -218,14 +157,11 @@ const children = [];
 let shuttingDown = false;
 
 /**
- * Kill a child *and its descendants*. `pnpm --filter X dev` spawns nested
- * processes (node → tsx watch / vite); a plain `child.kill('SIGTERM')`
- * only reaches the pnpm wrapper and orphans tsx / vite (which keep ports
- * busy on next run).
+ * Signal a service supervisor. The supervisor owns the nested
+ * `pnpm --filter X dev` process group and reaps it before exiting.
  *
- * On POSIX we put each child in its own process group (`detached: true`)
- * and signal the whole group with `kill(-pid)`. On Windows we fall back
- * to `taskkill /T` to walk the process tree.
+ * On POSIX each supervisor has its own process group, so `kill(-pid)`
+ * reliably reaches it. On Windows we fall back to `taskkill /T`.
  *
  * On Windows the call is **synchronous** (`spawnSync`): `Ctrl+C` is
  * broadcast by the console to every attached process, so the `cmd.exe`
@@ -330,14 +266,11 @@ if (process.stdin.isTTY && typeof process.stdin.setRawMode === 'function') {
 
 /** Spawn a long-running pnpm dev child, tracked for shutdown. */
 function spawnLongRunning(filter, label, extraEnv = {}) {
-  const child = spawn('pnpm', ['--filter', filter, 'dev'], {
+  const child = spawnSupervisedDevChild({
+    command: 'pnpm',
+    args: ['--filter', filter, 'dev'],
     cwd: repoRoot,
-    // Deny stdin so the child can't put the shared console into raw input
-    // mode (which would swallow Ctrl+C on Windows; see the raw-mode
-    // handler above for the full story).
-    stdio: ['ignore', 'inherit', 'inherit'],
     shell: process.platform === 'win32',
-    detached: process.platform !== 'win32',
     env: { ...process.env, ...extraEnv },
   });
   children.push(child);
@@ -460,16 +393,12 @@ async function main() {
   delete electronEnv.ELECTRON_RUN_AS_NODE;
 
   console.log('[dev-desktop] Launching Electron …');
-  const electron = spawn('pnpm', ['exec', 'electron', '.'], {
-    // Electron itself wants stdin in dev (DevTools, etc.) only for its own
-    // child processes; the parent process here doesn't need it, and giving
-    // it stdin would let it flip the console into raw mode and break our
-    // Ctrl+C handler. Deny stdin like the other long-running children.
-    stdio: ['ignore', 'inherit', 'inherit'],
+  const electron = spawnSupervisedDevChild({
+    command: 'pnpm',
+    args: ['exec', 'electron', '.'],
     shell: true,
     cwd: path.join(repoRoot, 'apps/desktop'),
     env: electronEnv,
-    detached: process.platform !== 'win32',
   });
   children.push(electron);
   electron.once('exit', (code) => {
