@@ -36,8 +36,8 @@ import {
   verifyOAuthCredentials,
   applyCopilotModelOverrides,
   getCopilotStaticHeaders,
-  fetchEntitledCopilotModels,
 } from './oauth.js';
+import { getPiModels } from './pi-models.js';
 import { getDataDir } from '../../data-dir.js';
 import {
   llmProviderApiKeySecretId,
@@ -78,6 +78,21 @@ const log = getLogger('llm');
 /** Read a built-in provider's model catalog from pi-ai's registry. */
 function getProviderModels(providerId: KnownProvider): Model<Api>[] {
   return getModels(providerId as BuiltinProvider) as Model<Api>[];
+}
+
+/** Map a pi-ai catalog model to the wire `LLMModelInfo` shape. */
+function toModelInfo(m: Model<Api>, providerId: string): LLMModelInfo {
+  return {
+    id: m.id,
+    name: m.name || m.id,
+    provider: providerId,
+    reasoning: m.reasoning,
+    input: m.input as ('text' | 'image')[],
+    ...(m.cost ? { cost: { input: m.cost.input, output: m.cost.output } } : {}),
+    ...(typeof m.contextWindow === 'number'
+      ? { contextWindow: m.contextWindow }
+      : {}),
+  };
 }
 
 /** Provider-specific metadata not available from pi-ai's registry. */
@@ -590,19 +605,7 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
   if (providerInfo.builtIn) {
     try {
       const models = getProviderModels(providerId as KnownProvider);
-      return models.map((m) => ({
-        id: m.id,
-        name: m.name || m.id,
-        provider: providerId,
-        reasoning: m.reasoning,
-        input: m.input as ('text' | 'image')[],
-        ...(m.cost
-          ? { cost: { input: m.cost.input, output: m.cost.output } }
-          : {}),
-        ...(typeof m.contextWindow === 'number'
-          ? { contextWindow: m.contextWindow }
-          : {}),
-      }));
+      return models.map((m) => toModelInfo(m, providerId));
     } catch {
       return [];
     }
@@ -763,24 +766,16 @@ async function fetchOpenAIModelIds(): Promise<string[] | null> {
 /**
  * Like {@link getModelsForProvider}, but resolves the *current account's*
  * live entitlement for the providers that expose one:
- *   - GitHub Copilot: queried from Copilot's `GET /models` endpoint (the
- *     same source VS Code's model picker uses).
+ *   - GitHub Copilot: pi-ai's `Models.getAvailable`, which filters the
+ *     bundled Copilot catalog by the `availableModelIds` captured on the
+ *     stored OAuth credential at login/refresh (no per-call network round
+ *     trip).
  *   - OpenAI: queried from `GET {baseUrl}/models`, filtered to chat models
  *     and merged with the static pi-ai metadata (see
  *     {@link mergeOpenAIModels}).
  *
- * The returned list is the live entitlement, enriched per model:
- *   - If pi-ai's static registry knows the id, we reuse its curated entry
- *     (accurate reasoning flag, input modalities, display name, and — via
- *     {@link buildModel} — the optimal request protocol).
- *   - Otherwise the model is newer than the bundled registry; we surface it
- *     anyway using the live metadata. Such models are requested over the
- *     universal `openai-completions` endpoint (see {@link buildModel}),
- *     which Copilot's gateway accepts for every chat model, so they remain
- *     usable until a pi-ai upgrade restores the optimal protocol.
- *
- * Falls back to the full static list when unauthenticated or the live fetch
- * fails, preserving the previous behavior.
+ * Falls back to the full static list when unauthenticated or the live
+ * lookup fails, preserving the previous behavior.
  */
 export async function getModelsForProviderLive(
   providerId: string,
@@ -796,21 +791,18 @@ export async function getModelsForProviderLive(
 
   if (providerId !== 'github-copilot') return staticModels;
 
-  const entitled = await fetchEntitledCopilotModels();
-  if (!entitled || entitled.length === 0) return staticModels;
-
-  const staticById = new Map(staticModels.map((m) => [m.id.toLowerCase(), m]));
-  return entitled.map((live) => {
-    const known = staticById.get(live.id.toLowerCase());
-    if (known) return known;
-    return {
-      id: live.id,
-      name: live.name,
-      provider: 'github-copilot',
-      reasoning: false,
-      input: live.vision ? ['text', 'image'] : ['text'],
-    } satisfies LLMModelInfo;
-  });
+  // Copilot: getAvailable() narrows the bundled catalog to the account's
+  // entitled `availableModelIds` (captured on the credential at login /
+  // token refresh). It returns [] when unauthenticated — fall back to the
+  // static catalog in that case.
+  try {
+    const available = await getPiModels().getAvailable('github-copilot');
+    if (available.length === 0) return staticModels;
+    return available.map((m) => toModelInfo(m, providerId));
+  } catch (err) {
+    log.warn({ err }, 'Copilot getAvailable failed; using static catalog');
+    return staticModels;
+  }
 }
 
 /**
