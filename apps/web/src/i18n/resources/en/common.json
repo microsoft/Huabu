@@ -23,6 +23,10 @@
     "lock": "Lock",
     "unlock": "Unlock"
   },
+  "canvasControls": {
+    "resetZoom": "Reset zoom to 100%",
+    "zoomAria": "Canvas zoom {{percentage}}%. Reset to 100%"
+  },
   "navigation": {
     "backHome": "Back to home",
     "home": "Home",

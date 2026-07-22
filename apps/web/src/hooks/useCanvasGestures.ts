@@ -90,13 +90,24 @@ const midpoint = (a: Touch, b: Touch): Point => ({
 // Trackpad pinch (ctrlKey + wheel)
 // ---------------------------------------------------------------------------
 
+const TRACKPAD_ZOOM_SENSITIVITY = 0.02;
+const MAX_WHEEL_ZOOM_DELTA = 10;
+
+/** Convert a wheel delta to a bounded multiplicative zoom factor. */
+export function wheelDeltaToZoomFactor(deltaY: number): number {
+  const boundedDelta =
+    Math.sign(deltaY) * Math.min(Math.abs(deltaY), MAX_WHEEL_ZOOM_DELTA);
+  return Math.pow(2, -boundedDelta * TRACKPAD_ZOOM_SENSITIVITY);
+}
+
 /**
  * Boost trackpad pinch-to-zoom sensitivity.
  *
  * Windows touchpads emit `ctrlKey + wheel` events with very small `deltaY`
  * values, resulting in sluggish zoom under d3-zoom's default sensitivity
  * (0.002). We intercept these in the capture phase and apply a 10× factor,
- * zooming towards the cursor.
+ * zooming towards the cursor. Large discrete mouse-wheel deltas are capped so
+ * one notch cannot cause an abrupt multi-fold zoom jump.
  */
 function useTrackpadPinch(
   wrapperRef: MutableRefObject<HTMLDivElement | null>,
@@ -106,15 +117,13 @@ function useTrackpadPinch(
     const el = wrapperRef.current;
     if (!el) return;
 
-    const SENSITIVITY = 0.02;
-
     const handleWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return;
       const instance = rfInstanceRef.current;
       if (!instance) return;
 
       const viewport = instance.getViewport();
-      const factor = Math.pow(2, -e.deltaY * SENSITIVITY);
+      const factor = wheelDeltaToZoomFactor(e.deltaY);
       const newZoom = clampZoom(viewport.zoom * factor);
       if (newZoom === viewport.zoom) return;
 
