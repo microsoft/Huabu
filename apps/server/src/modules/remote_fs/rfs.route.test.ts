@@ -279,7 +279,7 @@ describe('POST /api/rfs/:canvasId/query', () => {
 });
 
 describe('POST /api/rfs/:canvasId/execute', () => {
-  it('creates and connects nodes while returning generated IDs and revisions', async () => {
+  it('executes adjacent requests independently when they reuse a runId', async () => {
     const anchorFile = seedNote('c1', 'node-1', 'Alpha', 'existing body');
     agentMocks.runAgent.mockImplementation(() => {
       throw new Error('Internal model provider is not configured');
@@ -347,6 +347,7 @@ describe('POST /api/rfs/:canvasId/execute', () => {
         url: '/rfs/c1/execute',
         headers: { 'content-type': 'application/json' },
         payload: {
+          runId: 'external-run-1',
           commands: [
             {
               type: 'CONNECT_NODES',
@@ -356,6 +357,11 @@ describe('POST /api/rfs/:canvasId/execute', () => {
         },
       });
       const connected = rfsExecuteResponseSchema.parse(connectResponse.json());
+      expect(connected).toMatchObject({
+        runId: 'external-run-1',
+        fromVersion: 2,
+        toVersion: 3,
+      });
       expect(connected.results[0]?.edges?.[0]).toMatchObject({
         edgeId: expect.stringMatching(/^edge-/),
         source: 'node-1',

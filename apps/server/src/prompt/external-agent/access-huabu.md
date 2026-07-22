@@ -189,7 +189,9 @@ A command cannot refer to a server-assigned ID before you receive it. Create fir
 
 For a `MERGE_NODE_DATA` patch that changes `content`, first download the node and copy its unquoted `ETag` into `expectRev`. A missing or stale revision produces an HTTP 200 business result with `applied: false`, `reason: "conflict"`, and a structured conflict. Re-download, reconcile, and submit a new request.
 
-`runId` is tracing metadata, not an idempotency key. After a timeout or dropped connection, never blindly retry a mutation: query the Space, reconcile the observed state, then decide whether another command is needed.
+`runId` is an optional opaque correlation label of 1–256 characters. It does not need to be unique. When omitted, Huabu generates a fresh `run-<UUID>` value; either way, the response returns the effective value. Reusing one `runId` in adjacent requests does not join them, reject the later request, deduplicate execution, or return an earlier result: every request executes independently and may create another committed delta-log entry carrying the same label. Reuse a value only to correlate related requests; use distinct values when you need to distinguish them.
+
+`runId` is not an idempotency key and provides no retry safety. After a timeout or dropped connection, never blindly retry a mutation—even with the same `runId`: query the Space, reconcile the observed state, then decide whether another command is needed.
 
 The response includes version transition, projected commands, command results, generated IDs, affected IDs, and new revisions. It intentionally excludes Web UI deltas and internal change-review records.
 
