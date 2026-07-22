@@ -827,6 +827,8 @@ function ChoiceButton<T extends string>({
 // ---------------------------------------------------------------------------
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+const clamp = (v: number, lo: number, hi: number) =>
+  Math.min(hi, Math.max(lo, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /** Brand-avatar palette (mirrors `AgentIcon`'s private `COLOR_HEX`). */
@@ -843,6 +845,48 @@ const LOD_NODE_H = 132;
 /** Screen-width band (px) over which the avatar takes over the node. */
 const LOD_BAND_HI = 150;
 const LOD_BAND_LO = 66;
+
+/**
+ * Avatar diameter (screen px) for the proposed LOD takeover.
+ *
+ * The avatar is NOT a constant screen size. It tracks the node's on-screen
+ * size on a concave curve so it always reads as "part of" the body:
+ *   - zoomed in  → grows with the node (up to {@link AVATAR_MAX_PX}) so it
+ *     never looks like a tiny sticker stranded on a huge card;
+ *   - zoomed out → eases down toward {@link AVATAR_MIN_DOT_PX} so a field of
+ *     many nodes collapses into tidy dots instead of a crowd of equal chips.
+ *
+ * The concave gamma (<1) climbs out of the dot quickly and then flattens, so
+ * most of the useful zoom range shows a legible identity rather than spending
+ * it near either extreme. All five numbers are pure tuning knobs.
+ */
+const AVATAR_MIN_DOT_PX = 12;
+const AVATAR_MAX_PX = 88;
+const AVATAR_NODE_REP_MIN = 24;
+const AVATAR_NODE_REP_MAX = 520;
+const AVATAR_GAMMA = 0.7;
+
+/** Avatar size (px) at/below which the title caption is fully hidden. */
+const AVATAR_TITLE_MIN = 26;
+/** Avatar size (px) at/above which the title caption is fully revealed. */
+const AVATAR_TITLE_FULL = 44;
+
+/**
+ * Maps a node's on-screen size to an avatar diameter along the concave curve
+ * described above. Uses the geometric mean of width/height so a wide-short
+ * and a tall-narrow node of equal area land on the same size — matching the
+ * shared semantic-zoom philosophy.
+ */
+function avatarSizeForNode(screenW: number, screenH: number): number {
+  const rep = Math.sqrt(Math.max(0, screenW) * Math.max(0, screenH));
+  const n = clamp01(
+    (rep - AVATAR_NODE_REP_MIN) / (AVATAR_NODE_REP_MAX - AVATAR_NODE_REP_MIN),
+  );
+  const eased = Math.pow(n, AVATAR_GAMMA);
+  return Math.round(
+    AVATAR_MIN_DOT_PX + (AVATAR_MAX_PX - AVATAR_MIN_DOT_PX) * eased,
+  );
+}
 
 /** Pixel-faithful reproduction of the real question sticky note. */
 function StickyCard({
@@ -1177,6 +1221,13 @@ function LodAgentChip({
   // open chat bubble.
   const stickerFill = 'color-mix(in srgb, var(--question-bg) 32%, white)';
   const chipStyle: CSSProperties = {
+    // The shipped `.question-agent-badge` CSS pins width/height to
+    // `--question-agent-badge-size` with `!important`, so a plain inline
+    // width/height is ignored. Drive that variable instead so the container,
+    // the `open` bubble (1.1×/1.2×) and the avatar (0.8×) all scale together
+    // with the curve — otherwise the container stays 36px while the bubble
+    // grows, stranding the icon in a corner.
+    ['--question-agent-badge-size' as string]: `${size}px`,
     width: size,
     height: size,
     background: isOpen ? 'transparent' : stickerFill,
@@ -1198,8 +1249,18 @@ function LodAgentChip({
     >
       {isOpen ? (
         <svg
-          className="pointer-events-none absolute -top-0.5 -left-0.5 overflow-visible"
-          style={{ width: size * 1.1, height: size * 1.2 }}
+          className="pointer-events-none absolute overflow-visible"
+          style={{
+            // The bubble's round body (viewBox centre 22,22 within 44×48)
+            // must sit on the chip centre so the icon reads as centred. At
+            // size*1.1 × size*1.2 the body centre lands at 0.55·size, so a
+            // -0.05·size offset re-centres it — proportional, unlike the old
+            // fixed 2px nudge that drifted badly as the avatar grew.
+            left: -size * 0.05,
+            top: -size * 0.05,
+            width: size * 1.1,
+            height: size * 1.2,
+          }}
           viewBox="0 0 44 48"
           aria-hidden
         >
@@ -1219,18 +1280,10 @@ function LodAgentChip({
           size={innerSize}
           withFace
           motion={isRunning ? 'working' : 'none'}
-          className={cn(
-            'relative z-10',
-            isOpen && 'translate-x-0.5 translate-y-0.5',
-          )}
+          className="relative z-10"
         />
       ) : (
-        <div
-          className={cn(
-            'relative z-10 leading-none',
-            isOpen && 'translate-x-0.5 translate-y-0.5',
-          )}
-        >
+        <div className="relative z-10 leading-none">
           <BuiltInStarBody
             mode={source === 'agent' ? 'operate' : 'ask'}
             size={innerSize}
@@ -1276,19 +1329,49 @@ function LodViewport({
       ? clamp01((LOD_BAND_HI - screenW) / (LOD_BAND_HI - LOD_BAND_LO))
       : 0;
 
+  // Avatar size rides a concave curve on the node's screen size instead of
+  // being pinned to a constant screen size: it grows when you zoom in (so it
+  // never looks lost on a big card) and eases down to a dot when you zoom out
+  // (so a field of many nodes stays tidy). `current` keeps the shipped
+  // constant-size corner badge for comparison.
+  const avatarSize =
+    mode === 'proposed' ? avatarSizeForNode(screenW, screenH) : 40;
+
   const nodeLeft = (VW - screenW) / 2;
   const nodeTop = (VH - screenH) / 2;
   const cx = VW / 2;
   const cy = VH / 2;
 
-  // Corner anchor (matches the real badge offset {top:-22,left:-2} at
-  // constant 40px screen size — centre ≈ node top-left + (18, -2)).
-  const cornerX = nodeLeft + 18;
-  const cornerY = nodeTop - 2;
+  // Corner anchor straddles the node's top-left corner; scale the offset with
+  // the avatar so it keeps hugging the corner as the avatar grows/shrinks.
+  // When the node is zoomed in past the viewport (screen size > viewport),
+  // its true corner sits off-screen — clamp the anchor into the viewport so
+  // the avatar keeps hugging the *visible* corner instead of vanishing, which
+  // mirrors how a real canvas keeps the badge in view on an oversized node.
+  const anchorMargin = avatarSize * 0.75;
+  const cornerX = clamp(
+    nodeLeft + avatarSize * 0.42,
+    anchorMargin,
+    VW - anchorMargin,
+  );
+  const cornerY = clamp(
+    nodeTop - avatarSize * 0.05,
+    anchorMargin,
+    VH - anchorMargin,
+  );
   const badgeX = lerp(cornerX, cx, t);
   const badgeY = lerp(cornerY, cy, t);
   const bodyOpacity = mode === 'proposed' ? lerp(1, 0.12, t) : 1;
-  const showTitle = t > 0.55;
+
+  // The title only rides in once the avatar is big enough to anchor it, and
+  // it fades out again as the avatar collapses toward a dot — so the extreme
+  // zoomed-out state reads as a clean dot, not a dot with a floating caption.
+  const titleReveal = clamp01(
+    (avatarSize - AVATAR_TITLE_MIN) / (AVATAR_TITLE_FULL - AVATAR_TITLE_MIN),
+  );
+  const titleOpacity = titleReveal * t;
+  const showTitle = titleOpacity > 0.04;
+  const titleFont = Math.round(lerp(9, 13, titleReveal));
 
   return (
     <div className="flex flex-col items-center gap-2">
@@ -1314,7 +1397,7 @@ function LodViewport({
           />
         </div>
 
-        {/* Badge — constant 40px screen size, re-anchored by the LOD factor. */}
+        {/* Badge — size rides the avatar curve, re-anchored by the LOD factor. */}
         <div
           style={{
             position: 'absolute',
@@ -1325,17 +1408,22 @@ function LodViewport({
         >
           {mode === 'proposed' ? (
             <div className="flex flex-col items-center gap-1">
-              <LodAgentChip icon={icon} status={status} source={source} />
+              <LodAgentChip
+                icon={icon}
+                status={status}
+                source={source}
+                size={avatarSize}
+              />
               {showTitle ? (
                 <span
-                  className="max-w-[120px] truncate rounded px-1 text-center"
+                  className="max-w-30 truncate rounded px-1 text-center"
                   style={{
                     color: 'var(--question-fg)',
                     fontFamily:
                       '"Comic Sans MS", STXingkai, KaiTi, "Kaiti SC", cursive',
-                    fontSize: 12,
+                    fontSize: titleFont,
                     fontWeight: 600,
-                    opacity: t,
+                    opacity: titleOpacity,
                   }}
                 >
                   How does semantic zoom work?
@@ -1357,6 +1445,7 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
   const [status, setStatus] = useState<AgentBadgeStatus>('open');
   const [source, setSource] = useState<ChipSource>('external');
   const screenW = Math.round(LOD_NODE_W * zoom);
+  const avatarPx = avatarSizeForNode(LOD_NODE_W * zoom, LOD_NODE_H * zoom);
 
   return (
     <div className="border-edge-default bg-surface rounded-2xl border p-6">
@@ -1423,15 +1512,15 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
         </span>
         <input
           type="range"
-          min={12}
-          max={100}
+          min={1}
+          max={300}
           value={Math.round(zoom * 100)}
           onChange={(e) => setZoom(Number(e.target.value) / 100)}
-          className="flex-1 accent-[var(--info)]"
+          className="accent-info flex-1"
           aria-label="Zoom"
         />
-        <span className="text-fg-subtle w-40 text-right text-xs">
-          node ≈ {screenW}px on screen
+        <span className="text-fg-subtle w-56 text-right text-xs">
+          node ≈ {screenW}px · avatar ≈ {avatarPx}px
         </span>
       </div>
 
@@ -1456,10 +1545,10 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
 
       <div className="mt-8">
         <p className="text-fg-muted mb-3 text-xs font-medium">
-          Proposed transition filmstrip (100% → 12%)
+          Proposed transition filmstrip (300% → 1%)
         </p>
         <div className="flex flex-wrap justify-center gap-4">
-          {[1, 0.6, 0.36, 0.2, 0.12].map((z) => (
+          {[3, 1.5, 1, 0.5, 0.25, 0.12, 0.05, 0.01].map((z) => (
             <LodViewport
               key={z}
               icon={icon}
