@@ -230,9 +230,12 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
               oauthUserCode: null,
               oauthVerificationUri: null,
             });
-            // Refresh config to reflect authenticated state
+            // Refresh config to reflect authenticated state, then reload the
+            // model list: OAuth providers (e.g. Copilot) expose an account-
+            // specific entitlement that is only fetchable after login.
             const config = await getLLMConfig();
             set({ config });
+            if (config.provider) await get().loadModels(config.provider);
             return;
           }
           if (result.status === 'expired' || result.status === 'error') {

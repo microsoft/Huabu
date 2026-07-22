@@ -223,6 +223,23 @@ export const LLMSettings: React.FC = () => {
     await llmUpdateConfig({ provider, model: modelId });
   };
 
+  // A saved key changes which models the account is entitled to (OpenAI
+  // `/v1/models`, Copilot entitlement), so refresh the list once the key
+  // persists — the model picker renders after the key row.
+  const handleSaveChatKey = async (key: string) => {
+    const provider = llmConfig?.provider ?? '';
+    if (!provider) return;
+    await llmUpdateConfig({ provider, apiKey: key });
+    await llmLoadModels(provider);
+  };
+
+  const handleSaveUtilityKey = async (key: string) => {
+    const provider = utilityConfig?.provider ?? '';
+    if (!provider) return;
+    await updateUtilityConfig({ provider, apiKey: key });
+    await loadUtilityModels(provider);
+  };
+
   return (
     <>
       <SettingSection title={t('settings.chatModel')} collapsible>
@@ -242,43 +259,6 @@ export const LLMSettings: React.FC = () => {
             />
           </SettingControl>
         </SettingRow>
-
-        {llmConfig?.provider && llmModels.length > 0 && !isAzure && (
-          <SettingRow title={t('settings.model')}>
-            <SettingControl>
-              <Select
-                options={llmModels.map((m) => ({
-                  value: m.id,
-                  label: m.name || m.id,
-                }))}
-                value={llmConfig?.model ?? ''}
-                onChange={(v) => void handleModelChange(v)}
-                disabled={llmSaving}
-                ariaLabel={t('settings.model')}
-                className="w-full"
-              />
-            </SettingControl>
-          </SettingRow>
-        )}
-
-        {llmConfig?.provider && llmModels.length === 0 && !isAzure && (
-          <SettingRow title={t('settings.model')}>
-            <SettingControl>
-              <TextInput
-                type="text"
-                aria-label={t('settings.model')}
-                placeholder="e.g. gpt-4o"
-                value={manualModel}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setManualModel(v);
-                  debouncedSaveChat({ model: v.trim() });
-                }}
-                className="w-full"
-              />
-            </SettingControl>
-          </SettingRow>
-        )}
 
         {canOverrideBaseUrl && (
           <BaseUrlRow
@@ -435,8 +415,47 @@ export const LLMSettings: React.FC = () => {
             saved={llmConfig.authenticated}
             placeholder="sk-…"
             saving={llmSaving}
-            onSave={(key) => saveChat({ apiKey: key })}
+            onSave={handleSaveChatKey}
           />
+        )}
+
+        {/* Model picker comes last: for account-based providers the list is
+            only accurate once the key / login above is configured. */}
+        {llmConfig?.provider && llmModels.length > 0 && !isAzure && (
+          <SettingRow title={t('settings.model')}>
+            <SettingControl>
+              <Select
+                options={llmModels.map((m) => ({
+                  value: m.id,
+                  label: m.name || m.id,
+                }))}
+                value={llmConfig?.model ?? ''}
+                onChange={(v) => void handleModelChange(v)}
+                disabled={llmSaving}
+                ariaLabel={t('settings.model')}
+                className="w-full"
+              />
+            </SettingControl>
+          </SettingRow>
+        )}
+
+        {llmConfig?.provider && llmModels.length === 0 && !isAzure && (
+          <SettingRow title={t('settings.model')}>
+            <SettingControl>
+              <TextInput
+                type="text"
+                aria-label={t('settings.model')}
+                placeholder="e.g. gpt-4o"
+                value={manualModel}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setManualModel(v);
+                  debouncedSaveChat({ model: v.trim() });
+                }}
+                className="w-full"
+              />
+            </SettingControl>
+          </SettingRow>
         )}
       </SettingSection>
 
@@ -471,41 +490,6 @@ export const LLMSettings: React.FC = () => {
                 />
               </SettingControl>
             </SettingRow>
-
-            {utilityModels.length > 0 ? (
-              <SettingRow title={t('settings.model')}>
-                <SettingControl>
-                  <Select
-                    options={utilityModels.map((m) => ({
-                      value: m.id,
-                      label: m.name || m.id,
-                    }))}
-                    value={utilityConfig?.model ?? ''}
-                    onChange={(v) => void handleUtilityModelChange(v)}
-                    disabled={utilitySaving}
-                    ariaLabel={t('settings.model')}
-                    className="w-full"
-                  />
-                </SettingControl>
-              </SettingRow>
-            ) : (
-              <SettingRow title={t('settings.model')}>
-                <SettingControl>
-                  <TextInput
-                    type="text"
-                    aria-label={t('settings.model')}
-                    placeholder="e.g. gpt-4o-mini"
-                    value={utilityManualModel}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setUtilityManualModel(v);
-                      debouncedSaveUtility({ model: v.trim() });
-                    }}
-                    className="w-full"
-                  />
-                </SettingControl>
-              </SettingRow>
-            )}
 
             {canOverrideUtilityBaseUrl && (
               <BaseUrlRow
@@ -574,9 +558,46 @@ export const LLMSettings: React.FC = () => {
                   saved={utilityConfig.authenticated}
                   placeholder="sk-…"
                   saving={utilitySaving}
-                  onSave={(key) => saveUtility({ apiKey: key })}
+                  onSave={handleSaveUtilityKey}
                 />
               )
+            )}
+
+            {/* Model picker last — account-based lists need the key/login
+                above configured first. */}
+            {utilityModels.length > 0 ? (
+              <SettingRow title={t('settings.model')}>
+                <SettingControl>
+                  <Select
+                    options={utilityModels.map((m) => ({
+                      value: m.id,
+                      label: m.name || m.id,
+                    }))}
+                    value={utilityConfig?.model ?? ''}
+                    onChange={(v) => void handleUtilityModelChange(v)}
+                    disabled={utilitySaving}
+                    ariaLabel={t('settings.model')}
+                    className="w-full"
+                  />
+                </SettingControl>
+              </SettingRow>
+            ) : (
+              <SettingRow title={t('settings.model')}>
+                <SettingControl>
+                  <TextInput
+                    type="text"
+                    aria-label={t('settings.model')}
+                    placeholder="e.g. gpt-4o-mini"
+                    value={utilityManualModel}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setUtilityManualModel(v);
+                      debouncedSaveUtility({ model: v.trim() });
+                    }}
+                    className="w-full"
+                  />
+                </SettingControl>
+              </SettingRow>
             )}
           </>
         )}
