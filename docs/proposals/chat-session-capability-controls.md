@@ -20,7 +20,7 @@ Today the built-in Huabu agent (pi-ai providers, including GitHub Copilot) has n
 
 ## Hard constraint — pi-ai capability surface
 
-The installed `@earendil-works/pi-ai` (0.75.5) [`OpenAIResponsesOptions`](../../apps/server/node_modules/@earendil-works/pi-ai/dist/providers/openai-responses.d.ts) exposes only `reasoningEffort` (`minimal | low | medium | high | xhigh`), `reasoningSummary`, and `serviceTier`. It has **no** `text.verbosity` and **no** Standard/Pro reasoning-mode parameter.
+The installed `@earendil-works/pi-ai` [`OpenAIResponsesOptions`](../../apps/server/node_modules/@earendil-works/pi-ai/dist/providers/openai-responses.d.ts) exposes only `reasoningEffort` (`minimal | low | medium | high | xhigh`), `reasoningSummary`, and `serviceTier`. It has **no** `text.verbosity` and **no** Standard/Pro reasoning-mode parameter.
 
 | Control             | Wireable now | Mechanism                                                                                                     |
 | ------------------- | ------------ | ------------------------------------------------------------------------------------------------------------- |

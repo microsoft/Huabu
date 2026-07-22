@@ -213,7 +213,7 @@ export type OAuthStatusQuery = z.infer<typeof oauthStatusQuerySchema>;
  * `openai-codex`); it defaults to `github-copilot` server-side when omitted.
  */
 export const oauthProviderBodySchema = z.object({
-  provider: z.string().min(1).optional(),
+  provider: z.string().trim().min(1).optional(),
 });
 export type OAuthProviderBody = z.infer<typeof oauthProviderBodySchema>;
 

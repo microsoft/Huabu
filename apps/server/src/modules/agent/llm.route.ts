@@ -166,7 +166,12 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const parsed = oauthProviderBodySchema.safeParse(request.body ?? {});
-    const provider = parsed.success ? parsed.data.provider : undefined;
+    if (!parsed.success) {
+      return reply
+        .status(400)
+        .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
+    }
+    const provider = parsed.data.provider;
     try {
       const result = await startDeviceCodeFlow(provider);
       return reply.send(result);
@@ -187,7 +192,12 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const parsed = oauthProviderBodySchema.safeParse(request.body ?? {});
-    const provider = parsed.success ? parsed.data.provider : undefined;
+    if (!parsed.success) {
+      return reply
+        .status(400)
+        .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
+    }
+    const provider = parsed.data.provider;
     try {
       const status = await pollDeviceCode(provider);
       return reply.send({ status });
@@ -225,7 +235,12 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const parsed = oauthProviderBodySchema.safeParse(request.body ?? {});
-    const provider = parsed.success ? parsed.data.provider : undefined;
+    if (!parsed.success) {
+      return reply
+        .status(400)
+        .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
+    }
+    const provider = parsed.data.provider;
     await logoutOAuth(provider);
     return reply.send({ ok: true });
   });
