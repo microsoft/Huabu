@@ -473,6 +473,24 @@ body,
   transition-delay: 0s, 120ms;
 }
 
+/* Discrete three-stage takeover (question node). The whole card — background,
+   border, depth board, and content — fades as ONE binary step when the node
+   leaves the readable stage, so the zoomed-out node reads as just its
+   portal-rendered avatar/dot mark rather than a fading yellow box behind it.
+   `data-lod-body` is written only by `NodeTakeoverLayer`; it is a binary
+   attribute (visible/hidden), so the card is always crisp at rest — never a
+   resting half-opacity — and only the boundary crossing animates (200ms). The
+   mark lives in a separate screen-space portal, so it is not faded with the
+   card. Pointer-events stay on so the (now invisible) node footprint remains
+   selectable; the read-only body's dbl-click still routes to the same activate
+   handler as the mark. */
+.semantic-lod-node[data-lod-body] {
+  transition: opacity 200ms ease;
+}
+.semantic-lod-node[data-lod-body='hidden'] {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .semantic-lod-placeholder,
   .semantic-lod-content {

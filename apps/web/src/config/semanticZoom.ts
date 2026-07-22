@@ -53,10 +53,11 @@ export const SEMANTIC_ZOOM_CONFIG: SemanticZoomConfig = {
     note: { full: 'full', minimal: 'minimal' },
     pdf: { full: 'full', minimal: 'minimal' },
     web: { full: 'full', minimal: 'minimal' },
-    // Question nodes collapse to their agent avatar (identity) rather than a
-    // title label — the minimal payload is supplied by the node itself via
-    // NodeWrapper's `minimalContent` slot, not the generic SemanticPlaceholder.
-    question: { full: 'full', minimal: 'minimal' },
+    // NOTE: `question` is intentionally NOT here. It uses the continuous zoom
+    // takeover (V2) instead of the binary boundary: its agent mark slides from
+    // the corner to the node centre and the card fades via `NodeTakeoverLayer`
+    // / `useNodeTakeover`, driven by a representative-size band rather than this
+    // width threshold. See proposals/question-node-zoom-lod-avatar.md.
   },
 };
 

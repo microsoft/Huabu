@@ -8,7 +8,7 @@ import type { QuestionAgentPresentation } from '@/utils/questionAgentPresentatio
  * colour, attention halo, running-ring identity colour, and sticker fill.
  *
  * Shared by the corner {@link QuestionAgentBadge} and the zoomed-out
- * {@link QuestionMinimalAvatar} stand-in so status reads identically on both;
+ * {@link QuestionTakeoverMark} stand-in so status reads identically on both;
  * this is the single source of truth for status → colour mapping.
  */
 export interface QuestionBadgeChrome {

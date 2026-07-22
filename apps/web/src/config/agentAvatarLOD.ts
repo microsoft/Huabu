@@ -35,6 +35,24 @@ export const AVATAR_FACE_MIN = 24;
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
 
 /**
+ * Maps a node's representative on-screen size (√w·h, px) to an avatar diameter
+ * along a concave curve: the avatar grows with the node when zoomed in (up to
+ * {@link AVATAR_MAX_PX}) and eases toward {@link AVATAR_MIN_DOT_PX} when zoomed
+ * out. Split from {@link avatarSizeForNode} so a caller that already has the
+ * representative size (e.g. the continuous takeover engine) can size the avatar
+ * without recomputing the geometric mean.
+ */
+export function avatarSizeForRep(rep: number): number {
+  const n = clamp01(
+    (rep - AVATAR_NODE_REP_MIN) / (AVATAR_NODE_REP_MAX - AVATAR_NODE_REP_MIN),
+  );
+  const eased = Math.pow(n, AVATAR_GAMMA);
+  return Math.round(
+    AVATAR_MIN_DOT_PX + (AVATAR_MAX_PX - AVATAR_MIN_DOT_PX) * eased,
+  );
+}
+
+/**
  * Maps a node's on-screen size to an avatar diameter along a concave curve:
  * the avatar grows with the node when zoomed in (up to {@link AVATAR_MAX_PX})
  * and eases toward {@link AVATAR_MIN_DOT_PX} when zoomed out. Uses the geometric
@@ -42,13 +60,8 @@ const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
  * land on the same size — matching the semantic-zoom typography philosophy.
  */
 export function avatarSizeForNode(screenW: number, screenH: number): number {
-  const rep = Math.sqrt(Math.max(0, screenW) * Math.max(0, screenH));
-  const n = clamp01(
-    (rep - AVATAR_NODE_REP_MIN) / (AVATAR_NODE_REP_MAX - AVATAR_NODE_REP_MIN),
-  );
-  const eased = Math.pow(n, AVATAR_GAMMA);
-  return Math.round(
-    AVATAR_MIN_DOT_PX + (AVATAR_MAX_PX - AVATAR_MIN_DOT_PX) * eased,
+  return avatarSizeForRep(
+    Math.sqrt(Math.max(0, screenW) * Math.max(0, screenH)),
   );
 }
 

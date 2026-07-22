@@ -4,6 +4,7 @@ import { AgentIcon, agentIconColorHex } from './AgentIcon';
 import { BuiltInAgentAvatar } from './BuiltInAgentAvatar';
 
 import type { AgentIconMotion } from './AgentIcon';
+import type { AvatarDetail } from '@/config/agentAvatarLOD';
 import type { QuestionAgentPresentation } from '@/utils/questionAgentPresentation';
 
 export interface AgentAvatarMarkProps {
@@ -13,6 +14,9 @@ export interface AgentAvatarMarkProps {
   size: number;
   /** Optional semantic motion (running wobble). */
   motion?: AgentIconMotion;
+  /** Force a detail tier instead of deriving it from {@link size} (e.g. a
+   * readable corner badge that must always show the full character). */
+  detail?: AvatarDetail;
   className?: string;
 }
 
@@ -34,9 +38,10 @@ export function AgentAvatarMark({
   agent,
   size,
   motion = 'none',
+  detail: detailOverride,
   className,
 }: AgentAvatarMarkProps) {
-  const detail = resolveAvatarDetail(size);
+  const detail = detailOverride ?? resolveAvatarDetail(size);
 
   if (detail === 'dot') {
     const identityColor =

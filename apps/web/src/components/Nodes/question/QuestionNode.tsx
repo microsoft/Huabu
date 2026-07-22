@@ -24,14 +24,11 @@ import { getQuestionDisplayText } from '@/utils/node/questionDisplayText';
 import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentation.ts';
 
 import { NodeWrapper } from '../NodeWrapper';
-import {
-  QuestionAgentBadge,
-  type QuestionAgentBadgeStatus,
-} from './QuestionAgentBadge.tsx';
 import { enterQuestionCompose } from './questionCompose.ts';
-import { QuestionMinimalAvatar } from './QuestionMinimalAvatar.tsx';
+import { QuestionTakeoverMark } from './QuestionTakeoverMark.tsx';
 import { TextNodeBody } from '../shared/TextNodeBody';
 
+import type { QuestionAgentBadgeStatus } from './QuestionAgentBadge.tsx';
 import type { CanvasQuestionNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
 
@@ -278,15 +275,34 @@ export const QuestionNode = memo(
         fillColor={STICKY_BG}
         className="question-sticky rounded-lg transition-all duration-200"
         onDoubleClick={isForkPending ? undefined : handleActivate}
-        minimalContent={
-          <QuestionMinimalAvatar
-            nodeId={id}
-            status={badgeStatus ?? 'idle'}
-            agent={agentPresentation}
-            unread={isDoneUnviewed || isErrorUnviewed}
-            conflictCount={status === 'done' ? conflictCount : 0}
-          />
-        }
+        takeover={{
+          onActivate: isForkPending ? undefined : handleActivate,
+          renderMark: (s) => (
+            <QuestionTakeoverMark
+              state={s}
+              status={badgeStatus ?? 'idle'}
+              agent={agentPresentation}
+              unread={isDoneUnviewed || isErrorUnviewed}
+              conflictCount={status === 'done' ? conflictCount : 0}
+              interactive={canOpenInChat}
+              onOpen={canOpenInChat ? openInChat : undefined}
+              conflictTooltip={
+                conflictCount > 0
+                  ? t('node.agentChangesSkipped', { count: conflictCount })
+                  : undefined
+              }
+              tooltip={
+                status === 'error' && data.errorMessage
+                  ? data.errorMessage
+                  : canOpenInChat
+                    ? status === 'running'
+                      ? t('node.watchLiveConversation')
+                      : t('node.openConversation')
+                    : undefined
+              }
+            />
+          ),
+        }}
         {...surface.nodeWrapperProps}
       >
         <TextNodeBody
@@ -301,32 +317,7 @@ export const QuestionNode = memo(
           fontFamily={QUESTION_FONT_FAMILY}
           color="var(--question-fg)"
           textareaClassName="placeholder:text-fg-default/40"
-        >
-          {badgeStatus && (
-            <QuestionAgentBadge
-              status={badgeStatus}
-              agent={agentPresentation}
-              unread={isDoneUnviewed || isErrorUnviewed}
-              conflictCount={status === 'done' ? conflictCount : 0}
-              conflictTooltip={
-                conflictCount > 0
-                  ? t('node.agentChangesSkipped', { count: conflictCount })
-                  : undefined
-              }
-              offset={{ top: -20, left: 0 }}
-              tooltip={
-                status === 'error' && data.errorMessage
-                  ? data.errorMessage
-                  : canOpenInChat
-                    ? status === 'running'
-                      ? t('node.watchLiveConversation')
-                      : t('node.openConversation')
-                    : undefined
-              }
-              onClick={canOpenInChat ? openInChat : undefined}
-            />
-          )}
-        </TextNodeBody>
+        />
       </NodeWrapper>
     );
   },

@@ -27,9 +27,9 @@ The governing rule is semantic priority rather than uniform scaling: structural 
 
 ## 3. Node level of detail
 
-[`SEMANTIC_ZOOM_CONFIG`](../../apps/web/src/config/semanticZoom.ts) opts `note`, `pdf`, `web`, and `question` into the current two-level `full → minimal` pipeline. Unlisted node types remain `full` at every zoom.
+[`SEMANTIC_ZOOM_CONFIG`](../../apps/web/src/config/semanticZoom.ts) opts `note`, `pdf`, and `web` into the two-level `full → minimal` pipeline. Unlisted node types remain `full` at every zoom. The `question` node deliberately does **not** use this binary boundary — it uses the continuous zoom takeover described in §3.1.
 
-Most participating types render the generic tier-sized title label in `minimal`. The `question` node is the exception: it supplies its own minimal payload — its agent avatar as a zoomed-out stand-in — through `NodeWrapper`'s `minimalContent` slot, which replaces [`SemanticPlaceholder`](../../apps/web/src/components/Nodes/SemanticPlaceholder.tsx) inside the shared cross-fade layer. The avatar rides [`avatarSizeForNode`](../../apps/web/src/config/agentAvatarLOD.ts) on the node's on-screen size and sheds detail toward a solid identity dot ([`AgentAvatarMark`](../../apps/web/src/components/Common/AgentAvatarMark.tsx)); an idle question node (no agent status) falls back to the title label. See [question-node.md](./question-node.md) and [proposals/question-node-zoom-lod-avatar.md](../proposals/question-node-zoom-lod-avatar.md).
+Participating binary types render the generic tier-sized title label in `minimal`.
 
 [`useNodeLOD`](../../apps/web/src/hooks/useNodeLOD.ts) compares `nodeWidth × zoom` with a 150 px screen-width boundary. A 10 px hysteresis buffer means a full node must shrink below 140 px to collapse, while a minimal node must grow to at least 160 px to expand; retaining the previous mode prevents rapid switching near the boundary.
 
@@ -40,6 +40,27 @@ The minimal placeholder expresses hierarchy from node geometry, not title length
 Minimal labels wrap at word boundaries, break only an otherwise unbreakable token, and clamp to the smaller of six lines or the number of lines that physically fit the padded node height. They never continuously shrink to fit content.
 
 AI provenance chrome is independently hidden when a node's screen width falls below 150 px. This threshold reduces non-essential detail but does not determine the node body's LOD mode.
+
+### 3.1 Three-stage takeover (question node)
+
+The `question` node uses a discrete three-stage takeover instead of the binary boundary. Each **resting** stage is crisp — the continuous morph is only the transition animation between stages, so whenever the canvas is still the mark is at a fully-resolved stage, never a half-faded / half-sized in-between:
+
+| Stage      | When (node on-screen size) | What renders                                                                                                                                                       |
+| ---------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `readable` | node width ≥ ~150 px       | the sticky card **plus** the agent badge at the top-left corner; the badge scales together with the card (`badge = 46 × zoom`) and always shows the full character |
+| `avatar`   | text no longer legible     | the card fades out (binary), and a centred agent avatar stands in, sized to **fill** the node footprint (`AVATAR_FRACTION` of the shorter on-screen side)          |
+| `dot`      | avatar would be < ~22 px   | the avatar collapses to a solid identity dot                                                                                                                       |
+
+Boundaries use hysteresis so a stage never flickers near an edge. On a stage change the mark runs a one-shot FLIP animation (slide from corner to centre + resize); plain zoom within a stage does not animate. A small, mostly type-agnostic engine drives it:
+
+| File                                                                                                                          | Responsibility                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`config/nodeTakeover.ts`](../../apps/web/src/config/nodeTakeover.ts)                                                         | Pure staging math: `resolveQuestionStage` (screen size + hysteresis → `readable` \| `avatar` \| `dot`), `markSizeForStage`, size constants. No DOM.                                                                                                                                                                                               |
+| [`hooks/useNodeTakeover.ts`](../../apps/web/src/hooks/useNodeTakeover.ts)                                                     | Self-subscribes to zoom + node rect; returns `{ stage, size, point }` — the mark's target screen point (corner or centre) and diameter for the current stage.                                                                                                                                                                                     |
+| [`components/Nodes/NodeTakeoverLayer.tsx`](../../apps/web/src/components/Nodes/NodeTakeoverLayer.tsx)                         | Screen-space portal; positions the mark, runs the FLIP transition on stage change, writes a binary `data-lod-body` attribute on the node root, forwards a double-click. Memoised, so continuous zoom re-renders only this overlay, not the node body.                                                                                             |
+| [`components/Nodes/question/QuestionTakeoverMark.tsx`](../../apps/web/src/components/Nodes/question/QuestionTakeoverMark.tsx) | Question's mark: renders the badge / avatar / dot from `{ stage, size }`, forces the full character in `readable`, drops the chip border in the stand-in stages so it fills the footprint, shares status colour via [`questionBadgeChrome`](../../apps/web/src/components/Nodes/question/questionBadgeChrome.ts), and owns its own click-to-open. |
+
+The card body fade is a **binary** `data-lod-body` attribute written only by the overlay (`visible` in `readable`, `hidden` otherwise), so the card is always crisp at rest and only the boundary crossing animates. The engine has **no** interaction vocabulary: the mark owns its own single-click + gating; the engine exposes only one semantics-free `onActivate` (double-click passthrough) that `NodeWrapper` wires to the node's existing activate handler. See [question-node.md](./question-node.md#51-trigger) and [proposals/question-node-zoom-lod-avatar.md](../proposals/question-node-zoom-lod-avatar.md).
 
 ## 4. Frame and frame-label policy
 

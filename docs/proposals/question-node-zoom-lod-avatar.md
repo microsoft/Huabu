@@ -1,6 +1,20 @@
 # Question Node Zoom LOD — Avatar Takeover
 
-Status: Accepted — V1 implemented (V2 continuous morph deferred)
+Status: Shipped — discrete **three-stage** takeover (the continuous-`t` engine designed in the "V2" section below was prototyped, then deliberately superseded during review — see "What actually shipped")
+Last updated: 2026-07-23
+
+## What actually shipped (discrete three-stage)
+
+The authoritative description now lives in [canvas-zoom-rendering.md §3.1](../architecture/canvas-zoom-rendering.md#31-three-stage-takeover-question-node) and [question-node.md §5.1](../architecture/question-node.md). Summary of the final design and why it diverged from the "V2" continuous engine below:
+
+- **Three crisp resting stages, not a continuous `t`.** `readable` (card + a corner badge that scales with the card and always shows the full character) → `avatar` (card fades out binary, a centred avatar fills the node footprint) → `dot` (< ~22 px). The continuous morph is only the transition animation. This was chosen because a continuous `t` leaves ugly _static_ in-between frames (half-faded card, mid-size mark) when the user rests at an intermediate zoom; discrete stages are always crisp at rest.
+- **The card fade is binary** (`data-lod-body` attribute), not a per-frame `--lod-body-opacity` var.
+- **The stand-in fills the node footprint** (`AVATAR_FRACTION = 1.0`, chip border dropped in the stand-in stages) so edges — which connect to the node footprint — stay visually attached to the mark instead of floating around a smaller icon.
+- **No caption.** The avatar-plus-caption stand-in was taller than the node it replaced; dropped.
+- **Files:** [`config/nodeTakeover.ts`](../../apps/web/src/config/nodeTakeover.ts) (`resolveQuestionStage` + sizes), [`hooks/useNodeTakeover.ts`](../../apps/web/src/hooks/useNodeTakeover.ts) (`{ stage, size, point }`), [`components/Nodes/NodeTakeoverLayer.tsx`](../../apps/web/src/components/Nodes/NodeTakeoverLayer.tsx) (positioning, FLIP transition, binary card fade), [`components/Nodes/question/QuestionTakeoverMark.tsx`](../../apps/web/src/components/Nodes/question/QuestionTakeoverMark.tsx) (badge / avatar / dot). `QuestionMinimalAvatar` was folded away.
+- The generic-engine ambition (any node type opts in) is **deferred, not built** — the staging math is question-tuned for now.
+
+> The sections below record the earlier V1 (binary) and the explored "V2" continuous-engine design for history. They do **not** describe the shipped code; treat "What actually shipped" above + the architecture docs as authoritative.
 
 ## Decisions (locked)
 
@@ -31,60 +45,69 @@ One element across the whole range = the "shared-element transition" flagged in 
 
 - **Coordinate space: screen-space.** The mark lives in a screen-space overlay (like today's badge `OverlayPortal`), positioned from the node's transformed corner and centre. Everything is screen px; there is no `1/zoom` counter-scaling. (V1's counter-scaled in-node approach is retired.)
 - **Driver: representative size `√(w·h)`.** `t` and the size curve are both driven by the node's on-screen representative size, so wide-short and tall-narrow nodes behave identically. The `band` is expressed in rep-size px.
-- **Config splits policy vs presentation.** The central registry holds only _policy_ (`mode`, `band`); everything _visual_ (`fullAnchor`, `fullSize`, `minSize`, `maxSize`, the mark, the caption) is supplied by the node next to its own code.
-- **Interaction: one shared `onActivate`.** The node passes a single `onActivate`; the overlay wires it to the mark (single-click, + tooltip) and `NodeWrapper` wires the same callback to the shell (double-click). No reliance on DOM bubbling across the overlay/shell trees.
+- **Contract split: engine owns geometry, the node owns pixels.** The engine's shared vocabulary is deliberately type-agnostic — it never names `AvatarDetail`, a resolved `size`, or a pixel range. It exposes only `t` (takeover factor), `p` (eased progress), `representativeSize` (the node's on-screen √(w·h)), the two screen anchors, and the visibility/opacity signals. Everything visual — the avatar's `[14, 88]` size curve, the `dot | silhouette | full` detail tiers, the status chrome — stays inside `QuestionTakeoverMark` and `agentAvatarLOD.ts`.
+- **Anchor is a local spec, not an absolute point.** `fullAnchor` cannot be a screen `Point` — an absolute screen coordinate is invalid the moment the canvas pans/zooms or the node moves, so it can never live in a memo-stable descriptor. The node supplies a _relative_ anchor spec (which node corner, which mark origin, a fixed px offset); the engine resolves it to the live screen `anchorPt` each frame from the node's transformed rect, and fixes ONE interpolation reference (the mark's centre) so `lerp(anchorPt, centrePt, t)` never drifts by half a mark.
+- **Size is `lerp(fullSize → minimalCurve)`, not the raw curve.** At `t = 0` the mark must equal today's 36 px badge exactly; the shared `avatarSizeForNode` curve spans `[14, 88]` and does NOT pass through 36. So the mark computes `size = lerp(fullSize, minimalSizeForRepresentativeSize(repSize), p)` with `fullSize = 36`; only after takeover begins does it ride the avatar curve. Pixel parity at `t = 0` is a hard requirement, not tuning.
+- **Interaction: the engine has zero interaction vocabulary.** The engine does not know what "clickable", "a conversation", or "open" mean. The mark is rendered by the node (`renderMark`), so it owns its own single-click behaviour (e.g. open the conversation) with its own `onClick`, and reads its own hover/selected gating straight from the store — React events work inside the portal, so no engine "wiring" is needed and the retired `.react-flow__node:hover` descendant selector is not required. The engine only offers ONE optional, semantics-free `onActivate` that the overlay fires on a double-click of the mark container; `NodeWrapper` points it at the node's existing activate handler (the same one the shell double-click uses), so the engine never learns what activation _does_. The container is `pointer-events: none` by default and the mark opts its own sub-region into `pointer-events: auto` — a pure hit-area concern, not a business policy.
 
 ### Module boundaries (single responsibility · must-not-know)
 
-| Module                                              | Owns (only)                                                                                                                                                                  | Must NOT know                                           |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `config/nodeLOD` (registry)                         | `mode: binary \| continuous`, `band`                                                                                                                                         | any node's visuals, anchors, sizes, colours             |
-| `lodCurve` (pure math)                              | rep-size + band → `t`; `t` → eased `p ∈ [0,1]`; `bodyOpacity(t)`, `captionOpacity(t)`                                                                                        | pixels, node types, the DOM                             |
-| `useNodeTakeover(nodeId, {band,sizeRange})`         | self-subscribe to zoom + node size; return `{ t, p, size, detail, cornerPt, centrePt, bodyOpacity, captionOpacity }`                                                         | what the mark looks like; how it's positioned           |
-| `NodeTakeoverLayer` (overlay)                       | position the mark container `lerp(cornerPt,centrePt,t)`; publish `--lod-body-opacity`/`--lod-caption-opacity` on the node root; render the mark + caption; wire `onActivate` | the mark's internals; the card's markup                 |
-| `.semantic-lod-content` (card)                      | `opacity: var(--lod-body-opacity, 1)` in CSS                                                                                                                                 | that a takeover engine exists                           |
-| `NodeWrapper`                                       | pick ONE of `<BinaryPlaceholder>` / `<NodeTakeoverLayer>` and pass the node's stable descriptor + `onActivate`                                                               | takeover math or positioning                            |
-| node's `TakeoverMark` (e.g. `QuestionTakeoverMark`) | draw itself from `{ t, size, detail }`; map `p→size` via its own `[minSize,maxSize]`                                                                                         | where it is on screen, the card, the caption sequencing |
+| Module                                              | Owns (only)                                                                                                                                                                                                                       | Must NOT know                                             |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `config/nodeLOD` (registry)                         | `mode: binary \| continuous`, `band`                                                                                                                                                                                              | any node's visuals, anchors, sizes, colours               |
+| `lodCurve` (pure math)                              | rep-size + band → `t`; `t` → eased `p ∈ [0,1]`; `bodyOpacity(t)`, `bodyInteractive(t)`, `captionOpacity(t)`                                                                                                                       | pixels, node types, the DOM                               |
+| `useNodeTakeover(nodeId, { band, anchor })`         | self-subscribe to zoom + node rect; return `{ t, p, representativeSize, anchorPt, centrePt, bodyOpacity, bodyInteractive, captionOpacity }`                                                                                       | what the mark looks like; its size in px; its detail tier |
+| `NodeTakeoverLayer` (overlay)                       | position the mark container `lerp(anchorPt, centrePt, t)`; publish `--lod-body-opacity` **and** a discrete `data-lod-body='hidden'` on the node root; render the mark + caption container; wire `onActivate` + interaction policy | the mark's internals; its size/detail; the card's markup  |
+| `.semantic-lod-content` (card)                      | `opacity: var(--lod-body-opacity, 1)`, and when `data-lod-body='hidden'`: `pointer-events:none; visibility:hidden`                                                                                                                | that a takeover engine exists                             |
+| `NodeWrapper`                                       | pick ONE of `<BinaryPlaceholder>` / `<NodeTakeoverLayer>`; expose a stable root ref for the CSS var/attr; pass the node's stable descriptor + `onActivate`                                                                        | takeover math or positioning                              |
+| node's `TakeoverMark` (e.g. `QuestionTakeoverMark`) | derive `size` from `fullSize` + `representativeSize` + `p`, derive `detail`, draw itself + status chrome                                                                                                                          | where it is on screen; the card; caption sequencing       |
 
 The decoupling fixes baked into the table above, explicitly:
 
-- **(A)** `fullAnchor`/`fullSize`/`min`/`maxSize` live in the node descriptor, never the central registry.
-- **(B)** the card fade is a CSS var written _only_ by `NodeTakeoverLayer`; `NodeWrapper` and the card markup compute nothing.
-- **(C)** the mark render-prop receives `{ t, size, detail }` only — positioning is never leaked to it.
-- **(D)** activation is one `onActivate` shared by mark (click) and shell (double-click); no cross-tree bubbling.
-- **(E)** `lodCurve` yields a normalised `p ∈ [0,1]`; the per-type mark maps `p` to its own pixel range (avatar's `88px` etc. stay in the question/avatar layer).
-- **(F)** `useNodeTakeover` self-subscribes to zoom/size and takes only stable (memoised) props; `NodeTakeoverLayer` is memoised like `OverlayPortal`, so continuous zoom never re-renders node bodies.
+- **(A)** the relative anchor spec (which corner, which mark origin, px offset) and `fullSize` live in the node's descriptor/mark, never the central registry — and the anchor is relative, resolved to a live screen point by the engine.
+- **(B)** the card fade is driven _only_ by `NodeTakeoverLayer` via one CSS var **plus** a discrete `data-lod-body` attribute; `NodeWrapper` and the card markup compute nothing. The attribute restores `pointer-events:none` + `visibility:hidden` once the body has faded, so a fully-transparent body can never still capture clicks or hold focus.
+- **(C)** the mark render-prop receives type-agnostic engine signals (`t`, `p`, `representativeSize`) only — never a resolved pixel size, detail tier, or position; the mark owns the size/detail math.
+- **(D)** the engine has no interaction vocabulary: the mark (business) owns its own `onClick` + hover/selected gating (read from the store, not from DOM ancestry); the engine exposes only one semantics-free `onActivate` (double-click passthrough) wired by `NodeWrapper` to the node's existing activate handler. No `markActivation`/`markInteractive`, no cross-tree DOM bubbling.
+- **(E)** `lodCurve` yields a normalised `p ∈ [0,1]`; the per-type mark maps `p` (blended with `fullSize`) to its own pixel range (avatar's `[14, 88]` stays in the question/avatar layer).
+- **(F)** the heavy node body is already isolated today: `QuestionNode`/`NodeWrapper` are both `memo`, the body is passed as a stable `children` element, and it does not subscribe to zoom — so continuous zoom re-renders only the small mark/overlay (exactly as today's badge does), not the body. `useNodeTakeover` self-subscribes and `NodeTakeoverLayer` is memoised so this stays true; no extra body-isolation refactor is required. _(Downgraded from a blocker after review — see "Review corrections".)_
 
 ### Node contract (stable seam)
 
 ```ts
+// Engine-owned, type-agnostic signals handed to the mark/caption render props.
+interface TakeoverState {
+  t: number; // takeover factor [0,1] from rep-size + band
+  p: number; // eased progress [0,1]
+  representativeSize: number; // node on-screen √(w·h), px — the mark sizes itself from this
+}
+
+// A RELATIVE anchor spec; the engine resolves it to a live screen point.
+interface MarkAnchorSpec {
+  nodeCorner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+  markOrigin: 'top-left' | 'centre';
+  offsetPx: { x: number; y: number };
+}
+
 // Supplied by the node to NodeWrapper — presentation only.
 interface NodeTakeoverProps {
-  descriptor: {
-    band: Band;
-    sizeRange: [min: number, max: number];
-    fullAnchor: Point;
-  };
-  renderMark: (s: {
-    t: number;
-    size: number;
-    detail: AvatarDetail;
-  }) => ReactNode;
-  caption?: string; // engine owns fade/sequencing; node owns text + style via renderMark
-  onActivate?: (e: React.MouseEvent) => void;
+  descriptor: { band: Band; anchor: MarkAnchorSpec }; // policy + geometry only
+  renderMark: (s: TakeoverState) => ReactNode; // node owns size/detail/chrome AND its own onClick
+  renderCaption?: (s: TakeoverState) => ReactNode; // node owns text; engine owns container fade/position
+  onActivate?: (e: React.MouseEvent) => void; // semantics-free double-click passthrough only
 }
 ```
 
-`descriptor` and `renderMark` must be memo-stable (or perf isolation breaks — see F).
+`descriptor`, `renderMark`, and `renderCaption` must be memo-stable (or perf isolation breaks — see F). The engine hands the mark only `{ t, p, representativeSize }` — never a resolved `size` or `AvatarDetail` — so a non-avatar client (PDF thumbnail, text glyph) needs no engine change. It has **no** interaction vocabulary (`markActivation`/`markInteractive` were removed as over-coupling): the mark owns its own click and gating.
 
 ### Question migration
 
-Fold `QuestionAgentBadge` + `QuestionMinimalAvatar` into one `QuestionTakeoverMark({t,size,detail})`: at `t=0` it renders exactly today's corner badge (constant size, all status chrome), and as `t→1` it becomes the centred avatar + caption. It maps `p→size` with the avatar's own `[14, 88]`. Delete question's binary `minimalContent` branch. The shared `questionBadgeChrome` + `AgentAvatarMark` are reused unchanged.
+Fold `QuestionAgentBadge` + `QuestionMinimalAvatar` into one `QuestionTakeoverMark({ t, p, representativeSize })`: at `t = 0` it renders exactly today's corner badge (`fullSize = 36 px`, all status chrome), and as `t → 1` it becomes the centred avatar + caption. It derives its own pixel size as `lerp(36, avatarSizeForNode(repSize), p)` and its own `AvatarDetail` via `resolveAvatarDetail(size)` — the engine never sees either. It also owns its own click-to-open behaviour and its hover/selected gating (read from the store), so no engine interaction props are involved. Delete question's binary `minimalContent` branch. The shared `questionBadgeChrome` + `AgentAvatarMark` are reused unchanged.
 
 ### Extensibility checklist (definition of done)
 
 - Adding a node type = one `continuous` registry entry (`mode` + `band`) + one `TakeoverMark` + a descriptor. **No edits to `lodCurve`, `useNodeTakeover`, `NodeTakeoverLayer`, or `NodeWrapper`.**
-- The engine owns `t`/positioning/card-fade/caption-sequencing/perf; the type owns only its mark visual and its pixel range.
+- The engine owns `t`/positioning/card-fade (opacity **and** the `pointer-events`/`visibility` cutover)/caption-container-sequencing/perf; the type owns only its mark visual, its own `fullSize → curve` pixel mapping, and its detail tiers.
+- The engine never references `AvatarDetail`, `avatarSizeForNode`, or any avatar constant — proof the seam is type-agnostic.
 - Binary LOD (title-label) stays available for types that don't want a morph.
 
 ### Risks / watch-items
@@ -92,6 +115,8 @@ Fold `QuestionAgentBadge` + `QuestionMinimalAvatar` into one `QuestionTakeoverMa
 - **Full-state pixel parity**: at `t=0` the question mark must equal today's badge exactly — snapshot before/after.
 - **Edge smoothing** at the band ends so the mark doesn't pop when crossing `t≈0/1`.
 - **Overhang policy** stays as decided (floor + small symmetric overhang; do not clamp to the node footprint).
+- **Body interactivity cutover**: opacity alone is not enough — the faded card must also drop `pointer-events`/`visibility` (and ideally `inert`/`aria-hidden`) via the discrete `data-lod-body` attribute, or a transparent body still captures clicks and holds keyboard focus.
+- **Portal gating**: the screen-space mark is not a `.react-flow__node` descendant, so V1's `.question-agent-badge-hit` hover/selected CSS gating does not carry over. The mark reproduces it by reading `selected`/hover from the store itself — this stays entirely in the mark (business), not the engine.
 
 ### V1 → V2 cost
 
@@ -101,7 +126,28 @@ Additive: the mark visuals, size curve, detail tiers, and status chrome all carr
 
 Before touching the real canvas, rebuild the loop in the `AgentNodePlaygroundPage` lab: a screen-space `useNodeTakeover` + `NodeTakeoverLayer` driving one node with a draggable `t`, to lock the feel and the `t=0` pixel parity — then migrate question, then open it to other types.
 
----
+### Build order (question-first, being implemented)
+
+The lab already proves the feel, so V2 lands directly on the question node without a generic registry:
+
+1. **Pure math** — [`config/nodeTakeover.ts`](../../apps/web/src/config/nodeTakeover.ts): `takeoverFactor(rep, band)`, `easeTakeover` (smoothstep), `takeoverBodyOpacity`, `takeoverCaptionOpacity`, plus `TakeoverBand` / `MarkAnchorSpec` / `TakeoverState` types. Factor `avatarSizeForRep(rep)` out of `avatarSizeForNode`.
+2. **Hook** — [`hooks/useNodeTakeover.ts`](../../apps/web/src/hooks/useNodeTakeover.ts): self-subscribes to zoom + node rect, returns `TakeoverState` (screen-space `anchorPt`/`centrePt`, `t`, `p`, `representativeSize`, `bodyOpacity`, `bodyHidden`, `captionOpacity`). Type-agnostic.
+3. **Overlay** — [`components/Nodes/NodeTakeoverLayer.tsx`](../../apps/web/src/components/Nodes/NodeTakeoverLayer.tsx): portal into `.react-flow__renderer`, centres the mark at `lerp(anchorPt, centrePt, t)`, writes `--lod-body-opacity` + `data-lod-body` onto the node root ref, renders `renderMark` + `renderCaption`. Mounted only for takeover nodes, so non-takeover nodes gain no hook.
+4. **Mark** — [`components/Nodes/question/QuestionTakeoverMark.tsx`](../../apps/web/src/components/Nodes/question/QuestionTakeoverMark.tsx): folds badge + stand-in; `size = lerp(36, avatarSizeForRep(rep), p)`, owns its own click + gating.
+5. **Wiring** — `NodeWrapper` gains a `takeover` prop + a root ref + `.semantic-lod-content { opacity: var(--lod-body-opacity, 1) }`; `QuestionNode` passes `takeover`, drops the corner `QuestionAgentBadge` + the binary `minimalContent`; `question` leaves the binary `SEMANTIC_ZOOM_CONFIG.nodeLOD` list.
+6. **Generalize later** — only when a second node type needs it, lift steps 1–3 verbatim into a shared engine + registry (`mode: continuous`).
+
+### Review corrections
+
+Applied after a code review of this plan against the shipped V1 code:
+
+- **Engine seam is type-agnostic (P1).** Removed `size`/`detail`/`AvatarDetail`/`sizeRange` from the engine's return and contract; the engine exposes only `t`, `p`, `representativeSize`, the anchors, and visibility signals. The avatar `[14, 88]` curve and detail tiers live only in the question/avatar layer, so PDF/text clients need no engine change.
+- **`fullAnchor` is a relative spec, not a `Point` (P1).** An absolute screen point can't sit in a memo-stable descriptor; the node supplies a `MarkAnchorSpec` and the engine resolves the live screen point each frame, with one fixed interpolation reference.
+- **Size blends from the real `fullSize` (P1).** `t=0` must equal the shipped 36 px badge, which the `[14, 88]` curve does not pass through; the mark uses `lerp(36, curve(repSize), p)`.
+- **Body interactivity cutover (P1).** Opacity alone leaves an invisible-but-clickable body; the engine also publishes a discrete `data-lod-body='hidden'` that restores `pointer-events:none` + `visibility:hidden`.
+- **Interaction fully decoupled from the engine (P1).** `markActivation`/`markInteractive` were removed — they leaked business concepts ("clickable", "a conversation exists") into a supposedly generic engine. The mark owns its own single-click + hover/selected gating (React events work in the portal; gating reads the store); the engine keeps only one semantics-free `onActivate` double-click passthrough that `NodeWrapper` points at the node's existing handler.
+- **Perf claim (F) downgraded from a blocker (was P1 → non-issue).** The original review over-stated this. The heavy body is already isolated: `QuestionNode` and `NodeWrapper` are both `memo` and the body is a stable `children` element that does not subscribe to zoom, so continuous zoom re-renders only the small mark/overlay today. No extra body-isolation refactor is required; the engine just has to keep the overlay memoised.
+- **Generalization is deferred, not up-front (P2 · YAGNI).** Building a fully type-agnostic registry + contract for a single client (question) is speculative generality. Recommended build order: implement it question-first (a `QuestionTakeoverLayer` + mark), keep the module boundaries above as the _shape_ to grow into, and only lift the shared `lodCurve`/`useNodeTakeover`/`NodeTakeoverLayer` into a generic engine when a **second** node type (PDF thumbnail, text glyph) actually needs it. The seam is designed so that extraction is mechanical, so nothing is lost by waiting.
 
 > How the `AgentNodePlaygroundPage` "zoom LOD lab" (avatar takeover + identity dot) should land on the real canvas, and how much of the existing node LOD system it should reuse.
 > Owner: canvas
