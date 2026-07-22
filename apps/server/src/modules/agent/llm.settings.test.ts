@@ -10,6 +10,7 @@ import {
   getModelsForProvider,
   isOpenAIChatModelId,
   mergeOpenAIModels,
+  pickCheapestEligibleModel,
   pickCheapestModel,
 } from './llm.js';
 
@@ -161,6 +162,24 @@ describe('utility tier cheapest-model selection', () => {
 
   it('returns null when no model has a known positive price', () => {
     expect(pickCheapestModel([model('a', 0, 0), model('b', 0, 5)])).toBeNull();
+  });
+
+  it('only considers models in the account entitlement', () => {
+    const cheapest = pickCheapestEligibleModel(
+      [model('unavailable-mini', 0.1, 0.2), model('available-mini', 0.2, 0.4)],
+      new Set(['available-mini']),
+    );
+
+    expect(cheapest?.id).toBe('available-mini');
+  });
+
+  it('returns null when no priced catalog model is eligible', () => {
+    expect(
+      pickCheapestEligibleModel(
+        [model('catalog-only', 0.1, 0.2)],
+        new Set(['account-only']),
+      ),
+    ).toBeNull();
   });
 });
 

@@ -665,6 +665,10 @@ const OPENAI_NON_CHAT_MODEL_MARKERS = [
   'moderation',
 ] as const;
 
+const OPENAI_MODEL_IDS_CACHE_TTL_MS = 5 * 60_000;
+let openAIModelIdsCache: { ids: string[]; expiresAt: number } | null = null;
+let openAIModelIdsRequest: Promise<string[] | null> | null = null;
+
 /** Whether an OpenAI `/v1/models` id is a chat/completion model. */
 export function isOpenAIChatModelId(id: string): boolean {
   const lower = id.toLowerCase();
@@ -719,6 +723,27 @@ export function mergeOpenAIModels(
  * pi-ai catalogue instead of showing an empty list.
  */
 async function fetchOpenAIModelIds(): Promise<string[] | null> {
+  if (openAIModelIdsCache && openAIModelIdsCache.expiresAt > Date.now()) {
+    return [...openAIModelIdsCache.ids];
+  }
+  if (openAIModelIdsRequest) return openAIModelIdsRequest;
+
+  openAIModelIdsRequest = fetchOpenAIModelIdsUncached();
+  try {
+    const ids = await openAIModelIdsRequest;
+    if (ids) {
+      openAIModelIdsCache = {
+        ids: [...ids],
+        expiresAt: Date.now() + OPENAI_MODEL_IDS_CACHE_TTL_MS,
+      };
+    }
+    return ids;
+  } finally {
+    openAIModelIdsRequest = null;
+  }
+}
+
+async function fetchOpenAIModelIdsUncached(): Promise<string[] | null> {
   const apiKey = await resolveApiKeyAsync('openai');
   if (!apiKey) return null;
 
@@ -943,6 +968,12 @@ export async function setLLMConfig(
   activeConfig = persisted;
   cachedModel = null;
   cachedApiKey = null;
+  if (
+    persisted.provider === 'openai' &&
+    (update.apiKey !== undefined || update.baseUrl !== undefined)
+  ) {
+    openAIModelIdsCache = null;
+  }
 
   const providerInfo = getProviderCatalog().find(
     (p) => p.id === persisted.provider,
@@ -1289,6 +1320,16 @@ export function pickCheapestModel(models: Model<Api>[]): Model<Api> | null {
   return best;
 }
 
+/** Pick the cheapest model whose id is present in the provider entitlement. */
+export function pickCheapestEligibleModel(
+  models: Model<Api>[],
+  eligibleModelIds: ReadonlySet<string>,
+): Model<Api> | null {
+  return pickCheapestModel(
+    models.filter((model) => eligibleModelIds.has(model.id)),
+  );
+}
+
 /**
  * When the utility tier is following chat (no explicit utility config),
  * resolve the cheapest known-priced model within the authenticated chat
@@ -1300,22 +1341,67 @@ export function pickCheapestModel(models: Model<Api>[]): Model<Api> | null {
  * available, or when the cheapest already is the active chat model, so the
  * caller cleanly falls back to the (cached) chat model.
  */
-function resolveAutoCheapUtility(
+async function resolveAutoCheapUtility(
   chatCfg: PersistedConfig,
-): { cfg: PersistedConfig; model: Model<Api> } | null {
+): Promise<{ cfg: PersistedConfig; model: Model<Api> } | null> {
   const providerInfo = getProviderCatalog().find(
     (p) => p.id === chatCfg.provider,
   );
   if (!providerInfo?.builtIn) return null;
 
-  let models: Model<Api>[];
+  let catalog: Model<Api>[];
   try {
-    models = getProviderModels(chatCfg.provider as KnownProvider);
-  } catch {
+    catalog = getProviderModels(chatCfg.provider as KnownProvider);
+  } catch (err) {
+    log.warn(
+      { err, provider: chatCfg.provider },
+      'Failed to load provider catalog for automatic utility selection',
+    );
     return null;
   }
 
-  const cheapest = pickCheapestModel(models);
+  let eligibleModelIds: Set<string>;
+  try {
+    if (chatCfg.provider === 'github-copilot') {
+      const rawCredential = getSecret(SECRET_IDS.copilotOAuth);
+      if (!rawCredential) return null;
+      const credential = JSON.parse(rawCredential) as {
+        availableModelIds?: unknown;
+      };
+      if (
+        !Array.isArray(credential.availableModelIds) ||
+        !credential.availableModelIds.every(
+          (id): id is string => typeof id === 'string',
+        )
+      ) {
+        return null;
+      }
+      eligibleModelIds = new Set(credential.availableModelIds);
+    } else {
+      const available = await getPiModels().getAvailable(chatCfg.provider);
+      eligibleModelIds = new Set(available.map((model) => model.id));
+    }
+
+    // OpenAI's provider catalog is static, so additionally intersect it with
+    // the current API key's live /v1/models entitlement. A failed lookup is
+    // not permission to guess: fall back to the configured chat model.
+    if (chatCfg.provider === 'openai') {
+      const liveIds = await fetchOpenAIModelIds();
+      if (!liveIds) return null;
+      const liveIdSet = new Set(liveIds);
+      eligibleModelIds = new Set(
+        [...eligibleModelIds].filter((id) => liveIdSet.has(id)),
+      );
+    }
+  } catch (err) {
+    log.warn(
+      { err, provider: chatCfg.provider },
+      'Failed to resolve eligible models for automatic utility selection',
+    );
+    return null;
+  }
+
+  const cheapest = pickCheapestEligibleModel(catalog, eligibleModelIds);
   if (!cheapest || cheapest.id === chatCfg.model) return null;
 
   const cfg: PersistedConfig = { ...chatCfg, model: cheapest.id };
@@ -1323,7 +1409,12 @@ function resolveAutoCheapUtility(
 }
 
 /**
- * Resolve `(config, model)` for a role via the two-layer binding:
+ * Resolve `(config, model)` synchronously for callers that cannot consult
+ * account entitlements. An explicit utility model is safe to resolve here;
+ * automatic utility selection conservatively stays on the chat model and is
+ * applied by {@link resolveForRoleAsync} on runtime request paths.
+ *
+ * The two-layer binding is:
  * the role's default tier picks chat or utility. Utility resolution order
  * is **explicit utility model > auto-cheapest in the chat provider > chat
  * model**: when no utility model is configured, background roles default to
@@ -1348,17 +1439,32 @@ function resolveForRole(
     if (utilityCfg) {
       // Explicit utility model wins.
       resolved = { cfg: utilityCfg, model: getUtilityModel() };
-    } else {
-      // No explicit utility model → auto-pick the cheapest eligible model
-      // in the authenticated chat provider; fall back to the chat model.
-      const autoCheap = resolveAutoCheapUtility(ensureConfig());
-      if (autoCheap) resolved = autoCheap;
     }
   }
 
   // Vision guard: only relevant when an image is actually being sent.
   if (shouldStepUpForVision(role, resolved.model.input, opts?.hasImage)) {
     resolved = chat();
+  }
+
+  return resolved;
+}
+
+/** Resolve a role for runtime use, including account-aware auto selection. */
+async function resolveForRoleAsync(
+  role: ModelRole,
+  opts?: { hasImage?: boolean },
+): Promise<{ cfg: PersistedConfig; model: Model<Api> }> {
+  let resolved = resolveForRole(role, opts);
+  const info = MODEL_ROLES[role];
+
+  if (info.defaultTier === 'utility' && loadUtilityPersistedConfig() === null) {
+    const autoCheap = await resolveAutoCheapUtility(ensureConfig());
+    if (autoCheap) resolved = autoCheap;
+  }
+
+  if (shouldStepUpForVision(role, resolved.model.input, opts?.hasImage)) {
+    resolved = { cfg: ensureConfig(), model: getLLMModel() };
   }
 
   return resolved;
@@ -1413,7 +1519,7 @@ export async function resolveModelForRoleAsync(
   role: ModelRole,
   opts?: { hasImage?: boolean },
 ): Promise<Model<Api>> {
-  const { cfg, model } = resolveForRole(role, opts);
+  const { cfg, model } = await resolveForRoleAsync(role, opts);
   return applyCopilotAuthToModel(cfg, model);
 }
 
@@ -1422,6 +1528,9 @@ export async function ensureApiKeyForRole(
   role: ModelRole,
   opts?: { hasImage?: boolean },
 ): Promise<string> {
+  // Automatic utility selection stays within the chat provider, so resolving
+  // the provider synchronously avoids repeating its entitlement lookup after
+  // resolveModelForRoleAsync() has already selected the model.
   const { cfg } = resolveForRole(role, opts);
   return ensureApiKeyFor(cfg);
 }
@@ -1523,7 +1632,7 @@ export interface LLMCallOptions extends ProviderStreamOptions {
  */
 export async function llmStream(context: Context, options?: LLMCallOptions) {
   const { role = 'chat', hasImage, ...streamOptions } = options ?? {};
-  const { cfg, model } = resolveForRole(role, { hasImage });
+  const { cfg, model } = await resolveForRoleAsync(role, { hasImage });
   const [resolvedModel, apiKey] = await Promise.all([
     applyCopilotAuthToModel(cfg, model),
     ensureApiKeyFor(cfg),
@@ -1540,7 +1649,7 @@ export async function llmStream(context: Context, options?: LLMCallOptions) {
  */
 export async function llmComplete(context: Context, options?: LLMCallOptions) {
   const { role = 'chat', hasImage, ...streamOptions } = options ?? {};
-  const { cfg, model } = resolveForRole(role, { hasImage });
+  const { cfg, model } = await resolveForRoleAsync(role, { hasImage });
   const [resolvedModel, apiKey] = await Promise.all([
     applyCopilotAuthToModel(cfg, model),
     ensureApiKeyFor(cfg),
