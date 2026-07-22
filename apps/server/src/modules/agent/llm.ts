@@ -75,35 +75,9 @@ const log = getLogger('llm');
 
 // ==================== Provider Catalog ====================
 
-const OPENAI_CODEX_MODEL_ADDITIONS = [
-  { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
-  { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
-  { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
-] as const;
-
-/**
- * Extend pi-ai's generated registry with Codex models released after the
- * installed package. The Codex backend is authoritative for availability;
- * these entries only make its current public model IDs selectable in Huabu.
- */
+/** Read a built-in provider's model catalog from pi-ai's registry. */
 function getProviderModels(providerId: KnownProvider): Model<Api>[] {
-  const models = getModels(providerId as BuiltinProvider) as Model<Api>[];
-  if (providerId !== 'openai-codex') return models;
-
-  const template = models.find((model) => model.id === 'gpt-5.5');
-  if (!template) return models;
-
-  const existingIds = new Set(models.map((model) => model.id));
-  const additions = OPENAI_CODEX_MODEL_ADDITIONS.filter(
-    ({ id }) => !existingIds.has(id),
-  ).map(({ id, name }) => ({
-    ...template,
-    id,
-    name,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  }));
-
-  return [...additions, ...models];
+  return getModels(providerId as BuiltinProvider) as Model<Api>[];
 }
 
 /** Provider-specific metadata not available from pi-ai's registry. */
@@ -503,11 +477,12 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
 
   // Manual model construction (Azure, custom endpoints, etc.)
   //
-  // For github-copilot this path is hit by models newer than the bundled
-  // pi-ai registry. We deliberately ignore the provider's catalog `api`
-  // (which is derived from the first registry entry and happens to be
-  // `anthropic-messages`) and use the OpenAI-compatible `/chat/completions`
-  // endpoint, which Copilot's gateway accepts for every chat model.
+  // Copilot models present in pi-ai's catalog take the built-in path above
+  // with their correct per-model api. This manual path only handles
+  // github-copilot ids newer than the bundled catalog: their real api is
+  // unknown, so we request them over the universal openai-completions
+  // (`/chat/completions`) endpoint, which Copilot's gateway accepts for
+  // every chat model.
   const api =
     cfg.provider === 'github-copilot'
       ? 'openai-completions'
@@ -1301,8 +1276,8 @@ export function shouldStepUpForVision(
 /**
  * Pick the cheapest known-priced model from a pi-ai model list, ranked by
  * combined per-token input + output price. Entries without a positive
- * input price are skipped so synthesized/zero-priced additions (e.g. the
- * temporary Codex GPT-5.6 stubs) can't masquerade as "free" and win.
+ * input price are skipped so zero-priced or unpriced registry entries can't
+ * masquerade as "free" and win.
  * Returns `null` when no priced model is available. Pure over its input so
  * the ranking can be unit-tested without the registry.
  */
