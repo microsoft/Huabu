@@ -19,11 +19,12 @@ import {
 
 import type {
   AgentIconColor,
+  AgentIconMotion,
   AgentIconShape,
   AgentIconValue,
 } from '@/components/Common/AgentIcon';
 import type { LucideIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
 /**
  * Visual playground for linking Agent Profile avatars to Question Nodes.
@@ -117,70 +118,6 @@ const BUILT_IN_AVATAR_TREATMENTS: Array<{
     treatment: 'friendly-marks',
     label: 'Friendly marks',
     note: 'The mode silhouette becomes a face, with no separate toolbar-style glyph.',
-  },
-];
-
-type StateCase = {
-  status: DemoStatus;
-  label: string;
-  description: string;
-  question: string;
-  agentName?: string;
-  active?: boolean;
-};
-
-const STATE_CASES: StateCase[] = [
-  {
-    status: 'idle',
-    label: 'Idle',
-    description: 'The question has not started and is not open in Chat.',
-    question: 'How should we improve canvas loading time?',
-  },
-  {
-    status: 'idle',
-    label: 'Open for question',
-    description:
-      'A chat bubble anchors the selected agent here, ready for the first send.',
-    question: 'Compare the two rendering strategies.',
-    agentName: 'Claude Code',
-    active: true,
-  },
-  {
-    status: 'running',
-    label: 'Running',
-    description: 'The avatar owns identity; its semantic ring owns status.',
-    question: 'Profile the initial canvas render.',
-    agentName: 'GitHub Copilot',
-  },
-  {
-    status: 'done-unread',
-    label: 'Done · unread',
-    description:
-      'A shared attention nudge indicates an unviewed terminal result.',
-    question: 'Find unnecessary requests during startup.',
-    agentName: 'Codex',
-  },
-  {
-    status: 'done-viewed',
-    label: 'Done · viewed',
-    description: 'Completed and read returns to a quiet identity marker.',
-    question: 'Summarize the performance findings.',
-    agentName: 'Gemini CLI',
-  },
-  {
-    status: 'error',
-    label: 'Error',
-    description: 'The same attention nudge applies; red preserves the outcome.',
-    question: 'Apply the selected optimization.',
-    agentName: 'Claude Code',
-  },
-  {
-    status: 'conflict',
-    label: 'Done · conflicts',
-    description:
-      'The shared nudge draws attention; the count preserves detail.',
-    question: 'Refactor the canvas store without losing local edits.',
-    agentName: 'GitHub Copilot',
   },
 ];
 
@@ -509,105 +446,6 @@ const STATUS_META: Record<
     ringStyle: 'solid',
   },
 };
-
-function AgentRunBadge({
-  icon,
-  status,
-  agentName,
-  expanded,
-}: {
-  icon: AgentIconValue;
-  status: AgentBadgeStatus;
-  agentName: string;
-  expanded: boolean;
-}) {
-  const meta = STATUS_META[status];
-  const isRunning = status === 'running';
-  const isUnread = status === 'done-unread';
-  const isError = status === 'error';
-  const hasConflict = status === 'conflict';
-  const needsAttention = isUnread || isError || hasConflict;
-  const usesCustomRing = isRunning || isError;
-  const usesIntegratedChatBubble = meta.chatBubble === true;
-  const containerAnimation = needsAttention
-    ? `playground-question-attention-${SELECTED_ATTENTION_MOTION} 4s ease-in-out infinite`
-    : undefined;
-
-  return (
-    <div
-      className={cn(
-        'question-agent-badge relative inline-flex h-10 items-center rounded-full border-2',
-        expanded ? 'w-36 gap-1.5 pr-3 pl-1' : 'w-10 justify-center',
-        usesIntegratedChatBubble ? 'bg-transparent' : 'bg-surface shadow-sm',
-        isRunning && 'question-agent-ring-running',
-        isError && 'question-agent-ring-error',
-      )}
-      style={{
-        borderColor:
-          usesIntegratedChatBubble || usesCustomRing
-            ? 'transparent'
-            : meta.color,
-        borderStyle: meta.ringStyle,
-        boxShadow:
-          meta.quiet || usesIntegratedChatBubble || isRunning
-            ? 'none'
-            : isError
-              ? `0 0 9px color-mix(in srgb, ${meta.color} 30%, transparent)`
-              : needsAttention
-                ? `0 0 0 3px color-mix(in srgb, ${meta.color} 25%, transparent), 0 2px 9px color-mix(in srgb, ${meta.color} 32%, transparent)`
-                : `0 2px 9px color-mix(in srgb, ${meta.color} 32%, transparent)`,
-        animation: containerAnimation,
-      }}
-      title={`${agentName} · ${meta.title}`}
-      aria-label={`${agentName} · ${meta.title}`}
-    >
-      {usesIntegratedChatBubble ? (
-        <svg
-          className={cn(
-            'pointer-events-none absolute -top-0.5 -left-0.5 h-12 overflow-visible',
-            expanded ? 'w-[148px]' : 'w-11',
-          )}
-          viewBox={expanded ? '0 0 148 48' : '0 0 44 48'}
-          aria-hidden
-        >
-          <path
-            d={
-              expanded
-                ? 'M22 2h104c11 0 20 9 20 20s-9 20-20 20H22c-1.4 0-2.7-.2-4-.5L9 46l4-6C6.5 36.5 2 30 2 22 2 11 11 2 22 2Z'
-                : 'M22 2C11 2 2 11 2 22c0 8 4.5 14.5 11 18l-4 6 9-4.5c1.3.3 2.6.5 4 .5 11 0 20-9 20-20S33 2 22 2Z'
-            }
-            fill="var(--bg-surface)"
-            stroke={meta.color}
-            strokeWidth="2"
-            strokeLinejoin="round"
-          />
-        </svg>
-      ) : null}
-      <AgentIcon
-        shape={icon.shape}
-        color={icon.color}
-        size={32}
-        withFace
-        motion={isRunning ? 'working' : 'none'}
-        className={cn(
-          'question-agent-badge-icon relative z-10',
-          usesIntegratedChatBubble && 'translate-x-0.5',
-          usesIntegratedChatBubble && 'translate-y-0.5',
-        )}
-      />
-      {expanded ? (
-        <span className="text-fg-default relative z-10 max-w-28 truncate text-xs font-semibold">
-          {agentName}
-        </span>
-      ) : null}
-      {hasConflict ? (
-        <span className="bg-warning-bg text-warning absolute -top-2.5 -right-3.5 z-20 flex h-6 min-w-6 items-center justify-center gap-0.5 rounded-full px-1.5 text-[11px] font-bold shadow-sm">
-          <AlertTriangle size={12} />2
-        </span>
-      ) : null}
-    </div>
-  );
-}
 
 function BuiltInAgentStateBadge({
   mode,
@@ -952,71 +790,6 @@ function BuiltInAgentModeRow({ mode }: { mode: BuiltInAgentMode }) {
   );
 }
 
-function QuestionNodePreview({
-  stateCase,
-  icon,
-  expandedBadge,
-}: {
-  stateCase: StateCase;
-  icon: AgentIconValue;
-  expandedBadge: boolean;
-}) {
-  const { status, question, agentName } = stateCase;
-  const isActive = stateCase.active === true;
-  const isUnread = status === 'done-unread';
-  const badge =
-    isActive && agentName ? (
-      <AgentRunBadge
-        icon={icon}
-        status="open"
-        agentName={agentName}
-        expanded={expandedBadge}
-      />
-    ) : status !== 'idle' && agentName ? (
-      <AgentRunBadge
-        icon={icon}
-        status={status}
-        agentName={agentName}
-        expanded={expandedBadge}
-      />
-    ) : null;
-
-  return (
-    <article className="flex min-w-0 flex-col gap-3">
-      <div className="text-center">
-        <h2 className="text-fg-default text-sm font-semibold">
-          {stateCase.label}
-        </h2>
-        <p className="text-fg-muted mx-auto mt-0.5 max-w-64 text-xs leading-relaxed">
-          {stateCase.description}
-        </p>
-      </div>
-
-      <div className="relative mx-auto mt-3 w-full max-w-72 pt-3">
-        {badge ? (
-          <div className="absolute top-0 left-3 z-10 -translate-y-1/2">
-            {badge}
-          </div>
-        ) : null}
-
-        <div
-          className={cn(
-            'question-sticky relative flex min-h-36 flex-col justify-between rounded-lg border p-5 shadow-md transition-all',
-            isUnread && 'question-node-done-unviewed',
-          )}
-          style={{
-            color: 'var(--question-fg)',
-            backgroundColor: 'var(--question-bg)',
-            borderColor: 'var(--question-border)',
-          }}
-        >
-          <p className="text-base leading-snug font-semibold">{question}</p>
-        </div>
-      </div>
-    </article>
-  );
-}
-
 function ChoiceButton<T extends string>({
   value,
   selected,
@@ -1055,6 +828,14 @@ function ChoiceButton<T extends string>({
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+/** Brand-avatar palette (mirrors `AgentIcon`'s private `COLOR_HEX`). */
+const LOD_AGENT_COLOR_HEX: Record<AgentIconColor, string> = {
+  blue: '#00A4EF',
+  red: '#F25022',
+  yellow: '#FFB900',
+  green: '#7FBA00',
+};
 
 /** Canvas-space size of the demo question node (px at 100% zoom). */
 const LOD_NODE_W = 220;
@@ -1123,47 +904,294 @@ function StickyCard({
   );
 }
 
+type ChipSource = 'external' | 'chat' | 'agent';
+
+type BuiltInFace =
+  | 'chat-smile'
+  | 'chat-sparkle'
+  | 'chat-wink'
+  | 'chat-grin'
+  | 'agent-cursor'
+  | 'agent-wave'
+  | 'agent-hands';
+
+const BUILT_IN_FACE_VARIANTS: Array<{
+  face: BuiltInFace;
+  group: 'Chat' | 'Agent';
+  label: string;
+}> = [
+  { face: 'chat-smile', group: 'Chat', label: 'Open smile' },
+  { face: 'chat-sparkle', group: 'Chat', label: 'Sparkle eyes' },
+  { face: 'chat-wink', group: 'Chat', label: 'Wink' },
+  { face: 'chat-grin', group: 'Chat', label: 'Big grin' },
+  { face: 'agent-cursor', group: 'Agent', label: 'Cursor' },
+  { face: 'agent-wave', group: 'Agent', label: 'Waving hand' },
+  { face: 'agent-hands', group: 'Agent', label: 'Hands up' },
+];
+
 /**
- * Proposed agent status chip — warmer + rounder than the current techy
- * ring, so it belongs to the sticky-note family. Identity in the avatar;
- * state is a soft halo, not a hard conic gradient.
+ * Chubby rounded 5-point "Huabu star" body + hand-drawn face — the built-in
+ * agent identity, in a single fixed Huabu blue. No corner badge: Chat vs Agent
+ * is carried by the face. Chat faces lead with a big, expressive mouth; Agent
+ * faces add little hands (it acts on the canvas). Pass an explicit `face` to
+ * preview a specific candidate; otherwise `mode` picks a sensible default. The
+ * spiky polygon is fattened by a thick round-joined stroke in its own fill
+ * colour. Running reuses the external avatar's body wobble.
  */
-function ProposedAgentChip({
+function BuiltInStarBody({
+  mode,
+  size,
+  motion = 'none',
+  face,
+}: {
+  mode: BuiltInAgentMode;
+  size: number;
+  motion?: AgentIconMotion;
+  face?: BuiltInFace;
+}) {
+  const resolved: BuiltInFace =
+    face ?? (mode === 'operate' ? 'agent-hands' : 'chat-smile');
+  const fill = '#00A4EF';
+  const ink = '#24221E';
+
+  const star = (
+    <polygon
+      points="60,24 71.2,44.6 94.2,48.9 78.1,65.9 81.2,89.1 60,79 38.8,89.1 41.9,65.9 25.8,48.9 48.8,44.6"
+      fill={fill}
+      stroke={fill}
+      strokeWidth={11}
+      strokeLinejoin="round"
+      strokeLinecap="round"
+    />
+  );
+
+  // Happy arced eyes for the chatty faces; calm vertical eyes for the working
+  // agent faces.
+  const eyesLine = (
+    <>
+      <path d="M51 52 L50 59" />
+      <path d="M70 52 L69 59" />
+    </>
+  );
+  const roundEyes = (
+    <>
+      <circle cx="52" cy="55" r="3.5" fill={ink} stroke="none" />
+      <circle cx="68" cy="55" r="3.5" fill={ink} stroke="none" />
+    </>
+  );
+  const sparkleEyes = (
+    <>
+      <circle cx="52" cy="55.5" r="3.9" fill={ink} stroke="none" />
+      <circle cx="68" cy="55.5" r="3.9" fill={ink} stroke="none" />
+      <circle cx="50.6" cy="54.1" r="1.2" fill="#fff" stroke="none" />
+      <circle cx="66.6" cy="54.1" r="1.2" fill="#fff" stroke="none" />
+    </>
+  );
+  // A soft open smile shared by a few of the chatty faces.
+  const openSmile = <path d="M52 66 C56 72 64 72 68 66" />;
+
+  // `strokeEls` render inside the shared ink stroke group; `fillEls` render
+  // afterwards (filled eyes, cursor, blue mitten hands).
+  let strokeEls: ReactNode;
+  let fillEls: ReactNode = null;
+
+  switch (resolved) {
+    case 'chat-smile':
+      strokeEls = openSmile;
+      fillEls = roundEyes;
+      break;
+    case 'chat-sparkle':
+      strokeEls = <path d="M55 67 C58 70 62 70 65 67" />;
+      fillEls = sparkleEyes;
+      break;
+    case 'chat-wink':
+      strokeEls = (
+        <>
+          <path d="M64 56 C66 54 69 54 71 56" />
+          {openSmile}
+        </>
+      );
+      fillEls = <circle cx="52" cy="55" r="3.5" fill={ink} stroke="none" />;
+      break;
+    case 'chat-grin':
+      strokeEls = (
+        <>
+          <path d="M49 55 C51 52 54 52 56 55" />
+          <path d="M64 55 C66 52 69 52 71 55" />
+          <path d="M50 64 C55 75 65 75 70 64" />
+          <path d="M53 65 L67 65" />
+        </>
+      );
+      break;
+    case 'agent-cursor':
+      strokeEls = eyesLine;
+      fillEls = (
+        <path
+          d="M56 59 L56 75 L60 71 L62.5 77 L65 76 L62.5 70 L67 70 Z"
+          fill={ink}
+          stroke={ink}
+          strokeWidth="1"
+          strokeLinejoin="round"
+        />
+      );
+      break;
+    case 'agent-wave':
+      strokeEls = (
+        <>
+          {eyesLine}
+          <path d="M55 67 C59 69 63 69 67 67" />
+          <path d="M79 76 C86 72 89 65 87 58" />
+        </>
+      );
+      fillEls = (
+        <circle
+          cx="87"
+          cy="55"
+          r="4.6"
+          fill={fill}
+          stroke={ink}
+          strokeWidth="2.4"
+        />
+      );
+      break;
+    case 'agent-hands':
+      strokeEls = (
+        <>
+          {eyesLine}
+          <path d="M55 67 C59 69 63 69 67 67" />
+          <path d="M41 78 C34 73 32 66 35 60" />
+          <path d="M79 78 C86 73 88 66 85 60" />
+        </>
+      );
+      fillEls = (
+        <>
+          <circle
+            cx="34"
+            cy="57"
+            r="4.4"
+            fill={fill}
+            stroke={ink}
+            strokeWidth="2.4"
+          />
+          <circle
+            cx="86"
+            cy="57"
+            r="4.4"
+            fill={fill}
+            stroke={ink}
+            strokeWidth="2.4"
+          />
+        </>
+      );
+      break;
+  }
+
+  return (
+    <svg width={size} height={size} viewBox="14 14 92 92" aria-hidden>
+      {motion === 'working' ? (
+        <g className="agent-icon-working-body">{star}</g>
+      ) : (
+        <g>{star}</g>
+      )}
+      <g
+        fill="none"
+        stroke={ink}
+        strokeWidth="4.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        {strokeEls}
+      </g>
+      {fillEls}
+    </svg>
+  );
+}
+
+/**
+ * Faithful 1:1 copy of the shipped `QuestionAgentBadge` visual language so
+ * the LOD lab confirms the exact final template. It reuses the shipped badge
+ * CSS (`question-agent-ring-running` gradient sweep, `question-agent-ring-error`
+ * alert segments, `question-agent-attention` nudge) instead of re-inventing
+ * the rings, and renders either an external Agent avatar or the built-in
+ * mode-character (Chat / Agent).
+ */
+function LodAgentChip({
   icon,
   status,
+  source,
   size = 40,
+  conflictCount = 0,
 }: {
   icon: AgentIconValue;
   status: AgentBadgeStatus;
+  source: ChipSource;
   size?: number;
+  conflictCount?: number;
 }) {
   const isOpen = status === 'open';
   const isRunning = status === 'running';
   const isError = status === 'error';
   const isUnread = status === 'done-unread';
-  const haloColor = isError
+  const hasConflict = status === 'conflict' || conflictCount > 0;
+  const needsAttention = isUnread || isError || hasConflict;
+  const attentionColor = isError
     ? 'var(--danger)'
-    : isRunning
-      ? 'var(--info)'
+    : hasConflict
+      ? 'var(--warning)'
       : 'var(--success)';
-  const showHalo = isRunning || isError || isUnread;
+
+  // Mirror the real badge's border + shadow logic. `running` and
+  // `error` draw their ring via the shipped `::before` classes, so they stay
+  // transparent here; the quiet ring covers done-viewed.
+  let ringBorderColor = 'var(--question-agent-quiet-ring)';
+  let ringBoxShadow = 'none';
+  if (isOpen || isRunning) {
+    ringBorderColor = 'transparent';
+  } else if (needsAttention) {
+    // All three unviewed outcomes (done-unread, error, conflict) share ONE
+    // attention halo — a crisp inner ring + a wider outer glow — and differ
+    // only by colour + ring geometry. done-viewed stays quiet (no glow).
+    ringBoxShadow = `0 0 0 3px color-mix(in srgb, ${attentionColor} 26%, transparent), 0 0 12px 2px color-mix(in srgb, ${attentionColor} 42%, transparent)`;
+    // Error draws its segmented `::before` ring, so keep its border
+    // transparent; done-unread / conflict use a solid identity-coloured ring.
+    ringBorderColor = isError ? 'transparent' : attentionColor;
+  }
+
+  const innerSize = Math.round(size * 0.8);
+  const conflictBadgeCount =
+    status === 'conflict' ? conflictCount || 2 : conflictCount;
+
+  // Preview: tie the running sweep to the agent's own identity colour so the
+  // avatar "lights up in its own colour" while working. External agents use
+  // their picked colour; built-in modes use their character colour (Chat blue
+  // / Agent green). Scoped to the lab via the CSS var; the shipped badge keeps
+  // its `--info` default until the template is locked.
+  const runningRingColor =
+    source === 'external'
+      ? LOD_AGENT_COLOR_HEX[icon.color]
+      : source === 'agent'
+        ? LOD_AGENT_COLOR_HEX.green
+        : LOD_AGENT_COLOR_HEX.blue;
+
+  const chipStyle: CSSProperties = {
+    width: size,
+    height: size,
+    borderColor: ringBorderColor,
+    boxShadow: ringBoxShadow,
+    ['--question-agent-running-ring' as string]: runningRingColor,
+  };
+
   return (
     <div
-      className="relative inline-flex items-center justify-center rounded-full"
-      style={{
-        width: size,
-        height: size,
-        background: isOpen ? 'transparent' : 'var(--bg-surface)',
-        boxShadow: isOpen
-          ? 'none'
-          : showHalo
-            ? `0 0 0 3px color-mix(in srgb, ${haloColor} 22%, transparent), 0 2px 8px color-mix(in srgb, var(--question-fg) 22%, transparent)`
-            : '0 2px 8px color-mix(in srgb, var(--question-fg) 18%, transparent)',
-        animation:
-          isRunning || isUnread
-            ? 'playground-question-attention-nudge 4s ease-in-out infinite'
-            : undefined,
-      }}
+      className={cn(
+        'question-agent-badge relative inline-flex items-center justify-center rounded-full border-2',
+        isOpen ? 'bg-transparent' : 'bg-surface shadow-sm',
+        isRunning &&
+          'question-agent-ring-running border-transparent shadow-none',
+        isError && 'question-agent-ring-error border-transparent',
+        needsAttention && 'question-agent-attention',
+      )}
+      style={chipStyle}
     >
       {isOpen ? (
         <svg
@@ -1181,14 +1209,38 @@ function ProposedAgentChip({
           />
         </svg>
       ) : null}
-      <AgentIcon
-        shape={icon.shape}
-        color={icon.color}
-        size={Math.round(size * 0.8)}
-        withFace
-        motion={isRunning ? 'working' : 'none'}
-        className="relative z-10"
-      />
+      {source === 'external' ? (
+        <AgentIcon
+          shape={icon.shape}
+          color={icon.color}
+          size={innerSize}
+          withFace
+          motion={isRunning ? 'working' : 'none'}
+          className={cn(
+            'relative z-10',
+            isOpen && 'translate-x-0.5 translate-y-0.5',
+          )}
+        />
+      ) : (
+        <div
+          className={cn(
+            'relative z-10 leading-none',
+            isOpen && 'translate-x-0.5 translate-y-0.5',
+          )}
+        >
+          <BuiltInStarBody
+            mode={source === 'agent' ? 'operate' : 'ask'}
+            size={innerSize}
+            motion={isRunning ? 'working' : 'none'}
+          />
+        </div>
+      )}
+      {hasConflict ? (
+        <span className="bg-warning-bg text-warning absolute -top-2.5 -right-3.5 z-20 flex h-6 min-w-6 items-center justify-center gap-0.5 rounded-full px-1.5 text-[11px] font-bold shadow-sm">
+          <AlertTriangle size={12} />
+          {conflictBadgeCount}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -1197,12 +1249,14 @@ function ProposedAgentChip({
 function LodViewport({
   icon,
   status,
+  source,
   zoom,
   mode,
   label,
 }: {
   icon: AgentIconValue;
   status: AgentBadgeStatus;
+  source: ChipSource;
   zoom: number;
   mode: 'current' | 'proposed';
   label: string;
@@ -1266,7 +1320,7 @@ function LodViewport({
         >
           {mode === 'proposed' ? (
             <div className="flex flex-col items-center gap-1">
-              <ProposedAgentChip icon={icon} status={status} />
+              <LodAgentChip icon={icon} status={status} source={source} />
               {showTitle ? (
                 <span
                   className="max-w-[120px] truncate rounded px-1 text-center"
@@ -1284,7 +1338,7 @@ function LodViewport({
               ) : null}
             </div>
           ) : (
-            <ProposedAgentChip icon={icon} status={status} />
+            <LodAgentChip icon={icon} status={status} source={source} />
           )}
         </div>
       </div>
@@ -1296,6 +1350,7 @@ function LodViewport({
 function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
   const [zoom, setZoom] = useState(1);
   const [status, setStatus] = useState<AgentBadgeStatus>('open');
+  const [source, setSource] = useState<ChipSource>('external');
   const screenW = Math.round(LOD_NODE_W * zoom);
 
   return (
@@ -1320,6 +1375,7 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
               { value: 'done-unread', label: 'Unread' },
               { value: 'done-viewed', label: 'Done' },
               { value: 'error', label: 'Error' },
+              { value: 'conflict', label: 'Conflict' },
             ] as { value: AgentBadgeStatus; label: string }[]
           ).map((s) => (
             <Button
@@ -1333,6 +1389,27 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
             </Button>
           ))}
         </div>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <span className="text-fg-muted w-24 text-xs">Agent source</span>
+        {(
+          [
+            { value: 'external', label: 'External' },
+            { value: 'chat', label: 'Built-in · Chat' },
+            { value: 'agent', label: 'Built-in · Agent' },
+          ] as { value: ChipSource; label: string }[]
+        ).map((s) => (
+          <Button
+            key={s.value}
+            variant={source === s.value ? 'solid' : 'ghost'}
+            tone={source === s.value ? 'info' : 'neutral'}
+            size="sm"
+            onClick={() => setSource(s.value)}
+          >
+            {s.label}
+          </Button>
+        ))}
       </div>
 
       <div className="mb-5 flex items-center gap-4">
@@ -1357,6 +1434,7 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
         <LodViewport
           icon={icon}
           status={status}
+          source={source}
           zoom={zoom}
           mode="current"
           label="现状 · corner badge (no LOD)"
@@ -1364,6 +1442,7 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
         <LodViewport
           icon={icon}
           status={status}
+          source={source}
           zoom={zoom}
           mode="proposed"
           label="提案 · smooth avatar takeover"
@@ -1380,6 +1459,7 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
               key={z}
               icon={icon}
               status={status}
+              source={source}
               zoom={z}
               mode="proposed"
               label={`${Math.round(z * 100)}%`}
@@ -1394,7 +1474,6 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
 export default function AgentNodePlaygroundPage() {
   const [shape, setShape] = useState<AgentIconShape>('flower');
   const [color, setColor] = useState<AgentIconColor>('blue');
-  const [expandedBadge, setExpandedBadge] = useState(false);
   const icon = { shape, color };
 
   return (
@@ -1434,14 +1513,6 @@ export default function AgentNodePlaygroundPage() {
               </ChoiceButton>
             ))}
           </div>
-          <Button
-            variant={expandedBadge ? 'solid' : 'outline'}
-            tone={expandedBadge ? 'info' : 'neutral'}
-            size="sm"
-            onClick={() => setExpandedBadge((current) => !current)}
-          >
-            {expandedBadge ? 'Name visible' : 'Avatar only'}
-          </Button>
         </div>
       </header>
 
@@ -1450,15 +1521,91 @@ export default function AgentNodePlaygroundPage() {
           <QuestionNodeLodLab icon={icon} />
         </section>
 
-        <section className="grid grid-cols-1 gap-x-8 gap-y-12 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {STATE_CASES.map((stateCase) => (
-            <QuestionNodePreview
-              key={stateCase.label}
-              stateCase={stateCase}
-              icon={icon}
-              expandedBadge={expandedBadge}
-            />
-          ))}
+        <section className="mb-14">
+          <div className="mb-5">
+            <h2 className="text-fg-default font-semibold">
+              Built-in · Huabu star — Chat vs Agent
+            </h2>
+            <p className="text-fg-muted mt-1 max-w-3xl text-sm">
+              A single Huabu-blue identity, no corner badge. Chat has a hollow
+              open (talking) mouth; Agent shows a little cursor — it acts on the
+              canvas rather than talks. Shown static and running (body wobble);
+              the dimmed tile is an external agent for scale reference.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {[
+              { label: 'Static', motion: 'none' as AgentIconMotion },
+              {
+                label: 'Running (body wobble)',
+                motion: 'working' as AgentIconMotion,
+              },
+            ].map((row) => (
+              <article
+                key={row.label}
+                className="border-edge-default bg-surface rounded-lg border p-4"
+              >
+                <div className="flex h-20 items-center justify-center gap-6">
+                  <div className="flex flex-col items-center gap-1.5">
+                    <BuiltInStarBody mode="ask" size={52} motion={row.motion} />
+                    <span className="text-fg-subtle text-[10px]">Chat</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1.5">
+                    <BuiltInStarBody
+                      mode="operate"
+                      size={52}
+                      motion={row.motion}
+                    />
+                    <span className="text-fg-subtle text-[10px]">Agent</span>
+                  </div>
+                  <div className="flex flex-col items-center gap-1.5 opacity-60">
+                    <AgentIcon
+                      shape="cloud"
+                      color="red"
+                      size={52}
+                      withFace
+                      motion={row.motion}
+                    />
+                    <span className="text-fg-subtle text-[10px]">External</span>
+                  </div>
+                </div>
+                <h3 className="text-fg-default mt-3 text-sm font-semibold">
+                  {row.label}
+                </h3>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="mb-14">
+          <div className="mb-5">
+            <h2 className="text-fg-default font-semibold">
+              Built-in · face candidates
+            </h2>
+            <p className="text-fg-muted mt-1 max-w-3xl text-sm">
+              More faces to pick from — Chat leads with a bigger, expressive
+              mouth; Agent adds little hands (it acts on the canvas). Pick one
+              face per mode.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+            {BUILT_IN_FACE_VARIANTS.map((v) => (
+              <article
+                key={v.face}
+                className="border-edge-default bg-surface flex flex-col items-center gap-2 rounded-lg border p-4"
+              >
+                <BuiltInStarBody
+                  mode={v.group === 'Agent' ? 'operate' : 'ask'}
+                  face={v.face}
+                  size={56}
+                />
+                <span className="text-fg-default text-center text-xs font-semibold">
+                  {v.label}
+                </span>
+                <span className="text-fg-subtle text-[10px]">{v.group}</span>
+              </article>
+            ))}
+          </div>
         </section>
 
         <section className="mt-14">
