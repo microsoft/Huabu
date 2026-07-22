@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { hostname, platform } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import WebSocket from 'ws'
 import {
   AgentletMethods,
@@ -76,6 +77,15 @@ export function resolveAgentletId(
   machineHostname = hostname(),
 ): string {
   return configuredId?.trim() || machineHostname
+}
+
+export function resolveManagedSetupWorkerPath(
+  moduleUrl = import.meta.url,
+  pathExists: (path: string) => boolean = existsSync,
+  resolvePackage: () => string = () => require.resolve('@agentlet/agent-team/setup-worker'),
+): string {
+  const bundledWorkerPath = join(dirname(fileURLToPath(moduleUrl)), 'setup-worker.js')
+  return pathExists(bundledWorkerPath) ? bundledWorkerPath : resolvePackage()
 }
 
 /**
@@ -348,7 +358,7 @@ export class Agentlet {
     }
 
     try {
-      const workerPath = require.resolve('@agentlet/agent-team/setup-worker')
+      const workerPath = resolveManagedSetupWorkerPath()
       const child = fork(
         workerPath,
         [
