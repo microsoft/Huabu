@@ -53,6 +53,8 @@ import { fileURLToPath } from 'node:url';
 
 import dotenv from 'dotenv';
 
+import { spawnSupervisedDevChild } from './dev-child-supervisor.mjs';
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
 
@@ -218,14 +220,11 @@ const children = [];
 let shuttingDown = false;
 
 /**
- * Kill a child *and its descendants*. `pnpm --filter X dev` spawns nested
- * processes (node → tsx watch / vite); a plain `child.kill('SIGTERM')`
- * only reaches the pnpm wrapper and orphans tsx / vite (which keep ports
- * busy on next run).
+ * Signal a service supervisor. The supervisor owns the nested
+ * `pnpm --filter X dev` process group and reaps it before exiting.
  *
- * On POSIX we put each child in its own process group (`detached: true`)
- * and signal the whole group with `kill(-pid)`. On Windows we fall back
- * to `taskkill /T` to walk the process tree.
+ * On POSIX each supervisor has its own process group, so `kill(-pid)`
+ * reliably reaches it. On Windows we fall back to `taskkill /T`.
  *
  * On Windows the call is **synchronous** (`spawnSync`): `Ctrl+C` is
  * broadcast by the console to every attached process, so the `cmd.exe`
@@ -330,14 +329,11 @@ if (process.stdin.isTTY && typeof process.stdin.setRawMode === 'function') {
 
 /** Spawn a long-running pnpm dev child, tracked for shutdown. */
 function spawnLongRunning(filter, label, extraEnv = {}) {
-  const child = spawn('pnpm', ['--filter', filter, 'dev'], {
+  const child = spawnSupervisedDevChild({
+    command: 'pnpm',
+    args: ['--filter', filter, 'dev'],
     cwd: repoRoot,
-    // Deny stdin so the child can't put the shared console into raw input
-    // mode (which would swallow Ctrl+C on Windows; see the raw-mode
-    // handler above for the full story).
-    stdio: ['ignore', 'inherit', 'inherit'],
     shell: process.platform === 'win32',
-    detached: process.platform !== 'win32',
     env: { ...process.env, ...extraEnv },
   });
   children.push(child);
@@ -460,16 +456,12 @@ async function main() {
   delete electronEnv.ELECTRON_RUN_AS_NODE;
 
   console.log('[dev-desktop] Launching Electron …');
-  const electron = spawn('pnpm', ['exec', 'electron', '.'], {
-    // Electron itself wants stdin in dev (DevTools, etc.) only for its own
-    // child processes; the parent process here doesn't need it, and giving
-    // it stdin would let it flip the console into raw mode and break our
-    // Ctrl+C handler. Deny stdin like the other long-running children.
-    stdio: ['ignore', 'inherit', 'inherit'],
+  const electron = spawnSupervisedDevChild({
+    command: 'pnpm',
+    args: ['exec', 'electron', '.'],
     shell: true,
     cwd: path.join(repoRoot, 'apps/desktop'),
     env: electronEnv,
-    detached: process.platform !== 'win32',
   });
   children.push(electron);
   electron.once('exit', (code) => {

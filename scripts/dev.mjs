@@ -12,12 +12,14 @@
  *   process.env  >  apps/web/.env  >  <repo-root>/.env
  * Docs additionally reads DOCS_PORT and avoids the configured web port.
  */
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import dotenv from 'dotenv';
+
+import { spawnSupervisedDevChild } from './dev-child-supervisor.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
@@ -138,13 +140,11 @@ const children = [];
 let shuttingDown = false;
 
 /**
- * Kill a child *and its descendants*. `pnpm --filter X dev` spawns nested
- * processes (node → tsc -w / vite); a plain `child.kill('SIGTERM')` only
- * reaches the pnpm wrapper and orphans tsc / vite (which keep ports busy).
+ * Signal a service supervisor. The supervisor owns the nested
+ * `pnpm --filter X dev` process group and reaps it before exiting.
  *
- * On POSIX we put each child in its own process group (`detached: true` +
- * `setsid`) and signal the whole group with `kill(-pid)`. On Windows we
- * fall back to `taskkill /T` to walk the process tree.
+ * On POSIX each supervisor has its own process group, so `kill(-pid)`
+ * reliably reaches it. On Windows we fall back to `taskkill /T`.
  *
  * On Windows the call is **synchronous** (`spawnSync`): `Ctrl+C` is
  * broadcast by the console to every attached process, so the `cmd.exe`
@@ -256,15 +256,11 @@ if (process.stdin.isTTY && typeof process.stdin.setRawMode === 'function') {
 
 /** Spawn a `pnpm --filter <pkg> dev` child wired to our stdio. */
 function spawnPnpmDev(filter, label, extraEnv = {}) {
-  const child = spawn('pnpm', ['--filter', filter, 'dev'], {
+  const child = spawnSupervisedDevChild({
+    command: 'pnpm',
+    args: ['--filter', filter, 'dev'],
     cwd: repoRoot,
-    // Inherit stdout/stderr only — deny stdin so the child can't put the
-    // shared console into raw input mode (which would swallow Ctrl+C on
-    // Windows; see the raw-mode handler above for the full story).
-    stdio: ['ignore', 'inherit', 'inherit'],
     shell: process.platform === 'win32',
-    // POSIX: own process group so we can signal the whole subtree.
-    detached: process.platform !== 'win32',
     env: { ...process.env, ...extraEnv },
   });
   children.push(child);
@@ -291,17 +287,12 @@ function spawnPnpmDev(filter, label, extraEnv = {}) {
  * never races a still-empty `dist/` on cold start.
  */
 function spawnAgentletWatch(filter, label) {
-  const child = spawn(
-    'pnpm',
-    ['--filter', filter, 'exec', 'tsc', '-w', '--preserveWatchOutput'],
-    {
-      cwd: repoRoot,
-      // Same stdin-denial rationale as `spawnPnpmDev`.
-      stdio: ['ignore', 'inherit', 'inherit'],
-      shell: process.platform === 'win32',
-      detached: process.platform !== 'win32',
-    },
-  );
+  const child = spawnSupervisedDevChild({
+    command: 'pnpm',
+    args: ['--filter', filter, 'exec', 'tsc', '-w', '--preserveWatchOutput'],
+    cwd: repoRoot,
+    shell: process.platform === 'win32',
+  });
   children.push(child);
   child.on('exit', (code, signal) => {
     if (shuttingDown) return;
