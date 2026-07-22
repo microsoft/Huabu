@@ -24,39 +24,6 @@ import type {
 
 const log = getLogger('oauth');
 
-/**
- * Enterprise GHE domain stored on the credential, normalized to a hostname.
- * `undefined` for the public github.com flow.
- */
-function copilotEnterpriseDomain(creds: OAuthCredential): string | undefined {
-  const raw = (creds as { enterpriseUrl?: unknown }).enterpriseUrl;
-  if (typeof raw !== 'string' || !raw) return undefined;
-  try {
-    const url = raw.includes('://') ? new URL(raw) : new URL(`https://${raw}`);
-    return url.hostname;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Derive the credential-specific Copilot API base URL from an access token's
- * `proxy-ep`. Mirrors pi-ai's internal `getBaseUrlFromToken` so the sync
- * model-override path ({@link applyCopilotModelOverrides}) does not need to
- * await the async `toAuth`. Phase C can replace this with `Models.getAuth`.
- */
-function copilotBaseUrlFromToken(
-  token: string,
-  enterpriseDomain?: string,
-): string {
-  const match = token.match(/proxy-ep=([^;]+)/);
-  if (match) {
-    return `https://${match[1].replace(/^proxy\./, 'api.')}`;
-  }
-  if (enterpriseDomain) return `https://copilot-api.${enterpriseDomain}`;
-  return 'https://api.individual.githubcopilot.com';
-}
-
 // ==================== Persisted Credentials ====================
 
 export function loadCredentials(): OAuthCredential | null {
@@ -276,26 +243,6 @@ export async function getCopilotApiKey(): Promise<string | null> {
     );
     return null;
   }
-}
-
-/**
- * Set the credential-specific Copilot proxy `baseUrl` on each model.
- *
- * pi-ai's `OAuthAuth.toAuth` derives this baseUrl (plus the access-token api
- * key) but is async; this sync path only needs the baseUrl, which is a pure
- * function of the stored access token, so we derive it directly via
- * {@link copilotBaseUrlFromToken}. Headers are applied separately from the
- * static registry ({@link getCopilotStaticHeaders}), matching the previous
- * `modifyModels` behavior which only rewrote `baseUrl`.
- */
-export function applyCopilotModelOverrides(models: Model<Api>[]): Model<Api>[] {
-  const creds = loadCredentials();
-  if (!creds?.access) return models;
-  const baseUrl = copilotBaseUrlFromToken(
-    creds.access,
-    copilotEnterpriseDomain(creds),
-  );
-  return models.map((model) => ({ ...model, baseUrl }));
 }
 
 /**

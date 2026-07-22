@@ -34,7 +34,6 @@ import {
 import {
   getCopilotApiKey,
   verifyOAuthCredentials,
-  applyCopilotModelOverrides,
   getCopilotStaticHeaders,
 } from './oauth.js';
 import { getPiModels } from './pi-models.js';
@@ -478,11 +477,10 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
         if (cfg.baseUrl) {
           model = { ...model, baseUrl: cfg.baseUrl };
         }
-        // For Copilot, apply pi-ai's model overrides (baseUrl from token, headers)
-        if (cfg.provider === 'github-copilot') {
-          const [modified] = applyCopilotModelOverrides([model]);
-          if (modified) model = modified;
-        }
+        // Copilot's credential-specific gateway baseUrl + client headers are
+        // applied later, at request time, via applyCopilotAuthToModel
+        // (pi-ai Models.getAuth). The registry model already carries the
+        // client headers.
         return model;
       }
     } catch {
@@ -527,19 +525,16 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
     maxTokens: 16384,
   } as Model<Api>;
 
-  // For Copilot, apply pi-ai's model overrides (baseUrl from token).
-  //
-  // `modifyModels` only rewrites `baseUrl`, so we must seed the required
-  // Copilot client headers (`Editor-Version`, `Copilot-Integration-Id`, …)
-  // ourselves — otherwise newer ids built on this manual path are rejected
-  // with `400 missing Editor-Version header for IDE auth`.
+  // Copilot ids newer than the bundled catalog have no registry entry, so
+  // seed the required client headers (`Editor-Version`,
+  // `Copilot-Integration-Id`, …) here — otherwise the request is rejected
+  // with `400 missing Editor-Version header for IDE auth`. The
+  // credential-specific baseUrl is applied later via applyCopilotAuthToModel.
   if (cfg.provider === 'github-copilot') {
     model = {
       ...model,
       headers: getCopilotStaticHeaders(),
     } as Model<Api>;
-    const [modified] = applyCopilotModelOverrides([model]);
-    if (modified) model = modified;
   }
 
   return model;
@@ -1372,6 +1367,51 @@ export function getModelForRole(
   return resolveForRole(role, opts).model;
 }
 
+/**
+ * Resolve GitHub Copilot's credential-specific request context onto a model:
+ * the gateway `baseUrl` (derived by pi-ai from the OAuth token's `proxy-ep`)
+ * and the client headers, both via `Models.getAuth(model)`. This retires the
+ * hand-rolled token→baseUrl derivation. Non-Copilot models pass through
+ * unchanged; an unauthenticated Copilot returns the model untouched (the
+ * caller's api-key resolution then surfaces the "please log in" error).
+ */
+async function applyCopilotAuthToModel(
+  cfg: PersistedConfig,
+  model: Model<Api>,
+): Promise<Model<Api>> {
+  if (cfg.provider !== 'github-copilot') return model;
+  const result = await getPiModels().getAuth(model);
+  if (!result) return model;
+  // pi-ai's ProviderHeaders allows null values; Model.headers is string-only,
+  // so drop any null-valued headers before applying.
+  const headers = result.auth.headers
+    ? Object.fromEntries(
+        Object.entries(result.auth.headers).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string',
+        ),
+      )
+    : undefined;
+  return {
+    ...model,
+    ...(result.auth.baseUrl ? { baseUrl: result.auth.baseUrl } : {}),
+    ...(headers ? { headers } : {}),
+  };
+}
+
+/**
+ * Async variant of {@link getModelForRole} that also resolves GitHub
+ * Copilot's credential-specific gateway baseUrl + client headers via pi-ai
+ * `Models.getAuth`. Streaming paths must use this so Copilot requests hit the
+ * correct per-account gateway with the required headers.
+ */
+export async function resolveModelForRoleAsync(
+  role: ModelRole,
+  opts?: { hasImage?: boolean },
+): Promise<Model<Api>> {
+  const { cfg, model } = resolveForRole(role, opts);
+  return applyCopilotAuthToModel(cfg, model);
+}
+
 /** Resolve and authenticate the provider configured for a workload role. */
 export async function ensureApiKeyForRole(
   role: ModelRole,
@@ -1479,8 +1519,11 @@ export interface LLMCallOptions extends ProviderStreamOptions {
 export async function llmStream(context: Context, options?: LLMCallOptions) {
   const { role = 'chat', hasImage, ...streamOptions } = options ?? {};
   const { cfg, model } = resolveForRole(role, { hasImage });
-  const apiKey = await ensureApiKeyFor(cfg);
-  return piStream(model, context, {
+  const [resolvedModel, apiKey] = await Promise.all([
+    applyCopilotAuthToModel(cfg, model),
+    ensureApiKeyFor(cfg),
+  ]);
+  return piStream(resolvedModel, context, {
     apiKey,
     ...getProviderSpecificOptions(cfg),
     ...streamOptions,
@@ -1493,8 +1536,11 @@ export async function llmStream(context: Context, options?: LLMCallOptions) {
 export async function llmComplete(context: Context, options?: LLMCallOptions) {
   const { role = 'chat', hasImage, ...streamOptions } = options ?? {};
   const { cfg, model } = resolveForRole(role, { hasImage });
-  const apiKey = await ensureApiKeyFor(cfg);
-  return piComplete(model, context, {
+  const [resolvedModel, apiKey] = await Promise.all([
+    applyCopilotAuthToModel(cfg, model),
+    ensureApiKeyFor(cfg),
+  ]);
+  return piComplete(resolvedModel, context, {
     apiKey,
     ...getProviderSpecificOptions(cfg),
     ...streamOptions,
