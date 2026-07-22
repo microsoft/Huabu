@@ -92,8 +92,8 @@ export default defineConfig([
     },
   },
   {
-    // Agentlet daemon: build a self-contained bundle from source. We
-    // cannot just `cpSync` the `tsc`-emitted dist tree because its
+    // Agentlet daemon and setup worker: build self-contained bundles from
+    // source. We cannot just `cpSync` the `tsc`-emitted dist tree because its
     // `import { Command } from 'commander'` (and `ws`,
     // `@agentclientprotocol/sdk`, `@agentlet/protocol`) are bare
     // specifiers that need a `node_modules` to resolve — which we
@@ -109,6 +109,9 @@ export default defineConfig([
     entry: {
       index: path.resolve(
         '../../external/agentlet/packages/local/src/index.ts',
+      ),
+      'setup-worker': path.resolve(
+        '../../external/agentlet/packages/agent-team/src/setup/managed-setup-worker.ts',
       ),
     },
     format: ['esm'],
