@@ -14,6 +14,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import fastify from 'fastify';
+import {
+  rfsCapabilitiesResponseSchema,
+  rfsOperationCapabilityResponseSchema,
+  spaceQueryResponseSchema,
+} from '@sediment/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const agentMocks = vi.hoisted(() => ({
@@ -102,6 +107,151 @@ describe('GET /api/rfs/:canvasId/skill', () => {
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-type']).toMatch(/text\/markdown/);
       expect(res.body).toMatch(/Accessing this Huabu Space/i);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('direct Space query discovery', () => {
+  it('publishes bounded operation capabilities and generated schemas', async () => {
+    const app = await buildApp();
+    try {
+      const capabilities = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capabilities',
+      });
+      expect(capabilities.statusCode).toBe(200);
+      const parsedCapabilities = rfsCapabilitiesResponseSchema.parse(
+        capabilities.json(),
+      );
+      expect(parsedCapabilities).toMatchObject({
+        permissions: { read: true, write: true },
+        execution: { atomic: false, idempotent: false },
+        limits: { queryMax: 200, executeMaxCommands: 50 },
+      });
+
+      const detail = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capabilities/queries/INSPECT_NODES',
+      });
+      expect(detail.statusCode).toBe(200);
+      const parsedDetail = rfsOperationCapabilityResponseSchema.parse(
+        detail.json(),
+      );
+      expect(parsedDetail).toMatchObject({
+        kind: 'query',
+        type: 'INSPECT_NODES',
+      });
+      expect(parsedDetail.schema).toHaveProperty('properties.type');
+
+      const commandDetail = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capabilities/commands/CREATE_NODES',
+      });
+      const parsedCommand = rfsOperationCapabilityResponseSchema.parse(
+        commandDetail.json(),
+      );
+      expect(parsedCommand.examples).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns a structured unsupported-operation error', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capabilities/queries/UNKNOWN',
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json<{ code: string }>()).toMatchObject({
+        code: 'unsupported_query',
+      });
+
+      const inheritedName = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capabilities/queries/toString',
+      });
+      expect(inheritedName.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /api/rfs/:canvasId/query', () => {
+  it('dispatches spatial queries through the canonical JSON response', async () => {
+    seedNote('c1', 'node-1', 'Alpha', 'hello body');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'INSPECT_NODES', ids: ['node-1'] },
+      });
+      expect(response.statusCode).toBe(200);
+      const parsed = spaceQueryResponseSchema.parse(response.json());
+      expect(parsed).toMatchObject({
+        type: 'INSPECT_NODES',
+        result: {
+          count: 1,
+          nodes: [{ id: 'node-1', label: 'Alpha' }],
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('collects streaming search into a bounded JSON result', async () => {
+    seedNote('c1', 'node-1', 'Alpha', 'hello searchable body');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'SEARCH', query: 'searchable', limit: 10 },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(spaceQueryResponseSchema.parse(response.json())).toMatchObject({
+        type: 'SEARCH',
+        result: {
+          count: 1,
+          truncated: false,
+          matches: [{ tier: 'content', match: { nodeId: 'node-1' } }],
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects invalid JSON and out-of-range query limits', async () => {
+    const app = await buildApp();
+    try {
+      const invalidJson = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: '{',
+      });
+      expect(invalidJson.statusCode).toBe(400);
+      expect(invalidJson.json<{ code: string }>().code).toBe('invalid_json');
+
+      const invalidLimit = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'INSPECT_NODES', limit: 201 },
+      });
+      expect(invalidLimit.statusCode).toBe(400);
+      expect(invalidLimit.json<{ code: string }>().code).toBe(
+        'validation_failed',
+      );
     } finally {
       await app.close();
     }

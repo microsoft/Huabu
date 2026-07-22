@@ -28,11 +28,19 @@ import {
 } from '../canvas/index.js';
 import { canvasSearchRequestSchema } from './canvas-search.js';
 
+export const SPACE_OPERATIONS_PROTOCOL_VERSION = 1;
 export const SPACE_QUERY_DEFAULT_LIMIT = 50;
 export const SPACE_QUERY_MAX_LIMIT = 200;
 export const SPACE_SEARCH_DEFAULT_LIMIT = 100;
 export const SPACE_SEARCH_MAX_LIMIT = 2000;
 export const SPACE_EXECUTE_MAX_COMMANDS = 50;
+
+export const SPACE_QUERY_TYPES = [
+  'GET_SPACE_OUTLINE',
+  'INSPECT_NODES',
+  'INSPECT_EDGES',
+  'SEARCH',
+] as const;
 
 const pointSchema = z
   .object({
@@ -612,7 +620,7 @@ export const SPACE_QUERY_SCHEMAS = {
   INSPECT_NODES: inspectNodesQuerySchema,
   INSPECT_EDGES: inspectEdgesQuerySchema,
   SEARCH: searchSpaceQuerySchema,
-} as const;
+} as const satisfies Record<(typeof SPACE_QUERY_TYPES)[number], z.ZodType>;
 
 export const spaceQuerySchema = z.discriminatedUnion('type', [
   getSpaceOutlineQuerySchema,
@@ -622,6 +630,237 @@ export const spaceQuerySchema = z.discriminatedUnion('type', [
 ]);
 
 export type SpaceQuery = z.infer<typeof spaceQuerySchema>;
+
+const spaceNodeResultSchema = z
+  .object({
+    id: z.string(),
+    type: z.enum(CANVAS_NODE_TYPES),
+    label: z.string().optional(),
+    filename: z.string(),
+    summary: z.string().optional(),
+    preview: z.string().optional(),
+    rev: z.string().optional(),
+    parentFrame: z
+      .object({
+        id: z.string(),
+        label: z.string().optional(),
+      })
+      .strict()
+      .optional(),
+    position: pointSchema,
+    absolutePosition: pointSchema,
+    size: z
+      .object({
+        width: z.number(),
+        height: z.number(),
+      })
+      .strict(),
+    style: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+const outlineResultSchema = z
+  .object({
+    version: z.number(),
+    bbox: z
+      .object({
+        x: z.number(),
+        y: z.number(),
+        width: z.number(),
+        height: z.number(),
+      })
+      .strict()
+      .nullable(),
+    nodes: z.array(spaceNodeResultSchema),
+    edges: z.array(
+      z
+        .object({
+          id: z.string().optional(),
+          source: z.string(),
+          target: z.string(),
+        })
+        .strict(),
+    ),
+    spatial: z
+      .object({
+        clusters: z.array(
+          z
+            .object({
+              frameId: z.string().optional(),
+              frameLabel: z.string().optional(),
+              nodeIds: z.array(z.string()),
+              arrangement: z.string(),
+            })
+            .strict(),
+        ),
+      })
+      .strict(),
+  })
+  .strict();
+
+const inspectNodesResultSchema = z
+  .object({
+    count: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+    arrangement: z.string().optional(),
+    nodes: z.array(
+      spaceNodeResultSchema.extend({
+        distance: z.number().optional(),
+        centerDistance: z.number().optional(),
+        direction: z.enum(['left', 'right', 'above', 'below']).optional(),
+        edgeIds: z.array(z.string()).optional(),
+        hops: z.union([z.literal(1), z.literal(2)]).optional(),
+        clusterId: z.string().optional(),
+      }),
+    ),
+  })
+  .strict();
+
+const inspectEdgesResultSchema = z
+  .object({
+    count: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+    edges: z.array(
+      z
+        .object({
+          id: z.string().optional(),
+          source: z.string(),
+          target: z.string(),
+          lineType: z.enum(EDGE_LINE_TYPES).optional(),
+          lineStyle: z.enum(EDGE_LINE_STYLES).optional(),
+          stroke: z.string().optional(),
+          strokeWidth: z.number().optional(),
+          direction: z.enum(EDGE_DIRECTIONS).optional(),
+          label: z.string().optional(),
+          labelSource: z.enum(['auto', 'user', 'agent']).optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
+const searchMatchSchema = z
+  .object({
+    kind: z.enum(['node', 'edge']).optional(),
+    nodeId: z.string(),
+    nodeType: z.string(),
+    label: z.string().nullable(),
+    field: z.enum(['label', 'summary', 'keywords', 'content', 'conversation']),
+    snippet: z.string(),
+    matchStart: z.number().int().nonnegative(),
+    matchLength: z.number().int().nonnegative(),
+    occurrenceIndex: z.number().int().nonnegative(),
+    sourceNodeId: z.string().optional(),
+    targetNodeId: z.string().optional(),
+  })
+  .strict();
+
+const searchResultSchema = z
+  .object({
+    count: z.number().int().nonnegative(),
+    truncated: z.boolean(),
+    matches: z.array(
+      z
+        .object({
+          tier: z.enum(['meta', 'content', 'conversation']),
+          match: searchMatchSchema,
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
+export const spaceQueryResponseSchema = z.discriminatedUnion('type', [
+  z
+    .object({
+      type: z.literal('GET_SPACE_OUTLINE'),
+      result: outlineResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('INSPECT_NODES'),
+      result: inspectNodesResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('INSPECT_EDGES'),
+      result: inspectEdgesResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('SEARCH'),
+      result: searchResultSchema,
+    })
+    .strict(),
+]);
+
+export type SpaceQueryResponse = z.infer<typeof spaceQueryResponseSchema>;
+
+const jsonSchemaSchema = z.record(z.string(), z.unknown());
+
+export const rfsCapabilitiesResponseSchema = z
+  .object({
+    protocolVersion: z.literal(SPACE_OPERATIONS_PROTOCOL_VERSION),
+    permissions: z
+      .object({
+        read: z.boolean(),
+        write: z.boolean(),
+      })
+      .strict(),
+    execution: z
+      .object({
+        atomic: z.literal(false),
+        partialCommit: z.literal(true),
+        idempotent: z.literal(false),
+        runIdIsIdempotencyKey: z.literal(false),
+      })
+      .strict(),
+    limits: z
+      .object({
+        queryDefault: z.literal(SPACE_QUERY_DEFAULT_LIMIT),
+        queryMax: z.literal(SPACE_QUERY_MAX_LIMIT),
+        searchDefault: z.literal(SPACE_SEARCH_DEFAULT_LIMIT),
+        searchMax: z.literal(SPACE_SEARCH_MAX_LIMIT),
+        executeMaxCommands: z.literal(SPACE_EXECUTE_MAX_COMMANDS),
+      })
+      .strict(),
+    queryTypes: z.array(z.enum(SPACE_QUERY_TYPES)),
+    commandTypes: z.array(z.enum(AGENT_CANVAS_COMMAND_TYPES)),
+    links: z
+      .object({
+        skill: z.string(),
+        query: z.string(),
+        execute: z.string(),
+        queryCapabilityTemplate: z.string(),
+        commandCapabilityTemplate: z.string(),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type RfsCapabilitiesResponse = z.infer<
+  typeof rfsCapabilitiesResponseSchema
+>;
+
+export const rfsOperationCapabilityResponseSchema = z
+  .object({
+    kind: z.enum(['query', 'command']),
+    type: z.string(),
+    schema: jsonSchemaSchema,
+    constraints: z.array(z.string()),
+    result: z.string(),
+    examples: z.array(z.unknown()),
+  })
+  .strict();
+
+export type RfsOperationCapabilityResponse = z.infer<
+  typeof rfsOperationCapabilityResponseSchema
+>;
 
 export const rfsExecuteRequestSchema = z
   .object({
