@@ -104,3 +104,23 @@ Only controls whose capability list is non-empty render, matching the "hidden wh
 - Storage home for the overlay: a dedicated host store vs `AgentPersistentState.metadata`.
 - Whether `serviceTier` should be user-exposed at all (billing implications) or gated behind a setting.
 - Reasoning-effort value lists for non-OpenAI built-in providers (Anthropic thinking levels) — normalize or hide.
+
+## Spike: pi-ai 0.80.7 upgrade feasibility (2026-07-22)
+
+Investigated whether upgrading `@earendil-works/pi-ai` (+ `pi-agent-core`) from the pinned 0.75.5 to the current npm release supersedes our patch-style workarounds (the `openai-codex` GPT-5.6 additions, the Copilot `openai-completions` hard-code, the custom OAuth in `oauth.ts`, and the custom OpenAI `/v1/models` fetch). Research-only; no functional code changed.
+
+### Findings
+
+- **Versions / lockstep.** npm `latest` is **0.80.7** for **both** `@earendil-works/pi-ai` and `@earendil-works/pi-agent-core`, published in lockstep; `pi-agent-core@0.80.7` depends on `pi-ai ^0.80.7`. The upstream README (0.81.1, main branch) is ahead of npm — the GPT-5.6 catalog entries and `getSupportedThinkingLevels()` shown there may not be in npm 0.80.7 yet, so that must be re-checked at bump time.
+- **pi-agent-core contract is backward-compatible.** `Agent`'s `AgentOptions` in 0.80.7 still takes `initialState.model` (a plain serializable `Model`), `getApiKey(provider)`, `convertToLlm`, and `toolExecution`, plus new _optional_ fields (`transport`, `thinkingBudgets`, `streamFn`). It imports its wire types from `@earendil-works/pi-ai/compat`. So pi-driver's `new Agent({ initialState: { model }, getApiKey })` call ([handle.ts](../../external/agenetes/packages/pi-driver/src/handle.ts)) keeps working — **the new `createModels`/`Models` collection API is NOT forced by the upgrade.**
+- **Root entrypoint moved.** In 0.80.7 the root exports the new collection/auth API (`models.ts`, `auth/credential-store`, OAuth types); the old globals we use in [llm.ts](../../apps/server/src/modules/agent/llm.ts) (`getModel` / `getModels` / `stream` / `complete` / `getProviders` / `getEnvApiKey`) are **gone from root** and live on `@earendil-works/pi-ai/compat`. The minimal upgrade is therefore a mechanical import-path change (`@earendil-works/pi-ai` → `.../compat`), described upstream as "verbatim behavior, one import-path change".
+- **CredentialStore adapter is feasible but deferrable.** pi-ai's `CredentialStore` (`read`/`list`/`modify`/`delete`, type-tagged `api_key`|`oauth` credentials) maps cleanly onto our [`SecretStore`](../../apps/server/src/security/secret-store-types.ts) (`get`/`set`/`setMany` by id) via a `providerId → namespaced secret id` + JSON-encoded credential adapter. Only needed if we adopt native auth; not a blocker for the version bump.
+- **Copilot 400 / GPT-5.6.** The new provider architecture dispatches per model `api` (so a GPT-5.6 model would route to `openai-responses`, fixing the `/chat/completions` 400 at the root) — but only if the installed catalog actually carries GPT-5.6 with the right `api`. Since GPT-5.6 appears to be 0.81-only, on 0.80.7 we likely still keep `OPENAI_CODEX_MODEL_ADDITIONS` and/or use dynamic `refresh()`. Verify at bump.
+
+### Go / no-go: GO, staged (lower risk than first assumed)
+
+- **Phase A (minimal, low-risk).** Bump `pi-ai` + `pi-agent-core` to `^0.80.7` in `apps/server` and `external/agenetes/pi-driver` (separate subtree commit for pi-driver); switch the `llm.ts` old-global imports to `@earendil-works/pi-ai/compat`; keep `oauth.ts`, the `/v1/models` fetch, and the GPT-5.6 additions as-is. Verify workspace typecheck + server tests + the Electron single-file bundle (may need the documented Node `require` shim).
+- **Phase B (targeted Copilot 400 fix).** Independent of the bump: route Copilot Responses-only models to `openai-responses` in `buildModel`, or drop the hard-code if the newer catalog fixes it natively.
+- **Phase C (optional, later — "de-patch").** Adopt the new `createModels`/`createProvider` collection API, native OAuth (`models.login` + the CredentialStore adapter), and dynamic `refresh`/`fetchModels` — retiring `oauth.ts`, the custom `/v1/models` fetch, and the GPT-5.6 additions. Also exposes `getSupportedThinkingLevels()` / `compat.supportsReasoningEffort`, which turns this proposal's Stage 1 capability matrix into a direct pi-ai read.
+
+Net: our patches were correct workarounds for 0.75.5, not mistakes. The upgrade is worthwhile and **much cheaper than initially feared** (compat keeps the old API; pi-agent-core still takes `{ model, getApiKey }`), so the big collection-API/OAuth refactor can be deferred to Phase C rather than blocking the bump.
