@@ -7,7 +7,12 @@
 
 import { getModels } from '@earendil-works/pi-ai/compat';
 
-import { getPiModels, isOAuthProvider, secretIdFor } from './pi-models.js';
+import {
+  getPiModels,
+  isOAuthProvider,
+  oauthProviderIds,
+  secretIdFor,
+} from './pi-models.js';
 import { getPersistedSecret, getSecret } from '../../security/secret-store.js';
 import { getLogger } from '../../utils/logger.js';
 
@@ -319,4 +324,25 @@ export async function logoutOAuth(provider = 'github-copilot'): Promise<void> {
   // no-op success; skip the delete a non-writable store would reject.
   if (getPersistedSecret(secretIdFor(provider)) === null) return;
   await getPiModels().logout(provider);
+}
+
+/**
+ * Warm up OAuth access tokens in the background for every logged-in OAuth
+ * provider.
+ *
+ * The first `getAuth` for a provider after startup is the slow one: pi-ai
+ * lazily imports the provider's OAuth module and, when the cached access token
+ * has expired, runs a token refresh that also refetches the account's
+ * available model ids. On a fresh (or dev-reloaded) server that cost lands on
+ * the user's first `/api/llm/config` or first chat turn. Resolving it here,
+ * off the request path, means that first user action is instant.
+ *
+ * Fire-and-forget and best-effort: only providers with stored credentials are
+ * touched, and {@link getOAuthApiKey} already swallows + logs its own errors.
+ */
+export function prewarmOAuthCredentials(): void {
+  for (const provider of oauthProviderIds()) {
+    if (!hasOAuthCredentials(provider)) continue;
+    void getOAuthApiKey(provider);
+  }
 }

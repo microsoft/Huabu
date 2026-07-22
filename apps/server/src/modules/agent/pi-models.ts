@@ -45,6 +45,11 @@ export function isOAuthProvider(providerId: string): boolean {
   return OAUTH_PROVIDERS.has(providerId);
 }
 
+/** All provider ids that authenticate via OAuth (for iteration, e.g. prewarm). */
+export function oauthProviderIds(): readonly string[] {
+  return [...OAUTH_PROVIDERS];
+}
+
 /** SecretStore id that backs a provider's credential. */
 export function secretIdFor(providerId: string): string {
   if (providerId === 'github-copilot') return SECRET_IDS.copilotOAuth;
