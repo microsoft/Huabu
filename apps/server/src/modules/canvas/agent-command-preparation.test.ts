@@ -42,7 +42,7 @@ describe('prepareAgentCanvasCommands', () => {
     });
   });
 
-  it('injects built-in agent read-set revisions without replacing explicit ones', () => {
+  it('uses built-in read-set revisions and ignores caller-supplied ones', () => {
     const [command] = prepareAgentCanvasCommands(
       [
         {
@@ -61,7 +61,34 @@ describe('prepareAgentCanvasCommands', () => {
     );
 
     expect(command).toMatchObject({
-      patches: [{ expectRev: 'from-read-set' }, { expectRev: 'explicit' }],
+      patches: [{ expectRev: 'from-read-set' }, {}],
+    });
+    expect(command).toHaveProperty('type', 'MERGE_NODE_DATA');
+    if (command?.type !== 'MERGE_NODE_DATA') {
+      throw new Error('Expected MERGE_NODE_DATA');
+    }
+    expect(command.patches[1]).not.toHaveProperty('expectRev');
+  });
+
+  it('allows direct RFS callers to supply revisions explicitly', () => {
+    const [command] = prepareAgentCanvasCommands(
+      [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            {
+              nodeId: 'node-1',
+              expectRev: 'explicit',
+              patch: { content: 'one' },
+            },
+          ],
+        },
+      ],
+      { allowCallerRevisions: true },
+    );
+
+    expect(command).toMatchObject({
+      patches: [{ expectRev: 'explicit' }],
     });
   });
 });

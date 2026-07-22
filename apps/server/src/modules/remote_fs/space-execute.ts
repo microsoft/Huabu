@@ -148,7 +148,9 @@ export async function executeRfsCommands(
   const runId = request.runId ?? createId('run');
   const output = await executeOnServer({
     canvasId,
-    commands: prepareAgentCanvasCommands(request.commands),
+    commands: prepareAgentCanvasCommands(request.commands, {
+      allowCallerRevisions: true,
+    }),
     originator: { source: 'agent' },
     runId,
   });

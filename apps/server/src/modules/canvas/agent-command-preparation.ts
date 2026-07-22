@@ -7,6 +7,7 @@ import type {
 export interface PrepareAgentCommandsOptions {
   origin?: NodeOrigin;
   readSet?: ReadonlyMap<string, string>;
+  allowCallerRevisions?: boolean;
 }
 
 const DEFAULT_ORIGIN: NodeOrigin = { type: 'ai-operate' };
@@ -44,20 +45,22 @@ export function prepareAgentCanvasCommands(
       return {
         ...command,
         patches: command.patches.map((entry) => {
+          const { expectRev: callerRevision, ...patchEntry } = entry;
           const hasLabel = typeof entry.patch.label === 'string';
           const injectedRev =
-            'content' in entry.patch &&
-            entry.expectRev === undefined &&
-            options.readSet
+            'content' in entry.patch && options.readSet
               ? options.readSet.get(entry.nodeId)
               : undefined;
+          const revision =
+            injectedRev ??
+            (options.allowCallerRevisions ? callerRevision : undefined);
           return {
-            ...entry,
+            ...patchEntry,
             patch: {
               ...entry.patch,
               ...(hasLabel ? { labelSource: 'agent' as const } : {}),
             },
-            ...(injectedRev !== undefined ? { expectRev: injectedRev } : {}),
+            ...(revision !== undefined ? { expectRev: revision } : {}),
           };
         }),
       };

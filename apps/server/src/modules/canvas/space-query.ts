@@ -1,12 +1,13 @@
+import { SPACE_SEARCH_DEFAULT_LIMIT } from '@sediment/shared';
+
+import { searchCanvas } from './canvas-search.js';
 import {
   buildCanvasOutline,
   inspectEdges,
   inspectNodes,
 } from './canvas-spatial.js';
-import { searchCanvas } from './canvas-search.js';
 import { getCanvasStore } from '../storage/index.js';
 
-import { SPACE_SEARCH_DEFAULT_LIMIT } from '@sediment/shared';
 import type {
   CanvasSearchMatch,
   SpaceQuery,

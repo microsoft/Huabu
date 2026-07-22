@@ -14,13 +14,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import fastify from 'fastify';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import {
   rfsCapabilitiesResponseSchema,
   rfsExecuteResponseSchema,
   rfsOperationCapabilityResponseSchema,
   spaceQueryResponseSchema,
 } from '@sediment/shared';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const agentMocks = vi.hoisted(() => ({
   runAgent: vi.fn(),

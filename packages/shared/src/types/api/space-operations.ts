@@ -8,6 +8,7 @@
 
 import { z } from 'zod';
 
+import { canvasSearchRequestSchema } from './canvas-search.js';
 import {
   ACCENT_PALETTE,
   AGENT_CANVAS_COMMAND_TYPES,
@@ -26,7 +27,6 @@ import {
   NODE_FONT_STYLES,
   NODE_FONT_WEIGHTS,
 } from '../canvas/index.js';
-import { canvasSearchRequestSchema } from './canvas-search.js';
 
 export const SPACE_OPERATIONS_PROTOCOL_VERSION = 1;
 export const SPACE_QUERY_DEFAULT_LIMIT = 50;
@@ -204,18 +204,21 @@ export const deleteNodesCommandSchema = z
   .strict()
   .describe('Delete nodes by ID; incident edges are removed automatically.');
 
+const mergeNodeDataPatchSchema = z
+  .object({
+    nodeId: z.string().min(1),
+    patch: agentNodeDataSchema,
+  })
+  .strict();
+
 export const mergeNodeDataCommandSchema = z
   .object({
     type: z.literal('MERGE_NODE_DATA'),
     patches: z
       .array(
-        z
-          .object({
-            nodeId: z.string().min(1),
-            patch: agentNodeDataSchema,
-            expectRev: z.string().min(1).optional(),
-          })
-          .strict(),
+        mergeNodeDataPatchSchema.extend({
+          expectRev: z.string().min(1).optional(),
+        }),
       )
       .min(1),
   })
@@ -390,17 +393,47 @@ export const agentCanvasCommandSchema = z.discriminatedUnion('type', [
 
 export type AgentOperationCommand = z.infer<typeof agentCanvasCommandSchema>;
 
-export const agentCanvasCommandsParamsSchema = z
+export const builtInMergeNodeDataCommandSchema = z
+  .object({
+    type: z.literal('MERGE_NODE_DATA'),
+    patches: z.array(mergeNodeDataPatchSchema).min(1),
+  })
+  .strict()
+  .describe(
+    'Merge patches into node data. Content revisions are injected from the built-in turn read-set.',
+  );
+
+export const builtInAgentCanvasCommandSchema = z.discriminatedUnion('type', [
+  createNodesCommandSchema,
+  deleteNodesCommandSchema,
+  builtInMergeNodeDataCommandSchema,
+  setNodeParentCommandSchema,
+  dissolveFrameCommandSchema,
+  setNodeGeometryCommandSchema,
+  reorderNodesCommandSchema,
+  connectNodesCommandSchema,
+  disconnectEdgesCommandSchema,
+  setEdgeStyleCommandSchema,
+  alignNodesCommandSchema,
+  distributeNodesCommandSchema,
+  setFrameLayoutCommandSchema,
+]);
+
+export type BuiltInAgentOperationCommand = z.infer<
+  typeof builtInAgentCanvasCommandSchema
+>;
+
+export const builtInAgentCanvasCommandsParamsSchema = z
   .object({
     commands: z
-      .array(agentCanvasCommandSchema)
+      .array(builtInAgentCanvasCommandSchema)
       .min(1)
       .describe('Space commands to execute as a batch.'),
   })
   .strict();
 
-export type AgentCanvasCommandsParams = z.infer<
-  typeof agentCanvasCommandsParamsSchema
+export type BuiltInAgentCanvasCommandsParams = z.infer<
+  typeof builtInAgentCanvasCommandsParamsSchema
 >;
 
 const queryLimitSchema = z

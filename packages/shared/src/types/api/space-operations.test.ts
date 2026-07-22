@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { AGENT_CANVAS_COMMAND_TYPES } from '../canvas/index.js';
 import {
   AGENT_COMMAND_SCHEMAS,
   SPACE_EXECUTE_MAX_COMMANDS,
@@ -8,6 +7,7 @@ import {
   inspectNodesQuerySchema,
   rfsExecuteRequestSchema,
 } from './space-operations.js';
+import { AGENT_CANVAS_COMMAND_TYPES } from '../canvas/index.js';
 
 describe('agentCanvasCommandSchema', () => {
   it('keeps the schema registry aligned with the agent command catalogue', () => {

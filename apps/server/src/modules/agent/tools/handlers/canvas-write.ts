@@ -24,14 +24,14 @@
 import { createId } from '@sediment/shared';
 
 import { getLogger } from '../../../../utils/logger.js';
+import { prepareAgentCanvasCommands } from '../../../canvas/agent-command-preparation.js';
 import {
   CanvasNotFoundError,
   executeOnServer,
 } from '../../../canvas/canvas-executor.js';
-import { prepareAgentCanvasCommands } from '../../../canvas/agent-command-preparation.js';
 
 import type {
-  AgentOperationCommand,
+  BuiltInAgentOperationCommand,
   ExecuteConflict,
   NodeOrigin,
 } from '@sediment/shared';
@@ -66,7 +66,7 @@ function buildConflictHint(conflicts: readonly ExecuteConflict[]): string {
  */
 export type CanvasCommandsArgs = {
   canvasId: string;
-  commands: AgentOperationCommand[];
+  commands: BuiltInAgentOperationCommand[];
 };
 
 /** Default origin assigned to every node created by the operate agent. */

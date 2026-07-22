@@ -17,7 +17,7 @@ import { Type } from '@earendil-works/pi-ai';
 
 import {
   AGENT_CANVAS_COMMAND_TYPES,
-  agentCanvasCommandsParamsSchema,
+  builtInAgentCanvasCommandsParamsSchema,
   getSpaceOutlineQueryParamsSchema,
   inspectEdgesQueryParamsSchema,
   inspectNodesQueryParamsSchema,
@@ -140,7 +140,7 @@ export const inspectEdgesTool: ToolDefinition = {
 // ==================== Canvas Commands ====================
 
 export const canvasCommandsParamsSchema = zodToToolSchema(
-  agentCanvasCommandsParamsSchema,
+  builtInAgentCanvasCommandsParamsSchema,
 );
 
 export const canvasCommandsTool: ToolDefinition = {

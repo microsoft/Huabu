@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import {
   AGENT_CANVAS_COMMAND_TYPES,
   AGENT_COMMAND_SCHEMAS,
@@ -10,7 +12,6 @@ import {
   SPACE_SEARCH_DEFAULT_LIMIT,
   SPACE_SEARCH_MAX_LIMIT,
 } from '@sediment/shared';
-import { z } from 'zod';
 
 import type {
   RfsCapabilitiesResponse,

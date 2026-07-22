@@ -48,6 +48,33 @@ describe('shared Zod tool schemas', () => {
     ).toThrow();
   });
 
+  it('does not expose caller-owned content revisions to built-in agents', () => {
+    expect(() =>
+      validateToolArguments(canvasCommandsTool, {
+        type: 'toolCall',
+        id: 'call-revision',
+        name: 'space_commands',
+        arguments: {
+          commands: [
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'node-1',
+                  expectRev: 'copied-revision',
+                  patch: { content: 'Bypass attempt' },
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    ).toThrow();
+    expect(JSON.stringify(canvasCommandsTool.parameters)).not.toContain(
+      'expectRev',
+    );
+  });
+
   it('preserves field descriptions for the model-facing schema', () => {
     expect(JSON.stringify(canvasCommandsTool.parameters)).toContain(
       'top-left position',
