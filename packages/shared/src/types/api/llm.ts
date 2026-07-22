@@ -208,6 +208,16 @@ export const oauthStatusQuerySchema = z.object({
 export type OAuthStatusQuery = z.infer<typeof oauthStatusQuerySchema>;
 
 /**
+ * Body for `POST /api/llm/oauth/device-code`, `/oauth/poll`, and
+ * `/oauth/logout`. `provider` is the OAuth provider id (e.g. `github-copilot`,
+ * `openai-codex`); it defaults to `github-copilot` server-side when omitted.
+ */
+export const oauthProviderBodySchema = z.object({
+  provider: z.string().min(1).optional(),
+});
+export type OAuthProviderBody = z.infer<typeof oauthProviderBodySchema>;
+
+/**
  * Response from GET /api/llm/providers
  */
 export interface LLMProvidersResponse {

@@ -34,13 +34,22 @@ import type {
 const log = getLogger('pi-models');
 
 /** Providers whose credential is stored as an OAuth JSON blob, not a raw key. */
-const OAUTH_PROVIDERS = new Set(['github-copilot']);
+const OAUTH_PROVIDERS = new Set(['github-copilot', 'openai-codex']);
+
+/**
+ * Whether a provider authenticates via OAuth (device-code login) rather than
+ * a raw API key. OAuth providers persist a `{ access, refresh, … }` JSON blob
+ * and resolve their key through `Models.getAuth` (locked refresh).
+ */
+export function isOAuthProvider(providerId: string): boolean {
+  return OAUTH_PROVIDERS.has(providerId);
+}
 
 /** SecretStore id that backs a provider's credential. */
-function secretIdFor(providerId: string): string {
-  return providerId === 'github-copilot'
-    ? SECRET_IDS.copilotOAuth
-    : llmProviderApiKeySecretId(providerId);
+export function secretIdFor(providerId: string): string {
+  if (providerId === 'github-copilot') return SECRET_IDS.copilotOAuth;
+  if (providerId === 'openai-codex') return SECRET_IDS.codexOAuth;
+  return llmProviderApiKeySecretId(providerId);
 }
 
 /** Read + decode a provider credential from the SecretStore. */

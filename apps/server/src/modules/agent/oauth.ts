@@ -1,14 +1,13 @@
 /**
- * GitHub Copilot OAuth — delegates login, token refresh, and logout to
- * pi-ai's `Models` manager (see {@link getPiModels}), which owns the
- * CredentialStore and runs OAuth refresh under a per-provider lock.
- * Credentials live in the runtime SecretStore.
+ * OAuth providers (GitHub Copilot, OpenAI Codex) — delegates login, token
+ * refresh, and logout to pi-ai's `Models` manager (see {@link getPiModels}),
+ * which owns the CredentialStore and runs OAuth refresh under a per-provider
+ * lock. Credentials live in the runtime SecretStore.
  */
 
 import { getModels } from '@earendil-works/pi-ai/compat';
 
-import { getPiModels } from './pi-models.js';
-import { SECRET_IDS } from '../../security/secret-ids.js';
+import { getPiModels, isOAuthProvider, secretIdFor } from './pi-models.js';
 import { getPersistedSecret, getSecret } from '../../security/secret-store.js';
 import { getLogger } from '../../utils/logger.js';
 
@@ -26,9 +25,11 @@ const log = getLogger('oauth');
 
 // ==================== Persisted Credentials ====================
 
-export function loadCredentials(): OAuthCredential | null {
+export function loadCredentials(
+  provider = 'github-copilot',
+): OAuthCredential | null {
   try {
-    const raw = getSecret(SECRET_IDS.copilotOAuth);
+    const raw = getSecret(secretIdFor(provider));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<OAuthCredential>;
     if (!parsed.refresh || !parsed.access) return null;
@@ -48,6 +49,8 @@ interface PendingLoginSession {
   verificationUri: string | null;
   interval: number;
   promise: Promise<Credential>;
+  /** OAuth provider this login is for (e.g. `github-copilot`, `openai-codex`). */
+  provider: string;
   /** Diagnostic: wall-clock ms when the flow started. */
   startedAt: number;
 }
@@ -59,7 +62,9 @@ let pendingLogin: PendingLoginSession | null = null;
  * Start the GitHub Copilot device code flow via pi-ai.
  * Returns { userCode, verificationUri, interval } for the frontend to display.
  */
-export async function startDeviceCodeFlow(): Promise<{
+export async function startDeviceCodeFlow(
+  provider = 'github-copilot',
+): Promise<{
   userCode: string;
   verificationUri: string;
   interval: number;
@@ -77,6 +82,7 @@ export async function startDeviceCodeFlow(): Promise<{
     verificationUri: null,
     interval: 5,
     promise: null!,
+    provider,
     startedAt: Date.now(),
   };
 
@@ -90,19 +96,24 @@ export async function startDeviceCodeFlow(): Promise<{
     // completes the flow (it polls internally).
     const interaction: AuthInteraction = {
       signal: abortController.signal,
-      // pi-ai's only prompt is the GitHub Enterprise domain — return empty
-      // for the public github.com flow.
-      prompt: async (_prompt: AuthPrompt) => '',
+      // Provider-specific prompt handling:
+      //  - Codex asks (type: 'select') to choose a login method; pick the
+      //    headless device-code flow that matches our userCode UI.
+      //  - Copilot's only prompt is the optional GitHub Enterprise domain;
+      //    empty selects the public github.com flow.
+      prompt: async (prompt: AuthPrompt) =>
+        prompt.type === 'select' ? 'device_code' : '',
       notify: (event: AuthEvent) => {
         // Diagnostic: log the full login timeline (device_code → progress
         // "Enabling models..." → complete) so we can see where time goes.
         log.debug(
           {
+            provider,
             event: event.type,
             elapsedMs: Date.now() - session.startedAt,
             ...(event.type === 'progress' ? { message: event.message } : {}),
           },
-          'copilot login event',
+          'oauth login event',
         );
         if (event.type !== 'device_code') return;
         codeReceived = true;
@@ -114,11 +125,7 @@ export async function startDeviceCodeFlow(): Promise<{
         resolveCode();
       },
     };
-    const loginPromise = getPiModels().login(
-      'github-copilot',
-      'oauth',
-      interaction,
-    );
+    const loginPromise = getPiModels().login(provider, 'oauth', interaction);
 
     session.promise = loginPromise;
 
@@ -144,14 +151,14 @@ export async function startDeviceCodeFlow(): Promise<{
     userCodeReady,
     new Promise<never>((_, reject) =>
       setTimeout(
-        () => reject(new Error('Failed to get device code from GitHub.')),
+        () => reject(new Error('Failed to get device code from provider.')),
         30_000,
       ),
     ),
   ]).catch((err) => {
     log.error(
-      { err },
-      'copilot device-code flow failed before code was issued',
+      { err, provider },
+      'oauth device-code flow failed before code was issued',
     );
     abortController.abort();
     pendingLogin = null;
@@ -169,10 +176,10 @@ export async function startDeviceCodeFlow(): Promise<{
  * Poll for the OAuth flow result.
  * pi-ai handles the actual polling internally; we just check if it's done.
  */
-export async function pollDeviceCode(): Promise<
-  'pending' | 'complete' | 'expired'
-> {
-  if (!pendingLogin) {
+export async function pollDeviceCode(
+  provider = 'github-copilot',
+): Promise<'pending' | 'complete' | 'expired'> {
+  if (!pendingLogin || pendingLogin.provider !== provider) {
     throw new Error(
       'No pending OAuth session. Call startDeviceCodeFlow first.',
     );
@@ -193,8 +200,8 @@ export async function pollDeviceCode(): Promise<
     // The credential was already persisted by Models.login via the
     // CredentialStore; just clean up the pending session.
     log.debug(
-      { elapsedMs: Date.now() - pendingLogin.startedAt },
-      'copilot login complete',
+      { provider, elapsedMs: Date.now() - pendingLogin.startedAt },
+      'oauth login complete',
     );
     pendingLogin = null;
     return 'complete';
@@ -206,12 +213,11 @@ export async function pollDeviceCode(): Promise<
 // ==================== Credential Access ====================
 
 /**
- * Get a valid Copilot API key, refreshing if expired.
+ * Get a valid OAuth access token (used as the API key), refreshing if expired.
  *
- * Delegates to pi-ai's `Models.getAuth`, which resolves the provider's
- * OAuth credential and runs a locked refresh when the access token has
- * expired, persisting the rotated credential. The Copilot API key is the
- * resolved access token.
+ * Delegates to pi-ai's `Models.getAuth`, which resolves the provider's OAuth
+ * credential and runs a locked refresh when the access token has expired,
+ * persisting the rotated credential. The API key is the resolved access token.
  *
  * Errors (network failure, refresh-token expiry, malformed persisted creds,
  * etc.) are logged before being swallowed so the caller — which only knows
@@ -219,27 +225,29 @@ export async function pollDeviceCode(): Promise<
  * server logs. Returning `null` then triggers the upstream "Please log in via
  * Settings." message.
  */
-export async function getCopilotApiKey(): Promise<string | null> {
+export async function getOAuthApiKey(
+  provider = 'github-copilot',
+): Promise<string | null> {
   const startedAt = Date.now();
   try {
-    const result = await getPiModels().getAuth('github-copilot');
+    const result = await getPiModels().getAuth(provider);
     const elapsedMs = Date.now() - startedAt;
     const key = result?.auth.apiKey ?? null;
     if (!key) {
-      log.warn({ elapsedMs }, 'No usable GitHub Copilot credentials.');
+      log.warn({ provider, elapsedMs }, 'No usable OAuth credentials.');
       return null;
     }
     // Diagnostic: per-call timing so a slow first-turn getAuth (lazy OAuth
     // load / token refresh) is visible next to the SSE Connection error.
     log.debug(
-      { elapsedMs, source: result?.source },
-      'Resolved Copilot API key',
+      { provider, elapsedMs, source: result?.source },
+      'Resolved OAuth API key',
     );
     return key;
   } catch (err) {
     log.error(
-      { err, elapsedMs: Date.now() - startedAt },
-      'getCopilotApiKey failed',
+      { err, provider, elapsedMs: Date.now() - startedAt },
+      'getOAuthApiKey failed',
     );
     return null;
   }
@@ -272,8 +280,8 @@ export function getCopilotStaticHeaders(): Record<string, string> {
  * {@link verifyOAuthCredentials}.
  */
 export function hasOAuthCredentials(provider: string): boolean {
-  if (provider !== 'github-copilot') return false;
-  return !!loadCredentials();
+  if (!isOAuthProvider(provider)) return false;
+  return !!loadCredentials(provider);
 }
 
 /**
@@ -287,28 +295,28 @@ export function hasOAuthCredentials(provider: string): boolean {
  * fails (revoked / expired refresh token, network error, etc.). In the
  * latter case the caller should prompt the user to re-login.
  *
- * Reuses {@link getCopilotApiKey}, which performs the refresh-if-expired
+ * Reuses {@link getOAuthApiKey}, which performs the refresh-if-expired
  * dance and persists the rotated credentials — so a successful verify
  * also leaves the on-disk creds fresh for the next caller.
  */
 export async function verifyOAuthCredentials(
   provider: string,
 ): Promise<boolean> {
-  if (provider !== 'github-copilot') return false;
-  const key = await getCopilotApiKey();
+  if (!isOAuthProvider(provider)) return false;
+  const key = await getOAuthApiKey(provider);
   return key !== null;
 }
 
 /**
  * Clear stored OAuth credentials (logout).
  */
-export async function logoutOAuth(): Promise<void> {
-  if (pendingLogin) {
+export async function logoutOAuth(provider = 'github-copilot'): Promise<void> {
+  if (pendingLogin && pendingLogin.provider === provider) {
     pendingLogin.abortController.abort();
     pendingLogin = null;
   }
   // Nothing persisted (e.g. env-only headless / read-only store) → logout is a
   // no-op success; skip the delete a non-writable store would reject.
-  if (getPersistedSecret(SECRET_IDS.copilotOAuth) === null) return;
-  await getPiModels().logout('github-copilot');
+  if (getPersistedSecret(secretIdFor(provider)) === null) return;
+  await getPiModels().logout(provider);
 }

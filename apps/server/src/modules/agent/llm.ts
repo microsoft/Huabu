@@ -32,11 +32,11 @@ import {
 } from '@sediment/shared';
 
 import {
-  getCopilotApiKey,
+  getOAuthApiKey,
   verifyOAuthCredentials,
   getCopilotStaticHeaders,
 } from './oauth.js';
-import { getPiModels } from './pi-models.js';
+import { getPiModels, isOAuthProvider } from './pi-models.js';
 import { getDataDir } from '../../data-dir.js';
 import {
   llmProviderApiKeySecretId,
@@ -106,6 +106,10 @@ const PROVIDER_OVERRIDES: Record<string, Partial<LLMProviderInfo>> = {
     authType: 'oauth',
     baseUrl: { overridable: false },
   },
+  'openai-codex': {
+    authType: 'oauth',
+    baseUrl: { overridable: false },
+  },
 };
 
 /** Display-friendly names for providers whose pi-ai ID is cryptic. */
@@ -121,6 +125,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   mistral: 'Mistral',
   'amazon-bedrock': 'Amazon Bedrock',
   'github-copilot': 'GitHub Copilot',
+  'openai-codex': 'OpenAI Codex',
 };
 
 /**
@@ -454,9 +459,9 @@ async function resolveApiKeyAsync(
   providerId: string,
   explicitKey?: string,
 ): Promise<string | null> {
-  // OAuth providers
-  if (providerId === 'github-copilot') {
-    return getCopilotApiKey();
+  // OAuth providers (GitHub Copilot, OpenAI Codex) resolve an access token.
+  if (isOAuthProvider(providerId)) {
+    return getOAuthApiKey(providerId);
   }
   return resolveApiKey(providerId, explicitKey);
 }

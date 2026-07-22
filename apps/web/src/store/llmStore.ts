@@ -207,6 +207,9 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
   },
 
   startOAuth: async () => {
+    // Log into whichever provider is currently active/selected (e.g.
+    // github-copilot, openai-codex); the server defaults to Copilot if unset.
+    const provider = get().config?.provider || undefined;
     set({
       oauthPending: true,
       error: null,
@@ -214,7 +217,8 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
       oauthVerificationUri: null,
     });
     try {
-      const { userCode, verificationUri, interval } = await startOAuthLogin();
+      const { userCode, verificationUri, interval } =
+        await startOAuthLogin(provider);
       set({ oauthUserCode: userCode, oauthVerificationUri: verificationUri });
 
       // Open the verification URL in a new tab
@@ -238,7 +242,7 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
         }
 
         try {
-          const result = await pollOAuthLogin();
+          const result = await pollOAuthLogin(provider);
           if (result.status === 'complete') {
             set({
               oauthPending: false,
@@ -295,9 +299,10 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
   },
 
   logoutOAuth: async () => {
+    const provider = get().config?.provider || undefined;
     set({ error: null });
     try {
-      await logoutOAuth();
+      await logoutOAuth(provider);
       // Refresh config to reflect unauthenticated state
       const config = await getLLMConfig();
       set({ config });
