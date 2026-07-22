@@ -147,8 +147,7 @@ export const LLMSettings: React.FC = () => {
     setAzureApiVersion(llmConfig?.apiVersion ?? '');
   }, [isAzure, llmConfig?.model, llmConfig?.apiVersion]);
 
-  // Surface store errors as persistent toasts: a provider/login failure
-  // (e.g. a transient GitHub 502 during the OAuth token exchange) is
+  // Surface store errors as persistent toasts: a provider/login failure is
   // actionable, so it must stay on screen with a × until the user
   // dismisses it rather than fading after a few seconds.
   useEffect(() => {
@@ -387,25 +386,28 @@ export const LLMSettings: React.FC = () => {
                 <Copy />
               </Button>
             </div>
-            {oauthVerificationUri && (
-              <p className="text-fg-muted text-[11px] leading-snug">
-                {t('settings.orVisit')}{' '}
-                <a
-                  href={oauthVerificationUri}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-info underline underline-offset-2"
-                >
-                  {oauthVerificationUri}
-                </a>
-              </p>
-            )}
-            <div className="flex justify-end">
+            <div className="flex items-center justify-between gap-3">
+              {oauthVerificationUri ? (
+                <p className="text-fg-muted min-w-0 text-[11px] leading-snug">
+                  {t('settings.orVisit')}{' '}
+                  <a
+                    href={oauthVerificationUri}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-info underline underline-offset-2"
+                  >
+                    {oauthVerificationUri}
+                  </a>
+                </p>
+              ) : (
+                <span />
+              )}
               <Button
                 variant="ghost"
                 tone="neutral"
                 size="sm"
                 onClick={cancelOAuth}
+                className="shrink-0"
               >
                 {t('actions.cancel')}
               </Button>
