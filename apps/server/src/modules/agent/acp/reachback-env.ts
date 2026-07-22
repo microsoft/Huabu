@@ -7,8 +7,8 @@
  * change-review activity to the right conversation:
  *
  *   - `HUABU_RFS_URL`   — `http://127.0.0.1:<hostPort>/api/rfs/<canvasId>`,
- *                          the canvas-scoped RFS base (download / upload /
- *                          agent / skill). Bakes the canvasId into the path
+ *                          the canvas-scoped RFS base (capabilities / query /
+ *                          download / upload / execute / agent / skill). Bakes the canvasId into the path
  *                          so the agent needs no separate canvas variable.
  *   - `HUABU_THREAD_ID` — the ACP thread this agent serves, so reachback
  *                          `/execute` calls land on this conversation's

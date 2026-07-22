@@ -108,6 +108,8 @@ describe('GET /api/rfs/:canvasId/skill', () => {
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-type']).toMatch(/text\/markdown/);
       expect(res.body).toMatch(/Accessing this Huabu Space/i);
+      expect(res.body).toMatch(/POST execute/);
+      expect(res.body).toMatch(/work without an internal model provider/i);
     } finally {
       await app.close();
     }
@@ -261,9 +263,30 @@ describe('POST /api/rfs/:canvasId/query', () => {
 
 describe('POST /api/rfs/:canvasId/execute', () => {
   it('creates and connects nodes while returning generated IDs and revisions', async () => {
-    seedNote('c1', 'node-1', 'Alpha', 'existing body');
+    const anchorFile = seedNote('c1', 'node-1', 'Alpha', 'existing body');
+    agentMocks.runAgent.mockImplementation(() => {
+      throw new Error('Internal model provider is not configured');
+    });
     const app = await buildApp();
     try {
+      const anchorQuery = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'INSPECT_NODES', ids: ['node-1'] },
+      });
+      expect(anchorQuery.statusCode).toBe(200);
+      expect(anchorQuery.json()).toMatchObject({
+        result: { nodes: [{ id: 'node-1', filename: anchorFile }] },
+      });
+
+      const anchorDownload = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/download/${anchorFile}`,
+      });
+      expect(anchorDownload.statusCode).toBe(200);
+      expect(anchorDownload.body).toContain('existing body');
+
       const createResponse = await app.inject({
         method: 'POST',
         url: '/rfs/c1/execute',
@@ -321,6 +344,24 @@ describe('POST /api/rfs/:canvasId/execute', () => {
         source: 'node-1',
         target: createdNodeId,
       });
+
+      const verification = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          type: 'INSPECT_EDGES',
+          between: { a: 'node-1', b: createdNodeId },
+        },
+      });
+      expect(verification.statusCode).toBe(200);
+      expect(verification.json()).toMatchObject({
+        result: {
+          count: 1,
+          edges: [{ source: 'node-1', target: createdNodeId }],
+        },
+      });
+      expect(agentMocks.runAgent).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

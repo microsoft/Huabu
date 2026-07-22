@@ -1,104 +1,165 @@
 # Accessing this Huabu Space
 
-You are working with a **Huabu** Space (an infinite visual Space of _nodes_: notes, images, PDFs, sketches, questions, …). You do **not** see the Space directly. You reach into it over plain HTTP through the **Remote File System (RFS)** — no custom tool or SDK required, just `curl` (or `wget`, `Invoke-RestMethod`, `python requests`, Node `fetch`).
+You are working with a **Huabu** Space, an infinite visual surface of notes, images, PDFs, sketches, questions, frames, and links. You do not see the Space directly. Use plain HTTP with `curl`, `wget`, `Invoke-RestMethod`, Python `requests`, or Node `fetch`; no custom tool or SDK is required.
 
-Two environment variables are already set for you:
+Two environment variables are already set:
 
-- `HUABU_RFS_URL` — the base URL for this Space, e.g. `http://host:port/api/rfs/<canvasId>` (no trailing slash).
-- `AGENTLET_TOKEN` — your bearer token. Send it on **every** request: `Authorization: Bearer $AGENTLET_TOKEN`.
-
-There are two ways to work:
-
-1. **RFS files** — download/upload bytes by path.
-2. **ask-agent** — talk to the Space's own internal agent for anything structural (creating/moving/linking nodes, layout, snapshots, discovery).
-
----
-
-## 1. Download a file — `GET download/<path>`
-
-Fetch any file under the Space by its path. Node content lives at `nodes/<label>.md`; you are handed the exact `file` path for each selected node — pass it straight through (URL-encode spaces / unicode).
-
-**Always download to a file with `-o` and then read it as needed** — don't let response bodies stream straight into your context. Node/artifact contents can be large, and dumping them to stdout wastes your context window; save to disk, then open only the parts you need.
-
-For a node file, the response carries the node's metadata in headers: `X-Huabu-Node-Id`, `X-Huabu-Node-Type`, `X-Huabu-Node-Label` (percent-encoded UTF-8 — URL-decode it), `X-Huabu-Src`, `X-Huabu-Locked`, and `X-Huabu-Node-Edges` (a JSON string `{"parents":[...],"children":[...]}` of neighbour node ids). To save the body **and** see those headers in one command, dump headers with `-D` while writing the body with `-o`:
+- `HUABU_RFS_URL` — the base URL for this Space, with no trailing slash.
+- `AGENTLET_TOKEN` — the bearer token for every request.
 
 ```bash
 AUTH="Authorization: Bearer $AGENTLET_TOKEN"
-curl -fsS -H "$AUTH" -D - -o note.md "$HUABU_RFS_URL/download/nodes/My%20note.md"
-# headers → stdout, body → note.md. Use -D /dev/stderr to keep stdout clean,
-# or add | grep -i '^x-huabu' to see only the metadata.
 ```
 
-You're supposed to **never** guess node paths -- the file path is supposed to be provided in the user instructions and the context. In some legacy cases, you may see some artifacts only with a filename like `src: artifact_ab12cd.png` (no directory). In that case, you can fetch it with `GET download/artifacts/artifact_ab12cd.png`. Except for that, you should **never** assume any directory structure or naming convention. IF you need to discover which files matter, ask the agent (see below -- _Talk to the Space agent_).
+Prefer deterministic direct operations:
 
-There is **no directory listing** — to discover which files matter, ask the agent (below).
+1. Discover supported queries and commands through `capabilities`.
+2. Use `query` for graph, geometry, and content search.
+3. Use `download` for full node or artifact bytes.
+4. Use `execute` for validated Space commands.
+5. Use `agent` only when you deliberately want the optional internal Huabu agent to interpret an open-ended request.
 
-### Skip re-downloading unchanged nodes — `ETag`
+## 1. Discover operations
 
-Each node download returns an `ETag` (its content revision; also shown as `rev="…"` beside each node in your context). Remember it and send it back as `If-None-Match` next time: unchanged → `304 Not Modified` (empty body — reuse your copy); changed → `200` with a new `ETag`.
+Fetch the compact handshake once:
 
 ```bash
-curl -fsS -H "$AUTH" -H 'If-None-Match: "3d7e"' -D - -o note.md \
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/capabilities"
+```
+
+It reports protocol version, effective read/write permissions, limits, execution semantics, supported query and command types, and links. Load a detailed schema only for the operation you are about to use:
+
+```bash
+curl -fsS -H "$AUTH" \
+  "$HUABU_RFS_URL/capabilities/queries/INSPECT_NODES"
+
+curl -fsS -H "$AUTH" \
+  "$HUABU_RFS_URL/capabilities/commands/CREATE_NODES"
+```
+
+Do not guess fields or duplicate the schemas locally. Re-fetch the relevant capability when validation fails or the protocol changes.
+
+## 2. Query the Space
+
+`POST query` accepts one canonical query object. Keep queries bounded. Inspect responses include `count`, `total`, and `truncated`; search responses include `count` and `truncated`. Narrow the predicate or raise the limit within the advertised maximum when results truncate.
+
+```bash
+cat > /tmp/huabu-query.json <<'JSON'
+{
+  "type": "INSPECT_NODES",
+  "ids": ["node-123"]
+}
+JSON
+
+curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  --data-binary @/tmp/huabu-query.json "$HUABU_RFS_URL/query"
+```
+
+Use:
+
+- `GET_SPACE_OUTLINE` when whole-Space orientation is necessary; prefer an anchor-specific inspect query when selected-node context already identifies the relevant area.
+- `INSPECT_NODES` for identity, type, parent, geometry, proximity, cluster, or topology predicates.
+- `INSPECT_EDGES` for endpoints and complete edge style.
+- `SEARCH` for bounded literal search across labels, metadata, node bodies, and question conversations.
+
+Query results point to node files. Large bodies and artifacts remain out of band; download only the exact files you need.
+
+## 3. Download files
+
+Selected-node context supplies an exact `file` path. Pass that path through instead of guessing a filename. There is no directory-listing endpoint.
+
+Always write bodies to a file rather than dumping large content into your context. For a node, save response headers too: `X-Huabu-Node-Id`, `X-Huabu-Node-Type`, `X-Huabu-Node-Label`, `X-Huabu-Src`, `X-Huabu-Locked`, `X-Huabu-Node-Edges`, and `ETag`.
+
+```bash
+curl -fsS -H "$AUTH" -D /tmp/huabu-headers.txt -o /tmp/node.md \
   "$HUABU_RFS_URL/download/nodes/My%20note.md"
-# 304 → still current, skip re-reading;  200 → changed, re-read.
 ```
 
-## 2. Upload a file — `POST upload/<file>`
-
-Stage a payload the internal agent can consume (e.g. content for a new node). Uploads go to a shared scratch area — pick a **descriptive, unique** name. Re-using an existing name is rejected (409); choose another.
+The `ETag` is the node's authored-content revision. Cache it and use `If-None-Match` to avoid re-reading unchanged content. Write a conditional response to a temporary file so a `304` cannot replace your cached body with an empty file:
 
 ```bash
-curl -fsS -H "$AUTH" --data-binary @./summary.md \
-  "$HUABU_RFS_URL/upload/summary.md"
-# → 201 { "path": "upload/summary.md", "size": 1234 }
+STATUS="$(curl -sS -H "$AUTH" -H 'If-None-Match: "3d7e"' \
+  -D /tmp/huabu-headers.txt -o /tmp/node.next -w '%{http_code}' \
+  "$HUABU_RFS_URL/download/nodes/My%20note.md")"
+[ "$STATUS" = 200 ] && mv /tmp/node.next /tmp/node.md
+[ "$STATUS" = 304 ] && rm -f /tmp/node.next
 ```
 
-Remove a staged file with `DELETE`:
+`304 Not Modified` means your cached copy is current. `200` returns the new body and revision. Treat any other status as an error rather than using the temporary body.
+
+## 4. Upload payloads
+
+Stage bytes under a descriptive, unique name. Uploads are inert until an `execute` command references their returned path. Existing names are never overwritten; a collision returns `409`.
 
 ```bash
-curl -fsS -X DELETE -H "$AUTH" "$HUABU_RFS_URL/upload/summary.md"
+curl -fsS -H "$AUTH" --data-binary @./diagram.png \
+  "$HUABU_RFS_URL/upload/diagram.png"
 ```
 
-## 3. Talk to the Space agent — `POST agent`
+The response is `{ "path": "upload/diagram.png", "size": ... }`. Remove an unused staged file with:
 
-For anything the Space needs to _understand_ — creating nodes, moving/linking them, laying out frames, rendering sketches, or finding relevant nodes — send a natural-language prompt to the internal agent. It owns all Space mutations.
+```bash
+curl -fsS -X DELETE -H "$AUTH" \
+  "$HUABU_RFS_URL/upload/diagram.png"
+```
 
-The response is **always** an event stream (`text/event-stream`): comment heartbeats (`: ping`) keep the connection alive during long turns, `: threadId <id>` identifies the live conversation, and the final answer arrives as plain text inside `data:` frames.
+## 5. Execute Space commands
+
+`POST execute` accepts `{ "runId"?: string, "commands": [...] }`. The server owns canvas scope, agent origin, authorship metadata, and generated node/edge IDs; do not send them.
+
+Load the command capability before composing unfamiliar fields. Confirm with the user before destructive, broad, or difficult-to-reverse changes.
+
+```bash
+cat > /tmp/huabu-execute.json <<'JSON'
+{
+  "runId": "create-summary",
+  "commands": [
+    {
+      "type": "CREATE_NODES",
+      "nodes": [
+        {
+          "nodeType": "note",
+          "data": {
+            "label": "Summary",
+            "content": "# Summary\n\nDirectly created through Huabu HTTP."
+          },
+          "position": { "x": 400, "y": 240 }
+        }
+      ]
+    }
+  ]
+}
+JSON
+
+curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  --data-binary @/tmp/huabu-execute.json "$HUABU_RFS_URL/execute"
+```
+
+Commands run in order, failures do not roll back accepted commands, and an accepted subset commits once. Always inspect every entry in `results`; do not infer success from HTTP 200 alone. Read generated node IDs from `results[].nodes` and generated edge IDs from `results[].edges`.
+
+A command cannot refer to a server-assigned ID before you receive it. Create first, read the generated ID, then connect or reparent it in a follow-up request.
+
+For a `MERGE_NODE_DATA` patch that changes `content`, first download the node and copy its unquoted `ETag` into `expectRev`. A missing or stale revision produces an HTTP 200 business result with `applied: false`, `reason: "conflict"`, and a structured conflict. Re-download, reconcile, and submit a new request.
+
+`runId` is tracing metadata, not an idempotency key. After a timeout or dropped connection, never blindly retry a mutation: query the Space, reconcile the observed state, then decide whether another command is needed.
+
+The response includes version transition, projected commands, command results, generated IDs, affected IDs, and new revisions. It intentionally excludes Web UI deltas and internal change-review records.
+
+## 6. Optional internal agent
+
+`POST agent` is optional. Direct `query`, `download`, `upload`, and `execute` work without an internal model provider. Use the internal agent only for an intentionally open-ended task where model interpretation is valuable.
+
+The response is an SSE stream. Omit `X-Huabu-Thread-Id` to start a live conversation; return the emitted thread ID to continue it. Continuation does not survive a closed handle or Huabu restart.
 
 ```bash
 curl -N -H "$AUTH" -H "Content-Type: text/plain" \
-  --data-binary @./prompt.txt "$HUABU_RFS_URL/agent" \
-  | tee /tmp/huabu-agent.sse
-
-THREAD_ID="$(sed -n 's/^: threadId //p' /tmp/huabu-agent.sse | head -1)"
-sed -n 's/^data: //p' /tmp/huabu-agent.sse
+  --data-binary @./prompt.txt "$HUABU_RFS_URL/agent"
 ```
 
-Continue the same live conversation by returning that ID:
+## Error handling
 
-```bash
-curl -N -H "$AUTH" -H "Content-Type: text/plain" \
-  -H "X-Huabu-Thread-Id: $THREAD_ID" \
-  --data-binary @./follow-up.txt "$HUABU_RFS_URL/agent"
-```
-
-Request headers:
-
-- `X-Huabu-Thread-Id` — continue the live conversation returned by a prior call; omit it to create a new conversation.
-- `X-Huabu-Event-Mode` — `final` (default) returns only the final answer plus protocol comments; `all` also returns structured intermediate events.
-- `X-Huabu-Heartbeat-Sec` — heartbeat cadence from `5` to `30` seconds (default `15`).
-
-Typical asks:
-
-- "Create a `note` from `upload/summary.md`, place it near `node-123`, and link `node-123` → the new node."
-- "Which node files relate to the authentication design?" → returns concrete `file` paths you can then `download`.
-- "Render the sketches around `node-123` as PNGs." → the agent writes them to `artifacts/`; download each with `GET download/artifacts/<key>.png`.
-
----
-
-## Notes
-
-- **Auth every request.** Missing/invalid bearer → `401`.
-- **Errors** use `{ "message": ... }`; on failure the message includes a ready-to-run command to re-fetch this guide.
-- **Continuation is live-only.** If Huabu restarts or the handle is closed, start a new conversation by omitting `X-Huabu-Thread-Id`.
-- **Snapshots / vision:** sketch and image nodes are not readable as text — ask the agent to render them, then download the PNG.
+- Authenticate every request; missing or invalid bearer credentials return `401`.
+- Validation and transport errors use `{ "message": ..., "code"?: ... }`.
+- HTTP 200 execution responses may still contain rejected commands or content conflicts.
+- Error messages include a command that reloads this guide.
+- Keep full content in downloaded files; use bounded query metadata to decide what to read.

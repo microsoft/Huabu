@@ -70,32 +70,32 @@ docs/
 
 ### Active
 
-| Doc | Status | Summary |
-|---|---|---|
-| [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md) | In-Progress | Read/write revision freshness across agent and web paths. |
-| [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md) | Proposed | Canvas checkpoint and restoration design. |
-| [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md) | In-Progress | Roadmap from multi-agent sync to multi-user co-editing. |
-| [content-before-ai-design.md](./proposals/content-before-ai-design.md) | Needs review | Block-level and inline authorship provenance. |
-| [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md) | Draft | Follow-up credential storage hardening. |
-| [direct-space-operations.md](./proposals/direct-space-operations.md) | Planning | #348 deterministic RFS query and mutation operations for external agents. |
-| [headless-executor-plan.md](./proposals/headless-executor-plan.md) | Partly shipped | Server-side headless canvas executor and structure/content sync. |
-| [managed-acp-harness.md](./proposals/managed-acp-harness.md) | Draft | Resource-first Agent Team Profile compilation. |
-| [managed-agent-teams.md](./proposals/managed-agent-teams.md) | In-Progress | Huabu-managed discovery, configuration, preparation, and runtime. |
-| [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md) | In-Progress | Sediment-owned Milkdown toolbar and semantic editor commands. |
-| [model-role-routing.md](./proposals/model-role-routing.md) | Proposed | Model selection by runtime role. |
+| Doc                                                                                                | Status         | Summary                                                                   |
+| -------------------------------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------- |
+| [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md)                   | In-Progress    | Read/write revision freshness across agent and web paths.                 |
+| [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                 | Proposed       | Canvas checkpoint and restoration design.                                 |
+| [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                           | In-Progress    | Roadmap from multi-agent sync to multi-user co-editing.                   |
+| [content-before-ai-design.md](./proposals/content-before-ai-design.md)                             | Needs review   | Block-level and inline authorship provenance.                             |
+| [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md) | Draft          | Follow-up credential storage hardening.                                   |
+| [direct-space-operations.md](./proposals/direct-space-operations.md)                               | In-Progress    | #348 deterministic RFS query and mutation operations for external agents. |
+| [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                 | Partly shipped | Server-side headless canvas executor and structure/content sync.          |
+| [managed-acp-harness.md](./proposals/managed-acp-harness.md)                                       | Draft          | Resource-first Agent Team Profile compilation.                            |
+| [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.         |
+| [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Sediment-owned Milkdown toolbar and semantic editor commands.             |
+| [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                          |
 
 ### Shipped
 
-| Doc | Summary |
-|---|---|
-| [agent-reachback-rfs.md](./proposals/agent-reachback-rfs.md) | Canvas-scoped RFS file plane, ask-agent control plane, and skill bootstrap. |
-| [agenetes-agentlet-gateway-consolidation.md](./proposals/agenetes-agentlet-gateway-consolidation.md) | Agenetes-owned stateless Agentlet Gateway and ACP placement. |
-| [agenetes-thread-rehydration-and-forking.md](./proposals/agenetes-thread-rehydration-and-forking.md) | Durable-thread recovery and driver-owned rehydration. |
-| [agent-request-render-resolution.md](./proposals/agent-request-render-resolution.md) | Generic agent submission and input boundary. |
-| [layered-architecture.md](./proposals/layered-architecture.md) | Interaction-, protocol-, and task-driven architecture layers. |
-| [node-write-unification-plan.md](./proposals/node-write-unification-plan.md) | Unified authored-content persistence and revision handling. |
-| [pi-harness-driver-refactor-plan.md](./proposals/pi-harness-driver-refactor-plan.md) | Agenetes harness driver boundary. |
-| [unified-external-agent-settings.md](./proposals/unified-external-agent-settings.md) | Unified command-backed and manifest-backed Agent Profiles. |
+| Doc                                                                                                  | Summary                                                                     |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| [agent-reachback-rfs.md](./proposals/agent-reachback-rfs.md)                                         | Canvas-scoped RFS file plane, ask-agent control plane, and skill bootstrap. |
+| [agenetes-agentlet-gateway-consolidation.md](./proposals/agenetes-agentlet-gateway-consolidation.md) | Agenetes-owned stateless Agentlet Gateway and ACP placement.                |
+| [agenetes-thread-rehydration-and-forking.md](./proposals/agenetes-thread-rehydration-and-forking.md) | Durable-thread recovery and driver-owned rehydration.                       |
+| [agent-request-render-resolution.md](./proposals/agent-request-render-resolution.md)                 | Generic agent submission and input boundary.                                |
+| [layered-architecture.md](./proposals/layered-architecture.md)                                       | Interaction-, protocol-, and task-driven architecture layers.               |
+| [node-write-unification-plan.md](./proposals/node-write-unification-plan.md)                         | Unified authored-content persistence and revision handling.                 |
+| [pi-harness-driver-refactor-plan.md](./proposals/pi-harness-driver-refactor-plan.md)                 | Agenetes harness driver boundary.                                           |
+| [unified-external-agent-settings.md](./proposals/unified-external-agent-settings.md)                 | Unified command-backed and manifest-backed Agent Profiles.                  |
 
 When a proposal ships, set `Status: Shipped`, record the merge PR or commit, update the corresponding architecture document, and retain the proposal's stable path.
 
@@ -105,8 +105,8 @@ When a proposal ships, set `Status: Shipped`, record the merge PR or commit, upd
 
 Backlog documents are preserved discussion material, not approved implementation guidance.
 
-| Doc | Summary |
-|---|---|
+| Doc                                                  | Summary                                                             |
+| ---------------------------------------------------- | ------------------------------------------------------------------- |
 | [huabu-cli-design.md](./backlog/huabu-cli-design.md) | Early CLI/MCP exploration whose CLI-first assumptions predate #348. |
 
 ---
@@ -115,11 +115,11 @@ Backlog documents are preserved discussion material, not approved implementation
 
 Archive contains only abandoned or superseded designs.
 
-| Doc | Status | Summary |
-|---|---|---|
+| Doc                                                                          | Status     | Summary                                                                                         |
+| ---------------------------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------- |
 | [acp-eventstore-refactor-plan.md](./archive/acp-eventstore-refactor-plan.md) | Superseded | Earlier EventStore adaptation replaced by Gateway-owned live buffering and Agenetes durability. |
-| [agent-reachback.md](./archive/agent-reachback.md) | Superseded | Removed HRT `.mjs` node-CRUD reachback design. |
-| [agentlet-upgrade-plan.md](./archive/agentlet-upgrade-plan.md) | Superseded | Earlier split-hello migration absorbed by the Gateway consolidation. |
+| [agent-reachback.md](./archive/agent-reachback.md)                           | Superseded | Removed HRT `.mjs` node-CRUD reachback design.                                                  |
+| [agentlet-upgrade-plan.md](./archive/agentlet-upgrade-plan.md)               | Superseded | Earlier split-hello migration absorbed by the Gateway consolidation.                            |
 
 ---
 

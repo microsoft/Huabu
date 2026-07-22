@@ -71,6 +71,8 @@ The internal agent owns current graph discovery and mutation. It resolves spatia
 
 Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent environment. The external system prompt contains only the bootstrap instruction; the detailed procedural guide is loaded on demand from `GET /skill`.
 
+The guide is direct-first: an external agent can discover, query, download, upload, execute, and verify without invoking `POST /agent` or configuring an internal model provider. `POST /agent` remains an optional high-level interpretation path.
+
 RFS errors use the normal API error body and include a runnable `/skill` recovery command so a caller can reload the current usage contract after a malformed request.
 
 ## Code entry points
