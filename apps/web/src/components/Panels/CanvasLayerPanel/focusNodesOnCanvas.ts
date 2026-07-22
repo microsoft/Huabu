@@ -1,5 +1,61 @@
 import type { ReactFlowInstance } from '@xyflow/react';
 
+type NodeBounds = { x: number; y: number; width: number; height: number };
+
+/** Resolve bounds even when `onlyRenderVisibleElements` left nodes unmeasured. */
+export const getReliableNodeBounds = (
+  rfInstance: ReactFlowInstance,
+  nodeIds: string[],
+): NodeBounds | null => {
+  if (nodeIds.length === 0) return null;
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const nodeId of nodeIds) {
+    const internal = rfInstance.getInternalNode(nodeId);
+    if (!internal || internal.hidden) continue;
+    const width =
+      internal.measured.width ??
+      internal.width ??
+      internal.initialWidth ??
+      (typeof internal.style?.width === 'number' ? internal.style.width : 0);
+    const height =
+      internal.measured.height ??
+      internal.height ??
+      internal.initialHeight ??
+      (typeof internal.style?.height === 'number' ? internal.style.height : 0);
+    const x = internal.internals.positionAbsolute.x;
+    const y = internal.internals.positionAbsolute.y;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x + width > maxX) maxX = x + width;
+    if (y + height > maxY) maxY = y + height;
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+};
+
+/** Fit a set of nodes using reliable bounds rather than React Flow measurements. */
+export const fitNodesOnCanvas = (
+  rfInstance: ReactFlowInstance,
+  nodeIds: string[],
+  padding = 0.15,
+): Promise<boolean> => {
+  const bounds = getReliableNodeBounds(rfInstance, nodeIds);
+  if (!bounds) return Promise.resolve(false);
+  return rfInstance.fitBounds(bounds, { padding });
+};
+
 /**
  * Re-center the canvas viewport on a set of node ids.
  *
@@ -24,38 +80,11 @@ export const focusNodesOnCanvas = (
   nodeIds: string[],
   duration = 800,
 ): void => {
-  if (nodeIds.length === 0) return;
+  const bounds = getReliableNodeBounds(rfInstance, nodeIds);
+  if (!bounds) return;
 
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-
-  for (const nid of nodeIds) {
-    const internal = rfInstance.getInternalNode(nid);
-    if (!internal || internal.hidden) continue;
-    const w =
-      internal.measured.width ??
-      internal.width ??
-      internal.initialWidth ??
-      (typeof internal.style?.width === 'number' ? internal.style.width : 0);
-    const h =
-      internal.measured.height ??
-      internal.height ??
-      internal.initialHeight ??
-      (typeof internal.style?.height === 'number' ? internal.style.height : 0);
-    const ax = internal.internals.positionAbsolute.x;
-    const ay = internal.internals.positionAbsolute.y;
-    if (ax < minX) minX = ax;
-    if (ay < minY) minY = ay;
-    if (ax + w > maxX) maxX = ax + w;
-    if (ay + h > maxY) maxY = ay + h;
-  }
-
-  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
-
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
   const zoom = Math.min(rfInstance.getZoom(), 1);
   void rfInstance.setCenter(cx, cy, { duration, zoom });
 };

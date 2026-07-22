@@ -23,6 +23,10 @@
     "lock": "锁定",
     "unlock": "解锁"
   },
+  "canvasControls": {
+    "resetZoom": "重置缩放至 100%",
+    "zoomAria": "画布缩放 {{percentage}}%。重置至 100%"
+  },
   "navigation": {
     "backHome": "返回首页",
     "home": "首页",

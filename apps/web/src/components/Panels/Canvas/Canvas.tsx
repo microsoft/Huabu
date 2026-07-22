@@ -2,9 +2,12 @@ import {
   ReactFlow,
   Background,
   Controls,
+  ControlButton,
   MiniMap,
   ConnectionMode,
   SelectionMode,
+  useReactFlow,
+  useStore,
   type ReactFlowInstance,
   type Connection,
   type Edge,
@@ -18,6 +21,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 import '@xyflow/react/dist/style.css';
 
 import {
@@ -27,6 +31,7 @@ import {
 } from '@sediment/shared/canvas-engine';
 
 import { resolveArtifactUrl } from '@/api/artifact';
+import { Loading } from '@/components/Common/Loading';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
@@ -61,6 +66,7 @@ import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { SelectionOutlines } from './SelectionOutlines.tsx';
 import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
 import { StructuredDropOverlay } from './StructuredDropOverlay.tsx';
+import { useInitialCanvasViewport } from './useInitialCanvasViewport.ts';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
@@ -82,7 +88,6 @@ import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
-import type { CanvasViewport } from '@sediment/shared';
 import type {
   FrameFitResult,
   NestableNode,
@@ -219,6 +224,62 @@ const SelectionAutoPan: React.FC<{
   return null;
 };
 
+/** Displays the live canvas zoom and resets the viewport to 100% on click. */
+const CanvasZoomLevel: React.FC = () => {
+  const { t } = useTranslation();
+  const { zoomTo } = useReactFlow();
+  const zoom = useStore((state) => state.transform[2]);
+  const percentage = Math.round(zoom * 100);
+  const multiplier = Math.round(zoom * 10) / 10;
+
+  return (
+    <ControlButton
+      className="w-6.5! p-0! text-[10px]! leading-none font-medium! tabular-nums"
+      title={t('canvasControls.resetZoom')}
+      aria-label={t('canvasControls.zoomAria', { percentage })}
+      onClick={() => void zoomTo(1, { duration: 200 })}
+    >
+      {multiplier}×
+    </ControlButton>
+  );
+};
+
+const ReactFlowLockIcon: React.FC = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25 32">
+    <path d="M21.333 10.667H19.81V7.619C19.81 3.429 16.38 0 12.19 0 8 0 4.571 3.429 4.571 7.619v3.048H3.048A3.056 3.056 0 000 13.714v15.238A3.056 3.056 0 003.048 32h18.285a3.056 3.056 0 003.048-3.048V13.714a3.056 3.056 0 00-3.048-3.047zM12.19 24.533a3.056 3.056 0 01-3.047-3.047 3.056 3.056 0 013.047-3.048 3.056 3.056 0 013.048 3.048 3.056 3.056 0 01-3.048 3.047zm4.724-13.866H7.467V7.619c0-2.59 2.133-4.724 4.723-4.724 2.591 0 4.724 2.133 4.724 4.724v3.048z" />
+  </svg>
+);
+
+const ReactFlowUnlockIcon: React.FC = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 25 32">
+    <path d="M21.333 10.667H19.81V7.619C19.81 3.429 16.38 0 12.19 0c-4.114 1.828-1.37 2.133.305 2.438 1.676.305 4.42 2.59 4.42 5.181v3.048H3.047A3.056 3.056 0 000 13.714v15.238A3.056 3.056 0 003.048 32h18.285a3.056 3.056 0 003.048-3.048V13.714a3.056 3.056 0 00-3.048-3.047zM12.19 24.533a3.056 3.056 0 01-3.047-3.047 3.056 3.056 0 013.047-3.048 3.056 3.056 0 013.048 3.048 3.056 3.056 0 01-3.048 3.047z" />
+  </svg>
+);
+
+/**
+ * Mirrors React Flow's native interactivity toggle in a custom position.
+ *
+ * Driven by a single lifted `locked` state rather than mutating the React
+ * Flow store directly: `nodesDraggable` / `elementsSelectable` are controlled
+ * props on `<ReactFlow>`, so a direct store mutation would be re-applied (and
+ * silently reverted) on the next render whenever the tool-derived prop value
+ * changes. Gating both the props and this control from the same state keeps
+ * the lock authoritative.
+ */
+const CanvasInteractivityControl: React.FC<{
+  locked: boolean;
+  onToggle: () => void;
+}> = ({ locked, onToggle }) => {
+  const { t } = useTranslation();
+  const label = locked ? t('actions.unlock') : t('actions.lock');
+
+  return (
+    <ControlButton title={label} aria-label={label} onClick={onToggle}>
+      {locked ? <ReactFlowLockIcon /> : <ReactFlowUnlockIcon />}
+    </ControlButton>
+  );
+};
+
 type CanvasProps = {
   shortcutsDisabled?: boolean;
 };
@@ -287,6 +348,17 @@ export const Canvas: React.FC<CanvasProps> = ({
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const {
+    defaultViewport,
+    fitInitialViewport,
+    isPending: isInitialViewportPending,
+  } = useInitialCanvasViewport();
+
+  // When locked, the user can neither drag, connect, nor select elements.
+  // Gating the controlled `<ReactFlow>` props from this single state (rather
+  // than mutating the React Flow store) keeps the lock from being reverted
+  // when a tool-derived prop value changes.
+  const [interactivityLocked, setInteractivityLocked] = useState(false);
 
   // Keyboard shortcuts + paste handler (extracted to hook).
   // Also manages tool state (select/pan) and Space-key temporary pan.
@@ -656,33 +728,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => clearTimeout(timer);
   }, [expandedNodeId, expandMode]);
 
-  // Snapshot the persisted viewport (or decide to fit) at the moment
-  // this component mounts so React Flow's *first* render uses it
-  // directly via the `defaultViewport` / `fitView` props. Eliminates
-  // the visible jump from the default `(0, 0, 1)` viewport to the
-  // restored value that happened when we used to call `setViewport`
-  // after mount.
-  //
-  // `CanvasPage` only mounts `<Canvas>` once the URL canvas matches
-  // the store and `isLoading` is `false`, so reading the store
-  // imperatively here is always safe — the snapshot is taken exactly
-  // once per canvas load and never invalidated by later pan/zoom or
-  // node edits (`defaultViewport`/`fitView` only take effect on the
-  // React Flow instance's first mount anyway).
-  const initialViewportProps = useMemo<{
-    defaultViewport?: CanvasViewport;
-    fitView?: boolean;
-    fitViewOptions?: { padding: number };
-  }>(() => {
-    const { viewport, nodes: snapshotNodes } = useCanvasStore.getState();
-    if (viewport) return { defaultViewport: viewport };
-    if (snapshotNodes.length > 0) {
-      return { fitView: true, fitViewOptions: { padding: 0.15 } };
-    }
-    return {};
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- snapshot on mount only; `canvasId` is here purely to document intent.
-  }, [canvasId]);
-
   useEffect(() => {
     return () => {
       rfInstanceRef.current = null;
@@ -709,6 +754,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       ref={wrapperRef}
       data-canvas-root=""
       data-search-scope="canvas"
+      aria-busy={isInitialViewportPending}
       className={clsx(
         'bg-bg-default relative flex h-full w-full flex-col',
         pendingNodeType === 'note' && 'canvas-pending-note',
@@ -910,7 +956,8 @@ export const Canvas: React.FC<CanvasProps> = ({
       }}
     >
       <ReactFlow
-        {...initialViewportProps}
+        className={isInitialViewportPending ? 'invisible' : undefined}
+        defaultViewport={defaultViewport}
         deleteKeyCode={null}
         nodes={displayNodes}
         edges={displayEdges}
@@ -928,6 +975,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         onInit={(instance) => {
           rfInstanceRef.current = instance;
           setRfInstance(instance);
+          fitInitialViewport(instance);
         }}
         onMoveEnd={(_event, viewport) => {
           // Mirror pan/zoom into localStorage (per canvas) so browser and
@@ -968,8 +1016,11 @@ export const Canvas: React.FC<CanvasProps> = ({
         selectionMode={SelectionMode.Partial}
         onSelectionStart={handleSelectionStart}
         onSelectionEnd={handleSelectionEnd}
-        nodesDraggable={!pendingNodeType && tool !== 'lasso'}
-        elementsSelectable={!pendingNodeType}
+        nodesDraggable={
+          !interactivityLocked && !pendingNodeType && tool !== 'lasso'
+        }
+        nodesConnectable={!interactivityLocked}
+        elementsSelectable={!interactivityLocked && !pendingNodeType}
         panOnScroll={!isNotMouse}
         zoomOnScroll={true}
         zoomOnPinch={true}
@@ -1007,7 +1058,13 @@ export const Canvas: React.FC<CanvasProps> = ({
         <IntentPopover />
         <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
 
-        <Controls position="bottom-left" />
+        <Controls position="bottom-left" showInteractive={false}>
+          <CanvasZoomLevel />
+          <CanvasInteractivityControl
+            locked={interactivityLocked}
+            onToggle={() => setInteractivityLocked((prev) => !prev)}
+          />
+        </Controls>
         {minimapEnabled && (
           <MiniMap
             pannable
@@ -1025,6 +1082,15 @@ export const Canvas: React.FC<CanvasProps> = ({
         {/* Sketch intent processing overlay — lives in flow space so it pans/zooms with the canvas */}
         <SketchProcessingOverlay />
       </ReactFlow>
+
+      {isInitialViewportPending && (
+        <Loading
+          variant="brand"
+          layout="overlay"
+          size="md"
+          className="bg-bg-default z-100"
+        />
+      )}
 
       {lassoPreviewPath && (
         <svg
