@@ -10,8 +10,10 @@ import {
   getModelsForProvider,
   isOpenAIChatModelId,
   mergeOpenAIModels,
+  pickCheapestModel,
 } from './llm.js';
 
+import type { Api, Model } from '@earendil-works/pi-ai';
 import type { LLMModelInfo } from '@sediment/shared';
 
 describe('LLM provider catalog', () => {
@@ -129,6 +131,36 @@ describe('OpenAI live model discovery', () => {
     expect(mergeOpenAIModels(['text-embedding-3-large'], staticModels)).toBe(
       staticModels,
     );
+  });
+});
+
+describe('utility tier cheapest-model selection', () => {
+  const model = (id: string, input: number, output: number) =>
+    ({
+      id,
+      name: id,
+      cost: { input, output, cacheRead: 0, cacheWrite: 0 },
+    }) as unknown as Model<Api>;
+
+  it('picks the lowest combined input + output price', () => {
+    const cheapest = pickCheapestModel([
+      model('flagship', 5, 15),
+      model('mid', 1, 3),
+      model('mini', 0.15, 0.6),
+    ]);
+    expect(cheapest?.id).toBe('mini');
+  });
+
+  it('skips zero/unknown-priced entries so they never win', () => {
+    const cheapest = pickCheapestModel([
+      model('synth', 0, 0),
+      model('real', 2, 6),
+    ]);
+    expect(cheapest?.id).toBe('real');
+  });
+
+  it('returns null when no model has a known positive price', () => {
+    expect(pickCheapestModel([model('a', 0, 0), model('b', 0, 5)])).toBeNull();
   });
 });
 

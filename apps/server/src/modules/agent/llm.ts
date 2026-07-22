@@ -1169,12 +1169,15 @@ function loadUtilityPersistedConfig(): PersistedConfig | null {
 
 /**
  * Get the saved utility-tier configuration. An empty `provider` (the
- * default) means "follow the chat model". `authenticated` reflects whether
- * the chosen provider is usable: for OAuth providers it performs an
- * authoritative credential check (shared with the chat config, so logging
- * in once covers both tiers); for API-key providers it checks the shared
- * per-provider store / env. This lets the Settings UI show whether an
- * inline key is still needed, and never asks OAuth providers for a key.
+ * default) means "auto": background roles run on the cheapest eligible
+ * model in the authenticated chat provider (resolved at call time by
+ * {@link resolveAutoCheapUtility}), falling back to the chat model.
+ * `authenticated` reflects whether the chosen provider is usable: for OAuth
+ * providers it performs an authoritative credential check (shared with the
+ * chat config, so logging in once covers both tiers); for API-key providers
+ * it checks the shared per-provider store / env. This lets the Settings UI
+ * show whether an inline key is still needed, and never asks OAuth
+ * providers for a key.
  */
 export async function getUtilityConfig(): Promise<LLMUtilityConfig> {
   const u = loadPersistedStore().utilityConfig;
@@ -1295,11 +1298,71 @@ export function shouldStepUpForVision(
 }
 
 /**
+ * Pick the cheapest known-priced model from a pi-ai model list, ranked by
+ * combined per-token input + output price. Entries without a positive
+ * input price are skipped so synthesized/zero-priced additions (e.g. the
+ * temporary Codex GPT-5.6 stubs) can't masquerade as "free" and win.
+ * Returns `null` when no priced model is available. Pure over its input so
+ * the ranking can be unit-tested without the registry.
+ */
+export function pickCheapestModel(models: Model<Api>[]): Model<Api> | null {
+  let best: Model<Api> | null = null;
+  let bestPrice = Infinity;
+  for (const m of models) {
+    const inputCost = m.cost?.input ?? 0;
+    const outputCost = m.cost?.output ?? 0;
+    if (inputCost <= 0) continue;
+    const price = inputCost + outputCost;
+    if (price < bestPrice) {
+      bestPrice = price;
+      best = m;
+    }
+  }
+  return best;
+}
+
+/**
+ * When the utility tier is following chat (no explicit utility config),
+ * resolve the cheapest known-priced model within the authenticated chat
+ * provider so lightweight background roles (labeling / summaries /
+ * keywords) don't burn the flagship chat model's per-token rate — the
+ * utility credential is the chat provider's, so this needs no extra auth.
+ *
+ * Returns `null` for non-built-in providers, when no priced model is
+ * available, or when the cheapest already is the active chat model, so the
+ * caller cleanly falls back to the (cached) chat model.
+ */
+function resolveAutoCheapUtility(
+  chatCfg: PersistedConfig,
+): { cfg: PersistedConfig; model: Model<Api> } | null {
+  const providerInfo = getProviderCatalog().find(
+    (p) => p.id === chatCfg.provider,
+  );
+  if (!providerInfo?.builtIn) return null;
+
+  let models: Model<Api>[];
+  try {
+    models = getProviderModels(chatCfg.provider as KnownProvider);
+  } catch {
+    return null;
+  }
+
+  const cheapest = pickCheapestModel(models);
+  if (!cheapest || cheapest.id === chatCfg.model) return null;
+
+  const cfg: PersistedConfig = { ...chatCfg, model: cheapest.id };
+  return { cfg, model: buildModel(cfg) };
+}
+
+/**
  * Resolve `(config, model)` for a role via the two-layer binding:
- * the role's default tier picks chat or utility; utility falls through to
- * chat when unconfigured. A **vision guard** steps a resolved model up to
- * chat when the role may carry an image (`hasImage`) but the model cannot
- * accept image input.
+ * the role's default tier picks chat or utility. Utility resolution order
+ * is **explicit utility model > auto-cheapest in the chat provider > chat
+ * model**: when no utility model is configured, background roles default to
+ * the cheapest eligible model in the authenticated chat provider (see
+ * {@link resolveAutoCheapUtility}) instead of the flagship chat model. A
+ * **vision guard** then steps a resolved model up to chat when the role may
+ * carry an image (`hasImage`) but the model cannot accept image input.
  */
 function resolveForRole(
   role: ModelRole,
@@ -1314,7 +1377,15 @@ function resolveForRole(
   let resolved = chat();
   if (info.defaultTier === 'utility') {
     const utilityCfg = loadUtilityPersistedConfig();
-    if (utilityCfg) resolved = { cfg: utilityCfg, model: getUtilityModel() };
+    if (utilityCfg) {
+      // Explicit utility model wins.
+      resolved = { cfg: utilityCfg, model: getUtilityModel() };
+    } else {
+      // No explicit utility model → auto-pick the cheapest eligible model
+      // in the authenticated chat provider; fall back to the chat model.
+      const autoCheap = resolveAutoCheapUtility(ensureConfig());
+      if (autoCheap) resolved = autoCheap;
+    }
   }
 
   // Vision guard: only relevant when an image is actually being sent.
