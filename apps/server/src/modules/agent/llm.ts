@@ -668,6 +668,14 @@ const OPENAI_NON_CHAT_MODEL_MARKERS = [
 const OPENAI_MODEL_IDS_CACHE_TTL_MS = 5 * 60_000;
 let openAIModelIdsCache: { ids: string[]; expiresAt: number } | null = null;
 let openAIModelIdsRequest: Promise<string[] | null> | null = null;
+/**
+ * Bumped whenever the OpenAI key / baseUrl changes. An in-flight
+ * `/v1/models` fetch started under the previous credential captures the
+ * epoch at launch and, if it no longer matches on completion, neither
+ * repopulates the cache (stale-key ids) nor clears a newer in-flight
+ * request.
+ */
+let openAIModelIdsEpoch = 0;
 
 /** Whether an OpenAI `/v1/models` id is a chat/completion model. */
 export function isOpenAIChatModelId(id: string): boolean {
@@ -728,10 +736,13 @@ async function fetchOpenAIModelIds(): Promise<string[] | null> {
   }
   if (openAIModelIdsRequest) return openAIModelIdsRequest;
 
+  const epoch = openAIModelIdsEpoch;
   openAIModelIdsRequest = fetchOpenAIModelIdsUncached();
   try {
     const ids = await openAIModelIdsRequest;
-    if (ids) {
+    // Drop the result if the credential changed mid-flight — a stale-key
+    // model list must not seed the cache for the new key.
+    if (ids && epoch === openAIModelIdsEpoch) {
       openAIModelIdsCache = {
         ids: [...ids],
         expiresAt: Date.now() + OPENAI_MODEL_IDS_CACHE_TTL_MS,
@@ -739,7 +750,9 @@ async function fetchOpenAIModelIds(): Promise<string[] | null> {
     }
     return ids;
   } finally {
-    openAIModelIdsRequest = null;
+    // Only clear our own request slot; a config change may have already
+    // installed a fresh request for the new credential.
+    if (epoch === openAIModelIdsEpoch) openAIModelIdsRequest = null;
   }
 }
 
@@ -973,6 +986,8 @@ export async function setLLMConfig(
     (update.apiKey !== undefined || update.baseUrl !== undefined)
   ) {
     openAIModelIdsCache = null;
+    openAIModelIdsRequest = null;
+    openAIModelIdsEpoch += 1;
   }
 
   const providerInfo = getProviderCatalog().find(
@@ -1337,8 +1352,9 @@ export function pickCheapestEligibleModel(
  * keywords) don't burn the flagship chat model's per-token rate — the
  * utility credential is the chat provider's, so this needs no extra auth.
  *
- * Returns `null` for non-built-in providers, when no priced model is
- * available, or when the cheapest already is the active chat model, so the
+ * Returns `null` for non-built-in providers, for subscription OAuth providers
+ * without a reliable entitlement source (OpenAI Codex), when no priced model
+ * is available, or when the cheapest already is the active chat model, so the
  * caller cleanly falls back to the (cached) chat model.
  */
 async function resolveAutoCheapUtility(
@@ -1348,6 +1364,19 @@ async function resolveAutoCheapUtility(
     (p) => p.id === chatCfg.provider,
   );
   if (!providerInfo?.builtIn) return null;
+
+  // Subscription-based OAuth providers other than GitHub Copilot (i.e. OpenAI
+  // Codex) expose no reliable per-account entitlement: pi-ai's `getAvailable`
+  // returns their full static catalog (no `filterModels`, no
+  // `availableModelIds` on the credential), and the "cheapest" ranking is
+  // meaningless for a flat-rate subscription. Picking by price would surface
+  // models the ChatGPT plan cannot use (e.g. `gpt-5.3-codex-spark`) and the
+  // request would fail server-side with no fallback. Stay on the chat model.
+  if (
+    isOAuthProvider(chatCfg.provider) &&
+    chatCfg.provider !== 'github-copilot'
+  )
+    return null;
 
   let catalog: Model<Api>[];
   try {
@@ -1362,25 +1391,13 @@ async function resolveAutoCheapUtility(
 
   let eligibleModelIds: Set<string>;
   try {
-    if (chatCfg.provider === 'github-copilot') {
-      const rawCredential = getSecret(SECRET_IDS.copilotOAuth);
-      if (!rawCredential) return null;
-      const credential = JSON.parse(rawCredential) as {
-        availableModelIds?: unknown;
-      };
-      if (
-        !Array.isArray(credential.availableModelIds) ||
-        !credential.availableModelIds.every(
-          (id): id is string => typeof id === 'string',
-        )
-      ) {
-        return null;
-      }
-      eligibleModelIds = new Set(credential.availableModelIds);
-    } else {
-      const available = await getPiModels().getAvailable(chatCfg.provider);
-      eligibleModelIds = new Set(available.map((model) => model.id));
-    }
+    // `Models.getAvailable` narrows a provider's catalog to the ids the
+    // stored credential is entitled to (Copilot's `availableModelIds`, an
+    // OAuth account's model list, …) — the same source
+    // getModelsForProviderLive uses — so background selection can never pick
+    // a model the account is not entitled to.
+    const available = await getPiModels().getAvailable(chatCfg.provider);
+    eligibleModelIds = new Set(available.map((model) => model.id));
 
     // OpenAI's provider catalog is static, so additionally intersect it with
     // the current API key's live /v1/models entitlement. A failed lookup is
@@ -1470,14 +1487,6 @@ async function resolveForRoleAsync(
   return resolved;
 }
 
-/** Resolve the configured model for a built-in agent workload role. */
-export function getModelForRole(
-  role: ModelRole,
-  opts?: { hasImage?: boolean },
-): Model<Api> {
-  return resolveForRole(role, opts).model;
-}
-
 /**
  * Resolve GitHub Copilot's credential-specific request context onto a model:
  * the gateway `baseUrl` (derived by pi-ai from the OAuth token's `proxy-ep`)
@@ -1510,8 +1519,8 @@ async function applyCopilotAuthToModel(
 }
 
 /**
- * Async variant of {@link getModelForRole} that also resolves GitHub
- * Copilot's credential-specific gateway baseUrl + client headers via pi-ai
+ * Resolve a role's model for runtime use, also resolving GitHub Copilot's
+ * credential-specific gateway baseUrl + client headers via pi-ai
  * `Models.getAuth`. Streaming paths must use this so Copilot requests hit the
  * correct per-account gateway with the required headers.
  */
