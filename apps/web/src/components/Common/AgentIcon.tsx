@@ -68,6 +68,17 @@ export function agentIconColorHex(color: AgentIconColor): string {
 /** Ink used for the hand-drawn face strokes. */
 const FACE_INK = '#24221E';
 
+/**
+ * Per-shape vertical nudge (viewBox units) that recentres a shape whose
+ * artwork's optical centre does not coincide with the geometric viewBox centre
+ * (60,60). The flower's single top petal + paired lower petals push its visible
+ * mass slightly above centre, so it renders high inside a circular ring; the
+ * nudge moves body and face together so it sits vertically centred.
+ */
+const SHAPE_OFFSET_Y: Partial<Record<AgentIconShape, number>> = {
+  flower: 2.1,
+};
+
 /** Petal circle centers of the five-petal flower shape. */
 const FLOWER_PETALS = Array.from({ length: 5 }, (_, i) => {
   const a = ((-90 + i * 72) * Math.PI) / 180;
@@ -188,6 +199,7 @@ export function AgentIcon({
     </g>
   ) : null;
   const isWorking = motion === 'working';
+  const offsetY = SHAPE_OFFSET_Y[shape] ?? 0;
 
   return (
     <svg
@@ -199,21 +211,23 @@ export function AgentIcon({
       aria-hidden={title ? undefined : true}
       aria-label={title}
     >
-      {isWorking ? (
-        <g className="agent-icon-working-avatar">
-          <g className="agent-icon-working-body">
-            <ShapeBody shape={shape} fill={COLOR_HEX[color]} />
+      <g transform={offsetY ? `translate(0 ${offsetY})` : undefined}>
+        {isWorking ? (
+          <g className="agent-icon-working-avatar">
+            <g className="agent-icon-working-body">
+              <ShapeBody shape={shape} fill={COLOR_HEX[color]} />
+            </g>
+            {faceElement}
           </g>
-          {faceElement}
-        </g>
-      ) : (
-        <>
-          <g>
-            <ShapeBody shape={shape} fill={COLOR_HEX[color]} />
-          </g>
-          {faceElement}
-        </>
-      )}
+        ) : (
+          <>
+            <g>
+              <ShapeBody shape={shape} fill={COLOR_HEX[color]} />
+            </g>
+            {faceElement}
+          </>
+        )}
+      </g>
     </svg>
   );
 }

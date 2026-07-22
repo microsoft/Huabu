@@ -53,6 +53,10 @@ export const SEMANTIC_ZOOM_CONFIG: SemanticZoomConfig = {
     note: { full: 'full', minimal: 'minimal' },
     pdf: { full: 'full', minimal: 'minimal' },
     web: { full: 'full', minimal: 'minimal' },
+    // Question nodes collapse to their agent avatar (identity) rather than a
+    // title label — the minimal payload is supplied by the node itself via
+    // NodeWrapper's `minimalContent` slot, not the generic SemanticPlaceholder.
+    question: { full: 'full', minimal: 'minimal' },
   },
 };
 

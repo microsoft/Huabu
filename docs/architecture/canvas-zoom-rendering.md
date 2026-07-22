@@ -27,7 +27,9 @@ The governing rule is semantic priority rather than uniform scaling: structural 
 
 ## 3. Node level of detail
 
-[`SEMANTIC_ZOOM_CONFIG`](../../apps/web/src/config/semanticZoom.ts) opts only `note`, `pdf`, and `web` into the current two-level `full → minimal` pipeline. Unlisted node types remain `full` at every zoom.
+[`SEMANTIC_ZOOM_CONFIG`](../../apps/web/src/config/semanticZoom.ts) opts `note`, `pdf`, `web`, and `question` into the current two-level `full → minimal` pipeline. Unlisted node types remain `full` at every zoom.
+
+Most participating types render the generic tier-sized title label in `minimal`. The `question` node is the exception: it supplies its own minimal payload — its agent avatar as a zoomed-out stand-in — through `NodeWrapper`'s `minimalContent` slot, which replaces [`SemanticPlaceholder`](../../apps/web/src/components/Nodes/SemanticPlaceholder.tsx) inside the shared cross-fade layer. The avatar rides [`avatarSizeForNode`](../../apps/web/src/config/agentAvatarLOD.ts) on the node's on-screen size and sheds detail toward a solid identity dot ([`AgentAvatarMark`](../../apps/web/src/components/Common/AgentAvatarMark.tsx)); an idle question node (no agent status) falls back to the title label. See [question-node.md](./question-node.md) and [proposals/question-node-zoom-lod-avatar.md](../proposals/question-node-zoom-lod-avatar.md).
 
 [`useNodeLOD`](../../apps/web/src/hooks/useNodeLOD.ts) compares `nodeWidth × zoom` with a 150 px screen-width boundary. A 10 px hysteresis buffer means a full node must shrink below 140 px to collapse, while a minimal node must grow to at least 160 px to expand; retaining the previous mode prevents rapid switching near the boundary.
 

@@ -29,6 +29,7 @@ import {
   type QuestionAgentBadgeStatus,
 } from './QuestionAgentBadge.tsx';
 import { enterQuestionCompose } from './questionCompose.ts';
+import { QuestionMinimalAvatar } from './QuestionMinimalAvatar.tsx';
 import { TextNodeBody } from '../shared/TextNodeBody';
 
 import type { CanvasQuestionNodeData } from '../types';
@@ -276,6 +277,18 @@ export const QuestionNode = memo(
         allowOverflow
         fillColor={STICKY_BG}
         className="question-sticky rounded-lg transition-all duration-200"
+        onDoubleClick={isForkPending ? undefined : handleActivate}
+        minimalContent={
+          badgeStatus ? (
+            <QuestionMinimalAvatar
+              nodeId={id}
+              status={badgeStatus}
+              agent={agentPresentation}
+              unread={isDoneUnviewed || isErrorUnviewed}
+              conflictCount={status === 'done' ? conflictCount : 0}
+            />
+          ) : undefined
+        }
         {...surface.nodeWrapperProps}
       >
         <TextNodeBody

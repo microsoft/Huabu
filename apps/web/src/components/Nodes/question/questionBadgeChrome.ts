@@ -1,0 +1,89 @@
+import { agentIconColorHex } from '@/components/Common/AgentIcon';
+
+import type { QuestionAgentBadgeStatus } from './QuestionAgentBadge';
+import type { QuestionAgentPresentation } from '@/utils/questionAgentPresentation';
+
+/**
+ * Resolved visual chrome for a question node's agent status mark — the ring
+ * colour, attention halo, running-ring identity colour, and sticker fill.
+ *
+ * Shared by the corner {@link QuestionAgentBadge} and the zoomed-out
+ * {@link QuestionMinimalAvatar} stand-in so status reads identically on both;
+ * this is the single source of truth for status → colour mapping.
+ */
+export interface QuestionBadgeChrome {
+  isOpen: boolean;
+  isRunning: boolean;
+  isError: boolean;
+  hasConflict: boolean;
+  /** Any unviewed terminal outcome (done-unread, unviewed error, conflict). */
+  needsAttention: boolean;
+  attentionColor: string;
+  /** Identity colour the running sweep echoes. */
+  runningRingColor: string;
+  ringBorderColor: string;
+  ringBoxShadow: string;
+  stickerFill: string;
+}
+
+export function resolveQuestionBadgeChrome({
+  status,
+  agent,
+  unread,
+  conflictCount,
+}: {
+  status: QuestionAgentBadgeStatus;
+  agent: QuestionAgentPresentation;
+  unread: boolean;
+  conflictCount: number;
+}): QuestionBadgeChrome {
+  const isOpen = status === 'open';
+  const isRunning = status === 'running';
+  const isError = status === 'error';
+  const hasConflict = conflictCount > 0;
+  // Any unviewed terminal outcome wants attention: a done-unread answer, an
+  // (unviewed) error, or skipped-write conflicts.
+  const needsAttention = unread || hasConflict;
+  const attentionColor = isError
+    ? 'var(--danger)'
+    : hasConflict
+      ? 'var(--warning)'
+      : 'var(--success)';
+
+  // Running echoes the agent's own identity colour (external picked colour /
+  // built-in Huabu blue) so the sweeping ring reads as "this agent is working"
+  // rather than a generic system blue.
+  const runningRingColor =
+    agent.kind === 'external' ? agentIconColorHex(agent.icon.color) : '#00A4EF';
+
+  // Border + halo. `open` / `running` draw no halo (running uses its `::before`
+  // sweep). The three unviewed outcomes (done-unread, error, conflict) share
+  // ONE attention halo — a crisp inner ring + a wider outer glow — differing
+  // only by colour and, for error, the segmented `::before` ring geometry.
+  // A viewed answer (or viewed error) falls back to the quiet identity ring.
+  let ringBorderColor = 'var(--question-agent-quiet-ring)';
+  let ringBoxShadow = 'none';
+  if (isOpen || isRunning) {
+    ringBorderColor = 'transparent';
+  } else if (needsAttention) {
+    ringBoxShadow = `0 0 0 3px color-mix(in srgb, ${attentionColor} 26%, transparent), 0 0 12px 2px color-mix(in srgb, ${attentionColor} 42%, transparent)`;
+    ringBorderColor = isError ? 'transparent' : attentionColor;
+  }
+
+  // Warm off-white "sticker" fill, shared by the chip body and the open chat
+  // bubble so the badge reads like a little sticker resting on the note.
+  const stickerFill = 'color-mix(in srgb, var(--question-bg) 32%, white)';
+
+  return {
+    isOpen,
+    isRunning,
+    isError,
+    hasConflict,
+    needsAttention,
+    attentionColor,
+    runningRingColor,
+    ringBorderColor,
+    ringBoxShadow,
+    stickerFill,
+  };
+}

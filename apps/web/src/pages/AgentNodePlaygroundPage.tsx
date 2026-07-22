@@ -860,16 +860,33 @@ const LOD_BAND_LO = 66;
  * most of the useful zoom range shows a legible identity rather than spending
  * it near either extreme. All five numbers are pure tuning knobs.
  */
-const AVATAR_MIN_DOT_PX = 12;
+const AVATAR_MIN_DOT_PX = 14;
 const AVATAR_MAX_PX = 88;
 const AVATAR_NODE_REP_MIN = 24;
 const AVATAR_NODE_REP_MAX = 520;
 const AVATAR_GAMMA = 0.7;
 
-/** Avatar size (px) at/below which the title caption is fully hidden. */
-const AVATAR_TITLE_MIN = 26;
+/**
+ * Detail LOD for the avatar itself. The hand-drawn face and thin shape strokes
+ * turn to mush once the avatar is only a handful of pixels wide, so detail is
+ * shed in two steps as it shrinks:
+ *   - below {@link AVATAR_DOT_MAX} → a single solid dot in the agent's identity
+ *     colour (crispest possible mark at a few px);
+ *   - below {@link AVATAR_FACE_MIN} → the shape silhouette WITHOUT the face, so
+ *     the outline stays clean instead of a muddy scribble;
+ *   - at/above {@link AVATAR_FACE_MIN} → the full detailed avatar with its face.
+ */
+const AVATAR_DOT_MAX = 18;
+const AVATAR_FACE_MIN = 24;
+
+/**
+ * Avatar size (px) at/below which the title caption is fully hidden — set so
+ * the caption only disappears as the avatar collapses toward a dot, not while
+ * it is still a legible node stand-in.
+ */
+const AVATAR_TITLE_MIN = 14;
 /** Avatar size (px) at/above which the title caption is fully revealed. */
-const AVATAR_TITLE_FULL = 44;
+const AVATAR_TITLE_FULL = 24;
 
 /**
  * Maps a node's on-screen size to an avatar diameter along the concave curve
@@ -987,11 +1004,14 @@ function BuiltInStarBody({
   size,
   motion = 'none',
   face,
+  showFace = true,
 }: {
   mode: BuiltInAgentMode;
   size: number;
   motion?: AgentIconMotion;
   face?: BuiltInFace;
+  /** Draw the hand-drawn face. Off at small sizes where it reads as mush. */
+  showFace?: boolean;
 }) {
   const resolved: BuiltInFace =
     face ?? (mode === 'operate' ? 'agent-hands' : 'chat-smile');
@@ -1131,22 +1151,26 @@ function BuiltInStarBody({
   }
 
   return (
-    <svg width={size} height={size} viewBox="14 14 92 92" aria-hidden>
+    <svg width={size} height={size} viewBox="14 10.5 92 92" aria-hidden>
       {motion === 'working' ? (
         <g className="agent-icon-working-body">{star}</g>
       ) : (
         <g>{star}</g>
       )}
-      <g
-        fill="none"
-        stroke={ink}
-        strokeWidth="4.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {strokeEls}
-      </g>
-      {fillEls}
+      {showFace ? (
+        <>
+          <g
+            fill="none"
+            stroke={ink}
+            strokeWidth="4.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            {strokeEls}
+          </g>
+          {fillEls}
+        </>
+      ) : null}
     </svg>
   );
 }
@@ -1256,8 +1280,15 @@ function LodAgentChip({
             // size*1.1 × size*1.2 the body centre lands at 0.55·size, so a
             // -0.05·size offset re-centres it — proportional, unlike the old
             // fixed 2px nudge that drifted badly as the avatar grew.
-            left: -size * 0.05,
-            top: -size * 0.05,
+            //
+            // Absolute offsets resolve against the padding box (inside the
+            // chip's 2px border), while the icon is flex-centred in the
+            // border box; without compensating for that 2px inset the bubble
+            // sits 2px low/right of the icon — invisible when the avatar is
+            // large but clearly off-centre once it shrinks. Subtract the
+            // border width so both reference the same centre at every size.
+            left: -size * 0.05 - 2,
+            top: -size * 0.05 - 2,
             width: size * 1.1,
             height: size * 1.2,
           }}
@@ -1273,12 +1304,27 @@ function LodAgentChip({
           />
         </svg>
       ) : null}
-      {source === 'external' ? (
+      {size <= AVATAR_DOT_MAX ? (
+        // Collapsed detail LOD: a crisp solid identity dot. The detailed
+        // avatar is illegible at this scale, so drop it to the one mark that
+        // stays sharp — a filled circle in the agent's colour with a hairline
+        // light ring so it separates from the note behind it.
+        <span
+          className="relative z-10 rounded-full"
+          style={{
+            width: innerSize,
+            height: innerSize,
+            background: runningRingColor,
+            boxShadow:
+              'inset 0 0 0 1px color-mix(in srgb, white 45%, transparent)',
+          }}
+        />
+      ) : source === 'external' ? (
         <AgentIcon
           shape={icon.shape}
           color={icon.color}
           size={innerSize}
-          withFace
+          withFace={size >= AVATAR_FACE_MIN}
           motion={isRunning ? 'working' : 'none'}
           className="relative z-10"
         />
@@ -1287,6 +1333,7 @@ function LodAgentChip({
           <BuiltInStarBody
             mode={source === 'agent' ? 'operate' : 'ask'}
             size={innerSize}
+            showFace={size >= AVATAR_FACE_MIN}
             motion={isRunning ? 'working' : 'none'}
           />
         </div>
@@ -1311,6 +1358,8 @@ function LodViewport({
   zoom,
   mode,
   label,
+  vw = 340,
+  vh = 210,
 }: {
   icon: AgentIconValue;
   status: AgentBadgeStatus;
@@ -1318,9 +1367,13 @@ function LodViewport({
   zoom: number;
   mode: 'current' | 'proposed';
   label: string;
+  /** Viewport width in px. Callers grow it so a zoomed-in node still fits. */
+  vw?: number;
+  /** Viewport height in px. Callers grow it so a zoomed-in node still fits. */
+  vh?: number;
 }) {
-  const VW = 340;
-  const VH = 210;
+  const VW = vw;
+  const VH = vh;
   const screenW = LOD_NODE_W * zoom;
   const screenH = LOD_NODE_H * zoom;
   // LOD takeover factor (proposed only).
@@ -1361,15 +1414,21 @@ function LodViewport({
   );
   const badgeX = lerp(cornerX, cx, t);
   const badgeY = lerp(cornerY, cy, t);
-  const bodyOpacity = mode === 'proposed' ? lerp(1, 0.12, t) : 1;
+  // Fade the card fully out over the first half of the takeover so nothing of
+  // the original problem node lingers behind the avatar.
+  const bodyOpacity = mode === 'proposed' ? lerp(1, 0, clamp01(t / 0.5)) : 1;
 
-  // The title only rides in once the avatar is big enough to anchor it, and
-  // it fades out again as the avatar collapses toward a dot — so the extreme
-  // zoomed-out state reads as a clean dot, not a dot with a floating caption.
+  // Caption sequencing. The node's title only appears AFTER the card has fully
+  // faded (t ≥ 0.5), so the caption and the original problem-node text never
+  // show at once — the old logic let them overlap as a faint doubled line.
+  // Once visible it stays crisp through the takeover band and only eases back
+  // out as the avatar collapses toward a dot, so the deep zoom-out reads as a
+  // clean dot rather than a dot with a floating caption.
+  const captionIn = clamp01((t - 0.5) / 0.2);
   const titleReveal = clamp01(
     (avatarSize - AVATAR_TITLE_MIN) / (AVATAR_TITLE_FULL - AVATAR_TITLE_MIN),
   );
-  const titleOpacity = titleReveal * t;
+  const titleOpacity = captionIn * titleReveal;
   const showTitle = titleOpacity > 0.04;
   const titleFont = Math.round(lerp(9, 13, titleReveal));
 
@@ -1548,17 +1607,28 @@ function QuestionNodeLodLab({ icon }: { icon: AgentIconValue }) {
           Proposed transition filmstrip (300% → 1%)
         </p>
         <div className="flex flex-wrap justify-center gap-4">
-          {[3, 1.5, 1, 0.5, 0.25, 0.12, 0.05, 0.01].map((z) => (
-            <LodViewport
-              key={z}
-              icon={icon}
-              status={status}
-              source={source}
-              zoom={z}
-              mode="proposed"
-              label={`${Math.round(z * 100)}%`}
-            />
-          ))}
+          {[3, 1.5, 1, 0.5, 0.25, 0.12, 0.05, 0.01].map((z) => {
+            // Grow the canvas so a zoomed-in node (e.g. 300%/150%, where the
+            // node is larger than the default viewport) is drawn in full
+            // instead of being clipped by the frame.
+            const nodeW = LOD_NODE_W * z;
+            const nodeH = LOD_NODE_H * z;
+            const cellVW = Math.max(340, Math.round(nodeW + 72));
+            const cellVH = Math.max(210, Math.round(nodeH + 72));
+            return (
+              <LodViewport
+                key={z}
+                icon={icon}
+                status={status}
+                source={source}
+                zoom={z}
+                mode="proposed"
+                label={`${Math.round(z * 100)}%`}
+                vw={cellVW}
+                vh={cellVH}
+              />
+            );
+          })}
         </div>
       </div>
     </div>

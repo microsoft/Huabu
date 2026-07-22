@@ -40,6 +40,12 @@ export interface BuiltInAgentAvatarProps {
   size?: number;
   /** Optional semantic motion. Defaults to `none`. */
   motion?: AgentIconMotion;
+  /**
+   * Draw the hand-drawn face + hands. Off at small sizes (the silhouette
+   * detail tier) where the strokes read as mush; the plump star reads on its
+   * own. Defaults to `true`.
+   */
+  showFace?: boolean;
   className?: string;
 }
 
@@ -47,6 +53,7 @@ export function BuiltInAgentAvatar({
   mode,
   size = 32,
   motion = 'none',
+  showFace = true,
   className,
 }: BuiltInAgentAvatarProps) {
   const isAgent = mode === 'operate';
@@ -74,55 +81,59 @@ export function BuiltInAgentAvatar({
       ) : (
         <g>{star}</g>
       )}
-      <g
-        fill="none"
-        stroke={FACE_INK}
-        strokeWidth="4.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {isAgent ? (
-          <>
-            {/* Calm eyes + small smile. */}
-            <path d="M51 52 L50 59" />
-            <path d="M70 52 L69 59" />
-            <path d="M55 67 C59 69 63 69 67 67" />
-            {/* Two raised arms. */}
-            <path d="M41 78 C34 73 32 66 35 60" />
-            <path d="M79 78 C86 73 88 66 85 60" />
-          </>
-        ) : (
-          // Chat: a big open, talking smile (round eyes are filled below).
-          <path d="M52 66 C56 72 64 72 68 66" />
-        )}
-      </g>
-      {isAgent ? (
-        // Two little blue mitten hands.
+      {showFace ? (
         <>
-          <circle
-            cx="34"
-            cy="57"
-            r="4.4"
-            fill={STAR_FILL}
+          <g
+            fill="none"
             stroke={FACE_INK}
-            strokeWidth="2.4"
-          />
-          <circle
-            cx="86"
-            cy="57"
-            r="4.4"
-            fill={STAR_FILL}
-            stroke={FACE_INK}
-            strokeWidth="2.4"
-          />
+            strokeWidth="4.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            {isAgent ? (
+              <>
+                {/* Calm eyes + small smile. */}
+                <path d="M51 52 L50 59" />
+                <path d="M70 52 L69 59" />
+                <path d="M55 67 C59 69 63 69 67 67" />
+                {/* Two raised arms. */}
+                <path d="M41 78 C34 73 32 66 35 60" />
+                <path d="M79 78 C86 73 88 66 85 60" />
+              </>
+            ) : (
+              // Chat: a big open, talking smile (round eyes are filled below).
+              <path d="M52 66 C56 72 64 72 68 66" />
+            )}
+          </g>
+          {isAgent ? (
+            // Two little blue mitten hands.
+            <>
+              <circle
+                cx="34"
+                cy="57"
+                r="4.4"
+                fill={STAR_FILL}
+                stroke={FACE_INK}
+                strokeWidth="2.4"
+              />
+              <circle
+                cx="86"
+                cy="57"
+                r="4.4"
+                fill={STAR_FILL}
+                stroke={FACE_INK}
+                strokeWidth="2.4"
+              />
+            </>
+          ) : (
+            // Chat: round eyes.
+            <>
+              <circle cx="52" cy="55" r="3.5" fill={FACE_INK} />
+              <circle cx="68" cy="55" r="3.5" fill={FACE_INK} />
+            </>
+          )}
         </>
-      ) : (
-        // Chat: round eyes.
-        <>
-          <circle cx="52" cy="55" r="3.5" fill={FACE_INK} />
-          <circle cx="68" cy="55" r="3.5" fill={FACE_INK} />
-        </>
-      )}
+      ) : null}
     </svg>
   );
 }

@@ -184,6 +184,14 @@ interface NodeWrapperProps {
   toolbar?: React.ReactNode;
   actions?: React.ReactNode;
   overlayContent?: React.ReactNode;
+  /**
+   * Custom minimal-LOD payload. When the node type opts into `minimal` LOD
+   * (see {@link SEMANTIC_ZOOM_CONFIG}) and this is provided, it replaces the
+   * generic tier-sized title label ({@link SemanticPlaceholder}) inside the
+   * shared cross-fade slot. Used by the question node to show its agent
+   * avatar as the zoomed-out stand-in.
+   */
+  minimalContent?: React.ReactNode;
   /** Vertical offset in screen pixels from the node's top edge. Negative = above. */
   overlayOffsetY?: number;
   /** Semantic visibility computed by the overlay owner. */
@@ -253,6 +261,7 @@ export const NodeWrapper = memo(
     toolbar,
     actions,
     overlayContent,
+    minimalContent,
     overlayOffsetY = 0,
     overlayVisible = true,
     overlayInteractionPriority = 0,
@@ -669,15 +678,27 @@ export const NodeWrapper = memo(
             shared containing block also guarantees that the full-LOD hiding
             selector and the absolute inset use the same structural anchor.
           */}
-          {supportsMinimalLOD && (
-            <SemanticPlaceholder
-              type={type}
-              data={data}
-              active={isMinimal}
-              width={nodeWidth}
-              height={nodeHeight}
-            />
-          )}
+          {supportsMinimalLOD &&
+            (minimalContent ? (
+              // Node-supplied minimal payload (e.g. the question node's agent
+              // avatar). Wrapped in the shared cross-fade layer so it fades in
+              // as the full body fades out, mirroring SemanticPlaceholder.
+              <div
+                className="semantic-lod-placeholder absolute inset-0 z-10 flex items-center justify-center"
+                data-lod={isMinimal ? 'minimal' : 'full'}
+                aria-hidden={!isMinimal}
+              >
+                {minimalContent}
+              </div>
+            ) : (
+              <SemanticPlaceholder
+                type={type}
+                data={data}
+                active={isMinimal}
+                width={nodeWidth}
+                height={nodeHeight}
+              />
+            ))}
 
           {showIngestionOverlay && (
             <div className="pointer-events-none absolute right-1.5 bottom-1.5 z-10">
