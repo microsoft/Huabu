@@ -32,7 +32,10 @@ export function resolveQuestionBadgeChrome({
   unread,
   conflictCount,
 }: {
-  status: QuestionAgentBadgeStatus;
+  // `idle` (never asked) has no corner badge, but the zoomed-out stand-in
+  // still shows the agent identity quietly — it maps to the same quiet ring as
+  // a viewed answer (no halo, no bubble).
+  status: QuestionAgentBadgeStatus | 'idle';
   agent: QuestionAgentPresentation;
   unread: boolean;
   conflictCount: number;

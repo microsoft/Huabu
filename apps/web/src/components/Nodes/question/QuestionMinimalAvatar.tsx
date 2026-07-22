@@ -15,7 +15,8 @@ import type { CSSProperties } from 'react';
 export interface QuestionMinimalAvatarProps {
   /** Node id, used to read the node's canvas size from the store. */
   nodeId: string;
-  status: QuestionAgentBadgeStatus;
+  /** `idle` renders a quiet identity avatar (no ring/halo/bubble). */
+  status: QuestionAgentBadgeStatus | 'idle';
   agent: QuestionAgentPresentation;
   unread: boolean;
   conflictCount: number;
@@ -69,6 +70,11 @@ export function QuestionMinimalAvatar({
   // render at the target screen size and counter-scale by 1/zoom below.
   const chipSize = avatarSizeForNode(width * zoom, height * zoom);
   const markSize = Math.round(chipSize * 0.8);
+
+  // Idle (never asked) has no bound agent, so it must NOT borrow an agent's
+  // identity colour (the built-in Huabu blue reads as a live blue agent). Show
+  // a plain neutral dot instead — a quiet "unasked question" placeholder.
+  const isIdle = status === 'idle';
 
   const chipStyle: CSSProperties = {
     width: chipSize,
@@ -136,12 +142,25 @@ export function QuestionMinimalAvatar({
             />
           </svg>
         ) : null}
-        <AgentAvatarMark
-          agent={agent}
-          size={markSize}
-          motion={chip.isRunning ? 'working' : 'none'}
-          className="relative z-10"
-        />
+        {isIdle ? (
+          <span
+            className="relative z-10 block rounded-full"
+            style={{
+              width: markSize,
+              height: markSize,
+              background: 'var(--fg-subtle)',
+              boxShadow:
+                'inset 0 0 0 1px color-mix(in srgb, white 45%, transparent)',
+            }}
+          />
+        ) : (
+          <AgentAvatarMark
+            agent={agent}
+            size={markSize}
+            motion={chip.isRunning ? 'working' : 'none'}
+            className="relative z-10"
+          />
+        )}
       </div>
     </div>
   );

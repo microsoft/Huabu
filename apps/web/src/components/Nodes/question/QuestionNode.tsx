@@ -279,15 +279,13 @@ export const QuestionNode = memo(
         className="question-sticky rounded-lg transition-all duration-200"
         onDoubleClick={isForkPending ? undefined : handleActivate}
         minimalContent={
-          badgeStatus ? (
-            <QuestionMinimalAvatar
-              nodeId={id}
-              status={badgeStatus}
-              agent={agentPresentation}
-              unread={isDoneUnviewed || isErrorUnviewed}
-              conflictCount={status === 'done' ? conflictCount : 0}
-            />
-          ) : undefined
+          <QuestionMinimalAvatar
+            nodeId={id}
+            status={badgeStatus ?? 'idle'}
+            agent={agentPresentation}
+            unread={isDoneUnviewed || isErrorUnviewed}
+            conflictCount={status === 'done' ? conflictCount : 0}
+          />
         }
         {...surface.nodeWrapperProps}
       >

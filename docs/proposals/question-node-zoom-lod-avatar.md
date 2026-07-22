@@ -14,9 +14,92 @@ Status: Accepted — V1 implemented (V2 continuous morph deferred)
 - `question` opted into [`SEMANTIC_ZOOM_CONFIG.nodeLOD`](../../apps/web/src/config/semanticZoom.ts); `NodeWrapper` gained a generic `minimalContent` slot rendered in the existing cross-fade layer.
 - [`QuestionMinimalAvatar`](../../apps/web/src/components/Nodes/question/QuestionMinimalAvatar.tsx) renders the centred stand-in (counter-scaled `1/zoom`, purely visual); status chrome is shared with the corner badge via [`questionBadgeChrome.ts`](../../apps/web/src/components/Nodes/question/questionBadgeChrome.ts). Idle question nodes (no agent status) fall back to the generic title-label placeholder.
 
-## V2 — deferred
+## V2 — generalized continuous takeover
 
-The continuous corner→centre slide + continuous avatar size across the full range + caption-after-fade sequencing (§4 Phase 3). Additive on top of V1: replace the binary cross-fade with an interpolation driven off the same primitives.
+V2 turns the binary cross-fade into a **continuous corner→centre morph** and, per an explicit product requirement, makes it a **reusable engine any node type can opt into** — not question-specific. Question is the first client; a text node (title → glyph), a PDF (page → thumbnail dot), etc. should later opt in by supplying a "mark" + a band, with **zero engine changes**.
+
+### The unifying idea
+
+Today the corner badge (full) and the centred stand-in (minimal) are two separate elements swapped by a cross-fade. V2 makes them **one persistent element** whose position, size, detail, and the card's opacity all interpolate on a single takeover factor `t ∈ [0,1]` derived from the node's on-screen size:
+
+- `t = 0` (readable) → the mark sits at its full-state anchor (the corner, constant screen size) — pixel-identical to today's corner badge.
+- `t → 1` (small) → the mark slides to the node centre, rides the size curve toward a dot, the card fades out, and the caption eases in after the card is gone (the playground's `captionIn` sequencing).
+
+One element across the whole range = the "shared-element transition" flagged in V1, and it removes the badge/stand-in duplication.
+
+### Locked decisions
+
+- **Coordinate space: screen-space.** The mark lives in a screen-space overlay (like today's badge `OverlayPortal`), positioned from the node's transformed corner and centre. Everything is screen px; there is no `1/zoom` counter-scaling. (V1's counter-scaled in-node approach is retired.)
+- **Driver: representative size `√(w·h)`.** `t` and the size curve are both driven by the node's on-screen representative size, so wide-short and tall-narrow nodes behave identically. The `band` is expressed in rep-size px.
+- **Config splits policy vs presentation.** The central registry holds only _policy_ (`mode`, `band`); everything _visual_ (`fullAnchor`, `fullSize`, `minSize`, `maxSize`, the mark, the caption) is supplied by the node next to its own code.
+- **Interaction: one shared `onActivate`.** The node passes a single `onActivate`; the overlay wires it to the mark (single-click, + tooltip) and `NodeWrapper` wires the same callback to the shell (double-click). No reliance on DOM bubbling across the overlay/shell trees.
+
+### Module boundaries (single responsibility · must-not-know)
+
+| Module                                              | Owns (only)                                                                                                                                                                  | Must NOT know                                           |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `config/nodeLOD` (registry)                         | `mode: binary \| continuous`, `band`                                                                                                                                         | any node's visuals, anchors, sizes, colours             |
+| `lodCurve` (pure math)                              | rep-size + band → `t`; `t` → eased `p ∈ [0,1]`; `bodyOpacity(t)`, `captionOpacity(t)`                                                                                        | pixels, node types, the DOM                             |
+| `useNodeTakeover(nodeId, {band,sizeRange})`         | self-subscribe to zoom + node size; return `{ t, p, size, detail, cornerPt, centrePt, bodyOpacity, captionOpacity }`                                                         | what the mark looks like; how it's positioned           |
+| `NodeTakeoverLayer` (overlay)                       | position the mark container `lerp(cornerPt,centrePt,t)`; publish `--lod-body-opacity`/`--lod-caption-opacity` on the node root; render the mark + caption; wire `onActivate` | the mark's internals; the card's markup                 |
+| `.semantic-lod-content` (card)                      | `opacity: var(--lod-body-opacity, 1)` in CSS                                                                                                                                 | that a takeover engine exists                           |
+| `NodeWrapper`                                       | pick ONE of `<BinaryPlaceholder>` / `<NodeTakeoverLayer>` and pass the node's stable descriptor + `onActivate`                                                               | takeover math or positioning                            |
+| node's `TakeoverMark` (e.g. `QuestionTakeoverMark`) | draw itself from `{ t, size, detail }`; map `p→size` via its own `[minSize,maxSize]`                                                                                         | where it is on screen, the card, the caption sequencing |
+
+The decoupling fixes baked into the table above, explicitly:
+
+- **(A)** `fullAnchor`/`fullSize`/`min`/`maxSize` live in the node descriptor, never the central registry.
+- **(B)** the card fade is a CSS var written _only_ by `NodeTakeoverLayer`; `NodeWrapper` and the card markup compute nothing.
+- **(C)** the mark render-prop receives `{ t, size, detail }` only — positioning is never leaked to it.
+- **(D)** activation is one `onActivate` shared by mark (click) and shell (double-click); no cross-tree bubbling.
+- **(E)** `lodCurve` yields a normalised `p ∈ [0,1]`; the per-type mark maps `p` to its own pixel range (avatar's `88px` etc. stay in the question/avatar layer).
+- **(F)** `useNodeTakeover` self-subscribes to zoom/size and takes only stable (memoised) props; `NodeTakeoverLayer` is memoised like `OverlayPortal`, so continuous zoom never re-renders node bodies.
+
+### Node contract (stable seam)
+
+```ts
+// Supplied by the node to NodeWrapper — presentation only.
+interface NodeTakeoverProps {
+  descriptor: {
+    band: Band;
+    sizeRange: [min: number, max: number];
+    fullAnchor: Point;
+  };
+  renderMark: (s: {
+    t: number;
+    size: number;
+    detail: AvatarDetail;
+  }) => ReactNode;
+  caption?: string; // engine owns fade/sequencing; node owns text + style via renderMark
+  onActivate?: (e: React.MouseEvent) => void;
+}
+```
+
+`descriptor` and `renderMark` must be memo-stable (or perf isolation breaks — see F).
+
+### Question migration
+
+Fold `QuestionAgentBadge` + `QuestionMinimalAvatar` into one `QuestionTakeoverMark({t,size,detail})`: at `t=0` it renders exactly today's corner badge (constant size, all status chrome), and as `t→1` it becomes the centred avatar + caption. It maps `p→size` with the avatar's own `[14, 88]`. Delete question's binary `minimalContent` branch. The shared `questionBadgeChrome` + `AgentAvatarMark` are reused unchanged.
+
+### Extensibility checklist (definition of done)
+
+- Adding a node type = one `continuous` registry entry (`mode` + `band`) + one `TakeoverMark` + a descriptor. **No edits to `lodCurve`, `useNodeTakeover`, `NodeTakeoverLayer`, or `NodeWrapper`.**
+- The engine owns `t`/positioning/card-fade/caption-sequencing/perf; the type owns only its mark visual and its pixel range.
+- Binary LOD (title-label) stays available for types that don't want a morph.
+
+### Risks / watch-items
+
+- **Full-state pixel parity**: at `t=0` the question mark must equal today's badge exactly — snapshot before/after.
+- **Edge smoothing** at the band ends so the mark doesn't pop when crossing `t≈0/1`.
+- **Overhang policy** stays as decided (floor + small symmetric overhang; do not clamp to the node footprint).
+
+### V1 → V2 cost
+
+Additive: the mark visuals, size curve, detail tiers, and status chrome all carry over. New work is the engine (`lodCurve` + `useNodeTakeover` + `NodeTakeoverLayer`) and folding the two question elements into one `t`-driven mark. Because the coordinate model and interaction seam are now locked, this is a swap of "binary cross-fade" for "interpolation", not a rewrite.
+
+### Prototype-first
+
+Before touching the real canvas, rebuild the loop in the `AgentNodePlaygroundPage` lab: a screen-space `useNodeTakeover` + `NodeTakeoverLayer` driving one node with a draggable `t`, to lock the feel and the `t=0` pixel parity — then migrate question, then open it to other types.
 
 ---
 
