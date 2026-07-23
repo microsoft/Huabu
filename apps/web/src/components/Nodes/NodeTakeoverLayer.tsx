@@ -1,8 +1,9 @@
 import { useInternalNode, useStore } from '@xyflow/react';
-import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNodeTakeover } from '@/hooks/useNodeTakeover';
+import { useNodeCollapseStore } from '@/store/nodeCollapseStore';
 
 import type { TakeoverState } from '@/config/nodeTakeover';
 import type React from 'react';
@@ -17,13 +18,19 @@ export interface NodeTakeoverLayerProps {
   nodeRootRef: React.RefObject<HTMLDivElement | null>;
 }
 
-interface FlipState {
-  dx: number;
-  dy: number;
-  scale: number;
-}
+const FLIP_TRANSITION = 'transform 240ms cubic-bezier(0.4, 0, 0.2, 1)';
 
-const NO_FLIP: FlipState = { dx: 0, dy: 0, scale: 1 };
+/**
+ * Skip the slide when the mark's anchor moved further than this multiple of the
+ * mark size between the two stages. A genuine stage morph during smooth zoom
+ * shifts the anchor by at most ~one mark (corner→centre of a near-threshold
+ * node); a viewport JUMP (fitView, zoom buttons, wheel/dbl-click zoom) changes
+ * zoom AND pan in a single frame, so the old readable-corner and the new
+ * collapsed-centre can be hundreds of screen-px apart. FLIP-ing across that
+ * teleport makes the mark fly in from far away — so past this bound we snap
+ * instead of animating.
+ */
+const FLIP_MAX_TRAVEL_FACTOR = 3;
 
 /**
  * `NodeTakeoverLayer` — the screen-space overlay that realises the discrete
@@ -50,13 +57,22 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
   onActivate,
   nodeRootRef,
 }: NodeTakeoverLayerProps) {
-  const { stage, size, point } = useNodeTakeover(nodeId);
+  const { stage, size, point, collapsedRadius } = useNodeTakeover(nodeId);
   const domNode = useStore((s) => s.domNode);
   const internalNode = useInternalNode(nodeId);
+  const setCollapseRadius = useNodeCollapseStore((s) => s.setRadius);
   const rendererEl = useMemo(
     () => domNode?.querySelector('.react-flow__renderer') ?? null,
     [domNode],
   );
+
+  // Publish the collapsed mark radius (canvas space) so edges terminate on the
+  // visible mark circle instead of the hidden card footprint. Only changes when
+  // the node's collapse state flips (or it resizes), never per zoom frame.
+  useLayoutEffect(() => {
+    setCollapseRadius(nodeId, collapsedRadius);
+    return () => setCollapseRadius(nodeId, null);
+  }, [nodeId, collapsedRadius, setCollapseRadius]);
 
   // Binary card fade — written here (and only here) so NodeWrapper and the card
   // markup compute nothing.
@@ -70,37 +86,59 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
     return () => el.removeAttribute('data-lod-body');
   }, [stage, nodeRootRef]);
 
-  // FLIP the mark on stage change: capture the delta from the old target
-  // point/size, then animate it back to zero so the mark slides + resizes into
-  // its new stage. Only fires on a stage change, so plain zoom never animates.
+  // FLIP the mark on stage change, driven imperatively so it never flashes.
+  // We set the mark to its OLD target (translate + scale) and back to rest
+  // synchronously inside this layout effect — the first painted frame is
+  // already at the old position, so there is no intermediate commit at the new
+  // (far) anchor. Only fires on a stage change; plain zoom leaves the mark
+  // untouched, so the running animation is never interrupted and re-renders
+  // from pan/zoom never reset the transform (JSX never sets it on the flipper).
+  const flipperRef = useRef<HTMLDivElement>(null);
   const prev = useRef<{
     stage: string;
     x: number;
     y: number;
     size: number;
   } | null>(null);
-  const [flip, setFlip] = useState<FlipState>(NO_FLIP);
-  const [playing, setPlaying] = useState(false);
-  const rafRef = useRef(0);
 
   useLayoutEffect(() => {
     const cur = { stage, x: point.x, y: point.y, size };
     const p = prev.current;
     prev.current = cur;
-    if (!p || p.stage === stage) return;
+    const el = flipperRef.current;
+    if (!el || !p || p.stage === stage) return;
 
-    const dx = p.x - cur.x;
-    const dy = p.y - cur.y;
+    // The readable badge lives at the card's TOP-LEFT corner; the collapsed
+    // marks live at the card's CENTRE. Any transition that crosses the readable
+    // boundary therefore relocates the anchor (corner ↔ centre) — animating a
+    // slide across it looks like the mark "flying" from the corner to the
+    // centre and back. So across that boundary we DON'T translate (the anchor
+    // just snaps); we only tween the SCALE, giving a clean grow/shrink in place.
+    // Position sliding is kept only for avatar ↔ dot, where both anchors are the
+    // centre so there is no travel anyway.
+    const crossesReadable = (p.stage === 'readable') !== (stage === 'readable');
+    const dx = crossesReadable ? 0 : p.x - cur.x;
+    const dy = crossesReadable ? 0 : p.y - cur.y;
     const scale = cur.size > 0 ? p.size / cur.size : 1;
-    setFlip({ dx, dy, scale });
-    setPlaying(false);
 
-    cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(() => {
-      setFlip(NO_FLIP);
-      setPlaying(true);
-    });
-    return () => cancelAnimationFrame(rafRef.current);
+    // Safety net for the collapsed↔collapsed slide: a viewport jump (big zoom +
+    // pan in one frame) can still put the two centres far apart; past a sane
+    // multiple of the mark size we treat it as a teleport and snap.
+    const maxTravel = Math.max(p.size, cur.size) * FLIP_MAX_TRAVEL_FACTOR;
+    if (Math.hypot(dx, dy) > maxTravel) {
+      el.style.transition = 'none';
+      el.style.transform = 'translate(0px, 0px) scale(1)';
+      return;
+    }
+
+    // Start at the old target with no transition…
+    el.style.transition = 'none';
+    el.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
+    // …force the browser to register that start state before we animate…
+    void el.getBoundingClientRect();
+    // …then release to rest, which the transition tweens.
+    el.style.transition = FLIP_TRANSITION;
+    el.style.transform = 'translate(0px, 0px) scale(1)';
   }, [stage, point.x, point.y, size]);
 
   if (!rendererEl || !internalNode) return null;
@@ -117,19 +155,20 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
         zIndex: 1000,
       }}
     >
-      <div
-        onDoubleClick={onActivate}
-        style={{
-          pointerEvents: 'auto',
-          display: 'flex',
-          transformOrigin: 'center',
-          transform: `translate(-50%, -50%) translate(${flip.dx}px, ${flip.dy}px) scale(${flip.scale})`,
-          transition: playing
-            ? 'transform 240ms cubic-bezier(0.4, 0, 0.2, 1)'
-            : 'none',
-        }}
-      >
-        {renderMark(state)}
+      {/* Centering stays constant; the flipper below owns the animated
+          transform so React re-renders (pan/zoom) never clobber a FLIP. */}
+      <div style={{ transform: 'translate(-50%, -50%)' }}>
+        <div
+          ref={flipperRef}
+          onDoubleClick={onActivate}
+          style={{
+            pointerEvents: 'auto',
+            display: 'flex',
+            transformOrigin: 'center',
+          }}
+        >
+          {renderMark(state)}
+        </div>
       </div>
     </div>,
     rendererEl,

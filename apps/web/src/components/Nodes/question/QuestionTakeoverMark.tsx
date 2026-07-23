@@ -5,6 +5,7 @@ import './QuestionAgentBadge.css';
 
 import { AgentAvatarMark } from '@/components/Common/AgentAvatarMark.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
+import { MARK_FACE_MIN } from '@/config/nodeTakeover';
 
 import { resolveQuestionBadgeChrome } from './questionBadgeChrome.ts';
 
@@ -53,6 +54,15 @@ export function QuestionTakeoverMark({
   conflictTooltip,
 }: QuestionTakeoverMarkProps) {
   const { stage, size } = state;
+  const isIdle = status === 'idle';
+  const isReadable = stage === 'readable';
+
+  // The mark is only an ABBREVIATED stand-in for the node, shown when the body
+  // can't be. A never-asked node whose card is still readable has nothing to
+  // abbreviate and no agent status to show — so it renders no corner badge; the
+  // sticky-yellow mark only appears once the node collapses (avatar/dot).
+  if (isReadable && isIdle) return null;
+
   const chip = resolveQuestionBadgeChrome({
     status,
     agent,
@@ -60,8 +70,6 @@ export function QuestionTakeoverMark({
     conflictCount,
   });
 
-  const isIdle = status === 'idle';
-  const isReadable = stage === 'readable';
   // The readable badge keeps a chip border, so leave inner padding (0.8). The
   // stand-in stages drop the border (below) so the mark can fill the node
   // footprint that edges connect to — give the inner avatar/dot most of that
@@ -137,26 +145,28 @@ export function QuestionTakeoverMark({
         </svg>
       ) : null}
       {isIdle ? (
-        // Never-asked node: a quiet neutral dot at every size (no agent identity
-        // colour, no `?` glyph). `shrink-0` so the flex chip never squishes it
-        // into an ellipse.
+        // Never-asked node: a pale sticky-yellow dot (its own note identity),
+        // not an agent colour and not a neutral grey. `shrink-0` so the flex
+        // chip never squishes it into an ellipse.
         <span
           className="relative z-10 block shrink-0 rounded-full"
           style={{
             width: innerSize,
             height: innerSize,
-            background: 'var(--fg-subtle)',
+            background: chip.stickerFill,
             boxShadow:
-              'inset 0 0 0 1px color-mix(in srgb, white 45%, transparent)',
+              'inset 0 0 0 1.5px color-mix(in srgb, var(--question-border) 50%, transparent)',
           }}
         />
       ) : (
         <AgentAvatarMark
           agent={agent}
           size={innerSize}
-          // The readable corner badge must always be the full character, even
-          // when small; the stand-in stages let it shed detail toward a dot.
-          detail={isReadable ? 'full' : undefined}
+          // The readable badge is always the full character. Collapsed stand-ins
+          // stay a clean solid dot until the mark is clearly big enough to read
+          // a face (MARK_FACE_MIN), so a small mark never renders a muddy
+          // icon-that-looks-like-a-dot bigger than a real avatar.
+          detail={isReadable ? 'full' : size >= MARK_FACE_MIN ? 'full' : 'dot'}
           motion={chip.isRunning ? 'working' : 'none'}
           className="relative z-10 shrink-0"
         />

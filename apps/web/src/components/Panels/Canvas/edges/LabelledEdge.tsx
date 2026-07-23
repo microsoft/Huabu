@@ -13,6 +13,7 @@ import {
   getBezierPath,
   getSmoothStepPath,
   getStraightPath,
+  useInternalNode,
   useStore,
 } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -20,6 +21,7 @@ import { useTranslation } from 'react-i18next';
 
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import useCanvasStore from '@/store/canvasStore';
+import { useNodeCollapseStore } from '@/store/nodeCollapseStore';
 import { TEXT_NODE_PADDING_X } from '@/utils/node/nodeFontConfig';
 import { measureTextContent } from '@/utils/node/textMeasure';
 
@@ -56,6 +58,8 @@ function getEdgeStyle(data: EdgeProps['data']): EdgeStyle {
 export function LabelledEdge(props: EdgeProps) {
   const {
     id,
+    source,
+    target,
     sourceX,
     sourceY,
     targetX,
@@ -68,6 +72,41 @@ export function LabelledEdge(props: EdgeProps) {
     data,
     selected,
   } = props;
+
+  // When an endpoint node is collapsed to its zoom-LOD mark (a centred circle),
+  // terminate the edge on that circle instead of the node's hidden card
+  // footprint, so the edge stays visually attached to the mark at any aspect
+  // ratio (not just the node's shorter side). Only collapsed question nodes
+  // publish a radius; everything else keeps React Flow's handle point.
+  const sourceRadius = useNodeCollapseStore((s) => s.radii[source]);
+  const targetRadius = useNodeCollapseStore((s) => s.radii[target]);
+  const sourceInternal = useInternalNode(source);
+  const targetInternal = useInternalNode(target);
+
+  let sx = sourceX;
+  let sy = sourceY;
+  let tx = targetX;
+  let ty = targetY;
+  const sourceAbs = sourceInternal?.internals.positionAbsolute;
+  if (sourceRadius !== undefined && sourceAbs) {
+    const cx = sourceAbs.x + (sourceInternal?.measured?.width ?? 0) / 2;
+    const cy = sourceAbs.y + (sourceInternal?.measured?.height ?? 0) / 2;
+    const dx = tx - cx;
+    const dy = ty - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    sx = cx + (dx / len) * sourceRadius;
+    sy = cy + (dy / len) * sourceRadius;
+  }
+  const targetAbs = targetInternal?.internals.positionAbsolute;
+  if (targetRadius !== undefined && targetAbs) {
+    const cx = targetAbs.x + (targetInternal?.measured?.width ?? 0) / 2;
+    const cy = targetAbs.y + (targetInternal?.measured?.height ?? 0) / 2;
+    const dx = sx - cx;
+    const dy = sy - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    tx = cx + (dx / len) * targetRadius;
+    ty = cy + (dy / len) * targetRadius;
+  }
 
   const edgeStyle = getEdgeStyle(data);
   // `data.edgeStyle.lineType` is the source of truth; fall back to the
@@ -85,26 +124,26 @@ export function LabelledEdge(props: EdgeProps) {
   let labelY: number;
   if (lineType === 'straight') {
     [edgePath, labelX, labelY] = getStraightPath({
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
+      sourceX: sx,
+      sourceY: sy,
+      targetX: tx,
+      targetY: ty,
     });
   } else if (lineType === 'step') {
     [edgePath, labelX, labelY] = getSmoothStepPath({
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
+      sourceX: sx,
+      sourceY: sy,
+      targetX: tx,
+      targetY: ty,
       sourcePosition,
       targetPosition,
     });
   } else {
     [edgePath, labelX, labelY] = getBezierPath({
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
+      sourceX: sx,
+      sourceY: sy,
+      targetX: tx,
+      targetY: ty,
       sourcePosition,
       targetPosition,
     });

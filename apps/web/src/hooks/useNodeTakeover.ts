@@ -2,7 +2,7 @@ import { useInternalNode, useStore, useViewport } from '@xyflow/react';
 import { useRef } from 'react';
 
 import {
-  badgeSizeForZoom,
+  badgeSizeForNode,
   markSizeForStage,
   resolveQuestionStage,
   type QuestionLodStage,
@@ -15,6 +15,12 @@ export interface NodeTakeoverGeometry {
   size: number;
   /** Screen point (px) the mark centre should sit on this frame. */
   point: TakeoverPoint;
+  /**
+   * Canvas-space radius of the collapsed mark circle, or `null` when the node
+   * is readable. Zoom-independent (the mark fills the node's shorter side), so
+   * edges can clip to it without recomputing on every zoom frame.
+   */
+  collapsedRadius: number | null;
 }
 
 /**
@@ -44,8 +50,9 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
     prevStage.current = 'readable';
     return {
       stage: 'readable',
-      size: badgeSizeForZoom(zoom),
+      size: badgeSizeForNode(0, 0),
       point: { x: 0, y: 0 },
+      collapsedRadius: null,
     };
   }
 
@@ -56,8 +63,8 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
 
   const left = abs.x * zoom + vpX;
   const top = abs.y * zoom + vpY;
-  const size = markSizeForStage(stage, zoom, screenW, screenH);
-  const badge = badgeSizeForZoom(zoom);
+  const size = markSizeForStage(stage, screenW, screenH);
+  const badge = badgeSizeForNode(screenW, screenH);
 
   // Stage 1: hug the node's top-left corner (scales with the card). Stage 2/3:
   // the node centre (the mark stands in for the whole node).
@@ -66,5 +73,9 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
       ? { x: left + badge * 0.3, y: top + badge * 0.05 }
       : { x: left + screenW / 2, y: top + screenH / 2 };
 
-  return { stage, size, point };
+  // Collapsed stages: the mark is a bounded curve (not the footprint), so edges
+  // clip to the actual mark circle. Radius in canvas space = screen size / zoom.
+  const collapsedRadius = stage === 'readable' ? null : size / (2 * zoom);
+
+  return { stage, size, point, collapsedRadius };
 }
