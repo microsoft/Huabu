@@ -415,6 +415,8 @@ export class AcpAgentHandle<
       return;
     }
 
+    if (signal?.aborted) return;
+
     // Self-resolve (open or reuse) THIS turn's live ACP session from the
     // baked spec — the handle owns its session lifecycle now, so the
     // composition shell no longer opens it out-of-band and hands the entry
@@ -423,6 +425,8 @@ export class AcpAgentHandle<
     // hard failure (unbound profile / bridge down) throws here, surfacing
     // on the generator's first `next()` exactly as before.
     const entry = await this.ensureSession(logger);
+
+    if (signal?.aborted) return;
 
     // Fire an initial up-report (I9.7) now that the entry is resolved and
     // in the live registry: this persists the resumed session's sessionId
