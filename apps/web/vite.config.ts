@@ -142,5 +142,60 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    build: {
+      // The app ships inside Electron (modern Chromium) and targets evergreen
+      // browsers only, so raise the output target above Vite's conservative
+      // default. This lets esbuild emit native async/await, class fields and
+      // logical-assignment operators instead of down-levelled helpers, which
+      // shaves a bit off every chunk.
+      target: 'es2022',
+      rollupOptions: {
+        output: {
+          // Split heavy third-party libraries out of the single application
+          // chunk. Without this, React + Milkdown + CodeMirror + xyflow +
+          // KaTeX all land in one ~4.4 MB bundle that must be parsed before
+          // first paint and re-downloaded on every app-code change. Grouping
+          // by library gives long-lived, independently-cached vendor chunks
+          // and lets the browser download them in parallel.
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined;
+            // React runtime + router: changes rarely, shared by everything.
+            if (
+              /node_modules\/(react|react-dom|react-router|react-router-dom|scheduler)\//.test(
+                id,
+              )
+            ) {
+              return 'vendor-react';
+            }
+            // Editor stack: Milkdown/ProseMirror and CodeMirror/Lezer are
+            // interdependent (Milkdown's code-block plugin embeds CodeMirror),
+            // so keeping them in separate manual chunks creates a circular
+            // chunk graph. Group the whole editor toolchain into one chunk.
+            if (
+              id.includes('@milkdown') ||
+              id.includes('prosemirror') ||
+              id.includes('@codemirror') ||
+              id.includes('@lezer') ||
+              /node_modules\/codemirror\//.test(id)
+            ) {
+              return 'vendor-editor';
+            }
+            // React Flow canvas engine.
+            if (id.includes('@xyflow')) {
+              return 'vendor-xyflow';
+            }
+            // PDF rendering (already partly lazy-loaded at the component level).
+            if (id.includes('pdfjs-dist') || id.includes('react-pdf')) {
+              return 'vendor-pdf';
+            }
+            // Math typesetting.
+            if (id.includes('katex')) {
+              return 'vendor-katex';
+            }
+            return undefined;
+          },
+        },
+      },
+    },
   };
 });
