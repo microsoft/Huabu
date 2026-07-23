@@ -144,15 +144,26 @@ function collectCommandIds(
 export async function executeRfsCommands(
   canvasId: string,
   request: RfsExecuteRequest,
+  opts?: { hostThreadId?: string },
 ): Promise<RfsExecuteResponse> {
   const runId = request.runId ?? createId('run');
+  const hostThreadId = opts?.hostThreadId;
   const output = await executeOnServer({
     canvasId,
     commands: prepareAgentCanvasCommands(request.commands, {
       allowCallerRevisions: true,
     }),
-    originator: { source: 'agent' },
+    // Authorship stays server-owned (`source: 'agent'`); the caller only
+    // correlates which host conversation the write belongs to via the
+    // `X-Huabu-Host-Thread-Id` header. When present, attribute the batch's
+    // change-review records to that thread (persist to its sidecar +
+    // broadcast) exactly like the built-in agent path.
+    originator: {
+      source: 'agent',
+      ...(hostThreadId ? { threadId: hostThreadId } : {}),
+    },
     runId,
+    ...(hostThreadId ? { computeChanges: true } : {}),
   });
 
   const nodeIds = new Set<string>();

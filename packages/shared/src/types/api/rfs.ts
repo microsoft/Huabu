@@ -170,6 +170,39 @@ export const rfsAgentHeadersSchema = z
 
 export type RfsAgentHeaders = z.infer<typeof rfsAgentHeadersSchema>;
 
+/** Canonical request headers for `POST /api/rfs/:canvasId/execute`. */
+export const RFS_EXECUTE_HEADERS = {
+  /**
+   * The **host** conversation this write belongs to (the ACP thread the
+   * external agent serves, injected as `HUABU_THREAD_ID`). When present,
+   * the executor attributes the batch's change-review records to this
+   * thread so they surface in that conversation's change card. Distinct
+   * from {@link RFS_AGENT_HEADERS.threadId}, which continues an internal
+   * built-in agent turn on `POST /agent` — a different thread space.
+   */
+  hostThreadId: 'X-Huabu-Host-Thread-Id',
+} as const;
+
+/**
+ * Validated control headers for `POST /api/rfs/:canvasId/execute`.
+ *
+ * Fastify normalizes incoming header names to lowercase. Unknown standard
+ * headers are retained by `.passthrough()` and ignored by the route.
+ */
+export const rfsExecuteHeadersSchema = z
+  .object({
+    'x-huabu-host-thread-id': z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .regex(/^[^\r\n]+$/)
+      .optional(),
+  })
+  .passthrough();
+
+export type RfsExecuteHeaders = z.infer<typeof rfsExecuteHeadersSchema>;
+
 /**
  * Request body for `POST /api/rfs/:canvasId/agent`.
  *
