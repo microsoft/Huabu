@@ -1552,6 +1552,23 @@ export async function resolveModelForRoleAsync(
   return applyCopilotAuthToModel(cfg, model);
 }
 
+/**
+ * Resolve a specific model id for runtime use, applying GitHub Copilot's
+ * credential-specific gateway auth like {@link resolveModelForRoleAsync}.
+ *
+ * Used by the built-in agent's per-thread model override: the selection
+ * stays within the **active provider** (only the model id changes), so the
+ * provider api key resolved for the chat role still applies and no separate
+ * credential lookup is needed.
+ */
+export async function resolveModelByIdAsync(
+  modelId: string,
+): Promise<Model<Api>> {
+  const cfg: PersistedConfig = { ...ensureConfig(), model: modelId };
+  const model = buildModel(cfg);
+  return applyCopilotAuthToModel(cfg, model);
+}
+
 /** Resolve and authenticate the provider configured for a workload role. */
 export async function ensureApiKeyForRole(
   role: ModelRole,

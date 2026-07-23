@@ -231,6 +231,46 @@ export const oauthProviderBodySchema = z.object({
 });
 export type OAuthProviderBody = z.infer<typeof oauthProviderBodySchema>;
 
+// ==================== Per-thread chat settings ====================
+
+/**
+ * The built-in agent's per-thread capability selection, read from the
+ * thread's durable driver state. `null` fields mean "use the global
+ * Settings default". See docs/proposals/chat-session-capability-controls.md.
+ */
+export interface ChatThreadSettings {
+  /** Per-thread model override id, or `null` to use the global default. */
+  modelId: string | null;
+  /** Per-thread reasoning effort (pi thinking level), or `null`. */
+  reasoningEffort: string | null;
+}
+
+/** Response from `GET /api/agent/threads/:threadId/settings`. */
+export type ChatThreadSettingsResponse = ChatThreadSettings;
+
+/** Body for `POST /api/agent/threads/:threadId/model`. */
+export const setChatThreadModelRequestSchema = z.object({
+  canvasId: z.string().optional(),
+  modelId: z.string().min(1),
+});
+export type SetChatThreadModelRequest = z.infer<
+  typeof setChatThreadModelRequestSchema
+>;
+
+/** Body for `POST /api/agent/threads/:threadId/reasoning-effort`. */
+export const setChatThreadReasoningEffortRequestSchema = z.object({
+  canvasId: z.string().optional(),
+  reasoningEffort: z.string().min(1),
+});
+export type SetChatThreadReasoningEffortRequest = z.infer<
+  typeof setChatThreadReasoningEffortRequestSchema
+>;
+
+/** Response from the per-thread chat-settings mutations. */
+export interface SetChatThreadSettingResponse {
+  ok: true;
+}
+
 /**
  * Response from GET /api/llm/providers
  */

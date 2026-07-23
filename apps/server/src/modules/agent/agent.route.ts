@@ -17,11 +17,14 @@ import {
   agentRequestSchema,
   createId,
   forkThreadBodySchema,
+  setChatThreadModelRequestSchema,
+  setChatThreadReasoningEffortRequestSchema,
 } from '@sediment/shared';
 
 import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
 import { agenetes } from '../agent/agenetes/drivers.js';
+import { INTERNAL_DRIVER_KIND } from '../agent/agenetes/drivers.js';
 import { runAgent } from '../agent/agent.service.js';
 import {
   buildChatEnvelope,
@@ -34,6 +37,7 @@ import { planSkillDispatch } from '../agent/skill-model-routing.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
 
+import type { ControlMsg, Namespace } from '@agenetes/protocol';
 import type {
   AgentCanvasIdQuery,
   AgentRequest,
@@ -41,9 +45,11 @@ import type {
   ApiResult,
   ChatHistoryItem,
   ChatHistoryResponse,
+  ChatThreadSettingsResponse,
   ContextTokensResponse,
   ForkThreadBody,
   ForkThreadResponse,
+  SetChatThreadSettingResponse,
   StopThreadResponse,
 } from '@sediment/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -108,6 +114,51 @@ function scheduleRunCleanup(threadId: string, delayMs = 60_000): void {
     const run = activeRuns.get(threadId);
     if (run?.completed) activeRuns.delete(threadId);
   }, delayMs);
+}
+
+/**
+ * Dispatch a {@link ControlMsg} to a built-in (internal) chat thread's
+ * durable handle. Reuses the live Deployment handle when present, otherwise
+ * rehydrates from the persisted record so the selection is still applied +
+ * persisted. Guards against targeting an ACP thread or a thread that does
+ * not exist yet (a brand-new conversation has no record until its first
+ * turn; the client holds the pending selection until then).
+ */
+async function dispatchBuiltinControl(
+  namespace: Namespace,
+  threadId: string,
+  msg: ControlMsg,
+): Promise<
+  { ok: true } | { ok: false; status: number; message: string; code: string }
+> {
+  const record = agenetes.record(namespace, threadId);
+  if (!record) {
+    return {
+      ok: false,
+      status: 404,
+      message: `No built-in thread '${threadId}' to configure yet`,
+      code: 'thread_not_found',
+    };
+  }
+  if (record.spec.kind !== INTERNAL_DRIVER_KIND) {
+    return {
+      ok: false,
+      status: 409,
+      message: 'Per-thread model settings apply to the built-in agent only',
+      code: 'not_builtin',
+    };
+  }
+  const handle = agenetes.get(threadId) ?? agenetes.create(record.spec);
+  const ack = await handle.control(msg);
+  if (!ack.ok) {
+    return {
+      ok: false,
+      status: 502,
+      message: ack.error,
+      code: ack.code ?? 'control_failed',
+    };
+  }
+  return { ok: true };
 }
 
 const agentRoutes: FastifyPluginAsync = async (
@@ -295,6 +346,113 @@ const agentRoutes: FastifyPluginAsync = async (
       request.raw.socket?.removeListener('close', onClose);
       if (!clientGone) reply.raw.end();
     }
+  });
+
+  /**
+   * GET /agent/threads/:threadId/settings
+   * Read the built-in agent's per-thread capability selection (model +
+   * reasoning effort) from the thread's durable driver state. `null`
+   * fields mean "use the global Settings default".
+   */
+  fastify.get<{
+    Params: { threadId: string };
+    Querystring: AgentCanvasIdQuery;
+    Reply: ChatThreadSettingsResponse | { message: string };
+  }>('/threads/:threadId/settings', async function (request, reply) {
+    const { threadId } = request.params;
+    const parsedQuery = agentCanvasIdQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+      });
+    }
+    const record = agenetes.record(
+      canvasAcpNamespace(parsedQuery.data.canvasId ?? ''),
+      threadId,
+    );
+    const driverState = (record?.state?.driverState ?? {}) as {
+      modelId?: unknown;
+      reasoningEffort?: unknown;
+    };
+    return {
+      modelId:
+        typeof driverState.modelId === 'string' ? driverState.modelId : null,
+      reasoningEffort:
+        typeof driverState.reasoningEffort === 'string'
+          ? driverState.reasoningEffort
+          : null,
+    };
+  });
+
+  /**
+   * POST /agent/threads/:threadId/model
+   * Set the built-in agent's per-thread model override. Dispatched to the
+   * pi driver as a `set_model` control op; persists via the handle's
+   * up-report.
+   */
+  fastify.post<{
+    Params: { threadId: string };
+    Reply: SetChatThreadSettingResponse | { message: string; code?: string };
+  }>('/threads/:threadId/model', async function (request, reply) {
+    const { threadId } = request.params;
+    const parsed = setChatThreadModelRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+        code: 'validation_failed',
+      });
+    }
+    const result = await dispatchBuiltinControl(
+      canvasAcpNamespace(parsed.data.canvasId ?? ''),
+      threadId,
+      { type: 'set_model', data: { modelId: parsed.data.modelId } },
+    );
+    if (!result.ok) {
+      return reply
+        .code(result.status)
+        .send({ message: result.message, code: result.code });
+    }
+    return { ok: true };
+  });
+
+  /**
+   * POST /agent/threads/:threadId/reasoning-effort
+   * Set the built-in agent's per-thread reasoning effort. Dispatched as a
+   * `set_config_option` control op whose optionId matches the pi driver's
+   * `reasoning_effort` selector.
+   */
+  fastify.post<{
+    Params: { threadId: string };
+    Reply: SetChatThreadSettingResponse | { message: string; code?: string };
+  }>('/threads/:threadId/reasoning-effort', async function (request, reply) {
+    const { threadId } = request.params;
+    const parsed = setChatThreadReasoningEffortRequestSchema.safeParse(
+      request.body,
+    );
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+        code: 'validation_failed',
+      });
+    }
+    const result = await dispatchBuiltinControl(
+      canvasAcpNamespace(parsed.data.canvasId ?? ''),
+      threadId,
+      {
+        type: 'set_config_option',
+        // Must match REASONING_EFFORT_OPTION_ID in the pi driver.
+        data: {
+          optionId: 'reasoning_effort',
+          value: parsed.data.reasoningEffort,
+        },
+      },
+    );
+    if (!result.ok) {
+      return reply
+        .code(result.status)
+        .send({ message: result.message, code: result.code });
+    }
+    return { ok: true };
   });
 
   /**
