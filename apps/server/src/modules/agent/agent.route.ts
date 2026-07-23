@@ -34,7 +34,10 @@ import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.
 import { getLLMModel } from '../agent/llm.js';
 import { readWorkspaceMemory } from '../agent/memory/index.js';
 import { planSkillDispatch } from '../agent/skill-model-routing.js';
-import { acquireAgentTurn } from '../agent/turn-lease.js';
+import {
+  acquireAgentTurn,
+  waitForAgentTurnRelease,
+} from '../agent/turn-lease.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
 
 import type { ControlMsg, Namespace } from '@agenetes/protocol';
@@ -641,6 +644,19 @@ const agentRoutes: FastifyPluginAsync = async (
     });
     const skillDispatch = planSkillDispatch(envelope.skills.resolved);
     const runsSkillAuthoring = skillDispatch.closeLiveHandle;
+
+    // A replacement send races the client's fire-and-forget `/stop` request,
+    // so a just-cancelled turn's abort may not be observed here yet. Wait
+    // (bounded) for any in-flight turn on this thread to release its lease
+    // before acquiring — this absorbs the cancel-then-resend race. Placed
+    // immediately before `acquireAgentTurn` (no `await` in between) so the
+    // released lease cannot be re-taken by another request in the gap. A turn
+    // that never releases within the timeout, or a genuinely concurrent turn,
+    // falls through to the 409 below.
+    const previousRun = activeRuns.get(resolvedThreadId);
+    if (previousRun && !previousRun.completed) {
+      await waitForAgentTurnRelease(resolvedThreadId);
+    }
 
     const releaseTurn = acquireAgentTurn(resolvedThreadId);
     if (!releaseTurn) {

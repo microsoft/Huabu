@@ -6,6 +6,7 @@ import { emptyAcpOverlay } from './overlay.js';
 
 import type { AcpCreateSpec, AcpDurableState } from './handle.js';
 import type { AcpSessionEntry } from './session-registry.js';
+import type { SessionId } from '@agenetes/protocol';
 import type { AgentCreateContext } from '@agenetes/runtime';
 
 const sessionMocks = vi.hoisted(() => ({
@@ -27,6 +28,7 @@ const spec: AcpCreateSpec = {
       alias: 'copilot',
       command: 'copilot --acp',
       cwd: '/repo',
+      autoRestart: true,
     },
   },
 };
@@ -50,7 +52,7 @@ function durableContext(
     recoveryInput: {
       state: {
         driverState: {
-          sessionId: 'stale_session',
+          sessionId: 'stale_session' as SessionId,
           initialPreambleDelivered: false,
         },
         metadata: { currentModeId: 'ask' },
@@ -62,7 +64,9 @@ function durableContext(
 }
 
 function sessionEntry() {
-  const prompt = vi.fn(async () => ({ stopReason: 'end_turn' }));
+  const prompt = vi.fn(async (..._args: unknown[]) => ({
+    stopReason: 'end_turn',
+  }));
   return {
     entry: {
       client: { prompt },
@@ -191,6 +195,43 @@ describe('ACP durable history recovery', () => {
     ).rejects.toMatchObject({ code: 'spawn_failed' });
     expect(sessionMocks.ensureAcpSession).toHaveBeenCalledTimes(1);
     expect(authorizeHistoryLoad).not.toHaveBeenCalled();
+  });
+
+  it('does not dispatch a prompt when aborted during session bootstrap', async () => {
+    const { entry, prompt } = sessionEntry();
+    let finishBootstrap: ((entry: AcpSessionEntry) => void) | undefined;
+    sessionMocks.ensureAcpSession.mockImplementationOnce(
+      () =>
+        new Promise<AcpSessionEntry>((resolve) => {
+          finishBootstrap = resolve;
+        }),
+    );
+    const controller = new AbortController();
+    const handle = new AcpAgentHandle(spec, {
+      recovery: {
+        authorizeHistoryLoad: vi.fn(async () => ({
+          allowed: true as const,
+          estimatedSize: 0,
+        })),
+      },
+    });
+
+    const next = handle
+      .run(submission, {
+        overlay: emptyAcpOverlay(),
+        signal: controller.signal,
+        logger,
+      })
+      .next();
+    await vi.waitFor(() => {
+      expect(sessionMocks.ensureAcpSession).toHaveBeenCalledOnce();
+    });
+    controller.abort();
+    finishBootstrap?.(entry);
+
+    await expect(next).resolves.toEqual({ done: true, value: undefined });
+    expect(prompt).not.toHaveBeenCalled();
+    expect(sessionMocks.reportEntryState).not.toHaveBeenCalled();
   });
 
   it('persists a command-created session without consuming its preamble', async () => {
