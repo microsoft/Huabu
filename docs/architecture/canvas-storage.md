@@ -1,6 +1,6 @@
 # Canvas Storage Architecture
 
-> Last updated: 2026-07-21
+> Last updated: 2026-07-23
 
 ## 1. Overview
 
@@ -24,11 +24,14 @@ Runtime Home-folder activation prepares and migrates the selected directory in a
     .memory/                      # hidden, AI-private canvas memory
       canvas.md                   # canvas memory body
       state.json                  # memory worker bookkeeping
-    .history/                     # hidden dir
-      chat/<threadId>.turns.jsonl # finalized turns (append-only)
-      chat/<threadId>.active.json # in-progress turn (partial)
+    .history/                     # hidden dir; also the Agenetes namespace storage.root
+      chat_v2/                    # canonical chat log — owned by Agenetes L2, NOT CanvasStore
+        <threadId>.events.jsonl   # Tier-1: append-only AgentStreamEvent delta log (live turn)
+        <threadId>.turns.jsonl    # Tier-2: folded AgentTurn records — the tier history() reads
+      threads.json                # Agenetes durable workload records (agenetes-v2 schema)
+      chat/<threadId>.changes.json# change-review sidecar (CanvasStore; mutable, cleared on accept/revert)
       intent.json                 # IntentEpisode[]
-      events.jsonl                # JSONL: one { ts, payload: RecentAction } per line
+      events.jsonl                # canvas action log: one { ts, payload: RecentAction } per line
       delta-log.jsonl             # persisted canvas-command delta log
       acp-sessions.json           # per-thread ACP sessionId map (optional)
 ```
@@ -40,23 +43,28 @@ Key points:
 - Node filenames are `safe(label).md`; the node's stable id lives in the `id:` frontmatter field.
 - Artifacts live in `.artifacts/` (hidden) named `<artifactId><ext>`. No manifest file — the filename is the URL key.
 - Events are append-only JSONL (`events.jsonl`); each line is `{ ts: number, payload: RecentAction }`.
+- **Chat history is Chat-V2, owned by Agenetes L2 — not `CanvasStore`.** The canonical per-thread conversation is a two-tier append-only log under `chat_v2/`: Tier-1 `<threadId>.events.jsonl` (`AgentStreamEvent` deltas a running turn appends, written by `FileEventLogStore`) and Tier-2 `<threadId>.turns.jsonl` (folded `AgentTurn`s, written by `FileTurnStore` — the only tier `history()` reads back). These files sit under the canvas `.history/` only because it is the Agenetes namespace `storage.root` (`canvasAcpNamespace(canvasId)`); `CanvasStore` never touches them. Do **not** confuse `chat_v2/<threadId>.events.jsonl` (agent stream events) with the sibling `events.jsonl` (canvas action log) — same suffix, unrelated content.
+- Durable Agenetes workload records live in `.history/threads.json` (`agenetes-v2` schema, one record per thread; written by `FileThreadStore`).
+- Legacy chat files are one-way migrated into `chat_v2/` at workspace activation and retired to `.bak`: the oldest pi-ai `Context` `chat/<threadId>.json` via `migrate-chat-threads.ts` (hop 1), then the M5.6 `chat/<threadId>.turns.jsonl` / `.active.json` via `migrate-chat-turns.ts` (hop 2). `chatPath()` still names the legacy `.json`, but it is no longer the live chat store.
 
 ## 3. Storage Module
 
 `apps/server/src/modules/storage/`
 
-| File                      | Responsibility                                                                                  |
-| ------------------------- | ----------------------------------------------------------------------------------------------- |
-| `paths.ts`                | The only place that joins workspace paths. All path helpers live here.                          |
-| `io.ts`                   | Atomic writes, JSONL helpers, `sanitizeId`, `safeJoin`, `mkdirp`, `readJson`                    |
-| `frontmatter.ts`          | `toFrontmatter` / `parseFrontmatter`                                                            |
-| `naming.ts`               | `toSafeFilename`, `dedupeName`, `dedupeArtifactFilename`, `normalizeForCompare`                 |
-| `name-index.ts`           | In-memory `id ↔ filename` index — shared by canvas-dirs, node list, artifacts                   |
-| `canvas-dirs.ts`          | Workspace-level `canvasId → dirName` index; scan-on-demand; handles renames                     |
-| `canvas-store.ts`         | `CanvasStore` class (per-canvas facade)                                                         |
-| `write-coordinator.ts`    | Single durable-write chokepoint — `withCanvasMutex` / `updateNode` / `applyNodeUpdate` (see §4) |
-| `index.ts`                | `getCanvasStore` / `listCanvases` / `createCanvas` / `deleteCanvas` / `resetStorageCache`       |
-| `migrate-chat-threads.ts` | One-shot pi-ai `Context` → structured `.turns.jsonl` chat-thread migration                      |
+| File                      | Responsibility                                                                                                                                                                                                                                                                      |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `paths.ts`                | The only place that joins workspace paths. All path helpers live here.                                                                                                                                                                                                              |
+| `io.ts`                   | Atomic writes, JSONL helpers, `sanitizeId`, `safeJoin`, `mkdirp`, `readJson`                                                                                                                                                                                                        |
+| `frontmatter.ts`          | `toFrontmatter` / `parseFrontmatter`                                                                                                                                                                                                                                                |
+| `naming.ts`               | `toSafeFilename`, `dedupeName`, `dedupeArtifactFilename`, `normalizeForCompare`                                                                                                                                                                                                     |
+| `name-index.ts`           | In-memory `id ↔ filename` index — shared by canvas-dirs, node list, artifacts                                                                                                                                                                                                       |
+| `canvas-dirs.ts`          | Workspace-level `canvasId → dirName` index; scan-on-demand; handles renames                                                                                                                                                                                                         |
+| `canvas-store.ts`         | `CanvasStore` class (per-canvas facade)                                                                                                                                                                                                                                             |
+| `write-coordinator.ts`    | Single durable-write chokepoint — `withCanvasMutex` / `updateNode` / `applyNodeUpdate` (see §4)                                                                                                                                                                                     |
+| `index.ts`                | `getCanvasStore` / `listCanvases` / `createCanvas` / `deleteCanvas` / `resetStorageCache`                                                                                                                                                                                           |
+| _(not in this module)_    | The `chat_v2/` two-tier log + `threads.json` are owned by Agenetes L2 (`FileEventLogStore` / `FileTurnStore` / `FileThreadStore`), wired in [agenetes/drivers.ts](../../apps/server/src/modules/agent/agenetes/drivers.ts); see [agent-architecture.md](./agent-architecture.md) §5 |
+| `migrate-chat-threads.ts` | Chat migration **hop 1**: one-shot pi-ai `Context` `.json` → legacy `.history/chat/<threadId>.turns.jsonl`                                                                                                                                                                          |
+| `migrate-chat-turns.ts`   | Chat migration **hop 2**: legacy `.history/chat/<threadId>.turns.jsonl` → Agenetes Tier-2 `chat_v2/<threadId>.turns.jsonl`; retires source to `.bak`                                                                                                                                |
 
 Workspace activation is coordinated by `apps/server/src/modules/workspace-activation.ts`; the isolated child entry is `workspace-prepare.worker.ts`, and the ordered migration sequence is centralized in `workspace-prepare.ts`.
 
