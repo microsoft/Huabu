@@ -162,6 +162,49 @@
   box-shadow: 0 1px 3px color-mix(in srgb, var(--fg-default) 10%, transparent);
 }
 
+.question-agent-ring-approval::before {
+  position: absolute;
+  inset: -3px;
+  z-index: 0;
+  padding: 3px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from -32deg,
+    var(--warning) 0deg 292deg,
+    color-mix(in srgb, var(--warning) 18%, transparent) 292deg 360deg
+  );
+  content: '';
+  pointer-events: none;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+.question-agent-ring-approval::after {
+  position: absolute;
+  inset: -7px;
+  z-index: -1;
+  border: 3px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  border-radius: inherit;
+  content: '';
+  pointer-events: none;
+  animation: playground-approval-halo 2.4s ease-out infinite;
+}
+
+@keyframes playground-approval-halo {
+  0%,
+  35% {
+    opacity: 0.9;
+    transform: scale(0.88);
+  }
+  75%,
+  100% {
+    opacity: 0;
+    transform: scale(1.18);
+  }
+}
+
 .status-ring-candidate-running-sweep::before {
   inset: 0;
   background: conic-gradient(
@@ -315,7 +358,8 @@
   .status-ring-candidate-running-sweep::before,
   .status-ring-candidate-running-orbit::before,
   .status-ring-candidate-running-twin::before,
-  .status-ring-candidate-running-twin::after {
+  .status-ring-candidate-running-twin::after,
+  .question-agent-ring-approval::after {
     animation: none;
   }
 }

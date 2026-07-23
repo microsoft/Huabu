@@ -1,4 +1,11 @@
-import { AlertTriangle, Eye, Loader, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowRight,
+  Eye,
+  Loader,
+  ShieldQuestion,
+  X,
+} from 'lucide-react';
 import { useRef, useState } from 'react';
 
 import '@/components/Nodes/question/QuestionAgentBadge.css';
@@ -821,6 +828,231 @@ function ChoiceButton<T extends string>({
     >
       {children}
     </Button>
+  );
+}
+
+type ApprovalProposalState = 'running' | 'awaiting-approval';
+
+function ApprovalStatusMark({
+  icon,
+  size,
+  state,
+}: {
+  icon: AgentIconValue;
+  size: number;
+  state: ApprovalProposalState;
+}) {
+  const awaitingApproval = state === 'awaiting-approval';
+  const innerSize = Math.round(size * 0.8);
+  const satelliteSize = Math.max(12, Math.min(20, size * 0.45));
+
+  return (
+    <div
+      className={cn(
+        'question-agent-badge relative isolate inline-flex items-center justify-center rounded-full border-solid',
+        awaitingApproval
+          ? 'question-agent-ring-approval border-transparent'
+          : 'question-agent-ring-running border-transparent',
+      )}
+      style={
+        {
+          '--question-agent-badge-size': `${size}px`,
+          '--question-agent-running-ring': LOD_AGENT_COLOR_HEX[icon.color],
+          background: 'color-mix(in srgb, var(--question-bg) 32%, white)',
+          borderWidth: Math.max(0.75, Math.min(2, size * 0.05)),
+        } as CSSProperties
+      }
+      role="img"
+      aria-label={
+        awaitingApproval
+          ? 'External Agent · Approval required'
+          : 'External Agent · Running'
+      }
+    >
+      <AgentIcon
+        shape={icon.shape}
+        color={icon.color}
+        size={innerSize}
+        withFace
+        motion={awaitingApproval ? 'none' : 'working'}
+        className="relative z-10 shrink-0"
+      />
+      {awaitingApproval ? (
+        <span
+          className="bg-warning text-fg-inverse absolute -top-1.5 -right-1.5 z-20 flex items-center justify-center rounded-full shadow-sm"
+          style={{ width: satelliteSize, height: satelliteSize }}
+          aria-hidden
+        >
+          <ShieldQuestion size={Math.max(8, satelliteSize * 0.62)} />
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function ApprovalRequiredProposal({ icon }: { icon: AgentIconValue }) {
+  const [state, setState] =
+    useState<ApprovalProposalState>('awaiting-approval');
+  const awaitingApproval = state === 'awaiting-approval';
+
+  return (
+    <div className="border-warning bg-surface ring-warning/15 rounded-2xl border p-6 ring-2">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <h2 className="text-fg-default font-semibold">
+              Approval required · UI proposal
+            </h2>
+            <span className="bg-warning-bg text-warning rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase">
+              Blocking state
+            </span>
+          </div>
+          <p className="text-fg-muted max-w-3xl text-sm">
+            The Agent is paused, not running: motion stops, a static amber hold
+            ring replaces the blue sweep, and a shield satellite makes the
+            required action legible without recolouring the Agent identity.
+          </p>
+        </div>
+        <div className="bg-bg-default flex items-center gap-1 rounded-lg p-1">
+          {(
+            [
+              { value: 'running', label: 'Running' },
+              { value: 'awaiting-approval', label: 'Approval required' },
+            ] as { value: ApprovalProposalState; label: string }[]
+          ).map((option) => (
+            <Button
+              key={option.value}
+              size="sm"
+              variant={state === option.value ? 'solid' : 'ghost'}
+              tone={
+                state === option.value
+                  ? option.value === 'awaiting-approval'
+                    ? 'warning'
+                    : 'info'
+                  : 'neutral'
+              }
+              onClick={() => setState(option.value)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.65fr)]">
+        <div className="border-edge-default bg-bg-default overflow-hidden rounded-xl border">
+          <div className="grid min-h-72 place-items-center bg-[radial-gradient(color-mix(in_srgb,var(--fg-subtle)_30%,transparent)_1px,transparent_1px)] bg-size-[16px_16px] p-8 sm:grid-cols-2">
+            <div className="flex flex-col items-center gap-3">
+              <div className="relative">
+                <StickyCard
+                  screenW={220}
+                  screenH={132}
+                  bodyOpacity={1}
+                  zoom={1}
+                />
+                <div className="absolute top-1 left-2 -translate-x-1/2 -translate-y-1/2">
+                  <ApprovalStatusMark icon={icon} size={37} state={state} />
+                </div>
+              </div>
+              <span className="text-fg-muted text-xs">Readable corner</span>
+            </div>
+
+            <div className="flex flex-col items-center gap-3">
+              <div className="flex h-32 w-32 items-center justify-center">
+                <ApprovalStatusMark icon={icon} size={24} state={state} />
+              </div>
+              <span className="text-fg-muted text-xs">Collapsed takeover</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-3">
+          <div
+            className={cn(
+              'border-edge-default bg-bg-default rounded-xl border p-4',
+              awaitingApproval && 'border-warning ring-warning/15 ring-2',
+            )}
+            aria-live="polite"
+          >
+            <div className="flex min-w-0 items-start gap-3">
+              <span
+                className={cn(
+                  'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full',
+                  awaitingApproval
+                    ? 'bg-warning-bg text-warning'
+                    : 'bg-info-bg text-info',
+                )}
+              >
+                {awaitingApproval ? (
+                  <ShieldQuestion size={17} aria-hidden />
+                ) : (
+                  <Loader
+                    size={17}
+                    className="animate-spin motion-reduce:animate-none"
+                    aria-hidden
+                  />
+                )}
+              </span>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-fg-default text-sm font-semibold">
+                  {awaitingApproval
+                    ? 'Tool call needs approval'
+                    : 'Agent is running'}
+                </h3>
+                <p className="text-fg-muted mt-1 text-xs leading-relaxed wrap-break-word">
+                  {awaitingApproval
+                    ? 'External Agent wants to run “npm install”. Review the request to continue.'
+                    : 'The Agent continues working without requiring input.'}
+                </p>
+              </div>
+            </div>
+            {awaitingApproval ? (
+              <Button
+                size="sm"
+                variant="solid"
+                tone="warning"
+                className="mt-3 w-full gap-1.5"
+                onClick={() => setState('running')}
+              >
+                Review &amp; Approve
+                <ArrowRight size={14} aria-hidden />
+              </Button>
+            ) : null}
+          </div>
+
+          <div className="border-edge-default rounded-xl border p-4">
+            <h3 className="text-fg-default text-xs font-semibold">
+              State priority
+            </h3>
+            <div className="text-fg-muted mt-3 flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="bg-warning-bg text-warning rounded-full px-2 py-1 font-medium">
+                Approval
+              </span>
+              <span aria-hidden>›</span>
+              <span className="bg-bg-default rounded-full px-2 py-1">Open</span>
+              <span aria-hidden>›</span>
+              <span className="bg-info-bg text-info rounded-full px-2 py-1">
+                Running
+              </span>
+              <span aria-hidden>›</span>
+              <span className="bg-bg-default rounded-full px-2 py-1">
+                Result
+              </span>
+            </div>
+            <p className="text-fg-subtle mt-3 text-xs leading-relaxed">
+              The persistent prompt covers off-screen nodes; selecting it opens
+              the owning thread and scrolls to the permission card.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-fg-subtle mt-4 grid gap-2 text-xs sm:grid-cols-3">
+        <span>Static amber ring · no working motion</span>
+        <span>Shield remains distinct from Conflict</span>
+        <span>Reduced motion keeps the full visual signal</span>
+      </div>
+    </div>
   );
 }
 
@@ -2045,6 +2277,10 @@ export default function AgentNodePlaygroundPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-8">
+        <section className="mb-14">
+          <ApprovalRequiredProposal icon={icon} />
+        </section>
+
         <section className="mb-14">
           <FinalQuestionNodeLodProposal icon={icon} />
         </section>
