@@ -123,6 +123,18 @@ export interface AgentRunOptions {
   /** Whether this workload may send image content to the selected model. */
   hasImage?: boolean;
   /**
+   * Per-thread model override id carried with this turn (built-in chat).
+   * Applied to the thread before the run, so a model picked before the
+   * first message is seeded on thread creation. Deployment-only.
+   */
+  modelId?: string;
+  /**
+   * Per-thread reasoning effort carried with this turn (built-in chat).
+   * A pi thinking level, or `off` for the model default. Applied like
+   * {@link AgentRunOptions.modelId}.
+   */
+  reasoningEffort?: string;
+  /**
    * Soft cap on agent turns (LLM call + tool batch). When reached, the
    * agent loop is aborted internally and a cap-out error is emitted.
    * Mirrors the previous self-rolled `maxIterations`.
@@ -183,6 +195,8 @@ export async function* runAgent(
     origin,
     modelRole,
     hasImage,
+    modelId,
+    reasoningEffort,
     maxIterations,
     signal,
     workloadType = 'Job',
@@ -258,6 +272,27 @@ export async function* runAgent(
   // pi-backed handle. Deployments get-or-create by `threadId`; Jobs mint a
   // fresh handle.
   const handle = agenetes.create(spec) as BuiltinHandle;
+
+  // Apply any per-thread capability selection carried with this turn — a
+  // model / reasoning effort the client picked (e.g. before the thread's
+  // first message, when the settings endpoints have no record to target).
+  // Deployment-only, and only when it differs from the persisted selection
+  // so we don't rewrite the durable record every turn.
+  if (workloadType === 'Deployment' && deploymentThreadId) {
+    const priorSelection = (durableRecord?.state?.driverState ?? {}) as {
+      modelId?: unknown;
+      reasoningEffort?: unknown;
+    };
+    if (modelId && modelId !== priorSelection.modelId) {
+      await handle.control({ type: 'set_model', data: { modelId } });
+    }
+    if (reasoningEffort && reasoningEffort !== priorSelection.reasoningEffort) {
+      await handle.control({
+        type: 'set_config_option',
+        data: { optionId: 'reasoning_effort', value: reasoningEffort },
+      });
+    }
+  }
   if (workloadType === 'Deployment' && context.systemPrompt !== undefined) {
     await syncDeploymentSystemPrompt(
       handle,

@@ -263,6 +263,16 @@ export const agentRequestSchema = z.object({
    *  - Capped at 8 to keep the context budget sane.
    */
   invokedSkills: z.array(z.string().min(1)).max(8).optional(),
+  /**
+   * Built-in agent per-thread capability selection carried with this
+   * turn. Lets the client apply a model / reasoning-effort picked before
+   * the thread's first message (when the per-thread settings endpoints
+   * have no persisted record to target yet). Ignored for external (ACP)
+   * bindings. `reasoningEffort` accepts pi thinking levels plus `off`
+   * (the "Auto" / model-default choice).
+   */
+  modelId: z.string().min(1).optional(),
+  reasoningEffort: z.string().min(1).optional(),
 });
 export type AgentRequest = z.infer<typeof agentRequestSchema>;
 

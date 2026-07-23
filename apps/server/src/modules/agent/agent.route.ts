@@ -588,6 +588,8 @@ const agentRoutes: FastifyPluginAsync = async (
       anchorNodeId,
       agentBinding,
       invokedSkills,
+      modelId,
+      reasoningEffort,
     } = parsed.data;
 
     // Log the thread→agent binding so external dispatches are visible
@@ -765,6 +767,8 @@ const agentRoutes: FastifyPluginAsync = async (
           canvasId,
           envelope,
           context,
+          modelId,
+          reasoningEffort,
           maxIterations: 20,
           signal: abortController.signal,
           logger: request.log,

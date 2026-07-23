@@ -210,6 +210,14 @@ export const agentApi = {
        * as authoritative. Capped server-side at 8.
        */
       invokedSkills?: string[];
+      /**
+       * Built-in agent per-thread capability selection carried with this
+       * turn so a model / reasoning effort picked before the thread's
+       * first message is applied on thread creation. Ignored for external
+       * bindings.
+       */
+      modelId?: string;
+      reasoningEffort?: string;
       signal?: AbortSignal;
     },
   ): Promise<void> => {
@@ -228,6 +236,8 @@ export const agentApi = {
       invokedSkills: options?.invokedSkills?.length
         ? options.invokedSkills
         : undefined,
+      modelId: options?.modelId,
+      reasoningEffort: options?.reasoningEffort,
     };
 
     try {

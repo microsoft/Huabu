@@ -18,6 +18,7 @@ import {
   setChatThreadModel,
   setChatThreadReasoningEffort,
 } from '@/api/llm';
+import { useChatStore } from '@/store/chatStore';
 
 import type { ChatThreadSettings, LLMModelInfo } from '@sediment/shared';
 
@@ -90,24 +91,35 @@ export function useBuiltinThreadSettings({
     };
   }, [enabled, threadId, canvasId]);
 
+  // Mirror the current selection into the chat store so the send path can
+  // carry it on the request (applies a pre-first-message pick on thread
+  // creation). Cleared for external bindings.
+  const setChatSettings = useChatStore((s) => s.setChatSettings);
+  useEffect(() => {
+    setChatSettings(
+      enabled ? settings : { modelId: null, reasoningEffort: null },
+    );
+  }, [enabled, settings, setChatSettings]);
+
   const selectModel = useCallback(
     async (modelId: string) => {
       if (!threadId) return;
-      const prev = settings;
       setSettings((s) => ({ ...s, modelId })); // optimistic
       try {
         await setChatThreadModel(threadId, modelId, canvasId ?? undefined);
       } catch {
-        setSettings(prev); // revert on failure (e.g. thread not created yet)
+        // Keep the optimistic value: before the thread's first message the
+        // endpoint 404s (no record yet), and the selection is carried on
+        // the first message instead. A genuinely bad value is corrected by
+        // the next settings fetch.
       }
     },
-    [threadId, canvasId, settings],
+    [threadId, canvasId],
   );
 
   const selectReasoningEffort = useCallback(
     async (reasoningEffort: string) => {
       if (!threadId) return;
-      const prev = settings;
       setSettings((s) => ({ ...s, reasoningEffort })); // optimistic
       try {
         await setChatThreadReasoningEffort(
@@ -116,10 +128,10 @@ export function useBuiltinThreadSettings({
           canvasId ?? undefined,
         );
       } catch {
-        setSettings(prev);
+        // See selectModel: keep the optimistic value; carried on first send.
       }
     },
-    [threadId, canvasId, settings],
+    [threadId, canvasId],
   );
 
   // The effective model id: the per-thread override, else the global default.

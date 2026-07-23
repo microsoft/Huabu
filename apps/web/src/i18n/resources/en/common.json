@@ -537,6 +537,7 @@
     "model": "Model",
     "reasoningEffort": "Reasoning",
     "effort": {
+      "auto": "Auto",
       "minimal": "Minimal",
       "low": "Low",
       "medium": "Medium",

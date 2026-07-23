@@ -53,14 +53,19 @@ export function BuiltinSessionSelectors({
     [models, currentModelId],
   );
 
-  const effortOptions = useMemo<SelectOption<string>[]>(
-    () =>
-      (currentModel?.reasoningEfforts ?? []).map((effort) => ({
+  // Explicit "Auto" first: the model default (pi maps it to no reasoning
+  // effort). Shown when nothing is picked, so the pill never looks empty.
+  const effortOptions = useMemo<SelectOption<string>[]>(() => {
+    const efforts = currentModel?.reasoningEfforts ?? [];
+    if (efforts.length === 0) return [];
+    return [
+      { value: 'off', label: t('chat.effort.auto') },
+      ...efforts.map((effort) => ({
         value: effort,
         label: t(`chat.effort.${effort}`, effort),
       })),
-    [currentModel, t],
-  );
+    ];
+  }, [currentModel, t]);
 
   // Hidden-when-empty, mirroring AcpSessionSelectors: nothing to pick before
   // the model list has loaded, or when the active provider exposes none.
@@ -85,7 +90,7 @@ export function BuiltinSessionSelectors({
       {effortOptions.length > 0 ? (
         <Select<string>
           options={effortOptions}
-          value={currentReasoningEffort ?? ''}
+          value={currentReasoningEffort ?? 'off'}
           onChange={(next) => void onSelectReasoningEffort(next)}
           disabled={disabled}
           title={t('chat.reasoningEffort')}

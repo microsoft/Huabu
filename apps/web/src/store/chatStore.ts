@@ -53,6 +53,14 @@ export interface ChatState {
    */
   agentBinding: AgentBinding;
   /**
+   * The current thread's built-in per-thread capability selection
+   * (model / reasoning effort). Transient (not persisted) — synced from
+   * `useBuiltinThreadSettings` and read at message-send time so a
+   * selection picked before the first message is carried on the request.
+   * `null` fields mean "no override".
+   */
+  chatSettings: { modelId: string | null; reasoningEffort: string | null };
+  /**
    * Map of canvasId → AgentBinding, persisted so each canvas keeps its
    * own binding across reloads. Source of truth on the client; the
    * server is stateless about thread bindings and reads the binding
@@ -186,6 +194,12 @@ export interface ChatState {
    */
   setAgentBinding: (binding: AgentBinding, canvasId?: string) => void;
 
+  /** Replace the current thread's built-in capability selection. */
+  setChatSettings: (settings: {
+    modelId: string | null;
+    reasoningEffort: string | null;
+  }) => void;
+
   /** Switch to a canvas — loads or creates its threadId, resets in-memory messages. */
   switchToCanvas: (canvasId: string) => void;
 
@@ -317,6 +331,7 @@ export const useChatStore = create<ChatState>()(
       lastAction: 'ask',
       threadMap: {},
       agentBinding: DEFAULT_BINDING,
+      chatSettings: { modelId: null, reasoningEffort: null },
       bindingMap: {},
       pendingAttachments: [],
       selectionAttachment: null,
@@ -442,6 +457,8 @@ export const useChatStore = create<ChatState>()(
             : bindingMap,
         });
       },
+
+      setChatSettings: (settings) => set({ chatSettings: settings }),
 
       switchToCanvas: (canvasId: string) => {
         const { threadMap, bindingMap, questionReplayByCanvas } = get();
