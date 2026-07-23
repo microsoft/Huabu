@@ -65,7 +65,7 @@
     "@types/yauzl": "^2.10.3",
     "tsup": "^8.5.1",
     "tsx": "^4.0.0",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.3",
     "vite": "^7.0.0",
     "vitest": "^4.0.18"
   }

@@ -50,7 +50,7 @@ describe('desktop updater IPC', () => {
 
   async function register() {
     const send = vi.fn();
-    const { registerUpdaterIpc } = await import('./updater');
+    const { registerUpdaterIpc } = await import('./updater.js');
     registerUpdaterIpc(
       () =>
         ({

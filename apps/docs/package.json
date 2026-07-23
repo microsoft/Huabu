@@ -33,7 +33,7 @@
     "pagefind": "^1.4.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.3",
     "vite": "^6.0.0",
     "vitest": "^4.0.18"
   }

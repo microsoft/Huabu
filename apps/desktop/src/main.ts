@@ -49,7 +49,6 @@ import {
   shell,
 } from 'electron';
 import { utilityProcess, type UtilityProcess } from 'electron';
-import getPort from 'get-port';
 
 import { applyApplicationMenu, registerMenuIpc } from './mac-menu.js';
 import {
@@ -1153,6 +1152,9 @@ app.whenReady().then(async () => {
       // surfacing the error to the user.
       const tried = new Set<number>();
       let lastErr: Error | null = null;
+      // `get-port` is an ESM-only package; load it via dynamic import so
+      // this CommonJS Electron main bundle can consume it.
+      const { default: getPort } = await import('get-port');
       for (let attempt = 1; attempt <= MAX_SERVER_START_ATTEMPTS; attempt++) {
         // Bias the first attempt toward 3001 for stable origins
         // (localStorage, OAuth callback URLs, etc.); subsequent

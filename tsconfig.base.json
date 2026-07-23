@@ -5,7 +5,6 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
     "paths": {
       "@sediment/shared": ["./packages/shared/src/index.ts"],
       "@sediment/shared/canvas-engine": [
