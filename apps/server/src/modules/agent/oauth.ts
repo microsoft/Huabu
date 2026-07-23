@@ -5,6 +5,7 @@
  * lock. Credentials live in the runtime SecretStore.
  */
 
+import { registerBunOAuthFlows } from '@earendil-works/pi-ai/bun-oauth';
 import { getModels } from '@earendil-works/pi-ai/compat';
 
 import {
@@ -27,6 +28,10 @@ import type {
 } from '@earendil-works/pi-ai';
 
 const log = getLogger('oauth');
+
+// The server is bundled into one ESM file, so pi-ai's filesystem-relative
+// OAuth imports are unavailable at runtime. Register statically bundled flows.
+registerBunOAuthFlows();
 
 // ==================== Persisted Credentials ====================
 
