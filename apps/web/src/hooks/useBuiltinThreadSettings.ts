@@ -10,7 +10,7 @@
  * "same UI, different data source" split from the external ACP path.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   getChatThreadSettings,
@@ -56,6 +56,9 @@ export function useBuiltinThreadSettings({
   const [models, setModels] = useState<LLMModelInfo[]>([]);
   const [settings, setSettings] = useState<ChatThreadSettings>(EMPTY_SETTINGS);
   const [loading, setLoading] = useState(false);
+  // Bumped on every local user mutation. A settings fetch that started
+  // before a mutation must not clobber the newer local value (P1-2).
+  const mutationGenRef = useRef(0);
 
   // Fetch the active provider's model catalogue (capability + labels).
   useEffect(() => {
@@ -82,14 +85,21 @@ export function useBuiltinThreadSettings({
       setSettings(EMPTY_SETTINGS);
       return;
     }
+    // Clear the previous thread's selection immediately so the load window
+    // never carries a stale value into the newly-selected thread (P1-1).
+    setSettings(EMPTY_SETTINGS);
     let cancelled = false;
+    const genAtStart = mutationGenRef.current;
     setLoading(true);
     void getChatThreadSettings(threadId, canvasId ?? undefined)
       .then((next) => {
-        if (!cancelled) setSettings(next);
+        // Skip if the thread/enable changed, or the user picked a value
+        // after this fetch started — the local choice wins (P1-2).
+        if (cancelled || mutationGenRef.current !== genAtStart) return;
+        setSettings(next);
       })
       .catch(() => {
-        if (!cancelled) setSettings(EMPTY_SETTINGS);
+        // Keep EMPTY (or a local pick that bumped the generation).
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -101,17 +111,25 @@ export function useBuiltinThreadSettings({
 
   // Mirror the current selection into the chat store so the send path can
   // carry it on the request (applies a pre-first-message pick on thread
-  // creation). Cleared for external bindings.
+  // creation). Tagged with `threadId` so the send only uses it for the
+  // matching thread. Cleared for external bindings.
   const setChatSettings = useChatStore((s) => s.setChatSettings);
   useEffect(() => {
     setChatSettings(
-      enabled ? settings : { modelId: null, reasoningEffort: null },
+      enabled && threadId
+        ? {
+            threadId,
+            modelId: settings.modelId,
+            reasoningEffort: settings.reasoningEffort,
+          }
+        : { threadId: null, modelId: null, reasoningEffort: null },
     );
-  }, [enabled, settings, setChatSettings]);
+  }, [enabled, threadId, settings, setChatSettings]);
 
   const selectModel = useCallback(
     async (modelId: string) => {
       if (!threadId) return;
+      mutationGenRef.current += 1; // local choice beats any in-flight GET
       setSettings((s) => ({ ...s, modelId })); // optimistic
       // No persisted record yet → hold locally; the first message carries
       // it (skip the POST so nothing 404s).
@@ -129,6 +147,7 @@ export function useBuiltinThreadSettings({
   const selectReasoningEffort = useCallback(
     async (reasoningEffort: string) => {
       if (!threadId) return;
+      mutationGenRef.current += 1;
       setSettings((s) => ({ ...s, reasoningEffort })); // optimistic
       if (!threadHasMessages) return;
       try {
