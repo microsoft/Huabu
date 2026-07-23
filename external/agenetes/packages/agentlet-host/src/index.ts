@@ -98,6 +98,16 @@ export interface MountAgenetesOptions {
    */
   daemonEntryPath: string;
   /**
+   * Host-namespaced environment isolation for the forked daemon and
+   * every agent it spawns. `hostEnvPrefix` names the host's env
+   * namespace (e.g. `HUABU_`); any inherited variable in that namespace
+   * is dropped before the daemon inherits it unless it appears in
+   * `hostEnvAllowlist`. Non-namespaced OS/toolchain variables always
+   * pass through. Leave unset to inherit the full environment.
+   */
+  hostEnvPrefix?: string;
+  hostEnvAllowlist?: readonly string[];
+  /**
    * Override the Gateway authenticator. Defaults to the
    * connection-token validator in {@link getDaemonAuth}.
    */
@@ -140,6 +150,8 @@ export function mountAgenetes(
     daemonEntryPath: opts.daemonEntryPath,
     dataDir: opts.dataDir,
     agentletId,
+    hostEnvPrefix: opts.hostEnvPrefix,
+    hostEnvAllowlist: opts.hostEnvAllowlist,
   });
 
   return gateway;

@@ -232,6 +232,45 @@ export interface AttachOptions {
   dataDir: string;
   /** Machine identity shared by the daemon and Gateway authenticator. */
   agentletId?: string;
+  /**
+   * Host-namespaced environment isolation for the forked daemon (and,
+   * transitively, every agent it spawns). When `hostEnvPrefix` is set,
+   * any inherited variable whose name starts with that prefix is
+   * dropped before the daemon inherits it, UNLESS the name is listed in
+   * `hostEnvAllowlist`. Non-namespaced variables (`PATH`, `HOME`, …)
+   * always pass through untouched.
+   *
+   * The agentlet transport is host-agnostic and must receive its host
+   * coordinates through explicit injection (spawn `env`), never through
+   * ambient inheritance — this keeps host secrets and unrelated host
+   * config out of untrusted agent processes. The prefix + allowlist are
+   * opaque host policy; this package never interprets their meaning.
+   */
+  hostEnvPrefix?: string;
+  hostEnvAllowlist?: readonly string[];
+}
+
+/**
+ * Drop host-namespaced variables from an inherited environment.
+ *
+ * Any key starting with `prefix` is removed unless it appears in
+ * `allowlist`; every other key (including all non-namespaced OS /
+ * toolchain variables) is preserved verbatim. Returns a fresh object;
+ * the input is never mutated. A missing `prefix` is a no-op passthrough.
+ */
+export function filterHostNamespacedEnv(
+  env: NodeJS.ProcessEnv,
+  prefix: string | undefined,
+  allowlist: readonly string[] | undefined,
+): Record<string, string> {
+  const allow = new Set(allowlist ?? []);
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+    if (prefix && key.startsWith(prefix) && !allow.has(key)) continue;
+    out[key] = value;
+  }
+  return out;
 }
 
 class DaemonSupervisor {
@@ -260,6 +299,8 @@ class DaemonSupervisor {
    */
   private dataDir = '';
   private agentletId = '';
+  private hostEnvPrefix: string | undefined;
+  private hostEnvAllowlist: readonly string[] | undefined;
 
   /**
    * Install the supervisor on a Fastify app. Idempotent per-app —
@@ -271,6 +312,8 @@ class DaemonSupervisor {
     this.daemonEntryPath = opts.daemonEntryPath;
     this.dataDir = opts.dataDir;
     this.agentletId = opts.agentletId ?? hostname();
+    this.hostEnvPrefix = opts.hostEnvPrefix;
+    this.hostEnvAllowlist = opts.hostEnvAllowlist;
 
     cleanupLegacyTicketsFile(app, this.dataDir);
 
@@ -436,9 +479,17 @@ class DaemonSupervisor {
         stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
         // The daemon uses `process.exit` on fatal errors; avoid
         // inheriting our env wholesale to keep its config surface
-        // minimal — only what `parseCli` reads matters.
+        // minimal — only what `parseCli` reads matters. Host-namespaced
+        // variables are stripped here (unless allow-listed) so host
+        // secrets and config never reach the daemon or the agents it
+        // spawns; the daemon receives its coordinates via CLI args and
+        // agents via explicit spawn `env` injection.
         env: {
-          ...process.env,
+          ...filterHostNamespacedEnv(
+            process.env,
+            this.hostEnvPrefix,
+            this.hostEnvAllowlist,
+          ),
           AGENTLET_TOKEN: token,
         },
       });
