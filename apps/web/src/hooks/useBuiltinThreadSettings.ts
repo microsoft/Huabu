@@ -130,18 +130,39 @@ export function useBuiltinThreadSettings({
     async (modelId: string) => {
       if (!threadId) return;
       mutationGenRef.current += 1; // local choice beats any in-flight GET
-      setSettings((s) => ({ ...s, modelId })); // optimistic
+      const gen = mutationGenRef.current;
+      // Optimistic: adopt the model and drop an effort the new model can't
+      // honour (off/absent stay), so the UI never shows a stale effort.
+      const nextEfforts =
+        models.find((m) => m.id === modelId)?.reasoningEfforts ?? [];
+      setSettings((s) => ({
+        ...s,
+        modelId,
+        reasoningEffort:
+          s.reasoningEffort &&
+          s.reasoningEffort !== 'off' &&
+          !nextEfforts.includes(s.reasoningEffort)
+            ? null
+            : s.reasoningEffort,
+      }));
       // No persisted record yet → hold locally; the first message carries
       // it (skip the POST so nothing 404s).
       if (!threadHasMessages) return;
       try {
-        await setChatThreadModel(threadId, modelId, canvasId ?? undefined);
+        const corrected = await setChatThreadModel(
+          threadId,
+          modelId,
+          canvasId ?? undefined,
+        );
+        // Adopt the server's canonical (clamped) values, unless the user
+        // changed something while the request was in flight.
+        if (mutationGenRef.current === gen) setSettings(corrected);
       } catch {
         // Keep the optimistic value; a genuinely bad value is corrected by
         // the next settings fetch.
       }
     },
-    [threadId, canvasId, threadHasMessages],
+    [threadId, canvasId, threadHasMessages, models],
   );
 
   const selectReasoningEffort = useCallback(

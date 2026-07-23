@@ -161,6 +161,23 @@ async function dispatchBuiltinControl(
   return { ok: true };
 }
 
+/** Read a built-in thread's per-thread selection from its durable record. */
+function readBuiltinThreadSettings(
+  namespace: Namespace,
+  threadId: string,
+): ChatThreadSettingsResponse {
+  const driverState = (agenetes.record(namespace, threadId)?.state
+    ?.driverState ?? {}) as { modelId?: unknown; reasoningEffort?: unknown };
+  return {
+    modelId:
+      typeof driverState.modelId === 'string' ? driverState.modelId : null,
+    reasoningEffort:
+      typeof driverState.reasoningEffort === 'string'
+        ? driverState.reasoningEffort
+        : null,
+  };
+}
+
 const agentRoutes: FastifyPluginAsync = async (
   fastify,
   _opts,
@@ -366,22 +383,10 @@ const agentRoutes: FastifyPluginAsync = async (
         message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
       });
     }
-    const record = agenetes.record(
+    return readBuiltinThreadSettings(
       canvasAcpNamespace(parsedQuery.data.canvasId ?? ''),
       threadId,
     );
-    const driverState = (record?.state?.driverState ?? {}) as {
-      modelId?: unknown;
-      reasoningEffort?: unknown;
-    };
-    return {
-      modelId:
-        typeof driverState.modelId === 'string' ? driverState.modelId : null,
-      reasoningEffort:
-        typeof driverState.reasoningEffort === 'string'
-          ? driverState.reasoningEffort
-          : null,
-    };
   });
 
   /**
@@ -392,7 +397,7 @@ const agentRoutes: FastifyPluginAsync = async (
    */
   fastify.post<{
     Params: { threadId: string };
-    Reply: SetChatThreadSettingResponse | { message: string; code?: string };
+    Reply: ChatThreadSettingsResponse | { message: string; code?: string };
   }>('/threads/:threadId/model', async function (request, reply) {
     const { threadId } = request.params;
     const parsed = setChatThreadModelRequestSchema.safeParse(request.body);
@@ -402,17 +407,19 @@ const agentRoutes: FastifyPluginAsync = async (
         code: 'validation_failed',
       });
     }
-    const result = await dispatchBuiltinControl(
-      canvasAcpNamespace(parsed.data.canvasId ?? ''),
-      threadId,
-      { type: 'set_model', data: { modelId: parsed.data.modelId } },
-    );
+    const namespace = canvasAcpNamespace(parsed.data.canvasId ?? '');
+    const result = await dispatchBuiltinControl(namespace, threadId, {
+      type: 'set_model',
+      data: { modelId: parsed.data.modelId },
+    });
     if (!result.ok) {
       return reply
         .code(result.status)
         .send({ message: result.message, code: result.code });
     }
-    return { ok: true };
+    // Return the corrected settings: switching model may have dropped or
+    // clamped a now-incompatible reasoning effort in the driver.
+    return readBuiltinThreadSettings(namespace, threadId);
   });
 
   /**

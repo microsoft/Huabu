@@ -108,20 +108,19 @@ export async function getChatThreadSettings(
   );
 }
 
-/** Set a built-in chat thread's per-thread model override. */
+/** Set a built-in chat thread's per-thread model override. Returns the
+ * resulting settings — switching model may drop/clamp an incompatible
+ * reasoning effort server-side. */
 export async function setChatThreadModel(
   threadId: string,
   modelId: string,
   canvasId?: string,
-): Promise<SetChatThreadSettingResponse> {
-  return apiFetch<SetChatThreadSettingResponse>(
-    routes.agentThreadModel(threadId),
-    {
-      method: 'POST',
-      json: { modelId, canvasId },
-      fallbackMessage: 'Failed to switch model',
-    },
-  );
+): Promise<ChatThreadSettings> {
+  return apiFetch<ChatThreadSettings>(routes.agentThreadModel(threadId), {
+    method: 'POST',
+    json: { modelId, canvasId },
+    fallbackMessage: 'Failed to switch model',
+  });
 }
 
 /** Set a built-in chat thread's per-thread reasoning effort. */
