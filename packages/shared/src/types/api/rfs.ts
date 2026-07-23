@@ -2,17 +2,20 @@
  * Remote File System (RFS) API — wire types.
  *
  * The RFS is the curl-native surface external agents use to reach back into a
- * canvas. It replaces the v1 node-CRUD reachback tool with four endpoints under
- * `/api/rfs/:canvasId`:
+ * canvas. It replaces the v1 node-CRUD reachback tool with a discoverable HTTP
+ * surface under `/api/rfs/:canvasId`:
  *
  * - `GET  download/<path>` — fetch a node/artifact/upload file as raw bytes.
  *   All node metadata (including the label and incident edges) rides along in
  *   ASCII-safe `X-Huabu-*` response headers (see {@link RFS_HEADERS}).
  * - `POST/DELETE upload/<file>` — stage/remove a file in the shared upload area
  *   so the internal agent can consume it (see {@link RfsUploadResponse}).
- * - `POST agent` — talk to the canvas-internal agent for all graph-semantic
- *   work (create/move/layout/snapshot/discovery). Response is **always**
- *   `text/event-stream` (see {@link RfsAgentRequest}).
+ * - `POST query` with `type: "SNAPSHOT_NODES"` — render image, sketch, or frame
+ *   nodes into downloadable PNG artifacts without invoking the
+ *   canvas-internal agent.
+ * - `POST agent` — talk to the canvas-internal agent for open-ended semantic
+ *   work. Response is **always** `text/event-stream` (see
+ *   {@link RfsAgentRequest}).
  * - `GET  skill` — pull the full RFS usage guide (per-canvas `skill.md` override
  *   or the bundled default).
  *

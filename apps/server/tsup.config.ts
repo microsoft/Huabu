@@ -48,7 +48,10 @@ export default defineConfig([
     external: [/@napi-rs\/.*/],
     splitting: false,
     sourcemap: false,
-    clean: true,
+    // `prebundle` removes the shared output root once before tsup starts.
+    // Cleaning here would race the parallel agentlet config below because
+    // its output directory is nested under this one.
+    clean: false,
     // Target the Node version shipped with Electron 35 (~Node 22)
     target: 'node22',
     // Many bundled CJS packages call require('fs'), require('path'), etc.

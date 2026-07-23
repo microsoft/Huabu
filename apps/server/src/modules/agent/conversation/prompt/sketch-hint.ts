@@ -6,8 +6,9 @@
  * the agent at those urls so it does not redundantly ask for the same
  * node ids to be rendered again. Both backends raster, so both get the
  * hint — only the tool vocabulary differs: the built-in agent uses
- * `snapshot_nodes` / `generate_image`, the external agent asks the
- * canvas agent to render. Worded per the backend {@link RenderProfile}.
+ * `snapshot_nodes` / `generate_image`, while the external agent uses
+ * the direct RFS `SNAPSHOT_NODES` query. Worded per the backend
+ * {@link RenderProfile}.
  */
 
 import { isSketchRasterAttachment } from '../transcript/attachment-chips.js';
@@ -36,6 +37,6 @@ export function renderSketchRasterHint(
     })
     .join('; ');
   return profile.toolset === 'reachback'
-    ? `pre-snapshotted sketch artifacts are ready — reuse these urls directly instead of asking the canvas agent to render the same node ids again: ${items}`
+    ? `pre-snapshotted sketch artifacts are ready — reuse these urls directly instead of calling the RFS SNAPSHOT_NODES query for the same node ids again: ${items}`
     : `pre-snapshotted sketch artifacts are ready for generate_image.referenceArtifactSrcs — pass these urls directly without re-calling snapshot_nodes for the same node ids: ${items}`;
 }

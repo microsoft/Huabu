@@ -11,6 +11,7 @@ import {
   SPACE_QUERY_TYPES,
   SPACE_SEARCH_DEFAULT_LIMIT,
   SPACE_SEARCH_MAX_LIMIT,
+  SPACE_SNAPSHOT_MAX_NODES,
 } from '@sediment/shared';
 
 import type {
@@ -43,6 +44,29 @@ const QUERY_DETAILS: Record<
     ],
     result: 'Bounded metadata, content, and conversation matches.',
     examples: [{ type: 'SEARCH', query: 'architecture', limit: 50 }],
+  },
+  SNAPSHOT_NODES: {
+    constraints: [
+      `At most ${SPACE_SNAPSHOT_MAX_NODES} explicitly requested node IDs.`,
+      'Accepted node types are image, sketch, and frame. Passing a frame ID recursively includes every nested image and sketch descendant; child IDs do not need to be enumerated.',
+      'The query may materialize content-addressed PNG cache artifacts but does not change canvas topology or version.',
+    ],
+    result:
+      'Snapshot entries with an artifact src, a downloadable path, PNG dimensions, and every contributing node ID.',
+    examples: [
+      {
+        type: 'SNAPSHOT_NODES',
+        nodeIds: ['frame-123'],
+        maxPixels: 1280,
+      },
+      {
+        type: 'SNAPSHOT_NODES',
+        nodeIds: ['sketch-123'],
+        strokeSubsets: [
+          { nodeId: 'sketch-123', strokeIds: ['stroke-a', 'stroke-b'] },
+        ],
+      },
+    ],
   },
 };
 
@@ -150,6 +174,7 @@ export function getRfsCapabilities(): RfsCapabilitiesResponse {
       searchDefault: SPACE_SEARCH_DEFAULT_LIMIT,
       searchMax: SPACE_SEARCH_MAX_LIMIT,
       executeMaxCommands: SPACE_EXECUTE_MAX_COMMANDS,
+      snapshotMaxNodes: SPACE_SNAPSHOT_MAX_NODES,
     },
     queryTypes: [...SPACE_QUERY_TYPES],
     commandTypes: [...AGENT_CANVAS_COMMAND_TYPES],
