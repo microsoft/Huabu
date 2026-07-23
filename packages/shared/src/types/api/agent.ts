@@ -19,6 +19,7 @@
 import { z } from 'zod';
 
 import { recentActionSchema } from './canvas-events.js';
+import { REASONING_EFFORT_VALUES } from './llm.js';
 import { CANVAS_NODE_TYPES } from '../canvas/node.js';
 
 import type { AgentBinding } from './acp.js';
@@ -272,7 +273,7 @@ export const agentRequestSchema = z.object({
    * (the "Auto" / model-default choice).
    */
   modelId: z.string().min(1).optional(),
-  reasoningEffort: z.string().min(1).optional(),
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES).optional(),
 });
 export type AgentRequest = z.infer<typeof agentRequestSchema>;
 

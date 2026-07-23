@@ -237,7 +237,11 @@ export const agentApi = {
         ? options.invokedSkills
         : undefined,
       modelId: options?.modelId,
-      reasoningEffort: options?.reasoningEffort,
+      // The valid set is enforced server-side (zod). The client value
+      // originates from the model's own capability list plus `off`, so the
+      // cast is safe; a stray value is rejected on the server.
+      reasoningEffort:
+        options?.reasoningEffort as AgentRequest['reasoningEffort'],
     };
 
     try {

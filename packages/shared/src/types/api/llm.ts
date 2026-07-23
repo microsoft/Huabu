@@ -257,10 +257,27 @@ export type SetChatThreadModelRequest = z.infer<
   typeof setChatThreadModelRequestSchema
 >;
 
+/**
+ * Valid reasoning-effort values — pi-ai's thinking levels plus `off`
+ * (the "Auto" / model-default choice). The authoritative set for both the
+ * wire contract and per-model capability correction; non-UI callers cannot
+ * persist an out-of-set value.
+ */
+export const REASONING_EFFORT_VALUES = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORT_VALUES)[number];
+
 /** Body for `POST /api/agent/threads/:threadId/reasoning-effort`. */
 export const setChatThreadReasoningEffortRequestSchema = z.object({
   canvasId: z.string().optional(),
-  reasoningEffort: z.string().min(1),
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES),
 });
 export type SetChatThreadReasoningEffortRequest = z.infer<
   typeof setChatThreadReasoningEffortRequestSchema
