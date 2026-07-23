@@ -12,7 +12,11 @@
 
 import { MODEL_ROLES } from '@sediment/shared';
 
-import { ensureApiKeyForRole, resolveModelForRoleAsync } from '../llm.js';
+import {
+  ensureApiKeyForRole,
+  resolveModelByIdAsync,
+  resolveModelForRoleAsync,
+} from '../llm.js';
 import { getSessionReadSet } from '../session-read-set.js';
 import { buildAgentToolsByNames } from '../tools/index.js';
 
@@ -75,25 +79,33 @@ function getHuabuHostContext(
   };
 }
 
-function assertHostActiveModel(ref: PiModelRef): void {
-  if (ref.type !== 'host' || ref.id !== 'active') {
+function assertHostModelRef(ref: PiModelRef): void {
+  if (ref.type !== 'host') {
     throw new Error(
-      `[pi-driver] Unsupported Huabu PiModelRef ${JSON.stringify(ref)}. First milestone only supports { type: 'host', id: 'active' }.`,
+      `[pi-driver] Unsupported Huabu PiModelRef ${JSON.stringify(ref)}. Only { type: 'host' } refs are supported.`,
     );
   }
 }
 
 export const huabuPiDriverPorts = {
   async resolveModel(ref, ctx) {
-    assertHostActiveModel(ref);
+    assertHostModelRef(ref);
     const host = getHuabuHostContext(ctx);
+    // A concrete per-thread model override (any id other than the symbolic
+    // 'active') resolves within the active provider; 'active' falls back to
+    // the role's host-policy model.
+    if (ref.id !== 'active') {
+      return resolveModelByIdAsync(ref.id);
+    }
     return resolveModelForRoleAsync(host.modelRole ?? 'chat', {
       hasImage: host.hasImage,
     });
   },
   async getApiKey(ref, ctx) {
-    assertHostActiveModel(ref);
+    assertHostModelRef(ref);
     const host = getHuabuHostContext(ctx);
+    // The per-thread override stays within the active provider, so the chat
+    // role's provider credential applies to both 'active' and a concrete id.
     return ensureApiKeyForRole(host.modelRole ?? 'chat', {
       hasImage: host.hasImage,
     });

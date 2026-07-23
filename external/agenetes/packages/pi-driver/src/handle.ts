@@ -1,7 +1,13 @@
 import { resolveAgentInputs } from '@agenetes/protocol';
 import { HistoryLoadDeniedError } from '@agenetes/runtime';
 import { Agent, convertToLlm } from '@earendil-works/pi-agent-core';
+import {
+  clampThinkingLevel,
+  getSupportedThinkingLevels,
+} from '@earendil-works/pi-ai';
 import { streamSimple } from '@earendil-works/pi-ai/compat';
+
+import { PI_THINKING_LEVELS } from './types.js';
 
 import type {
   PiDriverPorts,
@@ -14,6 +20,8 @@ import type {
 import type {
   AgentCapabilities,
   AgentInput,
+  AgentMetadata,
+  AgentStateSnapshot,
   AgentSubmission,
   AgentStreamEvent,
   AgentTurn,
@@ -33,11 +41,49 @@ import type {
   AssistantMessage,
   Message,
   TextContent,
+  ThinkingLevel,
 } from '@earendil-works/pi-ai';
 
 export type InStreamEvent = Exclude<AgentStreamEvent, { type: 'meta' | 'end' }>;
 
-const PI_DEPLOYMENT_CONTROL_OPS = ['cancel', 'set_context'] as const;
+const PI_DEPLOYMENT_CONTROL_OPS = [
+  'cancel',
+  'set_context',
+  'set_model',
+  'set_config_option',
+] as const;
+
+/**
+ * The `set_config_option` id the built-in driver understands for the
+ * per-thread reasoning-effort selector. Modelled on ACP's `thought_level`
+ * config-option category; the host advertises the value list via the model
+ * capability endpoint.
+ */
+const REASONING_EFFORT_OPTION_ID = 'reasoning_effort';
+
+/**
+ * Correct a per-thread reasoning effort against a resolved model's
+ * capability: keep `off` / absent as-is; drop the effort when the model
+ * has no reasoning; otherwise clamp it to the nearest level the model
+ * supports (via pi-ai). Ensures a model switch never leaves a stale,
+ * unsupported effort in the durable state (which pi-ai would silently
+ * clamp at request time, desyncing the API/UI/runtime).
+ */
+function correctEffortForModel(
+  model: Parameters<typeof getSupportedThinkingLevels>[0],
+  effort: PiDurableState['reasoningEffort'],
+): PiDurableState['reasoningEffort'] {
+  if (effort === undefined || effort === 'off') return effort;
+  const supported = getSupportedThinkingLevels(model).filter(
+    (level) => level !== 'off',
+  );
+  if (supported.length === 0) return undefined;
+  if ((supported as readonly string[]).includes(effort)) return effort;
+  return clampThinkingLevel(
+    model,
+    effort as ThinkingLevel,
+  ) as PiDurableState['reasoningEffort'];
+}
 
 export const PI_DEPLOYMENT_CAPABILITIES: AgentCapabilities = {
   supportedControlMessages: [...PI_DEPLOYMENT_CONTROL_OPS],
@@ -184,13 +230,20 @@ export class PiAgentHandle<
   TSubmission,
   PiRunResult,
   InStreamEvent,
-  PiTurnCtx
+  PiTurnCtx,
+  PiDurableState
 > {
   readonly capabilities: AgentCapabilities;
 
   private agent?: Agent;
   private initPromise?: Promise<Agent>;
   private pendingSystemPrompt?: string;
+  /** The per-thread model / reasoning-effort selection (durable state). */
+  private selection: PiDurableState;
+  /** The registered up-report listener (persistence + notifications). */
+  private stateListener?: (
+    snapshot: AgentStateSnapshot<PiDurableState>,
+  ) => void;
 
   constructor(
     private readonly spec: PiWorkloadSpec,
@@ -199,6 +252,7 @@ export class PiAgentHandle<
   ) {
     this.capabilities = piCapabilitiesForWorkloadType(spec.workloadType);
     this.pendingSystemPrompt = resolvePiSystemPrompt(spec);
+    this.selection = createContext.recoveryInput?.state.driverState ?? {};
   }
 
   private async ensureAgent(): Promise<Agent> {
@@ -252,11 +306,22 @@ export class PiAgentHandle<
       ctx.maxIterations ?? recipe.runtime?.maxIterations ?? 20;
 
     // Symbolic model refs represent host policy, so re-resolve them on
-    // every turn boundary before kicking off the next run.
+    // every turn boundary before kicking off the next run. A per-thread
+    // model selection overrides the ref id; the host `resolveModel` port
+    // resolves the concrete id (falling back to the recipe default).
+    const modelRef =
+      this.selection.modelId !== undefined
+        ? { ...recipe.model, id: this.selection.modelId }
+        : recipe.model;
     agent.state.model = await this.ports.resolveModel(
-      recipe.model,
+      modelRef,
       modelContext(spec),
     );
+
+    if (this.selection.reasoningEffort !== undefined) {
+      agent.state.thinkingLevel = this.selection
+        .reasoningEffort as ThinkingLevel;
+    }
 
     if (this.pendingSystemPrompt !== undefined) {
       agent.state.systemPrompt = this.pendingSystemPrompt;
@@ -489,6 +554,56 @@ export class PiAgentHandle<
         }
         return { ok: true };
       }
+      case 'set_model': {
+        const model = await this.ports.resolveModel(
+          { ...this.spec.spec.recipe.model, id: msg.data.modelId },
+          modelContext(this.spec),
+        );
+        // Adopt the model and correct any now-incompatible reasoning effort
+        // so the durable state stays consistent with the model's capability.
+        this.selection = {
+          ...this.selection,
+          modelId: msg.data.modelId,
+          reasoningEffort: correctEffortForModel(
+            model,
+            this.selection.reasoningEffort,
+          ),
+        };
+        if (this.agent) {
+          this.agent.state.model = model;
+          if (this.selection.reasoningEffort !== undefined) {
+            this.agent.state.thinkingLevel = this.selection
+              .reasoningEffort as ThinkingLevel;
+          }
+        }
+        this.reportState();
+        return { ok: true };
+      }
+      case 'set_config_option': {
+        if (msg.data.optionId !== REASONING_EFFORT_OPTION_ID) {
+          return {
+            ok: false,
+            error: `unsupported config option: ${msg.data.optionId}`,
+            code: 'unsupported',
+          };
+        }
+        if (
+          typeof msg.data.value !== 'string' ||
+          !(PI_THINKING_LEVELS as readonly string[]).includes(msg.data.value)
+        ) {
+          return {
+            ok: false,
+            error: `invalid reasoning effort: ${String(msg.data.value)}`,
+          };
+        }
+        const level = msg.data.value as PiDurableState['reasoningEffort'];
+        this.selection = { ...this.selection, reasoningEffort: level };
+        if (this.agent && level !== undefined) {
+          this.agent.state.thinkingLevel = level as ThinkingLevel;
+        }
+        this.reportState();
+        return { ok: true };
+      }
       default:
         return {
           ok: false,
@@ -496,6 +611,29 @@ export class PiAgentHandle<
           code: 'unsupported',
         };
     }
+  }
+
+  onState(
+    listener: (snapshot: AgentStateSnapshot<PiDurableState>) => void,
+  ): () => void {
+    this.stateListener = listener;
+    return () => {
+      if (this.stateListener === listener) this.stateListener = undefined;
+    };
+  }
+
+  /** Fold the current per-thread selection into a full up-report snapshot. */
+  private snapshot(): AgentStateSnapshot<PiDurableState> {
+    const metadata: AgentMetadata = {
+      currentModelId: this.selection.modelId ?? null,
+      metaUpdatedAt: Date.now(),
+    };
+    return { driverState: { ...this.selection }, metadata };
+  }
+
+  /** Push the current snapshot to the registered up-report listener. */
+  private reportState(): void {
+    this.stateListener?.(this.snapshot());
   }
 
   close(): void {

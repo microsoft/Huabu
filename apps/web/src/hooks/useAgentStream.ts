@@ -905,6 +905,20 @@ export function useAgentStream(): UseAgentStreamReturn {
             agentBinding,
             anchorNodeId: questionNodeId ?? undefined,
             invokedSkills,
+            // Carry the current built-in per-thread selection so a model /
+            // reasoning effort picked before the first message is applied
+            // when the thread is created. Only when the stored selection
+            // belongs to THIS thread (guards a just-switched thread from
+            // writing the previous thread's model). Ignored server-side for
+            // external bindings.
+            ...(() => {
+              const cs = useChatStore.getState().chatSettings;
+              if (cs.threadId !== threadId) return {};
+              return {
+                modelId: cs.modelId ?? undefined,
+                reasoningEffort: cs.reasoningEffort ?? undefined,
+              };
+            })(),
             signal: abortController.signal,
           },
         );

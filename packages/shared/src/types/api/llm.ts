@@ -70,6 +70,20 @@ export interface LLMModelInfo {
    * Omitted for models the registry does not describe.
    */
   contextWindow?: number;
+  /**
+   * Supported reasoning-effort levels for this model (pi-ai thinking
+   * levels, excluding `off`), e.g. `['low','medium','high']`. Omitted /
+   * empty ⇒ the model has no reasoning-effort control. Powers the
+   * per-thread reasoning-effort selector.
+   */
+  reasoningEfforts?: string[];
+  /**
+   * Supported service tiers for this model's API (only OpenAI-responses /
+   * codex-responses / azure-responses expose the knob), e.g.
+   * `['auto','flex','priority']`. Omitted / empty ⇒ no service-tier
+   * control.
+   */
+  serviceTiers?: string[];
 }
 
 // ==================== Active Configuration ====================
@@ -216,6 +230,63 @@ export const oauthProviderBodySchema = z.object({
   provider: z.string().trim().min(1).optional(),
 });
 export type OAuthProviderBody = z.infer<typeof oauthProviderBodySchema>;
+
+// ==================== Per-thread chat settings ====================
+
+/**
+ * The built-in agent's per-thread capability selection, read from the
+ * thread's durable driver state. `null` fields mean "use the global
+ * Settings default". See docs/proposals/chat-session-capability-controls.md.
+ */
+export interface ChatThreadSettings {
+  /** Per-thread model override id, or `null` to use the global default. */
+  modelId: string | null;
+  /** Per-thread reasoning effort (pi thinking level), or `null`. */
+  reasoningEffort: string | null;
+}
+
+/** Response from `GET /api/agent/threads/:threadId/settings`. */
+export type ChatThreadSettingsResponse = ChatThreadSettings;
+
+/** Body for `POST /api/agent/threads/:threadId/model`. */
+export const setChatThreadModelRequestSchema = z.object({
+  canvasId: z.string().optional(),
+  modelId: z.string().min(1),
+});
+export type SetChatThreadModelRequest = z.infer<
+  typeof setChatThreadModelRequestSchema
+>;
+
+/**
+ * Valid reasoning-effort values — pi-ai's thinking levels plus `off`
+ * (the "Auto" / model-default choice). The authoritative set for both the
+ * wire contract and per-model capability correction; non-UI callers cannot
+ * persist an out-of-set value.
+ */
+export const REASONING_EFFORT_VALUES = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORT_VALUES)[number];
+
+/** Body for `POST /api/agent/threads/:threadId/reasoning-effort`. */
+export const setChatThreadReasoningEffortRequestSchema = z.object({
+  canvasId: z.string().optional(),
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES),
+});
+export type SetChatThreadReasoningEffortRequest = z.infer<
+  typeof setChatThreadReasoningEffortRequestSchema
+>;
+
+/** Response from the per-thread chat-settings mutations. */
+export interface SetChatThreadSettingResponse {
+  ok: true;
+}
 
 /**
  * Response from GET /api/llm/providers

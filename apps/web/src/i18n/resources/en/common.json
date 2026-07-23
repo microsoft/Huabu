@@ -535,6 +535,16 @@
     "loadingAgentOptionsProgress": "Loading agent options…",
     "agentMode": "Agent Mode",
     "model": "Model",
+    "reasoningEffort": "Reasoning",
+    "effort": {
+      "auto": "Auto",
+      "minimal": "Minimal",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "xhigh": "Extra high",
+      "max": "Max"
+    },
     "on": "On",
     "off": "Off",
     "connecting": "Connecting…",
