@@ -3,6 +3,8 @@ import { HistoryLoadDeniedError } from '@agenetes/runtime';
 import { Agent, convertToLlm } from '@earendil-works/pi-agent-core';
 import { streamSimple } from '@earendil-works/pi-ai/compat';
 
+import { PI_THINKING_LEVELS } from './types.js';
+
 import type {
   PiDriverPorts,
   PiDurableState,
@@ -543,18 +545,19 @@ export class PiAgentHandle<
             code: 'unsupported',
           };
         }
-        if (typeof msg.data.value !== 'string') {
+        if (
+          typeof msg.data.value !== 'string' ||
+          !(PI_THINKING_LEVELS as readonly string[]).includes(msg.data.value)
+        ) {
           return {
             ok: false,
-            error: 'reasoning effort must be a thinking-level string',
+            error: `invalid reasoning effort: ${String(msg.data.value)}`,
           };
         }
-        this.selection = {
-          ...this.selection,
-          reasoningEffort: msg.data.value,
-        };
-        if (this.agent) {
-          this.agent.state.thinkingLevel = msg.data.value as ThinkingLevel;
+        const level = msg.data.value as PiDurableState['reasoningEffort'];
+        this.selection = { ...this.selection, reasoningEffort: level };
+        if (this.agent && level !== undefined) {
+          this.agent.state.thinkingLevel = level as ThinkingLevel;
         }
         this.reportState();
         return { ok: true };

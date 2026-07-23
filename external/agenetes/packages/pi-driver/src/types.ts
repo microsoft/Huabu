@@ -94,20 +94,37 @@ export const piSpecSchema = agentSpecSchema.extend({
   hostContext: z.record(z.string(), z.unknown()).optional(),
 });
 
+/**
+ * The reasoning-effort values the driver accepts \u2014 pi-ai's thinking levels
+ * plus `off` (no explicit effort / model default). Constrains the durable
+ * state so an out-of-set value can never be persisted or cast into the
+ * agent's `thinkingLevel`.
+ */
+export const PI_THINKING_LEVELS = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+] as const;
+
 export const piDurableStateSchema = z
   .object({
     /**
-     * Per-thread model override. Opaque to the driver — it is handed to the
+     * Per-thread model override. Opaque to the driver \u2014 it is handed to the
      * host `resolveModel` port as the {@link PiModelRef} id, which resolves
-     * the concrete model. Absent ⇒ use the recipe's default model ref.
+     * the concrete model. Absent \u21d2 use the recipe's default model ref.
      */
     modelId: z.string().optional(),
     /**
      * Per-thread reasoning effort, applied as the agent's `thinkingLevel`.
-     * A pi thinking level string (e.g. `low` / `medium` / `high`); the host
-     * validates it against the model's capability. Absent ⇒ model default.
+     * One of {@link PI_THINKING_LEVELS}; `off` maps to no explicit effort.
+     * The host clamps it against the resolved model's capability on switch.
+     * Absent \u21d2 model default.
      */
-    reasoningEffort: z.string().optional(),
+    reasoningEffort: z.enum(PI_THINKING_LEVELS).optional(),
   })
   .strict();
 export type PiDurableState = z.infer<typeof piDurableStateSchema>;
