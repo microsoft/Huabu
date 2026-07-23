@@ -4,7 +4,7 @@ import {
   clusterToSvg,
   filterSketchStrokes,
   type ContextImage,
-} from './snapshot-node.js';
+} from './snapshot-nodes.js';
 
 import type { CanvasNode } from '@sediment/shared/canvas-engine';
 

@@ -10,6 +10,7 @@ The surface separates byte transfer from semantic canvas work:
 External agent
   ├─ download / upload ──> canvas file projection
   ├─ query ──────────────> canonical SpaceQuery dispatcher
+  ├─ query SNAPSHOT_NODES ──> shared snapshot renderer ──> PNG artifact
   ├─ execute ────────────> agent command preparation ──> CanvasCommand engine
   └─ agent ──────────────> internal Huabu agent ──> CanvasCommand engine
 ```
@@ -37,15 +38,21 @@ There is no directory-listing endpoint. External agents receive exact node paths
 
 ## Direct query plane
 
-`POST /query` accepts the canonical discriminated union from `packages/shared/src/types/api/space-operations.ts`: `GET_SPACE_OUTLINE`, `INSPECT_NODES`, `INSPECT_EDGES`, or `SEARCH`. The RFS route validates JSON and delegates to `executeSpaceQuery()`; spatial queries reuse the existing canvas spatial services, while search collects the existing cancellable event stream into a bounded JSON result. The route does not duplicate query semantics.
+`POST /query` accepts the canonical discriminated union from `packages/shared/src/types/api/space-operations.ts`: `GET_SPACE_OUTLINE`, `INSPECT_NODES`, `INSPECT_EDGES`, `SEARCH`, or `SNAPSHOT_NODES`. The RFS route validates JSON and delegates to `executeSpaceQuery()`; spatial queries reuse the existing canvas spatial services, search collects the existing cancellable event stream into a bounded JSON result, and snapshot delegates to the shared renderer. The route does not duplicate query semantics.
 
-Capability detail schemas are generated from the same Zod registry used for request validation and built-in agent tools. Query results remain metadata-oriented and bounded; large node bodies and artifacts are still read through `download`.
+Capability detail schemas are generated from the same Zod registry used for request validation and built-in agent tools. Query responses remain bounded and carry metadata rather than large bodies; node content and snapshot artifact bytes are still read through `download`.
 
 ## Direct execution plane
 
 `POST /execute` accepts `{ runId?, commands }`, rejects caller-supplied originator context and UI-only command variants, stamps server-owned agent authorship metadata, and invokes `executeOnServer()` with `{ source: 'agent' }`. The same preparation helper is used by the built-in `space_commands` tool; RFS does not call the Canvas HTTP route or duplicate executor behavior.
 
 Commands run in order with current partial-commit semantics. The JSON response reports the effective run ID, version transition, projected commands, every command outcome, generated node and edge IDs, affected entity IDs, new node revisions, and content conflicts. It deliberately omits Web-facing deltas, pending effects, change-review records, and conflict body content. A stale or unread content write is a completed business result returned with HTTP 200; the caller re-downloads the node before reconciling.
+
+## Snapshot query
+
+`SNAPSHOT_NODES` accepts bounded node IDs plus optional output-size and sketch-stroke subset controls through `POST /query`. Passing a frame ID recursively includes every nested image and sketch descendant, so callers do not enumerate child IDs. The query delegates to the same `snapshotNodesToArtifacts()` implementation used by the built-in `snapshot_nodes` tool, so clustering, frame expansion, content-addressing, image pass-through, and partial-sketch rendering have one implementation.
+
+The query response returns each artifact's bare `src`, public `downloadPath`, PNG dimensions, and contributing node IDs. Snapshotting may materialize a content-addressed query-cache artifact but does not mutate canvas topology or increment the canvas version. External agents can therefore obtain the user's hand-drawn sketches without invoking the optional internal agent.
 
 ## Authentication and scoping
 
@@ -71,7 +78,7 @@ The internal agent owns current graph discovery and mutation. It resolves spatia
 
 Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent environment. The external system prompt contains only the bootstrap instruction; the detailed procedural guide is loaded on demand from `GET /skill`.
 
-The guide is direct-first: an external agent can discover, query, download, upload, execute, and verify without invoking `POST /agent` or configuring an internal model provider. `POST /agent` remains an optional high-level interpretation path.
+The guide is direct-first: an external agent can discover, query, download, snapshot, upload, execute, and verify without invoking `POST /agent` or configuring an internal model provider. `POST /agent` remains an optional high-level interpretation path.
 
 RFS errors use the normal API error body and include a runnable `/skill` recovery command so a caller can reload the current usage contract after a malformed request.
 
@@ -79,11 +86,12 @@ RFS errors use the normal API error body and include a runnable `/skill` recover
 
 | File/dir                                                                                                                           | Responsibility                                                                 |
 | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts)                           | Canvas-scoped file, capability, direct-query, and ask-agent routes.            |
+| [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts)                           | Canvas-scoped file, capability, direct-operation, and ask-agent routes.        |
 | [`apps/server/src/modules/remote_fs/space-capabilities.ts`](../../apps/server/src/modules/remote_fs/space-capabilities.ts)         | Compact capability handshake and schema-derived per-operation descriptions.    |
 | [`apps/server/src/modules/remote_fs/space-execute.ts`](../../apps/server/src/modules/remote_fs/space-execute.ts)                   | Agent-friendly projection over canonical command preparation and execution.    |
 | [`apps/server/src/modules/canvas/space-query.ts`](../../apps/server/src/modules/canvas/space-query.ts)                             | Canonical query dispatcher over spatial and search services.                   |
 | [`apps/server/src/modules/canvas/agent-command-preparation.ts`](../../apps/server/src/modules/canvas/agent-command-preparation.ts) | Shared server-owned authorship and built-in read-set annotation.               |
+| [`apps/server/src/modules/canvas/snapshot-nodes.ts`](../../apps/server/src/modules/canvas/snapshot-nodes.ts)                       | Shared node-to-artifact snapshot query implementation.                         |
 | [`apps/server/src/modules/remote_fs/node-meta.ts`](../../apps/server/src/modules/remote_fs/node-meta.ts)                           | Safe path projection and node metadata headers.                                |
 | [`apps/server/src/modules/remote_fs/skill.ts`](../../apps/server/src/modules/remote_fs/skill.ts)                                   | Resolve the bundled or canvas-specific access guide.                           |
 | [`apps/server/src/prompt/external-agent/access-huabu.md`](../../apps/server/src/prompt/external-agent/access-huabu.md)             | Agent-facing RFS procedure served by `GET /skill`.                             |

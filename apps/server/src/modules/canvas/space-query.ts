@@ -6,6 +6,10 @@ import {
   inspectEdges,
   inspectNodes,
 } from './canvas-spatial.js';
+import {
+  snapshotNodesToArtifacts,
+  SnapshotNodeError,
+} from './snapshot-nodes.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type {
@@ -100,6 +104,34 @@ export async function executeSpaceQuery(
         type: query.type,
         result: { count: matches.length, truncated, matches },
       };
+    }
+    case 'SNAPSHOT_NODES': {
+      const { type: _type, ...params } = query;
+      try {
+        const snapshots = await snapshotNodesToArtifacts({
+          canvasId,
+          ...params,
+        });
+        return {
+          type: query.type,
+          result: {
+            snapshots: snapshots.map((snapshot) => ({
+              ...snapshot,
+              downloadPath: `artifacts/${snapshot.src}`,
+            })),
+          },
+        };
+      } catch (error) {
+        if (error instanceof SnapshotNodeError) {
+          throw new SpaceQueryError(
+            error.message,
+            error.code === 'canvas_not_found'
+              ? 'canvas_not_found'
+              : 'query_target_not_found',
+          );
+        }
+        throw error;
+      }
     }
   }
 }

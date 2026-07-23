@@ -16,8 +16,9 @@ Prefer deterministic direct operations:
 1. Discover supported queries and commands through `capabilities`.
 2. Use `query` for graph, geometry, and content search.
 3. Use `download` for full node or artifact bytes.
-4. Use `execute` for validated Space commands.
-5. Use `agent` only when you deliberately want the optional internal Huabu agent to interpret an open-ended request.
+4. Use the `SNAPSHOT_NODES` query to render image, sketch, or frame nodes into PNG artifacts you can inspect.
+5. Use `execute` for validated Space commands.
+6. Use `agent` only when you deliberately want the optional internal Huabu agent to interpret an open-ended request.
 
 ## 1. Discover operations
 
@@ -35,6 +36,9 @@ curl -fsS -H "$AUTH" \
 
 curl -fsS -H "$AUTH" \
   "$HUABU_RFS_URL/capabilities/commands/CREATE_NODES"
+
+curl -fsS -H "$AUTH" \
+  "$HUABU_RFS_URL/capabilities/queries/SNAPSHOT_NODES"
 ```
 
 Do not guess fields or duplicate the schemas locally. Re-fetch the relevant capability when validation fails or the protocol changes.
@@ -87,7 +91,42 @@ STATUS="$(curl -sS -H "$AUTH" -H 'If-None-Match: "3d7e"' \
 
 `304 Not Modified` means your cached copy is current. `200` returns the new body and revision. Treat any other status as an error rather than using the temporary body.
 
-## 4. Upload payloads
+## 4. Snapshot visual nodes
+
+Use the `SNAPSHOT_NODES` query when you need to see an `image` or the user's hand-drawn `sketch`. Passing one `frame` ID is sufficient: frame expansion is recursive by definition and includes all nested image and sketch descendants, so do not enumerate every child ID. Notes, text, PDFs, videos, and other non-still node types are not accepted; use `download` for their authored content instead.
+
+Fetch the query capability before constructing a request:
+
+```bash
+curl -fsS -H "$AUTH" \
+  "$HUABU_RFS_URL/capabilities/queries/SNAPSHOT_NODES"
+```
+
+Then submit node IDs obtained from `query`:
+
+```bash
+cat > /tmp/huabu-snapshot.json <<'JSON'
+{
+  "type": "SNAPSHOT_NODES",
+  "nodeIds": ["sketch-123"],
+  "maxPixels": 1280
+}
+JSON
+
+curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  --data-binary @/tmp/huabu-snapshot.json "$HUABU_RFS_URL/query"
+```
+
+The response is `{ "type": "SNAPSHOT_NODES", "result": { "snapshots": [{ "src", "downloadPath", "width", "height", "originNodeIds" }] } }`. `src` is the bare artifact key accepted by Huabu media-node commands; `downloadPath` is the exact path to retrieve through `GET download/<path>`. Multiple nearby image or sketch nodes may be spatially clustered into one PNG, and `originNodeIds` identifies every contributing node.
+
+```bash
+curl -fsS -H "$AUTH" -o /tmp/huabu-snapshot.png \
+  "$HUABU_RFS_URL/download/artifacts/sketch-raster-example.png"
+```
+
+Snapshots are content-addressed, so repeating an unchanged request reuses the existing artifact. To render only selected strokes from a sketch, use the capability-documented `strokeSubsets` KEEP list. Reduce `maxPixels` when the resulting PNG is too large for a downstream vision model.
+
+## 5. Upload payloads
 
 Stage bytes under a descriptive, unique name. Uploads are inert until an `execute` command references their returned path. Existing names are never overwritten; a collision returns `409`.
 
@@ -103,7 +142,7 @@ curl -fsS -X DELETE -H "$AUTH" \
   "$HUABU_RFS_URL/upload/diagram.png"
 ```
 
-## 5. Huabu layout basics
+## 6. Huabu layout basics
 
 Coordinates use screen-style axes: x increases to the right and y increases downward. A node's `position` is its top-left corner in **parent-local** coordinates: relative to its direct parent frame, or absolute Space coordinates when it is at the root. Query results also expose read-only `absolutePosition`, which resolves the complete parent chain into world coordinates. For root nodes, `position` and `absolutePosition` are equal.
 
@@ -125,7 +164,7 @@ Never pin top-level height for `text` or `question`; change rendered text scale 
 
 Frames default to `free` layout, where child positions remain explicit and parent-local. `column` and `row` are structured layouts configured through `SET_FRAME_LAYOUT`; `gridCount` selects 1–12 tracks and defaults to 1. Structured frames choose final child slots, so child `position` is only an ordering hint. Their default `hug` sizing fits the frame to its content; `manual` preserves a pinned frame size while children still reflow and may overflow. Fetch the `SET_FRAME_LAYOUT` capability before using sizing or track options.
 
-## 6. Execute Space commands
+## 7. Execute Space commands
 
 `POST execute` accepts `{ "runId"?: string, "commands": [...] }`. The server owns canvas scope, agent origin, authorship metadata, and generated node/edge IDs; do not send them.
 
@@ -195,9 +234,9 @@ For a `MERGE_NODE_DATA` patch that changes `content`, first download the node an
 
 The response includes version transition, projected commands, command results, generated IDs, affected IDs, and new revisions. It intentionally excludes Web UI deltas and internal change-review records.
 
-## 7. Optional internal agent
+## 8. Optional internal agent
 
-`POST agent` is optional. Direct `query`, `download`, `upload`, and `execute` work without an internal model provider. Use the internal agent only for an intentionally open-ended task where model interpretation is valuable.
+`POST agent` is optional. Direct `query` (including `SNAPSHOT_NODES`), `download`, `upload`, and `execute` work without an internal model provider. Use the internal agent only for an intentionally open-ended task where model interpretation is valuable.
 
 The response is an SSE stream. Omit `X-Huabu-Thread-Id` to start a live conversation; return the emitted thread ID to continue it. Continuation does not survive a closed handle or Huabu restart.
 

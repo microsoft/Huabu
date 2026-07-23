@@ -173,6 +173,19 @@ describe('direct Space query discovery', () => {
         commandDetail.json(),
       );
       expect(parsedCommand.examples).toHaveLength(1);
+
+      const snapshotDetail = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/capabilities/queries/SNAPSHOT_NODES',
+      });
+      const parsedSnapshot = rfsOperationCapabilityResponseSchema.parse(
+        snapshotDetail.json(),
+      );
+      expect(parsedSnapshot).toMatchObject({
+        kind: 'query',
+        type: 'SNAPSHOT_NODES',
+      });
+      expect(parsedSnapshot.schema).toHaveProperty('properties.nodeIds');
     } finally {
       await app.close();
     }
@@ -272,6 +285,124 @@ describe('POST /api/rfs/:canvasId/query', () => {
       expect(invalidLimit.json<{ code: string }>().code).toBe(
         'validation_failed',
       );
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('SNAPSHOT_NODES Space query', () => {
+  it('renders a sketch into a downloadable PNG artifact', async () => {
+    const store = getCanvasStore('c1');
+    store.write({
+      canvasId: 'c1',
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          {
+            id: 'frame-root',
+            type: 'frame',
+            position: { x: 0, y: 0 },
+            style: { width: 300, height: 200 },
+            data: { type: 'frame' },
+          },
+          {
+            id: 'frame-nested',
+            type: 'frame',
+            parentId: 'frame-root',
+            position: { x: 20, y: 20 },
+            style: { width: 200, height: 120 },
+            data: { type: 'frame' },
+          },
+          {
+            id: 'sketch-1',
+            type: 'sketch',
+            parentId: 'frame-nested',
+            position: { x: 20, y: 30 },
+            style: { width: 120, height: 80 },
+            data: {
+              type: 'sketch',
+              initialSize: { width: 120, height: 80 },
+              strokes: [
+                {
+                  id: 'stroke-1',
+                  points: [
+                    [10, 10, 0.5],
+                    [60, 60, 0.5],
+                    [110, 10, 0.5],
+                  ],
+                  color: 'blue',
+                  size: 4,
+                },
+              ],
+            },
+          },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          type: 'SNAPSHOT_NODES',
+          nodeIds: ['frame-root'],
+          maxPixels: 512,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      const parsed = spaceQueryResponseSchema.parse(response.json());
+      expect(parsed).toMatchObject({ type: 'SNAPSHOT_NODES' });
+      if (parsed.type !== 'SNAPSHOT_NODES') {
+        throw new Error('Expected SNAPSHOT_NODES response');
+      }
+      expect(parsed.result.snapshots).toEqual([
+        {
+          src: expect.stringMatching(/^sketch-raster-.+\.png$/),
+          downloadPath: expect.stringMatching(
+            /^artifacts\/sketch-raster-.+\.png$/,
+          ),
+          width: expect.any(Number),
+          height: expect.any(Number),
+          originNodeIds: ['sketch-1'],
+        },
+      ]);
+
+      const download = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/download/${parsed.result.snapshots[0].downloadPath}`,
+      });
+      expect(download.statusCode).toBe(200);
+      expect(download.rawPayload.subarray(0, 8)).toEqual(
+        Buffer.from('89504e470d0a1a0a', 'hex'),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('validates requests before rendering', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          type: 'SNAPSHOT_NODES',
+          nodeIds: [],
+          maxPixels: 128,
+        },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json<{ code: string }>().code).toBe('validation_failed');
     } finally {
       await app.close();
     }

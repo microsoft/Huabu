@@ -28,18 +28,23 @@ import {
   NODE_FONT_WEIGHTS,
 } from '../canvas/index.js';
 
-export const SPACE_OPERATIONS_PROTOCOL_VERSION = 1;
+export const SPACE_OPERATIONS_PROTOCOL_VERSION = 2;
 export const SPACE_QUERY_DEFAULT_LIMIT = 50;
 export const SPACE_QUERY_MAX_LIMIT = 200;
 export const SPACE_SEARCH_DEFAULT_LIMIT = 100;
 export const SPACE_SEARCH_MAX_LIMIT = 2000;
 export const SPACE_EXECUTE_MAX_COMMANDS = 50;
+export const SPACE_SNAPSHOT_MAX_NODES = 50;
+export const SPACE_SNAPSHOT_MIN_PIXELS = 256;
+export const SPACE_SNAPSHOT_MAX_PIXELS = 4096;
+export const SPACE_SNAPSHOT_DEFAULT_PIXELS = 1280;
 
 export const SPACE_QUERY_TYPES = [
   'GET_SPACE_OUTLINE',
   'INSPECT_NODES',
   'INSPECT_EDGES',
   'SEARCH',
+  'SNAPSHOT_NODES',
 ] as const;
 
 const pointSchema = z
@@ -630,6 +635,45 @@ export const searchSpaceQueryParamsSchema = canvasSearchRequestSchema
   })
   .strict();
 
+export const snapshotNodesQueryParamsSchema = z
+  .object({
+    nodeIds: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(SPACE_SNAPSHOT_MAX_NODES)
+      .describe(
+        'IDs of image, sketch, or frame nodes. Passing one frame ID is sufficient: frame expansion is recursive by definition and includes every nested image and sketch descendant, so callers do not need to enumerate child IDs. Multiple nearby nodes under the same parent may be spatially clustered into one composite PNG.',
+      ),
+    maxPixels: z
+      .number()
+      .int()
+      .min(SPACE_SNAPSHOT_MIN_PIXELS)
+      .max(SPACE_SNAPSHOT_MAX_PIXELS)
+      .optional()
+      .describe(
+        `Longest-edge pixel cap for each PNG (${SPACE_SNAPSHOT_MIN_PIXELS}-${SPACE_SNAPSHOT_MAX_PIXELS}). Defaults to ${SPACE_SNAPSHOT_DEFAULT_PIXELS}. Reduce it when a downstream vision model rejects an oversized image. Rendered clusters are rerendered at this cap; singleton images are downscaled only when their longest edge exceeds it. Results are content-addressed by source and cap.`,
+      ),
+    strokeSubsets: z
+      .array(
+        z
+          .object({
+            nodeId: z.string().min(1),
+            strokeIds: z.array(z.string().min(1)).min(1),
+          })
+          .strict(),
+      )
+      .max(SPACE_SNAPSHOT_MAX_NODES)
+      .optional()
+      .describe(
+        "Optional per-sketch KEEP lists for rendering only the named stroke IDs. Nodes without an entry render in full. If none of an entry's stroke IDs still exist, the query reports a stale-selection error instead of silently widening to the whole sketch.",
+      ),
+  })
+  .strict();
+
+export type SnapshotNodesQueryParams = z.infer<
+  typeof snapshotNodesQueryParamsSchema
+>;
+
 export const getSpaceOutlineQuerySchema =
   getSpaceOutlineQueryParamsSchema.extend({
     type: z.literal('GET_SPACE_OUTLINE'),
@@ -647,11 +691,16 @@ export const searchSpaceQuerySchema = searchSpaceQueryParamsSchema.extend({
   type: z.literal('SEARCH'),
 });
 
+export const snapshotNodesQuerySchema = snapshotNodesQueryParamsSchema.extend({
+  type: z.literal('SNAPSHOT_NODES'),
+});
+
 export const SPACE_QUERY_SCHEMAS = {
   GET_SPACE_OUTLINE: getSpaceOutlineQuerySchema,
   INSPECT_NODES: inspectNodesQuerySchema,
   INSPECT_EDGES: inspectEdgesQuerySchema,
   SEARCH: searchSpaceQuerySchema,
+  SNAPSHOT_NODES: snapshotNodesQuerySchema,
 } as const satisfies Record<(typeof SPACE_QUERY_TYPES)[number], z.ZodType>;
 
 export const spaceQuerySchema = z.discriminatedUnion('type', [
@@ -659,6 +708,7 @@ export const spaceQuerySchema = z.discriminatedUnion('type', [
   inspectNodesQuerySchema,
   inspectEdgesQuerySchema,
   searchSpaceQuerySchema,
+  snapshotNodesQuerySchema,
 ]);
 
 export type SpaceQuery = z.infer<typeof spaceQuerySchema>;
@@ -804,6 +854,32 @@ const searchResultSchema = z
   })
   .strict();
 
+const snapshotNodeResultSchema = z
+  .object({
+    src: z
+      .string()
+      .min(1)
+      .describe(
+        'Bare artifact key accepted by media-node data.src and other Huabu artifact consumers.',
+      ),
+    downloadPath: z
+      .string()
+      .min(1)
+      .describe(
+        'Canvas-relative path to pass to GET download/<path> for the PNG bytes.',
+      ),
+    width: z.number().int().nonnegative(),
+    height: z.number().int().nonnegative(),
+    originNodeIds: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
+
+const snapshotNodesResultSchema = z
+  .object({
+    snapshots: z.array(snapshotNodeResultSchema),
+  })
+  .strict();
+
 export const spaceQueryResponseSchema = z.discriminatedUnion('type', [
   z
     .object({
@@ -827,6 +903,12 @@ export const spaceQueryResponseSchema = z.discriminatedUnion('type', [
     .object({
       type: z.literal('SEARCH'),
       result: searchResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('SNAPSHOT_NODES'),
+      result: snapshotNodesResultSchema,
     })
     .strict(),
 ]);
@@ -859,6 +941,7 @@ export const rfsCapabilitiesResponseSchema = z
         searchDefault: z.literal(SPACE_SEARCH_DEFAULT_LIMIT),
         searchMax: z.literal(SPACE_SEARCH_MAX_LIMIT),
         executeMaxCommands: z.literal(SPACE_EXECUTE_MAX_COMMANDS),
+        snapshotMaxNodes: z.literal(SPACE_SNAPSHOT_MAX_NODES),
       })
       .strict(),
     queryTypes: z.array(z.enum(SPACE_QUERY_TYPES)),

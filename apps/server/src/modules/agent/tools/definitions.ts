@@ -21,6 +21,7 @@ import {
   getSpaceOutlineQueryParamsSchema,
   inspectEdgesQueryParamsSchema,
   inspectNodesQueryParamsSchema,
+  snapshotNodesQueryParamsSchema,
 } from '@sediment/shared';
 
 import { zodToToolSchema } from './zod-tool-schema.js';
@@ -369,32 +370,9 @@ export const fsWriteTool: ToolDefinition = {
 
 // ==================== Image Tools ====================
 
-export const snapshotNodesParamsSchema = Type.Object({
-  nodeIds: Type.Array(Type.String(), {
-    description:
-      'Ids of the nodes to snapshot, as they appear in `get_space_outline` / `inspect_nodes`. All nodes must live on the current Space. Pass a single id for a one-shot snapshot; pass multiple ids to let the tool spatially cluster nearby image and sketch nodes into one composite PNG per cluster.',
-  }),
-  maxPixels: Type.Optional(
-    Type.Integer({
-      minimum: 256,
-      maximum: 4096,
-      description:
-        'Optional longest-edge pixel cap for the output PNG (256-4096). Defaults to 1280 — enough resolution for vision while keeping a single attachment well under the upstream LLM’s body-size limit. Reduce this (e.g. to 768 or 512) when a previous turn returned `[Attached Image: … omitted from vision (~X.X MB exceeds the inline cap)]` so the resulting PNG is small enough to actually be sent. Applies uniformly to: rendered clusters (re-rendered at the new cap), and singleton image pass-throughs (re-rasterized only when the source’s longest edge exceeds `maxPixels`; otherwise the original artifact is returned unchanged). Result is content-addressed by `(source, maxPixels)`, so the same call is essentially free on repeat.',
-    }),
-  ),
-  strokeSubsets: Type.Optional(
-    Type.Array(
-      Type.Object({
-        nodeId: Type.String(),
-        strokeIds: Type.Array(Type.String()),
-      }),
-      {
-        description:
-          'Optional per-sketch-node stroke subset (a KEEP list, not an exclusion). Each entry renders ONLY the listed `strokeIds` of that `nodeId` (ids as they appear in the node’s `strokes[]`), letting you snapshot part of a sketch region — e.g. the few strokes the user lassoed — instead of the whole node. Nodes without an entry render in full; an entry whose ids match nothing returns a stale-selection error instead of widening to the full node. The subset render is content-addressed independently, so it never collides with the whole-node snapshot.',
-      },
-    ),
-  ),
-});
+export const snapshotNodesParamsSchema = zodToToolSchema(
+  snapshotNodesQueryParamsSchema,
+);
 
 export const snapshotNodesTool: ToolDefinition = {
   name: 'snapshot_nodes',

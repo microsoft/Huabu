@@ -20,9 +20,9 @@
 import { getSkill } from '../../../prompt/index.js';
 import { getNodeNeighbourhood } from '../../canvas/node-neighbourhood.js';
 import { describeNode } from '../../canvas/node-prompt.js';
+import { snapshotNodesToArtifacts } from '../../canvas/snapshot-nodes.js';
 import { getCanvasStore } from '../../storage/index.js';
 import { isUserInvokableSkill } from '../skills.route.js';
-import { snapshotNodesToArtifacts } from '../tools/handlers/snapshot-node.js';
 
 import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
 import type { AgentNodePreview } from '../node-ref.js';
