@@ -195,8 +195,8 @@ export const rfsExecuteHeadersSchema = z
       .string()
       .trim()
       .min(1)
-      .max(256)
-      .regex(/^[^\r\n]+$/)
+      .max(200)
+      .regex(/^[a-zA-Z0-9_-]+$/)
       .optional(),
   })
   .passthrough();

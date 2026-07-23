@@ -451,6 +451,25 @@ describe('POST /api/rfs/:canvasId/execute', () => {
       });
       expect(unattributed.statusCode).toBe(200);
       expect(getCanvasStore('c1').readChanges('thread-xyz')).toHaveLength(0);
+
+      // A malformed filesystem ID is ignored: the write still applies, but
+      // no change-review sidecar is attributed to it.
+      const malformed = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: {
+          'content-type': 'application/json',
+          'x-huabu-host-thread-id': 'thread/invalid',
+        },
+        payload,
+      });
+      expect(malformed.statusCode).toBe(200);
+      expect(
+        malformed.json<{ affected: { nodeIds: string[] } }>().affected.nodeIds,
+      ).toHaveLength(1);
+      expect(getCanvasStore('c1').readChanges('thread-invalid')).toHaveLength(
+        0,
+      );
     } finally {
       await app.close();
     }
