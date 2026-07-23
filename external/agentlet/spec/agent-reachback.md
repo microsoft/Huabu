@@ -59,22 +59,16 @@ flowchart LR
 
 ## 2. Environment Provisioning
 
-When the daemon spawns an agent process, it injects a set of **well-known
-environment variables** so the agent (and the Reachback tool it invokes) can
-locate its tools and authenticate back to the host. Precedence is
-`AGENTLET_SERVER` < daemon `envRegistry` < `sessionSpec.env` (host overrides
-win).
+When the daemon spawns an agent process, it injects a set of **well-known environment variables** so the agent (and the Reachback tool it invokes) can locate its tools and authenticate back to the host. Precedence is `AGENTLET_SERVER` < daemon `envRegistry` < `sessionSpec.env`, with `AGENTLET_TOKEN` always set from the daemon's authenticated launch options.
 
 | Variable | Provided by | Description |
 | -------- | ----------- | ----------- |
 | `AGENTLET_REACHBACK_DIR` | daemon `envRegistry` | Absolute path to the directory where Reachback tool scripts are saved. Defaults to `node_modules/.cache/agentlet/reachback`; overridable via the daemon's `process.env`. Resolved to an absolute path so agents with a different `cwd` still find it. |
 | `AGENTLET_SERVER` | daemon `--server` | The daemon's control-channel WebSocket URL (e.g. `ws://127.0.0.1:3001/api/bridge`). Tools derive an HTTP base URL from this (`ws://`→`http://`, strip path) unless the host provides its own override. |
 | `AGENTLET_TOKEN` | daemon `--token` | Bearer token the tool attaches to every call back to the host. May double as user/session identity for per-token access scoping. |
-| _host-specific_ | `sessionSpec.env` | Any additional variables the host app passes at spawn time (e.g. a workspace/document ID). Merged last, so a host can override defaults. |
+| _host-specific_ | `sessionSpec.env` | Any additional variables the host app passes at spawn time (e.g. a workspace/document ID). These override defaults but cannot replace the daemon-owned `AGENTLET_TOKEN`. |
 
-The daemon maintains these in an `envRegistry` keyed by variable name. The
-registry is the single source of truth for both (a) `${ENV_VAR}` interpolation
-in resource destinations (§3) and (b) the environment of spawned agents.
+The daemon maintains resource-directory variables in an `envRegistry` keyed by variable name. The registry is the single source of truth for `${ENV_VAR}` interpolation in resource destinations (§3). Spawned-agent environments combine the daemon's server URL and token with that registry and `sessionSpec.env`, so a token supplied through `--token` does not depend on also being present in the daemon process environment.
 
 ## 3. Tool Distribution
 
