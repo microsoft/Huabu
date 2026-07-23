@@ -17,7 +17,7 @@ import {
   type AgentIconValue,
 } from '@/components/Common/AgentIcon';
 
-import type { CustomData } from '@sediment/shared';
+import type { AgentBinding, CustomData } from '@sediment/shared';
 
 /**
  * Reserved `customData` key holding the avatar. Kept as a local literal (rather
@@ -78,6 +78,20 @@ export function readAgentIcon(profile: {
     if (isShape(shape) && isColor(color)) return { shape, color };
   }
   return getDefaultAgentIcon(profile.id);
+}
+
+/** Snapshot the effective external-agent icon when binding a conversation. */
+export function snapshotAgentIcon(
+  binding: AgentBinding,
+  profiles: readonly { id: string; customData?: CustomData }[],
+): AgentIconValue | undefined {
+  if (binding.kind !== 'external') return undefined;
+  const profile = profiles.find(
+    (candidate) => candidate.id === binding.profileId,
+  );
+  return profile
+    ? readAgentIcon(profile)
+    : getDefaultAgentIcon(binding.profileId);
 }
 
 /** Build the `customData` patch that sets a Profile's icon, preserving other keys. */

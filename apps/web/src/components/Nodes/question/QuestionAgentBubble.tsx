@@ -3,11 +3,11 @@ import { clsx } from 'clsx';
 import type { CSSProperties } from 'react';
 
 /**
- * Rounded speech-bubble outline shared by BOTH question-node agent marks — the
- * readable corner {@link QuestionAgentBadge} and the zoomed-out
- * {@link QuestionTakeoverMark}. It is the single source of truth for the
- * `open` bubble geometry (path, warm sticker fill, `--question-border` stroke)
- * so the two stages stay pixel-identical and neither re-implements the shape.
+ * Rounded speech-bubble outline shared by BOTH question-node agent-mark stages
+ * rendered by {@link QuestionTakeoverMark} — the readable corner badge and the
+ * zoomed-out collapsed mark. It is the single source of truth for the `open`
+ * bubble geometry (path, warm sticker fill, `--question-border` stroke) so the
+ * two stages stay pixel-identical and neither re-implements the shape.
  *
  * Sizing/positioning is left to the caller so each stage can drive it its own
  * way: the readable badge sizes it from `--question-agent-badge-size` via the

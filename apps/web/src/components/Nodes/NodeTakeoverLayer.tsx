@@ -42,21 +42,32 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
   onActivate,
   nodeRootRef,
 }: NodeTakeoverLayerProps) {
-  const { stage, size, point, collapsedRadius } = useNodeTakeover(nodeId);
+  const { stage, size, point, collapsedCenter, collapsedRadius } =
+    useNodeTakeover(nodeId);
   const domNode = useStore((s) => s.domNode);
   const internalNode = useInternalNode(nodeId);
-  const setCollapseRadius = useNodeCollapseStore((s) => s.setRadius);
+  const setMark = useNodeCollapseStore((s) => s.setMark);
   const rendererEl = useMemo(
     () => domNode?.querySelector('.react-flow__renderer') ?? null,
     [domNode],
   );
 
-  // Publish the collapsed mark radius (canvas space) so edges terminate on the
-  // visible mark circle instead of the hidden card footprint.
+  // Publish the collapsed mark's live centre + radius (canvas space) so edges
+  // terminate on the visible mark circle wherever it currently sits during the
+  // corner → centre glide, instead of a phantom circle pinned at the node
+  // centre. Depend on primitives so the effect only re-runs when the geometry
+  // actually changes, and clear on unmount in a separate effect so a per-frame
+  // update never transiently nulls the mark (which would flicker the edge).
+  const markCx = collapsedCenter?.x ?? null;
+  const markCy = collapsedCenter?.y ?? null;
   useLayoutEffect(() => {
-    setCollapseRadius(nodeId, collapsedRadius);
-    return () => setCollapseRadius(nodeId, null);
-  }, [nodeId, collapsedRadius, setCollapseRadius]);
+    if (markCx !== null && markCy !== null && collapsedRadius !== null) {
+      setMark(nodeId, { cx: markCx, cy: markCy, radius: collapsedRadius });
+    } else {
+      setMark(nodeId, null);
+    }
+  }, [nodeId, markCx, markCy, collapsedRadius, setMark]);
+  useLayoutEffect(() => () => setMark(nodeId, null), [nodeId, setMark]);
 
   // Binary card fade — written here (and only here) so NodeWrapper and the card
   // markup compute nothing.

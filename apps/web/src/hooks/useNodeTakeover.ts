@@ -18,6 +18,12 @@ export interface NodeTakeoverGeometry {
   /** Screen point (px) the mark centre should sit on this frame. */
   point: TakeoverPoint;
   /**
+   * Canvas-space centre of the mark this frame, or `null` when the node is
+   * readable. Derived from the interpolated screen point so edges clip to where
+   * the mark ACTUALLY is during the corner → centre glide.
+   */
+  collapsedCenter: TakeoverPoint | null;
+  /**
    * Canvas-space radius of the collapsed mark circle, or `null` when the node
    * is readable. Zoom-independent (the mark fills the node's shorter side), so
    * edges can clip to it without recomputing on every zoom frame.
@@ -54,6 +60,7 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
       stage: 'readable',
       size: badgeSizeForNode(0, 0),
       point: { x: 0, y: 0 },
+      collapsedCenter: null,
       collapsedRadius: null,
     };
   }
@@ -90,5 +97,13 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
   // to the actual mark circle. Radius in canvas space = screen size / zoom.
   const collapsedRadius = stage === 'readable' ? null : size / (2 * zoom);
 
-  return { stage, size, point, collapsedRadius };
+  // Live canvas-space centre of the mark (derived from the interpolated screen
+  // point) so edges clip to where the mark ACTUALLY is during the corner →
+  // centre glide, not to a phantom circle pinned at the node centre.
+  const collapsedCenter =
+    stage === 'readable'
+      ? null
+      : { x: (point.x - vpX) / zoom, y: (point.y - vpY) / zoom };
+
+  return { stage, size, point, collapsedCenter, collapsedRadius };
 }

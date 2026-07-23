@@ -18,7 +18,7 @@ import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
-import { getDefaultAgentIcon, readAgentIcon } from '@/utils/agentIcon';
+import { snapshotAgentIcon } from '@/utils/agentIcon';
 
 import type { AssistantSegment } from '../store/chatTypes';
 import type {
@@ -836,11 +836,10 @@ export function useAgentStream(): UseAgentStreamReturn {
         const composeBinding = isCompose
           ? {
               agentBinding: snapshotBinding,
-              agentIcon: selectedProfile
-                ? readAgentIcon(selectedProfile)
-                : selectedBinding.kind === 'external'
-                  ? getDefaultAgentIcon(selectedBinding.profileId)
-                  : undefined,
+              agentIcon: snapshotAgentIcon(
+                selectedBinding,
+                useAcpProfilesStore.getState().profiles,
+              ),
               agentMode,
             }
           : {};

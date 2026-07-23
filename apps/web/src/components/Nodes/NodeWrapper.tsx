@@ -187,20 +187,12 @@ interface NodeWrapperProps {
   actions?: React.ReactNode;
   overlayContent?: React.ReactNode;
   /**
-   * Custom minimal-LOD payload. When the node type opts into `minimal` LOD
-   * (see {@link SEMANTIC_ZOOM_CONFIG}) and this is provided, it replaces the
-   * generic tier-sized title label ({@link SemanticPlaceholder}) inside the
-   * shared cross-fade slot. Used by the question node to show its agent
-   * avatar as the zoomed-out stand-in.
-   */
-  minimalContent?: React.ReactNode;
-  /**
-   * Opt into the discrete three-stage zoom takeover. As the node shrinks, the
-   * node-supplied mark moves from the corner badge (readable) to a centred
-   * avatar (unreadable) to a dot (tiny), with the card fading out. The engine
-   * ({@link NodeTakeoverLayer}) owns staging, positioning, the transition
-   * animation, and the card-fade; the mark owns its own size, detail, status
-   * chrome, and click. Mutually exclusive with `minimalContent`.
+   * Opt into the continuous zoom takeover. As the node shrinks on screen, the
+   * node-supplied mark glides from the readable corner badge to a centred
+   * stand-in and resizes with it, while the card body fades out — a single
+   * continuous morph driven by the node's on-screen width, not a discrete
+   * stage swap. The engine ({@link NodeTakeoverLayer}) owns positioning and the
+   * card-fade; the mark owns its own size, detail, status chrome, and click.
    */
   takeover?: {
     renderMark: (state: TakeoverState) => React.ReactNode;
@@ -275,7 +267,6 @@ export const NodeWrapper = memo(
     toolbar,
     actions,
     overlayContent,
-    minimalContent,
     takeover,
     overlayOffsetY = 0,
     overlayVisible = true,
@@ -707,27 +698,15 @@ export const NodeWrapper = memo(
             shared containing block also guarantees that the full-LOD hiding
             selector and the absolute inset use the same structural anchor.
           */}
-          {supportsMinimalLOD &&
-            (minimalContent ? (
-              // Node-supplied minimal payload (e.g. the question node's agent
-              // avatar). Wrapped in the shared cross-fade layer so it fades in
-              // as the full body fades out, mirroring SemanticPlaceholder.
-              <div
-                className="semantic-lod-placeholder absolute inset-0 z-10 flex items-center justify-center"
-                data-lod={isMinimal ? 'minimal' : 'full'}
-                aria-hidden={!isMinimal}
-              >
-                {minimalContent}
-              </div>
-            ) : (
-              <SemanticPlaceholder
-                type={type}
-                data={data}
-                active={isMinimal}
-                width={nodeWidth}
-                height={nodeHeight}
-              />
-            ))}
+          {supportsMinimalLOD && (
+            <SemanticPlaceholder
+              type={type}
+              data={data}
+              active={isMinimal}
+              width={nodeWidth}
+              height={nodeHeight}
+            />
+          )}
 
           {showIngestionOverlay && (
             <div className="pointer-events-none absolute right-1.5 bottom-1.5 z-10">

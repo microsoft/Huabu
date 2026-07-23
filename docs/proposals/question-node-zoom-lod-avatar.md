@@ -5,7 +5,7 @@ Last updated: 2026-07-23
 
 ## Finalized proposal — playground avatar takeover
 
-The zoom-LOD lab in [`AgentNodePlaygroundPage.tsx`](../../apps/web/src/pages/AgentNodePlaygroundPage.tsx) is the visual design source for the shipped Question-node takeover. Its first section is now the 1:1 finalized executable reference and imports the production takeover math plus `QuestionTakeoverMark`; the earlier copied implementation remains immediately below it as proposal history. The final proposal is: preserve one persistent Agent mark across the entire zoom range, derive its geometry continuously from the Question node's live screen dimensions, and let that mark replace the unreadable card at deep zoom-out. The architecture reference in [canvas-zoom-rendering.md §3.1](../architecture/canvas-zoom-rendering.md#31-continuous-zoom-takeover-question-node) remains authoritative when this historical proposal and the implementation differ.
+The zoom-LOD lab in [`AgentNodePlaygroundPage.tsx`](../../apps/web/src/pages/playground/AgentNodePlaygroundPage.tsx) is the visual design source for the shipped Question-node takeover. Its first section is now the 1:1 finalized executable reference and imports the production takeover math plus `QuestionTakeoverMark`; the earlier copied implementation remains immediately below it as proposal history. The final proposal is: preserve one persistent Agent mark across the entire zoom range, derive its geometry continuously from the Question node's live screen dimensions, and let that mark replace the unreadable card at deep zoom-out. The architecture reference in [canvas-zoom-rendering.md §3.1](../architecture/canvas-zoom-rendering.md#31-continuous-zoom-takeover-question-node) remains authoritative when this historical proposal and the implementation differ.
 
 ### Final behaviour
 
@@ -187,7 +187,7 @@ Applied after a code review of this plan against the shipped V1 code:
 
 > How the `AgentNodePlaygroundPage` "zoom LOD lab" (avatar takeover + identity dot) should land on the real canvas, and how much of the existing node LOD system it should reuse.
 > Owner: canvas
-> Prototype: [`apps/web/src/pages/AgentNodePlaygroundPage.tsx`](../../apps/web/src/pages/AgentNodePlaygroundPage.tsx) (`QuestionNodeLodLab`, `LodViewport`, `LodAgentChip`, `avatarSizeForNode`).
+> Prototype: [`apps/web/src/pages/playground/AgentNodePlaygroundPage.tsx`](../../apps/web/src/pages/playground/AgentNodePlaygroundPage.tsx) (`QuestionNodeLodLab`, `LodViewport`, `LodAgentChip`, `avatarSizeForNode`).
 
 ## 1. Where we are today
 

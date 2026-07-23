@@ -13,7 +13,6 @@ import {
   getBezierPath,
   getSmoothStepPath,
   getStraightPath,
-  useInternalNode,
   useStore,
 } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -76,36 +75,33 @@ export function LabelledEdge(props: EdgeProps) {
   // When an endpoint node is collapsed to its zoom-LOD mark (a centred circle),
   // terminate the edge on that circle instead of the node's hidden card
   // footprint, so the edge stays visually attached to the mark at any aspect
-  // ratio (not just the node's shorter side). Only collapsed question nodes
-  // publish a radius; everything else keeps React Flow's handle point.
-  const sourceRadius = useNodeCollapseStore((s) => s.radii[source]);
-  const targetRadius = useNodeCollapseStore((s) => s.radii[target]);
-  const sourceInternal = useInternalNode(source);
-  const targetInternal = useInternalNode(target);
+  // ratio. A collapsed node publishes its mark's LIVE canvas-space centre +
+  // clip radius, so the edge follows the mark wherever it sits during the
+  // corner → centre glide — not a phantom circle at the node centre. Only
+  // collapsed question nodes publish geometry; everything else keeps React
+  // Flow's handle point.
+  const sourceMark = useNodeCollapseStore((s) => s.marks[source]);
+  const targetMark = useNodeCollapseStore((s) => s.marks[target]);
 
   let sx = sourceX;
   let sy = sourceY;
   let tx = targetX;
   let ty = targetY;
-  const sourceAbs = sourceInternal?.internals.positionAbsolute;
-  if (sourceRadius !== undefined && sourceAbs) {
-    const cx = sourceAbs.x + (sourceInternal?.measured?.width ?? 0) / 2;
-    const cy = sourceAbs.y + (sourceInternal?.measured?.height ?? 0) / 2;
+  if (sourceMark) {
+    const { cx, cy, radius } = sourceMark;
     const dx = tx - cx;
     const dy = ty - cy;
     const len = Math.hypot(dx, dy) || 1;
-    sx = cx + (dx / len) * sourceRadius;
-    sy = cy + (dy / len) * sourceRadius;
+    sx = cx + (dx / len) * radius;
+    sy = cy + (dy / len) * radius;
   }
-  const targetAbs = targetInternal?.internals.positionAbsolute;
-  if (targetRadius !== undefined && targetAbs) {
-    const cx = targetAbs.x + (targetInternal?.measured?.width ?? 0) / 2;
-    const cy = targetAbs.y + (targetInternal?.measured?.height ?? 0) / 2;
+  if (targetMark) {
+    const { cx, cy, radius } = targetMark;
     const dx = sx - cx;
     const dy = sy - cy;
     const len = Math.hypot(dx, dy) || 1;
-    tx = cx + (dx / len) * targetRadius;
-    ty = cy + (dy / len) * targetRadius;
+    tx = cx + (dx / len) * radius;
+    ty = cy + (dy / len) * radius;
   }
 
   const edgeStyle = getEdgeStyle(data);

@@ -41,9 +41,9 @@ import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { readAgentIcon, withAgentIcon } from '@/utils/agentIcon';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
-import { AgentIconPicker } from './AgentIconPicker';
 import { AgentletHealthBanner } from './AgentletHealthBanner';
 import { AgentProfileEditor } from './AgentProfileEditor';
+import { PersistedAgentIconPicker } from './PersistedAgentIconPicker';
 import { ProfileFormFooterTarget } from './ProfileFormFooter';
 import { useDetectedClis } from './useDetectedClis';
 import { useUnifiedAgents, type ManifestProfileRow } from './useUnifiedAgents';
@@ -257,6 +257,7 @@ export function ExternalAgentsSettings({
           err instanceof Error ? err.message : t('settings.profileSaveFailed'),
           { tone: 'danger' },
         );
+        throw err;
       }
     },
     [refreshCommand, t],
@@ -274,6 +275,7 @@ export function ExternalAgentsSettings({
           err instanceof Error ? err.message : t('settings.profileSaveFailed'),
           { tone: 'danger' },
         );
+        throw err;
       }
     },
     [refreshMember, t],
@@ -475,12 +477,10 @@ export function ExternalAgentsSettings({
                       <SettingRow
                         key={row.profile.id}
                         leading={
-                          <AgentIconPicker
+                          <PersistedAgentIconPicker
                             value={readAgentIcon(row.profile)}
                             alias={row.profile.alias}
-                            onChange={(icon) =>
-                              void saveManifestIcon(row, icon)
-                            }
+                            onSave={(icon) => saveManifestIcon(row, icon)}
                           />
                         }
                         title={row.profile.alias}
@@ -592,12 +592,10 @@ export function ExternalAgentsSettings({
                     <SettingRow
                       key={profile.id}
                       leading={
-                        <AgentIconPicker
+                        <PersistedAgentIconPicker
                           value={readAgentIcon(profile)}
                           alias={profile.alias}
-                          onChange={(icon) =>
-                            void saveCommandIcon(profile, icon)
-                          }
+                          onSave={(icon) => saveCommandIcon(profile, icon)}
                         />
                       }
                       title={profile.alias}

@@ -10,7 +10,7 @@ import { MARK_FACE_MIN } from '@/config/nodeTakeover';
 import { QuestionAgentBubble } from './QuestionAgentBubble.tsx';
 import { resolveQuestionBadgeChrome } from './questionBadgeChrome.ts';
 
-import type { QuestionAgentBadgeStatus } from './QuestionAgentBadge.tsx';
+import type { QuestionAgentBadgeStatus } from './questionBadgeChrome.ts';
 import type { TakeoverState } from '@/config/nodeTakeover';
 import type { QuestionAgentPresentation } from '@/utils/questionAgentPresentation.ts';
 import type { CSSProperties, ReactNode } from 'react';
@@ -26,6 +26,7 @@ export interface QuestionTakeoverMarkProps {
   /** True once a conversation exists — only then is a single-click meaningful. */
   interactive: boolean;
   onOpen?: () => void;
+  accessibleLabel?: string;
   tooltip?: ReactNode;
   conflictTooltip?: string;
 }
@@ -78,6 +79,7 @@ export function QuestionTakeoverMark({
   conflictCount,
   interactive,
   onOpen,
+  accessibleLabel,
   tooltip,
   conflictTooltip,
 }: QuestionTakeoverMarkProps) {
@@ -155,31 +157,8 @@ export function QuestionTakeoverMark({
       'color-mix(in srgb, var(--fg-subtle) 38%, var(--bg-surface))',
   };
 
-  const chip$ = (
-    <div
-      className={clsx(
-        'question-agent-badge relative inline-flex items-center justify-center rounded-full border-solid',
-        !isIdle && !showBubble && !chip.isRunning && 'shadow-sm',
-        chip.isRunning &&
-          'question-agent-ring-running border-transparent shadow-none',
-        chip.isApproval &&
-          'question-agent-ring-approval border-transparent shadow-none',
-        chip.isError &&
-          chip.needsAttention &&
-          'question-agent-ring-error border-transparent',
-        chip.needsAttention && !chip.isApproval && 'question-agent-attention',
-      )}
-      style={chipStyle}
-      onClick={
-        interactive && onOpen
-          ? (e) => {
-              e.stopPropagation();
-              onOpen();
-            }
-          : undefined
-      }
-      aria-hidden
-    >
+  const chipContent = (
+    <>
       {showBubble ? (
         <QuestionAgentBubble
           fill={chip.stickerFill}
@@ -193,9 +172,6 @@ export function QuestionTakeoverMark({
         />
       ) : null}
       {isIdle ? (
-        // Never-asked node: a pale sticky-yellow dot (its own note identity),
-        // not an agent colour and not a neutral grey. `shrink-0` so the flex
-        // chip never squishes it into an ellipse.
         <span
           className="relative z-10 block shrink-0 rounded-full"
           style={{
@@ -219,10 +195,6 @@ export function QuestionTakeoverMark({
           <AgentAvatarMark
             agent={agent}
             size={innerSize}
-            // Same badge in both stages: show the full character whenever the
-            // mark is big enough to read a face (MARK_FACE_MIN), and fall back
-            // to a clean solid dot only at the very smallest collapsed sizes so
-            // a tiny mark never renders a muddy icon-that-looks-like-a-dot.
             detail={size >= MARK_FACE_MIN ? 'full' : 'dot'}
             motion={chip.isRunning ? 'working' : 'none'}
             className="shrink-0"
@@ -251,6 +223,53 @@ export function QuestionTakeoverMark({
           <ShieldQuestion size={approvalSatelliteSize * 0.62} />
         </span>
       ) : null}
+    </>
+  );
+  const chipClassName = clsx(
+    'question-agent-badge relative inline-flex items-center justify-center rounded-full border-solid',
+    !isIdle && !showBubble && !chip.isRunning && 'shadow-sm',
+    chip.isRunning &&
+      'question-agent-ring-running border-transparent shadow-none',
+    chip.isApproval &&
+      'question-agent-ring-approval border-transparent shadow-none',
+    chip.isError &&
+      chip.needsAttention &&
+      'question-agent-ring-error border-transparent',
+    chip.needsAttention && !chip.isApproval && 'question-agent-attention',
+  );
+  const canOpen = interactive && !!onOpen;
+  // Deliberately a plain (role-annotated) div, NOT the shared <Button>: Button
+  // injects icon-size utilities (`[&_svg]:h-4 w-4`) that clamp the avatar SVG
+  // and fight the continuous size-driven mark, breaking the zoom-out stand-in.
+  // Keyboard + aria-label give it the same accessibility as a button.
+  const chip$ = canOpen ? (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={accessibleLabel ?? agent.alias}
+      className={chipClassName}
+      style={chipStyle}
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpen();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          onOpen();
+        }
+      }}
+    >
+      {chipContent}
+    </div>
+  ) : (
+    <div
+      className={clsx(chipClassName, 'pointer-events-none')}
+      style={chipStyle}
+      aria-hidden
+    >
+      {chipContent}
     </div>
   );
 

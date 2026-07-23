@@ -29,7 +29,7 @@ import { enterQuestionCompose } from './questionCompose.ts';
 import { QuestionTakeoverMark } from './QuestionTakeoverMark.tsx';
 import { TextNodeBody } from '../shared/TextNodeBody';
 
-import type { QuestionAgentBadgeStatus } from './QuestionAgentBadge.tsx';
+import type { QuestionAgentBadgeStatus } from './questionBadgeChrome.ts';
 import type { CanvasQuestionNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
 
@@ -303,6 +303,11 @@ export const QuestionNode = memo(
               conflictCount={status === 'done' ? conflictCount : 0}
               interactive={canOpenInChat}
               onOpen={canOpenInChat ? openInChat : undefined}
+              accessibleLabel={
+                canOpenInChat
+                  ? `${agentPresentation.alias} · ${t('node.openConversation')}`
+                  : undefined
+              }
               conflictTooltip={
                 conflictCount > 0
                   ? t('node.agentChangesSkipped', { count: conflictCount })

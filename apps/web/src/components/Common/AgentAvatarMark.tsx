@@ -1,35 +1,41 @@
-import { resolveAvatarDetail } from '@/config/agentAvatarLOD';
-
 import { AgentIcon, agentIconColorHex } from './AgentIcon';
 import { BuiltInAgentAvatar } from './BuiltInAgentAvatar';
 
 import type { AgentIconMotion } from './AgentIcon';
-import type { AvatarDetail } from '@/config/agentAvatarLOD';
 import type { QuestionAgentPresentation } from '@/utils/questionAgentPresentation';
+
+/**
+ * Avatar detail tier. The caller decides which to draw from the rendered size
+ * (the question takeover uses `MARK_FACE_MIN`): `full` draws the agent's face,
+ * `dot` collapses to a solid identity circle once the mark is too small for a
+ * face to read.
+ */
+export type AvatarDetail = 'full' | 'dot';
 
 export interface AgentAvatarMarkProps {
   /** Resolved identity to draw (external Agent icon or built-in mode). */
   agent: QuestionAgentPresentation;
-  /** Rendered avatar diameter (px). Drives the detail tier. */
+  /** Rendered avatar diameter (px). */
   size: number;
   /** Optional semantic motion (running wobble). */
   motion?: AgentIconMotion;
-  /** Force a detail tier instead of deriving it from {@link size} (e.g. a
-   * readable corner badge that must always show the full character). */
-  detail?: AvatarDetail;
+  /** Detail tier to draw. The caller picks it from {@link size} (the question
+   * takeover uses `MARK_FACE_MIN`): `full` shows the face, `dot` collapses to a
+   * solid identity circle. */
+  detail: AvatarDetail;
   className?: string;
 }
 
 /**
- * `AgentAvatarMark` — an agent's identity avatar with size-driven level of
- * detail, shared by every surface that shrinks an avatar toward a dot (the
- * question node's zoomed-out stand-in today; other identity surfaces later).
+ * `AgentAvatarMark` — an agent's identity avatar, shared by every surface that
+ * shrinks an avatar toward a dot (the question node's zoomed-out stand-in
+ * today; other identity surfaces later).
  *
- * As the size shrinks it sheds detail so the mark never turns to mush:
- *   - `full` (≥ {@link AVATAR_FACE_MIN}) → the detailed avatar with its face;
- *   - `silhouette` (< {@link AVATAR_FACE_MIN}) → the shape without the face;
- *   - `dot` (< {@link AVATAR_DOT_MAX}) → a solid circle in the agent's identity
- *     colour, the crispest possible mark at a few pixels.
+ * The caller picks the detail tier from the rendered size so the mark never
+ * turns to mush:
+ *   - `full` → the detailed avatar with its face;
+ *   - `dot`  → a solid circle in the agent's identity colour, the crispest
+ *     possible mark at a few pixels.
  *
  * Status chrome (rings, halos, bubble) is intentionally NOT drawn here — it is
  * layered by the caller so this stays a pure identity mark.
@@ -38,11 +44,9 @@ export function AgentAvatarMark({
   agent,
   size,
   motion = 'none',
-  detail: detailOverride,
+  detail,
   className,
 }: AgentAvatarMarkProps) {
-  const detail = detailOverride ?? resolveAvatarDetail(size);
-
   if (detail === 'dot') {
     const identityColor =
       agent.kind === 'external'

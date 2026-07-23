@@ -20,6 +20,7 @@ import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
 import { useBuiltinThreadSettings } from '@/hooks/useBuiltinThreadSettings';
 import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
+import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
@@ -31,6 +32,7 @@ import { findPendingPermissionRequest } from '@/store/chatTypes';
 import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
 import { usePanelStore } from '@/store/panelStore';
+import { snapshotAgentIcon } from '@/utils/agentIcon';
 
 import {
   AcpConnectionBadge,
@@ -739,6 +741,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         viewed: true,
         threadId,
         agentBinding,
+        agentIcon: snapshotAgentIcon(
+          agentBinding,
+          useAcpProfilesStore.getState().profiles,
+        ),
         agentMode: mode,
       },
     });

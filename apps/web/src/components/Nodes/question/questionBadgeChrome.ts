@@ -1,15 +1,27 @@
 import { agentIconColorHex } from '@/components/Common/AgentIcon';
 
-import type { QuestionAgentBadgeStatus } from './QuestionAgentBadge';
 import type { QuestionAgentPresentation } from '@/utils/questionAgentPresentation';
+
+/**
+ * Question node agent status the mark renders. `idle` (never asked) is handled
+ * separately by callers; these five are the states that produce a visible
+ * chip/mark.
+ */
+export type QuestionAgentBadgeStatus =
+  | 'open'
+  | 'running'
+  | 'approval'
+  | 'done'
+  | 'error';
 
 /**
  * Resolved visual chrome for a question node's agent status mark — the ring
  * colour, attention halo, running-ring identity colour, and sticker fill.
  *
- * Shared by the corner {@link QuestionAgentBadge} and the zoomed-out
- * {@link QuestionTakeoverMark} stand-in so status reads identically on both;
- * this is the single source of truth for status → colour mapping.
+ * Shared by the readable corner badge and the zoomed-out collapsed mark (both
+ * rendered by {@link QuestionTakeoverMark}) so status reads identically across
+ * the whole zoom range; this is the single source of truth for status → colour
+ * mapping.
  */
 export interface QuestionBadgeChrome {
   isOpen: boolean;
