@@ -276,6 +276,16 @@ const agentletGateway = mountAgenetes(app, {
   connectionToken: getConnectionToken(),
   dataDir: getDataDir(),
   daemonEntryPath: resolveDaemonEntry() ?? '',
+  // Host-namespaced env isolation: the agentlet daemon and every external
+  // agent it spawns are host-agnostic and must receive their Huabu
+  // coordinates only through explicit injection (per-agent reachback env),
+  // never through ambient inheritance. Strip the entire `HUABU_` namespace
+  // from the forked daemon's environment (empty allowlist — the daemon
+  // needs none of it) so host secrets like `HUABU_SECRET_KEY` and unrelated
+  // host config never leak into untrusted agent processes. See
+  // docs/architecture/agent-reachback.md ("Environment injection and isolation").
+  hostEnvPrefix: 'HUABU_',
+  hostEnvAllowlist: [],
   agentTeam: {
     storageDir: join(getDataDir(), 'agent-team'),
     secretStore: {
