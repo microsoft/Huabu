@@ -94,7 +94,22 @@ export const piSpecSchema = agentSpecSchema.extend({
   hostContext: z.record(z.string(), z.unknown()).optional(),
 });
 
-export const piDurableStateSchema = z.object({}).strict();
+export const piDurableStateSchema = z
+  .object({
+    /**
+     * Per-thread model override. Opaque to the driver — it is handed to the
+     * host `resolveModel` port as the {@link PiModelRef} id, which resolves
+     * the concrete model. Absent ⇒ use the recipe's default model ref.
+     */
+    modelId: z.string().optional(),
+    /**
+     * Per-thread reasoning effort, applied as the agent's `thinkingLevel`.
+     * A pi thinking level string (e.g. `low` / `medium` / `high`); the host
+     * validates it against the model's capability. Absent ⇒ model default.
+     */
+    reasoningEffort: z.string().optional(),
+  })
+  .strict();
 export type PiDurableState = z.infer<typeof piDurableStateSchema>;
 
 export interface PiModelContext {

@@ -189,3 +189,91 @@ describe('pi durable history seed', () => {
     });
   });
 });
+
+describe('pi per-thread selection', () => {
+  const ports = {
+    resolveModel: vi.fn(async () => ({ id: 'resolved' })),
+    getApiKey: vi.fn(),
+    resolveTools: vi.fn(async () => []),
+  } as never;
+
+  it('validates the extended durable state, rejecting unknown keys', () => {
+    const driver = piDriverFactory({ ports });
+    expect(
+      driver.validateState({ modelId: 'gpt-x', reasoningEffort: 'high' }),
+    ).toEqual({ modelId: 'gpt-x', reasoningEffort: 'high' });
+    expect(driver.validateState({})).toEqual({});
+    expect(() => driver.validateState({ bogus: true })).toThrowError(
+      expect.objectContaining({ code: 'invalid_driver_state' }),
+    );
+  });
+
+  it('seeds the selection from recovered driver state', async () => {
+    const driver = piDriverFactory({ ports });
+    const handle = driver.create(spec, {
+      recovery: { authorizeHistoryLoad: vi.fn() },
+      recoveryInput: {
+        state: { driverState: { modelId: 'gpt-seed', reasoningEffort: 'low' } },
+        turns: [],
+      },
+    });
+    const snapshots: unknown[] = [];
+    handle.onState?.((s) => snapshots.push(s));
+
+    // A no-op control that still triggers a report would be ideal, but the
+    // seed is observable via the first mutation preserving the other field.
+    await handle.control({ type: 'set_model', data: { modelId: 'gpt-next' } });
+    expect(snapshots.at(-1)).toMatchObject({
+      driverState: { modelId: 'gpt-next', reasoningEffort: 'low' },
+    });
+  });
+
+  it('applies set_model / set_config_option and up-reports the snapshot', async () => {
+    const driver = piDriverFactory({ ports });
+    const handle = driver.create(spec, {
+      recovery: { authorizeHistoryLoad: vi.fn() },
+    });
+    const snapshots: {
+      driverState: unknown;
+      metadata?: { currentModelId?: string | null };
+    }[] = [];
+    const unsub = handle.onState?.((s) => snapshots.push(s));
+
+    expect(
+      (await handle.control({ type: 'set_model', data: { modelId: 'gpt-x' } }))
+        .ok,
+    ).toBe(true);
+    expect(
+      (
+        await handle.control({
+          type: 'set_config_option',
+          data: { optionId: 'reasoning_effort', value: 'high' },
+        })
+      ).ok,
+    ).toBe(true);
+
+    expect(snapshots.at(-1)?.driverState).toEqual({
+      modelId: 'gpt-x',
+      reasoningEffort: 'high',
+    });
+    expect(snapshots.at(-1)?.metadata?.currentModelId).toBe('gpt-x');
+
+    const unknown = await handle.control({
+      type: 'set_config_option',
+      data: { optionId: 'nope', value: 'x' },
+    });
+    expect(unknown).toMatchObject({ ok: false, code: 'unsupported' });
+    unsub?.();
+  });
+
+  it('gates the selection control ops behind Deployment capability', async () => {
+    const driver = piDriverFactory({ ports });
+    const jobHandle = driver.create(
+      { ...spec, workloadType: 'Job' },
+      { recovery: { authorizeHistoryLoad: vi.fn() } },
+    );
+    expect(
+      await jobHandle.control({ type: 'set_model', data: { modelId: 'x' } }),
+    ).toMatchObject({ ok: false, code: 'unsupported' });
+  });
+});
