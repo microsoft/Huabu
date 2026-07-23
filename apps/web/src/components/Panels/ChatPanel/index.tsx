@@ -855,6 +855,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           messages={viewingSketchCluster ? sketchMessages : messages}
           isLoading={viewingSketchCluster ? false : isLoading}
           isHistoryLoading={!viewingSketchCluster && !isHistoryLoaded}
+          viewKey={
+            viewingSketchCluster?.clusterId ??
+            `${threadId}:${viewingQuestionThread?.openSequence ?? 0}`
+          }
+          isActive={!isCollapsed}
+          openPosition={viewingQuestionThread?.openPosition ?? 'bottom'}
           hideAIActions={!!viewingSketchCluster}
           onIntentReselect={handleIntentReselect}
           onRetry={() => {

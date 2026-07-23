@@ -1,11 +1,4 @@
-import {
-  AlertTriangle,
-  ArrowRight,
-  Eye,
-  Loader,
-  ShieldQuestion,
-  X,
-} from 'lucide-react';
+import { AlertTriangle, Eye, Loader, ShieldQuestion, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 import '@/components/Nodes/question/QuestionAgentBadge.css';
@@ -19,6 +12,7 @@ import {
 } from '@/components/Common/AgentIcon';
 import { Button } from '@/components/Common/Button';
 import { cn } from '@/components/Common/cn';
+import { CommandBlock } from '@/components/Common/CommandBlock';
 import { QuestionTakeoverMark } from '@/components/Nodes/question/QuestionTakeoverMark';
 import {
   AgentModeIcon,
@@ -833,6 +827,12 @@ function ChoiceButton<T extends string>({
 
 type ApprovalProposalState = 'running' | 'awaiting-approval';
 
+const APPROVAL_DEMO_OPTIONS = [
+  { id: 'allow-once', label: 'Allow once', reject: false },
+  { id: 'allow-always', label: 'Always allow', reject: false },
+  { id: 'reject-once', label: 'Reject', reject: true },
+] as const;
+
 function ApprovalStatusMark({
   icon,
   size,
@@ -893,7 +893,13 @@ function ApprovalStatusMark({
 function ApprovalRequiredProposal({ icon }: { icon: AgentIconValue }) {
   const [state, setState] =
     useState<ApprovalProposalState>('awaiting-approval');
+  const [resolution, setResolution] = useState<string | null>(null);
   const awaitingApproval = state === 'awaiting-approval';
+
+  const selectState = (nextState: ApprovalProposalState) => {
+    setState(nextState);
+    if (nextState === 'awaiting-approval') setResolution(null);
+  };
 
   return (
     <div className="border-warning bg-surface ring-warning/15 rounded-2xl border p-6 ring-2">
@@ -931,7 +937,7 @@ function ApprovalRequiredProposal({ icon }: { icon: AgentIconValue }) {
                     : 'info'
                   : 'neutral'
               }
-              onClick={() => setState(option.value)}
+              onClick={() => selectState(option.value)}
             >
               {option.label}
             </Button>
@@ -967,58 +973,76 @@ function ApprovalRequiredProposal({ icon }: { icon: AgentIconValue }) {
         </div>
 
         <div className="flex min-w-0 flex-col gap-3">
-          <div
-            className={cn(
-              'border-edge-default bg-bg-default rounded-xl border p-4',
-              awaitingApproval && 'border-warning ring-warning/15 ring-2',
-            )}
-            aria-live="polite"
-          >
-            <div className="flex min-w-0 items-start gap-3">
-              <span
-                className={cn(
-                  'mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full',
-                  awaitingApproval
-                    ? 'bg-warning-bg text-warning'
-                    : 'bg-info-bg text-info',
-                )}
-              >
-                {awaitingApproval ? (
-                  <ShieldQuestion size={17} aria-hidden />
-                ) : (
+          {awaitingApproval ? (
+            <div className="flex justify-start" aria-live="polite">
+              {resolution ? (
+                <div className="border-edge-default bg-surface text-fg-muted flex w-full items-center gap-1.5 rounded-md border px-3 py-2 text-xs">
+                  <ShieldQuestion
+                    size={14}
+                    className="text-fg-subtle shrink-0"
+                    aria-hidden
+                  />
+                  <span className="text-fg-default font-medium">
+                    Run npm install
+                  </span>
+                  <span aria-hidden>·</span>
+                  <span>{resolution}</span>
+                </div>
+              ) : (
+                <div
+                  role="group"
+                  aria-label="Agent permission request"
+                  className="border-warning bg-surface ring-warning/15 w-full rounded-md border ring-2"
+                >
+                  <div className="flex items-center gap-1.5 px-3 py-2">
+                    <span className="bg-warning-bg text-warning flex size-6 shrink-0 items-center justify-center rounded-full">
+                      <ShieldQuestion size={14} aria-hidden />
+                    </span>
+                    <span className="text-fg-default text-sm font-medium">
+                      Run npm install
+                    </span>
+                  </div>
+                  <CommandBlock
+                    text="npm install"
+                    className="border-warning/25 bg-warning-bg/45 [&_pre>span]:text-warning mx-3 mb-2"
+                  />
+                  <div className="flex flex-wrap gap-2 px-3 pb-3">
+                    {APPROVAL_DEMO_OPTIONS.map((option) => (
+                      <Button
+                        key={option.id}
+                        size="sm"
+                        variant={option.reject ? 'outline' : 'solid'}
+                        tone={option.reject ? 'danger' : 'warning'}
+                        onClick={() => setResolution(option.label)}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="border-edge-default bg-bg-default rounded-xl border p-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="bg-info-bg text-info mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full">
                   <Loader
                     size={17}
                     className="animate-spin motion-reduce:animate-none"
                     aria-hidden
                   />
-                )}
-              </span>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-fg-default text-sm font-semibold">
-                  {awaitingApproval
-                    ? 'Tool call needs approval'
-                    : 'Agent is running'}
-                </h3>
-                <p className="text-fg-muted mt-1 text-xs leading-relaxed wrap-break-word">
-                  {awaitingApproval
-                    ? 'External Agent wants to run “npm install”. Review the request to continue.'
-                    : 'The Agent continues working without requiring input.'}
-                </p>
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-fg-default text-sm font-semibold">
+                    Agent is running
+                  </h3>
+                  <p className="text-fg-muted mt-1 text-xs leading-relaxed wrap-break-word">
+                    The Agent continues working without requiring input.
+                  </p>
+                </div>
               </div>
             </div>
-            {awaitingApproval ? (
-              <Button
-                size="sm"
-                variant="solid"
-                tone="warning"
-                className="mt-3 w-full gap-1.5"
-                onClick={() => setState('running')}
-              >
-                Review &amp; Approve
-                <ArrowRight size={14} aria-hidden />
-              </Button>
-            ) : null}
-          </div>
+          )}
 
           <div className="border-edge-default rounded-xl border p-4">
             <h3 className="text-fg-default text-xs font-semibold">
@@ -1040,8 +1064,9 @@ function ApprovalRequiredProposal({ icon }: { icon: AgentIconValue }) {
               </span>
             </div>
             <p className="text-fg-subtle mt-3 text-xs leading-relaxed">
-              The persistent prompt covers off-screen nodes; selecting it opens
-              the owning thread and scrolls to the permission card.
+              The proposal keeps the live Chat permission card’s tool details,
+              decision options, and collapsed result; only the unresolved
+              blocking state receives the amber treatment.
             </p>
           </div>
         </div>

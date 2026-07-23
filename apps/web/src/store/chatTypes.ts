@@ -91,3 +91,18 @@ export type ChatMessage =
       /** Custom intent text typed by user. */
       customIntent?: string;
     };
+
+/** Return the first unresolved ACP permission request in a conversation. */
+export function findPendingPermissionRequestId(
+  messages: ChatMessage[],
+): string | null {
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    for (const segment of message.segments) {
+      if (segment.kind === 'permission' && !segment.resolution) {
+        return segment.requestId;
+      }
+    }
+  }
+  return null;
+}

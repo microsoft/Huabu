@@ -14,9 +14,10 @@ import type { QuestionAgentPresentation } from '@/utils/questionAgentPresentatio
 export interface QuestionBadgeChrome {
   isOpen: boolean;
   isRunning: boolean;
+  isApproval: boolean;
   isError: boolean;
   hasConflict: boolean;
-  /** Any unviewed terminal outcome (done-unread, unviewed error, conflict). */
+  /** Any blocking request or unviewed terminal outcome needing attention. */
   needsAttention: boolean;
   attentionColor: string;
   /** Identity colour the running sweep echoes. */
@@ -42,16 +43,19 @@ export function resolveQuestionBadgeChrome({
 }): QuestionBadgeChrome {
   const isOpen = status === 'open';
   const isRunning = status === 'running';
+  const isApproval = status === 'approval';
   const isError = status === 'error';
   const hasConflict = conflictCount > 0;
   // Any unviewed terminal outcome wants attention: a done-unread answer, an
   // (unviewed) error, or skipped-write conflicts.
-  const needsAttention = unread || hasConflict;
-  const attentionColor = isError
-    ? 'var(--danger)'
-    : hasConflict
-      ? 'var(--warning)'
-      : 'var(--success)';
+  const needsAttention = isApproval || unread || hasConflict;
+  const attentionColor = isApproval
+    ? 'var(--warning)'
+    : isError
+      ? 'var(--danger)'
+      : hasConflict
+        ? 'var(--warning)'
+        : 'var(--success)';
 
   // Running echoes the agent's own identity colour (external picked colour /
   // built-in Huabu blue) so the sweeping ring reads as "this agent is working"
@@ -66,8 +70,11 @@ export function resolveQuestionBadgeChrome({
   // A viewed answer (or viewed error) falls back to the quiet identity ring.
   let ringBorderColor = 'var(--question-agent-quiet-ring)';
   let ringBoxShadow = 'none';
-  if (isOpen || isRunning) {
+  if (isOpen || isRunning || isApproval) {
     ringBorderColor = 'transparent';
+    if (isApproval) {
+      ringBoxShadow = `0 0 0 3px color-mix(in srgb, ${attentionColor} 24%, transparent), 0 0 12px 2px color-mix(in srgb, ${attentionColor} 34%, transparent)`;
+    }
   } else if (needsAttention) {
     ringBoxShadow = `0 0 0 3px color-mix(in srgb, ${attentionColor} 26%, transparent), 0 0 12px 2px color-mix(in srgb, ${attentionColor} 42%, transparent)`;
     ringBorderColor = isError ? 'transparent' : attentionColor;
@@ -80,6 +87,7 @@ export function resolveQuestionBadgeChrome({
   return {
     isOpen,
     isRunning,
+    isApproval,
     isError,
     hasConflict,
     needsAttention,

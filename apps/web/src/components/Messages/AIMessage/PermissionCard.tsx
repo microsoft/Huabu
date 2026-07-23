@@ -13,7 +13,7 @@
  * via the SSE event-buffer replay).
  *
  * Semantic-token discipline (design-system §2.1):
- *   allow options  → tone `info` / `neutral`
+ *   allow options  → tone `warning`
  *   reject options → tone `danger`
  */
 
@@ -47,12 +47,12 @@ function isReject(kind: AcpPermissionOptionKind | undefined): boolean {
   return kind === 'reject_once' || kind === 'reject_always';
 }
 
-/** Map an option kind to a Button tone (allow → info/neutral, reject → danger). */
+/** Map an option kind to a Button tone (allow → warning, reject → danger). */
 function toneForOption(
   kind: AcpPermissionOptionKind | undefined,
-): 'info' | 'neutral' | 'danger' {
+): 'warning' | 'neutral' | 'danger' {
   if (isReject(kind)) return 'danger';
-  if (kind === 'allow_always' || kind === 'allow_once') return 'info';
+  if (kind === 'allow_always' || kind === 'allow_once') return 'warning';
   return 'neutral';
 }
 
@@ -206,13 +206,21 @@ export function PermissionCard({
         role="group"
         aria-label={t('messages.permissionRequestAria')}
         aria-live="polite"
-        className="border-edge-default bg-surface ml-1 w-full rounded-md border"
+        data-permission-request-id={requestId}
+        className="border-warning bg-surface ring-warning/15 ml-1 w-full rounded-md border ring-2"
       >
         <div className="flex items-center gap-1.5 px-3 py-2">
-          <ShieldQuestion size={14} className="text-info shrink-0" />
+          <span className="bg-warning-bg text-warning flex size-6 shrink-0 items-center justify-center rounded-full">
+            <ShieldQuestion size={14} />
+          </span>
           <span className="text-fg-default text-sm font-medium">{title}</span>
         </div>
-        {preview && <CommandBlock text={preview} className="mx-3 mb-2" />}
+        {preview && (
+          <CommandBlock
+            text={preview}
+            className="border-warning/25 bg-warning-bg/45 [&_pre>span]:text-warning mx-3 mb-2"
+          />
+        )}
         {locations.length > 0 && (
           <div className="text-fg-muted mx-3 mb-2 flex flex-wrap gap-1 text-xs">
             {locations.map((p) => (

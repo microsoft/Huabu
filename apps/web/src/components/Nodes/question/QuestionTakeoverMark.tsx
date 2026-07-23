@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ShieldQuestion } from 'lucide-react';
 
 import './QuestionAgentBadge.css';
 
@@ -40,6 +40,16 @@ export function resolveQuestionBadgeBackground({
   stickerFill: string;
 }): string {
   return isIdle || isOpen ? 'transparent' : stickerFill;
+}
+
+export function resolveQuestionSpecialRingGeometry(size: number): {
+  inset: number;
+  width: number;
+} {
+  return {
+    inset: Math.max(0.5, Math.min(3.5, size / 18)),
+    width: Math.max(0.75, Math.min(5, size / 12)),
+  };
 }
 
 /**
@@ -96,6 +106,8 @@ export function QuestionTakeoverMark({
   // carry a chunky fixed border; clamped so it stays hairline-crisp but never
   // vanishes. (The `open` bubble's SVG stroke already scales via its viewBox.)
   const ringWidth = Math.max(0.75, Math.min(2, size * 0.05));
+  const specialRing = resolveQuestionSpecialRingGeometry(size);
+  const approvalSatelliteSize = Math.max(12, Math.min(20, size * 0.45));
 
   // Geometric centring of the `open` bubble.
   // The bubble SVG's viewBox is `0 0 44 48` with the round part a circle
@@ -137,6 +149,8 @@ export function QuestionTakeoverMark({
     boxShadow: isIdle ? 'none' : chip.ringBoxShadow,
     cursor: interactive ? 'pointer' : 'default',
     ['--question-agent-running-ring' as string]: chip.runningRingColor,
+    ['--question-agent-special-ring-inset' as string]: `${specialRing.inset}px`,
+    ['--question-agent-special-ring-width' as string]: `${specialRing.width}px`,
     ['--question-agent-quiet-ring' as string]:
       'color-mix(in srgb, var(--fg-subtle) 38%, var(--bg-surface))',
   };
@@ -148,10 +162,12 @@ export function QuestionTakeoverMark({
         !isIdle && !showBubble && !chip.isRunning && 'shadow-sm',
         chip.isRunning &&
           'question-agent-ring-running border-transparent shadow-none',
+        chip.isApproval &&
+          'question-agent-ring-approval border-transparent shadow-none',
         chip.isError &&
           chip.needsAttention &&
           'question-agent-ring-error border-transparent',
-        chip.needsAttention && 'question-agent-attention',
+        chip.needsAttention && !chip.isApproval && 'question-agent-attention',
       )}
       style={chipStyle}
       onClick={
@@ -220,6 +236,19 @@ export function QuestionTakeoverMark({
         >
           <AlertTriangle size={12} />
           {conflictCount}
+        </span>
+      ) : null}
+      {chip.isApproval ? (
+        <span
+          className="bg-warning text-fg-inverse absolute z-20 flex items-center justify-center rounded-full shadow-sm"
+          style={{
+            width: approvalSatelliteSize,
+            height: approvalSatelliteSize,
+            top: -approvalSatelliteSize * 0.3,
+            right: -approvalSatelliteSize * 0.3,
+          }}
+        >
+          <ShieldQuestion size={approvalSatelliteSize * 0.62} />
         </span>
       ) : null}
     </div>

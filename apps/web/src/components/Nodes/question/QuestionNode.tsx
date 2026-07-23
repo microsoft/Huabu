@@ -13,6 +13,7 @@ import { useAcpProfilesStore } from '@/store/acpProfilesStore.ts';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
+import { findPendingPermissionRequestId } from '@/store/chatTypes.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
 import {
   getQuestionFontOpts,
@@ -124,6 +125,14 @@ export const QuestionNode = memo(
       !!data.threadId && (hasRun || status === 'running') && !isForkPending;
 
     const openQuestionThread = useChatStore((s) => s.openQuestionThread);
+    const needsApproval = useChatStore((s) => {
+      if (!data.threadId) return false;
+      return (
+        findPendingPermissionRequestId(
+          s.messagesByThread[data.threadId] ?? [],
+        ) !== null
+      );
+    });
     const showChatAnchor = useChatStore(
       (s) => s.viewingQuestionThread?.nodeId === id,
     );
@@ -154,6 +163,7 @@ export const QuestionNode = memo(
         data.threadId,
         data.agentBinding,
         canvasId || undefined,
+        hasRun && !data.viewed ? 'last-user' : 'bottom',
       );
       requestOpenRightPanel();
       // Mark as viewed only once the run has finished.
@@ -255,13 +265,15 @@ export const QuestionNode = memo(
     // panel hides that live view, so the badge falls back to the node's real
     // status. `showChatAnchor` covers both the initial compose and re-opening
     // an already-run node.
-    const badgeStatus: QuestionAgentBadgeStatus | null = isChatAnchorActive
-      ? 'open'
-      : isForkPending
-        ? 'running'
-        : status === 'idle'
-          ? null
-          : status;
+    const badgeStatus: QuestionAgentBadgeStatus | null = needsApproval
+      ? 'approval'
+      : isChatAnchorActive
+        ? 'open'
+        : isForkPending
+          ? 'running'
+          : status === 'idle'
+            ? null
+            : status;
 
     return (
       <NodeWrapper
@@ -292,13 +304,15 @@ export const QuestionNode = memo(
                   : undefined
               }
               tooltip={
-                status === 'error' && data.errorMessage
-                  ? data.errorMessage
-                  : canOpenInChat
-                    ? status === 'running'
-                      ? t('node.watchLiveConversation')
-                      : t('node.openConversation')
-                    : undefined
+                needsApproval
+                  ? t('messages.permissionRequested')
+                  : status === 'error' && data.errorMessage
+                    ? data.errorMessage
+                    : canOpenInChat
+                      ? status === 'running'
+                        ? t('node.watchLiveConversation')
+                        : t('node.openConversation')
+                      : undefined
               }
             />
           ),

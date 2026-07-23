@@ -47,6 +47,8 @@ The `question` node uses a **continuous** zoom takeover instead of the binary bo
 
 The policy can be summarized as **continuous mark geometry + discrete card visibility + size-driven glyph detail**. These three signals are deliberately independent: zoom width drives $t$, the hysteretic stage only hides or restores the card, and the final rendered mark size alone decides avatar versus dot.
 
+Status chrome follows the same geometry: the structural Running, Approval, and Error outer-ring width and outward inset scale from the rendered mark size with crisp minimums and restrained maximums, while attention halos remain fixed screen-space emphasis rather than part of the ring geometry.
+
 | $t$     | When (node on-screen width)           | What renders                                                                                                                                                 |
 | ------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | $t = 0$ | width ≥ `TAKEOVER_START_WIDTH` (64px) | the sticky card **plus** the agent badge at the top-left corner; the badge scales together with the card (`BADGE_FRACTION` of the shorter on-screen side)    |

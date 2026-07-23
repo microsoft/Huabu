@@ -1,6 +1,6 @@
 import { useStore } from '@xyflow/react';
 import { clsx } from 'clsx';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ShieldQuestion } from 'lucide-react';
 
 import './QuestionAgentBadge.css';
 
@@ -15,7 +15,12 @@ import { resolveQuestionBadgeChrome } from './questionBadgeChrome.ts';
 import type { QuestionAgentPresentation } from '@/utils/questionAgentPresentation.ts';
 import type { CSSProperties, ReactNode } from 'react';
 
-export type QuestionAgentBadgeStatus = 'open' | 'running' | 'done' | 'error';
+export type QuestionAgentBadgeStatus =
+  | 'open'
+  | 'running'
+  | 'approval'
+  | 'done'
+  | 'error';
 
 export interface QuestionAgentBadgeProps {
   status: QuestionAgentBadgeStatus;
@@ -43,6 +48,7 @@ export function QuestionAgentBadge({
   const {
     isOpen,
     isRunning,
+    isApproval,
     isError,
     hasConflict,
     needsAttention,
@@ -51,13 +57,15 @@ export function QuestionAgentBadge({
     ringBoxShadow,
     stickerFill,
   } = resolveQuestionBadgeChrome({ status, agent, unread, conflictCount });
-  const stateLabel = isOpen
-    ? 'Open for question'
-    : isRunning
-      ? 'Running'
-      : `${isError ? 'Error' : hasConflict ? 'Done · conflicts' : 'Done'}${
-          unread ? ' · unread' : ' · viewed'
-        }`;
+  const stateLabel = isApproval
+    ? 'Approval required'
+    : isOpen
+      ? 'Open for question'
+      : isRunning
+        ? 'Running'
+        : `${isError ? 'Error' : hasConflict ? 'Done · conflicts' : 'Done'}${
+            unread ? ' · unread' : ' · viewed'
+          }`;
 
   const badgeStyle: CSSProperties = {
     background: isOpen ? 'transparent' : stickerFill,
@@ -83,10 +91,11 @@ export function QuestionAgentBadge({
         isOpen && 'border-transparent shadow-none',
         isRunning &&
           'question-agent-ring-running border-transparent shadow-none',
+        isApproval && 'question-agent-ring-approval border-transparent',
         isError &&
           needsAttention &&
           'question-agent-ring-error border-transparent',
-        needsAttention && 'question-agent-attention',
+        needsAttention && !isApproval && 'question-agent-attention',
       )}
       style={badgeStyle}
     >
@@ -126,6 +135,11 @@ export function QuestionAgentBadge({
         >
           <AlertTriangle size={12} />
           {conflictCount}
+        </span>
+      ) : null}
+      {isApproval ? (
+        <span className="bg-warning text-fg-inverse absolute -top-1.5 -right-1.5 z-20 flex size-4 items-center justify-center rounded-full shadow-sm">
+          <ShieldQuestion size={10} />
         </span>
       ) : null}
     </Button>

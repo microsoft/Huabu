@@ -80,4 +80,35 @@ describe('QuestionAgentBadge', () => {
     expect(icon?.classList.contains('question-agent-badge-icon')).toBe(true);
     expect(badge?.style.borderColor).toBe('var(--question-agent-quiet-ring)');
   });
+
+  it('renders approval as a static warning hold state', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() => {
+      root?.render(
+        <QuestionAgentBadge
+          status="approval"
+          agent={{ kind: 'internal', alias: 'Huabu', mode: 'operate' }}
+          unread={false}
+          conflictCount={0}
+          offset={{ top: -22, left: -2 }}
+        />,
+      );
+    });
+
+    const badge = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Huabu · Approval required"]',
+    );
+
+    expect(badge?.classList.contains('question-agent-ring-approval')).toBe(
+      true,
+    );
+    expect(badge?.classList.contains('question-agent-ring-running')).toBe(
+      false,
+    );
+    expect(badge?.classList.contains('question-agent-attention')).toBe(false);
+    expect(badge?.querySelector('span.bg-warning svg')).not.toBeNull();
+  });
 });

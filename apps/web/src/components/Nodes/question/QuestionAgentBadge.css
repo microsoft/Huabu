@@ -20,6 +20,8 @@
      avatar is 0.8× of this. Keeps the playground's 40px proportions, scaled
      down to 36px so it feels less bulky on the note. */
   --question-agent-badge-size: 2.25rem;
+  --question-agent-special-ring-inset: 2px;
+  --question-agent-special-ring-width: 3px;
   --question-agent-quiet-ring: color-mix(
     in srgb,
     var(--fg-subtle) 38%,
@@ -64,11 +66,12 @@
 }
 
 .question-agent-ring-running::before,
+.question-agent-ring-approval::before,
 .question-agent-ring-error::before {
   position: absolute;
-  inset: -2px;
+  inset: calc(-1 * var(--question-agent-special-ring-inset));
   z-index: 0;
-  padding: 3px;
+  padding: var(--question-agent-special-ring-width);
   border-radius: inherit;
   content: '';
   pointer-events: none;
@@ -76,6 +79,14 @@
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
   mask-composite: exclude;
+}
+
+.question-agent-ring-approval::before {
+  background: conic-gradient(
+    from -32deg,
+    var(--warning) 0deg 292deg,
+    color-mix(in srgb, var(--warning) 18%, transparent) 292deg 360deg
+  );
 }
 
 .question-agent-ring-running::before {

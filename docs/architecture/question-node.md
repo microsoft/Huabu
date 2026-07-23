@@ -66,6 +66,7 @@ Created like any node via `CREATE_NODES` ([resolveAddNodes.ts](../../apps/web/sr
 - **Idle** → double-click opens compose (§5).
 - After sending: **running → done / error**.
 - Running uses the bound Agent identity with a flowing information ring; an external Agent avatar body rotates while the built-in Huabu logo remains still.
+- A live unresolved ACP permission request temporarily overrides every other badge state, stops working motion, and shows a static warning ring with a shield satellite; resolving or cancelling the request restores the underlying run state.
 - Done, error, and conflict attention styling appears only while `viewed === false`; opening the finished thread marks it viewed and returns the avatar to a quiet neutral ring.
 - Move / delete / resize / re-frame all go through the normal node flow; a stale
   pasted copy strips transient state so it starts fresh.
@@ -168,7 +169,7 @@ idle ──double-click──▶ compose (no status change)
                                   └─ error event ─▶ error (errorMessage set)
 ```
 
-Conversation replay: `openQuestionThread` ([chatStore.ts](../../apps/web/src/store/chatStore.ts)) re-opens a running/finished thread read-only; the node is the single source of truth for the agent mode.
+Conversation replay: `openQuestionThread` ([chatStore.ts](../../apps/web/src/store/chatStore.ts)) re-opens a running/finished thread read-only; the node is the single source of truth for the agent mode. When a conversation is opened, switched to, or revealed by expanding the panel, [MessageList](../../apps/web/src/components/Messages/MessageList.tsx) first places any unresolved permission card at the bottom of its own scroll container, immediately above ChatInput. Without a pending permission, a previously viewed Question opens at the conversation bottom, while an unread Question aligns its final user message with the top of the list so the unseen answer begins below it.
 
 ---
 
@@ -179,6 +180,7 @@ Conversation replay: `openQuestionThread` ([chatStore.ts](../../apps/web/src/sto
 | Component + toolbar | [QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)                                                                                                                                                                                                                                                                                                              |
 | Agent status mark   | [QuestionTakeoverMark.tsx](../../apps/web/src/components/Nodes/question/QuestionTakeoverMark.tsx) folds the former [QuestionAgentBadge.tsx](../../apps/web/src/components/Nodes/question/QuestionAgentBadge.tsx) chrome; zoom morph via [NodeTakeoverLayer.tsx](../../apps/web/src/components/Nodes/NodeTakeoverLayer.tsx) + [useNodeTakeover.ts](../../apps/web/src/hooks/useNodeTakeover.ts) |
 | Compose / replay    | [chatStore.ts](../../apps/web/src/store/chatStore.ts) `openQuestionCompose` / `openQuestionThread`                                                                                                                                                                                                                                                                                             |
+| Open scroll target  | [MessageList.tsx](../../apps/web/src/components/Messages/MessageList.tsx) + [messageListScroll.ts](../../apps/web/src/components/Messages/messageListScroll.ts)                                                                                                                                                                                                                                |
 | Send + state writes | [useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)                                                                                                                                                                                                                                                                                                                                |
 | Create path         | [resolveAddNodes.ts](../../apps/web/src/handler/canvasCommand/resolvers/resolveAddNodes.ts)                                                                                                                                                                                                                                                                                                    |
 | Dispatch API        | [agent.ts](../../apps/web/src/api/agent.ts) `streamMessage`                                                                                                                                                                                                                                                                                                                                    |
