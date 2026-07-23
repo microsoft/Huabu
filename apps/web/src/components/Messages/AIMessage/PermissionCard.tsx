@@ -1,21 +1,4 @@
-/**
- * Inline approve/deny card for an external (ACP) agent's
- * `session/request_permission`.
- *
- * The agent's request is suspended server-side until the user answers
- * here; the choice is POSTed via {@link respondAcpPermission} keyed by
- * `requestId`. Once answered (or cancelled) we set `resolution`
- * optimistically so the card collapses to a one-line summary without
- * waiting for any further stream event.
- *
- * Transient by design — permission parts are never persisted, so this
- * card only ever appears live (or briefly after a mid-turn reconnect
- * via the SSE event-buffer replay).
- *
- * Semantic-token discipline (design-system §2.1):
- *   allow options  → tone `warning`
- *   reject options → tone `danger`
- */
+/** ACP permission history record + the single actionable composer tray. */
 
 import { ShieldQuestion } from 'lucide-react';
 import { useState } from 'react';
@@ -25,21 +8,22 @@ import { respondAcpPermission } from '../../../api/acp';
 import { useChatStore } from '../../../store/chatStore';
 import { Button } from '../../Common/Button';
 import { CommandBlock } from '../../Common/CommandBlock';
+import { AssistantDisclosure } from '../AssistantDisclosure';
 
-import type { AssistantSegment } from '../../../store/chatTypes';
+import type { PermissionSegment } from '../../../store/chatTypes';
 import type {
   AcpPermissionOption,
   AcpPermissionOptionKind,
 } from '@sediment/shared';
 
-type PermissionPart = Extract<AssistantSegment, { kind: 'permission' }>;
-
 interface PermissionCardProps {
-  /** Thread the request belongs to; reply target. */
+  part: PermissionSegment;
+}
+
+interface PermissionTrayProps {
   threadId: string;
-  /** Assistant message that owns this permission segment. */
   messageId: string;
-  part: PermissionPart;
+  part: PermissionSegment;
 }
 
 /** Reject-orientation options render with the danger tone. */
@@ -54,6 +38,12 @@ function toneForOption(
   if (isReject(kind)) return 'danger';
   if (kind === 'allow_always' || kind === 'allow_once') return 'warning';
   return 'neutral';
+}
+
+function variantForOption(
+  kind: AcpPermissionOptionKind | undefined,
+): 'solid' | 'outline' {
+  return kind === 'allow_once' ? 'solid' : 'outline';
 }
 
 /**
@@ -98,7 +88,7 @@ function previewFromRawInput(rawInput: unknown): string | null {
 
 /** Extract a flat preview text from ACP `toolCall.content` blocks. */
 function previewFromContent(
-  content: NonNullable<PermissionPart['toolCall']['content']>,
+  content: NonNullable<PermissionSegment['toolCall']['content']>,
 ): string | null {
   const parts: string[] = [];
   for (const block of content) {
@@ -119,17 +109,75 @@ function previewFromContent(
   return joined.length > 800 ? `${joined.slice(0, 800)}…` : joined;
 }
 
-export function PermissionCard({
+function permissionTitle(part: PermissionSegment, fallback: string): string {
+  return part.toolCall.title?.trim() || fallback;
+}
+
+function resolutionLabel(
+  part: PermissionSegment,
+  cancelledLabel: string,
+  decidedLabel: string,
+): string | null {
+  if (!part.resolution) return null;
+  const picked = part.resolution.optionId
+    ? part.options.find(
+        (option) => option.optionId === part.resolution?.optionId,
+      )
+    : undefined;
+  return part.resolution.cancelled
+    ? cancelledLabel
+    : (picked?.name ?? decidedLabel);
+}
+
+export function PermissionCard({ part }: PermissionCardProps) {
+  const { t } = useTranslation();
+  const title = permissionTitle(part, t('messages.permissionRequested'));
+  // Only a resolved/cancelled request contributes a trailing status. While
+  // pending, the amber icon already signals the state and the composer tray
+  // owns the action, so we skip the label to avoid repeating it after the
+  // (possibly identical) fallback title.
+  const outcome = resolutionLabel(
+    part,
+    t('messages.cancelled'),
+    t('messages.decided'),
+  );
+
+  return (
+    <AssistantDisclosure
+      icon={
+        <ShieldQuestion
+          size={12}
+          className={part.resolution ? 'text-fg-subtle' : 'text-warning'}
+        />
+      }
+      title={
+        <>
+          <span className="text-fg-default font-medium">{title}</span>
+          {outcome ? (
+            <>
+              <span className="mx-1.5" aria-hidden>
+                ·
+              </span>
+              <span>{outcome}</span>
+            </>
+          ) : null}
+        </>
+      }
+    />
+  );
+}
+
+export function PermissionTray({
   threadId,
   messageId,
   part,
-}: PermissionCardProps) {
+}: PermissionTrayProps) {
   const { t } = useTranslation();
-  const updateMessage = useChatStore((s) => s.updateMessage);
+  const updateMessage = useChatStore((state) => state.updateMessage);
   const [submitting, setSubmitting] = useState(false);
 
-  const { requestId, toolCall, options, resolution } = part;
-  const title = toolCall.title?.trim() || t('messages.permissionRequested');
+  const { requestId, toolCall, options } = part;
+  const title = permissionTitle(part, t('messages.permissionRequested'));
 
   // Pick the most informative preview: rich `content` first (the agent
   // explicitly composed it for display), then `rawInput` (structured
@@ -146,7 +194,7 @@ export function PermissionCard({
     .filter((p): p is string => !!p);
 
   const resolve = async (option?: AcpPermissionOption) => {
-    if (submitting || resolution) return;
+    if (submitting || part.resolution) return;
     setSubmitting(true);
     // Optimistic local resolution before the network round-trip.
     applyResolution(
@@ -167,7 +215,7 @@ export function PermissionCard({
     }
   };
 
-  function applyResolution(next: PermissionPart['resolution']) {
+  function applyResolution(next: PermissionSegment['resolution']) {
     updateMessage(threadId, messageId, (m) => {
       if (m.role !== 'assistant') return m;
       const idx = m.segments.findIndex(
@@ -175,41 +223,21 @@ export function PermissionCard({
       );
       if (idx === -1) return m;
       const segs = [...m.segments];
-      const seg = segs[idx] as PermissionPart;
+      const seg = segs[idx] as PermissionSegment;
       segs[idx] = { ...seg, resolution: next };
       return { ...m, segments: segs };
     });
   }
 
-  if (resolution) {
-    const picked = resolution.optionId
-      ? options.find((o) => o.optionId === resolution.optionId)
-      : undefined;
-    const label = resolution.cancelled
-      ? t('messages.cancelled')
-      : (picked?.name ?? t('messages.decided'));
-    return (
-      <div className="flex justify-start">
-        <div className="border-edge-default bg-surface text-fg-muted ml-1 flex w-full items-center gap-1.5 rounded-md border px-3 py-2 text-xs">
-          <ShieldQuestion size={14} className="text-fg-subtle shrink-0" />
-          <span className="text-fg-default font-medium">{title}</span>
-          <span aria-hidden>·</span>
-          <span>{label}</span>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex justify-start">
-      <div
-        role="group"
-        aria-label={t('messages.permissionRequestAria')}
-        aria-live="polite"
-        data-permission-request-id={requestId}
-        className="border-warning bg-surface ring-warning/15 ml-1 w-full rounded-md border ring-2"
-      >
-        <div className="flex items-center gap-1.5 px-3 py-2">
+    <div
+      role="group"
+      aria-label={t('messages.permissionRequestAria')}
+      aria-live="polite"
+      className="border-edge-default bg-surface rounded-xl border"
+    >
+      <div className="px-3 py-2.5">
+        <div className="flex items-center gap-2">
           <span className="bg-warning-bg text-warning flex size-6 shrink-0 items-center justify-center rounded-full">
             <ShieldQuestion size={14} />
           </span>
@@ -218,11 +246,11 @@ export function PermissionCard({
         {preview && (
           <CommandBlock
             text={preview}
-            className="border-warning/25 bg-warning-bg/45 [&_pre>span]:text-warning mx-3 mb-2"
+            className="bg-warning-bg/45 [&_pre>span]:text-warning mt-2 border-transparent"
           />
         )}
         {locations.length > 0 && (
-          <div className="text-fg-muted mx-3 mb-2 flex flex-wrap gap-1 text-xs">
+          <div className="text-fg-muted mt-2 flex flex-wrap gap-1 text-xs">
             {locations.map((p) => (
               <span
                 key={p}
@@ -233,12 +261,12 @@ export function PermissionCard({
             ))}
           </div>
         )}
-        <div className="flex flex-wrap gap-2 px-3 pb-3">
+        <div className="mt-2.5 flex flex-wrap gap-2">
           {options.map((option) => (
             <Button
               key={option.optionId}
               size="sm"
-              variant={isReject(option.kind) ? 'outline' : 'solid'}
+              variant={variantForOption(option.kind)}
               tone={toneForOption(option.kind)}
               disabled={submitting}
               onClick={() => void resolve(option)}

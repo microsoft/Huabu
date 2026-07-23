@@ -1,4 +1,4 @@
-export type MessageListOpenPosition = 'permission' | 'last-user' | 'bottom';
+export type MessageListOpenPosition = 'last-user' | 'bottom';
 export type MessageListPreferredPosition = 'last-user' | 'bottom';
 
 /** Position an opened conversation without scrolling any page ancestors. */
@@ -6,17 +6,6 @@ export function positionMessageListOnOpen(
   container: HTMLElement,
   preferredPosition: MessageListPreferredPosition,
 ): MessageListOpenPosition {
-  const permissionCard = container.querySelector<HTMLElement>(
-    '[data-permission-request-id]',
-  );
-
-  if (permissionCard) {
-    const containerRect = container.getBoundingClientRect();
-    const cardRect = permissionCard.getBoundingClientRect();
-    container.scrollTop += cardRect.bottom - containerRect.bottom;
-    return 'permission';
-  }
-
   if (preferredPosition === 'last-user') {
     const userMessages = container.querySelectorAll<HTMLElement>(
       '[data-chat-user-message]',

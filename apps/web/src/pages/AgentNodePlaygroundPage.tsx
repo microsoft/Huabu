@@ -828,9 +828,9 @@ function ChoiceButton<T extends string>({
 type ApprovalProposalState = 'running' | 'awaiting-approval';
 
 const APPROVAL_DEMO_OPTIONS = [
-  { id: 'allow-once', label: 'Allow once', reject: false },
-  { id: 'allow-always', label: 'Always allow', reject: false },
-  { id: 'reject-once', label: 'Reject', reject: true },
+  { id: 'allow-once', label: 'Allow once', reject: false, primary: true },
+  { id: 'allow-always', label: 'Always allow', reject: false, primary: false },
+  { id: 'reject-once', label: 'Reject', reject: true, primary: false },
 ] as const;
 
 function ApprovalStatusMark({
@@ -974,27 +974,34 @@ function ApprovalRequiredProposal({ icon }: { icon: AgentIconValue }) {
 
         <div className="flex min-w-0 flex-col gap-3">
           {awaitingApproval ? (
-            <div className="flex justify-start" aria-live="polite">
-              {resolution ? (
-                <div className="border-edge-default bg-surface text-fg-muted flex w-full items-center gap-1.5 rounded-md border px-3 py-2 text-xs">
-                  <ShieldQuestion
-                    size={14}
-                    className="text-fg-subtle shrink-0"
-                    aria-hidden
-                  />
-                  <span className="text-fg-default font-medium">
-                    Run npm install
-                  </span>
-                  <span aria-hidden>·</span>
-                  <span>{resolution}</span>
-                </div>
-              ) : (
+            <div
+              className="border-edge-default bg-bg-default flex min-h-72 flex-col rounded-xl border p-3"
+              aria-live="polite"
+            >
+              <div className="text-fg-muted flex items-center gap-1.5 px-2 py-1.5 text-xs">
+                <ShieldQuestion
+                  size={14}
+                  className={
+                    resolution
+                      ? 'text-fg-subtle shrink-0'
+                      : 'text-warning shrink-0'
+                  }
+                  aria-hidden
+                />
+                <span className="text-fg-default font-medium">
+                  Run npm install
+                </span>
+                <span aria-hidden>·</span>
+                <span>{resolution ?? 'Permission requested'}</span>
+              </div>
+
+              {!resolution ? (
                 <div
                   role="group"
                   aria-label="Agent permission request"
-                  className="border-warning bg-surface ring-warning/15 w-full rounded-md border ring-2"
+                  className="border-edge-default bg-surface mt-auto rounded-xl border"
                 >
-                  <div className="flex items-center gap-1.5 px-3 py-2">
+                  <div className="flex items-center gap-2 px-3 pt-2.5">
                     <span className="bg-warning-bg text-warning flex size-6 shrink-0 items-center justify-center rounded-full">
                       <ShieldQuestion size={14} aria-hidden />
                     </span>
@@ -1004,14 +1011,14 @@ function ApprovalRequiredProposal({ icon }: { icon: AgentIconValue }) {
                   </div>
                   <CommandBlock
                     text="npm install"
-                    className="border-warning/25 bg-warning-bg/45 [&_pre>span]:text-warning mx-3 mb-2"
+                    className="bg-warning-bg/45 [&_pre>span]:text-warning mx-3 mt-2 border-transparent"
                   />
-                  <div className="flex flex-wrap gap-2 px-3 pb-3">
+                  <div className="flex flex-wrap gap-2 p-3 pt-2.5">
                     {APPROVAL_DEMO_OPTIONS.map((option) => (
                       <Button
                         key={option.id}
                         size="sm"
-                        variant={option.reject ? 'outline' : 'solid'}
+                        variant={option.primary ? 'solid' : 'outline'}
                         tone={option.reject ? 'danger' : 'warning'}
                         onClick={() => setResolution(option.label)}
                       >
@@ -1020,7 +1027,7 @@ function ApprovalRequiredProposal({ icon }: { icon: AgentIconValue }) {
                     ))}
                   </div>
                 </div>
-              )}
+              ) : null}
             </div>
           ) : (
             <div className="border-edge-default bg-bg-default rounded-xl border p-4">
@@ -1064,9 +1071,9 @@ function ApprovalRequiredProposal({ icon }: { icon: AgentIconValue }) {
               </span>
             </div>
             <p className="text-fg-subtle mt-3 text-xs leading-relaxed">
-              The proposal keeps the live Chat permission card’s tool details,
-              decision options, and collapsed result; only the unresolved
-              blocking state receives the amber treatment.
+              Message history records the request and result. The single
+              actionable tray stays above the composer while the request is
+              unresolved, keeping recent execution context adjacent.
             </p>
           </div>
         </div>

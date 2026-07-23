@@ -129,10 +129,21 @@ export const AIMessage = ({
   // reasoning content): the indicator signals that more output is on
   // the way. Suppressed when the trailing segment is a streaming
   // thinking card, since that card already shows its own "Thinking…"
-  // label + spinner and a second one would be redundant.
+  // label + spinner and a second one would be redundant. An unresolved
+  // permission also suppresses it because the agent is blocked on the user.
   const lastSeg = segments[lastIdx];
+  const isAwaitingPermission = segments.some(
+    (segment) => segment.kind === 'permission' && !segment.resolution,
+  );
   const showStreamingIndicator =
-    isStreaming && !(lastSeg && lastSeg.kind === 'thinking');
+    isStreaming &&
+    !isAwaitingPermission &&
+    !(lastSeg && lastSeg.kind === 'thinking');
+  const showMessageActions =
+    !isStreaming &&
+    !isAwaitingPermission &&
+    !hideActions &&
+    plainText.trim().length > 0;
 
   return (
     <div className="flex justify-start">
@@ -180,14 +191,7 @@ export const AIMessage = ({
           }
 
           if (seg.kind === 'permission') {
-            return (
-              <PermissionCard
-                key={`l${eIdx}`}
-                threadId={threadId}
-                messageId={messageId}
-                part={seg}
-              />
-            );
+            return <PermissionCard key={`l${eIdx}`} part={seg} />;
           }
 
           if (seg.kind === 'status') {
@@ -237,7 +241,7 @@ export const AIMessage = ({
           </div>
         )}
 
-        {!isStreaming && !hideActions && (
+        {showMessageActions && (
           <div className="ml-1 flex items-center gap-1 px-3">
             <Button
               variant="ghost"

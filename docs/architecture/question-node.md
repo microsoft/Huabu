@@ -169,7 +169,7 @@ idle ──double-click──▶ compose (no status change)
                                   └─ error event ─▶ error (errorMessage set)
 ```
 
-Conversation replay: `openQuestionThread` ([chatStore.ts](../../apps/web/src/store/chatStore.ts)) re-opens a running/finished thread read-only; the node is the single source of truth for the agent mode. When a conversation is opened, switched to, or revealed by expanding the panel, [MessageList](../../apps/web/src/components/Messages/MessageList.tsx) first places any unresolved permission card at the bottom of its own scroll container, immediately above ChatInput. Without a pending permission, a previously viewed Question opens at the conversation bottom, while an unread Question aligns its final user message with the top of the list so the unseen answer begins below it.
+Conversation replay: `openQuestionThread` ([chatStore.ts](../../apps/web/src/store/chatStore.ts)) re-opens a running/finished thread read-only; the node is the single source of truth for the agent mode. An unresolved permission renders one actionable tray above ChatInput while its original MessageList position remains a passive history record; opening that blocked conversation scrolls MessageList to the end. Without a pending permission, a previously viewed Question opens at the conversation bottom, while an unread Question aligns its final user message with the top of the list so the unseen answer begins below it.
 
 ---
 

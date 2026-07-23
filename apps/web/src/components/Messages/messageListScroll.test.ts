@@ -17,22 +17,6 @@ function rect(top: number, height: number): DOMRect {
 }
 
 describe('positionMessageListOnOpen', () => {
-  it('places an unresolved permission card at the bottom of the chat scroller', () => {
-    const container = document.createElement('div');
-    const permissionCard = document.createElement('div');
-    permissionCard.dataset.permissionRequestId = 'permission-1';
-    container.appendChild(permissionCard);
-
-    Object.defineProperty(container, 'clientHeight', { value: 200 });
-    container.getBoundingClientRect = () => rect(100, 200);
-    permissionCard.getBoundingClientRect = () => rect(600, 100);
-
-    expect(positionMessageListOnOpen(container, 'last-user')).toBe(
-      'permission',
-    );
-    expect(container.scrollTop).toBe(400);
-  });
-
   it('places the last user message at the top for an unread conversation', () => {
     const container = document.createElement('div');
     const firstUserMessage = document.createElement('div');

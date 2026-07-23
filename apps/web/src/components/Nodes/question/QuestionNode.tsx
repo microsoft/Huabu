@@ -163,7 +163,11 @@ export const QuestionNode = memo(
         data.threadId,
         data.agentBinding,
         canvasId || undefined,
-        hasRun && !data.viewed ? 'last-user' : 'bottom',
+        needsApproval
+          ? 'bottom'
+          : hasRun && !data.viewed
+            ? 'last-user'
+            : 'bottom',
       );
       requestOpenRightPanel();
       // Mark as viewed only once the run has finished.
@@ -175,6 +179,7 @@ export const QuestionNode = memo(
       data.threadId,
       data.agentBinding,
       data.viewed,
+      needsApproval,
       hasRun,
       canvasId,
       openQuestionThread,

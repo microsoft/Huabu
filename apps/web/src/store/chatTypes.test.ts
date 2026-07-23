@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { findPendingPermissionRequestId } from './chatTypes';
+import {
+  findPendingPermissionRequest,
+  findPendingPermissionRequestId,
+} from './chatTypes';
 
 import type { ChatMessage } from './chatTypes';
 
@@ -29,6 +32,10 @@ describe('findPendingPermissionRequestId', () => {
     expect(findPendingPermissionRequestId([permissionMessage()])).toBe(
       'permission-1',
     );
+    expect(findPendingPermissionRequest([permissionMessage()])).toMatchObject({
+      messageId: 'assistant-1',
+      part: { requestId: 'permission-1' },
+    });
   });
 
   it.each([{ optionId: 'allow-once' }, { cancelled: true }])(

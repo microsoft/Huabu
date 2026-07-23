@@ -38,7 +38,7 @@ interface MessageListProps {
   viewKey?: string;
   /** Whether the containing panel is expanded and visible. */
   isActive?: boolean;
-  /** Where to position the list when no unresolved permission takes priority. */
+  /** Where to position the list when the conversation opens. */
   openPosition?: MessageListPreferredPosition;
 }
 
@@ -62,8 +62,7 @@ export const MessageList = ({
   currentMessageCountRef.current = messages.length;
 
   // Opening a conversation is a deliberate navigation action. Position the
-  // list before paint: permission requests sit at the bottom; otherwise the
-  // caller chooses the final user message (unread) or conversation end (read).
+  // list before paint at the final user message (unread) or end (read / blocked).
   // Direct scrollTop writes keep movement scoped to this panel.
   useLayoutEffect(() => {
     if (!isActive || isHistoryLoading) return;

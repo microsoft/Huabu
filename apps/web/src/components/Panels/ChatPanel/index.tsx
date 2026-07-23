@@ -14,6 +14,7 @@ import { logIntentEpisode } from '@/api/intent';
 import { Button } from '@/components/Common/Button';
 import { Input } from '@/components/Common/Input';
 import { toast } from '@/components/Common/Toast';
+import { PermissionTray } from '@/components/Messages/AIMessage/PermissionCard';
 import { useAcpProfiles } from '@/hooks/useAcpProfiles';
 import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
@@ -26,6 +27,7 @@ import {
   selectCurrentMessages,
   useChatStore,
 } from '@/store/chatStore';
+import { findPendingPermissionRequest } from '@/store/chatTypes';
 import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
 import { usePanelStore } from '@/store/panelStore';
@@ -159,6 +161,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // thread, so a stream running in another thread (e.g. a question
   // node) does not paint into this list.
   const messages = useChatStore(selectCurrentMessages);
+  const pendingPermission = useMemo(
+    () => findPendingPermissionRequest(messages),
+    [messages],
+  );
   const isHistoryLoaded = useChatStore(selectCurrentHistoryLoaded);
   const updateMessage = useChatStore((state) => state.updateMessage);
   const clearMessages = useChatStore((state) => state.clearMessages);
@@ -860,7 +866,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             `${threadId}:${viewingQuestionThread?.openSequence ?? 0}`
           }
           isActive={!isCollapsed}
-          openPosition={viewingQuestionThread?.openPosition ?? 'bottom'}
+          openPosition={
+            pendingPermission
+              ? 'bottom'
+              : (viewingQuestionThread?.openPosition ?? 'bottom')
+          }
           hideAIActions={!!viewingSketchCluster}
           onIntentReselect={handleIntentReselect}
           onRetry={() => {
@@ -877,6 +887,15 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         {/* Input is hidden in sketch inspector mode — it's a read-only view. */}
         {!viewingSketchCluster && (
           <div className="px-3 pb-2">
+            {pendingPermission ? (
+              <div className="mb-2">
+                <PermissionTray
+                  threadId={threadId}
+                  messageId={pendingPermission.messageId}
+                  part={pendingPermission.part}
+                />
+              </div>
+            ) : null}
             {canvasId && threadId ? (
               <ChangeReviewCard canvasId={canvasId} threadId={threadId} />
             ) : null}
