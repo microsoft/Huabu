@@ -9,6 +9,7 @@ import { BuiltInAgentAvatar } from '@/components/Common/BuiltInAgentAvatar.tsx';
 import { Button } from '@/components/Common/Button.tsx';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 
+import { QuestionAgentBubble } from './QuestionAgentBubble.tsx';
 import { resolveQuestionBadgeChrome } from './questionBadgeChrome.ts';
 
 import type { QuestionAgentPresentation } from '@/utils/questionAgentPresentation.ts';
@@ -90,19 +91,10 @@ export function QuestionAgentBadge({
       style={badgeStyle}
     >
       {isOpen ? (
-        <svg
-          className="question-agent-badge-bubble pointer-events-none absolute -top-0.5 -left-0.5 overflow-visible"
-          viewBox="0 0 44 48"
-          aria-hidden
-        >
-          <path
-            d="M22 2C11 2 2 11 2 22c0 8 4.5 14.5 11 18l-4 6 9-4.5c1.3.3 2.6.5 4 .5 11 0 20-9 20-20S33 2 22 2Z"
-            fill={stickerFill}
-            stroke="var(--question-border)"
-            strokeWidth="2"
-            strokeLinejoin="round"
-          />
-        </svg>
+        <QuestionAgentBubble
+          fill={stickerFill}
+          className="question-agent-badge-bubble pointer-events-none absolute -top-0.5 -left-0.5"
+        />
       ) : null}
       {agent.kind === 'internal' ? (
         <BuiltInAgentAvatar

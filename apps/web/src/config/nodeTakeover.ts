@@ -1,25 +1,28 @@
 /**
- * Discrete zoom-LOD staging for the question node's agent mark.
+ * Zoom-LOD takeover geometry for the question node's agent mark.
  *
- * The mark has three CRISP resting stages; the continuous morph is only the
- * transition animation between them (owned by `NodeTakeoverLayer`), so whenever
- * the canvas is still the mark is at a clean, fully-resolved stage — never a
- * half-faded / half-sized in-between.
+ * The mark's SIZE and POSITION are a CONTINUOUS function of the node's
+ * on-screen width, so across a zoom the badge smoothly shrinks and glides from
+ * the readable card's corner into the centred collapsed mark — there is no
+ * discrete stage swap and no one-shot tween; every frame is the exact geometry
+ * for that zoom. A single {@link collapseProgress} `t ∈ [0,1]` drives it:
  *
- *   readable — node still large enough to read: the card shows and the agent
- *              badge sits at the top-left corner, scaling WITH the card.
- *   avatar   — node too small to read the text: the card gives way to a centred
- *              agent avatar (a stand-in sized to the node).
- *   dot      — node very small (avatar would be < ~22px): the avatar collapses
- *              to a solid identity dot.
+ *   t = 0  — node wide enough to read: the card shows and the agent badge sits
+ *            at the top-left corner, scaling WITH the card.
+ *   0<t<1  — transition band: the badge continuously moves corner → centre and
+ *            resizes badge → mark as the node shrinks.
+ *   t = 1  — node too small to read: the card is gone and a centred agent mark
+ *            stands in for it. The mark's GLYPH is size-driven (a full agent
+ *            avatar down to {@link MARK_FACE_MIN}px, then a solid dot).
  *
- * Boundaries are driven by the node's on-screen size (zoom × node size) with
- * hysteresis so a stage never flickers while pinching near an edge. All numbers
- * are pure tuning knobs. Question-tuned for now; lift into a registry if a
- * second node type ever opts into staged takeover.
+ * The discrete {@link QuestionLodStage} is derived from the same width ONLY to
+ * decide card-body visibility + chrome (it flips once, with hysteresis, at the
+ * band start); it never drives the mark's size or position. All numbers are
+ * pure tuning knobs. Question-tuned for now; lift into a registry if a second
+ * node type ever opts into staged takeover.
  */
 
-export type QuestionLodStage = 'readable' | 'avatar' | 'dot';
+export type QuestionLodStage = 'readable' | 'collapsed';
 
 /** Screen point in the canvas renderer overlay (px). */
 export interface TakeoverPoint {
@@ -35,19 +38,18 @@ export interface TakeoverState {
 }
 
 /**
- * Node screen WIDTH (px) at/above which the card stays readable (stage 1).
- * Set to ≈ the badge's min size ({@link BADGE_MIN_SIZE}) so the card only gives
- * way to the centred avatar once the corner badge is about as wide as the node
- * itself.
+ * Node screen WIDTH (px) at/above which the takeover is fully OFF (t = 0): the
+ * card body shows and the agent badge rests at the top-left corner.
  */
-export const STAGE_READABLE_MIN_WIDTH = 30;
-/** Hysteresis (px) around the readable boundary. */
-export const STAGE_READABLE_HYSTERESIS = 6;
-
-/** Avatar screen size (px) below which the mark collapses to a dot (stage 3). */
-export const STAGE_DOT_THRESHOLD = 9;
-/** Hysteresis (px) around the dot boundary. */
-export const STAGE_DOT_HYSTERESIS = 2;
+export const TAKEOVER_START_WIDTH = 64;
+/**
+ * Node screen WIDTH (px) at/below which the takeover is fully ON (t = 1): the
+ * card body is gone and the mark sits centred. Between this and
+ * {@link TAKEOVER_START_WIDTH} the mark continuously morphs corner → centre.
+ */
+export const TAKEOVER_END_WIDTH = 24;
+/** Hysteresis (px) around the body-visibility boundary so it never flickers. */
+export const TAKEOVER_HYSTERESIS = 6;
 
 /**
  * Readable-stage badge diameter as a fraction of the node's shorter on-screen
@@ -63,38 +65,58 @@ export const BADGE_MIN_SIZE = 30;
 export const BADGE_MAX_SIZE = 84;
 
 /**
- * Collapsed stand-in size (screen px), driven by the node's on-screen SHORTER
- * side (min(w,h)) — the same dimension the badge uses. Two bands that meet at
- * 14 px, so the size is continuous (no pop) but the glyph still switches:
- *   - short side ≥ {@link MARK_AVATAR_SHORT} → avatar, sized [14, 30]
- *   - short side <  {@link MARK_AVATAR_SHORT} → dot,    sized [10, 14)
- * The avatar cap (30) ≈ the badge floor, so the centred mark is never bigger
- * than the readable corner badge it takes over from. Edges follow the mark (see
- * `collapsedRadius`), so it need not fill the footprint.
+ * Collapsed mark size (screen px) — a single continuous curve driven by the
+ * node's on-screen SHORTER side (min(w,h), the same dimension the badge uses).
+ * The mark tracks the node's short side (concave, so it climbs out of the floor
+ * quickly then flattens toward the {@link MARK_MAX} cap ≈ the badge floor, so
+ * collapsing never pops the size) and floors at {@link MARK_MIN}. Edges follow
+ * the mark (see `collapsedRadius`), so it need not fill the footprint.
  */
-export const MARK_DOT_MIN = 10;
-export const MARK_DOT_MAX = 14;
-export const MARK_AVATAR_MIN = 14;
-export const MARK_AVATAR_MAX = 30;
-/**
- * Mark diameter (screen px) at/above which the stand-in shows the full agent
- * character; below it it is a clean solid identity dot. At the band boundary
- * (14), so dots are [10, 14) and avatars are [14, 30].
- */
-export const MARK_FACE_MIN = 14;
-/** Node shorter-side (screen px) at/above which the mark is an avatar, else a dot. */
-const MARK_AVATAR_SHORT = 14;
-/** Node shorter-side (screen px) mapped to {@link MARK_AVATAR_MAX}. */
+export const MARK_MIN = 6;
+export const MARK_MAX = 30;
+/** Node shorter-side (screen px) at/below which the mark sits at {@link MARK_MIN}. */
+const MARK_SHORT_MIN = 4;
+/** Node shorter-side (screen px) at/above which the mark sits at {@link MARK_MAX}. */
 const MARK_SHORT_MAX = 30;
-/** Concave easing (<1) for the avatar band: climb out quickly, then flatten. */
-const MARK_GAMMA = 0.55;
+/** Concave easing (<1): climb out of the floor quickly, then flatten. */
+const MARK_GAMMA = 0.7;
+/**
+ * Mark diameter (screen px) at/above which the collapsed mark shows the full
+ * agent character; below it it is a clean solid identity dot. Kept low, so the
+ * face survives down to a very small size (it stays legible) and only the
+ * tiniest marks fall back to a dot.
+ */
+export const MARK_FACE_MIN = 7;
 
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
 
+/** Linear interpolation. */
+export function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
 /**
- * Collapsed mark diameter (screen px). Returns a value in the avatar band
- * ([14, 30]) or the dot band ([10, 14)) — the two meet continuously at 14, so
- * the size never pops; only the glyph (dot ↔ face) switches there.
+ * Continuous collapse progress `t ∈ [0,1]` for the current on-screen width:
+ * 0 while the node is wider than {@link TAKEOVER_START_WIDTH} (readable card +
+ * corner badge), ramping to 1 by {@link TAKEOVER_END_WIDTH} (centred mark).
+ * Smoothstep-eased so the corner → centre glide starts and ends gently instead
+ * of at a constant velocity. This is what makes the takeover track the zoom
+ * continuously rather than snapping at a threshold.
+ */
+export function collapseProgress(nodeScreenW: number): number {
+  const raw =
+    (TAKEOVER_START_WIDTH - nodeScreenW) /
+    (TAKEOVER_START_WIDTH - TAKEOVER_END_WIDTH);
+  const t = clamp01(raw);
+  // smoothstep: t*t*(3 - 2t)
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Collapsed mark diameter (screen px): a single continuous concave curve of the
+ * node's shorter on-screen side, from {@link MARK_MIN} up to {@link MARK_MAX}.
+ * The glyph (face ↔ dot) is decided separately from the size via
+ * {@link MARK_FACE_MIN}, so there is no size discontinuity anywhere.
  */
 export function collapsedMarkSize(
   nodeScreenW: number,
@@ -104,19 +126,10 @@ export function collapsedMarkSize(
     Math.max(0, nodeScreenW),
     Math.max(0, nodeScreenH),
   );
-  if (shortSide >= MARK_AVATAR_SHORT) {
-    const n = clamp01(
-      (shortSide - MARK_AVATAR_SHORT) / (MARK_SHORT_MAX - MARK_AVATAR_SHORT),
-    );
-    return (
-      MARK_AVATAR_MIN +
-      (MARK_AVATAR_MAX - MARK_AVATAR_MIN) * Math.pow(n, MARK_GAMMA)
-    );
-  }
-  const m = clamp01(
-    (shortSide - MARK_DOT_MIN) / (MARK_AVATAR_SHORT - MARK_DOT_MIN),
+  const n = clamp01(
+    (shortSide - MARK_SHORT_MIN) / (MARK_SHORT_MAX - MARK_SHORT_MIN),
   );
-  return MARK_DOT_MIN + (MARK_DOT_MAX - MARK_DOT_MIN) * m;
+  return MARK_MIN + (MARK_MAX - MARK_MIN) * Math.pow(n, MARK_GAMMA);
 }
 
 /**
@@ -137,14 +150,6 @@ export function badgeSizeForNode(
   );
 }
 
-/** Node's shorter on-screen side (px) — drives the avatar↔dot stage boundary. */
-export function rawAvatarSize(
-  nodeScreenW: number,
-  nodeScreenH: number,
-): number {
-  return Math.min(nodeScreenW, nodeScreenH);
-}
-
 /** Rendered mark diameter (screen px) for a stage at the current geometry. */
 export function markSizeForStage(
   stage: QuestionLodStage,
@@ -156,33 +161,21 @@ export function markSizeForStage(
 }
 
 /**
- * Resolves the crisp stage for the current on-screen geometry, keeping the
- * previous stage unless the size has crossed a boundary by more than the
- * hysteresis buffer. `readable ↔ avatar` switches on node width (text
- * legibility); `avatar ↔ dot` switches on the avatar's own size.
+ * Resolves the crisp card-body stage for the current on-screen width. This is
+ * ONLY used to show/hide the card body and pick chrome — the mark's size and
+ * position come from the continuous {@link collapseProgress}, not from here.
+ * The body flips off once the node passes the takeover band start
+ * ({@link TAKEOVER_START_WIDTH}), with hysteresis so it never flickers at the
+ * edge. The face ↔ dot glyph is NOT a stage — it is size-driven in the mark
+ * itself (see {@link MARK_FACE_MIN}).
  */
 export function resolveQuestionStage(
   prev: QuestionLodStage,
   nodeScreenW: number,
-  nodeScreenH: number,
 ): QuestionLodStage {
   const w = nodeScreenW;
-  const avatar = rawAvatarSize(nodeScreenW, nodeScreenH);
-  const R = STAGE_READABLE_MIN_WIDTH;
-  const Rh = STAGE_READABLE_HYSTERESIS;
-  const D = STAGE_DOT_THRESHOLD;
-  const Dh = STAGE_DOT_HYSTERESIS;
-
-  switch (prev) {
-    case 'readable':
-      if (w < R - Rh) return avatar < D - Dh ? 'dot' : 'avatar';
-      return 'readable';
-    case 'dot':
-      if (avatar > D + Dh) return w >= R + Rh ? 'readable' : 'avatar';
-      return 'dot';
-    default: // avatar
-      if (w >= R + Rh) return 'readable';
-      if (avatar < D - Dh) return 'dot';
-      return 'avatar';
-  }
+  const S = TAKEOVER_START_WIDTH;
+  const H = TAKEOVER_HYSTERESIS;
+  if (prev === 'readable') return w < S - H ? 'collapsed' : 'readable';
+  return w >= S + H ? 'readable' : 'collapsed';
 }

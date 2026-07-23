@@ -3,7 +3,9 @@ import { useRef } from 'react';
 
 import {
   badgeSizeForNode,
-  markSizeForStage,
+  collapseProgress,
+  collapsedMarkSize,
+  lerp,
   resolveQuestionStage,
   type QuestionLodStage,
   type TakeoverPoint,
@@ -58,23 +60,34 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
 
   const screenW = width * zoom;
   const screenH = height * zoom;
-  const stage = resolveQuestionStage(prevStage.current, screenW, screenH);
+  const stage = resolveQuestionStage(prevStage.current, screenW);
   prevStage.current = stage;
 
   const left = abs.x * zoom + vpX;
   const top = abs.y * zoom + vpY;
-  const size = markSizeForStage(stage, screenW, screenH);
+
+  // Continuous collapse progress (0 = readable card + corner badge, 1 = centred
+  // mark). SIZE and POSITION are interpolated by it every frame, so the badge
+  // tracks the zoom smoothly instead of snapping + animating at a threshold.
+  const t = collapseProgress(screenW);
   const badge = badgeSizeForNode(screenW, screenH);
+  const mark = collapsedMarkSize(screenW, screenH);
+  const size = lerp(badge, mark, t);
 
-  // Stage 1: hug the node's top-left corner (scales with the card). Stage 2/3:
-  // the node centre (the mark stands in for the whole node).
-  const point: TakeoverPoint =
-    stage === 'readable'
-      ? { x: left + badge * 0.3, y: top + badge * 0.05 }
-      : { x: left + screenW / 2, y: top + screenH / 2 };
+  // Endpoints: the readable badge hugs the node's top-left corner; the collapsed
+  // mark sits at the node centre. Lerp between them so the mark glides corner →
+  // centre as the node shrinks.
+  const cornerX = left + badge * 0.3;
+  const cornerY = top + badge * 0.05;
+  const centreX = left + screenW / 2;
+  const centreY = top + screenH / 2;
+  const point: TakeoverPoint = {
+    x: lerp(cornerX, centreX, t),
+    y: lerp(cornerY, centreY, t),
+  };
 
-  // Collapsed stages: the mark is a bounded curve (not the footprint), so edges
-  // clip to the actual mark circle. Radius in canvas space = screen size / zoom.
+  // Collapsed: the mark is a bounded curve (not the footprint), so edges clip
+  // to the actual mark circle. Radius in canvas space = screen size / zoom.
   const collapsedRadius = stage === 'readable' ? null : size / (2 * zoom);
 
   return { stage, size, point, collapsedRadius };

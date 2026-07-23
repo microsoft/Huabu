@@ -22,7 +22,7 @@
   --question-agent-badge-size: 2.25rem;
   --question-agent-quiet-ring: color-mix(
     in srgb,
-    var(--fg-subtle) 55%,
+    var(--fg-subtle) 38%,
     var(--bg-surface)
   );
   width: var(--question-agent-badge-size) !important;
