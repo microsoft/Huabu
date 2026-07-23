@@ -1,5 +1,5 @@
 import { AlertTriangle, Eye, Loader, X } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import '@/components/Nodes/question/QuestionAgentBadge.css';
 
@@ -12,10 +12,18 @@ import {
 } from '@/components/Common/AgentIcon';
 import { Button } from '@/components/Common/Button';
 import { cn } from '@/components/Common/cn';
+import { QuestionTakeoverMark } from '@/components/Nodes/question/QuestionTakeoverMark';
 import {
   AgentModeIcon,
   ChatModeIcon,
 } from '@/components/Panels/ChatPanel/ModeIcon';
+import {
+  badgeSizeForNode,
+  collapseProgress,
+  collapsedMarkSize,
+  lerp as lerpTakeover,
+  resolveQuestionStage,
+} from '@/config/nodeTakeover';
 
 import type {
   AgentIconColor,
@@ -23,6 +31,8 @@ import type {
   AgentIconShape,
   AgentIconValue,
 } from '@/components/Common/AgentIcon';
+import type { QuestionLodStage } from '@/config/nodeTakeover';
+import type { QuestionAgentPresentation } from '@/utils/questionAgentPresentation';
 import type { LucideIcon } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 
@@ -1350,6 +1360,204 @@ function LodAgentChip({
   return chip;
 }
 
+/**
+ * Final 1:1 Question-node LOD preview.
+ *
+ * Unlike the historical proposal lab below, this preview deliberately imports
+ * the production takeover math and `QuestionTakeoverMark` itself. It therefore
+ * stays an exact executable reference for the shipped mark geometry, status
+ * chrome, avatar detail threshold, and open-bubble treatment instead of copying
+ * those decisions into a second playground-only implementation.
+ */
+function FinalQuestionNodeLodProposal({ icon }: { icon: AgentIconValue }) {
+  const [zoom, setZoom] = useState(1);
+  const [status, setStatus] = useState<AgentBadgeStatus>('open');
+  const [source, setSource] = useState<ChipSource>('external');
+  const previousStage = useRef<QuestionLodStage>('readable');
+
+  const screenW = LOD_NODE_W * zoom;
+  const screenH = LOD_NODE_H * zoom;
+  const stage = resolveQuestionStage(previousStage.current, screenW);
+  previousStage.current = stage;
+
+  const t = collapseProgress(screenW);
+  const readableSize = badgeSizeForNode(screenW, screenH);
+  const collapsedSize = collapsedMarkSize(screenW, screenH);
+  const size = lerpTakeover(readableSize, collapsedSize, t);
+
+  const viewportW = 520;
+  const viewportH = 300;
+  const nodeLeft = (viewportW - screenW) / 2;
+  const nodeTop = (viewportH - screenH) / 2;
+  const cornerX = nodeLeft + readableSize * 0.3;
+  const cornerY = nodeTop + readableSize * 0.05;
+  const centreX = nodeLeft + screenW / 2;
+  const centreY = nodeTop + screenH / 2;
+  const markX = lerpTakeover(cornerX, centreX, t);
+  const markY = lerpTakeover(cornerY, centreY, t);
+
+  const productionStatus =
+    status === 'done-unread' ||
+    status === 'done-viewed' ||
+    status === 'conflict'
+      ? 'done'
+      : status;
+  const unread =
+    status === 'done-unread' || status === 'error' || status === 'conflict';
+  const conflictCount = status === 'conflict' ? 2 : 0;
+  const agent: QuestionAgentPresentation =
+    source === 'external'
+      ? { kind: 'external', alias: 'External Agent', icon }
+      : {
+          kind: 'internal',
+          alias: 'Huabu',
+          mode: source === 'agent' ? 'operate' : 'ask',
+        };
+
+  return (
+    <div className="border-info bg-surface ring-info/15 rounded-2xl border p-6 ring-2">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="mb-2 flex items-center gap-2">
+            <h2 className="text-fg-default font-semibold">
+              Finalized · shipped Question-node LOD
+            </h2>
+            <span className="bg-info-bg text-info rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase">
+              1:1 production
+            </span>
+          </div>
+          <p className="text-fg-muted max-w-3xl text-sm">
+            This is the locked solution, rendered with the production takeover
+            curve and production mark component. The earlier playground
+            implementation remains below as proposal history.
+          </p>
+        </div>
+        <div className="text-fg-subtle text-right text-xs">
+          <div>width {Math.round(screenW)}px</div>
+          <div>
+            t {t.toFixed(2)} · mark {size.toFixed(1)}px · {stage}
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <span className="text-fg-muted w-24 text-xs">Status</span>
+        {(
+          [
+            { value: 'open', label: 'Open' },
+            { value: 'running', label: 'Running' },
+            { value: 'done-unread', label: 'Unread' },
+            { value: 'done-viewed', label: 'Done' },
+            { value: 'error', label: 'Error' },
+            { value: 'conflict', label: 'Conflict' },
+          ] as { value: AgentBadgeStatus; label: string }[]
+        ).map((option) => (
+          <Button
+            key={option.value}
+            variant={status === option.value ? 'solid' : 'ghost'}
+            tone={status === option.value ? 'info' : 'neutral'}
+            size="sm"
+            onClick={() => setStatus(option.value)}
+          >
+            {option.label}
+          </Button>
+        ))}
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <span className="text-fg-muted w-24 text-xs">Agent source</span>
+        {(
+          [
+            { value: 'external', label: 'External' },
+            { value: 'chat', label: 'Built-in · Chat' },
+            { value: 'agent', label: 'Built-in · Agent' },
+          ] as { value: ChipSource; label: string }[]
+        ).map((option) => (
+          <Button
+            key={option.value}
+            variant={source === option.value ? 'solid' : 'ghost'}
+            tone={source === option.value ? 'info' : 'neutral'}
+            size="sm"
+            onClick={() => setSource(option.value)}
+          >
+            {option.label}
+          </Button>
+        ))}
+      </div>
+
+      <div className="mb-5 flex items-center gap-4">
+        <span className="text-fg-muted w-24 text-xs">
+          Zoom {Math.round(zoom * 100)}%
+        </span>
+        <input
+          type="range"
+          min={1}
+          max={300}
+          value={Math.round(zoom * 100)}
+          onChange={(event) => setZoom(Number(event.target.value) / 100)}
+          className="accent-info flex-1"
+          aria-label="Final Question node LOD zoom"
+        />
+      </div>
+
+      <div className="flex justify-center overflow-hidden rounded-xl">
+        <div
+          className="relative"
+          style={{
+            width: viewportW,
+            height: viewportH,
+            background: 'var(--bg-default)',
+            backgroundImage:
+              'radial-gradient(color-mix(in srgb, var(--fg-subtle) 30%, transparent) 1px, transparent 1px)',
+            backgroundSize: '16px 16px',
+            border: '1px solid var(--edge-default)',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              left: nodeLeft,
+              top: nodeTop,
+              opacity: stage === 'readable' ? 1 : 0,
+              transition: 'opacity 200ms ease',
+            }}
+          >
+            <StickyCard
+              screenW={screenW}
+              screenH={screenH}
+              bodyOpacity={1}
+              zoom={zoom}
+            />
+          </div>
+          <div
+            style={{
+              position: 'absolute',
+              left: markX,
+              top: markY,
+              transform: 'translate(-50%, -50%)',
+            }}
+          >
+            <QuestionTakeoverMark
+              state={{ stage, size }}
+              status={productionStatus}
+              agent={agent}
+              unread={unread}
+              conflictCount={conflictCount}
+              interactive={false}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="text-fg-subtle mt-4 grid gap-2 text-xs sm:grid-cols-3">
+        <span>64px → 24px smoothstep takeover</span>
+        <span>Continuous mark geometry · binary card body</span>
+        <span>Full avatar → identity dot below 7px</span>
+      </div>
+    </div>
+  );
+}
+
 /** One canvas viewport rendering the node + badge at a simulated zoom. */
 function LodViewport({
   icon,
@@ -1837,6 +2045,10 @@ export default function AgentNodePlaygroundPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-8">
+        <section className="mb-14">
+          <FinalQuestionNodeLodProposal icon={icon} />
+        </section>
+
         <section className="mb-14">
           <QuestionNodeLodLab icon={icon} />
         </section>

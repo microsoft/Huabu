@@ -30,6 +30,18 @@ export interface QuestionTakeoverMarkProps {
   conflictTooltip?: string;
 }
 
+export function resolveQuestionBadgeBackground({
+  isIdle,
+  isOpen,
+  stickerFill,
+}: {
+  isIdle: boolean;
+  isOpen: boolean;
+  stickerFill: string;
+}): string {
+  return isIdle || isOpen ? 'transparent' : stickerFill;
+}
+
 /**
  * `QuestionTakeoverMark` — the single element that IS the question node's agent
  * mark across both discrete zoom stages. It is the SAME sticker badge (warm
@@ -85,7 +97,7 @@ export function QuestionTakeoverMark({
   // vanishes. (The `open` bubble's SVG stroke already scales via its viewBox.)
   const ringWidth = Math.max(0.75, Math.min(2, size * 0.05));
 
-  // Strict geometric centring of the `open` bubble — no per-size pixel fudge.
+  // Geometric centring of the `open` bubble.
   // The bubble SVG's viewBox is `0 0 44 48` with the round part a circle
   // centred at (22, 22). Sizing the box to 1.1×/1.2× the mark makes the circle
   // diameter equal the mark (40/44 · 1.1 · size = size), and the circle centre
@@ -93,11 +105,14 @@ export function QuestionTakeoverMark({
   // on BOTH axes:
   //   cx = left + width·(22/44) = −0.05·size + 1.1·size·0.5   = 0.5·size ✓
   //   cy = top  + height·(22/48) = −0.05·size + 1.2·size·0.4583 = 0.5·size ✓
-  // So the flex-centred avatar coincides with the circle centre at every zoom
-  // with no translate at all.
+  // So the flex-centred avatar coincides with the circle centre at every zoom.
+  // The Huabu/external artwork reads slightly left-and-high inside that circle,
+  // so apply a tiny proportional optical correction (1px at the usual 36px
+  // badge) rather than a fixed offset that would overwhelm collapsed marks.
   const bubbleWidth = size * 1.1;
   const bubbleHeight = size * 1.2;
   const bubbleOffset = -size * 0.05;
+  const bubbleAvatarOpticalOffset = size / 36;
 
   // Sticker fill for real agent marks: the collapsed mark is the readable badge
   // with the card body hidden, so it keeps the same background disc + ring. The
@@ -113,8 +128,11 @@ export function QuestionTakeoverMark({
     // is ignored by the `.question-agent-badge` rule.
     ['--question-agent-badge-size' as string]: `${size}px`,
     borderWidth: isIdle ? 0 : ringWidth,
-    background:
-      isIdle || chip.isRunning || showBubble ? 'transparent' : chip.stickerFill,
+    background: resolveQuestionBadgeBackground({
+      isIdle,
+      isOpen: showBubble,
+      stickerFill: chip.stickerFill,
+    }),
     borderColor: chip.ringBorderColor,
     boxShadow: isIdle ? 'none' : chip.ringBoxShadow,
     cursor: interactive ? 'pointer' : 'default',
@@ -172,20 +190,28 @@ export function QuestionTakeoverMark({
           }}
         />
       ) : (
-        // The bubble's circle centre coincides with the chip centre (see the
-        // `bubbleOffset` note), so the flex-centred avatar is already on the
-        // circle centre — no translate needed in either stage.
-        <AgentAvatarMark
-          agent={agent}
-          size={innerSize}
-          // Same badge in both stages: show the full character whenever the
-          // mark is big enough to read a face (MARK_FACE_MIN), and fall back
-          // to a clean solid dot only at the very smallest collapsed sizes so
-          // a tiny mark never renders a muddy icon-that-looks-like-a-dot.
-          detail={size >= MARK_FACE_MIN ? 'full' : 'dot'}
-          motion={chip.isRunning ? 'working' : 'none'}
-          className="relative z-10 shrink-0"
-        />
+        <span
+          className="relative z-10 flex shrink-0 items-center justify-center"
+          style={{
+            width: innerSize,
+            height: innerSize,
+            transform: showBubble
+              ? `translate(${bubbleAvatarOpticalOffset}px, ${bubbleAvatarOpticalOffset}px)`
+              : undefined,
+          }}
+        >
+          <AgentAvatarMark
+            agent={agent}
+            size={innerSize}
+            // Same badge in both stages: show the full character whenever the
+            // mark is big enough to read a face (MARK_FACE_MIN), and fall back
+            // to a clean solid dot only at the very smallest collapsed sizes so
+            // a tiny mark never renders a muddy icon-that-looks-like-a-dot.
+            detail={size >= MARK_FACE_MIN ? 'full' : 'dot'}
+            motion={chip.isRunning ? 'working' : 'none'}
+            className="shrink-0"
+          />
+        </span>
       )}
       {isReadable && chip.hasConflict ? (
         <span
