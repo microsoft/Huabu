@@ -303,6 +303,41 @@ body,
   touch-action: none;
 }
 
+[data-canvas-root] {
+  -webkit-touch-callout: none;
+}
+
+/* Touch/pen only: stop canvas gestures (draw, pan, lasso, node drag) from
+   selecting node/panel text and popping the iOS copy callout. Left as the
+   default for the mouse so desktop users can still select node text to
+   copy. Editable content and links re-enable selection below. */
+[data-canvas-root][data-not-mouse] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+[data-canvas-root]
+  :is(input, textarea, select, [contenteditable='true'], a[href]) {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* React Flow's bottom-right branding link is an <a href>, so the exception
+   above re-enabled selection on it — a stray finger would select its
+   "React Flow" text and pop the iOS callout. Keep it visible (attribution)
+   but never selectable, and make it click-through on touch so it can never
+   intercept a pan/tap. The link selector out-specifies the exception. */
+[data-canvas-root] .react-flow__attribution,
+[data-canvas-root] .react-flow__attribution a {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+[data-canvas-root][data-not-mouse] .react-flow__attribution {
+  pointer-events: none;
+}
+
 /* React Flow controls panel — remove the default subtle shadow and round the
    corners so it blends with the app's soft surface aesthetic.
    Tailwind's preflight resets <button> backgrounds to transparent, so we also
@@ -341,6 +376,19 @@ body,
 
 .canvas-pending-frame .react-flow__pane,
 .canvas-pending-frame .react-flow__node {
+  cursor: crosshair !important;
+}
+
+/*
+ * Lasso tool: show the crosshair only where a lasso can actually START —
+ * the empty pane and a frame's own background (both `isLassoStartTarget`).
+ * Other nodes keep their normal cursor (a note reads as click-to-select,
+ * not lasso). The retained selection loop advertises its own `move`
+ * cursor for dragging the selection. Nodes are not draggable in lasso
+ * mode (see `nodesDraggable`), so no grab affordance is lost.
+ */
+.canvas-lasso .react-flow__pane,
+.canvas-lasso .react-flow__node-frame {
   cursor: crosshair !important;
 }
 
@@ -478,6 +526,15 @@ body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
 }
 .react-flow__node-sketch[data-sketch-hover='true'],
 .react-flow__node-sketch[data-sketch-hover='true'] * {
+  pointer-events: auto !important;
+}
+/* A *selected* sketch behaves like an ordinary node: its whole bounding
+   box is grabbable, so it (or a multi-selection that includes it) can be
+   dragged from anywhere — not only from a hair-thin stroke, which made
+   sketches feel stuck on touch and awkward to move in a group. Unselected
+   sketches keep the stroke-only drill-through above. */
+.react-flow__node-sketch.selected,
+.react-flow__node-sketch.selected * {
   pointer-events: auto !important;
 }
 .react-flow__node-sketch .react-flow__handle,

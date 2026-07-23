@@ -1,13 +1,14 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
-import { RangeSlider } from '@/components/Common/RangeSlider';
 
 import {
   SKETCH_COLOR_OPTIONS,
   SKETCH_SIZE_MAX,
   SKETCH_SIZE_MIN,
 } from './sketchPath';
+import { SketchSizePicker } from './SketchSizePicker';
 
 interface SketchControlsProps {
   /** Current stroke color (accent palette token; legacy hex also accepted). */
@@ -19,11 +20,14 @@ interface SketchControlsProps {
   /** Called with the new thickness (clamped to [min, max] by the slider). */
   onSizeChange: (size: number) => void;
   /**
-   * Visual size for the embedded thickness slider. Defaults to `'sm'`
-   * to match the compact node floating toolbar; tool settings panels
-   * should pass `'md'`.
+   * Optional: fired once when the thickness slider drag begins / ends. Post-
+   * draw toolbars use this to bracket the per-tick `onSizeChange` writes into
+   * a single undo entry; the pre-draw settings panel (draft state, no undo)
+   * omits them.
    */
-  sliderSize?: 'sm' | 'md';
+  onSizeDragStart?: () => void;
+  onSizeDragEnd?: () => void;
+  touch?: boolean;
 }
 
 /**
@@ -43,9 +47,12 @@ export function SketchControls({
   size,
   onColorChange,
   onSizeChange,
-  sliderSize = 'sm',
+  onSizeDragStart,
+  onSizeDragEnd,
+  touch = false,
 }: SketchControlsProps) {
   const { t } = useTranslation();
+  const [openControl, setOpenControl] = useState<'color' | 'size' | null>(null);
   return (
     <>
       <FloatingToolbar.ColorPicker
@@ -53,14 +60,20 @@ export function SketchControls({
         value={color}
         onSelect={onColorChange}
         title={t('node.strokeColor')}
+        open={openControl === 'color'}
+        onOpenChange={(open) => setOpenControl(open ? 'color' : null)}
       />
-      <RangeSlider
+      <SketchSizePicker
         value={size}
         min={SKETCH_SIZE_MIN}
         max={SKETCH_SIZE_MAX}
         label={t('node.strokeThickness')}
-        size={sliderSize}
+        touch={touch}
         onChange={onSizeChange}
+        onDragStart={onSizeDragStart}
+        onDragEnd={onSizeDragEnd}
+        open={openControl === 'size'}
+        onOpenChange={(open) => setOpenControl(open ? 'size' : null)}
       />
     </>
   );

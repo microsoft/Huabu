@@ -27,6 +27,8 @@ import '@xyflow/react/dist/style.css';
 import {
   assignNodeZIndices,
   edgeZIndex,
+  getAbsolutePosition,
+  getNodeSize,
   indexById,
 } from '@sediment/shared/canvas-engine';
 
@@ -43,16 +45,32 @@ import {
   urlToNodeInput,
   textToNoteNodeInput,
 } from '@/handler/canvasCommand/nodeInputBuilders';
+import { getDragActivationDistance } from '@/handler/canvasGestureSession';
+import { createHandlerOwnerRecognizer } from '@/handler/canvasPointerRecognizers/handlerOwner';
+import { createPlacementRecognizer } from '@/handler/canvasPointerRecognizers/placement';
 import { useCanvasShortcuts } from '@/hooks/shortcuts';
 import { useAutoPanDuringSelection } from '@/hooks/useAutoPanDuringSelection';
 import { useCanvasGestures } from '@/hooks/useCanvasGestures';
 import { useCanvasLasso } from '@/hooks/useCanvasLasso';
+import { useCanvasPointerRouter } from '@/hooks/useCanvasPointerRouter';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
-import { useIsNotMouse } from '@/hooks/useInputMode';
+import {
+  useEffectiveInputMode,
+  useInputMode,
+  useIsNotMouse,
+} from '@/hooks/useInputMode';
 import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
+import { useSketchStrokeMove } from '@/hooks/useSketchStrokeMove';
 import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
+import {
+  canDirectlyManipulateWithPointer,
+  closestNodeElement,
+  isLassoStartTarget,
+  isPanelTarget,
+  resolveNodeDraggable,
+} from './canvasInputPolicy.ts';
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import {
   EDIT_EDGE_LABEL_EVENT,
@@ -61,10 +79,12 @@ import {
 } from './edges/LabelledEdge.tsx';
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
+import { StrokeSelectionToolbar } from './FloatingToolbars/StrokeSelectionToolbar.tsx';
 import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { SelectionOutlines } from './SelectionOutlines.tsx';
 import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
+import { StrokeSelectionRegion } from './StrokeSelectionRegion.tsx';
 import { StructuredDropOverlay } from './StructuredDropOverlay.tsx';
 import { useInitialCanvasViewport } from './useInitialCanvasViewport.ts';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
@@ -81,13 +101,22 @@ import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
 import { createQuestionNodeAndCompose } from '../../Nodes/question/questionCompose.ts';
 import { QuestionNode } from '../../Nodes/question/QuestionNode.tsx';
+import {
+  findSketchStrokesInPolygon,
+  isPointInFlowPolygon,
+} from '../../Nodes/sketch/sketchHitTest.ts';
 import { SketchNode } from '../../Nodes/sketch/SketchNode.tsx';
-import { SketchOverlay } from '../../Nodes/sketch/SketchOverlay.tsx';
+import {
+  CANCEL_SKETCH_GESTURE_EVENT,
+  SketchOverlay,
+} from '../../Nodes/sketch/SketchOverlay.tsx';
 import { SketchProcessingOverlay } from '../../Nodes/sketch/SketchProcessingOverlay.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
+import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
+import type { PointerRecognizer } from '@/handler/pointerRouter';
 import type {
   FrameFitResult,
   NestableNode,
@@ -204,8 +233,41 @@ function getInfoColor(): string {
 const CanvasGestures: React.FC<{
   wrapperRef: React.MutableRefObject<HTMLDivElement | null>;
   rfInstanceRef: React.MutableRefObject<ReactFlowInstance | null>;
-}> = ({ wrapperRef, rfInstanceRef }) => {
+  inputMode: 'mouse' | 'pen' | 'finger';
+  interactivityLocked: boolean;
+  explicitToolActive: boolean;
+  onTouchTakeover: () => void;
+  onEmptyCanvasTap: () => void;
+  onNodeTap: (nodeId: string) => void;
+  extraRecognizers: PointerRecognizer<
+    PointerEvent,
+    CanvasPointerRouterContext
+  >[];
+}> = ({
+  wrapperRef,
+  rfInstanceRef,
+  inputMode,
+  interactivityLocked,
+  explicitToolActive,
+  onTouchTakeover,
+  onEmptyCanvasTap,
+  onNodeTap,
+  extraRecognizers,
+}) => {
   useCanvasGestures(wrapperRef, rfInstanceRef);
+  useCanvasPointerRouter(
+    wrapperRef,
+    rfInstanceRef,
+    {
+      inputMode,
+      interactivityLocked,
+      explicitToolActive,
+      onTouchTakeover,
+      onEmptyCanvasTap,
+      onNodeTap,
+    },
+    extraRecognizers,
+  );
   return null;
 };
 
@@ -300,6 +362,19 @@ export const Canvas: React.FC<CanvasProps> = ({
   const canvasId = useCanvasStore((state) => state.canvasId);
   const minimapEnabled = useCanvasStore((state) => state.minimapEnabled);
   const pendingNodeType = useToolStore((state) => state.pendingNodeType);
+  // Whether a stroke-level sketch selection is active — suppresses node
+  // toolbars so a mixed lasso never shows them (boolean selector).
+  const hasStrokeSelection = useGesturePreviewStore(
+    (s) => Object.keys(s.sketchStrokeSelection).length > 0,
+  );
+  // True while a stroke-move drag is in progress — drives the wrapper's
+  // grabbing cursor (the pointer is captured by the router during the drag,
+  // so the region element's own cursor no longer applies). Uses `grabbing`
+  // to match node drag and canvas pan, since all three are "move a grabbed
+  // object" gestures.
+  const isStrokeMoving = useGesturePreviewStore(
+    (s) => s.sketchStrokeMovePreview !== null,
+  );
   const frameFitPreviews = useGesturePreviewStore(
     (state) => state.frameFitPreviews,
   );
@@ -345,6 +420,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const suppressNextPaneClickRef = useRef(false);
   const rfInstanceRef = useRef<ReactFlowInstance | null>(null);
   const lastDropRef = useRef<{ key: string; at: number } | null>(null);
   const mousePositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -373,6 +449,16 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
 
   const isNotMouse = useIsNotMouse();
+  const inputMode = useEffectiveInputMode();
+  const lastPointer = useInputMode();
+  // Tap-vs-drag activation follows the pointer actually in use.
+  const dragActivationDistance = isNotMouse
+    ? getDragActivationDistance(lastPointer === 'pen' ? 'pen' : 'touch')
+    : getDragActivationDistance('mouse');
+
+  useEffect(() => {
+    if (isNotMouse && tool === 'pan') setTool('select');
+  }, [isNotMouse, setTool, tool]);
 
   const handleSelectionStart = useCallback(() => {
     if (tool !== 'select') return;
@@ -422,7 +508,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             )
           : (event.target as Element);
 
-      const nodeEl = target?.closest('.react-flow__node');
+      const nodeEl = closestNodeElement(target);
       if (!nodeEl) return;
 
       const targetNodeId = nodeEl.getAttribute('data-id');
@@ -459,12 +545,82 @@ export const Canvas: React.FC<CanvasProps> = ({
     previewEdgeIds,
     isActive: isLassoActive,
     shiftScreenPoints: shiftLassoScreenPoints,
+    cancel: cancelLasso,
   } = useCanvasLasso({
     active: !pendingNodeType && tool === 'lasso',
     wrapperRef,
     rfInstanceRef,
     edges,
-    onSelect: (nodeIds) => selectNodes(nodeIds),
+    // Stage 2 selection routing (D1=A), by node type:
+    //   - a sketch node is ALWAYS stroke-level — the lasso selects exactly
+    //     the strokes it captured. Capturing every stroke of a sketch just
+    //     means the whole thing is selected, but it stays a STROKE selection
+    //     (never a node selection); move a whole sketch as an object with
+    //     the Select tool instead.
+    //   - every other node type is selected whole (React Flow).
+    // The two can coexist in one lasso. A fresh drag calls this with empty
+    // args, clearing both.
+    onSelect: (nodeIds, flowPolygon) => {
+      const strokeSelection =
+        flowPolygon.length >= 3 ? findSketchStrokesInPolygon(flowPolygon) : {};
+
+      // Lasso bbox in flow-space — used to drop "container" frames below.
+      let lassoBbox: {
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+      } | null = null;
+      for (const p of flowPolygon) {
+        if (!lassoBbox) lassoBbox = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
+        else {
+          if (p.x < lassoBbox.x1) lassoBbox.x1 = p.x;
+          if (p.y < lassoBbox.y1) lassoBbox.y1 = p.y;
+          if (p.x > lassoBbox.x2) lassoBbox.x2 = p.x;
+          if (p.y > lassoBbox.y2) lassoBbox.y2 = p.y;
+        }
+      }
+
+      const sketchIdSet = new Set(
+        nodes.filter((n) => n.type === 'sketch').map((n) => n.id),
+      );
+      const nn = nodes as NestableNode[];
+      const nonSketchNodeIds = nodeIds.filter((id) => {
+        if (sketchIdSet.has(id)) return false;
+        // Lassoing INSIDE a frame selects its CONTENTS, not the frame
+        // itself: drop any frame whose bounds fully enclose the lasso (it
+        // is a container the loop was drawn within, not a target). A
+        // nested frame the loop actually encircles does NOT enclose the
+        // loop, so it stays selected.
+        const node = nodes.find((n) => n.id === id);
+        if (node?.type === 'frame' && lassoBbox) {
+          const abs = getAbsolutePosition(nn, id);
+          const size = getNodeSize(node);
+          if (
+            abs &&
+            abs.x <= lassoBbox.x1 &&
+            abs.y <= lassoBbox.y1 &&
+            abs.x + size.width >= lassoBbox.x2 &&
+            abs.y + size.height >= lassoBbox.y2
+          ) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      const preview = useGesturePreviewStore.getState();
+      preview.setSketchStrokeSelection(strokeSelection);
+      // Retain the lasso loop for ANY non-empty selection (strokes and/or
+      // whole nodes) so the user can drag inside it to move the whole
+      // selection GoodNotes-style; drop it only when the lasso caught
+      // nothing.
+      const hasSelection =
+        Object.keys(strokeSelection).length > 0 || nonSketchNodeIds.length > 0;
+      preview.setSketchSelectionPolygon(hasSelection ? flowPolygon : null);
+      selectNodes(nonSketchNodeIds);
+    },
+    inputMode,
   });
 
   // Sketch hover routing: hit-test the cursor against painted strokes so
@@ -476,14 +632,32 @@ export const Canvas: React.FC<CanvasProps> = ({
     enabled:
       pendingNodeType !== 'sketch' && tool !== 'lasso' && !isBoxSelecting,
   });
-  const lassoPreviewNodeIdSet = useMemo(
-    () => new Set(previewNodeIds),
-    [previewNodeIds],
-  );
+  // Stage 2: a stroke-level selection only makes sense under the Lasso
+  // tool (where it is produced and its delete toolbar shows). Drop it the
+  // moment the tool changes so the highlight + toolbar don't linger.
+  useEffect(() => {
+    if (tool !== 'lasso') {
+      useGesturePreviewStore.getState().clearSketchStrokeSelection();
+    }
+  }, [tool]);
+  // A sketch node is never whole-node selected by the lasso (it always
+  // yields stroke-level hits, R3), so it must not flash the whole-node
+  // preview box while the lasso passes over it — only its captured strokes
+  // highlight, and only on commit.
+  const lassoPreviewNodeIdSet = useMemo(() => {
+    const sketchIds = new Set(
+      nodes.filter((n) => n.type === 'sketch').map((n) => n.id),
+    );
+    return new Set(previewNodeIds.filter((id) => !sketchIds.has(id)));
+  }, [previewNodeIds, nodes]);
   const lassoPreviewEdgeIdSet = useMemo(
     () => new Set(previewEdgeIds),
     [previewEdgeIds],
   );
+  const handleTouchTakeover = useCallback(() => {
+    cancelLasso();
+    window.dispatchEvent(new Event(CANCEL_SKETCH_GESTURE_EVENT));
+  }, [cancelLasso]);
   // Manual z-order: array/forest order is the sole stacking authority
   // (see `assignNodeZIndices`). React Flow runs in `zIndexMode="manual"`
   // so these derived values are used verbatim; without this a framed
@@ -520,9 +694,22 @@ export const Canvas: React.FC<CanvasProps> = ({
         return cached;
       }
 
-      const needsWrap = nextClassName !== baseClassName || node.zIndex !== z;
+      const touchDraggable = resolveNodeDraggable(
+        node.draggable,
+        node.selected,
+        isNotMouse,
+      );
+      const needsWrap =
+        nextClassName !== baseClassName ||
+        node.zIndex !== z ||
+        node.draggable !== touchDraggable;
       const wrapped = needsWrap
-        ? { ...node, className: nextClassName, zIndex: z }
+        ? {
+            ...node,
+            className: nextClassName,
+            zIndex: z,
+            draggable: touchDraggable,
+          }
         : node;
       nextCache.set(node, wrapped);
       return wrapped;
@@ -530,7 +717,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     zWrapCacheRef.current = nextCache;
     return result;
-  }, [lassoPreviewNodeIdSet, nodes, zByNode]);
+  }, [isNotMouse, lassoPreviewNodeIdSet, nodes, zByNode]);
 
   // Override marker colors on selected edges so arrows match the selection
   // highlight color (--color-info). CSS cannot style SVG <marker> referenced
@@ -635,53 +822,164 @@ export const Canvas: React.FC<CanvasProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [pendingNodeType, exitPendingNodeType]);
 
+  const placePendingNode = useCallback(
+    (clientX: number, clientY: number) => {
+      if (
+        !pendingNodeType ||
+        pendingNodeType === 'frame' ||
+        pendingNodeType === 'sketch'
+      ) {
+        return false;
+      }
+      const instance = rfInstanceRef.current;
+      if (!instance) return false;
+
+      const position = instance.screenToFlowPosition({
+        x: clientX,
+        y: clientY,
+      });
+
+      if (pendingNodeType === 'question') {
+        createQuestionNodeAndCompose({
+          addNode,
+          placementPoint: position,
+          canvasId,
+        });
+      } else {
+        addNode({
+          nodeType: pendingNodeType,
+          placementPoint: position,
+          data: {
+            content: '',
+            origin: { type: 'user-created' },
+          },
+        });
+      }
+      setPendingNodeType(null);
+      return true;
+    },
+    [addNode, canvasId, pendingNodeType, setPendingNodeType],
+  );
+
+  // Click-to-place pointer recognizer for the pointer router. Backed by
+  // refs so the recognizer is created once and never loses its in-flight
+  // tap state to a re-render.
+  const placePendingNodeRef = useRef(placePendingNode);
+  placePendingNodeRef.current = placePendingNode;
+  const suppressNextPaneClick = useCallback(() => {
+    suppressNextPaneClickRef.current = true;
+    window.setTimeout(() => {
+      suppressNextPaneClickRef.current = false;
+    }, 0);
+  }, []);
+  // Frame and lasso keep their existing self-gating handlers; the router
+  // forwards native pointer events to them (read via refs so the recognizer
+  // stays stable while the memoized handlers change identity).
+  const frameHandlersRef = useRef(framePointerHandlers);
+  frameHandlersRef.current = framePointerHandlers;
+  const lassoHandlersRef = useRef(lassoPointerHandlers);
+  lassoHandlersRef.current = lassoPointerHandlers;
+  // Stroke-move gesture (drag inside the retained lasso region). Claims a
+  // pointerdown before the lasso when it lands inside the selection polygon.
+  const strokeMoveHandlers = useSketchStrokeMove({ rfInstanceRef });
+  const strokeMoveHandlersRef = useRef(strokeMoveHandlers);
+  strokeMoveHandlersRef.current = strokeMoveHandlers;
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
+  const pointerRecognizers = useMemo<
+    PointerRecognizer<PointerEvent, CanvasPointerRouterContext>[]
+  >(() => {
+    const toReact = (event: PointerEvent) =>
+      event as unknown as React.PointerEvent<HTMLDivElement>;
+    return [
+      createPlacementRecognizer({
+        placePendingNode: (x, y) => placePendingNodeRef.current(x, y),
+        suppressNextPaneClick,
+      }),
+      createHandlerOwnerRecognizer(
+        'frame-drag',
+        () => ({
+          onPointerDown: (e) =>
+            frameHandlersRef.current.onPointerDown(toReact(e)),
+          onPointerMove: (e) =>
+            frameHandlersRef.current.onPointerMove(toReact(e)),
+          onPointerUp: (e) => frameHandlersRef.current.onPointerUp(toReact(e)),
+          onPointerCancel: (e) =>
+            frameHandlersRef.current.onPointerCancel(toReact(e)),
+        }),
+        (event, ctx) =>
+          useToolStore.getState().pendingNodeType === 'frame' &&
+          event.button === 0 &&
+          event.isPrimary &&
+          !isPanelTarget(event.target as Element | null) &&
+          canDirectlyManipulateWithPointer(event.pointerType, ctx.inputMode),
+      ),
+      createHandlerOwnerRecognizer(
+        'sketch-stroke-move',
+        () => ({
+          onPointerDown: (e) => strokeMoveHandlersRef.current.onPointerDown(e),
+          onPointerMove: (e) => strokeMoveHandlersRef.current.onPointerMove(e),
+          onPointerUp: (e) => strokeMoveHandlersRef.current.onPointerUp(e),
+          onPointerCancel: (e) =>
+            strokeMoveHandlersRef.current.onPointerCancel(e),
+        }),
+        (event, ctx) => {
+          if (ctx.interactivityLocked) return false;
+          if (useToolStore.getState().pendingNodeType !== null) return false;
+          if (toolRef.current !== 'lasso') return false;
+          if (event.button !== 0 || !event.isPrimary) return false;
+          if (
+            !canDirectlyManipulateWithPointer(event.pointerType, ctx.inputMode)
+          )
+            return false;
+          // Grabbing the retained region drags the whole selection — the
+          // strokes plus any whole nodes the lasso also caught (they move
+          // together, see useSketchStrokeMove).
+          const poly = useGesturePreviewStore.getState().sketchSelectionPolygon;
+          if (!poly || poly.length < 3) return false;
+          const inst = rfInstanceRef.current;
+          if (!inst) return false;
+          const flow = inst.screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+          });
+          return isPointInFlowPolygon(flow.x, flow.y, poly);
+        },
+      ),
+      createHandlerOwnerRecognizer(
+        'lasso',
+        () => ({
+          onPointerDown: (e) =>
+            lassoHandlersRef.current.onPointerDown(toReact(e)),
+          onPointerMove: (e) =>
+            lassoHandlersRef.current.onPointerMove(toReact(e)),
+          onPointerUp: (e) => lassoHandlersRef.current.onPointerUp(toReact(e)),
+          onPointerCancel: (e) =>
+            lassoHandlersRef.current.onPointerCancel(toReact(e)),
+        }),
+        (event, ctx) =>
+          !ctx.interactivityLocked &&
+          useToolStore.getState().pendingNodeType === null &&
+          toolRef.current === 'lasso' &&
+          event.button === 0 &&
+          event.isPrimary &&
+          isLassoStartTarget(event.target as Element | null) &&
+          canDirectlyManipulateWithPointer(event.pointerType, ctx.inputMode),
+      ),
+    ];
+  }, [suppressNextPaneClick]);
+
   // Handle click-to-place for note, text, and question; otherwise dismiss
   // any currently expanded view (preview or node) so clicking the canvas
   // background acts as a quick close gesture in split mode.
   const handlePaneClick = useCallback(
     (event: React.MouseEvent) => {
-      // 1. Click-to-place for pending node creation tools.
-      if (
-        pendingNodeType &&
-        pendingNodeType !== 'frame' &&
-        pendingNodeType !== 'sketch'
-      ) {
-        const instance = rfInstanceRef.current;
-        if (!instance) return;
-
-        const position = instance.screenToFlowPosition({
-          x: event.clientX,
-          y: event.clientY,
-        });
-
-        // Question nodes are born bound to a chat thread: mint the node
-        // id + thread id up front so we can drop the node AND jump
-        // straight into compose (open the panel, focus the input, pick
-        // the agent inline). Presetting `id` is supported by the
-        // ADD_NODES resolver and already used by paste.
-        if (pendingNodeType === 'question') {
-          createQuestionNodeAndCompose({
-            addNode,
-            placementPoint: position,
-            canvasId,
-          });
-          setPendingNodeType(null);
-          return;
-        }
-
-        const data: Record<string, unknown> = {
-          content: '',
-          origin: { type: 'user-created' },
-        };
-
-        addNode({
-          nodeType: pendingNodeType,
-          placementPoint: position,
-          data,
-        });
-        setPendingNodeType(null);
+      if (suppressNextPaneClickRef.current) {
+        suppressNextPaneClickRef.current = false;
         return;
       }
+      // 1. Click-to-place for pending node creation tools.
+      if (placePendingNode(event.clientX, event.clientY)) return;
 
       // 2. With a different creation tool still active (frame / sketch), the
       //    background click belongs to that tool — leave the expanded view
@@ -700,14 +998,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         closeExpanded();
       }
     },
-    [
-      pendingNodeType,
-      addNode,
-      setPendingNodeType,
-      expandedNodeId,
-      closeExpanded,
-      canvasId,
-    ],
+    [pendingNodeType, expandedNodeId, closeExpanded, placePendingNode],
   );
 
   // When a node is expanded in split mode, pan the canvas so the node stays visible.
@@ -755,6 +1046,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       data-canvas-root=""
       data-search-scope="canvas"
       aria-busy={isInitialViewportPending}
+      data-not-mouse={isNotMouse ? '' : undefined}
       className={clsx(
         'bg-bg-default relative flex h-full w-full flex-col',
         pendingNodeType === 'note' && 'canvas-pending-note',
@@ -763,23 +1055,19 @@ export const Canvas: React.FC<CanvasProps> = ({
         pendingNodeType === 'sketch' && 'cursor-crosshair',
         pendingNodeType === 'audio' && 'canvas-pending-audio',
         pendingNodeType === 'question' && 'canvas-pending-question',
-        tool === 'lasso' && 'cursor-crosshair',
+        tool === 'lasso' && !isStrokeMoving && 'canvas-lasso cursor-crosshair',
+        isStrokeMoving && 'cursor-grabbing',
       )}
-      onPointerDown={(event) => {
-        framePointerHandlers.onPointerDown(event);
-        lassoPointerHandlers.onPointerDown(event);
-      }}
-      onPointerMove={(event) => {
-        framePointerHandlers.onPointerMove(event);
-        lassoPointerHandlers.onPointerMove(event);
-      }}
-      onPointerUp={(event) => {
-        framePointerHandlers.onPointerUp(event);
-        lassoPointerHandlers.onPointerUp(event);
-      }}
-      onPointerCancel={(event) => {
-        framePointerHandlers.onPointerCancel(event);
-        lassoPointerHandlers.onPointerCancel(event);
+      onContextMenu={(event) => {
+        const target = event.target as Element;
+        if (
+          target.closest(
+            'input, textarea, select, [contenteditable="true"], a[href]',
+          )
+        ) {
+          return;
+        }
+        event.preventDefault();
       }}
       onDragOver={(e) => {
         // Accept both internal Sediment payloads and native file/URL drops
@@ -1004,26 +1292,42 @@ export const Canvas: React.FC<CanvasProps> = ({
           );
         }}
         panOnDrag={
-          pendingNodeType
-            ? [1] /* creation tool active → middle mouse button still pans */
-            : tool === 'pan'
-              ? true
-              : isNotMouse
-                ? false /* non-mouse + select tool → drag creates selection rect */
-                : [1] /* mouse + selection tools → middle mouse button pans */
+          isNotMouse
+            ? false /* touch/pen → custom pointer router is the sole pan driver;
+                       React Flow's d3-zoom touch pan (a separate Touch Events
+                       stream) would otherwise still fire under a truthy
+                       `[1]` and pan the canvas mid-frame/lasso/placement */
+            : pendingNodeType
+              ? [1] /* mouse + creation tool → middle mouse button still pans */
+              : tool === 'pan'
+                ? true
+                : [
+                    1,
+                  ] /* mouse + selection tools → middle mouse button pans; drag box-selects */
         }
-        selectionOnDrag={pendingNodeType ? false : tool === 'select'}
+        selectionOnDrag={
+          pendingNodeType ? false : !isNotMouse && tool === 'select'
+        }
         selectionMode={SelectionMode.Partial}
         onSelectionStart={handleSelectionStart}
         onSelectionEnd={handleSelectionEnd}
         nodesDraggable={
           !interactivityLocked && !pendingNodeType && tool !== 'lasso'
         }
+        nodeDragThreshold={dragActivationDistance}
+        nodeClickDistance={dragActivationDistance}
         nodesConnectable={!interactivityLocked}
         elementsSelectable={!interactivityLocked && !pendingNodeType}
         panOnScroll={!isNotMouse}
         zoomOnScroll={true}
-        zoomOnPinch={true}
+        // Touch/pen pinch is driven by the custom pointer router (via
+        // Pointer Events). React Flow's built-in pinch uses d3-zoom on a
+        // *separate* Touch Events stream that our capture-phase pointer
+        // suppression can't stop, so leaving it on lets both fight over
+        // `setViewport` and the gesture stalls. Mirror `panOnDrag` above:
+        // hand pan AND zoom to the router whenever a finger/pen is active,
+        // keeping React Flow's pinch only for the mouse (trackpad) case.
+        zoomOnPinch={!isNotMouse}
         minZoom={MIN_ZOOM}
         maxZoom={MAX_ZOOM}
         onlyRenderVisibleElements
@@ -1042,7 +1346,17 @@ export const Canvas: React.FC<CanvasProps> = ({
         zIndexMode="manual"
         elevateNodesOnSelect={false}
       >
-        <CanvasGestures wrapperRef={wrapperRef} rfInstanceRef={rfInstanceRef} />
+        <CanvasGestures
+          wrapperRef={wrapperRef}
+          rfInstanceRef={rfInstanceRef}
+          inputMode={inputMode}
+          interactivityLocked={interactivityLocked}
+          explicitToolActive={tool === 'lasso' || Boolean(pendingNodeType)}
+          onTouchTakeover={handleTouchTakeover}
+          onEmptyCanvasTap={() => selectNodes([])}
+          onNodeTap={(nodeId) => selectNodes([nodeId])}
+          extraRecognizers={pointerRecognizers}
+        />
         <SelectionAutoPan
           active={isBoxSelecting || isLassoActive}
           wrapperRef={wrapperRef}
@@ -1053,7 +1367,9 @@ export const Canvas: React.FC<CanvasProps> = ({
         </Panel>
         {!isBoxSelecting && <MultiSelectResizer />}
         {!isBoxSelecting && <SelectionOutlines />}
-        {!isBoxSelecting && <MultiSelectToolbar />}
+        {!isBoxSelecting && !hasStrokeSelection && <MultiSelectToolbar />}
+        {!isBoxSelecting && <StrokeSelectionRegion />}
+        {!isBoxSelecting && <StrokeSelectionToolbar />}
         {!isBoxSelecting && <EdgeStyleToolbar />}
         <IntentPopover />
         <Background color="var(--canvas-grid)" gap={GRID_SIZE} />

@@ -382,13 +382,25 @@ export const snapshotNodesParamsSchema = Type.Object({
         'Optional longest-edge pixel cap for the output PNG (256-4096). Defaults to 1280 — enough resolution for vision while keeping a single attachment well under the upstream LLM’s body-size limit. Reduce this (e.g. to 768 or 512) when a previous turn returned `[Attached Image: … omitted from vision (~X.X MB exceeds the inline cap)]` so the resulting PNG is small enough to actually be sent. Applies uniformly to: rendered clusters (re-rendered at the new cap), and singleton image pass-throughs (re-rasterized only when the source’s longest edge exceeds `maxPixels`; otherwise the original artifact is returned unchanged). Result is content-addressed by `(source, maxPixels)`, so the same call is essentially free on repeat.',
     }),
   ),
+  strokeSubsets: Type.Optional(
+    Type.Array(
+      Type.Object({
+        nodeId: Type.String(),
+        strokeIds: Type.Array(Type.String()),
+      }),
+      {
+        description:
+          'Optional per-sketch-node stroke subset (a KEEP list, not an exclusion). Each entry renders ONLY the listed `strokeIds` of that `nodeId` (ids as they appear in the node’s `strokes[]`), letting you snapshot part of a sketch region — e.g. the few strokes the user lassoed — instead of the whole node. Nodes without an entry render in full; an entry whose ids match nothing returns a stale-selection error instead of widening to the full node. The subset render is content-addressed independently, so it never collides with the whole-node snapshot.',
+      },
+    ),
+  ),
 });
 
 export const snapshotNodesTool: ToolDefinition = {
   name: 'snapshot_nodes',
   label: 'Snapshot nodes',
   description:
-    "Snapshot Space nodes into PNG attachments — use the returned `src` as a vision attachment (so you can SEE the node) or as `generate_image.referenceArtifactSrcs`. Call this for any `image` / `sketch` node you've located via `get_space_outline` / `inspect_nodes`; `frame` is also accepted and recursively expands to its image/sketch children. For `note` / `text` / `pdf` / `video` use `read(\"nodes/<file>.md\")` instead — they have no still image.\n\nMultiple ids are spatially clustered per parent frame (edge-to-edge ≤ 200 px): nearby image+sketch nodes composite into ONE PNG (images as backdrop, strokes on top); distant ids stay separate. A single image id short-circuits to that node's original artifact (or a downscaled copy when its longest edge exceeds `maxPixels`), so pass one id at a time when you want full-resolution pixels — e.g. drilling into a member of an earlier cluster.\n\nReturns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists every contributing node. The chat route already auto-snapshots the user's selection on your first turn (keys appear in user-message metadata), so don't re-snapshot the same selection unless you need full-res single-image pixels or a smaller `maxPixels` retry.",
+    "Snapshot Space nodes into PNG attachments — use the returned `src` as a vision attachment (so you can SEE the node) or as `generate_image.referenceArtifactSrcs`. Call this for any `image` / `sketch` node you've located via `get_space_outline` / `inspect_nodes`; `frame` is also accepted and recursively expands to its image/sketch children. For `note` / `text` / `pdf` / `video` use `read(\"nodes/<file>.md\")` instead — they have no still image.\n\nMultiple ids are spatially clustered per parent frame (edge-to-edge ≤ 200 px): nearby image+sketch nodes composite into ONE PNG (images as backdrop, strokes on top); distant ids stay separate. A single image id short-circuits to that node's original artifact (or a downscaled copy when its longest edge exceeds `maxPixels`), so pass one id at a time when you want full-resolution pixels — e.g. drilling into a member of an earlier cluster.\n\nTo see only PART of a sketch (e.g. a few lassoed strokes), pass `strokeSubsets: [{ nodeId, strokeIds }]` (a KEEP list) — that node then renders only those strokes; others render in full. If none of the listed ids still exist, the tool returns a stale-selection error instead of rendering the whole sketch.\n\nReturns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists every contributing node. The chat route already auto-snapshots the user's selection on your first turn (keys appear in user-message metadata), so don't re-snapshot the same selection unless you need full-res single-image pixels or a smaller `maxPixels` retry.",
   parameters: snapshotNodesParamsSchema,
 };
 

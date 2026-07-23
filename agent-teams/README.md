@@ -15,12 +15,13 @@ Huabu asks Agenetes to scan the bundled collection, persists the discovered memb
 
 ## Bundled teams
 
-| Agent                                          | Responsibility                                                                                    | Configs                                         | Harnesses           |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------- |
-| [`deepv-slides-maker/`](./deepv-slides-maker/) | Creates editable slide decks through a DeepV server.                                              | `DEEPV_SERVER_ENDPOINT`, `DEEPV_SERVER_API_KEY` | `claude`, `copilot` |
-| [`hackmd-publisher/`](./hackmd-publisher/)     | Publishes selected Space content to HackMD and writes back the URL.                               | `HMD_API_ACCESS_TOKEN`                          | `claude`, `copilot` |
-| [`html-slides-maker/`](./html-slides-maker/)   | Creates static HTML presentations and technical diagrams after confirming the presentation brief. | None                                            | `claude`, `copilot` |
-| [`paper-reviewer/`](./paper-reviewer/)         | Reviews academic papers and drafts review responses.                                              | None                                            | `claude`, `copilot` |
+| Agent                                          | Responsibility                                                                                      | Configs                                         | Harnesses           |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------- |
+| [`deepv-slides-maker/`](./deepv-slides-maker/) | Creates editable slide decks through a DeepV server.                                                | `DEEPV_SERVER_ENDPOINT`, `DEEPV_SERVER_API_KEY` | `claude`, `copilot` |
+| [`hackmd-publisher/`](./hackmd-publisher/)     | Publishes selected Space content to HackMD and writes back the URL.                                 | `HMD_API_ACCESS_TOKEN`                          | `claude`, `copilot` |
+| [`html-slides-maker/`](./html-slides-maker/)   | Creates static HTML presentations and technical diagrams after confirming the presentation brief.   | None                                            | `claude`, `copilot` |
+| [`paper-reviewer/`](./paper-reviewer/)         | Reviews academic papers and drafts review responses.                                                | None                                            | `claude`, `copilot` |
+| [`paper-scout/`](./paper-scout/)               | Quickly finds related arXiv and core HCI venue work and compares its approach with the user's idea. | None                                            | `claude`, `copilot` |
 
 ## Package layout
 

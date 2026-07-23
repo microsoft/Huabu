@@ -24,6 +24,10 @@ import { isEditableTarget } from '@/hooks/shortcuts';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useToolStore } from '@/store/toolStore';
 
+import {
+  getAvailableCanvasTools,
+  resolveCanvasToolShortcut,
+} from './canvasInputPolicy.ts';
 import { NODE_ICON } from '../../../config/nodeIcons.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { detectNodeType, detectOfficeFormat } from '../../../utils/io/media.ts';
@@ -34,6 +38,7 @@ import {
   SplitSelect,
   type SplitSelectOption,
 } from '../../Common/SplitSelect.tsx';
+import { SketchModeSwitcher } from '../../Nodes/sketch/SketchModeSwitcher.tsx';
 import { SketchSettingsPanel } from '../../Nodes/sketch/SketchSettingsPanel.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
@@ -57,6 +62,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const canUndo = useCanvasStore((s) => s.canUndo);
   const canRedo = useCanvasStore((s) => s.canRedo);
   const canvasId = useCanvasStore((s) => s.canvasId);
+  const toolTitle = (label: string, shortcut: string) =>
+    isNotMouse ? label : `${label} (${shortcut})`;
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -75,28 +82,31 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   // mirrors the currently active tool and the popover lists every option
   // (with its letter shortcut hint).
   const toolOptions = useMemo<SplitSelectOption<'select' | 'pan' | 'lasso'>[]>(
-    () => [
-      {
-        value: 'select',
-        label: t('toolbar.tools.select'),
-        icon: <MousePointer2 />,
-        shortcut: 'S',
-      },
-      {
-        value: 'pan',
-        label: t('toolbar.tools.pan'),
-        icon: <Hand />,
-        shortcut: 'P',
-      },
-      {
-        value: 'lasso',
-        label: t('toolbar.tools.lasso'),
-        icon: <Lasso />,
-        shortcut: 'L',
-      },
-    ],
-    [t],
+    () =>
+      getAvailableCanvasTools(isNotMouse).map((value) => ({
+        value,
+        label: t(`toolbar.tools.${value}`),
+        icon:
+          value === 'select' ? (
+            <MousePointer2 />
+          ) : value === 'pan' ? (
+            <Hand />
+          ) : (
+            <Lasso />
+          ),
+        shortcut: isNotMouse
+          ? undefined
+          : value === 'select'
+            ? 'S'
+            : value === 'pan'
+              ? 'P'
+              : 'L',
+      })),
+    [isNotMouse, t],
   );
+
+  const displayedTool = activeTool;
+  const displayedToolActive = true;
 
   // Single-character keyboard shortcuts for the toolbar items, mirroring
   // the badge hints shown on each button. Select / Pan / Lasso get
@@ -124,7 +134,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       if (matchesShortcut(e, 'tool.pan')) {
         e.preventDefault();
         if (pendingNodeType) setPendingNodeType(null);
-        onToolChange('pan');
+        onToolChange(resolveCanvasToolShortcut('pan', isNotMouse));
         return;
       }
       if (matchesShortcut(e, 'tool.lasso')) {
@@ -135,16 +145,19 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       }
       if (matchesShortcut(e, 'mode.frame')) {
         e.preventDefault();
+        onToolChange('select');
         setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame');
         return;
       }
       if (matchesShortcut(e, 'mode.note')) {
         e.preventDefault();
+        onToolChange('select');
         setPendingNodeType(pendingNodeType === 'note' ? null : 'note');
         return;
       }
       if (matchesShortcut(e, 'mode.text')) {
         e.preventDefault();
+        onToolChange('select');
         setPendingNodeType(pendingNodeType === 'text' ? null : 'text');
         return;
       }
@@ -153,6 +166,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         // Match the click handler: always reset the sketch tool to draw
         // mode so the eraser doesn't silently persist between sessions.
         setSketchDraft({ mode: 'draw' });
+        onToolChange('select');
         setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch');
         return;
       }
@@ -164,6 +178,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       // }
       if (matchesShortcut(e, 'mode.question')) {
         e.preventDefault();
+        onToolChange('select');
         setPendingNodeType(pendingNodeType === 'question' ? null : 'question');
         return;
       }
@@ -172,6 +187,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     activeModal,
+    isNotMouse,
     onToolChange,
     pendingNodeType,
     setPendingNodeType,
@@ -364,10 +380,14 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         <div className="flex items-center gap-1.5">
           <SplitSelect<'select' | 'pan' | 'lasso'>
             options={toolOptions}
-            value={activeTool}
+            value={displayedTool}
             onPrimaryAction={(tool) => {
               if (pendingNodeType) setPendingNodeType(null);
-              onToolChange(tool);
+              onToolChange(
+                isNotMouse && tool === 'lasso' && activeTool === 'lasso'
+                  ? 'select'
+                  : tool,
+              );
             }}
             onChange={(tool) => {
               if (pendingNodeType) setPendingNodeType(null);
@@ -378,20 +398,28 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             size="md"
             iconOnly
             align="top-left"
+            hideMenuButton={toolOptions.length === 1}
             primaryTitle={
-              activeTool === 'lasso'
-                ? `${t('toolbar.tools.lasso')} (L)`
-                : activeTool === 'pan'
-                  ? `${t('toolbar.tools.pan')} (P)`
-                  : `${t('toolbar.tools.select')} (S)`
+              displayedTool === 'lasso'
+                ? toolTitle(t('toolbar.tools.lasso'), 'L')
+                : displayedTool === 'pan'
+                  ? toolTitle(t('toolbar.tools.pan'), 'P')
+                  : toolTitle(t('toolbar.tools.select'), 'S')
             }
             menuTitle={t('toolbar.tools.moreTools')}
             primaryShortcutBadge={
-              activeTool === 'lasso' ? 'L' : activeTool === 'pan' ? 'P' : 'S'
+              isNotMouse
+                ? undefined
+                : activeTool === 'lasso'
+                  ? 'L'
+                  : activeTool === 'pan'
+                    ? 'P'
+                    : 'S'
             }
             primaryShortcutBadgeActive={!pendingNodeType}
             primaryButtonClassName={clsx(
               !pendingNodeType &&
+                displayedToolActive &&
                 'text-info bg-bg-default enabled:hover:bg-bg-default',
             )}
             menuButtonClassName="enabled:hover:bg-bg-default"
@@ -405,70 +433,90 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title={`${t('toolbar.nodes.note')} (1)`}
-            shortcutBadge="1"
+            title={toolTitle(t('toolbar.nodes.note'), '1')}
+            shortcutBadge={isNotMouse ? undefined : '1'}
             shortcutBadgeActive={pendingNodeType === 'note'}
             className={clsx(
               pendingNodeType === 'note' && 'text-info bg-bg-default',
             )}
-            onClick={() =>
-              setPendingNodeType(pendingNodeType === 'note' ? null : 'note')
-            }
+            onClick={() => {
+              onToolChange('select');
+              setPendingNodeType(pendingNodeType === 'note' ? null : 'note');
+            }}
           >
             <NODE_ICON.note />
           </Button>
           <Button
             variant="ghost"
             iconOnly
-            title={`${t('toolbar.nodes.text')} (2)`}
-            shortcutBadge="2"
+            title={toolTitle(t('toolbar.nodes.text'), '2')}
+            shortcutBadge={isNotMouse ? undefined : '2'}
             shortcutBadgeActive={pendingNodeType === 'text'}
             className={clsx(
               pendingNodeType === 'text' && 'text-info bg-bg-default',
             )}
-            onClick={() =>
-              setPendingNodeType(pendingNodeType === 'text' ? null : 'text')
-            }
+            onClick={() => {
+              onToolChange('select');
+              setPendingNodeType(pendingNodeType === 'text' ? null : 'text');
+            }}
           >
             <NODE_ICON.text />
           </Button>
           <Button
             variant="ghost"
             iconOnly
-            title={`${t('toolbar.nodes.frame')} (3)`}
-            shortcutBadge="3"
+            title={toolTitle(t('toolbar.nodes.frame'), '3')}
+            shortcutBadge={isNotMouse ? undefined : '3'}
             shortcutBadgeActive={pendingNodeType === 'frame'}
             className={clsx(
               pendingNodeType === 'frame' && 'text-info bg-bg-default',
             )}
-            onClick={() =>
-              setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame')
-            }
+            onClick={() => {
+              onToolChange('select');
+              setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame');
+            }}
           >
             <NODE_ICON.frame />
           </Button>
           <div className="relative flex items-center">
-            {pendingNodeType === 'sketch' && <SketchSettingsPanel />}
-            <Button
-              variant="ghost"
-              iconOnly
-              title={`${t('toolbar.nodes.sketch')} (4)`}
-              shortcutBadge="4"
-              shortcutBadgeActive={pendingNodeType === 'sketch'}
-              className={clsx(
-                pendingNodeType === 'sketch' && 'text-info bg-bg-default',
-              )}
-              onClick={() => {
-                // Clicking the Sketch button always resets the tool to draw
-                // mode so the eraser doesn't silently persist between sessions.
-                setSketchDraft({ mode: 'draw' });
-                setPendingNodeType(
-                  pendingNodeType === 'sketch' ? null : 'sketch',
-                );
-              }}
-            >
-              <NODE_ICON.sketch />
-            </Button>
+            {pendingNodeType === 'sketch' && (
+              <SketchSettingsPanel
+                touch={isNotMouse}
+                showModeSwitcher={!isNotMouse}
+              />
+            )}
+            {isNotMouse ? (
+              <SketchModeSwitcher
+                size="md"
+                active={pendingNodeType === 'sketch'}
+                onActivate={() => {
+                  onToolChange('select');
+                  setPendingNodeType('sketch');
+                }}
+              />
+            ) : (
+              <Button
+                variant="ghost"
+                iconOnly
+                title={`${t('toolbar.nodes.sketch')} (4)`}
+                shortcutBadge="4"
+                shortcutBadgeActive={pendingNodeType === 'sketch'}
+                className={clsx(
+                  pendingNodeType === 'sketch' && 'text-info bg-bg-default',
+                )}
+                onClick={() => {
+                  // Clicking the Sketch button always resets the tool to draw
+                  // mode so the eraser doesn't silently persist between sessions.
+                  setSketchDraft({ mode: 'draw' });
+                  onToolChange('select');
+                  setPendingNodeType(
+                    pendingNodeType === 'sketch' ? null : 'sketch',
+                  );
+                }}
+              >
+                <NODE_ICON.sketch />
+              </Button>
+            )}
           </div>
           {/* Temporarily disabled because the audio node feature is not ready yet.
           <Button
@@ -549,8 +597,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           <Button
             variant="ghost"
             iconOnly
-            title={`${t('toolbar.nodes.agent')} (A)`}
-            shortcutBadge="A"
+            title={toolTitle(t('toolbar.nodes.agent'), 'A')}
+            shortcutBadge={isNotMouse ? undefined : 'A'}
             shortcutBadgeActive={pendingNodeType === 'question'}
             className={clsx(
               pendingNodeType === 'question' && 'text-info bg-bg-default',

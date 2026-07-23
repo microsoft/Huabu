@@ -23,22 +23,25 @@ export const SNAP_GRID: [number, number] = [GRID_SIZE, GRID_SIZE];
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 5;
 
+/** Screen-space movement required before a touch gesture becomes a drag. */
+export const TOUCH_DRAG_ACTIVATION_PX = 8;
+
+/** Screen-space movement required before a pen gesture becomes a drag. */
+export const PEN_DRAG_ACTIVATION_PX = 4;
+
+/** Mouse keeps React Flow's existing crisp desktop drag behavior. */
+export const MOUSE_DRAG_ACTIVATION_PX = 1;
+
 /**
  * Sketch tool — pointer-up stroke merging (Microsoft Whiteboard /
  * Procreate behaviour). When the user finishes a stroke, instead of
- * always creating a brand-new sketch node, we look for a recent
- * nearby sketch node and append the stroke onto it. The two thresholds
- * below decide what "recent" and "nearby" mean. See
+ * always creating a brand-new sketch node, we look for the nearest
+ * nearby sketch region and append the stroke onto it. Merging is purely
+ * spatial (time plays no role); the threshold below decides what
+ * "nearby" means. See
  * `apps/web/src/components/Nodes/sketch/sketchMerge.ts` for the
  * matching algorithm.
  */
-
-/**
- * Maximum gap (ms) between a candidate sketch node's most-recent stroke
- * and the new stroke's pointer-up. Beyond this the new stroke starts a
- * fresh sketch node instead of merging.
- */
-export const SKETCH_STROKE_MERGE_MAX_GAP_MS = 5000;
 
 /**
  * Maximum gap (in **screen-space px**) between the new stroke's bbox
@@ -66,7 +69,7 @@ export const SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX = 80;
  * The actual radius is user-adjustable via the eraser slider in
  * `SketchSettingsPanel` and lives on `toolStore.sketchDraft.eraserSize`.
  */
-export const SKETCH_ERASER_RADIUS_SCREEN_PX = 16;
+export const SKETCH_ERASER_RADIUS_SCREEN_PX = 12;
 
 /** Minimum eraser brush radius (screen-space px) exposed to the user. */
 export const SKETCH_ERASER_RADIUS_MIN_PX = 4;

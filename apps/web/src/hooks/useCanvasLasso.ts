@@ -2,13 +2,23 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
+import {
+  beginCanvasGesture,
+  endCanvasGesture,
+  updateCanvasGesture,
+  type CanvasPointerType,
+} from '@/handler/canvasGestureSession';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
+import { isLassoStartTarget } from '../components/Panels/Canvas/canvasInputPolicy';
+
+import type { EffectiveInputMode } from '@/store/toolStore';
 import type { Edge, ReactFlowInstance } from '@xyflow/react';
 
 type Point = {
@@ -32,12 +42,20 @@ interface UseCanvasLassoOptions {
   wrapperRef: MutableRefObject<HTMLDivElement | null>;
   rfInstanceRef: MutableRefObject<ReactFlowInstance | null>;
   edges: Edge[];
-  onSelect: (nodeIds: string[]) => void;
+  /**
+   * Called on lasso commit (and with empty args when a fresh drag
+   * clears the previous selection). `flowPolygon` is the committed lasso
+   * polygon in flow-space, so the consumer can compute stroke-level hits
+   * and choose stroke- vs node-selection without the hook knowing about
+   * sketches.
+   */
+  onSelect: (nodeIds: string[], flowPolygon: Point[]) => void;
+  inputMode: EffectiveInputMode;
 }
 
 interface UseCanvasLassoResult {
   pointerHandlers: {
-    onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => void;
+    onPointerDown: (e: ReactPointerEvent<HTMLDivElement>) => boolean;
     onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => void;
     onPointerUp: (e: ReactPointerEvent<HTMLDivElement>) => void;
     onPointerCancel: (e: ReactPointerEvent<HTMLDivElement>) => void;
@@ -53,6 +71,7 @@ interface UseCanvasLassoResult {
    * as the viewport scrolls under it.
    */
   shiftScreenPoints: (dx: number, dy: number) => void;
+  cancel: () => void;
 }
 
 function distance(a: Point, b: Point) {
@@ -198,16 +217,10 @@ function getNodeRect(instance: ReactFlowInstance, nodeId: string): Rect | null {
   };
 }
 
-function getSelectedNodeIdsFromPolygon(
-  polygon: Point[],
-  instance: ReactFlowInstance | null,
+function getSelectedNodeIdsFromFlowPolygon(
+  flowPolygon: Point[],
+  instance: ReactFlowInstance,
 ) {
-  if (!instance) return [];
-
-  const flowPolygon = polygon.map((point) =>
-    instance.screenToFlowPosition(point),
-  );
-
   return instance
     .getNodes()
     .filter((node) => {
@@ -223,17 +236,38 @@ export function useCanvasLasso({
   rfInstanceRef,
   edges,
   onSelect,
+  inputMode,
 }: UseCanvasLassoOptions): UseCanvasLassoResult {
   const [screenPoints, setScreenPoints] = useState<Point[] | null>(null);
+  const pendingRef = useRef<{
+    pointerId: number;
+    start: Point;
+    captureTarget: HTMLDivElement;
+  } | null>(null);
+  // Whether this drag has already cleared the previous selection. Used to
+  // fire `onSelect([], [])` exactly once, from the event handler body —
+  // never inside a `setScreenPoints` updater (that runs during render and
+  // trips React's "setState while rendering another component" warning).
+  const clearedRef = useRef(false);
 
   const cancel = useCallback(() => {
+    const pending = pendingRef.current;
+    if (pending) {
+      endCanvasGesture(pending.pointerId);
+      if (pending.captureTarget.hasPointerCapture(pending.pointerId)) {
+        pending.captureTarget.releasePointerCapture(pending.pointerId);
+      }
+      pendingRef.current = null;
+    }
+    clearedRef.current = false;
     setScreenPoints(null);
   }, []);
 
   useEffect(() => {
-    if (active) return;
-    setScreenPoints(null);
-  }, [active]);
+    if (!active) cancel();
+  }, [active, cancel]);
+
+  useEffect(() => cancel, [cancel]);
 
   useEffect(() => {
     if (!active) return;
@@ -250,63 +284,84 @@ export function useCanvasLasso({
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!active) return;
-      if (event.button !== 0 || !event.isPrimary) return;
+      if (!active) return false;
+      if (event.button !== 0 || !event.isPrimary) return false;
+      // The mouse always draws a lasso. Non-mouse pointers are accepted only
+      // when the input mode routes them to direct manipulation.
+      if (
+        event.pointerType !== 'mouse' &&
+        (inputMode === 'mouse' ||
+          (inputMode === 'pen' && event.pointerType !== 'pen') ||
+          (inputMode === 'finger' && event.pointerType !== 'touch'))
+      ) {
+        return false;
+      }
       const target = event.target as HTMLElement;
 
-      // Touch devices: React Flow's synthetic click selection on nodes is
-      // unreliable while the lasso tool is active (`nodesDraggable={false}`
-      // detaches d3-drag, and the pane/wrapper pointer flow swallows the tap
-      // before a click is synthesised). Mouse already works via React Flow's
-      // own onClick handler, so only intercept touch / pen taps here.
-      if (event.pointerType !== 'mouse') {
-        const nodeEl = target.closest<HTMLElement>('.react-flow__node');
-        if (nodeEl) {
-          const nodeId = nodeEl.getAttribute('data-id');
-          if (nodeId) {
-            event.preventDefault();
-            event.stopPropagation();
-            onSelect([nodeId]);
-          }
-          return;
-        }
-      }
-
-      if (!target.closest('.react-flow__pane')) return;
-      if (target.closest('.react-flow__panel')) return;
-      if (
-        target.closest(
-          '.react-flow__node, .react-flow__edge, .react-flow__handle',
-        )
-      ) {
-        return;
-      }
+      if (!isLassoStartTarget(target)) return false;
 
       event.preventDefault();
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
 
-      onSelect([]);
-      setScreenPoints([{ x: event.clientX, y: event.clientY }]);
+      const start = { x: event.clientX, y: event.clientY };
+      if (
+        !beginCanvasGesture(
+          'lasso',
+          event.pointerId,
+          event.pointerType as CanvasPointerType,
+          start,
+        )
+      ) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        return false;
+      }
+      pendingRef.current = {
+        pointerId: event.pointerId,
+        start,
+        captureTarget: event.currentTarget,
+      };
+      clearedRef.current = false;
+      return true;
     },
-    [active, onSelect],
+    [active, inputMode],
   );
 
   const onPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      setScreenPoints((previous) => {
-        if (!previous) return previous;
-        return appendPoint(previous, { x: event.clientX, y: event.clientY });
-      });
+      const pending = pendingRef.current;
+      if (!pending || pending.pointerId !== event.pointerId) return;
+      const nextPoint = { x: event.clientX, y: event.clientY };
+      const phase = updateCanvasGesture(event.pointerId, nextPoint);
+      if (phase === 'pending') return;
+
+      // Clear the previous selection once, as the lasso actually starts
+      // drawing — done here (event handler) rather than inside the
+      // setScreenPoints updater to avoid a setState-during-render warning.
+      if (!clearedRef.current) {
+        clearedRef.current = true;
+        onSelect([], []);
+      }
+      setScreenPoints((previous) =>
+        previous
+          ? appendPoint(previous, nextPoint)
+          : [pending.start, nextPoint],
+      );
     },
-    [],
+    [onSelect],
   );
 
   const commit = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!screenPoints) return;
+      const pending = pendingRef.current;
+      if (!pending || pending.pointerId !== event.pointerId) return;
 
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      pendingRef.current = null;
+      endCanvasGesture(event.pointerId);
+      if (!screenPoints) return;
 
       const finalScreenPoints = appendPoint(screenPoints, {
         x: event.clientX,
@@ -316,12 +371,16 @@ export function useCanvasLasso({
         finalScreenPoints.length >= MIN_LASSO_POINTS &&
         hasEnoughArea(finalScreenPoints)
       ) {
-        onSelect(
-          getSelectedNodeIdsFromPolygon(
-            finalScreenPoints,
-            rfInstanceRef.current,
-          ),
-        );
+        const instance = rfInstanceRef.current;
+        const flowPolygon = instance
+          ? finalScreenPoints.map((point) =>
+              instance.screenToFlowPosition(point),
+            )
+          : [];
+        const nodeIds = instance
+          ? getSelectedNodeIdsFromFlowPolygon(flowPolygon, instance)
+          : [];
+        onSelect(nodeIds, flowPolygon);
       }
 
       cancel();
@@ -331,11 +390,10 @@ export function useCanvasLasso({
 
   const onPointerCancel = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!screenPoints) return;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      if (pendingRef.current?.pointerId !== event.pointerId) return;
       cancel();
     },
-    [cancel, screenPoints],
+    [cancel],
   );
 
   const shiftScreenPoints = useCallback((dx: number, dy: number) => {
@@ -368,7 +426,12 @@ export function useCanvasLasso({
     if (!screenPoints || screenPoints.length < MIN_LASSO_POINTS) return [];
     if (!hasEnoughArea(screenPoints)) return [];
 
-    return getSelectedNodeIdsFromPolygon(screenPoints, rfInstanceRef.current);
+    const instance = rfInstanceRef.current;
+    if (!instance) return [];
+    const flowPolygon = screenPoints.map((point) =>
+      instance.screenToFlowPosition(point),
+    );
+    return getSelectedNodeIdsFromFlowPolygon(flowPolygon, instance);
   }, [rfInstanceRef, screenPoints]);
 
   const previewEdgeIds = useMemo(
@@ -388,5 +451,6 @@ export function useCanvasLasso({
     previewEdgeIds,
     isActive: screenPoints !== null,
     shiftScreenPoints,
+    cancel,
   };
 }

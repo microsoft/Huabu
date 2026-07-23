@@ -98,6 +98,18 @@ export default function resolvePasteClipboard(
     const clonedData = JSON.parse(JSON.stringify(node.data ?? {}));
     clonedData.label = label;
     clonedData.origin = { type: 'user-pasted' };
+    // Stroke ids identify individual ink entries across selection, move,
+    // erase, hover, and merge paths. A pasted sketch is a new identity
+    // domain, so retaining source ids would create collisions if the copy is
+    // later merged back into the original region.
+    if (nodeType === 'sketch' && Array.isArray(clonedData.strokes)) {
+      clonedData.strokes = clonedData.strokes.map(
+        (stroke: Record<string, unknown>) => ({
+          ...stroke,
+          id: createId('stroke'),
+        }),
+      );
+    }
 
     // Reset question node runtime state so the copy starts fresh -
     // UNLESS it's a forked copy (`__forkConversation`), in which case
@@ -151,6 +163,10 @@ export default function resolvePasteClipboard(
       position,
       ...(size && { size }),
       ...(parentId && { parentId }),
+      // Paste / duplicate selects everything it created so the user can
+      // immediately move it. `selectOnCreate: true` also opts question
+      // nodes in, overriding their default no-auto-select policy.
+      selectOnCreate: true,
     });
     traceNodes.push({ id: nodeId, type: nodeType, label });
   }

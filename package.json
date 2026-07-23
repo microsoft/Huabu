@@ -22,6 +22,7 @@
     "preview:docs": "pnpm --filter @sediment/docs preview",
     "test:docs": "pnpm --filter @sediment/docs test",
     "check:i18n": "node scripts/check-i18n-parity.mjs",
+    "vision:ocr": "node scripts/test-azure-vision.mjs",
     "subtree:pull:agentlet": "git subtree pull --prefix=external/agentlet agentlet-upstream main --squash",
     "subtree:push:agentlet": "git subtree push --prefix=external/agentlet agentlet-upstream main",
     "lint": "eslint .",

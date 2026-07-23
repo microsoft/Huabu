@@ -12,6 +12,7 @@ import type {
   AssistantPart,
   ChatAttachment,
   IntentCandidate,
+  SelectedStrokeSubset,
 } from '@sediment/shared';
 
 /**
@@ -50,6 +51,12 @@ export type ChatMessage =
       attachments?: ChatAttachment[];
       /** IDs of canvas nodes selected when this message was sent. */
       selectedNodeIds?: string[];
+      /**
+       * Per-sketch-node partial stroke selections (lassoed subset) sent
+       * as context. Coexists with `selectedNodeIds` (the node also
+       * appears there). Absent when no partial stroke selection.
+       */
+      selectedStrokeIds?: SelectedStrokeSubset[];
       /**
        * Skill ids the user explicitly invoked via leading `/<id>`
        * tokens in the chat input. The tokens themselves are stripped

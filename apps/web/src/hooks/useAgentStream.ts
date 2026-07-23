@@ -14,6 +14,7 @@ import {
 import { agentApi } from '@/api/agent';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import type { AssistantSegment } from '../store/chatTypes';
 import type {
@@ -703,11 +704,28 @@ export function useAgentStream(): UseAgentStreamReturn {
       // Selected node ids are still recorded on the persisted user
       // message so the UI can re-render the selection chip after a
       // reload, even though we no longer derive any attachments from
-      // them client-side.
-      const selectedNodeIds = useCanvasStore
+      // them client-side. Include sketch nodes carrying a Stage-2
+      // partial stroke selection (which live outside ReactFlow node
+      // selection, in gesturePreviewStore) so the chip matches what was
+      // actually sent as context.
+      const nodeSelectedIds = useCanvasStore
         .getState()
         .nodes.filter((n) => n.selected && n.id !== anchorQuestionNodeId)
         .map((n) => n.id);
+      const selectedStrokeIds = Object.entries(
+        useGesturePreviewStore.getState().sketchStrokeSelection,
+      )
+        .filter(
+          ([nodeId, strokeIds]) =>
+            strokeIds.length > 0 && nodeId !== anchorQuestionNodeId,
+        )
+        .map(([nodeId, strokeIds]) => ({ nodeId, strokeIds }));
+      const selectedNodeIds = Array.from(
+        new Set([
+          ...nodeSelectedIds,
+          ...selectedStrokeIds.map((s) => s.nodeId),
+        ]),
+      );
 
       const mergedAttachments = [...allPending];
       const attachments =
@@ -732,6 +750,7 @@ export function useAgentStream(): UseAgentStreamReturn {
           content: prompt,
           attachments,
           ...(selectedNodeIds.length > 0 ? { selectedNodeIds } : {}),
+          ...(selectedStrokeIds.length > 0 ? { selectedStrokeIds } : {}),
           ...(invokedSkills && invokedSkills.length > 0
             ? { invokedSkills }
             : {}),

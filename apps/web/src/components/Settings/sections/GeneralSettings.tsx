@@ -13,8 +13,10 @@ import { Toggle } from '@/components/Common/Toggle';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { canCheckForUpdates, useAppUpdate } from '@/hooks/useAppUpdate';
 import { getElectronBridge } from '@/hooks/useElectron';
+import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import { supportedLngs, type SupportedLanguage } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
+import { useToolStore, type InputModePreference } from '@/store/toolStore';
 
 /** Native language names, shown regardless of the active UI language. */
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
@@ -42,6 +44,13 @@ export const GeneralSettings: React.FC = () => {
   const { t, i18n } = useTranslation();
   const minimapEnabled = useCanvasStore((s) => s.minimapEnabled);
   const toggleMinimap = useCanvasStore((s) => s.toggleMinimap);
+  const inputModePreference = useToolStore(
+    (state) => state.inputModePreference,
+  );
+  const setInputModePreference = useToolStore(
+    (state) => state.setInputModePreference,
+  );
+  const effectiveInputMode = useEffectiveInputMode();
   const [idleTimeoutSecs, setIdleTimeoutSecs] = useState(600);
   const [idleTimeoutSelection, setIdleTimeoutSelection] = useState('600');
   const [customMinutes, setCustomMinutes] = useState('10');
@@ -187,6 +196,28 @@ export const GeneralSettings: React.FC = () => {
           </Button>
         </SettingRow>
       )}
+      <SettingRow
+        title={t('settings.inputMode')}
+        description={t('settings.inputModeDescription')}
+      >
+        <Select<InputModePreference>
+          options={[
+            {
+              value: 'auto',
+              label: t('settings.automaticResolved', {
+                mode: t(`settings.inputMode_${effectiveInputMode}`),
+              }),
+            },
+            { value: 'mouse', label: t('settings.inputMode_mouse') },
+            { value: 'pen', label: t('settings.inputMode_pen') },
+            { value: 'finger', label: t('settings.inputMode_finger') },
+          ]}
+          value={inputModePreference}
+          onChange={setInputModePreference}
+          title={t('settings.inputMode')}
+          ariaLabel={t('settings.inputMode')}
+        />
+      </SettingRow>
       <SettingRow
         title={t('settings.externalAgentIdleTimeout')}
         description={t('settings.externalAgentIdleTimeoutDescription')}

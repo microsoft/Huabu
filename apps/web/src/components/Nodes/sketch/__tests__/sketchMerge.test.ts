@@ -10,14 +10,12 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-import {
-  SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX,
-  SKETCH_STROKE_MERGE_MAX_GAP_MS,
-} from '@/config/canvas';
+import { SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX } from '@/config/canvas';
 
 import {
   buildEraseCommands,
   buildMergeCommands,
+  buildMoveStrokesCommands,
   findMergeTarget,
 } from '../sketchMerge';
 
@@ -100,13 +98,12 @@ describe('findMergeTarget', () => {
     const got = findMergeTarget(
       { x: 0, y: 0, width: 50, height: 50 },
       null,
-      NOW,
       FLOW_THRESHOLD,
     );
     expect(got).toBeNull();
   });
 
-  it('returns null when the only candidate is older than the time window', () => {
+  it('merges into a spatially-near region no matter how long ago it was drawn', () => {
     setNodes([
       makeSketch({
         id: 'a',
@@ -116,7 +113,9 @@ describe('findMergeTarget', () => {
           {
             id: 's1',
             points: [[0, 0]],
-            createdAt: NOW - SKETCH_STROKE_MERGE_MAX_GAP_MS - 1,
+            // Drawn ten minutes ago — the old time window would have
+            // rejected this; purely spatial merging still folds in.
+            createdAt: NOW - 10 * 60 * 1000,
           },
         ],
       }),
@@ -124,10 +123,9 @@ describe('findMergeTarget', () => {
     const got = findMergeTarget(
       { x: 50, y: 50, width: 10, height: 10 }, // overlapping bbox
       null,
-      NOW,
       FLOW_THRESHOLD,
     );
-    expect(got).toBeNull();
+    expect(got).toBe('a');
   });
 
   it('returns null when the only candidate is farther than maxDistance', () => {
@@ -143,7 +141,6 @@ describe('findMergeTarget', () => {
       // bbox starts well past `0 + 50 + FLOW_THRESHOLD` on the X axis
       { x: 50 + FLOW_THRESHOLD + 5, y: 0, width: 10, height: 10 },
       null,
-      NOW,
       FLOW_THRESHOLD,
     );
     expect(got).toBeNull();
@@ -161,7 +158,6 @@ describe('findMergeTarget', () => {
     const got = findMergeTarget(
       { x: 50, y: 50, width: 10, height: 10 },
       null,
-      NOW,
       FLOW_THRESHOLD,
     );
     expect(got).toBe('a');
@@ -191,7 +187,6 @@ describe('findMergeTarget', () => {
       findMergeTarget(
         { x: 10, y: 10, width: 5, height: 5 },
         null,
-        NOW,
         FLOW_THRESHOLD,
       ),
     ).toBe('top-level');
@@ -200,38 +195,36 @@ describe('findMergeTarget', () => {
       findMergeTarget(
         { x: 10, y: 10, width: 5, height: 5 },
         'frame-1' as never,
-        NOW,
         FLOW_THRESHOLD,
       ),
     ).toBe('in-frame');
   });
 
-  it('tiebreaks by most-recent touch when both are within range', () => {
+  it('picks the spatially nearest region, not the most recent', () => {
     setNodes([
       makeSketch({
-        id: 'older',
-        position: { x: 0, y: 0 },
+        id: 'recent-far',
+        position: { x: 200, y: 0 },
         size: { width: 50, height: 50 },
-        strokes: [{ id: 's1', points: [[0, 0]], createdAt: NOW - 500 }],
+        strokes: [{ id: 's1', points: [[0, 0]], createdAt: NOW }], // most recent
       }),
       makeSketch({
-        id: 'newer',
-        position: { x: 200, y: 0 }, // farther but more recent
+        id: 'old-near',
+        position: { x: 0, y: 0 },
         size: { width: 50, height: 50 },
-        strokes: [{ id: 's2', points: [[0, 0]], createdAt: NOW - 50 }],
+        strokes: [{ id: 's2', points: [[0, 0]], createdAt: NOW - 5000 }], // older
       }),
     ]);
-    // Threshold large enough for both to qualify.
     const got = findMergeTarget(
-      { x: 60, y: 0, width: 130, height: 50 }, // overlaps `newer`, near `older`
+      // dist to old-near = 5, to recent-far = 135 → nearest wins despite age
+      { x: 55, y: 0, width: 10, height: 10 },
       null,
-      NOW,
       300,
     );
-    expect(got).toBe('newer');
+    expect(got).toBe('old-near');
   });
 
-  it('on equal touch timestamps, picks the closer candidate', () => {
+  it('picks the closer of two candidates', () => {
     setNodes([
       makeSketch({
         id: 'far',
@@ -249,7 +242,6 @@ describe('findMergeTarget', () => {
     const got = findMergeTarget(
       { x: 0, y: 0, width: 60, height: 50 }, // distance: near=40, far=140
       null,
-      NOW,
       300,
     );
     expect(got).toBe('near');
@@ -272,7 +264,6 @@ describe('findMergeTarget', () => {
     const got = findMergeTarget(
       { x: 120, y: 0, width: 10, height: 10 },
       null,
-      NOW,
       FLOW_THRESHOLD,
     );
     expect(got).toBe('a');
@@ -424,6 +415,68 @@ describe('buildMergeCommands', () => {
     // The flow position of the original point should be preserved.
     expect(patch.strokes[0].points[0]).toEqual([100, 50]);
     // New stroke shifted by (210, 0) → (210, 0).
+    expect(patch.strokes[1].points[0]).toEqual([210, 0]);
+  });
+
+  it('uses persisted style size when the node is unmounted (no measured / node.width)', () => {
+    // Regression: a scaled sketch loaded from disk but not yet mounted has
+    // only `style` geometry (persisted by the canvas engine, possibly as a
+    // CSS string) — no `measured`, no top-level `node.width`. The hit-test
+    // already resolves the rendered size via getSketchRenderedSize
+    // (measured → node.width → style → initialSize); the merge builder must
+    // read the SAME size, otherwise it would fall back to initialSize
+    // (scale = 1) and bake / persist the strokes at the wrong scale.
+    //
+    // initialSize 100×100, style 200×100 → scaleX = 2, scaleY = 1. If the
+    // builder ignored style it would emit scale = 1 and place the existing
+    // point at (50, 50) with a 100-wide bbox.
+    setNodes([
+      {
+        id: 'a',
+        type: 'sketch',
+        position: { x: 0, y: 0 },
+        // No `measured`, no `width` / `height` — only persisted `style`,
+        // written as a CSS-length string to also exercise parseDimension.
+        style: { width: '200px', height: '100px' },
+        data: {
+          type: 'sketch',
+          strokes: [
+            {
+              id: 's1',
+              points: [[50, 50]],
+              color: '#000',
+              size: 4,
+              createdAt: NOW,
+            },
+          ],
+          initialSize: { width: 100, height: 100 },
+        },
+      } as unknown as Node,
+    ]);
+    const cmds = buildMergeCommands(
+      'a' as never,
+      null,
+      [[0, 0]],
+      { x: 210, y: 0, width: 30, height: 30 },
+      '#000',
+      4,
+      NOW,
+      'n',
+    );
+    const merge = cmds[0] as Extract<
+      (typeof cmds)[number],
+      { type: 'MERGE_NODE_DATA' }
+    >;
+    const patch = merge.patches[0].patch as {
+      strokes: Array<{ id: string; points: number[][] }>;
+      initialSize: { width: number; height: number };
+    };
+    // Union bbox: x ∈ [0, 240], y ∈ [0, 100] — proves style width (200)
+    // drove the resized bbox, not initialSize (100).
+    expect(patch.initialSize).toEqual({ width: 240, height: 100 });
+    // Existing stroke baked with style-derived scale: (50 * 2, 50 * 1).
+    expect(patch.strokes[0].points[0]).toEqual([100, 50]);
+    // New stroke shifted by (210, 0).
     expect(patch.strokes[1].points[0]).toEqual([210, 0]);
   });
 
@@ -593,5 +646,115 @@ describe('buildEraseCommands', () => {
     ]);
     const cmds = buildEraseCommands('a' as never, new Set(['s1']));
     expect(cmds).toEqual([{ type: 'DELETE_NODES', nodeIds: ['a'] }]);
+  });
+});
+
+// =====================================================================
+// buildMoveStrokesCommands
+// =====================================================================
+
+describe('buildMoveStrokesCommands', () => {
+  const NOW = 4_000_000;
+
+  it('returns [] when no strokes are moved', () => {
+    expect(buildMoveStrokesCommands('a' as never, new Set(), 5, 5)).toEqual([]);
+  });
+
+  it('returns [] when the delta is zero', () => {
+    expect(
+      buildMoveStrokesCommands('a' as never, new Set(['s1']), 0, 0),
+    ).toEqual([]);
+  });
+
+  it('returns [] when the target node does not exist', () => {
+    setNodes([]);
+    expect(
+      buildMoveStrokesCommands('missing' as never, new Set(['s1']), 5, 5),
+    ).toEqual([]);
+  });
+
+  it('translates the moved stroke and reframes the union bbox', () => {
+    // Node at flow origin (10, 20), size 100×100 (scale = 1).
+    //   's1' (moved) size 0 at local (0, 0)   → flow (10, 20).
+    //   's2' (kept)  size 0 at local (40, 40) → flow (50, 60).
+    // Move s1 by (+30, +10): s1 flow → (40, 30). s2 stays (50, 60).
+    // Union bbox: (40, 30)–(50, 60) → 10×30, origin (40, 30).
+    setNodes([
+      makeSketch({
+        id: 'a',
+        position: { x: 10, y: 20 },
+        size: { width: 100, height: 100 },
+        strokes: [
+          { id: 's1', points: [[0, 0]], size: 0, createdAt: NOW },
+          { id: 's2', points: [[40, 40]], size: 0, createdAt: NOW },
+        ],
+      }),
+    ]);
+    const cmds = buildMoveStrokesCommands(
+      'a' as never,
+      new Set(['s1']),
+      30,
+      10,
+    );
+    expect(cmds).toHaveLength(2);
+
+    const geom = cmds[1] as Extract<
+      (typeof cmds)[number],
+      { type: 'SET_NODE_GEOMETRY' }
+    >;
+    expect(geom.items).toEqual([
+      {
+        nodeId: 'a',
+        position: { x: 40, y: 30 },
+        size: { width: 10, height: 30 },
+      },
+    ]);
+
+    const patch = (
+      cmds[0] as Extract<(typeof cmds)[number], { type: 'MERGE_NODE_DATA' }>
+    ).patches[0].patch as {
+      strokes: Array<{ id: string; points: number[][] }>;
+      initialSize: { width: number; height: number };
+    };
+    expect(patch.initialSize).toEqual({ width: 10, height: 30 });
+    // Re-rooted at new origin (40, 30):
+    //   s1 flow (40, 30) → local (0, 0).
+    //   s2 flow (50, 60) → local (10, 30).
+    const s1 = patch.strokes.find((s) => s.id === 's1');
+    const s2 = patch.strokes.find((s) => s.id === 's2');
+    expect(s1?.points).toEqual([[0, 0]]);
+    expect(s2?.points).toEqual([[10, 30]]);
+  });
+
+  it('bakes the current scale into moved and kept strokes (resized node)', () => {
+    // Initial 100×100, currently 200×100 → scaleX = 2, scaleY = 1.
+    //   's1' (moved) local (10, 10) → flow (10 + 20, 20 + 10) = (30, 30).
+    //   's2' (kept)  local (50, 50) → flow (10 + 100, 20 + 50) = (110, 70).
+    // Move s1 by (+10, +10): s1 flow → (40, 40). s2 stays (110, 70).
+    // Union bbox: (40, 40)–(110, 70) → 70×30, origin (40, 40).
+    setNodes([
+      makeSketch({
+        id: 'a',
+        position: { x: 10, y: 20 },
+        size: { width: 200, height: 100 },
+        initialSize: { width: 100, height: 100 },
+        strokes: [
+          { id: 's1', points: [[10, 10]], size: 0, createdAt: NOW },
+          { id: 's2', points: [[50, 50]], size: 0, createdAt: NOW },
+        ],
+      }),
+    ]);
+    const cmds = buildMoveStrokesCommands(
+      'a' as never,
+      new Set(['s1']),
+      10,
+      10,
+    );
+    const geom = cmds[1] as Extract<
+      (typeof cmds)[number],
+      { type: 'SET_NODE_GEOMETRY' }
+    >;
+    expect(geom.items[0].position).toEqual({ x: 40, y: 40 });
+    expect(geom.items[0].size).toEqual({ width: 70, height: 30 });
   });
 });

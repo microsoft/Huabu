@@ -205,6 +205,12 @@
     "showMiniMap": "显示小地图",
     "hideMiniMap": "隐藏小地图",
     "miniMapDescription": "在 Space 右下角显示概览。",
+    "inputMode": "输入模式",
+    "inputModeDescription": "选择操作画布的指针。鼠标模式会忽略触摸屏和手写笔输入。",
+    "inputMode_mouse": "鼠标",
+    "inputMode_pen": "手写笔",
+    "inputMode_finger": "手指",
+    "automaticResolved": "自动（{{mode}}）",
     "externalAgentIdleTimeout": "外部 Agent 空闲超时",
     "externalAgentIdleTimeoutDescription": "外部 Agent 进程持续空闲达到该时长后自动挂起。修改仅对之后新启动或恢复的进程生效。",
     "externalAgentIdleTimeoutSaved": "已更新外部 Agent 空闲超时",
@@ -590,7 +596,9 @@
     "sourceLabel_one": "个来源",
     "sourceLabel_other": "个来源",
     "selectedSourcesLabel_one": "已选择 {{count}} 个来源：{{sources}}",
-    "selectedSourcesLabel_other": "已选择 {{count}} 个来源：{{sources}}"
+    "selectedSourcesLabel_other": "已选择 {{count}} 个来源：{{sources}}",
+    "partialStrokeCount_one": "{{count}} 笔",
+    "partialStrokeCount_other": "{{count}} 笔"
   },
   "messages": {
     "generationInterrupted": "生成已中断",

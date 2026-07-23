@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { configDefaults } from 'vitest/config';
 
 import baseConfig from './vite.config';
 
@@ -20,6 +21,10 @@ export default defineConfig(async (env) => {
     test: {
       environment: 'happy-dom',
       setupFiles: ['./vitest.setup.ts'],
+      // Playwright end-to-end specs under `e2e/` run via `playwright test`,
+      // not Vitest; exclude them so Vitest does not try to load
+      // `@playwright/test`.
+      exclude: [...configDefaults.exclude, 'e2e/**'],
     },
   };
 });

@@ -18,7 +18,7 @@ import { useToolStore } from '../../store/toolStore';
 
 type NewCanvasPlacementIntent = {
   canvasId: string;
-  nodeType: 'note';
+  nodeType: 'note' | 'sketch';
 };
 
 function readNewCanvasPlacementIntent(
@@ -33,14 +33,15 @@ function readNewCanvasPlacementIntent(
   if (typeof placement !== 'object' || placement === null) return null;
 
   const candidate = placement as Record<string, unknown>;
+  const nodeType = candidate['nodeType'];
   if (
     candidate['canvasId'] !== routeCanvasId ||
-    candidate['nodeType'] !== 'note'
+    (nodeType !== 'note' && nodeType !== 'sketch')
   ) {
     return null;
   }
 
-  return { canvasId: routeCanvasId, nodeType: 'note' };
+  return { canvasId: routeCanvasId, nodeType };
 }
 
 /**
@@ -123,7 +124,8 @@ export default function CanvasPage() {
     }
   }, [canvasId, storeCanvasId, loadCanvas, switchCanvas, navigate]);
 
-  // Only a newly created canvas may opt into the Note-first empty state.
+  // Only a newly created canvas may opt into its input-appropriate creation
+  // tool (Note for mouse, Sketch for pen/finger).
   // Waiting for the matching canvas to finish loading avoids treating the
   // store's transient empty array as real content, while consuming the ref
   // prevents deletion-to-empty or later rerenders from re-arming the tool.

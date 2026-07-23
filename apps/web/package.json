@@ -11,7 +11,9 @@
     "format": "prettier --write .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e:install": "playwright install chromium",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.4",
@@ -56,6 +58,7 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4.1.18",
     "@types/diff": "^8.0.0",
     "@types/node": "^22.15.0",

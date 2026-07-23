@@ -2,14 +2,18 @@
  * Stroke-merge helpers for the sketch tool.
  *
  * When the user finishes a stroke, we don't always create a brand-new
- * sketch node. If there's a *recent* sketch node nearby that the user
- * was just doodling on, we instead append the new stroke onto that node
- * (Microsoft Whiteboard / Procreate behaviour). This avoids littering
- * the canvas with one node per pen lift.
+ * sketch node. If there's a sketch node (a "region") nearby, we instead
+ * append the new stroke onto that node (Microsoft Whiteboard / Procreate
+ * behaviour). This avoids littering the canvas with one node per pen lift
+ * and keeps a continuous piece of handwriting in a single region.
  *
- * Decision rules (tuned per plan v2.1):
- *  - Time window: the candidate's most-recent stroke must have been
- *    drawn in the last `SKETCH_STROKE_MERGE_MAX_GAP_MS` ms.
+ * Decision rules:
+ *  - Purely spatial: the target is the *nearest* existing sketch region
+ *    within `maxDistance` of the new stroke's bbox. Time is NOT a factor
+ *    — coming back to write next to an old region still merges into it,
+ *    so a mid-writing think-pause can never split a line across nodes.
+ *    Per-stroke `createdAt` is preserved as intra-region metadata, but it
+ *    no longer influences the region boundary.
  *  - Proximity: the new stroke's bbox must be within `maxDistance`
  *    units of the candidate's current bbox (axis-aligned, zero on
  *    overlap). The caller chooses the unit — typically by converting
@@ -23,14 +27,21 @@
  *  - Cross-color is allowed: merging a black scribble onto a red one
  *    just produces a node with mixed-color strokes, since each stroke
  *    keeps its own `color` / `size`.
- *  - Tiebreak: most recently touched candidate wins; on ties, the
- *    closest bbox wins.
+ *  - Tiebreak: nearest bbox edge distance wins; on ties, the nearest
+ *    bbox centre wins (still purely spatial, deterministic).
  *
- * If no candidate qualifies, the caller falls back to creating a new
- * sketch node.
+ * Only ever targets a single existing region for the new stroke; it
+ * never merges two existing regions (that "bridging" merge is a separate,
+ * later concern). If no candidate qualifies, the caller falls back to
+ * creating a new sketch node.
  */
 
-import { SKETCH_STROKE_MERGE_MAX_GAP_MS } from '@/config/canvas';
+import {
+  getAbsolutePosition,
+  getSketchRenderedSize,
+} from '@sediment/shared/canvas-engine';
+
+import { canvasHistoryManager } from '@/store/canvasHistoryManager';
 import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasSketchNodeData } from '../types';
@@ -39,6 +50,8 @@ import type {
   CanvasNodeId,
   SketchStroke,
 } from '@sediment/shared';
+import type { NestableNode } from '@sediment/shared/canvas-engine';
+import type { Node } from '@xyflow/react';
 
 /** Axis-aligned bounding box in flow-space coordinates. */
 export interface FlowBBox {
@@ -66,21 +79,10 @@ function bboxDistance(a: FlowBBox, b: FlowBBox): number {
 }
 
 /**
- * Return the most-recently-touched stroke timestamp on a sketch node.
- * Returns `0` if the node has no strokes (defensive \u2014 schema requires
- * at least one).
- */
-function latestStrokeAt(strokes: readonly SketchStroke[]): number {
-  let max = 0;
-  for (const s of strokes) {
-    if (s.createdAt > max) max = s.createdAt;
-  }
-  return max;
-}
 
-/**
  * Find an eligible sketch node to merge a brand-new stroke into, or
- * `null` if no candidate qualifies.
+ * `null` if no candidate qualifies. Purely spatial — the nearest existing
+ * sketch region within `maxDistance` wins; time plays no role.
  *
  * @param newBboxFlow  Bbox of the just-finished stroke, in the same
  *                     coordinate space as the candidates' `node.position`
@@ -88,8 +90,6 @@ function latestStrokeAt(strokes: readonly SketchStroke[]): number {
  *                     parent-local for strokes inside a frame).
  * @param newParentId  Parent frame ID of the new stroke (or `null` for
  *                     top-level). Cross-frame matches are rejected.
- * @param now          Wall-clock timestamp of the pointer-up event,
- *                     in ms (typically `Date.now()`).
  * @param maxDistance  Maximum allowed bbox-to-bbox distance, in the
  *                     same units as `newBboxFlow`. Callers converting
  *                     a screen-space threshold should pass
@@ -98,12 +98,15 @@ function latestStrokeAt(strokes: readonly SketchStroke[]): number {
 export function findMergeTarget(
   newBboxFlow: FlowBBox,
   newParentId: CanvasNodeId | null,
-  now: number,
   maxDistance: number,
 ): CanvasNodeId | null {
   const nodes = useCanvasStore.getState().nodes;
 
-  let best: { id: CanvasNodeId; touchedAt: number; dist: number } | null = null;
+  const newCx = newBboxFlow.x + newBboxFlow.width / 2;
+  const newCy = newBboxFlow.y + newBboxFlow.height / 2;
+
+  let best: { id: CanvasNodeId; dist: number; centerDist: number } | null =
+    null;
 
   for (const node of nodes) {
     if (node.type !== 'sketch') continue;
@@ -113,13 +116,7 @@ export function findMergeTarget(
     const strokes = data.strokes ?? [];
     if (strokes.length === 0) continue;
 
-    const touchedAt = latestStrokeAt(strokes);
-    if (now - touchedAt > SKETCH_STROKE_MERGE_MAX_GAP_MS) continue;
-
-    const w =
-      node.measured?.width ?? node.width ?? data.initialSize?.width ?? 0;
-    const h =
-      node.measured?.height ?? node.height ?? data.initialSize?.height ?? 0;
+    const { width: w, height: h } = getSketchRenderedSize(node);
     const candBbox: FlowBBox = {
       x: node.position.x,
       y: node.position.y,
@@ -130,12 +127,19 @@ export function findMergeTarget(
     const dist = bboxDistance(newBboxFlow, candBbox);
     if (dist > maxDistance) continue;
 
+    // Deterministic, purely spatial tiebreak: on equal edge distance
+    // (e.g. two overlapping regions, both dist 0) prefer the one whose
+    // centre is nearest.
+    const candCx = candBbox.x + candBbox.width / 2;
+    const candCy = candBbox.y + candBbox.height / 2;
+    const centerDist = Math.hypot(newCx - candCx, newCy - candCy);
+
     if (
       !best ||
-      touchedAt > best.touchedAt ||
-      (touchedAt === best.touchedAt && dist < best.dist)
+      dist < best.dist ||
+      (dist === best.dist && centerDist < best.centerDist)
     ) {
-      best = { id: node.id as CanvasNodeId, touchedAt, dist };
+      best = { id: node.id as CanvasNodeId, dist, centerDist };
     }
   }
 
@@ -211,8 +215,13 @@ export function buildMergeCommands(
   const data = node.data as CanvasSketchNodeData;
   const baseW = data.initialSize?.width || 1;
   const baseH = data.initialSize?.height || 1;
-  const curW = node.measured?.width ?? node.width ?? baseW;
-  const curH = node.measured?.height ?? node.height ?? baseH;
+  // Single source of truth for the rendered size (measured -> node.width ->
+  // style -> initialSize), so this stays in sync with the hit-test that
+  // selected this node as the merge target. Falls back to the baked base
+  // size only for a degenerate node with no size info at all.
+  const rendered = getSketchRenderedSize(node);
+  const curW = rendered.width || baseW;
+  const curH = rendered.height || baseH;
   const scaleX = curW / baseW;
   const scaleY = curH / baseH;
 
@@ -327,12 +336,30 @@ export function buildEraseCommands(
   targetNodeId: CanvasNodeId,
   removedStrokeIds: Set<string>,
 ): CanvasCommand[] {
-  if (removedStrokeIds.size === 0) return [];
-
   const node = useCanvasStore
     .getState()
     .nodes.find((n) => n.id === targetNodeId);
-  if (!node || node.type !== 'sketch') return [];
+  if (!node) return [];
+  return computeEraseCommands(node as Node, removedStrokeIds);
+}
+
+/**
+ * Pure core of {@link buildEraseCommands}: identical logic, but operating
+ * on a caller-supplied sketch node snapshot instead of reading the store —
+ * so it can run inside a pure UI-intent resolver. Shared with the
+ * stroke-transfer builder, whose "source side" (removing the moved strokes
+ * from each origin region) is exactly an erase.
+ *
+ * @param node              Sketch node snapshot to erase from.
+ * @param removedStrokeIds  Set of stroke ids to remove.
+ */
+export function computeEraseCommands(
+  node: Node,
+  removedStrokeIds: Set<string>,
+): CanvasCommand[] {
+  if (removedStrokeIds.size === 0) return [];
+  if (node.type !== 'sketch') return [];
+  const targetNodeId = node.id as CanvasNodeId;
 
   const data = node.data as CanvasSketchNodeData;
   const remaining = data.strokes.filter((s) => !removedStrokeIds.has(s.id));
@@ -348,8 +375,11 @@ export function buildEraseCommands(
 
   const baseW = data.initialSize?.width || 1;
   const baseH = data.initialSize?.height || 1;
-  const curW = node.measured?.width ?? node.width ?? baseW;
-  const curH = node.measured?.height ?? node.height ?? baseH;
+  // Same rendered-size source as the hit-test (measured -> node.width ->
+  // style -> initialSize) so erase geometry matches what was tested.
+  const rendered = getSketchRenderedSize(node);
+  const curW = rendered.width || baseW;
+  const curH = rendered.height || baseH;
   const scaleX = curW / baseW;
   const scaleY = curH / baseH;
   const O = { x: node.position.x, y: node.position.y };
@@ -417,4 +447,434 @@ export function buildEraseCommands(
       ],
     },
   ];
+}
+
+/**
+ * Build the commands to translate a SUBSET of a sketch node's strokes by
+ * `(dxFlow, dyFlow)` flow-space units (Stage 2 in-node move), reframing the
+ * node tightly around the result. Mirrors {@link buildEraseCommands} but
+ * moves strokes instead of removing them: every stroke is baked into flow
+ * space (scale applied), the moved ones get the offset, then all points are
+ * reframed into a fresh local space (scale reset to 1).
+ *
+ * Returns `[]` when nothing would change. Uses `snapshot:'caller'`; caller
+ * must `beginGesture('SET_NODE_GEOMETRY')` before `executeCommands`.
+ */
+export function buildMoveStrokesCommands(
+  targetNodeId: CanvasNodeId,
+  movedStrokeIds: Set<string>,
+  dxFlow: number,
+  dyFlow: number,
+): CanvasCommand[] {
+  if (movedStrokeIds.size === 0) return [];
+  if (dxFlow === 0 && dyFlow === 0) return [];
+
+  const node = useCanvasStore
+    .getState()
+    .nodes.find((n) => n.id === targetNodeId);
+  if (!node || node.type !== 'sketch') return [];
+
+  const data = node.data as CanvasSketchNodeData;
+  if (data.strokes.length === 0) return [];
+
+  const baseW = data.initialSize?.width || 1;
+  const baseH = data.initialSize?.height || 1;
+  // Same rendered-size source as the hit-test (measured -> node.width ->
+  // style -> initialSize) so move geometry matches what was tested.
+  const rendered = getSketchRenderedSize(node);
+  const curW = rendered.width || baseW;
+  const curH = rendered.height || baseH;
+  const scaleX = curW / baseW;
+  const scaleY = curH / baseH;
+  const O = { x: node.position.x, y: node.position.y };
+
+  // Bake every stroke into flow space; moved strokes get the offset.
+  const flowStrokes = data.strokes.map((s) => {
+    const moved = movedStrokeIds.has(s.id);
+    const ox = moved ? dxFlow : 0;
+    const oy = moved ? dyFlow : 0;
+    return {
+      s,
+      pts: s.points.map((p) => {
+        const fx = O.x + p[0] * scaleX + ox;
+        const fy = O.y + p[1] * scaleY + oy;
+        return p.length > 2 ? [fx, fy, ...p.slice(2)] : [fx, fy];
+      }),
+    };
+  });
+
+  // Tight union bbox (flow), padded per stroke by its own size/2.
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  for (const { s, pts } of flowStrokes) {
+    const pad = (s.size ?? 0) / 2;
+    for (const p of pts) {
+      if (p[0] - pad < x1) x1 = p[0] - pad;
+      if (p[1] - pad < y1) y1 = p[1] - pad;
+      if (p[0] + pad > x2) x2 = p[0] + pad;
+      if (p[1] + pad > y2) y2 = p[1] + pad;
+    }
+  }
+  if (!Number.isFinite(x1)) return [];
+
+  const unionW = x2 - x1;
+  const unionH = y2 - y1;
+
+  // Reframe every point into the new local space (top-left = x1,y1);
+  // resetting initialSize to the union makes the local scale 1 again.
+  const bakedMoved: SketchStroke[] = flowStrokes.map(({ s, pts }) => ({
+    ...s,
+    points: pts.map((p) =>
+      p.length > 2
+        ? [p[0] - x1, p[1] - y1, ...p.slice(2)]
+        : [p[0] - x1, p[1] - y1],
+    ),
+  }));
+
+  return [
+    {
+      type: 'MERGE_NODE_DATA',
+      patches: [
+        {
+          nodeId: targetNodeId,
+          patch: {
+            strokes: bakedMoved,
+            initialSize: { width: unionW, height: unionH },
+          },
+        },
+      ],
+    },
+    {
+      type: 'SET_NODE_GEOMETRY',
+      items: [
+        {
+          nodeId: targetNodeId,
+          position: { x: x1, y: y1 },
+          size: { width: unionW, height: unionH },
+        },
+      ],
+    },
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Stroke transfer: split into a new region / merge into another region
+// ---------------------------------------------------------------------------
+//
+// Unlike the erase / in-node-move builders above (which stay entirely inside
+// a single node and can treat `node.position` as a flat origin), a transfer
+// re-homes strokes into a DIFFERENT node — possibly under a different parent
+// frame. So the geometry here goes through ABSOLUTE flow coordinates
+// (`getAbsolutePosition`): bake each source's moved strokes into absolute
+// flow, then reframe them into the destination's local space. When source
+// and destination share a parent the offsets cancel and this reduces to the
+// same math the in-node builders use.
+
+/** Current render scale of a sketch node (measured size ÷ baked initialSize). */
+function sketchNodeScale(node: Node): { scaleX: number; scaleY: number } {
+  const data = node.data as CanvasSketchNodeData;
+  const baseW = data.initialSize?.width || 1;
+  const baseH = data.initialSize?.height || 1;
+  // Same rendered-size source as the hit-test (measured -> node.width ->
+  // style -> initialSize) so cross-region transfer geometry matches.
+  const rendered = getSketchRenderedSize(node);
+  const curW = rendered.width || baseW;
+  const curH = rendered.height || baseH;
+  return { scaleX: curW / baseW, scaleY: curH / baseH };
+}
+
+/**
+ * Bake the given strokes into ABSOLUTE flow coordinates: apply the node's
+ * current resize scale and translate by the node's absolute top-left
+ * (`absOrigin` from `getAbsolutePosition`, so this is correct even when the
+ * node lives inside a frame), plus an optional extra translation (the drop
+ * delta). Extra point components (pressure at index 2, …) are preserved.
+ */
+function bakeStrokesToAbsFlow(
+  strokes: SketchStroke[],
+  absOrigin: { x: number; y: number },
+  scaleX: number,
+  scaleY: number,
+  extraDx = 0,
+  extraDy = 0,
+): SketchStroke[] {
+  return strokes.map((s) => ({
+    ...s,
+    points: s.points.map((p) => {
+      const fx = absOrigin.x + p[0] * scaleX + extraDx;
+      const fy = absOrigin.y + p[1] * scaleY + extraDy;
+      return p.length > 2 ? [fx, fy, ...p.slice(2)] : [fx, fy];
+    }),
+  }));
+}
+
+/**
+ * Tight bounding box (flow coords) of already-baked flow strokes, padded per
+ * stroke by its own `size / 2` so the perfect-freehand halo stays enclosed.
+ * Returns `null` when there are no finite points.
+ */
+function flowStrokesBounds(
+  strokes: SketchStroke[],
+): { x1: number; y1: number; x2: number; y2: number } | null {
+  let x1 = Infinity;
+  let y1 = Infinity;
+  let x2 = -Infinity;
+  let y2 = -Infinity;
+  for (const s of strokes) {
+    const pad = (s.size ?? 0) / 2;
+    for (const p of s.points) {
+      if (p[0] - pad < x1) x1 = p[0] - pad;
+      if (p[1] - pad < y1) y1 = p[1] - pad;
+      if (p[0] + pad > x2) x2 = p[0] + pad;
+      if (p[1] + pad > y2) y2 = p[1] + pad;
+    }
+  }
+  return Number.isFinite(x1) ? { x1, y1, x2, y2 } : null;
+}
+
+/** Reframe flow-coord strokes into a local space whose origin is (ox, oy). */
+function reframeFlowStrokes(
+  strokes: SketchStroke[],
+  ox: number,
+  oy: number,
+): SketchStroke[] {
+  return strokes.map((s) => ({
+    ...s,
+    points: s.points.map((p) =>
+      p.length > 2
+        ? [p[0] - ox, p[1] - oy, ...p.slice(2)]
+        : [p[0] - ox, p[1] - oy],
+    ),
+  }));
+}
+
+/** Parameters for {@link buildSketchStrokeTransferCommands}. */
+export interface SketchStrokeTransferParams {
+  /** Full node list — for absolute-position + target lookups. */
+  nodes: Node[];
+  /** Per-source stroke ids to pull out of each origin region. */
+  sources: Array<{ nodeId: CanvasNodeId; strokeIds: string[] }>;
+  /** Flow-space translation applied to the extracted strokes (drop delta). */
+  dropDelta: { dx: number; dy: number };
+  /**
+   * Existing sketch region to merge the strokes into, or `null` to split
+   * them out into a brand-new region.
+   */
+  targetNodeId: CanvasNodeId | null;
+  /** Pre-allocated id for the new region (used only when `targetNodeId` is `null`). */
+  newNodeId: CanvasNodeId;
+  /**
+   * Parent frame for the NEW region (a `findFrameAtPoint` / `resolveFrameAtPoint`
+   * result at the drop point). Ignored when merging into an existing target —
+   * the moved strokes simply adopt the target's own parent.
+   */
+  destParentId: CanvasNodeId | null;
+}
+
+/**
+ * Build the command batch for a stroke-level split / cross-region move:
+ * remove a subset of strokes from one or more source regions and re-home
+ * them either into an existing region (`targetNodeId`) or a fresh region
+ * (`targetNodeId === null`).
+ *
+ * Outcome per side:
+ *  - **Source(s)**: reuse {@link computeEraseCommands} — survivors are
+ *    reframed, or the whole node is deleted if every stroke moved out.
+ *  - **Destination**: the moved strokes are baked into absolute flow (with
+ *    the drop delta), unioned with the target's existing strokes (merge) or
+ *    on their own (split), then reframed into the destination's local space.
+ *
+ * Returns `[]` (a no-op) when nothing meaningful would move, so callers
+ * never delete strokes without re-homing them. The batch mixes
+ * `snapshot:'caller'` (`SET_NODE_GEOMETRY`) and self-snapshot commands
+ * (`CREATE_NODES` / `DELETE_NODES`); commit it inside a single
+ * `beginNodeDataGesture` / `endNodeDataGesture` bracket so it folds into one
+ * undo entry regardless of which branch fired.
+ *
+ * Pure over its `nodes` snapshot (no store reads), so it runs inside a
+ * UI-intent resolver.
+ */
+export function buildSketchStrokeTransferCommands(
+  params: SketchStrokeTransferParams,
+): CanvasCommand[] {
+  const { nodes, dropDelta, targetNodeId, newNodeId, destParentId } = params;
+  const nn = nodes as unknown as NestableNode[];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+
+  // ── 1. Extract the moved strokes from every source into absolute flow ──
+  const extractedFlow: SketchStroke[] = [];
+  const sourceCommands: CanvasCommand[] = [];
+  for (const { nodeId, strokeIds } of params.sources) {
+    if (strokeIds.length === 0) continue;
+    // A source that is also the drop target is an in-node move, not a
+    // transfer — handled by the caller's move path, skip here.
+    if (nodeId === targetNodeId) continue;
+    const node = byId.get(nodeId);
+    if (!node || node.type !== 'sketch') continue;
+    const data = node.data as CanvasSketchNodeData;
+    const keep = new Set(strokeIds);
+    const moved = (data.strokes ?? []).filter((s) => keep.has(s.id));
+    if (moved.length === 0) continue;
+
+    const absOrigin = getAbsolutePosition(nn, nodeId) ?? node.position;
+    const { scaleX, scaleY } = sketchNodeScale(node);
+    extractedFlow.push(
+      ...bakeStrokesToAbsFlow(
+        moved,
+        absOrigin,
+        scaleX,
+        scaleY,
+        dropDelta.dx,
+        dropDelta.dy,
+      ),
+    );
+
+    // Source side = erase the moved strokes (rebake survivors / delete node
+    // when the region is emptied).
+    sourceCommands.push(...computeEraseCommands(node, keep));
+  }
+
+  const movedBounds = flowStrokesBounds(extractedFlow);
+  // Nothing meaningful to move (no source matched, or degenerate geometry) —
+  // abort entirely so we never delete strokes without re-homing them.
+  if (!movedBounds || extractedFlow.length === 0) return [];
+
+  if (targetNodeId !== null) {
+    // ── 2a. Merge the moved strokes into an existing region ──
+    const target = byId.get(targetNodeId);
+    if (!target || target.type !== 'sketch') return [];
+    const targetData = target.data as CanvasSketchNodeData;
+    const targetAbs = getAbsolutePosition(nn, targetNodeId) ?? target.position;
+    const { scaleX, scaleY } = sketchNodeScale(target);
+    const targetFlow = bakeStrokesToAbsFlow(
+      targetData.strokes ?? [],
+      targetAbs,
+      scaleX,
+      scaleY,
+    );
+
+    const all = [...targetFlow, ...extractedFlow];
+    const bounds = flowStrokesBounds(all);
+    if (!bounds) return [];
+    const unionW = bounds.x2 - bounds.x1;
+    const unionH = bounds.y2 - bounds.y1;
+    const reframed = reframeFlowStrokes(all, bounds.x1, bounds.y1);
+
+    const targetParentAbs = target.parentId
+      ? (getAbsolutePosition(nn, target.parentId) ?? { x: 0, y: 0 })
+      : { x: 0, y: 0 };
+
+    return [
+      ...sourceCommands,
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          {
+            nodeId: targetNodeId,
+            patch: {
+              strokes: reframed,
+              initialSize: { width: unionW, height: unionH },
+            },
+          },
+        ],
+      },
+      {
+        type: 'SET_NODE_GEOMETRY',
+        items: [
+          {
+            nodeId: targetNodeId,
+            position: {
+              x: bounds.x1 - targetParentAbs.x,
+              y: bounds.y1 - targetParentAbs.y,
+            },
+            size: { width: unionW, height: unionH },
+          },
+        ],
+      },
+    ];
+  }
+
+  // ── 2b. Split the moved strokes out into a brand-new region ──
+  const unionW = movedBounds.x2 - movedBounds.x1;
+  const unionH = movedBounds.y2 - movedBounds.y1;
+  const reframed = reframeFlowStrokes(
+    extractedFlow,
+    movedBounds.x1,
+    movedBounds.y1,
+  );
+  const destParentAbs = destParentId
+    ? (getAbsolutePosition(nn, destParentId) ?? { x: 0, y: 0 })
+    : { x: 0, y: 0 };
+
+  return [
+    ...sourceCommands,
+    {
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          id: newNodeId,
+          nodeType: 'sketch',
+          position: {
+            x: movedBounds.x1 - destParentAbs.x,
+            y: movedBounds.y1 - destParentAbs.y,
+          },
+          size: { width: unionW, height: unionH },
+          ...(destParentId ? { parentId: destParentId } : {}),
+          // A split-off region must not steal selection (it would interrupt
+          // the pen and shadow nodes under its transparent bbox).
+          selectOnCreate: false,
+          data: {
+            strokes: reframed,
+            initialSize: { width: unionW, height: unionH },
+            origin: { type: 'user-created' },
+          },
+        },
+      ] as Extract<CanvasCommand, { type: 'CREATE_NODES' }>['nodes'],
+    },
+  ];
+}
+
+/**
+ * Execute a batch of stroke-mutation commands (move / erase) as **one undo
+ * entry**, applying the shared snapshot-folding policy in a single place so
+ * every caller (stroke move, stroke delete, mixed gestures) stays
+ * consistent.
+ *
+ * - `foldIntoOpenGesture: true` — the caller has ALREADY opened an undo
+ *   gesture (e.g. a node-drag / node-delete that took its own snapshot) and
+ *   wants this batch to fold into that SAME entry. We re-arm the gesture
+ *   snapshot flag so `executeCommands` neither pushes a second snapshot nor
+ *   warns about a `snapshot:'caller'` command lacking a `beginGesture`.
+ * - `foldIntoOpenGesture: false` (default) — this batch owns its own
+ *   single-entry gesture; we open one via `beginGesture('SET_NODE_GEOMETRY')`
+ *   when the batch contains a caller-snapshot geometry command (a pure
+ *   `DELETE_NODES`-only batch needs none — the command self-snapshots).
+ *
+ * No-op for an empty batch.
+ */
+export function commitStrokeCommands(
+  commands: CanvasCommand[],
+  { foldIntoOpenGesture = false }: { foldIntoOpenGesture?: boolean } = {},
+): void {
+  if (commands.length === 0) return;
+  const store = useCanvasStore.getState();
+  if (foldIntoOpenGesture) {
+    canvasHistoryManager.markGestureSnapshot();
+  } else if (commands.some((c) => c.type === 'SET_NODE_GEOMETRY')) {
+    store.beginGesture('SET_NODE_GEOMETRY');
+  }
+  try {
+    store.executeCommands(commands, 'ui');
+  } finally {
+    // A folded batch containing a caller-snapshot command is consumed by
+    // executeCommands itself. DELETE_NODES-only and all-no-op batches are
+    // not, so close the re-armed flag here as an idempotent safety net. If it
+    // leaked, an unrelated later edit could incorrectly skip its own undo
+    // snapshot.
+    if (foldIntoOpenGesture) {
+      canvasHistoryManager.consumeGestureSnapshot();
+    }
+  }
 }

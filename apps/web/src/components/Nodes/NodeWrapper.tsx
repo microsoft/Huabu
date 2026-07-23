@@ -46,6 +46,7 @@ import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore, {
   clearNodeDuplicateGuard,
 } from '@/store/canvasStore.ts';
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore.ts';
 import { coerceProvenance } from '@/utils/blockProvenance';
 
 import { getAccentTokens } from './accentTokens.ts';
@@ -534,6 +535,14 @@ export const NodeWrapper = memo(
     const showResizer =
       selected && resizable && !data.locked && selectedCount === 1;
 
+    // While a stroke-level (sketch) selection exists, its own toolbar (or,
+    // on desktop, none) owns the surface — suppress this node's floating
+    // toolbar so a mixed lasso never shows the node toolbar. Boolean
+    // selector so this only re-renders when the flag flips.
+    const hasStrokeSelection = useGesturePreviewStore(
+      (s) => Object.keys(s.sketchStrokeSelection).length > 0,
+    );
+
     // Derive accent-tinted tokens once so border/shadow stay in sync with
     // the rest of the canvas (PreviewCard, SemanticPlaceholder, ...).
     // Stored value is a palette token (or legacy hex); resolve to CSS color.
@@ -567,15 +576,18 @@ export const NodeWrapper = memo(
             lineClassName="!border-transparent"
           />
         )}
-        {selected && selectedCount === 1 && !isDragging && (
-          <NodeFloatingToolbar
-            id={id}
-            type={type}
-            data={data}
-            toolbar={toolbar}
-            actions={actions}
-          />
-        )}
+        {selected &&
+          selectedCount === 1 &&
+          !isDragging &&
+          !hasStrokeSelection && (
+            <NodeFloatingToolbar
+              id={id}
+              type={type}
+              data={data}
+              toolbar={toolbar}
+              actions={actions}
+            />
+          )}
 
         {/* Zoom-invariant overlay portal — isolated component to avoid re-rendering the entire NodeWrapper on pan/zoom */}
         {overlayContent && (

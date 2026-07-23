@@ -6,6 +6,7 @@ import { resolveAccent } from '@sediment/shared';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import useCanvasStore from '@/store/canvasStore';
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { useIntentStore } from '@/store/intentStore';
 
 import { NodeWrapper } from '../NodeWrapper';
@@ -63,6 +64,47 @@ export const SketchNode = memo(
       (s) => s.requestSketchRecognition,
     );
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+    const beginNodeDataGesture = useCanvasStore((s) => s.beginNodeDataGesture);
+    const endNodeDataGesture = useCanvasStore((s) => s.endNodeDataGesture);
+    const erasedStrokeIds = useGesturePreviewStore(
+      (s) => s.sketchErasePreview[id],
+    );
+    const erasedStrokeIdSet = useMemo(
+      () => new Set(erasedStrokeIds),
+      [erasedStrokeIds],
+    );
+
+    const selectedStrokeIds = useGesturePreviewStore(
+      (s) => s.sketchStrokeSelection[id],
+    );
+    const selectedStrokeIdSet = useMemo(
+      () => new Set(selectedStrokeIds),
+      [selectedStrokeIds],
+    );
+    // Transient hover highlight (e.g. hovering a chat message's stroke
+    // chip). Only strokes still present on this node paint — erased
+    // strokes / deleted nodes simply never match, so no cleanup needed.
+    const highlightStrokeIds = useGesturePreviewStore(
+      (s) => s.sketchStrokeHighlight[id],
+    );
+    const highlightStrokeIdSet = useMemo(
+      () => new Set(highlightStrokeIds),
+      [highlightStrokeIds],
+    );
+    // Live translate applied to selected strokes while a move drag is in
+    // progress (flow-space; 1 SVG unit = 1 flow unit within the node).
+    const movePreview = useGesturePreviewStore(
+      (s) => s.sketchStrokeMovePreview,
+    );
+    // When this node is carried by a dragged ancestor (e.g. a framed sketch
+    // lassoed together with its frame), the ancestor's drag already moves
+    // the whole node by the group delta. Applying the stroke preview on top
+    // would translate the selected strokes a second time, sliding them out
+    // of the frame — so suppress the preview for this node in that case.
+    const carriedNodeIds = useGesturePreviewStore(
+      (s) => s.sketchStrokeMoveCarriedNodeIds,
+    );
+    const isCarried = carriedNodeIds.includes(id);
 
     const strokes = data.strokes ?? [];
     // Toolbar swatches show the most recently drawn stroke's color/size
@@ -87,6 +129,8 @@ export const SketchNode = memo(
             strokes: strokes.map((s) => ({ ...s, size })),
           })
         }
+        onSizeDragStart={beginNodeDataGesture}
+        onSizeDragEnd={endNodeDataGesture}
       />
     );
 
@@ -118,6 +162,7 @@ export const SketchNode = memo(
           height={h}
           viewBox={`0 0 ${w} ${h}`}
           className="h-full w-full"
+          overflow="visible"
         >
           {/*
             Hit-testing: the wrapper `.react-flow__node-sketch` is set to
@@ -127,9 +172,28 @@ export const SketchNode = memo(
             which only registers hits on actual rendered fill \u2014 i.e. the
             painted stroke shape itself. No Tailwind override needed.
           */}
-          {strokes.map((s) => (
-            <StrokePath key={s.id} stroke={s} scaleX={scaleX} scaleY={scaleY} />
-          ))}
+          {strokes.map((s) => {
+            const isSelected = selectedStrokeIdSet.has(s.id);
+            const isHighlighted = !isSelected && highlightStrokeIdSet.has(s.id);
+            return (
+              <g
+                key={s.id}
+                visibility={erasedStrokeIdSet.has(s.id) ? 'hidden' : undefined}
+                transform={
+                  movePreview && isSelected && !isCarried
+                    ? `translate(${movePreview.dx} ${movePreview.dy})`
+                    : undefined
+                }
+                style={
+                  isSelected || isHighlighted
+                    ? { filter: 'drop-shadow(0 0 3px var(--color-info))' }
+                    : undefined
+                }
+              >
+                <StrokePath stroke={s} scaleX={scaleX} scaleY={scaleY} />
+              </g>
+            );
+          })}
         </svg>
       </NodeWrapper>
     );

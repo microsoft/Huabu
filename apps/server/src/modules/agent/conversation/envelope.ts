@@ -26,7 +26,11 @@ import { snapshotNodesToArtifacts } from '../tools/handlers/snapshot-node.js';
 
 import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
 import type { AgentNodePreview } from '../node-ref.js';
-import type { ChatAttachment, WireSelectionNode } from '@sediment/shared';
+import type {
+  ChatAttachment,
+  SelectedStrokeSubset,
+  WireSelectionNode,
+} from '@sediment/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /** A user-invoked skill resolved to its body for this turn. */
@@ -70,6 +74,14 @@ export interface ChatEnvelope {
       imageAttachments: ChatAttachment[];
       /** Composite PNG snapshots derived from selected sketch/image nodes. */
       snapshotAttachments: ChatAttachment[];
+      /**
+       * Per-sketch-node partial stroke selections (the lassoed subset).
+       * Persisted with the envelope so history reload can re-surface
+       * “N strokes” + hover-highlight. Absent / empty = no partial
+       * selection (older persisted turns naturally lack it — zero
+       * migration).
+       */
+      strokeSubsets?: SelectedStrokeSubset[];
     };
     /**
      * The node the request was anchored at (e.g. a question node), plus
@@ -154,6 +166,29 @@ function collectSketchNodeIds(nodes: WireSelectionNode[]): string[] {
   };
   walk(nodes);
   return ids;
+}
+
+/**
+ * Walk the wire selection for sketch nodes that carry a PARTIAL stroke
+ * selection (`strokeIds` present — the user lassoed a subset rather than
+ * the whole node) and shape them into `snapshot_nodes` `strokeSubsets`
+ * entries (a KEEP list — render only these strokes). Sketch nodes without
+ * `strokeIds` render in full and never appear here.
+ */
+function collectSketchStrokeSubsets(
+  nodes: WireSelectionNode[],
+): { nodeId: string; strokeIds: string[] }[] {
+  const out: { nodeId: string; strokeIds: string[] }[] = [];
+  const walk = (list: WireSelectionNode[]) => {
+    for (const n of list) {
+      if (n.type === 'sketch' && n.strokeIds && n.strokeIds.length > 0) {
+        out.push({ nodeId: n.id, strokeIds: n.strokeIds });
+      }
+      if (n.children) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return out;
 }
 
 /**
@@ -276,6 +311,8 @@ async function deriveSnapshotAttachments(
   const consumedImageIds = new Set<string>();
 
   const sketchIds = collectSketchNodeIds(selectedNodes);
+  const strokeSubsets = collectSketchStrokeSubsets(selectedNodes);
+  const partialNodeIds = new Set(strokeSubsets.map((f) => f.nodeId));
   const selectedImageIds = selectionImageAttachments
     .map((a) => a.originNodeId)
     .filter((id): id is string => typeof id === 'string');
@@ -288,10 +325,13 @@ async function deriveSnapshotAttachments(
     const rasterResults = await snapshotNodesToArtifacts({
       nodeIds: snapshotIds,
       canvasId,
+      ...(strokeSubsets.length > 0 ? { strokeSubsets } : {}),
     });
     const selectedImageIdSet = new Set(selectedImageIds);
     for (const r of rasterResults) {
-      const strokeIds = r.originNodeIds.filter(
+      // `originNodeIds` are NODE ids; split them into the sketch nodes vs
+      // the backdrop image nodes contributing to this composite.
+      const sketchNodeIds = r.originNodeIds.filter(
         (id) => !selectedImageIdSet.has(id),
       );
       const imageIds = r.originNodeIds.filter((id) =>
@@ -300,21 +340,26 @@ async function deriveSnapshotAttachments(
       // Singleton image pass-through (no strokes, exactly one image —
       // handler short-circuited to that node's original artifact):
       // leave it to its standalone `selectionImageAttachments` entry.
-      if (strokeIds.length === 0 && imageIds.length === 1) continue;
+      if (sketchNodeIds.length === 0 && imageIds.length === 1) continue;
       // Anything else is a composite owned by this snapshot.
       for (const iid of imageIds) consumedImageIds.add(iid);
-      const nStrokes = strokeIds.length;
+      const nStrokes = sketchNodeIds.length;
       const nImages = imageIds.length;
+      // Flag when any contributing stroke node was rendered from a
+      // PARTIAL stroke selection, so the label tells the agent it is
+      // seeing a subset (the lassoed strokes), not the whole node.
+      const isPartial = sketchNodeIds.some((id) => partialNodeIds.has(id));
+      const partialTag = isPartial ? ' — partial stroke selection' : '';
       const label =
         nStrokes === 0
           ? `Image cluster (${nImages} images)`
           : nImages > 0
             ? `Sketch cluster (${nStrokes} stroke node${
                 nStrokes === 1 ? '' : 's'
-              } + ${nImages} backdrop image${nImages === 1 ? '' : 's'})`
+              } + ${nImages} backdrop image${nImages === 1 ? '' : 's'})${partialTag}`
             : nStrokes === 1
-              ? 'Sketch (1 stroke node)'
-              : `Sketch cluster (${nStrokes} stroke nodes)`;
+              ? `Sketch (1 stroke node)${partialTag}`
+              : `Sketch cluster (${nStrokes} stroke nodes)${partialTag}`;
       snapshotAttachments.push({
         type: 'image',
         source: 'selection',
@@ -420,6 +465,9 @@ export async function buildChatEnvelope(
         selectedIds: selectedNodes ? collectSelectedNodeIds(selectedNodes) : [],
         imageAttachments: dedupedImageAttachments,
         snapshotAttachments,
+        strokeSubsets: selectedNodes
+          ? collectSketchStrokeSubsets(selectedNodes)
+          : [],
       },
       ...(anchor ? { anchor } : {}),
     },

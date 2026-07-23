@@ -77,6 +77,15 @@ export type WireNodeRef = z.infer<typeof wireNodeRefSchema>;
 export interface WireSelectionNode extends WireNodeRef {
   /** Source URL — only present for `type === 'image'`. */
   src?: string;
+  /**
+   * Partial stroke selection — only present for `type === 'sketch'`
+   * when the user lassoed a SUBSET of the node's strokes (Stage 2
+   * stroke selection) rather than the whole node. Ids are stable
+   * `SketchStroke.id`s. Absent = the whole sketch is in scope. The
+   * server threads this into the auto-snapshot as a `strokeSubsets`
+   * entry and marks the node's context ref as a partial selection.
+   */
+  strokeIds?: string[];
   /** Direct frame children; undefined for non-frame nodes. */
   children?: WireSelectionNode[];
 }
@@ -88,6 +97,7 @@ export const wireSelectionNodeSchema: z.ZodType<WireSelectionNode> = z.lazy(
       type: z.enum(CANVAS_NODE_TYPES),
       label: z.string().optional(),
       src: z.string().optional(),
+      strokeIds: z.array(z.string()).optional(),
       children: z.array(wireSelectionNodeSchema).optional(),
     }),
 );

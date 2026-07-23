@@ -163,3 +163,11 @@ Thumbs.db
 # Agent Teams — generated workspaces and secrets
 agent-teams/**/workspaces/
 agent-teams/**/.env
+
+# Playwright end-to-end artifacts
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/blob-report/
+apps/web/.last-run.json
+
+tmp

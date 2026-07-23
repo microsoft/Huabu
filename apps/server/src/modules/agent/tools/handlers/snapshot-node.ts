@@ -56,6 +56,7 @@ import { initWasm, Resvg } from '@resvg/resvg-wasm';
 import { getStroke } from 'perfect-freehand';
 
 import { findClusters, resolveAccent } from '@sediment/shared';
+import { getSketchRenderedSize } from '@sediment/shared/canvas-engine';
 
 import { getCanvasStore } from '../../../storage/index.js';
 
@@ -253,29 +254,52 @@ function escapeXml(s: string): string {
 
 // ─── Sketch helpers ────────────────────────────────────────────────────────
 /**
- * Effective on-canvas size for a sketch node. Prefers React Flow's
- * `measured` (reflects any user resize), then engine-persisted
- * `style.{width,height}`, then `data.initialSize`, then 0. The
- * `initialSize` fallback matters on first paint before xyflow has had
- * a chance to write `measured`.
+ * Effective on-canvas size for a sketch node. Thin server-side alias for
+ * the shared {@link getSketchRenderedSize}: the persisted `CanvasNode` is
+ * structurally a ReactFlow node, so the shared reader's superset chain
+ * (`measured → node.width → style → initialSize → 0`) already selects the
+ * right source here — the engine only ever populates `measured` / `style`,
+ * so the `node.width` tier is a no-op on the server. Kept as a named
+ * wrapper so call sites read intent and the sketch-only `initialSize`
+ * fallback stays documented at the point of use.
  */
 function sketchEffectiveSize(n: CanvasNode): {
   width: number;
   height: number;
 } {
-  const style = readStyle(n);
-  const data = getSketchData(n);
-  const w =
-    num(n.measured?.width) ??
-    num(style?.width) ??
-    data?.initialSize?.width ??
-    0;
-  const h =
-    num(n.measured?.height) ??
-    num(style?.height) ??
-    data?.initialSize?.height ??
-    0;
-  return { width: w, height: h };
+  return getSketchRenderedSize(n);
+}
+
+/**
+ * Return a shallow-cloned sketch node whose `data.strokes` is narrowed
+ * to `keep` (the caller-requested stroke id subset), preserving the
+ * node's original stroke order and every other field (position, size,
+ * initialSize) so the whole downstream pipeline — clustering, bbox,
+ * fingerprint, render — treats it exactly like a full node with fewer
+ * strokes. The content-address fingerprint hashes stroke points, so the
+ * subset render is automatically distinct from the whole-node render.
+ *
+ * Returns the original node when `keep` already covers every stroke. A
+ * non-empty KEEP-list that matches nothing is rejected instead of silently
+ * widening the requested context to the full sketch.
+ */
+export function filterSketchStrokes(
+  node: CanvasNode,
+  keep: Set<string>,
+): CanvasNode {
+  const strokes = getSketchData(node)?.strokes ?? [];
+  if (strokes.length === 0) return node;
+  const filtered = strokes.filter((s) => keep.has(s.id));
+  if (filtered.length === 0) {
+    throw new Error(
+      `None of the requested stroke ids exist on sketch node ${node.id}. The stroke selection may be stale; ask the user to select the strokes again.`,
+    );
+  }
+  if (filtered.length === strokes.length) return node;
+  return {
+    ...node,
+    data: { ...(node.data as Record<string, unknown>), strokes: filtered },
+  } as CanvasNode;
 }
 
 /**
@@ -821,6 +845,16 @@ export async function snapshotNodesToArtifacts(
   const allNodes = (canvas.state.nodes ?? []) as CanvasNode[];
   const byId = new Map(allNodes.map((n) => [n.id, n] as const));
 
+  // Per-node stroke subset requested by the caller (partial-selection
+  // snapshot). Keyed by node id; empty entries are dropped so a node
+  // with no ids renders in full.
+  const strokeSubsetMap = new Map<string, Set<string>>();
+  for (const f of args.strokeSubsets ?? []) {
+    if (f.strokeIds.length > 0) {
+      strokeSubsetMap.set(f.nodeId, new Set(f.strokeIds));
+    }
+  }
+
   // Dedup ids while preserving first-seen order so the result reads
   // like the request did.
   const seenIds = new Set<string>();
@@ -874,7 +908,9 @@ export async function snapshotNodesToArtifacts(
     const type = getNodeType(node);
 
     if (type === 'image' || type === 'sketch') {
-      snapshottable.push({ node, type, fromFrame });
+      const keep = type === 'sketch' ? strokeSubsetMap.get(id) : undefined;
+      const effective = keep ? filterSketchStrokes(node, keep) : node;
+      snapshottable.push({ node: effective, type, fromFrame });
       continue;
     }
     // Non-snapshottable types coming via frame expansion are skipped

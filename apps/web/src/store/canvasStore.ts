@@ -108,6 +108,20 @@ const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
 const NODE_CONTENT_DEBOUNCE_MS = 500;
 
+/**
+ * Arm a single undo snapshot for a gesture: snapshot the current state and
+ * mark it as the gesture's snapshot so subsequent same-gesture writes fold
+ * into it rather than each pushing their own entry. Shared by `beginGesture`
+ * (caller-snapshot geometry gestures) and `beginNodeDataGesture`
+ * (self-snapshotting data-edit bursts like the stroke-size slider): the two
+ * differ only in WHEN they arm and how they release, not in the arming
+ * itself — so that stays a single source of truth here.
+ */
+function armGestureSnapshot(nodes: Node[], edges: Edge[]): void {
+  const pushed = canvasHistoryManager.takeSnapshot(nodes, edges);
+  canvasHistoryManager.markGestureSnapshot(pushed);
+}
+
 // ─── Viewport localStorage ────────────────────────────────────────────────
 //
 // Pan + zoom is local UI state, not canvas data: persisting it server-side
@@ -370,6 +384,11 @@ type RFState = {
   onNodeDrag: OnNodeDrag;
   onNodeDragStop: OnNodeDrag;
   /**
+   * Cancel the active node drag without running drop/reparent resolution.
+   * Restores the pre-drag positions and discards the gesture snapshot.
+   */
+  cancelActiveNodeDrag: () => void;
+  /**
    * Tear down any drag-time snap state and detach the window-level
    * Alt listeners attached during `onNodeDragStart`. Idempotent.
    * Called from Canvas unmount to cover the path where the component
@@ -423,6 +442,21 @@ type RFState = {
     sourceContentAfterMove: string;
     targetNodeId: string;
     targetContentAfterInsert: string;
+  }) => void;
+  /**
+   * Stroke-level split / cross-region move (Stage 4B). Pulls the given
+   * strokes out of their source region(s) and re-homes them either into an
+   * existing region (`targetNodeId`) or a brand-new region
+   * (`targetNodeId === null`). Wrapped in one `beginNodeDataGesture` /
+   * `endNodeDataGesture` bracket so the whole reorganisation — survivor
+   * reflow, source deletion, and the new/merged region — collapses into a
+   * single undo entry regardless of which command mix the resolver emits.
+   */
+  moveSketchStrokesToRegion: (input: {
+    sources: Array<{ nodeId: string; strokeIds: string[] }>;
+    dropDelta: { dx: number; dy: number };
+    targetNodeId: string | null;
+    dropPoint: { x: number; y: number };
   }) => void;
   deleteNodes: (nodeIds: string[]) => void;
   disconnectEdges: (edgeIds: string[]) => void;
@@ -594,6 +628,20 @@ type RFState = {
    * Use `onNodeDragStart` / `onNodeResizeStart` instead of calling directly.
    */
   beginGesture: (commandType: CanvasCommandType) => void;
+
+  /**
+   * Bracket a burst of live `updateNodeData` edits (e.g. dragging the
+   * stroke-size slider, whose `onChange` fires every tick) into a SINGLE
+   * undo entry. `beginNodeDataGesture` snapshots the pre-edit state once
+   * and arms the gesture flag; the per-tick `MERGE_NODE_DATA` writes then
+   * fold into it instead of each self-snapshotting. `endNodeDataGesture`
+   * releases the flag on pointer-up / cancel. Unlike `beginGesture` this
+   * works for `snapshot: 'yes'` commands (which self-snapshot), so it is
+   * the right bracket for data edits rather than geometry gestures.
+   */
+  beginNodeDataGesture: () => void;
+  /** Release the {@link beginNodeDataGesture} bracket. */
+  endNodeDataGesture: () => void;
 
   /** Align selected nodes along an axis. */
   alignSelectedNodes: (direction: AlignDirection) => void;
@@ -1524,9 +1572,39 @@ const useCanvasStore = create<RFState>()(
     getAgentChatContext: (): AgentChatContext => {
       const { nodes } = get();
       const buildSelectedDetail = makeBuildSelectedDetail(nodes);
-      return {
-        selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
-      };
+      const selectedNodes = nodes
+        .filter((n) => n.selected)
+        .map(buildSelectedDetail);
+
+      // Fold in any Stage-2 partial stroke selection as sketch wire
+      // nodes carrying `strokeIds`. Stroke selection lives outside
+      // ReactFlow node selection (gesturePreviewStore), so these nodes
+      // are normally NOT in the `n.selected` set — append them with
+      // their stroke subset so the server can auto-snapshot + address
+      // just those strokes and tell the agent it is a partial selection.
+      const strokeSel = useGesturePreviewStore.getState().sketchStrokeSelection;
+      const selectedIds = new Set(selectedNodes.map((n) => n.id));
+      for (const [nodeId, strokeIds] of Object.entries(strokeSel)) {
+        if (!strokeIds || strokeIds.length === 0) continue;
+        const node = nodes.find((n) => n.id === nodeId);
+        if (!node || node.type !== 'sketch') continue;
+        if (selectedIds.has(nodeId)) {
+          // Rare mixed case: the sketch is also whole-node selected —
+          // attach the subset to its existing wire entry.
+          const existing = selectedNodes.find((n) => n.id === nodeId);
+          if (existing) existing.strokeIds = strokeIds;
+          continue;
+        }
+        const data = node.data as Record<string, unknown> | undefined;
+        selectedNodes.push({
+          id: nodeId,
+          type: 'sketch',
+          label: data?.label as string | undefined,
+          strokeIds,
+        });
+      }
+
+      return { selectedNodes };
     },
 
     getIntentContext: (): IntentContext => {
@@ -1628,6 +1706,12 @@ const useCanvasStore = create<RFState>()(
             ? state.viewport
             : null;
         const loadedViewport = storedViewport ?? legacyServerViewport;
+        // An authoritative node replacement invalidates every transient that
+        // points at the previous in-memory geometry. This applies both to a
+        // different-canvas switch and to a same-canvas SSE gap/snapshot heal:
+        // even when the canvas id is unchanged, selected stroke ids and
+        // retained polygons may have been deleted or moved remotely.
+        useGesturePreviewStore.getState().resetCanvasScopedTransients();
         // Apply the authoritative server state via the no-autosave setter.
         // A load must NEVER schedule a structure PUT: the nodes/edges we
         // just fetched already ARE the server's state, so bumping the
@@ -1728,7 +1812,7 @@ const useCanvasStore = create<RFState>()(
       // inherit the previous canvas's recent-action trail.
       intentActionWindow.clear();
       useToolStore.getState().resetForCanvasSwitch();
-      useGesturePreviewStore.getState().clearFrameFitPreview();
+      useGesturePreviewStore.getState().resetCanvasScopedTransients();
       canvasHistoryManager.clear();
 
       // Load the new canvas
@@ -2460,6 +2544,40 @@ const useCanvasStore = create<RFState>()(
       }
     },
 
+    cancelActiveNodeDrag: () => {
+      if (_dragPreviewRafId !== null) {
+        cancelAnimationFrame(_dragPreviewRafId);
+        _dragPreviewRafId = null;
+      }
+      const preview = useGesturePreviewStore.getState();
+      preview.clearFrameFitPreview();
+      preview.clearStructuredDropPreview();
+
+      const startPositions = _dragStartPositions;
+      _dragStartPositions = null;
+      if (startPositions) {
+        get()._setStateNoAutosave({
+          nodes: get().nodes.map((node) => {
+            const start = startPositions.get(node.id);
+            return start
+              ? {
+                  ...node,
+                  position: { x: start.x, y: start.y },
+                  dragging: false,
+                }
+              : node;
+          }),
+        });
+      }
+
+      endSnapSession();
+      canvasHistoryManager.rollbackGestureSnapshot();
+      set({
+        canUndo: canvasHistoryManager.canUndo,
+        canRedo: canvasHistoryManager.canRedo,
+      });
+    },
+
     endActiveDragSession: () => {
       // Bridges the Canvas component's unmount cleanup into the snap
       // session's lifecycle. Without this, a component teardown
@@ -2730,6 +2848,35 @@ const useCanvasStore = create<RFState>()(
       });
     },
 
+    moveSketchStrokesToRegion: ({
+      sources,
+      dropDelta,
+      targetNodeId,
+      dropPoint,
+    }) => {
+      // The transfer batch mixes caller-snapshot (`SET_NODE_GEOMETRY`) and
+      // self-snapshot (`CREATE_NODES` / `DELETE_NODES`) commands, so bracket
+      // it in the general data-gesture (arms + releases regardless of the
+      // command mix) to fold everything into one undo entry.
+      const before = get().nodes;
+      get().beginNodeDataGesture();
+      get().dispatchUiIntent({
+        type: 'MOVE_SKETCH_STROKES_TO_REGION',
+        sources,
+        dropDelta,
+        targetNodeId,
+        dropPoint,
+      });
+      if (get().nodes === before) {
+        // The resolver produced no applicable command (e.g. every source
+        // vanished between selection and drop). Drop the optimistic
+        // snapshot so no phantom empty undo entry is left behind.
+        canvasHistoryManager.rollbackGestureSnapshot();
+      } else {
+        get().endNodeDataGesture();
+      }
+    },
+
     deleteNodes: (nodeIds) => {
       get().dispatchUiIntent({ type: 'DELETE_NODES', nodeIds });
     },
@@ -2886,11 +3033,25 @@ const useCanvasStore = create<RFState>()(
     },
 
     beginGesture: (commandType) => {
+      // Caller-snapshot gestures (drag / resize) arm here; the closing
+      // caller-snapshot command consumes the flag inside `executeCommands`.
       if (COMMAND_META[commandType].snapshot === 'caller') {
         const { nodes, edges } = get();
-        const pushed = canvasHistoryManager.takeSnapshot(nodes, edges);
-        canvasHistoryManager.markGestureSnapshot(pushed);
+        armGestureSnapshot(nodes, edges);
       }
+    },
+
+    beginNodeDataGesture: () => {
+      // Bracket a burst of live `updateNodeData` ticks into ONE undo entry.
+      // `MERGE_NODE_DATA` self-snapshots ('yes') and so never consumes the
+      // flag, hence the explicit `endNodeDataGesture` counterpart below.
+      const { nodes, edges } = get();
+      armGestureSnapshot(nodes, edges);
+    },
+
+    endNodeDataGesture: () => {
+      // Release the flag so the next unrelated edit snapshots normally.
+      canvasHistoryManager.consumeGestureSnapshot();
     },
 
     alignSelectedNodes: (direction) => {
@@ -3184,6 +3345,15 @@ const useCanvasStore = create<RFState>()(
       const snapshot = canvasHistoryManager.undo(nodes, edges);
       if (!snapshot) return;
 
+      // Undo swaps in authoritative geometry, so any retained stroke
+      // selection / polygon may no longer describe it (e.g. the classic
+      // "move strokes then undo" strands the dashed region at the moved
+      // position while the strokes revert). Drop the whole floating
+      // selection — the delta is unknowable from a generic undo, so
+      // re-homing the polygon is not possible; clearing is the safe,
+      // reload-consistent choice.
+      useGesturePreviewStore.getState().resetCanvasScopedTransients();
+
       const action: RecentAction = { action: 'canvas_undone' };
       set({
         nodes: snapshot.nodes,
@@ -3204,6 +3374,10 @@ const useCanvasStore = create<RFState>()(
       const { nodes, edges, canvasId } = get();
       const snapshot = canvasHistoryManager.redo(nodes, edges);
       if (!snapshot) return;
+
+      // See `undo`: a redo is the same authoritative geometry swap, so
+      // discard the floating stroke selection for the same reason.
+      useGesturePreviewStore.getState().resetCanvasScopedTransients();
 
       const action: RecentAction = { action: 'canvas_redone' };
       set({

@@ -1,13 +1,22 @@
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import { NodeRef } from '../Common/NodeRef';
 
-import type { ChatAttachment } from '@sediment/shared';
+import type { ChatAttachment, SelectedStrokeSubset } from '@sediment/shared';
 
 interface UserMessageProps {
   content: string;
   attachments?: ChatAttachment[];
   selectedNodeIds?: string[];
+  /**
+   * Per-sketch-node partial stroke selections sent with this message.
+   * Used to annotate the matching node chip with its stroke count so it
+   * reads as a subset rather than the whole node.
+   */
+  selectedStrokeIds?: SelectedStrokeSubset[];
   /**
    * Skill ids the user explicitly invoked via leading `/<id>` tokens.
    * The tokens are stripped from `content` at submit time (see
@@ -22,9 +31,21 @@ export const UserMessage = ({
   content,
   attachments,
   selectedNodeIds,
+  selectedStrokeIds,
   invokedSkills,
 }: UserMessageProps) => {
   const { t } = useTranslation();
+  const setStrokeHighlight = useGesturePreviewStore(
+    (s) => s.setSketchStrokeHighlight,
+  );
+  const clearStrokeHighlight = useGesturePreviewStore(
+    (s) => s.clearSketchStrokeHighlight,
+  );
+  const strokeIdsByNode = useMemo(
+    () =>
+      new Map((selectedStrokeIds ?? []).map((s) => [s.nodeId, s.strokeIds])),
+    [selectedStrokeIds],
+  );
   const hasRefs =
     (attachments && attachments.length > 0) ||
     (selectedNodeIds && selectedNodeIds.length > 0);
@@ -57,9 +78,22 @@ export const UserMessage = ({
             {attachments?.map((att, i) => (
               <NodeRef key={att.url ?? `att-${i}`} attachment={att} />
             ))}
-            {selectedNodeIds?.map((id) => (
-              <NodeRef key={id} nodeId={id} />
-            ))}
+            {selectedNodeIds?.map((id) => {
+              const strokeIds = strokeIdsByNode.get(id);
+              if (!strokeIds) return <NodeRef key={id} nodeId={id} />;
+              // Hovering a partial-stroke chip highlights just those
+              // strokes on the canvas (best-effort: SketchNode only paints
+              // ids still present, so erased strokes / deleted nodes no-op).
+              return (
+                <span
+                  key={id}
+                  onMouseEnter={() => setStrokeHighlight({ [id]: strokeIds })}
+                  onMouseLeave={() => clearStrokeHighlight()}
+                >
+                  <NodeRef nodeId={id} strokeCount={strokeIds.length} />
+                </span>
+              );
+            })}
           </div>
         </div>
       )}
