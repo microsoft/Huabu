@@ -97,7 +97,13 @@ export function createPreprocessQueue(opts: {
       // against typos without dragging a runtime list into the
       // web bundle.
       if (node.type === ('sketch' satisfies CanvasNodeType)) return;
+      const scheduledState = opts.getState();
+      if (!scheduledState.canvasId) return;
       const nodeId = node.id;
+      scheduledState.setNodeIngestion(nodeId, {
+        status: 'pending',
+        updatedAt: Date.now(),
+      });
       debouncer.schedule(nodeId, () => {
         const state = opts.getState();
         if (!state.canvasId) return;

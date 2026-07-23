@@ -63,6 +63,7 @@ Each profile also declares **`bodyOwnership`** (`types.ts`): `'authored'` for us
 ## 4. Triggers & state
 
 - Frontend `preprocessNodeIfNeeded` ([preprocess.ts](../../apps/web/src/handler/canvasCommand/preprocess.ts)) is the unified entry; one `triggerPreprocessing` callback, debounced per node via [preprocessQueue.ts](../../apps/web/src/store/canvasStore/save/preprocessQueue.ts).
+- Scheduling immediately marks the node ingestion state as `pending`, including the debounce wait. Preview components use that state to avoid requesting server-persisted content before preprocessing has written the node sidecar.
 - **`note` / `text` are settle-triggered, not mutation-triggered.** Their label auto-derives from the first heading/line, so firing preprocess on every typing pause churned the `.md` filename. Instead [postEffects.web.ts](../../apps/web/src/handler/canvasCommand/postEffects.web.ts) skips them on mutation, and `settleNodePreprocess` ([canvasStore.ts](../../apps/web/src/store/canvasStore.ts)) fires once at the edit-done boundary — `closeExpanded` / `openExpanded` for a `note`, `TextNode`'s blur for inline `text`. The body still saves on the fast `nodeContentQueue` cadence independently; other node types keep the per-mutation debounce.
 - `node_inserted` / `node_updated` carry a snapshot; dispatcher diffs against the profile's `watchFields` to plan the minimum stages.
 - Label policy: Enrich may propose a label, but Project includes it only when `labelSource !== 'user'`.
