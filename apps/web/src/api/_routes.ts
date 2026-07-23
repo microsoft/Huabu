@@ -143,6 +143,16 @@ export const routes = {
   acpThreadConfigOption: (threadId: string) =>
     `/acp/threads/${enc(threadId)}/config-option`,
 
+  // ── Built-in agent per-thread settings ────────────────────────────
+  agentThreadSettings: (threadId: string, canvasId?: string) =>
+    `/agent/threads/${enc(threadId)}/settings${
+      canvasId ? `?canvasId=${enc(canvasId)}` : ''
+    }`,
+  agentThreadModel: (threadId: string) =>
+    `/agent/threads/${enc(threadId)}/model`,
+  agentThreadReasoningEffort: (threadId: string) =>
+    `/agent/threads/${enc(threadId)}/reasoning-effort`,
+
   // ── Skills (user-invokable catalogue) ─────────────────────────────
   skillsList: (scope?: string) => {
     const params = scope ? `?scope=${enc(scope)}` : '';

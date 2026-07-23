@@ -2,6 +2,7 @@ import { apiFetch } from './_client';
 import { routes } from './_routes';
 
 import type {
+  ChatThreadSettings,
   LLMConfig,
   LLMConfigUpdate,
   LLMImageConfig,
@@ -15,6 +16,7 @@ import type {
   OAuthDeviceCodeResponse,
   OAuthPollResponse,
   OAuthStatusResponse,
+  SetChatThreadSettingResponse,
 } from '@sediment/shared';
 
 // ==================== Config ====================
@@ -91,6 +93,51 @@ export async function getLLMModels(provider: string): Promise<LLMModelInfo[]> {
     fallbackMessage: 'Failed to get LLM models',
   });
   return data.models;
+}
+
+// ==================== Per-thread chat settings (built-in agent) ==========
+
+/** Read a built-in chat thread's per-thread model / reasoning-effort selection. */
+export async function getChatThreadSettings(
+  threadId: string,
+  canvasId?: string,
+): Promise<ChatThreadSettings> {
+  return apiFetch<ChatThreadSettings>(
+    routes.agentThreadSettings(threadId, canvasId),
+    { fallbackMessage: 'Failed to load chat settings' },
+  );
+}
+
+/** Set a built-in chat thread's per-thread model override. */
+export async function setChatThreadModel(
+  threadId: string,
+  modelId: string,
+  canvasId?: string,
+): Promise<SetChatThreadSettingResponse> {
+  return apiFetch<SetChatThreadSettingResponse>(
+    routes.agentThreadModel(threadId),
+    {
+      method: 'POST',
+      json: { modelId, canvasId },
+      fallbackMessage: 'Failed to switch model',
+    },
+  );
+}
+
+/** Set a built-in chat thread's per-thread reasoning effort. */
+export async function setChatThreadReasoningEffort(
+  threadId: string,
+  reasoningEffort: string,
+  canvasId?: string,
+): Promise<SetChatThreadSettingResponse> {
+  return apiFetch<SetChatThreadSettingResponse>(
+    routes.agentThreadReasoningEffort(threadId),
+    {
+      method: 'POST',
+      json: { reasoningEffort, canvasId },
+      fallbackMessage: 'Failed to set reasoning effort',
+    },
+  );
 }
 
 // ==================== OAuth ====================

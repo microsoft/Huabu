@@ -15,6 +15,7 @@ import { toast } from '@/components/Common/Toast';
 import { useAcpProfiles } from '@/hooks/useAcpProfiles';
 import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
+import { useBuiltinThreadSettings } from '@/hooks/useBuiltinThreadSettings';
 import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
@@ -33,6 +34,7 @@ import {
 } from './AcpConnectionBadge';
 import { AcpSessionSelectors } from './AcpSessionSelectors';
 import { AgentSelector, type AgentChoice } from './AgentSelector';
+import { BuiltinSessionSelectors } from './BuiltinSessionSelectors';
 import { ChangeReviewCard } from './ChangeReviewCard';
 import { ChatInput } from './ChatInput';
 import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
@@ -314,6 +316,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   useEffect(() => {
     acpSessionMetaRef.current = acpSessionMeta;
   }, [acpSessionMeta]);
+
+  // Built-in agent per-thread selectors (model + reasoning effort). Data
+  // source is Huabu's own model capability, not an ACP agent's
+  // configOptions; only active for internal bindings.
+  const builtinThreadSettings = useBuiltinThreadSettings({
+    threadId,
+    canvasId,
+    provider: llmConfig?.provider,
+    defaultModelId: llmConfig?.model,
+    enabled: agentBinding.kind !== 'external',
+  });
 
   // Three-state connection summary for the header badge, derived from
   // `useAcpSessionMeta`. **Optimistic green by default** — opening a
@@ -883,7 +896,20 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                     onSelectModel={handleAcpSelectModel}
                     onSelectConfigOption={handleAcpSelectConfigOption}
                   />
-                ) : null
+                ) : (
+                  <BuiltinSessionSelectors
+                    models={builtinThreadSettings.models}
+                    currentModelId={builtinThreadSettings.effectiveModelId}
+                    currentReasoningEffort={
+                      builtinThreadSettings.settings.reasoningEffort
+                    }
+                    loading={builtinThreadSettings.loading}
+                    onSelectModel={builtinThreadSettings.selectModel}
+                    onSelectReasoningEffort={
+                      builtinThreadSettings.selectReasoningEffort
+                    }
+                  />
+                )
               }
               // For external (ACP) bindings, defer to the agent's own
               // `session_usage_update`; the internal context-token fetch
