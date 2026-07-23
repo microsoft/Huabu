@@ -1,6 +1,10 @@
 import { resolveAgentInputs } from '@agenetes/protocol';
 import { HistoryLoadDeniedError } from '@agenetes/runtime';
 import { Agent, convertToLlm } from '@earendil-works/pi-agent-core';
+import {
+  clampThinkingLevel,
+  getSupportedThinkingLevels,
+} from '@earendil-works/pi-ai';
 import { streamSimple } from '@earendil-works/pi-ai/compat';
 
 import { PI_THINKING_LEVELS } from './types.js';
@@ -56,6 +60,30 @@ const PI_DEPLOYMENT_CONTROL_OPS = [
  * capability endpoint.
  */
 const REASONING_EFFORT_OPTION_ID = 'reasoning_effort';
+
+/**
+ * Correct a per-thread reasoning effort against a resolved model's
+ * capability: keep `off` / absent as-is; drop the effort when the model
+ * has no reasoning; otherwise clamp it to the nearest level the model
+ * supports (via pi-ai). Ensures a model switch never leaves a stale,
+ * unsupported effort in the durable state (which pi-ai would silently
+ * clamp at request time, desyncing the API/UI/runtime).
+ */
+function correctEffortForModel(
+  model: Parameters<typeof getSupportedThinkingLevels>[0],
+  effort: PiDurableState['reasoningEffort'],
+): PiDurableState['reasoningEffort'] {
+  if (effort === undefined || effort === 'off') return effort;
+  const supported = getSupportedThinkingLevels(model).filter(
+    (level) => level !== 'off',
+  );
+  if (supported.length === 0) return undefined;
+  if ((supported as readonly string[]).includes(effort)) return effort;
+  return clampThinkingLevel(
+    model,
+    effort as ThinkingLevel,
+  ) as PiDurableState['reasoningEffort'];
+}
 
 export const PI_DEPLOYMENT_CAPABILITIES: AgentCapabilities = {
   supportedControlMessages: [...PI_DEPLOYMENT_CONTROL_OPS],
@@ -527,12 +555,26 @@ export class PiAgentHandle<
         return { ok: true };
       }
       case 'set_model': {
-        this.selection = { ...this.selection, modelId: msg.data.modelId };
+        const model = await this.ports.resolveModel(
+          { ...this.spec.spec.recipe.model, id: msg.data.modelId },
+          modelContext(this.spec),
+        );
+        // Adopt the model and correct any now-incompatible reasoning effort
+        // so the durable state stays consistent with the model's capability.
+        this.selection = {
+          ...this.selection,
+          modelId: msg.data.modelId,
+          reasoningEffort: correctEffortForModel(
+            model,
+            this.selection.reasoningEffort,
+          ),
+        };
         if (this.agent) {
-          this.agent.state.model = await this.ports.resolveModel(
-            { ...this.spec.spec.recipe.model, id: msg.data.modelId },
-            modelContext(this.spec),
-          );
+          this.agent.state.model = model;
+          if (this.selection.reasoningEffort !== undefined) {
+            this.agent.state.thinkingLevel = this.selection
+              .reasoningEffort as ThinkingLevel;
+          }
         }
         this.reportState();
         return { ok: true };

@@ -191,8 +191,9 @@ describe('pi durable history seed', () => {
 });
 
 describe('pi per-thread selection', () => {
+  // A reasoning-capable model (no thinkingLevelMap ⇒ supports up to 'high').
   const ports = {
-    resolveModel: vi.fn(async () => ({ id: 'resolved' })),
+    resolveModel: vi.fn(async () => ({ id: 'resolved', reasoning: true })),
     getApiKey: vi.fn(),
     resolveTools: vi.fn(async () => []),
   } as never;
@@ -275,5 +276,43 @@ describe('pi per-thread selection', () => {
     expect(
       await jobHandle.control({ type: 'set_model', data: { modelId: 'x' } }),
     ).toMatchObject({ ok: false, code: 'unsupported' });
+  });
+
+  it('drops the reasoning effort when switching to a non-reasoning model', async () => {
+    const driver = piDriverFactory({
+      ports: {
+        resolveModel: vi.fn(async () => ({ id: 'plain', reasoning: false })),
+        getApiKey: vi.fn(),
+        resolveTools: vi.fn(async () => []),
+      } as never,
+    });
+    const handle = driver.create(spec, {
+      recovery: { authorizeHistoryLoad: vi.fn() },
+      recoveryInput: {
+        state: { driverState: { modelId: 'gpt-r', reasoningEffort: 'high' } },
+        turns: [],
+      },
+    });
+    const snapshots: { driverState: { reasoningEffort?: string } }[] = [];
+    handle.onState?.((s) => snapshots.push(s as never));
+    await handle.control({ type: 'set_model', data: { modelId: 'plain' } });
+    // 'high' is incompatible with a non-reasoning model → dropped.
+    expect(snapshots.at(-1)?.driverState).toEqual({ modelId: 'plain' });
+  });
+
+  it('clamps an unsupported effort to the nearest supported level', async () => {
+    // The shared reasoning mock supports up to 'high' (no xhigh/max).
+    const driver = piDriverFactory({ ports });
+    const handle = driver.create(spec, {
+      recovery: { authorizeHistoryLoad: vi.fn() },
+      recoveryInput: {
+        state: { driverState: { modelId: 'm', reasoningEffort: 'xhigh' } },
+        turns: [],
+      },
+    });
+    const snapshots: { driverState: { reasoningEffort?: string } }[] = [];
+    handle.onState?.((s) => snapshots.push(s as never));
+    await handle.control({ type: 'set_model', data: { modelId: 'm2' } });
+    expect(snapshots.at(-1)?.driverState.reasoningEffort).toBe('high');
   });
 });
