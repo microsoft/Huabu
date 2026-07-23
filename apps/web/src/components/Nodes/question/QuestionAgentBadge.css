@@ -43,12 +43,11 @@
   flex: none;
 }
 
-/* The `open` speech bubble is an SVG child of the Button, whose descendant
-   `svg` sizing rule would otherwise shrink it. Force the intended 44×48
-   box so the bubble wraps the avatar instead of collapsing to an icon. */
+/* The `open` speech bubble fades in when a node's conversation opens, so it
+   eases in around the avatar instead of popping. Sizing and position are owned
+   by the caller (the takeover mark sizes it inline from its live size), so this
+   rule carries the appearance animation only. */
 .question-agent-badge-bubble {
-  width: calc(var(--question-agent-badge-size) * 1.1) !important;
-  height: calc(var(--question-agent-badge-size) * 1.2) !important;
   animation: question-agent-fade-in 220ms ease;
 }
 

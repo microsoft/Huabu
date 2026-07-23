@@ -119,14 +119,11 @@ export function QuestionTakeoverMark({
   // on BOTH axes:
   //   cx = left + width·(22/44) = −0.05·size + 1.1·size·0.5   = 0.5·size ✓
   //   cy = top  + height·(22/48) = −0.05·size + 1.2·size·0.4583 = 0.5·size ✓
-  // So the flex-centred avatar coincides with the circle centre at every zoom.
-  // The Huabu/external artwork reads slightly left-and-high inside that circle,
-  // so apply a tiny proportional optical correction (1px at the usual 36px
-  // badge) rather than a fixed offset that would overwhelm collapsed marks.
+  // So the flex-centred avatar coincides with the circle centre at every zoom,
+  // and it stays put across open ↔ read (no optical nudge, no positional pop).
   const bubbleWidth = size * 1.1;
   const bubbleHeight = size * 1.2;
   const bubbleOffset = -size * 0.05;
-  const bubbleAvatarOpticalOffset = size / 36;
 
   // Sticker fill for real agent marks: the collapsed mark is the readable badge
   // with the card body hidden, so it keeps the same background disc + ring. The
@@ -141,7 +138,12 @@ export function QuestionTakeoverMark({
     // Drive the sized-with-`!important` container variable; inline width/height
     // is ignored by the `.question-agent-badge` rule.
     ['--question-agent-badge-size' as string]: `${size}px`,
-    borderWidth: isIdle ? 0 : ringWidth,
+    // Open draws no visible border (the chrome is the bubble), so zero its
+    // width too: an absolute child (the bubble) is positioned from the PADDING
+    // box, so a non-zero transparent border would push the bubble's circle down
+    // -right of the disc/avatar (both centred on the border box). Zeroing it
+    // keeps the bubble concentric with the disc and the avatar.
+    borderWidth: isIdle || showBubble ? 0 : ringWidth,
     background: resolveQuestionBadgeBackground({
       isIdle,
       isOpen: showBubble,
@@ -162,7 +164,7 @@ export function QuestionTakeoverMark({
       {showBubble ? (
         <QuestionAgentBubble
           fill={chip.stickerFill}
-          className="pointer-events-none absolute"
+          className="question-agent-badge-bubble pointer-events-none absolute"
           style={{
             left: bubbleOffset,
             top: bubbleOffset,
@@ -187,9 +189,6 @@ export function QuestionTakeoverMark({
           style={{
             width: innerSize,
             height: innerSize,
-            transform: showBubble
-              ? `translate(${bubbleAvatarOpticalOffset}px, ${bubbleAvatarOpticalOffset}px)`
-              : undefined,
           }}
         >
           <AgentAvatarMark

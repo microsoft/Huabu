@@ -9,11 +9,11 @@ import type { CSSProperties } from 'react';
  * bubble geometry (path, warm sticker fill, `--question-border` stroke) so the
  * two stages stay pixel-identical and neither re-implements the shape.
  *
- * Sizing/positioning is left to the caller so each stage can drive it its own
- * way: the readable badge sizes it from `--question-agent-badge-size` via the
- * `.question-agent-badge-bubble` CSS rule, while the takeover mark sizes it
- * inline from its live `size`. The `viewBox` keeps the 2px stroke scaling with
- * whatever box the caller gives it.
+ * Sizing and position are owned entirely by the caller
+ * ({@link QuestionTakeoverMark} sizes it inline from its live `size`); the
+ * `.question-agent-badge-bubble` class carries only the fade-in that eases the
+ * bubble in when a node's conversation opens. The `viewBox` keeps the 2px
+ * stroke scaling with whatever box the caller gives it.
  */
 export function QuestionAgentBubble({
   fill,
