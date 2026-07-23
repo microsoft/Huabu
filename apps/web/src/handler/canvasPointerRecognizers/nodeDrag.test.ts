@@ -35,6 +35,7 @@ const selectedNode = {
 
 const context = {
   inputMode: 'pen',
+  interactivityLocked: false,
   instance: {
     screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }),
   },
@@ -70,6 +71,17 @@ beforeEach(() => {
 });
 
 describe('createNodeDragRecognizer', () => {
+  it('does not claim a selected node while canvas interactivity is locked', () => {
+    const recognizer = createNodeDragRecognizer();
+
+    expect(
+      recognizer.canClaim(pointer(1, 0, 0), {
+        ...context,
+        interactivityLocked: true,
+      }),
+    ).toBe(false);
+  });
+
   it('cancels a locked drag without running drop resolution', () => {
     const recognizer = createNodeDragRecognizer();
     const down = pointer(1, 0, 0);
@@ -94,6 +106,22 @@ describe('createNodeDragRecognizer', () => {
 
     expect(onNodeDragStart).not.toHaveBeenCalled();
     expect(cancelActiveNodeDrag).not.toHaveBeenCalled();
+    expect(onNodeDragStop).not.toHaveBeenCalled();
+  });
+
+  it('cancels an active drag if interactivity becomes locked', () => {
+    const recognizer = createNodeDragRecognizer();
+    const down = pointer(3, 0, 0);
+
+    expect(recognizer.onDown(down, context)).toBe('claim');
+    recognizer.onMove?.(pointer(3, 9, 0), context);
+    recognizer.onMove?.(pointer(3, 10, 0), {
+      ...context,
+      interactivityLocked: true,
+    });
+
+    expect(onNodeDragStart).toHaveBeenCalledTimes(1);
+    expect(cancelActiveNodeDrag).toHaveBeenCalledTimes(1);
     expect(onNodeDragStop).not.toHaveBeenCalled();
   });
 });

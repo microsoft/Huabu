@@ -2,7 +2,7 @@
 
 > The single, complete reference for canvas gestures across mouse, touch, and pen.
 > Sections 1–5 define the interaction contract (the rules), section 6 describes the pointer-router mechanism that delivers it, section 7 is the validation boundary, and the appendix places the model against mainstream whiteboard and note apps.
-> Last updated: 2026-07-19
+> Last updated: 2026-07-23
 
 ## 1. Input preferences
 
@@ -67,6 +67,8 @@ The shared values define only the tap-versus-drag activation gate. Feature-speci
 In Finger mode, one-finger touch on empty canvas owns a pending viewport gesture: releasing below the touch activation distance clears the current selection, while crossing the distance locks and pans without clearing selection. Empty-canvas ownership is determined by excluding nodes and React Flow panels rather than requiring a particular React Flow pane descendant, so Background and other non-interactive canvas layers remain pannable. Node content and selected nodes retain their normal target ownership.
 
 The canvas root suppresses browser long-press callouts and native context menus on non-editable interaction surfaces so they cannot interrupt Pan, Lasso, Sketch, or node manipulation. While a finger or pen is the current pointer (`[data-canvas-root][data-not-mouse]`) it also disables text selection (`user-select: none`), so a drawing/pan/drag gesture that crosses node or panel text cannot select it and pop the iOS copy callout; the mouse keeps text selection so desktop users can still copy node text. Text inputs, selects, editable content, and real links retain their native context menus and remain selectable.
+
+The React Flow interactivity lock applies to native and pointer-router interaction paths alike. While locked, node dragging, Lasso selection, retained Sketch-selection movement, and touch tap selection are disabled; viewport pan and zoom remain available, matching React Flow's native lock behavior. Creation tools remain governed by their own active-tool state rather than the interactivity lock.
 
 In Pen mode, pen input manipulates on-canvas nodes and content while touch input is intercepted before React Flow selection and drives viewport navigation. Touch remains available to application chrome inside React Flow panels. A finger tap that never locks into a pan doubles as selection: on a pending release the `viewport-navigation` recognizer resolves the topmost node under the touch-down point through the shared `nodeIdAtScreenPoint` hit-test and selects it (or clears the selection on empty canvas). Because that hit-test walks node bounding boxes rather than the DOM target, it works even when the full-screen Sketch overlay covers the node — so the pen keeps drawing while the finger picks nodes and navigates, matching pen-first note apps.
 

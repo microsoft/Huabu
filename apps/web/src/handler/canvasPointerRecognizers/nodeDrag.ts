@@ -57,6 +57,13 @@ export function createNodeDragRecognizer(): PointerRecognizer<
     startPositions = new Map();
   };
 
+  const cancelDrag = (): void => {
+    if (locked && primaryNode) {
+      useCanvasStore.getState().cancelActiveNodeDrag();
+    }
+    reset();
+  };
+
   /** Node id under the point iff it exists AND is currently selected. */
   const selectedNodeIdAt = (event: PointerEvent): string | null => {
     const id = nodeIdAtScreenPoint(event.clientX, event.clientY);
@@ -105,6 +112,7 @@ export function createNodeDragRecognizer(): PointerRecognizer<
     id: 'node-drag',
     canClaim: (event, ctx) =>
       pointerId === null &&
+      !ctx.interactivityLocked &&
       event.pointerType === 'touch' &&
       ctx.inputMode === 'pen' &&
       event.isPrimary &&
@@ -134,6 +142,10 @@ export function createNodeDragRecognizer(): PointerRecognizer<
     },
     onMove: (event, ctx) => {
       if (event.pointerId !== pointerId) return;
+      if (ctx.interactivityLocked) {
+        cancelDrag();
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       if (!locked) {
@@ -156,6 +168,10 @@ export function createNodeDragRecognizer(): PointerRecognizer<
     },
     onUp: (event, ctx) => {
       if (event.pointerId !== pointerId) return;
+      if (ctx.interactivityLocked) {
+        cancelDrag();
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       if (locked && primaryNode) {
@@ -175,13 +191,10 @@ export function createNodeDragRecognizer(): PointerRecognizer<
     },
     onCancel: (event) => {
       if (event.pointerId !== pointerId) return;
-      if (locked && primaryNode) {
-        // Cancellation is not a drop: restore the pre-drag positions, clear
-        // `dragging`, and tear down snap/history state without running frame
-        // re-parenting or scheduling a save.
-        useCanvasStore.getState().cancelActiveNodeDrag();
-      }
-      reset();
+      // Cancellation is not a drop: restore the pre-drag positions, clear
+      // `dragging`, and tear down snap/history state without running frame
+      // re-parenting or scheduling a save.
+      cancelDrag();
     },
   };
 }

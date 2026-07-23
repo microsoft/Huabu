@@ -234,6 +234,7 @@ const CanvasGestures: React.FC<{
   wrapperRef: React.MutableRefObject<HTMLDivElement | null>;
   rfInstanceRef: React.MutableRefObject<ReactFlowInstance | null>;
   inputMode: 'mouse' | 'pen' | 'finger';
+  interactivityLocked: boolean;
   explicitToolActive: boolean;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
@@ -246,6 +247,7 @@ const CanvasGestures: React.FC<{
   wrapperRef,
   rfInstanceRef,
   inputMode,
+  interactivityLocked,
   explicitToolActive,
   onTouchTakeover,
   onEmptyCanvasTap,
@@ -258,6 +260,7 @@ const CanvasGestures: React.FC<{
     rfInstanceRef,
     {
       inputMode,
+      interactivityLocked,
       explicitToolActive,
       onTouchTakeover,
       onEmptyCanvasTap,
@@ -921,6 +924,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             strokeMoveHandlersRef.current.onPointerCancel(e),
         }),
         (event, ctx) => {
+          if (ctx.interactivityLocked) return false;
           if (useToolStore.getState().pendingNodeType !== null) return false;
           if (toolRef.current !== 'lasso') return false;
           if (event.button !== 0 || !event.isPrimary) return false;
@@ -954,6 +958,7 @@ export const Canvas: React.FC<CanvasProps> = ({
             lassoHandlersRef.current.onPointerCancel(toReact(e)),
         }),
         (event, ctx) =>
+          !ctx.interactivityLocked &&
           useToolStore.getState().pendingNodeType === null &&
           toolRef.current === 'lasso' &&
           event.button === 0 &&
@@ -1345,6 +1350,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           wrapperRef={wrapperRef}
           rfInstanceRef={rfInstanceRef}
           inputMode={inputMode}
+          interactivityLocked={interactivityLocked}
           explicitToolActive={tool === 'lasso' || Boolean(pendingNodeType)}
           onTouchTakeover={handleTouchTakeover}
           onEmptyCanvasTap={() => selectNodes([])}

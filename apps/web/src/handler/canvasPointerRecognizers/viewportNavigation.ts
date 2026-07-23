@@ -250,7 +250,7 @@ export function createViewportNavigationRecognizer(): PointerRecognizer<
       // works even when a full-screen tool overlay (Sketch) covers the
       // node and steals the DOM target — the pen keeps drawing while the
       // finger picks nodes.
-      if (phase === 'pending') {
+      if (phase === 'pending' && !ctx.interactivityLocked) {
         const nodeId = nodeIdAtScreenPoint(panStart.x, panStart.y);
         if (nodeId) ctx.onNodeTap(nodeId);
         else ctx.onEmptyCanvasTap();
