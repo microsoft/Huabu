@@ -326,6 +326,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     provider: llmConfig?.provider,
     defaultModelId: llmConfig?.model,
     enabled: agentBinding.kind !== 'external',
+    threadHasMessages: messages.length > 0,
   });
 
   // Three-state connection summary for the header badge, derived from

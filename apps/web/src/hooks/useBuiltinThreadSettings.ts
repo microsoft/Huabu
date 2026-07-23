@@ -31,6 +31,13 @@ interface UseBuiltinThreadSettingsArgs {
   defaultModelId: string | null | undefined;
   /** Only fetch/operate for built-in threads. */
   enabled: boolean;
+  /**
+   * Whether the thread already has a persisted record (i.e. has run at
+   * least one turn / has messages). Before that, the settings endpoints
+   * have nothing to target, so a selection is only held locally and
+   * carried on the first message — we skip the POST to avoid a 404.
+   */
+  threadHasMessages: boolean;
 }
 
 const EMPTY_SETTINGS: ChatThreadSettings = {
@@ -44,6 +51,7 @@ export function useBuiltinThreadSettings({
   provider,
   defaultModelId,
   enabled,
+  threadHasMessages,
 }: UseBuiltinThreadSettingsArgs) {
   const [models, setModels] = useState<LLMModelInfo[]>([]);
   const [settings, setSettings] = useState<ChatThreadSettings>(EMPTY_SETTINGS);
@@ -105,22 +113,24 @@ export function useBuiltinThreadSettings({
     async (modelId: string) => {
       if (!threadId) return;
       setSettings((s) => ({ ...s, modelId })); // optimistic
+      // No persisted record yet → hold locally; the first message carries
+      // it (skip the POST so nothing 404s).
+      if (!threadHasMessages) return;
       try {
         await setChatThreadModel(threadId, modelId, canvasId ?? undefined);
       } catch {
-        // Keep the optimistic value: before the thread's first message the
-        // endpoint 404s (no record yet), and the selection is carried on
-        // the first message instead. A genuinely bad value is corrected by
+        // Keep the optimistic value; a genuinely bad value is corrected by
         // the next settings fetch.
       }
     },
-    [threadId, canvasId],
+    [threadId, canvasId, threadHasMessages],
   );
 
   const selectReasoningEffort = useCallback(
     async (reasoningEffort: string) => {
       if (!threadId) return;
       setSettings((s) => ({ ...s, reasoningEffort })); // optimistic
+      if (!threadHasMessages) return;
       try {
         await setChatThreadReasoningEffort(
           threadId,
@@ -128,10 +138,10 @@ export function useBuiltinThreadSettings({
           canvasId ?? undefined,
         );
       } catch {
-        // See selectModel: keep the optimistic value; carried on first send.
+        // Keep the optimistic value; carried on the next send.
       }
     },
-    [threadId, canvasId],
+    [threadId, canvasId, threadHasMessages],
   );
 
   // The effective model id: the per-thread override, else the global default.
