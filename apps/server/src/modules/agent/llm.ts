@@ -15,6 +15,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import {
   stream as piStream,
   complete as piComplete,
@@ -79,8 +80,25 @@ function getProviderModels(providerId: KnownProvider): Model<Api>[] {
   return getModels(providerId as BuiltinProvider) as Model<Api>[];
 }
 
+/**
+ * APIs that expose OpenAI's `service_tier` stream option. Only models on
+ * one of these can carry a per-thread service-tier selector.
+ */
+const SERVICE_TIER_APIS = new Set([
+  'openai-responses',
+  'openai-codex-responses',
+  'azure-openai-responses',
+]);
+
+/** Static service-tier value list surfaced for `SERVICE_TIER_APIS` models. */
+const SERVICE_TIERS = ['auto', 'flex', 'priority'] as const;
+
 /** Map a pi-ai catalog model to the wire `LLMModelInfo` shape. */
 function toModelInfo(m: Model<Api>, providerId: string): LLMModelInfo {
+  const reasoningEfforts = getSupportedThinkingLevels(m).filter(
+    (level) => level !== 'off',
+  );
+  const serviceTiers = SERVICE_TIER_APIS.has(m.api) ? [...SERVICE_TIERS] : [];
   return {
     id: m.id,
     name: m.name || m.id,
@@ -91,6 +109,8 @@ function toModelInfo(m: Model<Api>, providerId: string): LLMModelInfo {
     ...(typeof m.contextWindow === 'number'
       ? { contextWindow: m.contextWindow }
       : {}),
+    ...(reasoningEfforts.length > 0 ? { reasoningEfforts } : {}),
+    ...(serviceTiers.length > 0 ? { serviceTiers } : {}),
   };
 }
 

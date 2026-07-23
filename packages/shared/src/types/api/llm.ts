@@ -70,6 +70,20 @@ export interface LLMModelInfo {
    * Omitted for models the registry does not describe.
    */
   contextWindow?: number;
+  /**
+   * Supported reasoning-effort levels for this model (pi-ai thinking
+   * levels, excluding `off`), e.g. `['low','medium','high']`. Omitted /
+   * empty ⇒ the model has no reasoning-effort control. Powers the
+   * per-thread reasoning-effort selector.
+   */
+  reasoningEfforts?: string[];
+  /**
+   * Supported service tiers for this model's API (only OpenAI-responses /
+   * codex-responses / azure-responses expose the knob), e.g.
+   * `['auto','flex','priority']`. Omitted / empty ⇒ no service-tier
+   * control.
+   */
+  serviceTiers?: string[];
 }
 
 // ==================== Active Configuration ====================

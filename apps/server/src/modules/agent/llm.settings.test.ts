@@ -71,6 +71,30 @@ describe('LLM provider catalog', () => {
     expect(typeof priced!.contextWindow).toBe('number');
     expect(priced!.contextWindow).toBeGreaterThan(0);
   });
+
+  it('surfaces reasoning-effort and service-tier capability for built-in models', () => {
+    const models = getModelsForProvider('openai');
+
+    // Reasoning-capable models expose their supported effort levels; the
+    // list never contains the internal `off` sentinel.
+    const withEfforts = models.filter(
+      (m) => (m.reasoningEfforts?.length ?? 0) > 0,
+    );
+    expect(withEfforts.length).toBeGreaterThan(0);
+    for (const m of withEfforts) {
+      expect(m.reasoningEfforts).not.toContain('off');
+    }
+
+    // OpenAI-responses models advertise the service-tier knob; every value
+    // comes from the fixed tier list.
+    const withTiers = models.filter((m) => (m.serviceTiers?.length ?? 0) > 0);
+    expect(withTiers.length).toBeGreaterThan(0);
+    for (const m of withTiers) {
+      for (const tier of m.serviceTiers!) {
+        expect(['auto', 'flex', 'priority']).toContain(tier);
+      }
+    }
+  });
 });
 
 describe('OpenAI live model discovery', () => {
