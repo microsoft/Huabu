@@ -3,7 +3,7 @@
 > Structure, dependency rules, and conventions for the frontend. The point of
 > this doc is the **layering rules** below — not an exhaustive file listing
 > (those rot fast; `ls` the dir for the current files).
-> Last updated: 2026-07-14
+> Last updated: 2026-07-23
 
 ---
 
@@ -14,7 +14,8 @@ apps/web/src/
 ├── App.tsx        # Router + WorkspaceGuard
 ├── main.tsx       # ReactDOM entry
 ├── index.css      # Global CSS / design tokens
-├── pages/         # Route-level pages & app shell
+├── pages/         # Production route-level pages & app shell
+│   └── playground/ # Development-only visual and interaction test routes
 ├── components/    # Reusable UI (no business logic): Common, Nodes, Panels, Messages, Milkdown, CodeMirror, Search
 ├── handler/       # Pure processing logic, no React: canvasCommand/, sketch/, snap/, pdfHighlight/
 ├── hooks/         # Shared React hooks
@@ -71,6 +72,7 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 5. **Shared hooks** belong in `hooks/`; single-component hooks stay co-located.
 6. **Barrel exports** (`index.ts`) provide clean import paths in `handler/`, `utils/io/`, `utils/node/`.
 7. **Design tokens only** — never raw hex / Tailwind palette / ShadCN aliases. The token declarations in [`apps/web/src/index.css`](../../apps/web/src/index.css) are authoritative; reusable UI contracts live in [`apps/web/src/components/Common/`](../../apps/web/src/components/Common/).
+8. **Development playgrounds** belong in `pages/playground/`, use route-level lazy imports, are registered only when `import.meta.env.DEV` is true, and live outside `WorkspaceGuardLayout` so visual testing does not require an active workspace.
 
 The keyboard shortcut catalog may retain internal runtime bindings with `hidden: true`; `getKeyboardShortcutSections()` excludes them from the user-facing modal. Removed bindings must be deleted from the catalog rather than left as display-only entries.
 

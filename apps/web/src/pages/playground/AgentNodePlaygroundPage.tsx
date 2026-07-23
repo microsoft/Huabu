@@ -825,7 +825,7 @@ function ChoiceButton<T extends string>({
   );
 }
 
-type ApprovalProposalState = 'running' | 'awaiting-approval';
+type ApprovalState = 'running' | 'awaiting-approval';
 
 const APPROVAL_DEMO_OPTIONS = [
   { id: 'allow-once', label: 'Allow once', reject: false, primary: true },
@@ -840,7 +840,7 @@ function ApprovalStatusMark({
 }: {
   icon: AgentIconValue;
   size: number;
-  state: ApprovalProposalState;
+  state: ApprovalState;
 }) {
   const awaitingApproval = state === 'awaiting-approval';
   const innerSize = Math.round(size * 0.8);
@@ -890,27 +890,26 @@ function ApprovalStatusMark({
   );
 }
 
-function ApprovalRequiredProposal({ icon }: { icon: AgentIconValue }) {
-  const [state, setState] =
-    useState<ApprovalProposalState>('awaiting-approval');
+function ApprovalRequiredReference({ icon }: { icon: AgentIconValue }) {
+  const [state, setState] = useState<ApprovalState>('awaiting-approval');
   const [resolution, setResolution] = useState<string | null>(null);
   const awaitingApproval = state === 'awaiting-approval';
 
-  const selectState = (nextState: ApprovalProposalState) => {
+  const selectState = (nextState: ApprovalState) => {
     setState(nextState);
     if (nextState === 'awaiting-approval') setResolution(null);
   };
 
   return (
-    <div className="border-warning bg-surface ring-warning/15 rounded-2xl border p-6 ring-2">
+    <section className="border-edge-default mt-6 border-t pt-6">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <h2 className="text-fg-default font-semibold">
-              Approval required · UI proposal
+              Approval required · production reference
             </h2>
             <span className="bg-warning-bg text-warning rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase">
-              Blocking state
+              Shipped
             </span>
           </div>
           <p className="text-fg-muted max-w-3xl text-sm">
@@ -924,7 +923,7 @@ function ApprovalRequiredProposal({ icon }: { icon: AgentIconValue }) {
             [
               { value: 'running', label: 'Running' },
               { value: 'awaiting-approval', label: 'Approval required' },
-            ] as { value: ApprovalProposalState; label: string }[]
+            ] as { value: ApprovalState; label: string }[]
           ).map((option) => (
             <Button
               key={option.value}
@@ -1084,7 +1083,7 @@ function ApprovalRequiredProposal({ icon }: { icon: AgentIconValue }) {
         <span>Shield remains distinct from Conflict</span>
         <span>Reduced motion keeps the full visual signal</span>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1633,7 +1632,7 @@ function LodAgentChip({
  * chrome, avatar detail threshold, and open-bubble treatment instead of copying
  * those decisions into a second playground-only implementation.
  */
-function FinalQuestionNodeLodProposal({ icon }: { icon: AgentIconValue }) {
+function FinalQuestionNodeLodReference({ icon }: { icon: AgentIconValue }) {
   const [zoom, setZoom] = useState(1);
   const [status, setStatus] = useState<AgentBadgeStatus>('open');
   const [source, setSource] = useState<ChipSource>('external');
@@ -1684,16 +1683,16 @@ function FinalQuestionNodeLodProposal({ icon }: { icon: AgentIconValue }) {
         <div>
           <div className="mb-2 flex items-center gap-2">
             <h2 className="text-fg-default font-semibold">
-              Finalized · shipped Question-node LOD
+              Finalized · shipped Question-node states
             </h2>
             <span className="bg-info-bg text-info rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase">
               1:1 production
             </span>
           </div>
           <p className="text-fg-muted max-w-3xl text-sm">
-            This is the locked solution, rendered with the production takeover
-            curve and production mark component. The earlier playground
-            implementation remains below as proposal history.
+            Locked production references for semantic zoom, status marks, and
+            blocking permission requests. The earlier playground implementation
+            remains below as proposal history.
           </p>
         </div>
         <div className="text-fg-subtle text-right text-xs">
@@ -1818,6 +1817,8 @@ function FinalQuestionNodeLodProposal({ icon }: { icon: AgentIconValue }) {
         <span>Continuous mark geometry · binary card body</span>
         <span>Full avatar → identity dot below 7px</span>
       </div>
+
+      <ApprovalRequiredReference icon={icon} />
     </div>
   );
 }
@@ -2310,11 +2311,7 @@ export default function AgentNodePlaygroundPage() {
 
       <main className="mx-auto max-w-7xl px-6 py-8">
         <section className="mb-14">
-          <ApprovalRequiredProposal icon={icon} />
-        </section>
-
-        <section className="mb-14">
-          <FinalQuestionNodeLodProposal icon={icon} />
+          <FinalQuestionNodeLodReference icon={icon} />
         </section>
 
         <section className="mb-14">

@@ -16,15 +16,39 @@ import { NativeMenuBridge } from './components/Shell/NativeMenuBridge';
 import { WindowChrome } from './components/Shell/WindowChrome';
 import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
 import { useInputModeListener } from './hooks/useInputMode';
-import AgentNodePlaygroundPage from './pages/AgentNodePlaygroundPage';
 import CanvasListPage from './pages/CanvasListPage';
 import CanvasPage from './pages/CanvasPage/CanvasPage.tsx';
-import ComponentShowcasePage from './pages/ComponentShowcasePage';
-import ToolCallPlaygroundPage from './pages/ToolCallPlaygroundPage';
 import { WorkspaceLoadingScreen } from './pages/WorkspaceLoadingScreen';
 import WorkspaceSetupPage from './pages/WorkspaceSetupPage';
 import { drainPendingSaves } from './store/canvasStore.ts';
 import { useWorkspaceStore } from './store/workspaceStore';
+
+const playgroundRoutes = import.meta.env.DEV
+  ? [
+      {
+        path: '/playground/components',
+        lazy: async () => ({
+          Component: (await import('./pages/playground/ComponentShowcasePage'))
+            .default,
+        }),
+      },
+      {
+        path: '/playground/tool-calls',
+        lazy: async () => ({
+          Component: (await import('./pages/playground/ToolCallPlaygroundPage'))
+            .default,
+        }),
+      },
+      {
+        path: '/playground/agent-nodes',
+        lazy: async () => ({
+          Component: (
+            await import('./pages/playground/AgentNodePlaygroundPage')
+          ).default,
+        }),
+      },
+    ]
+  : [];
 
 /**
  * Carries the "still bootstrapping the workspace store" flag from the
@@ -198,22 +222,11 @@ export default function App() {
             // reach it to switch workspaces in free mode. The page itself
             // redirects to "/" in managed mode.
             { path: '/setup', element: <SetupRoute /> },
+            ...playgroundRoutes,
             {
               element: <WorkspaceGuardLayout />,
               children: [
                 { path: '/', element: <CanvasListPage /> },
-                {
-                  path: '/playground/components',
-                  element: <ComponentShowcasePage />,
-                },
-                {
-                  path: '/playground/tool-calls',
-                  element: <ToolCallPlaygroundPage />,
-                },
-                {
-                  path: '/playground/agent-nodes',
-                  element: <AgentNodePlaygroundPage />,
-                },
                 { path: '/canvas/:canvasId', element: <CanvasPage /> },
                 { path: '*', element: <Navigate to="/" replace /> },
               ],

@@ -12,23 +12,23 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 
-import { Button } from '../components/Common/Button';
-import { DragToCanvasHandleButton } from '../components/Common/DragToCanvasHandleButton';
+import { Button } from '@/components/Common/Button';
+import { DragToCanvasHandleButton } from '@/components/Common/DragToCanvasHandleButton';
 import {
   DropdownMenu,
   DropdownMenuItem,
-} from '../components/Common/DropdownMenu';
-import { EmptyState } from '../components/Common/EmptyState';
-import { Input } from '../components/Common/Input';
-import { Loading } from '../components/Common/Loading';
-import { Modal } from '../components/Common/Modal';
-import { Popover } from '../components/Common/Popover';
-import { Select } from '../components/Common/Select';
-import { SplitSelect } from '../components/Common/SplitSelect';
-import { TabGroup } from '../components/Common/TabGroup';
-import { toast } from '../components/Common/Toast';
-import { Tooltip } from '../components/Common/Tooltip';
-import { Header } from '../components/Panels/Header/Header';
+} from '@/components/Common/DropdownMenu';
+import { EmptyState } from '@/components/Common/EmptyState';
+import { Input } from '@/components/Common/Input';
+import { Loading } from '@/components/Common/Loading';
+import { Modal } from '@/components/Common/Modal';
+import { Popover } from '@/components/Common/Popover';
+import { Select } from '@/components/Common/Select';
+import { SplitSelect } from '@/components/Common/SplitSelect';
+import { TabGroup } from '@/components/Common/TabGroup';
+import { toast } from '@/components/Common/Toast';
+import { Tooltip } from '@/components/Common/Tooltip';
+import { Header } from '@/components/Panels/Header/Header';
 
 // ─── Button constants ───────────────────────────────────────────────────────
 
