@@ -612,16 +612,18 @@ export class Agentlet {
     try {
       // Inject daemon-managed env vars into the spawned agent process:
       // - AGENTLET_SERVER: WS URL for reachback HTTP derivation
+      // - AGENTLET_TOKEN: daemon token used to authenticate reachback
       // - envRegistry: all well-known dirs (AGENTLET_REACHBACK_DIR, etc.)
-      // sessionSpec.env (from host app) is merged last to allow overrides.
+      // Host env overrides defaults, except for the daemon-owned token.
       const agent = new AgentProcess({
         command: sessionSpec.command,
         cwd,
-        env: {
-          AGENTLET_SERVER: this.options.server,
-          ...this.envRegistry,
-          ...sessionSpec.env,
-        },
+        env: buildAgentProcessEnv(
+          this.options.server,
+          this.options.token,
+          this.envRegistry,
+          sessionSpec.env,
+        ),
       })
 
       agent.on('error', (err) => {
@@ -1026,5 +1028,19 @@ export class Agentlet {
     }
     process.on('SIGINT', handler)
     process.on('SIGTERM', handler)
+  }
+}
+
+export function buildAgentProcessEnv(
+  server: string,
+  token: string,
+  envRegistry: Readonly<Record<string, string>>,
+  sessionEnv?: Readonly<Record<string, string>>,
+): Record<string, string> {
+  return {
+    AGENTLET_SERVER: server,
+    ...envRegistry,
+    ...sessionEnv,
+    AGENTLET_TOKEN: token,
   }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildAgentProcessEnv,
   resolveAgentletId,
   resolveManagedSetupWorkerPath,
 } from '../src/agentlet.js'
@@ -51,5 +52,35 @@ describe('managed setup worker resolution', () => {
         () => '/workspace/packages/agent-team/dist/setup/managed-setup-worker.js',
       ),
     ).toBe('/workspace/packages/agent-team/dist/setup/managed-setup-worker.js')
+  })
+})
+
+describe('spawned agent environment', () => {
+  it('injects the daemon token even when it was provided only through CLI options', () => {
+    expect(
+      buildAgentProcessEnv(
+        'ws://127.0.0.1:3001/api/acp/agent',
+        'cli-token',
+        { AGENTLET_REACHBACK_DIR: '/tmp/reachback' },
+        { HUABU_RFS_URL: 'http://127.0.0.1:3001/api/rfs/canvas-1' },
+      ),
+    ).toEqual({
+      AGENTLET_SERVER: 'ws://127.0.0.1:3001/api/acp/agent',
+      AGENTLET_TOKEN: 'cli-token',
+      AGENTLET_REACHBACK_DIR: '/tmp/reachback',
+      HUABU_RFS_URL: 'http://127.0.0.1:3001/api/rfs/canvas-1',
+    })
+  })
+
+  it('keeps the daemon token authoritative over host environment overrides', () => {
+    expect(
+      buildAgentProcessEnv('ws://daemon.test', 'daemon-token', {}, {
+        AGENTLET_SERVER: 'ws://host.test',
+        AGENTLET_TOKEN: 'host-token',
+      }),
+    ).toMatchObject({
+      AGENTLET_SERVER: 'ws://host.test',
+      AGENTLET_TOKEN: 'daemon-token',
+    })
   })
 })
