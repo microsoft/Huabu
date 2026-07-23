@@ -1,17 +1,17 @@
 # Question Node Zoom LOD — Avatar Takeover
 
-Status: Shipped — discrete **three-stage** takeover (the continuous-`t` engine designed in the "V2" section below was prototyped, then deliberately superseded during review — see "What actually shipped")
+Status: Shipped — **continuous-`t` takeover**. (This project went binary V1 → discrete three-stage → and finally landed on the continuous-`t` engine that the "V2" section below first explored. The intermediate three-stage design was itself superseded — see "What actually shipped".)
 Last updated: 2026-07-23
 
-## What actually shipped (discrete three-stage)
+## What actually shipped (continuous-`t` takeover)
 
-The authoritative description now lives in [canvas-zoom-rendering.md §3.1](../architecture/canvas-zoom-rendering.md#31-three-stage-takeover-question-node) and [question-node.md §5.1](../architecture/question-node.md). Summary of the final design and why it diverged from the "V2" continuous engine below:
+The authoritative description now lives in [canvas-zoom-rendering.md §3.1](../architecture/canvas-zoom-rendering.md#31-continuous-zoom-takeover-question-node) and [question-node.md §5.1](../architecture/question-node.md). Summary of the final design:
 
-- **Three crisp resting stages, not a continuous `t`.** `readable` (card + a corner badge that scales with the card and always shows the full character) → `avatar` (card fades out binary, a centred avatar fills the node footprint) → `dot` (< ~22 px). The continuous morph is only the transition animation. This was chosen because a continuous `t` leaves ugly _static_ in-between frames (half-faded card, mid-size mark) when the user rests at an intermediate zoom; discrete stages are always crisp at rest.
-- **The card fade is binary** (`data-lod-body` attribute), not a per-frame `--lod-body-opacity` var.
-- **The stand-in fills the node footprint** (`AVATAR_FRACTION = 1.0`, chip border dropped in the stand-in stages) so edges — which connect to the node footprint — stay visually attached to the mark instead of floating around a smaller icon.
-- **No caption.** The avatar-plus-caption stand-in was taller than the node it replaced; dropped.
-- **Files:** [`config/nodeTakeover.ts`](../../apps/web/src/config/nodeTakeover.ts) (`resolveQuestionStage` + sizes), [`hooks/useNodeTakeover.ts`](../../apps/web/src/hooks/useNodeTakeover.ts) (`{ stage, size, point }`), [`components/Nodes/NodeTakeoverLayer.tsx`](../../apps/web/src/components/Nodes/NodeTakeoverLayer.tsx) (positioning, FLIP transition, binary card fade), [`components/Nodes/question/QuestionTakeoverMark.tsx`](../../apps/web/src/components/Nodes/question/QuestionTakeoverMark.tsx) (badge / avatar / dot). `QuestionMinimalAvatar` was folded away.
+- **Continuous morph, not discrete stages.** The mark's size and position are a smoothstep-eased function of the node's on-screen width (`collapseProgress` → `t ∈ [0,1]`): the badge glides corner → centre and resizes badge → mark in lock-step with the zoom gesture. The earlier three-stage design (with a one-shot FLIP between crisp resting stages) was dropped because the stage swap + decoupled FLIP felt abrupt; the continuous geometry tracks the gesture with no snap. The static-in-between-frames worry that motivated discrete stages did not materialise in practice.
+- **The card fade is still binary** (`data-lod-body` attribute), derived from a two-value `readable | collapsed` stage (`resolveQuestionStage`, with hysteresis) that governs body visibility + chrome ONLY — never the mark's size/position.
+- **The glyph is size-driven, not a stage.** Full avatar down to `MARK_FACE_MIN` px, then a solid identity dot.
+- **The `open` chat bubble is a shared component** ([`QuestionAgentBubble`](../../apps/web/src/components/Nodes/question/QuestionAgentBubble.tsx)) reused by both the readable corner badge and the takeover mark, and its avatar is centred strictly on the bubble's circle geometry (no per-size pixel fudge).
+- **Files:** [`config/nodeTakeover.ts`](../../apps/web/src/config/nodeTakeover.ts) (`collapseProgress`, `badgeSizeForNode` / `collapsedMarkSize`, `resolveQuestionStage`, `lerp`, sizes), [`hooks/useNodeTakeover.ts`](../../apps/web/src/hooks/useNodeTakeover.ts) (`{ stage, size, point, collapsedRadius }`, interpolated by `t`), [`components/Nodes/NodeTakeoverLayer.tsx`](../../apps/web/src/components/Nodes/NodeTakeoverLayer.tsx) (continuous positioning, binary card fade — no FLIP), [`components/Nodes/question/QuestionTakeoverMark.tsx`](../../apps/web/src/components/Nodes/question/QuestionTakeoverMark.tsx) (the one badge across the whole range), [`components/Nodes/question/QuestionAgentBubble.tsx`](../../apps/web/src/components/Nodes/question/QuestionAgentBubble.tsx) (shared bubble).
 - The generic-engine ambition (any node type opts in) is **deferred, not built** — the staging math is question-tuned for now.
 
 > The sections below record the earlier V1 (binary) and the explored "V2" continuous-engine design for history. They do **not** describe the shipped code; treat "What actually shipped" above + the architecture docs as authoritative.

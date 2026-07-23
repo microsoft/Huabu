@@ -133,9 +133,9 @@ export function collapsedMarkSize(
 }
 
 /**
- * Stage-1 badge diameter (screen px). Proportional to the node's shorter side
- * (so it scales with the card, both with zoom AND with the node's own size),
- * with min/max clamps.
+ * Readable-end badge diameter (screen px) — the mark's size at `t = 0`.
+ * Proportional to the node's shorter side (so it scales with the card, both
+ * with zoom AND with the node's own size), with min/max clamps.
  */
 export function badgeSizeForNode(
   nodeScreenW: number,
@@ -148,16 +148,6 @@ export function badgeSizeForNode(
       BADGE_FRACTION * Math.min(nodeScreenW, nodeScreenH),
     ),
   );
-}
-
-/** Rendered mark diameter (screen px) for a stage at the current geometry. */
-export function markSizeForStage(
-  stage: QuestionLodStage,
-  nodeScreenW: number,
-  nodeScreenH: number,
-): number {
-  if (stage === 'readable') return badgeSizeForNode(nodeScreenW, nodeScreenH);
-  return collapsedMarkSize(nodeScreenW, nodeScreenH);
 }
 
 /**
