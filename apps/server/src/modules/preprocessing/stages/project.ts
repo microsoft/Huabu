@@ -39,7 +39,13 @@ export function project(
   // that skip Persist (image, frame, …) fall back to the raw extracted /
   // enriched label.
   if (!isLabelProtected(request.snapshot.labelSource, request.snapshot.title)) {
-    const rawAutoLabel = ctx.extracted?.title ?? ctx.enriched?.suggestedLabel;
+    // `ctx.normalized.label` is the last-resort local fallback (e.g. a
+    // `question`'s first line when the LLM enrich stage produced nothing —
+    // offline / provider unreachable), so the node is never left nameless.
+    const rawAutoLabel =
+      ctx.extracted?.title ??
+      ctx.enriched?.suggestedLabel ??
+      ctx.normalized?.label;
     const autoLabel = ctx.persisted?.persistedLabel ?? rawAutoLabel;
     if (autoLabel) {
       // Skip when the suggestion already matches the snapshot label

@@ -7,6 +7,8 @@
  * `nodes/<nodeId>.md` is keyed by.
  */
 
+import { extractTitleFromText } from '../utils.js';
+
 import type {
   ResolvedInput,
   ExtractResult,
@@ -29,12 +31,19 @@ export function normalize(
   //   LLM-generated label later via the pipeline backfill.
   // - For note/text nodes, resolved.title (derived from content) is a
   //   reasonable fallback.
+  // - For content-bearing nodes with no title from either source (e.g. a
+  //   `question` created while the LLM provider is unreachable, which has no
+  //   Extract stage), derive a stable local title from the first line so the
+  //   node is never nameless. This is a permanent `auto` label — it is not
+  //   re-derived once set, so the visible name stays stable.
   const label =
     resolved.labelSource === 'user' || resolved.labelSource === 'agent'
       ? (resolved.title ?? extracted.title)
       : resolved.nodeType === 'web' || resolved.nodeType === 'pdf'
         ? extracted.title
-        : (extracted.title ?? resolved.title);
+        : (extracted.title ??
+          resolved.title ??
+          extractTitleFromText(canonicalContent));
 
   // Metadata: merge extracted metadata with any existing metadata
   const metadata = extracted.metadata

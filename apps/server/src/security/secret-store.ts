@@ -38,6 +38,14 @@ export async function initializeSecretStore(): Promise<void> {
   const encryptedPath = join(dataDir, 'encrypted-secrets.json');
   const encodedKey = process.env.HUABU_SECRET_KEY?.trim();
   if (encodedKey) {
+    // Consume the master key from the environment and scrub it. The parsed
+    // key now lives only inside the EncryptedFileSecretStore instance below,
+    // so it is never inherited by forked child processes (the agentlet
+    // daemon and the external agents it spawns). Defense in depth alongside
+    // the agentlet transport's `HUABU_` namespace strip; see
+    // docs/architecture/credential-storage.md and
+    // docs/architecture/agent-reachback.md.
+    delete process.env.HUABU_SECRET_KEY;
     const store = new EncryptedFileSecretStore(
       dataDir,
       parseServerMasterKey(encodedKey),

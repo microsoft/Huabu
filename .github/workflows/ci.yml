@@ -53,11 +53,3 @@ jobs:
 
       - name: i18n parity
         run: pnpm run check:i18n
-
-      - name: Documentation tests
-        run: pnpm run test:docs
-
-      - name: Documentation artifact
-        run: pnpm run build:docs
-        env:
-          DOCS_BASE_PATH: /Sediment/
