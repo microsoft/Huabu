@@ -136,8 +136,19 @@ export default function ExternalAgents() {
             <strong>Display name</strong>,
             'Optional. Huabu derives a name from the agent or Preset and the working-directory folder when you leave it empty.',
           ],
+          [
+            <strong>Icon</strong>,
+            'Choose one of four Profile icon shapes and four colors to identify this External Agent in Agent menus and on Agent Nodes. Huabu assigns a Profile icon automatically, and you can change it later.',
+          ],
         ]}
       />
+      <P>
+        See{' '}
+        <DocLink href="/docs/ai/agents-and-status#external-agent-profile-icons">
+          External Agent Profile icons
+        </DocLink>{' '}
+        to preview the available shapes and colors.
+      </P>
       <P>
         With no Preset, select <strong>Create profile</strong>. The Profile is
         ready to use immediately. Choose <strong>Custom command</strong> at the

@@ -80,6 +80,13 @@ const groupsRaw: RawGroup[] = [
         load: () => import('./sections/ai/WorkWithAI'),
       },
       {
+        to: '/docs/ai/agents-and-status',
+        label: 'Agents & Status',
+        description:
+          'Recognize Agent identities, External Agent Profile icons, and Agent Node status.',
+        load: () => import('./sections/ai/AgentsAndStatus'),
+      },
+      {
         to: '/docs/ai/models-and-capabilities',
         label: 'Models & Capabilities',
         description:

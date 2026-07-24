@@ -29,13 +29,15 @@ export default function ModelsAndCapabilities() {
       <H2>Choose your models</H2>
       <P>
         Open <strong>Settings &gt; Huabu Agent</strong> to configure models and
-        optional capabilities. Only the Chat Model is required.
+        optional capabilities. <strong>Chat</strong> and <strong>Agent</strong>{' '}
+        require a <strong>Provider</strong>, its credentials or sign-in, and a
+        Chat Model or Azure OpenAI Deployment.
       </P>
       <Table
         headers={['Setting', 'Used for', 'Required']}
         rows={[
           [
-            <strong>Chat Model</strong>,
+            <strong>Chat Model or Deployment</strong>,
             'Conversations, Agent work, and running Skills.',
             'Yes',
           ],
@@ -54,37 +56,54 @@ export default function ModelsAndCapabilities() {
 
       <H2>Chat Model</H2>
       <P>
-        The Chat Model powers built-in Chat and Agent conversations. It reasons
-        over your request, reads Space material, chooses tools, and plans Space
-        changes. Running a Skill to complete a task also uses this model. Chat
-        acts as the fallback when the Utility Model is not configured or cannot
-        process required image input.
+        The <strong>Chat Model</strong> powers built-in Chat and Agent
+        conversations. It reasons over your request, reads Space material,
+        chooses tools, and plans Space changes. Running a <strong>Skill</strong>{' '}
+        to complete a task also uses this model. Chat acts as the fallback when
+        the <strong>Utility Model</strong> is not configured or cannot process
+        required image input.
+      </P>
+      <P>
+        When a Provider exposes multiple models, Settings labels the selection{' '}
+        <strong>Default model</strong>. Built-in Chat and Agent conversations
+        use it until you switch models above the chat input. The new choice is
+        saved for that conversation only and does not change the Settings
+        default. A Provider or account that exposes one model shows{' '}
+        <strong>Model</strong> instead. <strong>Azure OpenAI</strong> uses the
+        single <strong>Deployment</strong> configured in Settings, so there is
+        no conversation-level model choice. Models with configurable reasoning
+        also show a <strong>Reasoning</strong> control above the chat input.
       </P>
       <Callout tone="tip">
-        Choose the most capable model you want to use for interactive work. It
-        needs a sufficiently large context window for longer conversations and
-        Spaces.
+        For a multi-model Provider, keep a capable model with a sufficiently
+        large context window as your <strong>Default model</strong>, then switch
+        individual conversations when a task benefits from a different model.
       </Callout>
 
       <H2>Utility Model</H2>
       <P>
-        The optional Utility Model handles frequent, lightweight background
-        work: Memory curation, Skill creation and updates, intent suggestions,
-        image and Frame labels, and content labels, summaries, and keywords. A
-        faster or less expensive model can reduce latency and cost for these
-        tasks.
+        The optional <strong>Utility Model</strong> handles frequent,
+        lightweight background work: Memory curation, Skill creation and
+        updates, intent suggestions, image and Frame labels, and content labels,
+        summaries, and keywords. A faster or less expensive model can reduce
+        latency and cost for these tasks.
       </P>
       <Callout tone="info">
-        Leave Utility Model set to <strong>Follow chat model</strong> to use the
-        Chat Model for these tasks too.
+        Leave Utility Model set to <strong>Automatic (cheapest)</strong> and
+        Huabu selects the least expensive eligible model that it can confirm for
+        your Chat Model provider. If availability cannot be confirmed, including
+        with a <strong>Codex subscription login</strong>, Huabu uses the{' '}
+        <strong>Chat Model</strong>. For predictable capability and cost, choose
+        a specific Utility Model instead.
       </Callout>
 
       <H2>Image understanding</H2>
       <P>
-        Chat and Agent can inspect images when the selected Chat Model supports
-        image input. Huabu also uses image input when it labels image nodes or
-        interprets visual context. If a configured Utility Model cannot accept
-        images, Huabu falls back to the Chat Model for that image task.
+        Chat and Agent can inspect images when the selected{' '}
+        <strong>Chat Model</strong> supports image input. Huabu also uses image
+        input when it labels image nodes or interprets visual context. If a
+        configured <strong>Utility Model</strong> cannot accept images, Huabu
+        falls back to the Chat Model for that image task.
       </P>
 
       <H2>Image generation</H2>
