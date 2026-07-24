@@ -16,12 +16,12 @@
  * keeps its slot (just hidden) in read-only mode.
  */
 
-import { ChevronDown, Route } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { AgentIcon } from '@/components/Common/AgentIcon';
-import { readAgentIcon } from '@/utils/agentIcon';
+import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentation';
 
 import {
   AgentMenuOptions,
@@ -34,6 +34,7 @@ import { Popover } from '../../Common/Popover';
 
 import type {
   AgentBinding,
+  AgentIcon,
   AgentMode,
   AgentProfileView,
 } from '@sediment/shared';
@@ -58,6 +59,13 @@ interface AgentSelectorProps {
   onRefreshProfiles?: () => void | Promise<void>;
   /** Disable the control completely (e.g. history not yet loaded). */
   disabled?: boolean;
+  /**
+   * Bind-time avatar snapshot for an external binding whose Profile no
+   * longer exists (question-node `agentIcon`). Preserves the historical
+   * identity in the read-only chip instead of falling back to a generic
+   * icon, mirroring the canvas node.
+   */
+  fallbackIcon?: AgentIcon;
 }
 
 /** Icon + label describing the currently-bound agent. */
@@ -66,17 +74,29 @@ function describeBinding(
   mode: AgentMode,
   labels: { chat: string; agent: string },
   profiles: AgentProfileView[],
+  fallbackIcon?: AgentIcon,
 ): { icon: ReactNode; label: string } {
-  if (binding.kind === 'external') {
-    const profile = profiles.find((p) => p.id === binding.profileId);
-    const icon = profile ? readAgentIcon(profile) : undefined;
+  // Share the external-binding resolution policy with the canvas question
+  // node (live Profile → bind-time snapshot → deterministic default), so a
+  // deleted Profile shows the same identity here as on the canvas. Only the
+  // rendering differs: the chip needs a ReactNode and the built-in agent's
+  // ask/operate faces, which the presentation helper does not model.
+  const presentation = resolveQuestionAgentPresentation({
+    binding,
+    fallbackIcon,
+    profiles,
+  });
+  if (presentation.kind === 'external') {
     return {
-      icon: icon ? (
-        <AgentIcon shape={icon.shape} color={icon.color} size={16} withFace />
-      ) : (
-        <Route size={13} />
+      icon: (
+        <AgentIcon
+          shape={presentation.icon.shape}
+          color={presentation.icon.color}
+          size={16}
+          withFace
+        />
       ),
-      label: profile?.alias ?? binding.alias,
+      label: presentation.alias,
     };
   }
   return mode === 'operate'
@@ -95,6 +115,7 @@ export const AgentSelector = ({
   onSelect,
   onRefreshProfiles,
   disabled = false,
+  fallbackIcon,
 }: AgentSelectorProps) => {
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
@@ -144,6 +165,7 @@ export const AgentSelector = ({
       agent: t('chat.modeAgent'),
     },
     profiles,
+    fallbackIcon,
   );
 
   return (
