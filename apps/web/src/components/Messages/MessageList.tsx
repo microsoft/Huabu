@@ -1,14 +1,22 @@
 import { ArrowDown } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import { AIMessage } from './AIMessage';
 import { IntentSelectMessage } from './IntentSelectMessage';
+import { positionMessageListOnOpen } from './messageListScroll';
 import { StatusMessage } from './StatusMessage';
 import { UserMessage } from './UserMessage';
 import { Button } from '../Common/Button';
 import { Loading } from '../Common/Loading';
 import { ThinkingIndicator } from '../Common/ThinkingIndicator';
 
+import type { MessageListPreferredPosition } from './messageListScroll';
 import type { ChatMessage } from '../../store/chatTypes';
 
 interface MessageListProps {
@@ -26,6 +34,12 @@ interface MessageListProps {
   onIntentReselect?: (messageId: string, intent: string) => void;
   /** Called when the user clicks retry on an interrupted status message. */
   onRetry?: () => void;
+  /** Stable identity for the conversation currently rendered by the list. */
+  viewKey?: string;
+  /** Whether the containing panel is expanded and visible. */
+  isActive?: boolean;
+  /** Where to position the list when the conversation opens. */
+  openPosition?: MessageListPreferredPosition;
 }
 
 export const MessageList = ({
@@ -35,12 +49,32 @@ export const MessageList = ({
   hideAIActions,
   onIntentReselect,
   onRetry,
+  viewKey,
+  isActive = true,
+  openPosition = 'bottom',
 }: MessageListProps) => {
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const prevMessageCountRef = useRef(messages.length);
+  const currentMessageCountRef = useRef(messages.length);
+  currentMessageCountRef.current = messages.length;
+
+  // Opening a conversation is a deliberate navigation action. Position the
+  // list before paint at the final user message (unread) or end (read / blocked).
+  // Direct scrollTop writes keep movement scoped to this panel.
+  useLayoutEffect(() => {
+    if (!isActive || isHistoryLoading) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const position = positionMessageListOnOpen(container, openPosition);
+    isAtBottomRef.current = position !== 'last-user';
+
+    setHasNewMessage(false);
+    prevMessageCountRef.current = currentMessageCountRef.current;
+  }, [viewKey, isActive, isHistoryLoading, openPosition]);
 
   // Find the in-flight assistant message for the *current* turn.
   //

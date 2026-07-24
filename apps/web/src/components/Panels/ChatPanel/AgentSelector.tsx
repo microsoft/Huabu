@@ -16,15 +16,19 @@
  * keeps its slot (just hidden) in read-only mode.
  */
 
-import { ChevronDown, MessageSquare, Route, Sprout } from 'lucide-react';
+import { ChevronDown, Route } from 'lucide-react';
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+
+import { AgentIcon } from '@/components/Common/AgentIcon';
+import { readAgentIcon } from '@/utils/agentIcon';
 
 import {
   AgentMenuOptions,
   useAddAgentEditor,
   type AgentChoice,
 } from './agentMenu';
+import { BuiltInAgentAvatar } from '../../Common/BuiltInAgentAvatar';
 import { cn } from '../../Common/cn';
 import { Popover } from '../../Common/Popover';
 
@@ -61,13 +65,26 @@ function describeBinding(
   binding: AgentBinding,
   mode: AgentMode,
   labels: { chat: string; agent: string },
+  profiles: AgentProfileView[],
 ): { icon: ReactNode; label: string } {
   if (binding.kind === 'external') {
-    return { icon: <Route size={13} />, label: binding.alias };
+    const profile = profiles.find((p) => p.id === binding.profileId);
+    const icon = profile ? readAgentIcon(profile) : undefined;
+    return {
+      icon: icon ? (
+        <AgentIcon shape={icon.shape} color={icon.color} size={16} withFace />
+      ) : (
+        <Route size={13} />
+      ),
+      label: profile?.alias ?? binding.alias,
+    };
   }
   return mode === 'operate'
-    ? { icon: <Sprout size={13} />, label: labels.agent }
-    : { icon: <MessageSquare size={13} />, label: labels.chat };
+    ? {
+        icon: <BuiltInAgentAvatar mode="operate" size={16} />,
+        label: labels.agent,
+      }
+    : { icon: <BuiltInAgentAvatar mode="ask" size={16} />, label: labels.chat };
 }
 
 export const AgentSelector = ({
@@ -119,10 +136,15 @@ export const AgentSelector = ({
     return { x: rect.left, y: rect.top };
   }, []);
 
-  const current = describeBinding(currentBinding, currentMode, {
-    chat: t('chat.modeChat'),
-    agent: t('chat.modeAgent'),
-  });
+  const current = describeBinding(
+    currentBinding,
+    currentMode,
+    {
+      chat: t('chat.modeChat'),
+      agent: t('chat.modeAgent'),
+    },
+    profiles,
+  );
 
   return (
     <>

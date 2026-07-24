@@ -21,12 +21,19 @@ import { SettingControl } from '@/components/Settings/Common/SettingControl';
 import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { SettingSubGroup } from '@/components/Settings/Common/SettingSubGroup';
+import {
+  readAgentIcon,
+  randomAgentIcon,
+  withAgentIcon,
+} from '@/utils/agentIcon';
 
+import { AgentIconField } from './AgentIconField';
 import { ProfileEditActions } from './ProfileEditActions';
 import { ProfileEditFields } from './ProfileEditFields';
 import { ProfileFormFooter } from './ProfileFormFooter';
 import { ReadOnlyField } from './ReadOnlyField';
 
+import type { AgentIconValue } from '@/components/Common/AgentIcon';
 import type {
   AcpAgentCliInfo,
   AcpCommandProfileView,
@@ -220,6 +227,9 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
   const [form, setForm] = useState<CommandProfileFormState>(() =>
     editing ? EMPTY_FORM : { ...EMPTY_FORM, cliId: '' },
   );
+  const [icon, setIcon] = useState<AgentIconValue>(() =>
+    editing ? readAgentIcon(editing) : randomAgentIcon(),
+  );
   const [saving, setSaving] = useState(false);
 
   // Reset the form whenever the editor is (re)opened for a different
@@ -241,6 +251,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
         customCommand: parsed.customCommand,
         cwd: editing.workingDirPath,
       });
+      setIcon(readAgentIcon(editing));
     } else {
       // For new profiles, wait for host-CLI detection to settle before
       // committing a default. Until then keep `cliId` empty so the ACP
@@ -317,7 +328,12 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
       const displayName = form.displayName.trim() || editing.alias;
       setSaving(true);
       try {
-        await updateAcpProfile(editing.id, { alias: displayName });
+        await updateAcpProfile(editing.id, {
+          alias: displayName,
+          ...(icon
+            ? { customData: withAgentIcon(editing.customData, icon) }
+            : {}),
+        });
         toast(t('settings.profileUpdated'), { tone: 'success' });
         await onSaved();
         onClose();
@@ -366,6 +382,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
         workingDirPath: cwd,
         launch: { kind: 'acp-command', command },
         metadata: { cliId: form.cliId },
+        customData: withAgentIcon(undefined, icon),
       };
       await createAcpProfile(payload);
       toast(t('settings.profileCreated'), { tone: 'success' });
@@ -381,7 +398,16 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [form, defaultDisplayName, detectedClis, editing, onSaved, onClose, t]);
+  }, [
+    form,
+    defaultDisplayName,
+    detectedClis,
+    editing,
+    icon,
+    onSaved,
+    onClose,
+    t,
+  ]);
 
   /**
    * One unified picker: installed Agents first, missing Agents disabled
@@ -488,6 +514,12 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
               className="w-full"
             />
           }
+        />
+        <AgentIconField
+          value={icon}
+          onChange={setIcon}
+          alias={form.displayName || editing.alias}
+          disabled={saving}
         />
         <ProfileEditActions
           saving={saving}
@@ -629,6 +661,14 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
           />
         </SettingControl>
       </SettingRow>
+
+      {/* ─── Icon ──────────────────────────────────────────────── */}
+      <AgentIconField
+        value={icon}
+        onChange={setIcon}
+        alias={form.displayName || defaultDisplayName}
+        disabled={saving}
+      />
 
       {/* ─── Actions ───────────────────────────────────────────── */}
       <ProfileFormFooter>

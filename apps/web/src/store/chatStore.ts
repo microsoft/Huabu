@@ -18,6 +18,8 @@ import type {
  */
 const DEFAULT_BINDING: AgentBinding = { kind: 'internal' };
 
+export type QuestionThreadOpenPosition = 'last-user' | 'bottom';
+
 export interface ChatState {
   /**
    * Per-thread message lists. Indexed by threadId, in-memory only.
@@ -79,17 +81,16 @@ export interface ChatState {
    * When set, the chat panel is viewing a question node's conversation thread
    * instead of the normal canvas chat.
    *
-   * `compose: true` marks the *initial* composition of a freshly-created
-   * question node: the thread is still empty, the agent binding is mutable
-   * (the inline agent selector is editable), and the first message the user
-   * sends authors the node's `content` + locks its binding. Without the flag
-   * the panel is in replay mode for an already-run node (binding locked,
-   * mode derived from the node).
+   * Whether this is the *initial* composition of a freshly-created node vs a
+   * replay of an already-run one is NOT stored here — it is derived from the
+   * node's own status (`idle` = composing). That keeps a single source of
+   * truth (the node) and avoids the stored flag drifting out of sync.
    */
   viewingQuestionThread: {
     nodeId: string;
     threadId: string;
-    compose?: boolean;
+    openPosition: QuestionThreadOpenPosition;
+    openSequence: number;
   } | null;
 
   questionReplayByCanvas: Record<
@@ -239,6 +240,7 @@ export interface ChatState {
     threadId: string,
     binding?: AgentBinding,
     canvasId?: string,
+    openPosition?: QuestionThreadOpenPosition,
   ) => void;
   /**
    * Open a freshly-created question node for *composition*: switch the
@@ -481,6 +483,8 @@ export const useChatStore = create<ChatState>()(
             viewingQuestionThread: {
               nodeId: replay.nodeId,
               threadId: replay.threadId,
+              openPosition: 'bottom',
+              openSequence: 0,
             },
             threadId: replay.threadId,
             agentBinding: replay.binding,
@@ -554,7 +558,13 @@ export const useChatStore = create<ChatState>()(
       setSelectionAttachment: (attachment) =>
         set({ selectionAttachment: attachment }),
 
-      openQuestionThread: (nodeId, threadId, binding, canvasId) => {
+      openQuestionThread: (
+        nodeId,
+        threadId,
+        binding,
+        canvasId,
+        openPosition = 'bottom',
+      ) => {
         const {
           threadId: currentThreadId,
           agentBinding: currentBinding,
@@ -566,8 +576,19 @@ export const useChatStore = create<ChatState>()(
           questionReplayByCanvas,
         } = get();
 
-        // Already viewing this exact question thread — nothing to do.
-        if (currentViewing?.threadId === threadId) return;
+        const nextOpenSequence = (currentViewing?.openSequence ?? 0) + 1;
+
+        // Re-opening the same thread still carries a fresh positioning intent.
+        if (currentViewing?.threadId === threadId) {
+          set({
+            viewingQuestionThread: {
+              ...currentViewing,
+              openPosition,
+              openSequence: nextOpenSequence,
+            },
+          });
+          return;
+        }
 
         // If we're already viewing a different question thread, don't
         // overwrite the saved canvas state — keep the original.
@@ -609,7 +630,12 @@ export const useChatStore = create<ChatState>()(
           : currentLastAction;
 
         set({
-          viewingQuestionThread: { nodeId, threadId },
+          viewingQuestionThread: {
+            nodeId,
+            threadId,
+            openPosition,
+            openSequence: nextOpenSequence,
+          },
           threadId: threadId,
           agentBinding: nextBinding,
           ...(!isAlreadyViewing && {
@@ -666,7 +692,12 @@ export const useChatStore = create<ChatState>()(
         const isAlreadyViewing = currentViewing !== null;
 
         set({
-          viewingQuestionThread: { nodeId, threadId, compose: true },
+          viewingQuestionThread: {
+            nodeId,
+            threadId,
+            openPosition: 'bottom',
+            openSequence: (currentViewing?.openSequence ?? 0) + 1,
+          },
           threadId,
           agentBinding: initialBinding,
           messagesByThread: messagesByThread[threadId]

@@ -28,8 +28,8 @@ import { useChatStore } from '@/store/chatStore';
 import { useIntentStore } from '@/store/intentStore';
 import { usePanelStore } from '@/store/panelStore';
 
+import { StatusBadge } from './StatusBadge';
 import { Button } from '../../Common/Button';
-import { StatusBadge } from '../../Common/StatusBadge';
 
 import type { SketchProcessingCluster } from '@/store/intentStore';
 import type { CanvasChangeRecord, Delta } from '@sediment/shared/canvas-engine';

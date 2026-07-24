@@ -219,12 +219,13 @@ export interface AgentBindingInternal {
  * `agentletAgentId` is intentionally NOT part of the binding because
  * it changes across spawns.
  *
- * `alias` is a UI-only mirror of `profile.displayName` captured at
- * bind-time; it remains stable even if the profile is renamed later.
+ * `alias` is a bind-time display fallback. Surfaces should prefer the current
+ * Profile alias while the Profile still exists, then use this snapshot after
+ * the Profile is deleted or otherwise unavailable.
  */
 export interface AgentBindingExternal {
   kind: 'external';
-  /** Display label shown in the UI (mirror of `profile.displayName`). */
+  /** Bind-time display fallback used when the Profile is unavailable. */
   alias: string;
   /** The user-configured profile this thread is bound to. */
   profileId: string;

@@ -25,6 +25,7 @@ import type {
   AgentTeamRoot,
   AgentTeamRootRef,
   AgentTeamRootScan,
+  JsonValue,
 } from './types.js';
 import type { AgentTeamScanDiagnostic } from '@agentlet/protocol';
 
@@ -68,6 +69,28 @@ function assertString(value: unknown, label: string): asserts value is string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new Error(
       `Invalid Agent Team registry: ${label} must be a non-empty string`,
+    );
+  }
+}
+
+/**
+ * Round-trip the opaque {@link AgentProfileBase.customData} bag. agenetes never
+ * interprets its contents, so we only require it to be a JSON object; a
+ * JSON round-trip strips anything non-serializable (functions, `undefined`).
+ */
+function parseCustomData(
+  value: unknown,
+  label: string,
+): Record<string, JsonValue> | undefined {
+  if (value === undefined) return undefined;
+  if (!isObject(value)) {
+    throw new Error(`Invalid Agent Team registry: ${label} must be an object`);
+  }
+  try {
+    return JSON.parse(JSON.stringify(value)) as Record<string, JsonValue>;
+  } catch {
+    throw new Error(
+      `Invalid Agent Team registry: ${label} must be JSON-serializable`,
     );
   }
 }
@@ -358,11 +381,13 @@ function parseProfile(value: unknown, index: number): AgentProfile {
       `Invalid Agent Team registry: ${label}.launch must be an object`,
     );
   }
+  const customData = parseCustomData(value.customData, `${label}.customData`);
   const base = {
     id: value.id,
     alias: value.alias,
     agentletId: value.agentletId,
     workingDirPath: value.workingDirPath,
+    ...(customData === undefined ? {} : { customData }),
   };
   if (value.launch.kind === 'agent-team-manifest') {
     assertString(value.launch.manifestPath, `${label}.launch.manifestPath`);

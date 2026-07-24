@@ -52,7 +52,7 @@ export const UserMessage = ({
   const hasSkills = !!invokedSkills && invokedSkills.length > 0;
 
   return (
-    <div className="my-3 flex flex-col items-end">
+    <div data-chat-user-message className="my-3 flex flex-col items-end">
       <div className="mt-2 flex max-w-[80%] flex-col items-end gap-1">
         <div className="bg-bg-default text-fg-default overflow-hidden rounded-md border border-none px-4 py-2 text-sm">
           <div className="leading-relaxed wrap-anywhere whitespace-pre-wrap">

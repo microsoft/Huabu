@@ -45,6 +45,8 @@ let inFlightRefresh: Promise<void> | null = null;
 interface AcpProfilesState {
   /** Every profile the user has created. Empty until the first fetch. */
   profiles: AgentProfileView[];
+  /** Profile ids that are currently runtime-ready and safe to select. */
+  selectableProfileIds: string[];
   /** Latest agentlet snapshot. `null` until the first fetch resolves. */
   agentlet: AcpAgentletStatus | null;
   /**
@@ -69,6 +71,7 @@ interface AcpProfilesState {
 
 export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
   profiles: [],
+  selectableProfileIds: [],
   agentlet: null,
   loaded: false,
   error: null,
@@ -108,11 +111,9 @@ export const useAcpProfilesStore = create<AcpProfilesState>()((set, get) => ({
       set({ loading: true });
       try {
         const res = await listAcpProfiles();
-        const selectableIds = new Set(res.selectableProfileIds);
         set({
-          profiles: res.profiles.filter((profile) =>
-            selectableIds.has(profile.id),
-          ),
+          profiles: res.profiles,
+          selectableProfileIds: res.selectableProfileIds,
           agentlet: res.agentlet,
           loaded: true,
           error: null,

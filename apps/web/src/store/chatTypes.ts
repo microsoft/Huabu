@@ -91,3 +91,40 @@ export type ChatMessage =
       /** Custom intent text typed by user. */
       customIntent?: string;
     };
+
+export type PermissionSegment = Extract<
+  AssistantSegment,
+  { kind: 'permission' }
+>;
+
+export interface PendingPermissionRequest {
+  messageId: string;
+  part: PermissionSegment;
+}
+
+/**
+ * Return the unresolved ACP permission request in a conversation, if any.
+ *
+ * A pending permission blocks the agent, so it can only ever live in the
+ * trailing assistant message — nothing streams after it until the user
+ * answers. We therefore inspect just the last message instead of scanning
+ * the whole history.
+ */
+export function findPendingPermissionRequest(
+  messages: ChatMessage[],
+): PendingPermissionRequest | null {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== 'assistant') return null;
+  for (const segment of last.segments) {
+    if (segment.kind === 'permission' && !segment.resolution) {
+      return { messageId: last.id, part: segment };
+    }
+  }
+  return null;
+}
+
+export function findPendingPermissionRequestId(
+  messages: ChatMessage[],
+): string | null {
+  return findPendingPermissionRequest(messages)?.part.requestId ?? null;
+}

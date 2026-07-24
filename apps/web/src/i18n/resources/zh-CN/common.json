@@ -173,6 +173,26 @@
     "addAnotherAgent": "再添加一个 Agent",
     "addAnotherAgentDescription": "配置新的外部 Agent 用于绑定聊天。",
     "editProfile": "编辑配置",
+    "agentIcon": {
+      "label": "图标",
+      "hint": "选一个形状和颜色，方便区分这个 agent。",
+      "change": "更改“{{alias}}”的图标",
+      "shape": "形状",
+      "color": "颜色",
+      "shapes": {
+        "circle": "圆形",
+        "diamond": "菱形",
+        "spark": "闪光星",
+        "flower": "五瓣花",
+        "cloud": "云朵"
+      },
+      "colors": {
+        "blue": "蓝色",
+        "red": "红色",
+        "yellow": "黄色",
+        "green": "绿色"
+      }
+    },
     "deleteProfile": "删除配置",
     "deleteProfileConfirm": "确定删除“{{alias}}”吗？此操作无法撤销。",
     "deleteExternalAgentTitle": "删除外部 Agent？",

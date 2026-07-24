@@ -7,6 +7,8 @@ interface SettingRowProps {
   description?: string;
   /** Associates the title with a form control id. */
   labelFor?: string;
+  /** Optional adornment rendered before the text column (e.g. an avatar). */
+  leading?: React.ReactNode;
   /** Control element rendered on the right (e.g. Button, Toggle, Select, link icon). */
   children: React.ReactNode;
   /** Additional class names for the row element. */
@@ -24,6 +26,7 @@ export const SettingRow: React.FC<SettingRowProps> = ({
   title,
   description,
   labelFor,
+  leading,
   children,
   className = '',
   density = 'default',
@@ -32,23 +35,26 @@ export const SettingRow: React.FC<SettingRowProps> = ({
     <div
       className={`flex items-center justify-between gap-3 px-3 ${density === 'compact' ? 'py-1.5' : 'py-2.5'} ${className}`.trim()}
     >
-      <div className="min-w-0 flex-1">
-        {title &&
-          (labelFor ? (
-            <label
-              htmlFor={labelFor}
-              className="text-fg-default block cursor-pointer text-xs font-medium"
-            >
-              {title}
-            </label>
-          ) : (
-            <p className="text-fg-default text-xs font-medium">{title}</p>
-          ))}
-        {description && (
-          <p className="text-fg-subtle mt-0.5 text-[11px] leading-snug">
-            {description}
-          </p>
-        )}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        {leading && <div className="shrink-0">{leading}</div>}
+        <div className="min-w-0 flex-1">
+          {title &&
+            (labelFor ? (
+              <label
+                htmlFor={labelFor}
+                className="text-fg-default block cursor-pointer text-xs font-medium"
+              >
+                {title}
+              </label>
+            ) : (
+              <p className="text-fg-default text-xs font-medium">{title}</p>
+            ))}
+          {description && (
+            <p className="text-fg-subtle mt-0.5 text-[11px] leading-snug">
+              {description}
+            </p>
+          )}
+        </div>
       </div>
       <div className="shrink-0">{children}</div>
     </div>

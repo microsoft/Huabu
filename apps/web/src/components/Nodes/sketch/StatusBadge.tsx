@@ -1,7 +1,7 @@
 /**
- * StatusBadge — pill-shaped status indicator used to annotate canvas nodes
- * and overlays (currently QuestionNode and the sketch processing
- * overlay).
+ * StatusBadge — pill-shaped status indicator for the sketch processing
+ * overlay. Colocated with its only rendering call site
+ * (`SketchProcessingOverlay`); the Layer Panel reuses only `getStatusLabel`.
  *
  * Behavior
  *  - Zoom-invariant: lives in React Flow's flow space but counter-scales
@@ -22,8 +22,10 @@
 import { useStore } from '@xyflow/react';
 import { Check, Clock, Loader, Pencil, X } from 'lucide-react';
 
-import { cn } from './cn';
-import { Tooltip } from './Tooltip';
+import './StatusBadge.css';
+
+import { cn } from '../../Common/cn';
+import { Tooltip } from '../../Common/Tooltip';
 
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -44,9 +46,8 @@ interface StatusVisual {
   spin?: boolean;
 }
 
-// Single visual identity — both QuestionNode and the sketch overlay
-// render at exactly these dimensions, then counter-scale so the on-screen
-// size stays constant at every zoom level.
+// Fixed dimensions counter-scale so the on-screen size stays constant at
+// every zoom level.
 const ICON_BOX_PX = 20;
 const ICON_PX = 12;
 
@@ -90,7 +91,7 @@ const STATUS_VISUALS: Record<StatusBadgeStatus, StatusVisual> = {
 };
 
 /**
- * Returns the human-readable label associated with a question/sketch
+ * Returns the human-readable label associated with a canvas processing
  * status. Exposed so other surfaces (e.g. the LayerPanel status dot)
  * stay in sync with the canvas badge wording without duplicating the
  * lookup table.

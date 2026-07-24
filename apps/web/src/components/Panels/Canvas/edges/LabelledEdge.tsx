@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next';
 
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import useCanvasStore from '@/store/canvasStore';
+import { useNodeCollapseStore } from '@/store/nodeCollapseStore';
 import { TEXT_NODE_PADDING_X } from '@/utils/node/nodeFontConfig';
 import { measureTextContent } from '@/utils/node/textMeasure';
 
@@ -56,6 +57,8 @@ function getEdgeStyle(data: EdgeProps['data']): EdgeStyle {
 export function LabelledEdge(props: EdgeProps) {
   const {
     id,
+    source,
+    target,
     sourceX,
     sourceY,
     targetX,
@@ -68,6 +71,38 @@ export function LabelledEdge(props: EdgeProps) {
     data,
     selected,
   } = props;
+
+  // When an endpoint node is collapsed to its zoom-LOD mark (a centred circle),
+  // terminate the edge on that circle instead of the node's hidden card
+  // footprint, so the edge stays visually attached to the mark at any aspect
+  // ratio. A collapsed node publishes its mark's LIVE canvas-space centre +
+  // clip radius, so the edge follows the mark wherever it sits during the
+  // corner → centre glide — not a phantom circle at the node centre. Only
+  // collapsed question nodes publish geometry; everything else keeps React
+  // Flow's handle point.
+  const sourceMark = useNodeCollapseStore((s) => s.marks[source]);
+  const targetMark = useNodeCollapseStore((s) => s.marks[target]);
+
+  let sx = sourceX;
+  let sy = sourceY;
+  let tx = targetX;
+  let ty = targetY;
+  if (sourceMark) {
+    const { cx, cy, radius } = sourceMark;
+    const dx = tx - cx;
+    const dy = ty - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    sx = cx + (dx / len) * radius;
+    sy = cy + (dy / len) * radius;
+  }
+  if (targetMark) {
+    const { cx, cy, radius } = targetMark;
+    const dx = sx - cx;
+    const dy = sy - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    tx = cx + (dx / len) * radius;
+    ty = cy + (dy / len) * radius;
+  }
 
   const edgeStyle = getEdgeStyle(data);
   // `data.edgeStyle.lineType` is the source of truth; fall back to the
@@ -85,26 +120,26 @@ export function LabelledEdge(props: EdgeProps) {
   let labelY: number;
   if (lineType === 'straight') {
     [edgePath, labelX, labelY] = getStraightPath({
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
+      sourceX: sx,
+      sourceY: sy,
+      targetX: tx,
+      targetY: ty,
     });
   } else if (lineType === 'step') {
     [edgePath, labelX, labelY] = getSmoothStepPath({
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
+      sourceX: sx,
+      sourceY: sy,
+      targetX: tx,
+      targetY: ty,
       sourcePosition,
       targetPosition,
     });
   } else {
     [edgePath, labelX, labelY] = getBezierPath({
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
+      sourceX: sx,
+      sourceY: sy,
+      targetX: tx,
+      targetY: ty,
       sourcePosition,
       targetPosition,
     });

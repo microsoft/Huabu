@@ -6,6 +6,7 @@
 import type { AccentToken } from './color.js';
 import type { AgentMode } from '../agent/agent.js';
 import type { AgentBinding } from '../api/acp.js';
+import type { AgentIcon } from '../api/agent-profile.js';
 
 // ==================== Basic Node Types ====================
 
@@ -534,6 +535,13 @@ export interface QuestionNodeData extends BaseNodeData {
    * agent with `agentMode='ask'`.
    */
   agentBinding?: AgentBinding;
+  /**
+   * Bind-time avatar fallback for this question's external agent. The UI
+   * prefers the current Profile icon while that Profile exists, then uses this
+   * snapshot if the Profile is deleted or unavailable. Internal agents use the
+   * built-in Huabu identity instead.
+   */
+  agentIcon?: AgentIcon;
   /**
    * Built-in agent mode when `agentBinding` is internal or omitted.
    * Defaults to `'ask'`. Ignored for external bindings.

@@ -262,6 +262,12 @@ describe('AgentProfileEditor (create)', () => {
         manifestPath: 'C:\\templates\\reviewer\\agentlet.yaml',
         harness: 'copilot',
       },
+      customData: {
+        icon: {
+          shape: expect.any(String),
+          color: expect.any(String),
+        },
+      },
     });
     expect(apiMocks.setupManifest).toHaveBeenCalledWith('profile-1');
   });

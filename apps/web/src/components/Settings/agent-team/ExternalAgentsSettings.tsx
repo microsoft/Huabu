@@ -20,10 +20,15 @@ import { Pencil, Play, Plus, Square, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { deleteAcpProfile, restartAcpAgentlet } from '@/api/acp';
+import {
+  deleteAcpProfile,
+  restartAcpAgentlet,
+  updateAcpProfile,
+} from '@/api/acp';
 import {
   cancelAgentTeamProfileSetup,
   deleteAgentTeamProfile,
+  patchAgentTeamProfile,
   setupAgentTeamProfile,
 } from '@/api/agent-team';
 import { Button } from '@/components/Common/Button';
@@ -33,14 +38,17 @@ import { toast } from '@/components/Common/Toast';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { SettingSection } from '@/components/Settings/Common/SettingSection';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import { readAgentIcon, withAgentIcon } from '@/utils/agentIcon';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
 import { AgentletHealthBanner } from './AgentletHealthBanner';
 import { AgentProfileEditor } from './AgentProfileEditor';
+import { PersistedAgentIconPicker } from './PersistedAgentIconPicker';
 import { ProfileFormFooterTarget } from './ProfileFormFooter';
 import { useDetectedClis } from './useDetectedClis';
 import { useUnifiedAgents, type ManifestProfileRow } from './useUnifiedAgents';
 
+import type { AgentIconValue } from '@/components/Common/AgentIcon';
 import type {
   AcpCommandProfileView,
   AgentTeamManifestProfileView,
@@ -237,6 +245,42 @@ export function ExternalAgentsSettings({
     manifestPath: row.member.manifestPath,
   });
 
+  const saveCommandIcon = useCallback(
+    async (profile: AcpCommandProfileView, icon: AgentIconValue) => {
+      try {
+        await updateAcpProfile(profile.id, {
+          customData: withAgentIcon(profile.customData, icon),
+        });
+        await refreshCommand();
+      } catch (err) {
+        toast(
+          err instanceof Error ? err.message : t('settings.profileSaveFailed'),
+          { tone: 'danger' },
+        );
+        throw err;
+      }
+    },
+    [refreshCommand, t],
+  );
+
+  const saveManifestIcon = useCallback(
+    async (row: ManifestProfileRow, icon: AgentIconValue) => {
+      try {
+        await patchAgentTeamProfile(row.profile.id, {
+          customData: withAgentIcon(row.profile.customData, icon),
+        });
+        await refreshMember(memberRefOf(row));
+      } catch (err) {
+        toast(
+          err instanceof Error ? err.message : t('settings.profileSaveFailed'),
+          { tone: 'danger' },
+        );
+        throw err;
+      }
+    },
+    [refreshMember, t],
+  );
+
   /**
    * Row description for a command Profile. A structured (detected-CLI)
    * Profile is named after its agent and never exposes the raw launch
@@ -432,6 +476,13 @@ export function ExternalAgentsSettings({
                     return (
                       <SettingRow
                         key={row.profile.id}
+                        leading={
+                          <PersistedAgentIconPicker
+                            value={readAgentIcon(row.profile)}
+                            alias={row.profile.alias}
+                            onSave={(icon) => saveManifestIcon(row, icon)}
+                          />
+                        }
                         title={row.profile.alias}
                         description={harnessLabel}
                       >
@@ -540,6 +591,13 @@ export function ExternalAgentsSettings({
                   {commandProfiles.map((profile) => (
                     <SettingRow
                       key={profile.id}
+                      leading={
+                        <PersistedAgentIconPicker
+                          value={readAgentIcon(profile)}
+                          alias={profile.alias}
+                          onSave={(icon) => saveCommandIcon(profile, icon)}
+                        />
+                      }
                       title={profile.alias}
                       description={describeCommandProfile(profile)}
                     >

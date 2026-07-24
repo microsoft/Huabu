@@ -17,11 +17,55 @@ const pathSchema = trimmedString(4096).refine(
   { message: 'Must be an absolute path' },
 );
 
+/**
+ * An arbitrary JSON value. Backs {@link customDataSchema}, the opaque
+ * per-Profile bag agenetes stores verbatim without interpreting.
+ */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonValueSchema),
+    z.record(z.string(), jsonValueSchema),
+  ]),
+);
+
+/**
+ * Caller-owned, opaque bag of JSON data carried on every Profile. Sediment uses
+ * it for display preferences (see {@link agentIconSchema}); agenetes persists it
+ * verbatim and never reads it.
+ */
+export const customDataSchema = z.record(z.string(), jsonValueSchema);
+export type CustomData = z.infer<typeof customDataSchema>;
+
+/** The basic-shape agent avatars. */
+export const agentIconSchema = z
+  .object({
+    shape: z.enum(['circle', 'diamond', 'spark', 'flower', 'cloud']),
+    color: z.enum(['blue', 'red', 'yellow', 'green']),
+  })
+  .strict();
+export type AgentIcon = z.infer<typeof agentIconSchema>;
+
+/** Reserved `customData` key under which the agent avatar is stored. */
+export const AGENT_ICON_CUSTOM_DATA_KEY = 'icon';
+
 const profileBaseSchema = z.object({
   id: trimmedString(255),
   alias: trimmedString(255),
   agentletId: trimmedString(255),
   workingDirPath: pathSchema,
+  customData: customDataSchema.optional(),
 });
 
 const setupErrorSchema = z
@@ -158,6 +202,7 @@ export type CreateAcpCommandProfileBody = z.infer<
 export const patchAgentProfileBodySchema = z
   .object({
     alias: trimmedString(255).optional(),
+    customData: customDataSchema.nullable().optional(),
     metadata: commandMetadataSchema.nullable().optional(),
   })
   .strict()

@@ -1,17 +1,19 @@
-import { clsx } from 'clsx';
-import { AlertTriangle, MapPin, MessageSquare } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { createId, getQuestionNodeStatus } from '@sediment/shared';
 
+import './QuestionNode.css';
+
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
-import { StatusBadge } from '@/components/Common/StatusBadge.tsx';
-import { Tooltip } from '@/components/Common/Tooltip.tsx';
+import { useActivelyViewingQuestionNode } from '@/hooks/useActivelyViewingQuestion';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
+import { useAcpProfilesStore } from '@/store/acpProfilesStore.ts';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
+import { findPendingPermissionRequestId } from '@/store/chatTypes.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
 import {
   getQuestionFontOpts,
@@ -20,11 +22,14 @@ import {
   QUESTION_NODE_PLACEHOLDER,
 } from '@/utils/node/nodeFontConfig';
 import { getQuestionDisplayText } from '@/utils/node/questionDisplayText';
+import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentation.ts';
 
 import { NodeWrapper } from '../NodeWrapper';
 import { enterQuestionCompose } from './questionCompose.ts';
+import { QuestionTakeoverMark } from './QuestionTakeoverMark.tsx';
 import { TextNodeBody } from '../shared/TextNodeBody';
 
+import type { QuestionAgentBadgeStatus } from './questionBadgeChrome.ts';
 import type { CanvasQuestionNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
 
@@ -120,11 +125,32 @@ export const QuestionNode = memo(
       !!data.threadId && (hasRun || status === 'running') && !isForkPending;
 
     const openQuestionThread = useChatStore((s) => s.openQuestionThread);
+    const needsApproval = useChatStore((s) => {
+      if (!data.threadId) return false;
+      return (
+        findPendingPermissionRequestId(
+          s.messagesByThread[data.threadId] ?? [],
+        ) !== null
+      );
+    });
     const showChatAnchor = useChatStore(
       (s) => s.viewingQuestionThread?.nodeId === id,
     );
-    const isRightPanelCollapsed = usePanelStore((s) => s.isRightCollapsed);
+    // Composing = this node is the chat anchor AND it has never been
+    // authored/run yet (`idle`). Derived from the node's status, not a stored
+    // `compose` flag.
+    const isOpenForQuestion = showChatAnchor && status === 'idle';
+    const composeAgentBinding = useChatStore((s) => s.agentBinding);
+    // While composing a brand-new question, the mode follows the user's inline
+    // Chat/Agent pick (`lastAction`) rather than the node's not-yet-written
+    // `agentMode` (mirrors ChatPanel's compose logic).
+    const composeAgentMode = useChatStore((s) => s.lastAction);
+    const agentProfiles = useAcpProfilesStore((s) => s.profiles);
     const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
+    // True only while this node's conversation is open AND the chat panel is
+    // expanded — the badge shows `open` only then; a collapsed panel falls
+    // back to the node's real status.
+    const isChatAnchorActive = useActivelyViewingQuestionNode(id);
     const canvasId = useCanvasStore((s) => s.canvasId);
 
     // ------------------------------------------------------------------
@@ -137,6 +163,11 @@ export const QuestionNode = memo(
         data.threadId,
         data.agentBinding,
         canvasId || undefined,
+        needsApproval
+          ? 'bottom'
+          : hasRun && !data.viewed
+            ? 'last-user'
+            : 'bottom',
       );
       requestOpenRightPanel();
       // Mark as viewed only once the run has finished.
@@ -148,6 +179,7 @@ export const QuestionNode = memo(
       data.threadId,
       data.agentBinding,
       data.viewed,
+      needsApproval,
       hasRun,
       canvasId,
       openQuestionThread,
@@ -218,6 +250,35 @@ export const QuestionNode = memo(
     );
 
     const isDoneUnviewed = status === 'done' && !viewed;
+    const isErrorUnviewed = status === 'error' && !viewed;
+    const effectiveBinding = isOpenForQuestion
+      ? composeAgentBinding
+      : (data.agentBinding ?? { kind: 'internal' as const });
+    const agentPresentation = resolveQuestionAgentPresentation({
+      binding: effectiveBinding,
+      fallbackIcon: data.agentIcon,
+      profiles: agentProfiles,
+      agentMode: isOpenForQuestion
+        ? composeAgentMode
+        : (data.agentMode ?? 'ask'),
+    });
+    // `open` is the highest-priority badge state, BUT only while the chat
+    // panel is actually visible: whenever this node's conversation is open in
+    // an expanded panel (it is the anchor), the user can already watch the
+    // live result there, so the badge only hints "this conversation is open"
+    // — it deliberately overrides running / done / error. Collapsing the right
+    // panel hides that live view, so the badge falls back to the node's real
+    // status. `showChatAnchor` covers both the initial compose and re-opening
+    // an already-run node.
+    const badgeStatus: QuestionAgentBadgeStatus | null = needsApproval
+      ? 'approval'
+      : isChatAnchorActive
+        ? 'open'
+        : isForkPending
+          ? 'running'
+          : status === 'idle'
+            ? null
+            : status;
 
     return (
       <NodeWrapper
@@ -229,10 +290,43 @@ export const QuestionNode = memo(
         keepAspectRatio={false}
         allowOverflow
         fillColor={STICKY_BG}
-        className={clsx(
-          'question-sticky rounded-lg transition-all duration-200',
-          isDoneUnviewed && 'question-node-done-unviewed',
-        )}
+        className="question-sticky rounded-lg transition-all duration-200"
+        onDoubleClick={isForkPending ? undefined : handleActivate}
+        takeover={{
+          onActivate: isForkPending ? undefined : handleActivate,
+          renderMark: (s) => (
+            <QuestionTakeoverMark
+              state={s}
+              status={badgeStatus ?? 'idle'}
+              agent={agentPresentation}
+              unread={isDoneUnviewed || isErrorUnviewed}
+              conflictCount={status === 'done' ? conflictCount : 0}
+              interactive={canOpenInChat}
+              onOpen={canOpenInChat ? openInChat : undefined}
+              accessibleLabel={
+                canOpenInChat
+                  ? `${agentPresentation.alias} · ${t('node.openConversation')}`
+                  : undefined
+              }
+              conflictTooltip={
+                conflictCount > 0
+                  ? t('node.agentChangesSkipped', { count: conflictCount })
+                  : undefined
+              }
+              tooltip={
+                needsApproval
+                  ? t('messages.permissionRequested')
+                  : status === 'error' && data.errorMessage
+                    ? data.errorMessage
+                    : canOpenInChat
+                      ? status === 'running'
+                        ? t('node.watchLiveConversation')
+                        : t('node.openConversation')
+                      : undefined
+              }
+            />
+          ),
+        }}
         {...surface.nodeWrapperProps}
       >
         <TextNodeBody
@@ -247,96 +341,8 @@ export const QuestionNode = memo(
           fontFamily={QUESTION_FONT_FAMILY}
           color="var(--question-fg)"
           textareaClassName="placeholder:text-fg-default/40"
-        >
-          {status !== 'idle' && (
-            <StatusBadge
-              status={isForkPending ? 'running' : status}
-              offset={{ top: -22, left: -2 }}
-              shake={!isForkPending && status === 'error'}
-              className={isDoneUnviewed ? 'question-done-pill' : undefined}
-              tooltip={
-                status === 'error' && data.errorMessage
-                  ? data.errorMessage
-                  : undefined
-              }
-              onClick={canOpenInChat ? openInChat : undefined}
-              title={
-                canOpenInChat
-                  ? status === 'running'
-                    ? t('node.watchLiveConversation')
-                    : t('node.openConversation')
-                  : undefined
-              }
-              trailing={
-                status === 'done' && conflictCount > 0 ? (
-                  <ConflictBadge count={conflictCount} />
-                ) : undefined
-              }
-            />
-          )}
-        </TextNodeBody>
-        {showChatAnchor && !isRightPanelCollapsed && <ChatAnchorOverlay />}
+        />
       </NodeWrapper>
     );
   },
 );
-
-/**
- * Small warning chip rendered next to a question node's "Done" badge when
- * one or more of the run's canvas writes were skipped because the user
- * was mid-editing the target node. Signals a
- * partially-applied run without a global toast; clicking the badge itself
- * opens the conversation where the skipped rows are listed.
- */
-function ConflictBadge({ count }: { count: number }) {
-  const { t } = useTranslation();
-  return (
-    <Tooltip content={t('node.agentChangesSkipped', { count })}>
-      <span className="bg-warning-bg text-warning pointer-events-auto inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs font-semibold shadow-sm">
-        <AlertTriangle size={12} />
-        {count}
-      </span>
-    </Tooltip>
-  );
-}
-
-function ChatAnchorOverlay() {
-  // A light "anchored" mask laid over the question node's content layer.
-  // Deliberately a content-layer overlay (not a floating corner badge and
-  // not a wraparound glow): it sits above the card body, so it never fights
-  // the sticky depth board's stacking and never competes with the run-status
-  // badge that floats above the node. A warm, low-alpha wash (not a grey
-  // scrim, which would read as "disabled") keeps the text readable while an
-  // anchor watermark makes the "this node anchors the open chat" state clear.
-  return (
-    <div
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg"
-      style={{
-        // Size container so the watermark can scale with the node via
-        // `cqh` (height) / `cqi` (width) units below.
-        containerType: 'size',
-        background:
-          'color-mix(in srgb, var(--question-border) 9%, transparent)',
-        boxShadow:
-          'inset 0 0 0 1.5px color-mix(in srgb, var(--question-border) 55%, transparent), inset 0 0 12px color-mix(in srgb, var(--question-border) 20%, transparent)',
-      }}
-    >
-      <MapPin
-        strokeWidth={1.5}
-        className="absolute"
-        style={{
-          // Adaptive size: ~60% of the node's shorter side (min of height
-          // `cqh` / width `cqi`), clamped so it never gets tiny or
-          // overwhelms the card. Tune the two percentages to taste.
-          height: 'clamp(20px, min(60cqh, 34cqi), 88px)',
-          width: 'auto',
-          right: -2,
-          bottom: -2,
-          color: 'var(--question-border)',
-          opacity: 0.32,
-        }}
-      />
-    </div>
-  );
-}

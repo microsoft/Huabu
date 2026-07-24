@@ -55,9 +55,11 @@ import {
   NodeSideAffordance,
   useCreateConnectedNode,
 } from './NodeConnectAffordance.tsx';
+import { NodeTakeoverLayer } from './NodeTakeoverLayer.tsx';
 import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
 
 import type { CanvasNodeType, NodeData } from './types.ts';
+import type { TakeoverState } from '@/config/nodeTakeover';
 
 const OverlayPortal = memo(
   ({
@@ -184,6 +186,18 @@ interface NodeWrapperProps {
   toolbar?: React.ReactNode;
   actions?: React.ReactNode;
   overlayContent?: React.ReactNode;
+  /**
+   * Opt into the continuous zoom takeover. As the node shrinks on screen, the
+   * node-supplied mark glides from the readable corner badge to a centred
+   * stand-in and resizes with it, while the card body fades out — a single
+   * continuous morph driven by the node's on-screen width, not a discrete
+   * stage swap. The engine ({@link NodeTakeoverLayer}) owns positioning and the
+   * card-fade; the mark owns its own size, detail, status chrome, and click.
+   */
+  takeover?: {
+    renderMark: (state: TakeoverState) => React.ReactNode;
+    onActivate?: React.MouseEventHandler;
+  };
   /** Vertical offset in screen pixels from the node's top edge. Negative = above. */
   overlayOffsetY?: number;
   /** Semantic visibility computed by the overlay owner. */
@@ -253,6 +267,7 @@ export const NodeWrapper = memo(
     toolbar,
     actions,
     overlayContent,
+    takeover,
     overlayOffsetY = 0,
     overlayVisible = true,
     overlayInteractionPriority = 0,
@@ -365,6 +380,7 @@ export const NodeWrapper = memo(
     }, [id]);
 
     const renderMode = useNodeLOD(id, type);
+    const rootRef = useRef<HTMLDivElement>(null);
     const { zoom } = useViewport();
     const isNotMouse = useIsNotMouse();
 
@@ -605,7 +621,20 @@ export const NodeWrapper = memo(
           </OverlayPortal>
         )}
 
+        {/* Discrete three-stage zoom takeover — screen-space overlay that also
+            drives the card fade. Isolated + memoised so continuous zoom never
+            re-renders the node body. */}
+        {takeover && (
+          <NodeTakeoverLayer
+            nodeId={id}
+            renderMark={takeover.renderMark}
+            onActivate={takeover.onActivate}
+            nodeRootRef={rootRef}
+          />
+        )}
+
         <div
+          ref={rootRef}
           className={cn(
             // `transition` (not `transition-all`) intentionally
             // EXCLUDES width / height from the animated property

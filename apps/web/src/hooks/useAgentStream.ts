@@ -2,6 +2,7 @@ import { useCallback, useRef, useEffect } from 'react';
 
 import {
   createId,
+  getQuestionNodeStatus,
   variantForInternalTool,
   type AssistantToolPart,
   type AssistantToolVariant,
@@ -12,9 +13,12 @@ import {
 } from '@sediment/shared';
 
 import { agentApi } from '@/api/agent';
+import { isActivelyViewingQuestion } from '@/hooks/useActivelyViewingQuestion';
+import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
+import { snapshotAgentIcon } from '@/utils/agentIcon';
 
 import type { AssistantSegment } from '../store/chatTypes';
 import type {
@@ -798,20 +802,17 @@ export function useAgentStream(): UseAgentStreamReturn {
       let sawDone = false;
 
       if (questionNodeId) {
-        // First send of a freshly-composed question node: author the
-        // node's `content` from this prompt and lock in the agent the
-        // user picked in the inline selector (binding + built-in mode).
-        // Clearing the `compose` flag flips the panel from "editable
-        // composer" to replay semantics for every follow-up turn.
-        const isCompose = viewingQuestion?.compose === true;
+        // First send of a freshly-composed question node ⇔ the node is still
+        // `idle` (never authored/run). Derived from the node's own status so
+        // there is no stored `compose` flag to keep in sync. On that first
+        // send we author the node's `content` and lock in the agent the user
+        // picked in the inline selector (binding + built-in mode); follow-up
+        // turns skip both.
+        const composeNode = useCanvasStore
+          .getState()
+          .nodes.find((n) => n.id === questionNodeId);
+        const isCompose = getQuestionNodeStatus(composeNode?.data) === 'idle';
         if (isCompose) {
-          useChatStore.setState({
-            viewingQuestionThread: {
-              nodeId: questionNodeId,
-              threadId,
-              compose: false,
-            },
-          });
           // Author content through the intent pipeline so it gets a
           // markdown sidecar save + server-side label preprocessing —
           // matching how the inline editor used to commit the prompt.
@@ -819,9 +820,26 @@ export function useAgentStream(): UseAgentStreamReturn {
             .getState()
             .updateNodeData(questionNodeId, { content: prompt });
         }
+        const selectedBinding = useChatStore.getState().agentBinding;
+        const selectedProfile =
+          selectedBinding.kind === 'external'
+            ? useAcpProfilesStore
+                .getState()
+                .profiles.find(
+                  (profile) => profile.id === selectedBinding.profileId,
+                )
+            : undefined;
+        const snapshotBinding =
+          selectedBinding.kind === 'external' && selectedProfile
+            ? { ...selectedBinding, alias: selectedProfile.alias }
+            : selectedBinding;
         const composeBinding = isCompose
           ? {
-              agentBinding: useChatStore.getState().agentBinding,
+              agentBinding: snapshotBinding,
+              agentIcon: snapshotAgentIcon(
+                selectedBinding,
+                useAcpProfilesStore.getState().profiles,
+              ),
               agentMode,
             }
           : {};
@@ -883,9 +901,13 @@ export function useAgentStream(): UseAgentStreamReturn {
               // useful final `done` event ever arrived. A cap-out error
               // emitted after a successful answer is treated as success.
               if (questionNodeId) {
+                const stillViewing = isActivelyViewingQuestion({
+                  nodeId: questionNodeId,
+                });
                 useCanvasStore.getState().patchNodeSilent(questionNodeId, {
                   status: sawDone ? 'done' : 'error',
                   errorMessage: sawDone ? undefined : err.message,
+                  ...(stillViewing ? { viewed: true } : {}),
                 });
               }
               setThreadLoading(threadId, false);
@@ -903,9 +925,9 @@ export function useAgentStream(): UseAgentStreamReturn {
                 // thread at completion, count it as read — they watched
                 // the answer stream. Otherwise leave `viewed: false` so
                 // the layer-panel dot stays "unread" until they open it.
-                const stillViewing =
-                  useChatStore.getState().viewingQuestionThread?.nodeId ===
-                  questionNodeId;
+                const stillViewing = isActivelyViewingQuestion({
+                  nodeId: questionNodeId,
+                });
                 useCanvasStore.getState().patchNodeSilent(questionNodeId, {
                   status: 'done',
                   errorMessage: undefined,
@@ -949,9 +971,9 @@ export function useAgentStream(): UseAgentStreamReturn {
           if (questionNodeId) {
             // User stopped the stream while in the thread — count as
             // viewed; otherwise leave unread so the dot reappears.
-            const stillViewing =
-              useChatStore.getState().viewingQuestionThread?.nodeId ===
-              questionNodeId;
+            const stillViewing = isActivelyViewingQuestion({
+              nodeId: questionNodeId,
+            });
             useCanvasStore.getState().patchNodeSilent(questionNodeId, {
               status: 'done',
               errorMessage: undefined,
@@ -968,9 +990,13 @@ export function useAgentStream(): UseAgentStreamReturn {
         console.error(`${agentMode} failed:`, err);
         if (questionNodeId) {
           const message = err instanceof Error ? err.message : 'Unknown error';
+          const stillViewing = isActivelyViewingQuestion({
+            nodeId: questionNodeId,
+          });
           useCanvasStore.getState().patchNodeSilent(questionNodeId, {
             status: sawDone ? 'done' : 'error',
             errorMessage: sawDone ? undefined : message,
+            ...(stillViewing ? { viewed: true } : {}),
           });
         }
         setThreadLoading(threadId, false);

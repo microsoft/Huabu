@@ -44,9 +44,10 @@ Like sketch nodes, a question node has two independent relationships with AI:
 | `status`          | ✅        | Optional sparse status: absent means `idle`; non-default values are `running` / `done` / `error`                                     |
 | `threadId`        | ✅        | Owns one chat thread; minted on first compose                                                                                        |
 | `agentBinding`    | ✅        | Internal or external agent, locked on first send                                                                                     |
+| `agentIcon`       | ✅        | External Agent's bind-time avatar fallback; current Profile icon wins while that Profile still exists                                |
 | `agentMode`       | ✅        | `ask` (default) / `operate` for the internal agent                                                                                   |
 | `errorMessage`    | ✅        | Set on `status === 'error'`                                                                                                          |
-| `viewed`          | ✅        | Drives the done-unviewed glow                                                                                                        |
+| `viewed`          | ✅        | Drives unread terminal-state attention on the Agent avatar                                                                           |
 | `responseSummary` | reserved  | Teaser field; not yet written by the runner                                                                                          |
 
 Not persisted: the in-flight `AbortController` (module-level in `useAgentStream`).
@@ -64,6 +65,9 @@ Created like any node via `CREATE_NODES` ([resolveAddNodes.ts](../../apps/web/sr
 
 - **Idle** → double-click opens compose (§5).
 - After sending: **running → done / error**.
+- Running uses the bound Agent identity with a flowing information ring; an external Agent avatar body rotates while the built-in Huabu logo remains still.
+- A live unresolved ACP permission request temporarily overrides every other badge state, stops working motion, and shows a static warning ring with a shield satellite; resolving or cancelling the request restores the underlying run state.
+- Done, error, and conflict attention styling appears only while `viewed === false`; opening the finished thread marks it viewed and returns the avatar to a quiet neutral ring.
 - Move / delete / resize / re-frame all go through the normal node flow; a stale
   pasted copy strips transient state so it starts fresh.
 - **Create-time selection**: a question node does **not** auto-select when born
@@ -129,6 +133,10 @@ additional chat context.
 
 The chat panel header is the question node's rename surface in both compose and replay modes. Clicking the title (or focusing it and pressing Enter/Space) opens the same inline editor used by expanded content nodes; blur/Enter commits through `canvasStore.tryRename('node', ...)`, Escape cancels, and the shared rename path owns collision detection, persistence, and rollback. A fresh compose view continues to show the neutral “New question” title until the user assigns a name.
 
+The Agent avatar above the node is also its run-status surface. Compose shows the currently selected Agent inside a question bubble; running uses the flowing ring; unread done/error/conflict outcomes use their semantic ring, glow, and low-frequency attention nudge. Existing Profiles are resolved live, so alias and icon edits update old Question nodes. For an external Agent, the first send also stores the current alias in `agentBinding` and the effective icon in `agentIcon`; if the Profile is later deleted or unavailable, those bind-time values preserve the historical identity without copying the Profile's full `customData` bag into the node. The built-in Agent uses the Huabu brand logo directly and does not persist an avatar snapshot.
+
+As the canvas zooms out, a question node's agent mark **takes over** as the node's stand-in **continuously** ([QuestionTakeoverMark](../../apps/web/src/components/Nodes/question/QuestionTakeoverMark.tsx)): the mark's size and position are a smooth (smoothstep-eased) function of the node's on-screen width, so the badge glides from the readable card's top-left corner into a centred stand-in mark and resizes in lock-step with the zoom gesture — there is no discrete stage swap and no one-shot animation. At full zoom it is the sticky card plus a corner badge that scales with the card; as the node shrinks the badge moves corner → centre and resizes; once the node is too small to read, the card fades out (a single binary `data-lod-body` signal) and only the centred mark remains. The mark's glyph is size-driven: a full agent avatar down to a few px, then a solid identity dot (via [AgentAvatarMark](../../apps/web/src/components/Common/AgentAvatarMark.tsx)), so a field of zoomed-out question nodes reads as tidy colour-coded dots. An idle (never-asked) node shows a quiet neutral dot instead of borrowing an agent's identity colour. When the mark can open an existing conversation, it renders as a labelled, keyboard-focusable shared button; non-interactive marks remain hidden from the accessibility tree. The morph is driven by the takeover engine ([useNodeTakeover](../../apps/web/src/hooks/useNodeTakeover.ts) / [NodeTakeoverLayer](../../apps/web/src/components/Nodes/NodeTakeoverLayer.tsx)); the `open` chat bubble is the shared [QuestionAgentBubble](../../apps/web/src/components/Nodes/question/QuestionAgentBubble.tsx) and status colour is shared via [questionBadgeChrome.ts](../../apps/web/src/components/Nodes/question/questionBadgeChrome.ts). See [canvas-zoom-rendering.md#31-continuous-zoom-takeover-question-node](./canvas-zoom-rendering.md#31-continuous-zoom-takeover-question-node) and [proposals/question-node-zoom-lod-avatar.md](../proposals/question-node-zoom-lod-avatar.md).
+
 ### 5.2 Dispatch
 
 All questions run through `/api/agent` ([agent.ts](../../apps/web/src/api/agent.ts) → [intent](../../apps/server/src/modules/canvas/node-neighbourhood.ts)). On first send `useAgentStream` ([useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)) locks `agentBinding` + `agentMode` onto the node:
@@ -161,21 +169,23 @@ idle ──double-click──▶ compose (no status change)
                                   └─ error event ─▶ error (errorMessage set)
 ```
 
-Conversation replay: `openQuestionThread` ([chatStore.ts](../../apps/web/src/store/chatStore.ts)) re-opens a running/finished thread read-only; the node is the single source of truth for the agent mode.
+Conversation replay: `openQuestionThread` ([chatStore.ts](../../apps/web/src/store/chatStore.ts)) re-opens a running/finished thread read-only; the node is the single source of truth for the agent mode. An unresolved permission renders one actionable tray above ChatInput while its original MessageList position remains a passive history record; opening that blocked conversation scrolls MessageList to the end. Without a pending permission, a previously viewed Question opens at the conversation bottom, while an unread Question aligns its final user message with the top of the list so the unseen answer begins below it.
 
 ---
 
 ## 6. Code entry points
 
-| Concern             | File                                                                                                                                               |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Component + toolbar | [QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)                                                                  |
-| Compose / replay    | [chatStore.ts](../../apps/web/src/store/chatStore.ts) `openQuestionCompose` / `openQuestionThread`                                                 |
-| Send + state writes | [useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)                                                                                    |
-| Create path         | [resolveAddNodes.ts](../../apps/web/src/handler/canvasCommand/resolvers/resolveAddNodes.ts)                                                        |
-| Dispatch API        | [agent.ts](../../apps/web/src/api/agent.ts) `streamMessage`                                                                                        |
-| Spatial context     | [node-neighbourhood.ts](../../apps/server/src/modules/canvas/node-neighbourhood.ts)                                                                |
-| Shared types        | [node.ts](../../packages/shared/src/types/canvas/node.ts) `QuestionNodeData` · [acp.ts](../../packages/shared/src/types/api/acp.ts) `AgentBinding` |
+| Concern             | File                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Component + toolbar | [QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)                                                                                                                                                                                                                                                                             |
+| Agent status mark   | [QuestionTakeoverMark.tsx](../../apps/web/src/components/Nodes/question/QuestionTakeoverMark.tsx) renders the readable corner badge and the zoomed-out collapsed mark in one component; zoom morph via [NodeTakeoverLayer.tsx](../../apps/web/src/components/Nodes/NodeTakeoverLayer.tsx) + [useNodeTakeover.ts](../../apps/web/src/hooks/useNodeTakeover.ts) |
+| Compose / replay    | [chatStore.ts](../../apps/web/src/store/chatStore.ts) `openQuestionCompose` / `openQuestionThread`                                                                                                                                                                                                                                                            |
+| Open scroll target  | [MessageList.tsx](../../apps/web/src/components/Messages/MessageList.tsx) + [messageListScroll.ts](../../apps/web/src/components/Messages/messageListScroll.ts)                                                                                                                                                                                               |
+| Send + state writes | [useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)                                                                                                                                                                                                                                                                                               |
+| Create path         | [resolveAddNodes.ts](../../apps/web/src/handler/canvasCommand/resolvers/resolveAddNodes.ts)                                                                                                                                                                                                                                                                   |
+| Dispatch API        | [agent.ts](../../apps/web/src/api/agent.ts) `streamMessage`                                                                                                                                                                                                                                                                                                   |
+| Spatial context     | [node-neighbourhood.ts](../../apps/server/src/modules/canvas/node-neighbourhood.ts)                                                                                                                                                                                                                                                                           |
+| Shared types        | [node.ts](../../packages/shared/src/types/canvas/node.ts) `QuestionNodeData` · [acp.ts](../../packages/shared/src/types/api/acp.ts) `AgentBinding`                                                                                                                                                                                                            |
 
 ---
 

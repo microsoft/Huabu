@@ -13,9 +13,9 @@
 
 import { useMemo, useState } from 'react';
 
-import { MessageList } from '../components/Messages/MessageList';
+import { MessageList } from '@/components/Messages/MessageList';
 
-import type { ChatMessage } from '../store/chatTypes';
+import type { ChatMessage } from '@/store/chatTypes';
 
 // ─── Sample input ──────────────────────────────────────────────────────
 //

@@ -473,6 +473,24 @@ body,
   transition-delay: 0s, 120ms;
 }
 
+/* Discrete three-stage takeover (question node). The whole card — background,
+   border, depth board, and content — fades as ONE binary step when the node
+   leaves the readable stage, so the zoomed-out node reads as just its
+   portal-rendered avatar/dot mark rather than a fading yellow box behind it.
+   `data-lod-body` is written only by `NodeTakeoverLayer`; it is a binary
+   attribute (visible/hidden), so the card is always crisp at rest — never a
+   resting half-opacity — and only the boundary crossing animates (200ms). The
+   mark lives in a separate screen-space portal, so it is not faded with the
+   card. Pointer-events stay on so the (now invisible) node footprint remains
+   selectable; the read-only body's dbl-click still routes to the same activate
+   handler as the mark. */
+.semantic-lod-node[data-lod-body] {
+  transition: opacity 200ms ease;
+}
+.semantic-lod-node[data-lod-body='hidden'] {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .semantic-lod-placeholder,
   .semantic-lod-content {
@@ -637,86 +655,6 @@ body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
 .skeleton-line:nth-child(3) {
   width: 50%;
   animation-delay: 0.3s;
-}
-
-/* ── Question node badge animations ── */
-
-/* Running: icon spin */
-@keyframes question-icon-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Error: shake */
-@keyframes question-badge-shake {
-  0%,
-  100% {
-    transform: translateX(0);
-  }
-  20%,
-  60% {
-    transform: translateX(-3px);
-  }
-  40%,
-  80% {
-    transform: translateX(3px);
-  }
-}
-
-/* ── Sticky-note styling ── */
-
-/* Done & not yet viewed: gentle wobble on the badge pill to draw the eye
-   without the loud green glow. Stops as soon as the user marks it viewed
-   (parent `.question-node-done-unviewed` class is removed). */
-.question-node-done-unviewed .question-done-pill {
-  transform-origin: 50% 50%;
-  animation: question-done-pill-wobble 2.4s ease-in-out infinite;
-}
-
-@keyframes question-done-pill-wobble {
-  0%,
-  55%,
-  100% {
-    transform: rotate(0deg);
-  }
-  10% {
-    transform: rotate(-6deg);
-  }
-  20% {
-    transform: rotate(5deg);
-  }
-  30% {
-    transform: rotate(-4deg);
-  }
-  40% {
-    transform: rotate(3deg);
-  }
-  50% {
-    transform: rotate(0deg);
-  }
-}
-
-.question-sticky {
-  --depth-offset: 8px;
-  position: relative;
-  overflow: visible !important;
-}
-
-/* Back layer — darker yellow-green strip visible on right & bottom edges */
-.question-sticky::before {
-  content: '';
-  position: absolute;
-  inset: var(--depth-offset) calc(var(--depth-offset) * -1)
-    calc(var(--depth-offset) * -1) var(--depth-offset);
-  background: var(--question-border);
-  /* Match the front card's border-radius (Tailwind `rounded-lg` = 0.5rem). */
-  border-radius: 0.5rem;
-  z-index: -1;
-  pointer-events: none;
 }
 
 /* ===================================================================

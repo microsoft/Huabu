@@ -462,6 +462,14 @@ export class AgentTeamRegistry {
         'Only ACP command Profiles accept metadata patches',
       );
     }
+    // `customData` is opaque host data on the base Profile: undefined leaves it,
+    // null clears it, an object replaces the whole bag.
+    const customDataPatch =
+      input.customData === undefined
+        ? {}
+        : input.customData === null
+          ? { customData: undefined }
+          : { customData: input.customData };
     const next: AgentProfile =
       current.launch.kind === 'acp-command'
         ? {
@@ -472,8 +480,13 @@ export class AgentTeamRegistry {
               : input.metadata === null
                 ? { metadata: undefined }
                 : { metadata: input.metadata }),
+            ...customDataPatch,
           }
-        : { ...current, alias: input.alias ?? current.alias };
+        : {
+            ...current,
+            alias: input.alias ?? current.alias,
+            ...customDataPatch,
+          };
     this.persistProfile(next);
     return structuredClone(next);
   }
@@ -942,6 +955,9 @@ export class AgentTeamRegistry {
       alias: this.assertAlias(input.alias),
       agentletId: input.agentletId,
       workingDirPath: input.workingDirPath,
+      ...(input.customData === undefined
+        ? {}
+        : { customData: input.customData }),
       launch: {
         kind: 'agent-team-manifest',
         manifestPath: input.manifestPath,
@@ -979,6 +995,9 @@ export class AgentTeamRegistry {
       workingDirPath: input.workingDirPath,
       launch: { kind: 'acp-command', command: input.command },
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+      ...(input.customData === undefined
+        ? {}
+        : { customData: input.customData }),
     };
     this.commit({
       ...cloneState(this.state),
