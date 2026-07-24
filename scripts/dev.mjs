@@ -2,15 +2,13 @@
 /**
  * Dev orchestrator.
  *
- * Starts `shared` (tsc -w), `server`, and the standalone `docs` app in
- * parallel, polls their TCP ports until they accept connections, then starts
- * `web` with the actual handbook URL injected. This avoids the cold-start
+ * Starts `shared` (tsc -w) and `server` in parallel, polls the Server TCP port
+ * until it accepts connections, then starts `web`. This avoids the cold-start
  * window where Vite is already proxying `/api/*` while the server is still
  * booting (which surfaces as harmless but noisy ECONNREFUSED logs).
  *
- * Port resolution mirrors apps/web/vite.config.ts:
+ * Environment resolution mirrors apps/web/vite.config.ts:
  *   process.env  >  apps/web/.env  >  <repo-root>/.env
- * Docs additionally reads DOCS_PORT and avoids the configured web port.
  */
 import { spawnSync } from 'node:child_process';
 import net from 'node:net';
@@ -20,7 +18,6 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
 import { spawnSupervisedDevChild } from './dev-child-supervisor.mjs';
-import { findAvailablePort } from './dev-ports.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
@@ -55,8 +52,8 @@ const env = loadEnv(
 
 const SERVER_PORT = Number.parseInt(env.SERVER_PORT || env.PORT || '3001', 10);
 const SERVER_HOST = '127.0.0.1';
-const WEB_PORT = Number.parseInt(env.WEB_PORT || env.VITE_PORT || '5173', 10);
-const DOCS_PORT = Number.parseInt(env.DOCS_PORT || '5174', 10);
+const HANDBOOK_URL =
+  env.VITE_HANDBOOK_URL || 'https://microsoft.github.io/Huabu/docs/';
 // How long to wait for the server to accept connections before giving up.
 // Cold starts (first tsx/esbuild compile, Windows Defender scanning a fresh
 // node_modules, or a loaded machine) can blow past a tight window, so the
@@ -276,36 +273,20 @@ function spawnAgentletWatch(filter, label) {
   return child;
 }
 
-const docsPort = await findAvailablePort(
-  DOCS_PORT,
-  new Set([SERVER_PORT, WEB_PORT]),
-);
-if (docsPort !== DOCS_PORT) {
-  console.warn(
-    `[dev] Docs port ${DOCS_PORT} is in use or reserved; using ${docsPort} instead.`,
-  );
-}
-
-console.log('[dev] starting agentlet watcher + shared + server + docs …');
+console.log('[dev] starting agentlet watcher + shared + server …');
 // `predev` already populated protocol dist; this watcher keeps it current for
 // the daemon bundle and Agenetes Gateway consumers during development.
 spawnAgentletWatch('@agentlet/protocol', 'agentlet/protocol');
 spawnPnpmDev('@sediment/shared', 'shared');
 spawnPnpmDev('@sediment/server', 'server');
-spawnPnpmDev('@sediment/docs', 'docs', {
-  DOCS_PORT: String(docsPort),
-});
 
 try {
-  await Promise.all([
-    waitForPort(SERVER_HOST, SERVER_PORT, READY_TIMEOUT_MS),
-    waitForPort(SERVER_HOST, docsPort, READY_TIMEOUT_MS),
-  ]);
+  await waitForPort(SERVER_HOST, SERVER_PORT, READY_TIMEOUT_MS);
   console.log(
-    `[dev] server is up at http://${SERVER_HOST}:${SERVER_PORT}, docs up at http://${SERVER_HOST}:${docsPort}/docs/; starting web …`,
+    `[dev] server is up at http://${SERVER_HOST}:${SERVER_PORT}; starting web …`,
   );
   spawnPnpmDev('@sediment/web', 'web', {
-    VITE_HANDBOOK_URL: `http://${SERVER_HOST}:${docsPort}/docs/`,
+    VITE_HANDBOOK_URL: HANDBOOK_URL,
   });
 } catch (err) {
   console.error('[dev]', err);
