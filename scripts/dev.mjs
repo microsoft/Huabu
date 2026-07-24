@@ -9,6 +9,10 @@
  *
  * Environment resolution mirrors apps/web/vite.config.ts:
  *   process.env  >  apps/web/.env  >  <repo-root>/.env
+ * Each preferred port (server, web) is then probed with findAvailablePort
+ * and slid to the next free one if occupied, and the resolved ports are
+ * injected into every consumer so the Vite proxy target stays in sync with
+ * wherever each service actually bound.
  */
 import { spawnSync } from 'node:child_process';
 import net from 'node:net';
@@ -18,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
 import { spawnSupervisedDevChild } from './dev-child-supervisor.mjs';
+import { findAvailablePort } from './dev-ports.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
@@ -51,6 +56,7 @@ const env = loadEnv(
 );
 
 const SERVER_PORT = Number.parseInt(env.SERVER_PORT || env.PORT || '3001', 10);
+const WEB_PORT = Number.parseInt(env.WEB_PORT || env.VITE_PORT || '5173', 10);
 const SERVER_HOST = '127.0.0.1';
 const HANDBOOK_URL =
   env.VITE_HANDBOOK_URL || 'https://microsoft.github.io/Huabu/docs/';
@@ -273,19 +279,46 @@ function spawnAgentletWatch(filter, label) {
   return child;
 }
 
+// Resolve actually-free ports before spawning anything (mirrors
+// scripts/dev-desktop.mjs). If a stale server/vite is still holding the
+// preferred port, slide to the next free one instead of crashing the
+// server or letting Vite's strictPort abort — and propagate the resolved
+// ports to every consumer so the Vite proxy target stays in sync with
+// wherever each service actually bound.
+const serverPort = await findAvailablePort(SERVER_PORT);
+if (serverPort !== SERVER_PORT) {
+  console.warn(
+    `[dev] Server port ${SERVER_PORT} is in use; using ${serverPort} instead.`,
+  );
+}
+const webPort = await findAvailablePort(WEB_PORT, new Set([serverPort]));
+if (webPort !== WEB_PORT) {
+  console.warn(
+    `[dev] Web port ${WEB_PORT} is in use or reserved; using ${webPort} instead.`,
+  );
+}
+
 console.log('[dev] starting agentlet watcher + shared + server …');
 // `predev` already populated protocol dist; this watcher keeps it current for
 // the daemon bundle and Agenetes Gateway consumers during development.
 spawnAgentletWatch('@agentlet/protocol', 'agentlet/protocol');
 spawnPnpmDev('@sediment/shared', 'shared');
-spawnPnpmDev('@sediment/server', 'server');
+spawnPnpmDev('@sediment/server', 'server', {
+  SERVER_PORT: String(serverPort),
+});
 
 try {
-  await waitForPort(SERVER_HOST, SERVER_PORT, READY_TIMEOUT_MS);
+  await waitForPort(SERVER_HOST, serverPort, READY_TIMEOUT_MS);
   console.log(
-    `[dev] server is up at http://${SERVER_HOST}:${SERVER_PORT}; starting web …`,
+    `[dev] server is up at http://${SERVER_HOST}:${serverPort}; starting web on :${webPort} …`,
   );
+  // Pass the resolved ports through env so vite.config.ts binds the port we
+  // already probed as free (its strictPort would otherwise abort) and its
+  // `/api/*` proxy target follows the server wherever it actually bound.
   spawnPnpmDev('@sediment/web', 'web', {
+    SERVER_PORT: String(serverPort),
+    WEB_PORT: String(webPort),
+    VITE_PORT: String(webPort),
     VITE_HANDBOOK_URL: HANDBOOK_URL,
   });
 } catch (err) {
