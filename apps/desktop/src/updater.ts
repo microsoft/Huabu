@@ -80,6 +80,54 @@ let lastStatus: UpdateStatus = { state: 'idle' };
 let wired = false;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
+/**
+ * Errors already "claimed" by the operation that produced them.
+ *
+ * electron-updater has a single shared `error` event for checks,
+ * downloads, and installs, so it cannot tell them apart on its own. But a
+ * check (`checkForUpdates()`) and a download (`downloadUpdate()`) each
+ * reject their own promise with the SAME Error instance the shared event
+ * also carries — so whoever awaits that promise records the instance
+ * here. An install (`quitAndInstall()`) exposes no promise, so its
+ * failure is the one error that reaches the shared event UNclaimed. That
+ * is how we attribute each error to its operation by identity, rather
+ * than by a blanket "an install is in flight" flag that would wrongly
+ * swallow every coincident check error as an install failure.
+ *
+ * A WeakSet so claimed errors stay collectable once nothing else
+ * references them; we never enumerate or clear it.
+ */
+const operationErrors = new WeakSet<object>();
+
+function claimOperationError(err: unknown): void {
+  if (typeof err === 'object' && err !== null) {
+    operationErrors.add(err);
+  }
+}
+
+/**
+ * Whether an explicit "Restart to update" (`update:install`) has been
+ * committed. `quitAndInstall()` can report a missing / un-launchable
+ * installer through the shared `error` event *asynchronously* (the
+ * installer is spawned detached). Because that error arrives UNclaimed
+ * (install has no promise), the shared listener already recognises it as
+ * an install failure via `operationErrors`; this flag only gates
+ * *whether* to raise the persistent "Update failed" badge for such an
+ * unclaimed error, so a stray error before any install request is logged
+ * rather than badged. It latches on the first install request; it is
+ * deliberately never cleared by a coincident check/download error —
+ * attribution, not this flag, is what stops those from being mistaken for
+ * the install's own (possibly late) failure.
+ */
+let installOpActive = false;
+
+/**
+ * The window resolver captured on {@link registerUpdaterIpc}, so the
+ * background poll in {@link startAutoUpdateChecks} can publish status
+ * transitions too. Registration always runs before polling starts.
+ */
+let resolveWindow: (() => BrowserWindow | null) | null = null;
+
 function isPackaged(): boolean {
   return app.isPackaged;
 }
@@ -122,6 +170,7 @@ export function registerUpdaterIpc(
 ): void {
   if (wired) return;
   wired = true;
+  resolveWindow = getWindow;
 
   ipcMain.handle('update:get-state', (): UpdateStatus => lastStatus);
 
@@ -137,7 +186,16 @@ export function registerUpdaterIpc(
       return { ok: true, status: lastStatus };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setStatus({ state: 'error', message }, getWindow);
+      // Claim this error so the shared `error` event — which electron-updater
+      // fires with the same instance — knows a check already owns it and
+      // never mistakes it for an install failure. A failed *check* is not
+      // "update failed": nothing was downloaded or installed, so we only
+      // clear the transient 'checking' state; the renderer surfaces the
+      // reason as a one-off toast from this result (see useAppUpdate.check()).
+      claimOperationError(err);
+      if (lastStatus.state === 'checking') {
+        setStatus({ state: 'idle' }, getWindow);
+      }
       return { ok: false, error: message };
     }
   });
@@ -154,6 +212,12 @@ export function registerUpdaterIpc(
       return { ok: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      // Claim this error so the shared `error` event (fired with the same
+      // instance) treats it as download-owned, not an install failure. A
+      // user-started download failing IS "update failed", so raise the
+      // persistent badge here — owned by this catch, never inferred from a
+      // shared flag a coincident background check could forge.
+      claimOperationError(err);
       setStatus({ state: 'error', message }, getWindow);
       return { ok: false, error: message };
     }
@@ -168,7 +232,14 @@ export function registerUpdaterIpc(
     }
     // `quitAndInstall` triggers `before-quit`, so the main process's
     // cooperative server-shutdown path still runs before the installer
-    // relaunches the app.
+    // relaunches the app. On success the app quits; on failure (installer
+    // missing / cannot launch) electron-updater emits the shared `error`
+    // event — possibly asynchronously, since the installer is spawned
+    // detached — and with an error no operation promise claims. The shared
+    // listener therefore recognises it as the install failure (see
+    // `operationErrors`); `installOpActive` only gates raising the
+    // persistent "Update failed" badge for such an unclaimed error.
+    installOpActive = true;
     setImmediate(() => autoUpdater.quitAndInstall());
     return { ok: true };
   });
@@ -212,8 +283,32 @@ export function registerUpdaterIpc(
     setStatus({ state: 'downloaded', version: info.version }, getWindow);
   });
   autoUpdater.on('error', (err) => {
-    const message = err instanceof Error ? err.message : String(err);
-    setStatus({ state: 'error', message }, getWindow);
+    // electron-updater dispatches this synchronously, BEFORE the
+    // check/download promise it also rejects (with the SAME error) settles.
+    // Defer one macrotask so that operation's catch (a microtask) runs
+    // first and claims the error. An error still unclaimed once the
+    // microtask queue has drained was produced by no check/download we
+    // initiated — i.e. a quitAndInstall() failure, the only operation with
+    // no promise to carry it.
+    setImmediate(() => {
+      const message = err instanceof Error ? err.message : String(err);
+      if (typeof err === 'object' && err !== null && operationErrors.has(err)) {
+        // Already handled by its originating check/download; the shared
+        // event is a redundant mirror for those, so there is nothing to do.
+        return;
+      }
+      if (installOpActive) {
+        // After an install request, the one unclaimed error source is the
+        // installer itself — surface it as the persistent "Update failed"
+        // badge, even when it arrives async and even when a background
+        // check failed first (that check error was claimed above).
+        setStatus({ state: 'error', message }, getWindow);
+        return;
+      }
+      // A stray error with no owning operation and no install committed
+      // installs nothing, so it never raises the badge — just log it.
+      console.error('[updater] update error:', message);
+    });
   });
 }
 
@@ -226,8 +321,18 @@ export function startAutoUpdateChecks(): void {
   if (!isPackaged()) return;
 
   const check = (): void => {
-    autoUpdater.checkForUpdates().catch(() => {
-      // Surfaced via the 'error' event listener; nothing to do here.
+    // Background poll. It owns its own failure: claim the error so the
+    // shared `error` event cannot mistake it for an install, log it (a
+    // check installs nothing, so never a badge), and clear any transient
+    // 'checking' state. This holds even while a user download or install
+    // is in flight, because attribution — not a shared flag — decides.
+    autoUpdater.checkForUpdates().catch((err: unknown) => {
+      claimOperationError(err);
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[updater] update check failed:', message);
+      if (resolveWindow && lastStatus.state === 'checking') {
+        setStatus({ state: 'idle' }, resolveWindow);
+      }
     });
   };
 
