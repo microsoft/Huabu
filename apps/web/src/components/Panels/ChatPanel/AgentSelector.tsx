@@ -34,7 +34,7 @@ import { Popover } from '../../Common/Popover';
 
 import type {
   AgentBinding,
-  AgentIcon,
+  AgentIcon as AgentIconData,
   AgentMode,
   AgentProfileView,
 } from '@sediment/shared';
@@ -65,7 +65,7 @@ interface AgentSelectorProps {
    * identity in the read-only chip instead of falling back to a generic
    * icon, mirroring the canvas node.
    */
-  fallbackIcon?: AgentIcon;
+  fallbackIcon?: AgentIconData;
 }
 
 /** Icon + label describing the currently-bound agent. */
@@ -74,7 +74,7 @@ function describeBinding(
   mode: AgentMode,
   labels: { chat: string; agent: string },
   profiles: AgentProfileView[],
-  fallbackIcon?: AgentIcon,
+  fallbackIcon?: AgentIconData,
 ): { icon: ReactNode; label: string } {
   // Share the external-binding resolution policy with the canvas question
   // node (live Profile → bind-time snapshot → deterministic default), so a
