@@ -24,10 +24,6 @@ import {
   setPortalNodePinsCommandSchema,
 } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
-import type {
-  CanvasEdge,
-  CanvasNode,
-} from '@huabu/shared/canvas-engine';
 
 import {
   CanvasCommandRoutingError,
@@ -111,6 +107,10 @@ import type {
   PutNodeContentResponse,
   RevealNodesFolderResponse,
 } from '@huabu/shared';
+import type {
+  CanvasEdge,
+  CanvasNode,
+} from '@huabu/shared/canvas-engine';
 import type { FastifyPluginAsync } from 'fastify';
 
 /**
