@@ -57,6 +57,12 @@ export default function AgentsAndStatus() {
         Done · viewed returns to a quiet ring.
       </P>
       <P>
+        The number on the Changes skipped badge counts how many of the
+        Agent&apos;s edits Huabu skipped because you were editing the target
+        node when the run finished, so a partly applied run is not reported as
+        fully done.
+      </P>
+      <P>
         As you zoom out, the mark moves to the center and eventually stands in
         for the whole Agent Node. At the smallest size it becomes a colored dot,
         while keeping the same Agent identity and status meaning.

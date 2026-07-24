@@ -211,12 +211,18 @@ function StatusMark({ state }: Pick<StatusExample, 'state'>) {
         <AgentAvatar working={working} />
       </span>
       {state === 'approval' ? (
-        <span className="agent-status-satellite agent-status-satellite-approval">
+        <span
+          className="agent-status-satellite agent-status-satellite-approval"
+          aria-hidden
+        >
           <ShieldQuestion aria-hidden size={12} />
         </span>
       ) : null}
       {state === 'conflict' ? (
-        <span className="agent-status-satellite agent-status-satellite-conflict">
+        <span
+          className="agent-status-satellite agent-status-satellite-conflict"
+          aria-hidden
+        >
           <AlertTriangle aria-hidden size={12} />2
         </span>
       ) : null}
