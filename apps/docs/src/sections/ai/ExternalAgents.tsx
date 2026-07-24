@@ -17,6 +17,7 @@ import {
 
 const toc: TocEntry[] = [
   { id: 'what-is-an-external-agent', label: 'What is an external agent?' },
+  { id: 'access-to-your-space', label: 'Access to your Space' },
   { id: 'before-you-start', label: 'Before you start' },
   { id: 'create-a-profile', label: 'Create a Profile' },
   { id: 'understand-presets', label: 'Understand Presets' },
@@ -42,6 +43,25 @@ export default function ExternalAgents() {
         directory and chat thread. Model access, authentication, tools,
         permissions, and usage charges remain with the agent or its provider.
       </P>
+
+      <H2>Access to your Space</H2>
+      <P>
+        A connected external agent does more than chat. Like Huabu Agent, it can
+        read the current Space — its nodes, their content, and layout — and
+        change it by creating, editing, connecting, moving, or deleting nodes.
+        This access is scoped to the single Space and conversation the agent is
+        attached to while that conversation runs; it does not extend to your
+        other Spaces.
+      </P>
+      <Callout tone="info">
+        An external agent may ask for your approval before it acts. The request
+        appears as a{' '}
+        <DocLink href="/docs/ai/agents-and-status#read-agent-node-status">
+          Permission required
+        </DocLink>{' '}
+        state on its Agent Node. You can also review and undo the changes an
+        agent makes, just as you would for Huabu Agent.
+      </Callout>
 
       <H2>Before you start</H2>
       <P>Prepare the agent on the same computer that runs Huabu:</P>
@@ -136,8 +156,19 @@ export default function ExternalAgents() {
             <strong>Display name</strong>,
             'Optional. Huabu derives a name from the agent or Preset and the working-directory folder when you leave it empty.',
           ],
+          [
+            <strong>Icon</strong>,
+            'Choose one of four Profile icon shapes and four colors to identify this External Agent in Agent menus and on Agent Nodes. Huabu assigns a Profile icon automatically, and you can change it later.',
+          ],
         ]}
       />
+      <P>
+        See{' '}
+        <DocLink href="/docs/ai/agents-and-status#external-agent-profile-icons">
+          External Agent Profile icons
+        </DocLink>{' '}
+        to preview the available shapes and colors.
+      </P>
       <P>
         With no Preset, select <strong>Create profile</strong>. The Profile is
         ready to use immediately. Choose <strong>Custom command</strong> at the

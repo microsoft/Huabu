@@ -3,6 +3,7 @@
 
 import {
   Callout,
+  DocLink,
   H2,
   P,
   PageLayout,
@@ -17,7 +18,7 @@ const toc: TocEntry[] = [
   { id: 'let-agent-work', label: 'Let Agent work on the Space' },
   { id: 'review-ai-changes', label: 'Review AI changes' },
   {
-    id: 'work-beside-material',
+    id: 'work-beside-your-material-with-an-agent-node',
     label: 'Work beside your material with an Agent Node',
   },
   { id: 'ask-and-discuss', label: 'Ask and discuss in Chat' },
@@ -64,6 +65,13 @@ export default function WorkWithAI() {
           ],
         ]}
       />
+      <P>
+        See{' '}
+        <DocLink href="/docs/ai/agents-and-status#huabu-chat-and-huabu-agent">
+          Agents &amp; Status
+        </DocLink>{' '}
+        to recognize the distinct Huabu Chat and Huabu Agent characters.
+      </P>
 
       <H2>Give AI the right context</H2>
       <P>
@@ -157,9 +165,7 @@ export default function WorkWithAI() {
         <li>
           The Chat Panel opens a conversation bound to the new Agent Node.
         </li>
-        <li>
-          Choose the built-in Chat, Agent, or an available external agent.
-        </li>
+        <li>Choose Huabu Chat, Huabu Agent, or an available External Agent.</li>
         <li>Write the question and send it.</li>
         <li>
           Double-click the Agent Node later to reopen and continue its thread.
@@ -169,6 +175,13 @@ export default function WorkWithAI() {
         Put the Agent Node inside the Frame you want it to understand, or
         connect it to the most relevant nodes. The conversation stays bound to
         that node and to the agent selected for it.
+      </P>
+      <P>
+        See{' '}
+        <DocLink href="/docs/ai/agents-and-status#read-agent-node-status">
+          Read Agent Node status
+        </DocLink>{' '}
+        to identify running, permission, unread, error, and conflict states.
       </P>
 
       <H2>Ask and discuss in Chat</H2>
@@ -184,6 +197,15 @@ export default function WorkWithAI() {
         search files or the web, and explain what it finds, but it does not
         modify the Space. Use it for summaries, comparisons, explanations, and
         brainstorming.
+      </P>
+      <P>
+        For built-in Chat and Agent conversations, use the model control above
+        the chat input to switch models without changing the default in
+        Settings. See{' '}
+        <DocLink href="/docs/ai/models-and-capabilities#chat-model">
+          Chat Model
+        </DocLink>{' '}
+        for details.
       </P>
       <Callout tone="info">
         When the next step requires Space changes, start a new conversation with{' '}

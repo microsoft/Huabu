@@ -58,7 +58,10 @@ export default function QuickStart() {
         ) from the app header (or press <Shortcut combo="mod+," />
         ), then select <strong>Huabu Agent</strong>. The{' '}
         <strong>Chat Model</strong> is the only model you must set up to get
-        started.
+        started. Most providers ask for a <strong>Default model</strong>; Azure
+        OpenAI asks for a single <strong>Deployment</strong>. When your provider
+        offers multiple models, you can switch models for one conversation from
+        the Chat Panel without changing the Settings default.
       </P>
       <P>
         The same page also holds optional settings — a{' '}
@@ -74,7 +77,7 @@ export default function QuickStart() {
       <DocImage
         src="/docs/quick-start/configure-llm.png"
         alt="Huabu Agent settings with the Chat Model provider, endpoint, and API key fields"
-        caption="Configure models and keys in Huabu Agent settings — only the Chat Model is required."
+        caption="Configure a provider, credentials, and its Chat Model or Deployment in Huabu Agent settings."
         className="mx-auto max-w-2xl"
       />
 
