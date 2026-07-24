@@ -96,6 +96,12 @@ export const putCanvasBodySchema = z.object({
   version: z.number().int().nonnegative(),
   state: z.unknown(),
   title: z.string().min(1).optional(),
+  /**
+   * Opaque per-tab client id (P2 / Plan A). Echoed back on the sync
+   * broadcast as `originatorClientId` so the originating tab can skip
+   * its own PUT echo instead of re-applying its own change.
+   */
+  clientId: z.string().optional(),
 });
 export type PutCanvasRequest = z.infer<typeof putCanvasBodySchema>;
 

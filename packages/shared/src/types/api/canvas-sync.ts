@@ -62,6 +62,14 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
        * the API layer; the client casts.
        */
       changes: z.array(z.unknown()).optional(),
+      /**
+       * Opaque id of the client (tab) that originated this update (P2 /
+       * Plan A user-edit broadcast). The originating tab filters its own
+       * echo by comparing this against its local client id; absent for
+       * server-originated writes (e.g. headless `/execute`) that no tab
+       * needs to de-dupe.
+       */
+      originatorClientId: z.string().optional(),
     }),
   }),
 ]);
