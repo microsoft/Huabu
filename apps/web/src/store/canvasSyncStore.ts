@@ -8,6 +8,7 @@ import { canvasSyncStreamUrl } from '@/api/canvasSync';
 import { dismissToast, toast } from '@/components/Common/Toast';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
+import { CLIENT_ID } from '@/store/clientId';
 import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
@@ -90,10 +91,15 @@ function notifySkippedAgentWrites(
     return typeof label === 'string' && label.trim() ? label : 'a note';
   };
   const names = skippedNodeIds.map(labelOf);
+  // User hand-edit broadcasts (P2 / Plan A) carry no `threadId`; an agent
+  // batch does. Word the notice accordingly so a dropped edit from another
+  // window doesn't read as “the agent”.
+  const actor = threadId ? 'The agent’s' : 'A';
+  const source = threadId ? '' : ' from another window';
   const message =
     names.length === 1
-      ? `The agent's change to “${names[0]}” was skipped because you were editing it — your version was kept.`
-      : `The agent's changes to ${names.length} nodes were skipped because you were editing them — your versions were kept.`;
+      ? `${actor} change to “${names[0]}”${source} was skipped because you were editing it — your version was kept.`
+      : `${actor} changes to ${names.length} nodes${source} were skipped because you were editing them — your versions were kept.`;
   if (conflictToastId) dismissToast(conflictToastId);
   conflictToastId = toast(message, {
     tone: 'warning',
@@ -150,6 +156,11 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
             }
 
             // event.type === 'update'
+            // Skip our own PUT echo (P2 / Plan A): the originating tab has
+            // already applied this edit optimistically, so re-applying the
+            // broadcast would be redundant (and could fight a still-pending
+            // local edit). Server-originated writes carry no id and pass.
+            if (event.data.originatorClientId === CLIENT_ID) return;
             const { fromVersion, toVersion, deltas, pendingEffects } =
               event.data;
             let skippedNodeIds: string[] = [];
