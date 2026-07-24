@@ -57,10 +57,14 @@ describe('handbook route registry', () => {
     );
   });
 
-  it('presents everyday AI work in one task-focused page', () => {
+  it('presents AI workflow and reference pages', () => {
     const ai = groups.find((group) => group.label === 'AI');
     expect(ai?.items.map(({ to, label }) => ({ to, label }))).toEqual([
       { to: '/docs/work-with-ai', label: 'Work with AI' },
+      {
+        to: '/docs/ai/agents-and-status',
+        label: 'Agents & Status',
+      },
       {
         to: '/docs/ai/models-and-capabilities',
         label: 'Models & Capabilities',
