@@ -26,6 +26,21 @@ The explicit `update:install` action lets the user restart and install immediate
 
 The main process owns a single `UpdateStatus` snapshot, pushes every transition over the `update:status` channel, and answers `update:get-state` so a freshly-mounted renderer syncs immediately. The renderer never talks to `electron-updater` directly — only through the sandboxed `electronBridge.updater` surface.
 
+**The persistent "Update failed" badge means a _download_ failed, not a _check_.** Failing to reach the release feed is not the same as an update failing, so the two are surfaced differently:
+
+- **Download / install failure** (an explicit `update:download` or `update:install` the user started) → snapshot transitions to `error`, and the header shows the persistent red "Update failed" badge (click to retry).
+- **Version-check failure** — whether a silent startup / periodic poll or a manual "check for updates" — installs nothing, so it never raises that badge. Background polls are logged to the console and clear their transient `checking` state back to `idle`. A manual check additionally returns the reason to the renderer, which shows a one-off toast ("Unable to check for updates: …") — no persistent badge.
+
+electron-updater raises a single shared `error` event for checks, downloads, and installs alike, so [updater.ts](../../apps/desktop/src/updater.ts) attributes each error to its operation **by Error identity**, never by a blanket "an install is in flight" flag (which would wrongly swallow every coincident check error as an install failure). A check (`checkForUpdates()`) and a download (`downloadUpdate()`) each reject their own promise with the _same_ `Error` instance the shared event carries, so the handler awaiting that promise records the instance in an `operationErrors` `WeakSet` — claiming it. An install (`quitAndInstall()`) exposes no promise, so its failure is the one error that reaches the shared event **unclaimed**.
+
+The shared `error` listener therefore defers one macrotask (so the operation's promise `catch` — a microtask — runs first and claims the error), then:
+
+- **claimed** → the originating check/download already handled it; do nothing.
+- **unclaimed, an install committed** (`installOpActive`) → the installer itself failed; raise the persistent "Update failed" badge, even when the error arrives asynchronously and even when a background check failed first (that check error was claimed, so it never reaches here).
+- **unclaimed, no install committed** → a stray error that installs nothing; log only, never a badge.
+
+`installOpActive` latches on the first install request and gates only that middle case; it is never cleared by a coincident check/download error, because attribution — not the flag — is what keeps those from being mistaken for the install's own (possibly late) failure.
+
 ## The update feed is configuration, not code
 
 electron-updater reads the GitHub owner/repo from `app-update.yml`, which electron-builder bakes into the app at build time from the `publish` block in [electron-builder.yml](../../apps/desktop/electron-builder.yml). Those values are **not hardcoded** — they come from the `HUABU_UPDATE_OWNER` / `HUABU_UPDATE_REPO` env vars, set from GitHub Actions repository **Variables** in [release.yml](../../.github/workflows/release.yml) and [nightly.yml](../../.github/workflows/nightly.yml). Both variables are required for every distributable build; the workflows fail before packaging when either is empty.
