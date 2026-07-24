@@ -450,7 +450,16 @@ export const LLMSettings: React.FC = () => {
         {/* Model picker comes last: for account-based providers the list is
             only accurate once the key / login above is configured. */}
         {llmConfig?.provider && llmModels.length > 0 && !isAzure && (
-          <SettingRow title={t('settings.model')}>
+          <SettingRow
+            title={t(
+              llmModels.length > 1 ? 'settings.defaultModel' : 'settings.model',
+            )}
+            description={
+              llmModels.length > 1
+                ? t('settings.chatModelDefaultDesc')
+                : undefined
+            }
+          >
             <SettingControl>
               <Select
                 options={llmModels.map((m) => ({
@@ -460,7 +469,11 @@ export const LLMSettings: React.FC = () => {
                 value={llmConfig?.model ?? ''}
                 onChange={(v) => void handleModelChange(v)}
                 disabled={llmSaving}
-                ariaLabel={t('settings.model')}
+                ariaLabel={t(
+                  llmModels.length > 1
+                    ? 'settings.defaultModel'
+                    : 'settings.model',
+                )}
                 className="w-full"
               />
             </SettingControl>
