@@ -50,7 +50,20 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         writeSSE(reply.raw, event);
       });
 
+      // Periodic comment-line keep-alive so idle connections aren't reaped
+      // by intermediary proxies / load balancers and the client can detect
+      // a dead stream. `:` lines are ignored by the EventSource parser.
+      const heartbeat = setInterval(() => {
+        try {
+          reply.raw.write(': ping\n\n');
+        } catch {
+          /* stream already closed — the close handler will clean up */
+        }
+      }, 25_000);
+      heartbeat.unref?.();
+
       request.raw.on('close', () => {
+        clearInterval(heartbeat);
         unsubscribe();
         try {
           reply.raw.end();
