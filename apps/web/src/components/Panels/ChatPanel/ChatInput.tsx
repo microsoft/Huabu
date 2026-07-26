@@ -355,6 +355,9 @@ export const ChatInput = ({
 
     if (e.key !== 'Enter') return;
     if (e.shiftKey) return;
+    // While a turn is streaming the input stays editable, but Enter must not
+    // send: the visible action is Stop, and the draft is held for next round.
+    if (isStreaming) return;
     if (isSubmitDisabled) return;
 
     e.preventDefault();

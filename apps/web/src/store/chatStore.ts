@@ -36,6 +36,15 @@ export interface ChatState {
    * mid-stream.
    */
   messagesByThread: Record<string, ChatMessage[]>;
+  /**
+   * Per-thread composer drafts. Indexed by threadId, in-memory only.
+   * A missing key means "no draft" (empty composer). Keyed by thread so
+   * an unsent draft stays with its own session instead of leaking across
+   * threads when the user navigates the canvas or a question replay
+   * mid-compose. Read via `selectCurrentDraft`; cleaned up alongside
+   * `messagesByThread` in `evictInactiveThreads`.
+   */
+  draftsByThread: Record<string, string>;
   /** Current thread identifier for the active canvas. */
   threadId: string;
   /**
@@ -219,6 +228,13 @@ export interface ChatState {
   /** Clear all staged attachments (called after message is sent). */
   clearPendingAttachments: () => void;
 
+  /**
+   * Set (or clear) the current thread's composer draft. Passing an empty
+   * string deletes the key so `draftsByThread` doesn't accumulate empty
+   * entries. Sending a message clears the draft through this same path.
+   */
+  setDraft: (threadId: string, text: string) => void;
+
   /** Set/replace the text-selection-based attachment (auto-managed by ExpandedNodePanel). */
   setSelectionAttachment: (attachment: ChatAttachment | null) => void;
 
@@ -339,6 +355,7 @@ export const useChatStore = create<ChatState>()(
   persist(
     (set, get) => ({
       messagesByThread: {},
+      draftsByThread: {},
       threadId: createId('thread'),
       historyLoadedThreads: new Set<string>(),
       lastAction: 'ask',
@@ -556,6 +573,19 @@ export const useChatStore = create<ChatState>()(
         })),
 
       clearPendingAttachments: () => set({ pendingAttachments: [] }),
+
+      setDraft: (threadId, text) =>
+        set((state) => {
+          const current = state.draftsByThread[threadId] ?? '';
+          if (text === current) return {};
+          const nextDrafts = { ...state.draftsByThread };
+          if (text === '') {
+            delete nextDrafts[threadId];
+          } else {
+            nextDrafts[threadId] = text;
+          }
+          return { draftsByThread: nextDrafts };
+        }),
 
       setSelectionAttachment: (attachment) =>
         set({ selectionAttachment: attachment }),
@@ -943,13 +973,16 @@ export const useChatStore = create<ChatState>()(
           if (evictable.length === 0) return {};
 
           const nextMessages = { ...state.messagesByThread };
+          const nextDrafts = { ...state.draftsByThread };
           const nextLoaded = new Set(state.historyLoadedThreads);
           for (const tid of evictable) {
             delete nextMessages[tid];
+            delete nextDrafts[tid];
             nextLoaded.delete(tid);
           }
           return {
             messagesByThread: nextMessages,
+            draftsByThread: nextDrafts,
             historyLoadedThreads: nextLoaded,
           };
         }),
@@ -1033,6 +1066,10 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
  */
 export const selectCurrentMessages = (state: ChatState): ChatMessage[] =>
   state.messagesByThread[state.threadId] ?? EMPTY_MESSAGES;
+
+/** Read the currently-visible thread's composer draft ('' when none). */
+export const selectCurrentDraft = (state: ChatState): string =>
+  state.draftsByThread[state.threadId] ?? '';
 
 /** True if the currently-visible thread has been hydrated from the server. */
 export const selectCurrentHistoryLoaded = (state: ChatState): boolean =>

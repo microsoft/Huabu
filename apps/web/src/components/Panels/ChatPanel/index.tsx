@@ -27,6 +27,7 @@ import useCanvasStore from '@/store/canvasStore';
 import {
   selectCurrentHistoryLoaded,
   selectCurrentMessages,
+  selectCurrentDraft,
   useChatStore,
 } from '@/store/chatStore';
 import { findPendingPermissionRequest } from '@/store/chatTypes';
@@ -71,7 +72,13 @@ interface ChatPanelProps {
 export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [input, setInput] = useState('');
+  // Composer draft lives in the store keyed by threadId (see chatStore
+  // `draftsByThread`) so an unsent draft stays with its own session
+  // instead of being wiped when the user switches canvas or opens a
+  // question replay. `setInput` is wired to the current thread below,
+  // once `threadId` is available.
+  const input = useChatStore(selectCurrentDraft);
+  const setDraft = useChatStore((state) => state.setDraft);
   const setLastAction = useChatStore((state) => state.setLastAction);
 
   // Canvas-level chat mode toggle. Persisted to localStorage so a page
@@ -194,6 +201,13 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const updateMessage = useChatStore((state) => state.updateMessage);
   const clearMessages = useChatStore((state) => state.clearMessages);
   const threadId = useChatStore((state) => state.threadId);
+  // Wire the composer's onChange to the current thread's draft slot. An
+  // empty string clears the draft (see `setDraft`), so the existing
+  // `setInput('')` on send doubles as clear-on-send.
+  const setInput = useCallback(
+    (text: string) => setDraft(threadId, text),
+    [setDraft, threadId],
+  );
   const addNode = useCanvasStore((state) => state.addNode);
   const llmConfig = useLLMStore((state) => state.config);
   const llmModels = useLLMStore((state) => state.models);
@@ -753,6 +767,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     !isLoading;
   const handleSelectAgent = useCallback(
     (choice: AgentChoice) => {
+      // Agent binding is immutable once a turn starts (1 thread = 1 binding).
+      // The selector is already read-only then; keep this guard as defense in
+      // depth in case a stale menu event arrives during the transition.
       if (isLoading) return;
       setAgentBinding(choice.binding, canvasId || undefined);
       setLastAction(choice.mode);
@@ -1024,7 +1041,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               // snapshot. Transport-health gating is now expressed via the
               // connection badge above; we keep the input enabled so the
               // user can retry / trigger a re-ensure on the next send.
-              disabled={isLoading || !isHistoryLoaded}
+              // Only gate the composer on history load, not on streaming: the
+              // user can keep drafting while the Send button is replaced by
+              // Stop. The Agent selector remains locked by the thread's
+              // 1-thread-1-binding contract; only the draft carries forward.
+              disabled={!isHistoryLoaded}
             />
           </div>
         )}

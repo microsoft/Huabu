@@ -30,20 +30,16 @@ import {
   isModeConfigOption,
   isModelConfigOption,
 } from './acpSessionConfigOption';
+import { SessionSelectorPill } from './SessionSelectorPill';
 import { Button } from '../../Common/Button';
 import { Loading } from '../../Common/Loading';
 import { Popover } from '../../Common/Popover';
-import { Select, type SelectOption } from '../../Common/Select';
 
+import type { SelectOption } from '../../Common/Select';
 import type {
   AcpSessionConfigOption,
   AcpSessionMetaSnapshot,
 } from '@sediment/shared';
-
-// Tighter trigger than the default `size="sm"` Button to keep the
-// toolbar row from wrapping when the agent publishes 3+ pills. Wins
-// over the size class via `tailwind-merge` in `Select`'s `cn()`.
-const COMPACT_TRIGGER_CLASS = 'px-1.5 py-0.5 gap-1';
 
 interface AcpSessionSelectorsProps {
   meta: AcpSessionMetaSnapshot;
@@ -110,18 +106,12 @@ function ConfigOptionSelect({
       { value: 'false', label: t('chat.off') },
     ];
     return (
-      <Select<'true' | 'false'>
+      <SessionSelectorPill<'true' | 'false'>
         options={options}
         value={current ? 'true' : 'false'}
         onChange={(next) => void onSelect(next === 'true')}
         disabled={disabled}
         title={label}
-        variant="ghost"
-        shape="pill"
-        tone="neutral"
-        size="sm"
-        align="top-left"
-        className={COMPACT_TRIGGER_CLASS}
       />
     );
   }
@@ -187,18 +177,12 @@ function ConfigOptionSelect({
   const value = currentValue || flat[0].value;
 
   return (
-    <Select<string>
+    <SessionSelectorPill<string>
       options={flat}
       value={value}
       onChange={(next) => void onSelect(next)}
       disabled={disabled}
       title={label}
-      variant="ghost"
-      shape="pill"
-      tone="neutral"
-      size="sm"
-      align="top-left"
-      className={COMPACT_TRIGGER_CLASS}
     />
   );
 }
@@ -315,33 +299,21 @@ export const AcpSessionSelectors = ({
         className="flex min-w-0 shrink items-center overflow-hidden"
       >
         {showLegacyMode && (
-          <Select<string>
+          <SessionSelectorPill<string>
             options={modeOptions}
             value={meta.currentModeId ?? modeOptions[0].value}
             onChange={(next) => void onSelectMode(next)}
             disabled={disabled}
             title={t('chat.agentMode')}
-            variant="ghost"
-            shape="pill"
-            tone="neutral"
-            size="sm"
-            align="top-left"
-            className={COMPACT_TRIGGER_CLASS}
           />
         )}
         {showLegacyModel && (
-          <Select<string>
+          <SessionSelectorPill<string>
             options={modelOptions}
             value={meta.currentModelId ?? modelOptions[0].value}
             onChange={(next) => void onSelectModel(next)}
             disabled={disabled}
             title={t('chat.model')}
-            variant="ghost"
-            shape="pill"
-            tone="neutral"
-            size="sm"
-            align="top-left"
-            className={COMPACT_TRIGGER_CLASS}
           />
         )}
         {meta.configOptions.map((opt) => {
