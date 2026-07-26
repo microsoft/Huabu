@@ -29,10 +29,11 @@ import type { Node } from '@xyflow/react';
 
 /** Extract a lightweight NodeRef from a ReactFlow node. */
 export function extractNodeRef(node: Node): NodeRef {
+  const label = node.data?.label;
   return {
     id: node.id,
     type: (node.type ?? 'note') as CanvasNodeType,
-    label: node.data?.label as string | undefined,
+    ...(typeof label === 'string' ? { label } : {}),
     origin: (node.data as Record<string, unknown> | undefined)
       ?.origin as NodeRef['origin'],
   };
