@@ -15,24 +15,29 @@
 
 import { z } from 'zod';
 
-export type WorkspaceMode = 'free' | 'managed';
+export const workspaceModeSchema = z.enum(['free', 'managed']);
+export type WorkspaceMode = z.infer<typeof workspaceModeSchema>;
 
-export interface WorkspaceCapabilities {
+export const workspaceCapabilitiesSchema = z.object({
   /** Whether the user is allowed to change workspace at runtime. */
-  canChangeWorkspace: boolean;
+  canChangeWorkspace: z.boolean(),
   /** Whether the server can show a native folder picker. */
-  nativePicker: boolean;
-}
+  nativePicker: z.boolean(),
+});
+export type WorkspaceCapabilities = z.infer<typeof workspaceCapabilitiesSchema>;
 
-export interface WorkspaceInfo {
-  mode: WorkspaceMode;
-  configured: boolean;
+export const workspaceInfoSchema = z.object({
+  mode: workspaceModeSchema,
+  configured: z.boolean(),
   /** Free-mode active absolute path. Always null in managed mode. */
-  path: string | null;
+  path: z.string().nullable(),
   /** Display label (basename of the active path), or null. */
-  name: string | null;
-  capabilities: WorkspaceCapabilities;
-}
+  name: z.string().nullable(),
+  /** Stable hidden World canvas identity, or null before configuration. */
+  worldCanvasId: z.string().min(1).nullable(),
+  capabilities: workspaceCapabilitiesSchema,
+});
+export type WorkspaceInfo = z.infer<typeof workspaceInfoSchema>;
 
 /**
  * Result of `POST /api/workspace/pick-folder`.

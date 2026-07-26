@@ -34,6 +34,7 @@ import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import {
+  isWorldCanvasId,
   refreshCanvasDirIndex,
   registerCanvasDir,
   suggestCanvasDir,
@@ -555,6 +556,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<DeleteCanvasResponse>;
   }>('/:canvasId', async function (request, reply) {
     const { canvasId } = request.params;
+    if (isWorldCanvasId(canvasId)) {
+      return reply
+        .code(403)
+        .send({ message: 'World canvas cannot be deleted' });
+    }
     // Suspend the external-note watcher across the directory delete: on
     // Windows a live `fs.watch` handle inside the canvas subtree makes
     // `rmSync` fail with EPERM (same root cause as the rename path).
@@ -1118,6 +1124,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           message: `Another canvas already uses the directory name "${renameResult.conflictWith}"`,
           conflictWith: renameResult.conflictWith,
         } satisfies CanvasConflictResponse);
+      }
+      if (!renameResult.ok && renameResult.reason === 'forbidden') {
+        return reply
+          .code(403)
+          .send({ message: 'World canvas cannot be renamed' });
       }
       if (!renameResult.ok && renameResult.reason === 'fs-error') {
         request.log.error(

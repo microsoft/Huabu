@@ -21,6 +21,7 @@ import {
   refreshCanvasDirIndex,
   registerCanvasDir,
   renameCanvasDirOnDisk,
+  isWorldCanvasId,
   unregisterCanvasDir,
 } from './canvas-dirs.js';
 import { parseFrontmatter, toFrontmatter } from './frontmatter.js';
@@ -178,6 +179,7 @@ export type RenameSelfResult =
   | { ok: true; dirName: string }
   | { ok: false; reason: 'conflict'; conflictWith: string }
   | { ok: false; reason: 'not-found' }
+  | { ok: false; reason: 'forbidden' }
   | { ok: false; reason: 'fs-error'; message: string };
 
 /**
@@ -392,7 +394,7 @@ export class CanvasStore {
 
     const dirName = path.basename(canvasRoot(this.canvasId));
     const expectedDir = toSafeFilename(file.title, this.canvasId);
-    if (dirName && dirName !== expectedDir) {
+    if (!isWorldCanvasId(this.canvasId) && dirName && dirName !== expectedDir) {
       const next: CanvasFile = {
         ...file,
         title: dirName,
@@ -438,6 +440,9 @@ export class CanvasStore {
    * throwing so the route layer can map it to a 409.
    */
   renameSelf(newTitle: string | null): RenameSelfResult {
+    if (isWorldCanvasId(this.canvasId)) {
+      return { ok: false, reason: 'forbidden' };
+    }
     const desired = toSafeFilename(newTitle, this.canvasId);
     if (!existsSync(canvasRoot(this.canvasId))) {
       return { ok: false, reason: 'not-found' };
@@ -1322,6 +1327,9 @@ export class CanvasStore {
 
   /** Recursively delete the entire canvas directory. */
   destroy(): boolean {
+    if (isWorldCanvasId(this.canvasId)) {
+      throw new Error('World canvas cannot be deleted');
+    }
     const root = canvasRoot(this.canvasId);
     if (!existsSync(root)) {
       unregisterCanvasDir(this.canvasId);

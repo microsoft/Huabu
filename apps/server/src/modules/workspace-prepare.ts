@@ -13,6 +13,7 @@ import { migrateLegacyAgenetesThreads } from './storage/migrate-agenetes-threads
 import { migrateCanvasToSpace } from './storage/migrate-canvas-to-space.js';
 import { migrateLegacyChatThreads } from './storage/migrate-chat-threads.js';
 import { migrateLegacyChatTurns } from './storage/migrate-chat-turns.js';
+import { ensureWorldCanvasOnDisk } from './storage/world-canvas.js';
 
 /**
  * Prepare and migrate a resolved absolute workspace path on disk.
@@ -40,4 +41,5 @@ export function prepareWorkspaceOnDisk(workspacePath: string): void {
   // M6.9 row 1: fold the removed `acp-sessions.json` (v3) recovery records
   // into `threads.json` `ThreadRecord`s.
   migrateLegacyAcpSessions(workspacePath);
+  ensureWorldCanvasOnDisk(workspacePath);
 }

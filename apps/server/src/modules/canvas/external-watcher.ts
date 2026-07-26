@@ -5,11 +5,12 @@ import chokidar, { type FSWatcher } from 'chokidar';
 
 import { getLogger } from '../../utils/logger.js';
 import {
-  listCanvasDirEntries,
+  listAllCanvasDirEntries,
   refreshCanvasDirIndex,
 } from '../storage/canvas-dirs.js';
 import { parseFrontmatter } from '../storage/frontmatter.js';
 import { getCanvasStore } from '../storage/index.js';
+import { WORLD_CANVAS_DIR_NAME } from '../storage/paths.js';
 import { getWorkspacePath, isWorkspaceConfigured } from '../workspace.js';
 
 import type { ExternalNoteEvent, ExternalNoteItem } from '@sediment/shared';
@@ -31,7 +32,7 @@ function resolvePath(
   if (parts.length !== 3 || parts[1] !== 'nodes') return null;
   if (!parts[2].endsWith('.md')) return null;
   refreshCanvasDirIndex();
-  for (const entry of listCanvasDirEntries()) {
+  for (const entry of listAllCanvasDirEntries()) {
     if (entry.filename === parts[0]) {
       return { canvasId: entry.id, relativePath: `nodes/${parts[2]}` };
     }
@@ -129,7 +130,14 @@ function armWatcher(): void {
   watcher = chokidar.watch(ws, {
     ignoreInitial: false,
     depth: 2,
-    ignored: (p: string) => path.basename(p).startsWith('.'),
+    ignored: (candidate: string) => {
+      const basename = path.basename(candidate);
+      if (!basename.startsWith('.')) return false;
+      return (
+        path.resolve(candidate) !==
+        path.join(path.resolve(ws), WORLD_CANVAS_DIR_NAME)
+      );
+    },
     awaitWriteFinish: { stabilityThreshold: 120, pollInterval: 50 },
   });
   watcher
@@ -257,7 +265,9 @@ export async function runWithExternalNoteWatcherSuspended<T>(
       // canvasId to clear it lazily. Keyed by `canvasId`, so a rename
       // (which changes only the directory name, not the id) is unaffected.
       refreshCanvasDirIndex();
-      const liveCanvasIds = new Set(listCanvasDirEntries().map((e) => e.id));
+      const liveCanvasIds = new Set(
+        listAllCanvasDirEntries().map((entry) => entry.id),
+      );
       for (const id of pendingByCanvas.keys()) {
         if (!liveCanvasIds.has(id)) pendingByCanvas.delete(id);
       }

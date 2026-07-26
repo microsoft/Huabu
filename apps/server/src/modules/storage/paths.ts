@@ -44,6 +44,7 @@ export function canvasRoot(canvasId: string): string {
  * (L2 internal). See migrate-canvas-to-space.ts for the legacy rename.
  */
 export const SPACE_JSON_FILENAME = 'space.json';
+export const WORLD_CANVAS_DIR_NAME = '.world';
 
 export function canvasJsonPath(canvasId: string): string {
   return path.join(canvasRoot(canvasId), SPACE_JSON_FILENAME);

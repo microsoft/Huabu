@@ -136,6 +136,8 @@ interface WorkspaceState {
   workspacePath: string | null;
   /** Display label (basename of the active workspace), or null. */
   workspaceName: string | null;
+  /** Stable hidden World canvas identity, or null before configuration. */
+  worldCanvasId: string | null;
   /** Recently used free-mode paths (most recent first). */
   recentWorkspaces: string[];
 
@@ -185,6 +187,7 @@ function fromInfo(info: WorkspaceInfo): Partial<WorkspaceState> {
     capabilities: info.capabilities,
     workspacePath: info.path,
     workspaceName: info.name,
+    worldCanvasId: info.worldCanvasId,
     isReady: info.configured,
   };
 }
@@ -234,6 +237,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       ? localStorage.getItem(FREE_PATH_KEY)
       : null,
   workspaceName: null,
+  worldCanvasId: null,
   recentWorkspaces:
     typeof localStorage !== 'undefined' ? loadLocalStorageRecents() : [],
   isReady: false,

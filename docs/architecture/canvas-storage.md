@@ -12,6 +12,8 @@ Runtime Home-folder activation prepares and migrates the selected directory in a
 
 ```
 <workspace>/
+  .world/                         # hidden workspace-owned World Canvas
+    space.json                    # stable generated canvasId; normal Canvas topology
   setting/                        # user-owned, cross-canvas
     user.md                     # workspace memory (user preferences)
     skills/<id>/SKILL.md          # user / memory-agent authored skills
@@ -38,8 +40,10 @@ Runtime Home-folder activation prepares and migrates the selected directory in a
 
 Key points:
 
-- The **directory name** is derived from the canvas title via `toSafeFilename(title)`, not from `canvasId`. The stable `canvasId` only lives inside `space.json`.
+- An ordinary Space **directory name** is derived from its title via `toSafeFilename(title)`, not from `canvasId`. The stable `canvasId` only lives inside `space.json`; the World is the reserved `.world` exception.
 - `listCanvases()` rescans the workspace on every call, skipping entries that start with `.` or lack `space.json`.
+- Workspace preparation creates exactly one hidden `.world/space.json` after migrations. Its generated `canvasId` remains stable, resolves through the normal `CanvasStore`, and is exposed separately as `WorkspaceInfo.worldCanvasId`; ordinary Canvas lists continue to omit it.
+- An established `.world` directory with a missing or malformed `space.json` is an integrity error. World identity is never silently regenerated, and the World cannot be deleted or directory-renamed through ordinary Space lifecycle operations.
 - Node filenames are `safe(label).md`; the node's stable id lives in the `id:` frontmatter field.
 - Artifacts live in `.artifacts/` (hidden) named `<artifactId><ext>`. No manifest file — the filename is the URL key.
 - Events are append-only JSONL (`events.jsonl`); each line is `{ ts: number, payload: RecentAction }`.
