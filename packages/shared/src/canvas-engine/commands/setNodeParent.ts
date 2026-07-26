@@ -1,9 +1,11 @@
 import { noop, type CommandDefinition } from './types.js';
 import {
-  moveNodeIntoFrame,
-  moveNodeOutOfFrame,
+  canParentNode,
+  getDescendantIds,
+  moveNodeIntoContainer,
+  moveNodeOutOfContainer,
   type NestableNode,
-} from '../frame/index.js';
+} from '../container/index.js';
 
 import type { CanvasCommand } from '../../index.js';
 import type { Node } from '@xyflow/react';
@@ -39,10 +41,33 @@ const setNodeParent: CommandDefinition<Cmd> = {
         return noop(state, 'invalid-target');
       }
     }
-    if (parentId && !result.some((n) => n.id === parentId)) {
-      return noop(state, 'invalid-parent');
+    if (parentId) {
+      const parent = result.find((node) => node.id === parentId);
+      if (!parent) return noop(state, 'invalid-parent');
+      if (parent.data?.locked) return noop(state, 'invalid-parent');
+      for (const nodeId of cmd.nodeIds) {
+        const child = result.find((node) => node.id === (nodeId as string));
+        if (!canParentNode(parent, child)) {
+          return noop(state, 'invalid-parent');
+        }
+        if (
+          child?.parentId !== parentId &&
+          getDescendantIds(result, child?.id ?? '').includes(parentId)
+        ) {
+          return noop(state, 'invalid-parent');
+        }
+      }
+    } else {
+      for (const nodeId of cmd.nodeIds) {
+        const child = result.find((node) => node.id === (nodeId as string));
+        const parent = child?.parentId
+          ? result.find((node) => node.id === child.parentId)
+          : undefined;
+        if (parent?.data?.locked) return noop(state, 'invalid-parent');
+      }
     }
 
+    let changed = false;
     for (const nodeId of cmd.nodeIds) {
       const id = nodeId as string;
       const node = result.find((n) => n.id === id);
@@ -51,22 +76,38 @@ const setNodeParent: CommandDefinition<Cmd> = {
       const prevParentId = node.parentId;
 
       if (parentId) {
-        // Move into frame.
-        const frame = result.find((n) => n.id === parentId);
-        if (!frame) continue;
-        result = moveNodeIntoFrame(result, id, parentId);
-        affectedFrameIds.add(parentId);
-        if (prevParentId && prevParentId !== parentId) {
+        const next = moveNodeIntoContainer(result, id, parentId);
+        if (next === result) continue;
+        result = next;
+        changed = true;
+        if (
+          result.find((candidate) => candidate.id === parentId)?.type ===
+          'frame'
+        ) {
+          affectedFrameIds.add(parentId);
+        }
+        if (
+          prevParentId &&
+          prevParentId !== parentId &&
+          result.find((candidate) => candidate.id === prevParentId)?.type ===
+            'frame'
+        ) {
           affectedFrameIds.add(prevParentId);
         }
         // Queue affected frames for label re-resolution.
         const targetFrame = result.find((n) => n.id === parentId);
-        if (targetFrame && !mutatedNodes.some((p) => p.id === targetFrame.id)) {
+        if (
+          targetFrame?.type === 'frame' &&
+          !mutatedNodes.some((p) => p.id === targetFrame.id)
+        ) {
           mutatedNodes.push(targetFrame as Node);
         }
         if (prevParentId && prevParentId !== parentId) {
           const prevFrame = result.find((n) => n.id === prevParentId);
-          if (prevFrame && !mutatedNodes.some((p) => p.id === prevFrame.id)) {
+          if (
+            prevFrame?.type === 'frame' &&
+            !mutatedNodes.some((p) => p.id === prevFrame.id)
+          ) {
             mutatedNodes.push(prevFrame as Node);
           }
         }
@@ -75,8 +116,11 @@ const setNodeParent: CommandDefinition<Cmd> = {
         const frame = prevParentId
           ? (result.find((n) => n.id === prevParentId) as Node | undefined)
           : undefined;
-        result = moveNodeOutOfFrame(result, id);
-        if (frame) {
+        const next = moveNodeOutOfContainer(result, id);
+        if (next === result) continue;
+        result = next;
+        changed = true;
+        if (frame?.type === 'frame') {
           affectedFrameIds.add(frame.id);
           if (!mutatedNodes.some((p) => p.id === frame.id)) {
             mutatedNodes.push(frame);
@@ -85,6 +129,7 @@ const setNodeParent: CommandDefinition<Cmd> = {
       }
     }
 
+    if (!changed) return noop(state);
     return {
       applied: true,
       nodes: result,

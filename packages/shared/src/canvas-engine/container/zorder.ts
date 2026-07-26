@@ -1,5 +1,5 @@
 /**
- * Frame z-order - explicit render stacking derived from forest order.
+ * Container z-order - explicit render stacking derived from forest order.
  *
  * React Flow's default `zIndexMode: 'auto'` applies two implicit rules
  * that override authored `zIndex`:

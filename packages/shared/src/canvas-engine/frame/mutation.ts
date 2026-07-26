@@ -1,11 +1,9 @@
 /**
  * Frame Mutation - Operations that produce new nodes/edges arrays
  *
- * Includes the core moves (`moveNodeIntoFrame`, `moveNodeOutOfFrame`),
- * batch operations (`frameNodes`, `frameNodesInRect`, `unframe`), and the
- * auto-detect entry points (`autoFrameNodeByOverlap`,
- * `autoUnframeNodeByNonOverlap`) that delegate to the core moves once
- * the geometry predicates decide a change is warranted.
+ * Includes Frame-specific batch operations (`frameNodes`,
+ * `frameNodesInRect`, `unframe`) and overlap-driven auto-detect entry points.
+ * Generic reparenting lives in `container/mutation.ts`.
  *
  * All functions are pure: input arrays are never mutated.
  */
@@ -20,15 +18,18 @@ import {
   type Rect,
 } from './geometry.js';
 import {
+  moveNodeIntoContainer,
+  moveNodeOutOfContainer,
+} from '../container/mutation.js';
+import {
   addPos,
   createAbsolutePositionGetter,
-  getDescendantIds,
   getTopLevelIds,
   indexById,
   normalizeTreeOrder,
   subPos,
   type NestableNode,
-} from './tree.js';
+} from '../container/tree.js';
 import { medianOfChildExtents, paddingFromExtent } from '../utils/constants.js';
 import { getNodeSize } from '../utils/nodeSizes.js';
 
@@ -143,7 +144,7 @@ export function autoUnframeNodeByNonOverlap(
   if (!checkShouldUnframe(nodeRect, parentRect, options)) return nodes;
 
   // Delegate to moveNodeOutOfFrame for consistent validation and movement logic
-  return moveNodeOutOfFrame(nodes, nodeId);
+  return moveNodeOutOfContainer(nodes, nodeId);
 }
 
 /**
@@ -180,7 +181,7 @@ export function autoFrameNodeByOverlap(
   if (!bestFrameId) return nodes;
 
   // Delegate to moveNodeIntoFrame for consistent validation and movement logic
-  return moveNodeIntoFrame(nodes, nodeId, bestFrameId);
+  return moveNodeIntoContainer(nodes, nodeId, bestFrameId);
 }
 
 /**
@@ -287,58 +288,6 @@ export function frameNodes(
   };
 }
 
-/**
- * Move a node into a frame, making it a child of the frame.
- * Preserves the node's visual position on the canvas.
- *
- * This is the core function for frame operations. It validates:
- * - Node and frame existence
- * - Frame is not locked
- * - No frames inside frames
- * - No cycles
- * - Not already a child
- */
-export function moveNodeIntoFrame(
-  nodes: NestableNode[],
-  nodeId: string,
-  frameId: string,
-): NestableNode[] {
-  const byId = indexById(nodes);
-  const node = byId.get(nodeId);
-  const frame = byId.get(frameId);
-
-  if (!node || !frame) return nodes;
-  if (frame.data?.locked) return nodes; // Don't move into locked frames
-  if (node.id === frameId) return nodes; // Can't move into itself
-  if (node.parentId === frameId) return nodes; // Already a child
-
-  // Check if frameId is a descendant of nodeId (would create a cycle)
-  const descendants = new Set(getDescendantIds(nodes, nodeId));
-  if (descendants.has(frameId)) return nodes;
-
-  const getAbs = createAbsolutePositionGetter(byId);
-  const nodeAbs = getAbs(nodeId);
-  const frameAbs = getAbs(frameId);
-
-  if (!nodeAbs || !frameAbs) return nodes;
-
-  // Calculate new relative position
-  const newPosition = subPos(nodeAbs, frameAbs);
-
-  const nextNodes = nodes.map((n) => {
-    if (n.id !== nodeId) return n;
-    return {
-      ...n,
-      parentId: frameId,
-      position: newPosition,
-      extent: undefined,
-      zIndex: -1,
-    };
-  });
-
-  return normalizeTreeOrder(nextNodes);
-}
-
 export type FrameNodesInRectOptions = {
   /**
    * Fraction of a candidate node's area that must overlap the drawn rectangle
@@ -413,49 +362,9 @@ export function frameNodesInRect(
     const intersection = rectIntersectionArea(nodeRect, frameRect);
 
     if (intersection / nodeArea >= threshold) {
-      result = moveNodeIntoFrame(result, node.id, frameId);
+      result = moveNodeIntoContainer(result, node.id, frameId);
     }
   }
 
   return { nodes: result, frameId };
-}
-
-/**
- * Move a node out of its parent frame, making it a top-level node.
- * Preserves the node's visual position on the canvas.
- *
- * This is the core function for unframe operations. It validates:
- * - Node has a parent
- * - Parent frame is not locked
- * - Node position can be calculated
- */
-export function moveNodeOutOfFrame(
-  nodes: NestableNode[],
-  nodeId: string,
-): NestableNode[] {
-  const byId = indexById(nodes);
-  const node = byId.get(nodeId);
-
-  if (!node?.parentId) return nodes; // Already top-level
-
-  const parent = byId.get(node.parentId);
-  if (parent?.data?.locked) return nodes; // Don't move out of locked frames
-
-  const getAbs = createAbsolutePositionGetter(byId);
-  const nodeAbs = getAbs(nodeId);
-
-  if (!nodeAbs) return nodes;
-
-  const nextNodes = nodes.map((n) => {
-    if (n.id !== nodeId) return n;
-
-    const { parentId: _parentId, zIndex: _zIndex, ...rest } = n;
-    return {
-      ...rest,
-      position: nodeAbs,
-      extent: undefined,
-    };
-  });
-
-  return normalizeTreeOrder(nextNodes);
 }

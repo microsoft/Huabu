@@ -73,16 +73,16 @@ These directions are not part of the first-version implementation sequence. The 
 
 ## 3. Terminology
 
-| Term | Working meaning |
-| --- | --- |
-| Workspace | The selected Home folder that contains user settings and canvases. |
-| World Canvas | The workspace-owned top-level canvas used for cross-project thinking and navigation. |
-| Space | An independently persisted project canvas with its own content, version, execution, and agent scope. |
-| `canvasRef` | A special World container node that canonically references one Space. |
-| Project Portal | The visual and interaction experience rendered by a `canvasRef`. |
-| `nodeRef` | A persistent World node that symbolically references one canonical source node in another canvas. |
-| Pin | Explicitly create or retain a `nodeRef` for a canonical source node in the World. |
-| Unpin | Remove the World-owned `nodeRef` without deleting or editing its canonical source node. |
+| Term           | Working meaning                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------- |
+| Workspace      | The selected Home folder that contains user settings and canvases.                                   |
+| World Canvas   | The workspace-owned top-level canvas used for cross-project thinking and navigation.                 |
+| Space          | An independently persisted project canvas with its own content, version, execution, and agent scope. |
+| `canvasRef`    | A special World container node that canonically references one Space.                                |
+| Project Portal | The visual and interaction experience rendered by a `canvasRef`.                                     |
+| `nodeRef`      | A persistent World node that symbolically references one canonical source node in another canvas.    |
+| Pin            | Explicitly create or retain a `nodeRef` for a canonical source node in the World.                    |
+| Unpin          | Remove the World-owned `nodeRef` without deleting or editing its canonical source node.              |
 
 ## 4. Scope model
 
@@ -193,7 +193,7 @@ The first version does not persist a last-known label or preview. Broken rendere
 
 ### Container semantics
 
-The existing parent/child forest, parent-local coordinates, cycle protection, tree ordering, and subtree z-order are largely generic even though they currently live under the Frame modules. [`frame/tree.ts`](../../packages/shared/src/canvas-engine/frame/tree.ts) explicitly operates on a generic parent/child graph, and [`frame/zorder.ts`](../../packages/shared/src/canvas-engine/frame/zorder.ts) derives subtree stacking from live parent links rather than Frame type checks.
+The parent/child forest, parent-local coordinates, cycle protection, tree ordering, and subtree z-order now live under the shared [`container`](../../packages/shared/src/canvas-engine/container) module. Frame delegates generic hierarchy, reparenting, z-order, and content-hug geometry to that module while retaining its own interaction and layout policies.
 
 The shared Container protocol includes:
 
@@ -203,7 +203,7 @@ The shared Container protocol includes:
 - Parents precede descendants in the node array.
 - Each subtree occupies a contiguous render z-order band.
 
-The engine should add an explicit `isContainerNode()` / `canParentNode(parent, child)` policy and extract the generic hierarchy operation currently named `moveNodeIntoFrame` into a Container-level operation. This also closes the current gap where `SET_NODE_PARENT` verifies that a parent exists but does not require it to be a valid container type.
+The engine exposes explicit `isContainerNode()` / `canParentNode(parent, child)` policy and generic `moveNodeIntoContainer()` / `moveNodeOutOfContainer()` operations. `SET_NODE_PARENT` requires a valid Container parent rather than accepting any existing node.
 
 Frame-only policy remains:
 

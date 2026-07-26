@@ -122,12 +122,12 @@ To make array order authoritative we render with
 [`<ReactFlow zIndexMode="manual">`](../../apps/web/src/components/Panels/Canvas/Canvas.tsx)
 and derive every `zIndex` ourselves in the **render layer**:
 
-- [`assignNodeZIndices`](../../packages/shared/src/canvas-engine/frame/zorder.ts)
+- [`assignNodeZIndices`](../../packages/shared/src/canvas-engine/container/zorder.ts)
   — a depth-first walk of the parent/child forest (parents before children,
   siblings in array order) assigns each node a contiguous z. Children land
   immediately above their frame; a later sibling out-ranks the whole preceding
   subtree.
-- [`edgeZIndex`](../../packages/shared/src/canvas-engine/frame/zorder.ts) — an
+- [`edgeZIndex`](../../packages/shared/src/canvas-engine/container/zorder.ts) — an
   edge floats at the z of its highest **framed** endpoint (0 when both endpoints
   are top-level), mirroring React Flow's old auto-mode edge behaviour, which
   manual mode otherwise drops. `Canvas.tsx` writes this onto `edge.zIndex`; the

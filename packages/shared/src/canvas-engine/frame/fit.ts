@@ -1,265 +1,50 @@
 /**
- * Frame Fit - Auto-resize frames to wrap their children
- *
- * Read-only computation (`computeFrameFit`) plus the apply variants
- * (`fitFrameToChildren`, `fitFrames`). All functions return new arrays
- * and preserve children's visual (absolute) positions on the canvas.
- *
- * `fitFrames` performs a deepest-first cascade so refitting an inner
- * frame also refits any ancestors whose interior bounds changed.
+ * Frame Fit - Frame policy over generic Container content-hug geometry.
  */
 
 import {
-  createAbsolutePositionGetter,
-  indexById,
-  type NestableNode,
-} from './tree.js';
-import { medianOfChildExtents, paddingFromExtent } from '../utils/constants.js';
-import { getNodeSize } from '../utils/nodeSizes.js';
+  applyContainerFit,
+  computeContainerFit,
+  type ContainerFitResult,
+  type FitContainerOptions,
+} from '../container/fit.js';
+import { indexById, type NestableNode } from '../container/tree.js';
 
 import type { FrameLayoutMode } from '../../types/canvas/node.js';
-import type { XYPosition } from '@xyflow/react';
 
-export type FitFrameOptions = {
-  /**
-   * Padding around the bounding box of children. Default: derived
-   * from the children's pooled-extent median via
-   * `paddingFromExtent`, matching `applyColumnLayout` /
-   * `applyRowLayout` so structured and free frames breathe the same
-   * way. Falls back to the floor (16 px, `FRAME_PADDING_MIN`) when
-   * the frame has no measurable children.
-   */
-  padding?: number;
-  /** Minimum frame width. Default: 20. */
-  minWidth?: number;
-  /** Minimum frame height. Default: 20. */
-  minHeight?: number;
-  /** Children to exclude from the bounding-box calculation (e.g. nodes about to leave). */
-  excludeNodeIds?: ReadonlySet<string>;
-  /**
-   * Extra rects in absolute canvas coordinates to include in the bounding box.
-   * Used by the drag-preview system to show how the frame would look if a
-   * currently-dragged node (not yet a child) were dropped at its current position.
-   */
-  includeAbsoluteRects?: ReadonlyArray<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  }>;
-};
-
-/**
- * Computed fit result describing the ideal position and size for a frame
- * to tightly wrap its children. Used both by `fitFrameToChildren` (which
- * applies the result) and by the drag-preview system (which only reads it).
- */
-export type FrameFitResult = {
+export type FitFrameOptions = FitContainerOptions;
+export type FrameFitResult = Omit<ContainerFitResult, 'containerId'> & {
   frameId: string;
-  /** Position of the frame (absolute when used as preview overlay). */
-  position: XYPosition;
-  /** New width and height. */
-  width: number;
-  height: number;
 };
 
-/**
- * Compute the ideal frame position and size to tightly wrap all its direct
- * children, without mutating any nodes. Returns `null` if the frame has no
- * children or does not exist.
- *
- * This is a pure read-only function — use `fitFrameToChildren` to apply the
- * result to a nodes array.
- */
 export function computeFrameFit(
   nodes: NestableNode[],
   frameId: string,
   options: FitFrameOptions = {},
 ): FrameFitResult | null {
-  const byId = indexById(nodes);
-  const frame = byId.get(frameId);
-  if (!frame) return null;
-  if (frame.type !== 'frame') return null;
-  if (frame.data?.locked) return null;
+  const frame = nodes.find((node) => node.id === frameId);
+  if (frame?.type !== 'frame' || frame.data?.locked) return null;
 
-  const minWidth = options.minWidth ?? 20;
-  const minHeight = options.minHeight ?? 20;
-
-  // Collect direct children (optionally excluding specific nodes)
-  const excludeIds = options.excludeNodeIds;
-  const children = nodes.filter(
-    (n) => n.parentId === frameId && (!excludeIds || !excludeIds.has(n.id)),
-  );
-  const hasExtraRects = (options.includeAbsoluteRects?.length ?? 0) > 0;
-  if (children.length === 0 && !hasExtraRects) return null;
-
-  // Derive padding from the children's pooled-extent median, the same
-  // basis structured-frame layouts use (`gapFromExtent` /
-  // `paddingFromExtent`). Caller may override with `options.padding`.
-  // Including any extra-rects here too keeps the preview pass (which
-  // feeds a yet-to-enter node's rect via `includeAbsoluteRects`)
-  // matched against the same median the post-drop fit will see.
-  const childSizes = children.map((c) => getNodeSize(c));
-  const extraSizes = (options.includeAbsoluteRects ?? []).map((r) => ({
-    width: r.width,
-    height: r.height,
-  }));
-  const padding =
-    options.padding ??
-    paddingFromExtent(medianOfChildExtents([...childSizes, ...extraSizes]));
-
-  // Build bounding box from children's relative positions
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-
-  for (let i = 0; i < children.length; i += 1) {
-    const child = children[i];
-    const size = childSizes[i];
-    minX = Math.min(minX, child.position.x);
-    minY = Math.min(minY, child.position.y);
-    maxX = Math.max(maxX, child.position.x + size.width);
-    maxY = Math.max(maxY, child.position.y + size.height);
-  }
-
-  // Include extra absolute rects (nodes about to enter the frame).
-  // Convert from absolute canvas coords to frame-relative coords.
-  if (hasExtraRects) {
-    const getAbs = createAbsolutePositionGetter(byId);
-    const frameAbsPos = getAbs(frameId);
-    if (frameAbsPos) {
-      for (const rect of options.includeAbsoluteRects ?? []) {
-        const relX = rect.x - frameAbsPos.x;
-        const relY = rect.y - frameAbsPos.y;
-        minX = Math.min(minX, relX);
-        minY = Math.min(minY, relY);
-        maxX = Math.max(maxX, relX + rect.width);
-        maxY = Math.max(maxY, relY + rect.height);
-      }
-    }
-  }
-
-  if (!Number.isFinite(minX) || !Number.isFinite(minY)) return null;
-
-  // The children's relative positions are relative to the frame's position.
-  // If a child is at negative relative coords, the frame needs to shift left/up.
-  const deltaX = minX - padding;
-  const deltaY = minY - padding;
-
-  const width = Math.max(minWidth, maxX - minX + padding * 2);
-  const height = Math.max(minHeight, maxY - minY + padding * 2);
-
-  // Compute new frame position in the same coordinate space as the current frame.
-  const newPosition: XYPosition = {
-    x: frame.position.x + deltaX,
-    y: frame.position.y + deltaY,
-  };
-
-  return { frameId, position: newPosition, width, height };
+  const fit = computeContainerFit(nodes, frameId, options);
+  if (!fit) return null;
+  const { containerId: _containerId, ...geometry } = fit;
+  return { frameId, ...geometry };
 }
 
-/**
- * Resize a frame to tightly fit all its direct children, preserving the
- * visual (absolute) positions of all children on the canvas.
- *
- * Returns the original nodes array unchanged if:
- * - The frame doesn't exist or is not a frame type
- * - The frame is locked
- * - The frame has no children
- */
 export function fitFrameToChildren(
   nodes: NestableNode[],
   frameId: string,
   options: FitFrameOptions = {},
 ): NestableNode[] {
-  // Defensive: structured (`column` / `row`) frames are sized by
-  // `applyStructuredFrameRelayout` using the same pooled-median
-  // `paddingFromExtent` as `computeFrameFit`, so in the happy path
-  // both compute identical sizes and the fit pass is a no-op. The
-  // short-circuit guards against callers that mutate child geometry
-  // non-uniformly outside the resize gesture (e.g. an agent dispatch
-  // that resizes a single child) — `computeFrameFit` would otherwise
-  // override the structured solver's content-driven output. Skipping
-  // keeps the structured pass authoritative; the ancestor cascade in
-  // `fitFrames` still walks up to refit any outer free-mode wrappers.
-  const frame = nodes.find((n) => n.id === frameId);
-  if (frame && frame.type === 'frame') {
-    const layoutMode = (frame.data as { layoutMode?: FrameLayoutMode })
-      ?.layoutMode;
-    if (layoutMode === 'column' || layoutMode === 'row') return nodes;
-  }
+  const frame = nodes.find((node) => node.id === frameId);
+  if (frame?.type !== 'frame' || frame.data?.locked) return nodes;
 
-  const fit = computeFrameFit(nodes, frameId, options);
-  if (!fit) return nodes;
+  const layoutMode = (frame.data as { layoutMode?: FrameLayoutMode })
+    ?.layoutMode;
+  if (layoutMode === 'column' || layoutMode === 'row') return nodes;
 
-  if (!frame) return nodes;
-
-  // Compute the delta between old and new frame origins so we can offset
-  // children to keep them visually stationary.
-  const deltaX = fit.position.x - frame.position.x;
-  const deltaY = fit.position.y - frame.position.y;
-
-  // No-op short-circuit: when the computed fit matches the frame's
-  // current geometry exactly AND there is no origin shift to apply to
-  // children, return the input array reference. This preserves
-  // reference-equality so callers (e.g. `scheduleDeferredFrameFit`'s
-  // `next !== current` guard) can skip a needless `set({ nodes })`
-  // and the rerender it triggers.
-  const currentWidth = frame.style?.width;
-  const currentHeight = frame.style?.height;
-  if (
-    deltaX === 0 &&
-    deltaY === 0 &&
-    currentWidth === fit.width &&
-    currentHeight === fit.height
-  ) {
-    return nodes;
-  }
-
-  return nodes.map((n) => {
-    if (n.id === frameId) {
-      // Mirror the new size into `measured` so the immediately-following
-      // pass for this frame's *parent* (see `fitFrames` cascade) sees the
-      // post-fit dimensions. Without this, `getNodeSize` would return the
-      // stale `measured` value (it takes precedence over `style`) and the
-      // outer frame would compute its bounding box against the inner
-      // frame's previous size — defeating the cascade. ReactFlow's
-      // ResizeObserver writes the same number back on the next frame, so
-      // there's no jitter from doing this eagerly here.
-      const prevMeasured = (n.measured ?? {}) as {
-        width?: number;
-        height?: number;
-      };
-      return {
-        ...n,
-        position: fit.position,
-        style: {
-          ...(n.style ?? {}),
-          width: fit.width,
-          height: fit.height,
-        },
-        measured: {
-          ...prevMeasured,
-          width: fit.width,
-          height: fit.height,
-        },
-      };
-    }
-
-    // Offset direct children to compensate for frame origin shift
-    if (n.parentId === frameId) {
-      return {
-        ...n,
-        position: {
-          x: n.position.x - deltaX,
-          y: n.position.y - deltaY,
-        },
-      };
-    }
-
-    return n;
-  });
+  const fit = computeContainerFit(nodes, frameId, options);
+  return fit ? applyContainerFit(nodes, fit) : nodes;
 }
 
 /**

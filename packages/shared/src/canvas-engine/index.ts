@@ -114,6 +114,24 @@ export {
 export { type SelectionBounds, getSelectionBounds } from './utils/bounds.js';
 export {
   type NestableNode,
+  type ContainerFitResult,
+  type ContainerInsets,
+  type FitContainerOptions,
+  normalizeTreeOrder,
+  getAbsolutePosition,
+  createAbsolutePositionGetter,
+  indexById,
+  getDescendantIds,
+  canParentNode,
+  isContainerNode,
+  moveNodeIntoContainer,
+  moveNodeOutOfContainer,
+  computeContainerFit,
+  applyContainerFit,
+  assignNodeZIndices,
+  edgeZIndex,
+} from './container/index.js';
+export {
   type UnframeResult,
   type FrameNodesOptions,
   type FrameNodesResult,
@@ -123,11 +141,6 @@ export {
   type FrameNodesInRectResult,
   type FitFrameOptions,
   type FrameFitResult,
-  normalizeTreeOrder,
-  getAbsolutePosition,
-  createAbsolutePositionGetter,
-  indexById,
-  getDescendantIds,
   unframe,
   autoUnframeNodeByNonOverlap,
   wouldUnframe,
@@ -142,8 +155,6 @@ export {
   fitFrames,
   getFrameSizing,
   moveNodeOutOfFrame,
-  assignNodeZIndices,
-  edgeZIndex,
 } from './frame/index.js';
 export {
   DEFAULT_EDGE_STROKE_TOKEN,

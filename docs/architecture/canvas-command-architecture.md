@@ -73,7 +73,7 @@ Composite intent examples:
 `CanvasCommand` is the smallest shared executable domain instruction (not the smallest state diff). A command may own deterministic domain behavior inside execution:
 
 - `DELETE_NODES` automatically removes incident edges.
-- `SET_NODE_PARENT` rejects invalid targets or cycles.
+- `SET_NODE_PARENT` rejects invalid targets, non-Container parents, or cycles.
 - `CONNECT_NODES` rejects the command (`applied: false`, `reason: 'invalid-target'`) when any edge endpoint is not a live node — it never silently drops the edge.
 - `ALIGN_NODES` aligns provided nodes without relying on selection.
 
@@ -166,7 +166,7 @@ Web-only pieces stay in `apps/web/src/handler/canvasCommand/`: `uiIntent.ts`, `r
 
 ### Move Node Into Frame
 
-Web: user drags node over frame → `NODE_DRAG_STOP` intent → resolver identifies `nodeId` + `frameId` → emits `SET_NODE_PARENT`.
+Web: user drags node over frame → `NODE_DRAG_STOP` intent → resolver identifies `nodeId` + `frameId` → emits `SET_NODE_PARENT`. The shared handler delegates to the generic Container reparent primitive; Frame overlap detection remains UI policy.
 
 Agent: emits `SET_NODE_PARENT` directly.
 

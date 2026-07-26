@@ -2,23 +2,24 @@
  * Frame subsystem - public surface
  *
  * The internal split is:
- * - `tree.ts`      - generic parent/child + coordinate primitives
  * - `geometry.ts`  - private rectangle / overlap helpers + shared Options types
  * - `detection.ts` - pure read-only predicates ("would X happen?")
  * - `mutation.ts`  - operations that return new nodes/edges arrays
- * - `fit.ts`       - frame auto-resize (compute + apply, with cascade)
+ * - `fit.ts`       - Frame policy over generic Container fit geometry
  *
  * Consumers should import from this barrel.
  */
 
-export type { NestableNode } from './tree.js';
+// Compatibility re-exports for existing Frame consumers. New generic
+// hierarchy code should import from `container/index.ts`.
+export type { NestableNode } from '../container/tree.js';
 export {
   createAbsolutePositionGetter,
   getAbsolutePosition,
   getDescendantIds,
   indexById,
   normalizeTreeOrder,
-} from './tree.js';
+} from '../container/tree.js';
 
 export type {
   AutoFrameByOverlapOptions,
@@ -39,14 +40,16 @@ export {
   autoUnframeNodeByNonOverlap,
   frameNodes,
   frameNodesInRect,
-  moveNodeIntoFrame,
-  moveNodeOutOfFrame,
   unframe,
 } from './mutation.js';
+export {
+  moveNodeIntoContainer as moveNodeIntoFrame,
+  moveNodeOutOfContainer as moveNodeOutOfFrame,
+} from '../container/mutation.js';
 
 export type { FitFrameOptions, FrameFitResult } from './fit.js';
 export { computeFrameFit, fitFrameToChildren, fitFrames } from './fit.js';
 
 export { getFrameSizing } from './sizing.js';
 
-export { assignNodeZIndices, edgeZIndex } from './zorder.js';
+export { assignNodeZIndices, edgeZIndex } from '../container/zorder.js';

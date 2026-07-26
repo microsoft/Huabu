@@ -127,6 +127,20 @@ describe('SET_NODE_PARENT — visible target/parent failures', () => {
     expect(commandResults[0].reason).toBe('invalid-parent');
   });
 
+  it('rejects with invalid-parent when the target is not a Container', () => {
+    const { commandResults } = run(
+      {
+        type: 'SET_NODE_PARENT',
+        nodeIds: ['a'],
+        parentId: 'b',
+      } as unknown as CanvasCommand,
+      [node('a'), node('b')],
+    );
+
+    expect(commandResults[0].applied).toBe(false);
+    expect(commandResults[0].reason).toBe('invalid-parent');
+  });
+
   it('reparents successfully when both node and frame exist', () => {
     const { commandResults, writeResult } = run(
       {
@@ -141,5 +155,24 @@ describe('SET_NODE_PARENT — visible target/parent failures', () => {
     expect(writeResult.nodes.find((n) => n.id === 'a')?.parentId).toBe(
       'frame-1',
     );
+  });
+
+  it('rejects a mixed batch when any reparent would create a cycle', () => {
+    const outer = frame('outer');
+    const inner = { ...frame('inner'), parentId: 'outer' };
+    const { commandResults, writeResult } = run(
+      {
+        type: 'SET_NODE_PARENT',
+        nodeIds: ['outer', 'free'],
+        parentId: 'inner',
+      } as unknown as CanvasCommand,
+      [outer, inner, node('free')],
+    );
+
+    expect(commandResults[0].applied).toBe(false);
+    expect(commandResults[0].reason).toBe('invalid-parent');
+    expect(
+      writeResult.nodes.find((n) => n.id === 'free')?.parentId,
+    ).toBeUndefined();
   });
 });
