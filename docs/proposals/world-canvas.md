@@ -2,7 +2,7 @@
 
 > Explore a workspace-level semantic canvas above project Spaces without dissolving their storage and execution boundaries.
 >
-> Status: **Draft** · Last updated: 2026-07-26 · Tracks: [#346](https://github.com/hai-team/Sediment/issues/346)
+> Status: **Shipped** · Last updated: 2026-07-26 · Tracks: [#346](https://github.com/hai-team/Sediment/issues/346)
 
 ---
 
@@ -10,7 +10,7 @@
 
 Huabu currently exposes each Space as both a top-level navigation unit and an independently persisted canvas. This works within a project but fragments cross-project thinking across separate surfaces.
 
-This proposal records the resolved first-version design for a workspace-level **World Canvas**. It remains a draft pending implementation review, but no product or architecture decision described as first-version scope remains open.
+This proposal records the shipped first-version design for a workspace-level **World Canvas**.
 
 The desired product hierarchy is:
 
@@ -22,7 +22,7 @@ Workspace
             └─ semantic projection of one project Space
 ```
 
-## 2. Current discussion status
+## 2. Shipped contract
 
 ### Agreed baseline
 
@@ -369,9 +369,9 @@ A normal World conversation treats the World as an ordinary Huabu Canvas whose a
 
 For cross-Space reads, `canvasRef.targetCanvasId` provides the explicit target address and the existing query/read plane is reused rather than wrapped in a new public `PortalQuery` protocol. Read-only tools may accept an optional target Canvas when their conversation owner is World; the server verifies that the target is referenced by a canonical `canvasRef` in that World. RFS callers that already hold the target Canvas ID continue to use the existing `/api/rfs/:canvasId/query` and download surfaces directly. This permission does not extend ordinary World `space_commands` into arbitrary source writes.
 
-When a `nodeRef` targets a source agent/question node, opening it may keep the user visually in the World while presenting that source-owned conversation. Every valid source agent node owns a thread from creation. An idle source agent node whose thread has no messages is therefore immediately eligible: the user may compose and send its first turn from the World, with the prompt, binding, mode, and lifecycle persisted to the source node exactly as they would be from the source Space. The `nodeRef` never creates a thread and does not copy `threadId`, agent binding, mode, status, viewed state, error, or messages. A resolver supplies those fields as non-persistent target data, and backend agent requests use the source canvas and source node as the conversation and neighbourhood scope. A resolved agent node without a thread is malformed legacy data to repair through migration or surface as an integrity error, not a normal World interaction state.
+When a `nodeRef` targets a source agent/question node, opening it keeps the user visually in the World while presenting that source-owned conversation. Every valid source agent node owns a thread from creation. An idle source agent node whose thread has no messages is therefore immediately eligible: the user may compose and send its first turn from the World, with the prompt, binding, mode, and lifecycle persisted to the source node exactly as they would be from the source Space. The `nodeRef` never creates a thread and does not copy `threadId`, agent binding, mode, status, viewed state, error, or messages. The resolver supplies those fields as non-persistent target data, and backend agent requests use the source canvas and source node as the conversation and neighbourhood scope. A resolved agent node without a thread is surfaced as an integrity error.
 
-Conceptually the UI needs a dual-owned view:
+The UI represents this as a dual-owned view:
 
 ```typescript
 interface AgentConversationView {
@@ -391,15 +391,15 @@ This is a headless conversation mode, not a second conversation. RFS, `executeSp
 
 All durable conversation truth is server-owned. Thread history and active runs remain in the server agent runtime; lifecycle fields remain on the source agent node and are written through the source Canvas server executor when a headless turn starts or finishes. World UI may show temporary pending feedback, but it cannot persist or author source status through the active World `canvasStore`.
 
-Resolved `nodeRef` display data is refreshed from the server on World load, shortcut open, window focus, headless turn start/end, and Pin/Unpin completion. The first version does not add cross-canvas realtime invalidation because current Canvas SSE covers only `executeOnServer()` and revert paths, not every structure PUT, node-content PUT, preprocessing write, or external-file mutation. The resolver cache should expose invalidation internally so a complete unified server mutation notification layer can drive it later without changing the read model.
+Resolved `nodeRef` display data is refreshed from the server on World load, shortcut open, window focus, headless turn start/end, and Pin/Unpin completion. The first version does not add cross-canvas realtime invalidation because current Canvas SSE covers only `executeOnServer()` and revert paths, not every structure PUT, node-content PUT, preprocessing write, or external-file mutation.
 
-World selection must not be passed blindly into a source-owned conversation because World node IDs are not source Space node IDs. The first implementation should use the source agent node as the anchor and only translate additional context when an explicit reference mapping exists.
+World selection is not passed into a source-owned conversation because World node IDs are not source Space node IDs. The source agent node is the anchor, and the first version sends an empty `selectedNodes` list because no additional mapping exists.
 
 A headless shortcut preserves the existing source conversation mode, including Operate. Source commands execute and persist normally, their tool results remain visible in the World conversation, and their review records remain stored with the source Canvas. To minimize first-version changes, World does not attempt to preview or revert source deltas against an unloaded Canvas; it presents an Open Space action, and the existing full Change Review becomes available after entering the source Space.
 
 ### Headless conversation as a foundation
 
-Headless conversation should be designed as a reusable execution primitive rather than a `nodeRef`-specific exception. Its core contract is that a source-owned thread can receive its first or a subsequent turn while continuing to own its Canvas scope, anchor node, tools, lifecycle, and mutations without requiring that Canvas to be the currently rendered React Flow surface.
+Headless conversation is implemented as a reusable ownership indirection rather than a `nodeRef`-specific exception. A source-owned thread can receive its first or a subsequent turn while continuing to own its Canvas scope, anchor node, tools, lifecycle, and mutations without requiring that Canvas to be the currently rendered React Flow surface.
 
 The first World use case presents one source-owned conversation through a World `nodeRef`. Multiple such conversations may run concurrently while the user remains in the World, but this is not a new World-specific task model: ordinary Canvas agent nodes already use independent threads, per-thread turn leases, and per-canvas write mutexes. World only changes where those existing conversations are presented.
 
@@ -419,15 +419,15 @@ Assume the World contains canonical Portals for Project A and Project B. Each Po
 
 This flow adds only the cross-Canvas indirection between the World presentation anchor and each source conversation owner. Every other interaction and concurrency rule is inherited from ordinary Canvas Agent Nodes.
 
-## 9. Remaining implementation details
+## 9. Implementation details
 
-No product or architecture decision from the current design discussion remains blocking for the first implementation sequence.
+No product or architecture decision remains blocking for the shipped first version.
 
 Implementation-level choices such as exact zod schema names, batch/output limits, initial-layout spacing constants, resolved-cache representation, UI copy, and the concrete settings key should be decided alongside their owning modules and tests without changing the contracts above.
 
-## 10. Suggested exploration sequence
+## 10. Shipped implementation sequence
 
-This sequence covers only the resolved first-version design and may be refined as implementation evidence accumulates:
+The first version shipped in this sequence:
 
 1. Create and discover one hidden `.world/space.json` per workspace while routing it through the existing `CanvasStore`.
 2. Extract the agreed minimum Container protocol and separate Frame-only policy.
@@ -461,4 +461,4 @@ The authoritative current-system documents remain:
 - [Agent context](../architecture/agent-context.md)
 - [Web architecture](../architecture/web-architecture.md)
 
-This draft does not modify those current architecture contracts.
+The shipped implementation is folded into the architecture documents above; this proposal remains the design record for issue #346.

@@ -134,7 +134,9 @@ export const QuestionNode = memo(
       );
     });
     const showChatAnchor = useChatStore(
-      (s) => s.viewingQuestionThread?.nodeId === id,
+      (s) =>
+        s.viewingQuestionThread?.presentationAnchor.nodeId === id &&
+        s.viewingQuestionThread.conversationOwner.nodeId === id,
     );
     // Composing = this node is the chat anchor AND it has never been
     // authored/run yet (`idle`). Derived from the node's status, not a stored
@@ -159,8 +161,14 @@ export const QuestionNode = memo(
     const openInChat = useCallback(() => {
       if (!data.threadId) return;
       openQuestionThread(
-        id,
-        data.threadId,
+        {
+          presentationAnchor: { canvasId, nodeId: id },
+          conversationOwner: {
+            canvasId,
+            nodeId: id,
+            threadId: data.threadId,
+          },
+        },
         data.agentBinding,
         canvasId || undefined,
         needsApproval
@@ -198,7 +206,13 @@ export const QuestionNode = memo(
         threadId = createId('thread');
         patchNodeSilent(id, { threadId });
       }
-      enterQuestionCompose(id, threadId, canvasId);
+      enterQuestionCompose(
+        {
+          presentationAnchor: { canvasId, nodeId: id },
+          conversationOwner: { canvasId, nodeId: id, threadId },
+        },
+        canvasId,
+      );
     }, [id, data.threadId, canvasId, patchNodeSilent]);
 
     // ------------------------------------------------------------------

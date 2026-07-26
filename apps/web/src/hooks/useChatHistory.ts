@@ -4,8 +4,15 @@ import { createId } from '@sediment/shared';
 
 import { agentApi } from '@/api/agent';
 import { isActivelyViewingQuestion } from '@/hooks/useActivelyViewingQuestion';
+import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import {
+  ConversationIntegrityError,
+  patchConversationOwnerNode,
+  refreshConversationPresentation,
+  validateConversationView,
+} from '@/store/conversationOwner';
 
 import { handleStreamEvent } from './useAgentStream';
 
@@ -29,6 +36,16 @@ export function useChatHistory(
   );
   const addMessage = useChatStore((state) => state.addMessage);
   const canvasId = useCanvasStore((state) => state.canvasId);
+  const conversationView = useChatStore((state) => state.viewingQuestionThread);
+  const savedReplay = useChatStore((state) =>
+    canvasId ? state.questionReplayByCanvas[canvasId]?.view : undefined,
+  );
+  const effectiveConversationView =
+    conversationView?.presentationAnchor.canvasId === canvasId
+      ? conversationView
+      : (savedReplay ?? null);
+  const ownerCanvasId =
+    effectiveConversationView?.conversationOwner.canvasId || canvasId;
 
   // Switch chat thread when canvas changes
   useEffect(() => {
@@ -41,7 +58,7 @@ export function useChatHistory(
   // Wait for canvasId to be available — on initial mount the canvas may
   // not have loaded yet, causing a request without canvasId that 404s.
   useEffect(() => {
-    if (!canvasId) return;
+    if (!ownerCanvasId) return;
     // Snapshot the thread we're loading for. If the user switches threads
     // mid-fetch, we still want to land the response on the originating
     // thread (cache survives navigation) rather than the current one.
@@ -56,10 +73,37 @@ export function useChatHistory(
       setHistoryLoaded: setLoaded,
     } = useChatStore.getState();
 
-    agentApi
-      .fetchHistory(tid, canvasId)
+    const fetchValidatedHistory = async () => {
+      if (effectiveConversationView) {
+        try {
+          await validateConversationView(effectiveConversationView);
+        } catch (error) {
+          if (error instanceof ConversationIntegrityError) {
+            const current = useChatStore.getState().viewingQuestionThread;
+            if (
+              current?.presentationAnchor.canvasId ===
+                effectiveConversationView.presentationAnchor.canvasId &&
+              current.presentationAnchor.nodeId ===
+                effectiveConversationView.presentationAnchor.nodeId
+            ) {
+              useChatStore
+                .getState()
+                .closeQuestionThread(
+                  effectiveConversationView.presentationAnchor.canvasId,
+                );
+            }
+            return;
+          }
+          throw error;
+        }
+      }
+      if (cancelled) return;
+      return agentApi.fetchHistory(tid, ownerCanvasId);
+    };
+
+    fetchValidatedHistory()
       .then((res) => {
-        if (cancelled) return;
+        if (cancelled || !res) return;
 
         // If the server returned a different threadId (fallback to latest),
         // update the client's threadMap so future requests use the correct id.
@@ -67,10 +111,22 @@ export function useChatHistory(
           res.threadId && res.threadId !== tid ? res.threadId : null;
         const finalTid = overrideTid ?? tid;
         if (overrideTid) {
-          useChatStore.setState((state) => ({
-            threadId: overrideTid,
-            threadMap: { ...state.threadMap, [canvasId]: overrideTid },
-          }));
+          const current = useChatStore.getState();
+          const currentOwnerCanvasId =
+            current.viewingQuestionThread?.conversationOwner.canvasId ||
+            useCanvasStore.getState().canvasId;
+          if (
+            current.threadId === tid &&
+            currentOwnerCanvasId === ownerCanvasId
+          ) {
+            useChatStore.setState((state) => ({
+              threadId: overrideTid,
+              threadMap: {
+                ...state.threadMap,
+                [ownerCanvasId]: overrideTid,
+              },
+            }));
+          }
         }
 
         const serverMessages: ChatMessage[] = res.messages.map(
@@ -158,13 +214,13 @@ export function useChatHistory(
     return () => {
       cancelled = true;
     };
-  }, [threadId, canvasId]);
+  }, [threadId, ownerCanvasId, effectiveConversationView]);
 
   // Try to reconnect to an active server-side run after history is loaded.
   // This handles the page-refresh case: events buffered during the refresh
   // are replayed, then live streaming resumes.
   useEffect(() => {
-    if (!isHistoryLoaded || !threadId || !canvasId) return;
+    if (!isHistoryLoaded || !threadId || !ownerCanvasId) return;
 
     // Only attempt reconnect if history suggests an incomplete run:
     // the last message is from the user (or intent-select) without a
@@ -179,8 +235,32 @@ export function useChatHistory(
 
     let cancelled = false;
     const ownerThreadId = threadId;
+    const ownerView = effectiveConversationView;
 
     const tryReconnect = async () => {
+      if (ownerView) {
+        try {
+          await validateConversationView(ownerView);
+        } catch (error) {
+          if (error instanceof ConversationIntegrityError) {
+            const current = useChatStore.getState().viewingQuestionThread;
+            if (
+              current?.presentationAnchor.canvasId ===
+                ownerView.presentationAnchor.canvasId &&
+              current.presentationAnchor.nodeId ===
+                ownerView.presentationAnchor.nodeId
+            ) {
+              useChatStore
+                .getState()
+                .closeQuestionThread(ownerView.presentationAnchor.canvasId);
+            }
+            return;
+          }
+          throw error;
+        }
+      }
+      if (cancelled) return;
+
       const assistantId = createId('message');
       // Flag set to true once we know the server has an active run
       let streaming = false;
@@ -198,6 +278,32 @@ export function useChatHistory(
         forThreadId: string,
         patch: Record<string, unknown>,
       ) => {
+        if (
+          ownerView?.conversationOwner.threadId === forThreadId &&
+          ownerView.conversationOwner.canvasId === ownerCanvasId
+        ) {
+          void patchConversationOwnerNode(ownerView, patch)
+            .then(async () => {
+              await refreshConversationPresentation(ownerView);
+              if (
+                ownerView.presentationAnchor.canvasId !==
+                  ownerView.conversationOwner.canvasId ||
+                ownerView.presentationAnchor.nodeId !==
+                  ownerView.conversationOwner.nodeId
+              ) {
+                await useAcpThreadChangesStore
+                  .getState()
+                  .load(ownerCanvasId, forThreadId);
+              }
+            })
+            .catch((error) =>
+              console.error(
+                '[useChatHistory] failed to persist owner lifecycle',
+                error,
+              ),
+            );
+          return;
+        }
         const node = useCanvasStore
           .getState()
           .nodes.find(
@@ -238,7 +344,7 @@ export function useChatHistory(
 
       const connected = await agentApi.reconnectStream(
         ownerThreadId,
-        canvasId,
+        ownerCanvasId,
         {
           onEvent: (event: AgentStreamEvent) => {
             if (cancelled) return;
@@ -301,7 +407,12 @@ export function useChatHistory(
     return () => {
       cancelled = true;
     };
-    // Only run once after history loads, not on every re-render
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHistoryLoaded, threadId, canvasId]);
+  }, [
+    isHistoryLoaded,
+    threadId,
+    ownerCanvasId,
+    effectiveConversationView,
+    addMessage,
+    setIsLoading,
+  ]);
 }

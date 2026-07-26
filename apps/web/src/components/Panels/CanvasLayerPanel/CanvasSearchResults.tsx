@@ -287,8 +287,10 @@ export const CanvasSearchResults = (): JSX.Element => {
         | undefined;
       if (!data?.threadId) return false;
       openQuestionThread(
-        nodeId,
-        data.threadId,
+        {
+          presentationAnchor: { canvasId, nodeId },
+          conversationOwner: { canvasId, nodeId, threadId: data.threadId },
+        },
         data.agentBinding,
         canvasId || undefined,
       );

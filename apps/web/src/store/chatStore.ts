@@ -6,6 +6,7 @@ import { createId } from '@sediment/shared';
 import type { ChatMessage } from './chatTypes';
 import type {
   AgentBinding,
+  AgentConversationView,
   AgentMode,
   AssistantToolPart,
   ChatAttachment,
@@ -86,18 +87,17 @@ export interface ChatState {
    * node's own status (`idle` = composing). That keeps a single source of
    * truth (the node) and avoids the stored flag drifting out of sync.
    */
-  viewingQuestionThread: {
-    nodeId: string;
-    threadId: string;
-    openPosition: QuestionThreadOpenPosition;
-    openSequence: number;
-  } | null;
+  viewingQuestionThread:
+    | (AgentConversationView & {
+        openPosition: QuestionThreadOpenPosition;
+        openSequence: number;
+      })
+    | null;
 
   questionReplayByCanvas: Record<
     string,
     {
-      nodeId: string;
-      threadId: string;
+      view: AgentConversationView;
       binding: AgentBinding;
       savedCanvasThreadId: string;
       savedCanvasBinding: AgentBinding;
@@ -236,11 +236,18 @@ export interface ChatState {
    * this view automatically.
    */
   openQuestionThread: (
-    nodeId: string,
-    threadId: string,
+    view: AgentConversationView,
     binding?: AgentBinding,
     canvasId?: string,
     openPosition?: QuestionThreadOpenPosition,
+  ) => void;
+  /**
+   * Re-anchor an already-open headless conversation in its owner Canvas while
+   * preserving that Canvas's own plain-chat state for replay close.
+   */
+  openQuestionThreadInOwnerCanvas: (
+    view: AgentConversationView,
+    binding?: AgentBinding,
   ) => void;
   /**
    * Open a freshly-created question node for *composition*: switch the
@@ -255,11 +262,7 @@ export interface ChatState {
    * case needs no agent pick. Stashes the canvas thread / binding /
    * lastAction so leaving compose restores the plain canvas chat.
    */
-  openQuestionCompose: (
-    nodeId: string,
-    threadId: string,
-    canvasId?: string,
-  ) => void;
+  openQuestionCompose: (view: AgentConversationView, canvasId?: string) => void;
   /**
    * Close question thread replay and return to normal canvas chat.
    * Pass `canvasId` to also drop the persisted replay pointer so the
@@ -481,12 +484,11 @@ export const useChatStore = create<ChatState>()(
           // consulting the canvas, even after a full page refresh.
           set({
             viewingQuestionThread: {
-              nodeId: replay.nodeId,
-              threadId: replay.threadId,
+              ...replay.view,
               openPosition: 'bottom',
               openSequence: 0,
             },
-            threadId: replay.threadId,
+            threadId: replay.view.conversationOwner.threadId,
             agentBinding: replay.binding,
             _savedCanvasThreadId: replay.savedCanvasThreadId,
             _savedCanvasBinding: replay.savedCanvasBinding,
@@ -559,8 +561,7 @@ export const useChatStore = create<ChatState>()(
         set({ selectionAttachment: attachment }),
 
       openQuestionThread: (
-        nodeId,
-        threadId,
+        view,
         binding,
         canvasId,
         openPosition = 'bottom',
@@ -575,17 +576,35 @@ export const useChatStore = create<ChatState>()(
           _savedCanvasLastAction: savedLastActionSlot,
           questionReplayByCanvas,
         } = get();
+        const threadId = view.conversationOwner.threadId;
 
         const nextOpenSequence = (currentViewing?.openSequence ?? 0) + 1;
 
         // Re-opening the same thread still carries a fresh positioning intent.
-        if (currentViewing?.threadId === threadId) {
+        if (
+          currentViewing?.conversationOwner.threadId === threadId &&
+          currentViewing.conversationOwner.canvasId ===
+            view.conversationOwner.canvasId
+        ) {
           set({
             viewingQuestionThread: {
-              ...currentViewing,
+              ...view,
               openPosition,
               openSequence: nextOpenSequence,
             },
+            ...(canvasId && {
+              questionReplayByCanvas: {
+                ...questionReplayByCanvas,
+                [canvasId]: {
+                  view,
+                  binding: binding ?? currentBinding,
+                  savedCanvasThreadId: savedThreadIdSlot ?? currentThreadId,
+                  savedCanvasBinding: savedBindingSlot ?? currentBinding,
+                  savedCanvasLastAction:
+                    savedLastActionSlot ?? currentLastAction,
+                },
+              },
+            }),
           });
           return;
         }
@@ -631,8 +650,7 @@ export const useChatStore = create<ChatState>()(
 
         set({
           viewingQuestionThread: {
-            nodeId,
-            threadId,
+            ...view,
             openPosition,
             openSequence: nextOpenSequence,
           },
@@ -647,8 +665,7 @@ export const useChatStore = create<ChatState>()(
             questionReplayByCanvas: {
               ...questionReplayByCanvas,
               [canvasId]: {
-                nodeId,
-                threadId,
+                view,
                 binding: nextBinding,
                 savedCanvasThreadId: persistedSavedThreadId,
                 savedCanvasBinding: persistedSavedBinding,
@@ -660,7 +677,63 @@ export const useChatStore = create<ChatState>()(
         get().evictInactiveThreads();
       },
 
-      openQuestionCompose: (nodeId, threadId, canvasId) => {
+      openQuestionThreadInOwnerCanvas: (view, binding) => {
+        const {
+          threadMap,
+          bindingMap,
+          lastAction,
+          questionReplayByCanvas,
+          viewingQuestionThread,
+        } = get();
+        const canvasId = view.conversationOwner.canvasId;
+        const savedCanvasThreadId = threadMap[canvasId] ?? createId('thread');
+        const savedCanvasBinding = bindingMap[canvasId] ?? DEFAULT_BINDING;
+        const nextBinding = binding ?? DEFAULT_BINDING;
+        const ownerView: AgentConversationView = {
+          presentationAnchor: {
+            canvasId,
+            nodeId: view.conversationOwner.nodeId,
+          },
+          conversationOwner: view.conversationOwner,
+        };
+
+        set({
+          viewingQuestionThread: {
+            ...ownerView,
+            openPosition: 'bottom',
+            openSequence: (viewingQuestionThread?.openSequence ?? 0) + 1,
+          },
+          threadId: view.conversationOwner.threadId,
+          agentBinding: nextBinding,
+          _savedCanvasThreadId: savedCanvasThreadId,
+          _savedCanvasBinding: savedCanvasBinding,
+          _savedCanvasLastAction: lastAction,
+          threadMap: {
+            ...threadMap,
+            [canvasId]: savedCanvasThreadId,
+          },
+          bindingMap: {
+            ...bindingMap,
+            [canvasId]: savedCanvasBinding,
+          },
+          questionReplayByCanvas: {
+            ...questionReplayByCanvas,
+            [canvasId]: {
+              view: ownerView,
+              binding: nextBinding,
+              savedCanvasThreadId,
+              savedCanvasBinding,
+              savedCanvasLastAction: lastAction,
+            },
+          },
+          pendingAttachments: [],
+          selectionAttachment: null,
+          viewingSketchCluster: null,
+        });
+        get().evictInactiveThreads();
+      },
+
+      openQuestionCompose: (view, canvasId) => {
         const {
           threadId: currentThreadId,
           agentBinding: currentBinding,
@@ -670,9 +743,16 @@ export const useChatStore = create<ChatState>()(
           historyLoadedThreads,
           bindingMap,
         } = get();
+        const threadId = view.conversationOwner.threadId;
 
         // Already composing/viewing this exact thread — nothing to do.
-        if (currentViewing?.threadId === threadId) return;
+        if (
+          currentViewing?.conversationOwner.threadId === threadId &&
+          currentViewing.conversationOwner.canvasId ===
+            view.conversationOwner.canvasId
+        ) {
+          return;
+        }
 
         // Default the new node to the canvas's last-used agent so the
         // common case (one agent per canvas) needs no explicit pick.
@@ -693,8 +773,7 @@ export const useChatStore = create<ChatState>()(
 
         set({
           viewingQuestionThread: {
-            nodeId,
-            threadId,
+            ...view,
             openPosition: 'bottom',
             openSequence: (currentViewing?.openSequence ?? 0) + 1,
           },
@@ -781,13 +860,22 @@ export const useChatStore = create<ChatState>()(
         const { questionReplayByCanvas, viewingQuestionThread } = get();
         const replay = questionReplayByCanvas[canvasId];
         if (!replay) return;
-        if (nodeIds.has(replay.nodeId)) return;
+        if (
+          replay.view.presentationAnchor.canvasId !== canvasId ||
+          nodeIds.has(replay.view.presentationAnchor.nodeId)
+        ) {
+          return;
+        }
         // The question node owning this replay was deleted while we
         // were elsewhere. If the panel is currently showing it, roll
         // back to the canvas chat — `closeQuestionThread` also wipes
         // the persisted pointer in the same set. Otherwise just drop
         // the dangling entry.
-        if (viewingQuestionThread?.nodeId === replay.nodeId) {
+        if (
+          viewingQuestionThread?.presentationAnchor.canvasId === canvasId &&
+          viewingQuestionThread.presentationAnchor.nodeId ===
+            replay.view.presentationAnchor.nodeId
+        ) {
           get().closeQuestionThread(canvasId);
           return;
         }
@@ -806,7 +894,8 @@ export const useChatStore = create<ChatState>()(
         // the persisted replay pointer for this canvas, so we're done.
         if (
           viewingQuestionThread &&
-          deleted.has(viewingQuestionThread.nodeId)
+          viewingQuestionThread.presentationAnchor.canvasId === canvasId &&
+          deleted.has(viewingQuestionThread.presentationAnchor.nodeId)
         ) {
           get().closeQuestionThread(canvasId);
           return;
@@ -816,7 +905,11 @@ export const useChatStore = create<ChatState>()(
         // may now dangle at a deleted node — drop it so a later revisit
         // doesn't restore a foreign thread.
         const replay = questionReplayByCanvas[canvasId];
-        if (replay && deleted.has(replay.nodeId)) {
+        if (
+          replay &&
+          replay.view.presentationAnchor.canvasId === canvasId &&
+          deleted.has(replay.view.presentationAnchor.nodeId)
+        ) {
           const next = { ...questionReplayByCanvas };
           delete next[canvasId];
           set({ questionReplayByCanvas: next });
@@ -863,6 +956,58 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'sediment-chat',
+      version: 2,
+      migrate: (persisted) => {
+        const state = persisted as Partial<ChatState> & {
+          questionReplayByCanvas?: Record<
+            string,
+            {
+              nodeId?: string;
+              threadId?: string;
+              binding: AgentBinding;
+              savedCanvasThreadId: string;
+              savedCanvasBinding: AgentBinding;
+              savedCanvasLastAction: AgentMode;
+              view?: AgentConversationView;
+            }
+          >;
+        };
+        const migrated: ChatState['questionReplayByCanvas'] = {};
+        for (const [canvasId, replay] of Object.entries(
+          state.questionReplayByCanvas ?? {},
+        )) {
+          const view =
+            replay.view ??
+            (replay.nodeId && replay.threadId
+              ? {
+                  presentationAnchor: {
+                    canvasId,
+                    nodeId: replay.nodeId,
+                  },
+                  conversationOwner: {
+                    canvasId,
+                    nodeId: replay.nodeId,
+                    threadId: replay.threadId,
+                  },
+                }
+              : null);
+          if (!view) continue;
+          migrated[canvasId] = {
+            view,
+            binding: replay.binding,
+            savedCanvasThreadId: replay.savedCanvasThreadId,
+            savedCanvasBinding: replay.savedCanvasBinding,
+            savedCanvasLastAction: replay.savedCanvasLastAction,
+          };
+        }
+        return {
+          threadMap: state.threadMap ?? {},
+          threadId: state.threadId ?? createId('thread'),
+          lastAction: state.lastAction ?? 'ask',
+          bindingMap: state.bindingMap ?? {},
+          questionReplayByCanvas: migrated,
+        };
+      },
       partialize: (state) => ({
         threadMap: state.threadMap,
         threadId: state.threadId,

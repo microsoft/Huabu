@@ -128,6 +128,8 @@ interface AcpThreadChangesState {
   isStale: (record: CanvasChangeRecord) => boolean;
 }
 
+const loadGenerationByThread = new Map<string, number>();
+
 function removeFrom(
   byThread: Record<string, CanvasChangeRecord[]>,
   threadId: string,
@@ -144,8 +146,12 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
     conflictedByThread: {},
 
     load: async (canvasId, threadId) => {
+      const key = `${canvasId}\0${threadId}`;
+      const generation = (loadGenerationByThread.get(key) ?? 0) + 1;
+      loadGenerationByThread.set(key, generation);
       try {
         const records = await getThreadChanges(canvasId, threadId);
+        if (loadGenerationByThread.get(key) !== generation) return;
         set((s) => {
           // Preserve in-session conflict flags across a reload so opening
           // the conversation (which triggers this load) still shows the

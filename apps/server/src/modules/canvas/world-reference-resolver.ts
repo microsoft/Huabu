@@ -1,3 +1,5 @@
+import { agentBindingSchema, getQuestionNodeStatus } from '@sediment/shared';
+
 import { describeNode } from './node-prompt.js';
 import { readWorldTargetCanvasesStrict } from './world-target-access.js';
 import {
@@ -6,12 +8,12 @@ import {
 } from '../storage/canvas-dirs.js';
 import { getCanvasStore } from '../storage/index.js';
 
+import type { CanvasFile, NodeContent } from '../storage/canvas-store.js';
 import type {
   CanvasNodeType,
   GetWorldReferencesResponse,
   ResolvedWorldReference,
 } from '@sediment/shared';
-import type { CanvasFile, NodeContent } from '../storage/canvas-store.js';
 
 interface StoredNode {
   id: string;
@@ -133,6 +135,7 @@ export async function resolveWorldReferences(
       continue;
     }
 
+    const sourceContent = source.content?.get(target.nodeId) ?? null;
     const resolved = describeNode(
       getCanvasStore(target.canvasId),
       {
@@ -140,8 +143,13 @@ export async function resolveWorldReferences(
         type: sourceNode.type as CanvasNodeType,
       },
       'preview',
-      source.content?.get(target.nodeId) ?? null,
+      sourceContent,
     );
+    const sourceData = sourceNode.data ?? {};
+    const agentBinding =
+      sourceNode.type === 'question'
+        ? agentBindingSchema.safeParse(sourceData.agentBinding)
+        : null;
     references.push({
       kind: 'nodeRef',
       referenceNodeId: node.id as `node-${string}`,
@@ -156,6 +164,23 @@ export async function resolveWorldReferences(
         ...(resolved.summary ? { summary: resolved.summary } : {}),
         ...(resolved.preview ? { preview: resolved.preview } : {}),
         ...(resolved.rev ? { rev: resolved.rev } : {}),
+        ...(sourceNode.type === 'question'
+          ? {
+              ...(typeof sourceData.threadId === 'string' &&
+              sourceData.threadId.length > 0
+                ? { threadId: sourceData.threadId }
+                : {}),
+              status: getQuestionNodeStatus(sourceData),
+              viewed: sourceData.viewed === true,
+              agentMode: sourceData.agentMode === 'operate' ? 'operate' : 'ask',
+              agentBinding: agentBinding?.success
+                ? agentBinding.data
+                : { kind: 'internal' },
+              hasAuthoredContent:
+                typeof sourceContent?.content === 'string' &&
+                sourceContent.content.trim().length > 0,
+            }
+          : {}),
       },
     });
   }

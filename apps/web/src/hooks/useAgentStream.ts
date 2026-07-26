@@ -2,7 +2,6 @@ import { useCallback, useRef, useEffect } from 'react';
 
 import {
   createId,
-  getQuestionNodeStatus,
   variantForInternalTool,
   type AssistantToolPart,
   type AssistantToolVariant,
@@ -13,10 +12,23 @@ import {
 } from '@sediment/shared';
 
 import { agentApi } from '@/api/agent';
+import { toast } from '@/components/Common/Toast';
 import { isActivelyViewingQuestion } from '@/hooks/useActivelyViewingQuestion';
+import { i18n } from '@/i18n';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import {
+  conversationRequestScope,
+  ConversationIntegrityError,
+  isHeadlessConversation,
+  patchConversationOwnerNode,
+  refreshConversationPresentation,
+  resolveConversationOwnerSource,
+  shouldComposeConversationOwner,
+  validateConversationView,
+} from '@/store/conversationOwner';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
 
@@ -686,6 +698,32 @@ export function useAgentStream(): UseAgentStreamReturn {
       )
         return;
 
+      const conversationView =
+        useChatStore.getState().viewingQuestionThread ?? null;
+      if (conversationView) {
+        try {
+          await validateConversationView(conversationView);
+        } catch (error) {
+          if (error instanceof ConversationIntegrityError) {
+            toast(i18n.t('world.conversationIntegrityError'), {
+              tone: 'danger',
+            });
+            return;
+          }
+          throw error;
+        }
+        const currentChat = useChatStore.getState();
+        if (
+          currentChat.threadId !== threadId ||
+          currentChat.viewingQuestionThread?.presentationAnchor.canvasId !==
+            conversationView.presentationAnchor.canvasId ||
+          currentChat.viewingQuestionThread?.presentationAnchor.nodeId !==
+            conversationView.presentationAnchor.nodeId
+        ) {
+          return;
+        }
+      }
+
       setLastAction(agentMode);
 
       // Merge pending attachments + selection attachment into a single array.
@@ -702,8 +740,22 @@ export function useAgentStream(): UseAgentStreamReturn {
       // injects its neighbourhood via `anchorNodeId`. Exclude it from the
       // selected-node context so the node isn't also attached to itself as
       // a "source".
+      const requestScope = conversationRequestScope(conversationView, canvasId);
       const anchorQuestionNodeId =
-        useChatStore.getState().viewingQuestionThread?.nodeId ?? null;
+        conversationView?.conversationOwner.nodeId ?? null;
+      const headless = isHeadlessConversation(conversationView);
+      const refreshAfterLifecycle = async () => {
+        if (!conversationView) return;
+        await refreshConversationPresentation(conversationView);
+        if (headless) {
+          await useAcpThreadChangesStore
+            .getState()
+            .load(
+              conversationView.conversationOwner.canvasId,
+              conversationView.conversationOwner.threadId,
+            );
+        }
+      };
 
       // Selected node ids are still recorded on the persisted user
       // message so the UI can re-render the selection chip after a
@@ -730,6 +782,12 @@ export function useAgentStream(): UseAgentStreamReturn {
           ...selectedStrokeIds.map((s) => s.nodeId),
         ]),
       );
+      const sentSelectedNodeIds = requestScope.includeCanvasSelection
+        ? selectedNodeIds
+        : [];
+      const sentSelectedStrokeIds = requestScope.includeCanvasSelection
+        ? selectedStrokeIds
+        : [];
 
       const mergedAttachments = [...allPending];
       const attachments =
@@ -753,8 +811,12 @@ export function useAgentStream(): UseAgentStreamReturn {
           role: 'user',
           content: prompt,
           attachments,
-          ...(selectedNodeIds.length > 0 ? { selectedNodeIds } : {}),
-          ...(selectedStrokeIds.length > 0 ? { selectedStrokeIds } : {}),
+          ...(sentSelectedNodeIds.length > 0
+            ? { selectedNodeIds: sentSelectedNodeIds }
+            : {}),
+          ...(sentSelectedStrokeIds.length > 0
+            ? { selectedStrokeIds: sentSelectedStrokeIds }
+            : {}),
           ...(invokedSkills && invokedSkills.length > 0
             ? { invokedSkills }
             : {}),
@@ -797,22 +859,25 @@ export function useAgentStream(): UseAgentStreamReturn {
       // iterations`) emitted *after* a complete answer doesn't flip the
       // node to `error` (issue 3 — tool failures during a successful
       // agent run should not poison the final status).
-      const viewingQuestion = useChatStore.getState().viewingQuestionThread;
-      const questionNodeId = viewingQuestion?.nodeId ?? null;
+      const questionNodeId = conversationView?.conversationOwner.nodeId ?? null;
       let sawDone = false;
 
-      if (questionNodeId) {
+      if (questionNodeId && conversationView) {
         // First send of a freshly-composed question node ⇔ the node is still
         // `idle` (never authored/run). Derived from the node's own status so
         // there is no stored `compose` flag to keep in sync. On that first
         // send we author the node's `content` and lock in the agent the user
         // picked in the inline selector (binding + built-in mode); follow-up
         // turns skip both.
-        const composeNode = useCanvasStore
-          .getState()
-          .nodes.find((n) => n.id === questionNodeId);
-        const isCompose = getQuestionNodeStatus(composeNode?.data) === 'idle';
-        if (isCompose) {
+        const canvasState = useCanvasStore.getState();
+        const ownerSource = resolveConversationOwnerSource(
+          canvasState.canvasId,
+          canvasState.nodes,
+          canvasState.worldReferences,
+          conversationView,
+        );
+        const isCompose = shouldComposeConversationOwner(ownerSource, headless);
+        if (isCompose && !headless) {
           // Author content through the intent pipeline so it gets a
           // markdown sidecar save + server-side label preprocessing —
           // matching how the inline editor used to commit the prompt.
@@ -833,26 +898,44 @@ export function useAgentStream(): UseAgentStreamReturn {
           selectedBinding.kind === 'external' && selectedProfile
             ? { ...selectedBinding, alias: selectedProfile.alias }
             : selectedBinding;
-        const composeBinding = isCompose
-          ? {
-              agentBinding: snapshotBinding,
-              agentIcon: snapshotAgentIcon(
-                selectedBinding,
-                useAcpProfilesStore.getState().profiles,
-              ),
-              agentMode,
-            }
-          : {};
+        const composeBinding =
+          isCompose && !headless
+            ? {
+                agentBinding: snapshotBinding,
+                agentIcon: snapshotAgentIcon(
+                  selectedBinding,
+                  useAcpProfilesStore.getState().profiles,
+                ),
+                agentMode,
+              }
+            : {};
         // Reset `viewed` so the layer-panel dot + on-canvas "done · unread"
         // glow re-appear when the follow-up answer lands (mirrors
         // `useQuestionRunner`'s initial-run behaviour). `onComplete`
         // marks it viewed again if the user is still in the thread.
-        useCanvasStore.getState().patchNodeSilent(questionNodeId, {
+        const startPatch = {
+          ...(isCompose && headless ? { content: prompt } : {}),
           status: 'running',
           errorMessage: undefined,
           viewed: false,
           ...composeBinding,
-        });
+        };
+        try {
+          await patchConversationOwnerNode(conversationView, startPatch);
+          await refreshConversationPresentation(conversationView);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : 'Unknown error';
+          setThreadLoading(threadId, false);
+          releaseAbort();
+          addMessage(threadId, {
+            id: createId('status'),
+            role: 'status',
+            status: 'error',
+            detail: message,
+          });
+          return;
+        }
       }
 
       // Make sure any buffered behavioural events have hit the server
@@ -870,15 +953,18 @@ export function useAgentStream(): UseAgentStreamReturn {
       // Build the canvas context, dropping the anchored question node
       // from `selectedNodes` for the same reason as `selectedNodeIds`
       // above — it is the conversation anchor, not a separate source.
-      const baseCanvasContext = getAgentChatContext();
-      const canvasContext = anchorQuestionNodeId
-        ? {
-            ...baseCanvasContext,
-            selectedNodes: baseCanvasContext.selectedNodes.filter(
-              (n) => n.id !== anchorQuestionNodeId,
-            ),
-          }
-        : baseCanvasContext;
+      const baseCanvasContext = requestScope.includeCanvasSelection
+        ? getAgentChatContext()
+        : { selectedNodes: [] };
+      const canvasContext =
+        anchorQuestionNodeId && !headless
+          ? {
+              ...baseCanvasContext,
+              selectedNodes: baseCanvasContext.selectedNodes.filter(
+                (n) => n.id !== anchorQuestionNodeId,
+              ),
+            }
+          : baseCanvasContext;
 
       try {
         await agentApi.streamMessage(
@@ -904,14 +990,28 @@ export function useAgentStream(): UseAgentStreamReturn {
                 const stillViewing = isActivelyViewingQuestion({
                   nodeId: questionNodeId,
                 });
-                useCanvasStore.getState().patchNodeSilent(questionNodeId, {
-                  status: sawDone ? 'done' : 'error',
-                  errorMessage: sawDone ? undefined : err.message,
-                  ...(stillViewing ? { viewed: true } : {}),
-                });
+                if (conversationView) {
+                  void patchConversationOwnerNode(conversationView, {
+                    status: sawDone ? 'done' : 'error',
+                    errorMessage: sawDone ? undefined : err.message,
+                    ...(stillViewing ? { viewed: true } : {}),
+                  })
+                    .then(refreshAfterLifecycle)
+                    .catch((error) =>
+                      console.error(
+                        '[useAgentStream] failed to persist owner error',
+                        error,
+                      ),
+                    )
+                    .finally(() => {
+                      setThreadLoading(threadId, false);
+                      releaseAbort();
+                    });
+                }
+              } else {
+                setThreadLoading(threadId, false);
+                releaseAbort();
               }
-              setThreadLoading(threadId, false);
-              releaseAbort();
               addMessage(threadId, {
                 id: createId('status'),
                 role: 'status',
@@ -928,23 +1028,37 @@ export function useAgentStream(): UseAgentStreamReturn {
                 const stillViewing = isActivelyViewingQuestion({
                   nodeId: questionNodeId,
                 });
-                useCanvasStore.getState().patchNodeSilent(questionNodeId, {
-                  status: 'done',
-                  errorMessage: undefined,
-                  ...(stillViewing ? { viewed: true } : {}),
-                });
+                if (conversationView) {
+                  void patchConversationOwnerNode(conversationView, {
+                    status: 'done',
+                    errorMessage: undefined,
+                    ...(stillViewing ? { viewed: true } : {}),
+                  })
+                    .then(refreshAfterLifecycle)
+                    .catch((error) =>
+                      console.error(
+                        '[useAgentStream] failed to persist owner completion',
+                        error,
+                      ),
+                    )
+                    .finally(() => {
+                      setThreadLoading(threadId, false);
+                      releaseAbort();
+                    });
+                }
+              } else {
+                setThreadLoading(threadId, false);
+                releaseAbort();
               }
-              setThreadLoading(threadId, false);
-              releaseAbort();
             },
           },
           {
             canvasContext,
-            canvasId: canvasId || undefined,
+            canvasId: requestScope.canvasId || undefined,
             attachments,
             intentData,
             agentBinding,
-            anchorNodeId: questionNodeId ?? undefined,
+            anchorNodeId: requestScope.anchorNodeId,
             invokedSkills,
             // Carry the current built-in per-thread selection so a model /
             // reasoning effort picked before the first message is applied
@@ -974,11 +1088,14 @@ export function useAgentStream(): UseAgentStreamReturn {
             const stillViewing = isActivelyViewingQuestion({
               nodeId: questionNodeId,
             });
-            useCanvasStore.getState().patchNodeSilent(questionNodeId, {
-              status: 'done',
-              errorMessage: undefined,
-              ...(stillViewing ? { viewed: true } : {}),
-            });
+            if (conversationView) {
+              await patchConversationOwnerNode(conversationView, {
+                status: 'done',
+                errorMessage: undefined,
+                ...(stillViewing ? { viewed: true } : {}),
+              });
+              await refreshAfterLifecycle();
+            }
           }
           return;
         }
@@ -993,11 +1110,14 @@ export function useAgentStream(): UseAgentStreamReturn {
           const stillViewing = isActivelyViewingQuestion({
             nodeId: questionNodeId,
           });
-          useCanvasStore.getState().patchNodeSilent(questionNodeId, {
-            status: sawDone ? 'done' : 'error',
-            errorMessage: sawDone ? undefined : message,
-            ...(stillViewing ? { viewed: true } : {}),
-          });
+          if (conversationView) {
+            await patchConversationOwnerNode(conversationView, {
+              status: sawDone ? 'done' : 'error',
+              errorMessage: sawDone ? undefined : message,
+              ...(stillViewing ? { viewed: true } : {}),
+            });
+            await refreshAfterLifecycle();
+          }
         }
         setThreadLoading(threadId, false);
         releaseAbort();
@@ -1019,7 +1139,6 @@ export function useAgentStream(): UseAgentStreamReturn {
       getAgentChatContext,
       canvasId,
       setThreadLoading,
-      updateMessage,
     ],
   );
 

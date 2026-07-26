@@ -71,9 +71,18 @@ function openConflictThread(threadId: string, canvasId: string): void {
   if (questionNode) {
     const binding = (questionNode.data as { agentBinding?: AgentBinding })
       .agentBinding;
-    useChatStore
-      .getState()
-      .openQuestionThread(questionNode.id, threadId, binding, canvasId);
+    useChatStore.getState().openQuestionThread(
+      {
+        presentationAnchor: { canvasId, nodeId: questionNode.id },
+        conversationOwner: {
+          canvasId,
+          nodeId: questionNode.id,
+          threadId,
+        },
+      },
+      binding,
+      canvasId,
+    );
   }
 }
 

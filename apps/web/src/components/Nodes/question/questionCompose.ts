@@ -9,24 +9,22 @@
  */
 import { createId } from '@sediment/shared';
 
+import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent.ts';
-import type { CanvasNodeId } from '@sediment/shared';
+import type { AgentConversationView, CanvasNodeId } from '@sediment/shared';
 
 /**
  * Open the chat panel in compose mode for a question node's thread and
  * focus the input.
  */
 export function enterQuestionCompose(
-  nodeId: string,
-  threadId: string,
+  view: AgentConversationView,
   canvasId: string | null,
 ): void {
-  useChatStore
-    .getState()
-    .openQuestionCompose(nodeId, threadId, canvasId || undefined);
+  useChatStore.getState().openQuestionCompose(view, canvasId || undefined);
   usePanelStore.getState().requestOpenRightPanel();
   usePanelStore.getState().requestFocusChatInput();
 }
@@ -45,6 +43,7 @@ export function createQuestionNodeAndCompose(opts: {
 }): { nodeId: CanvasNodeId; threadId: string } {
   const nodeId = opts.id ?? (createId('node') as CanvasNodeId);
   const threadId = createId('thread');
+  const canvasId = opts.canvasId ?? useCanvasStore.getState().canvasId;
   opts.addNode({
     id: nodeId,
     nodeType: 'question',
@@ -55,6 +54,19 @@ export function createQuestionNodeAndCompose(opts: {
       origin: { type: 'user-created' },
     },
   });
-  enterQuestionCompose(nodeId, threadId, opts.canvasId);
+  enterQuestionCompose(
+    {
+      presentationAnchor: {
+        canvasId,
+        nodeId,
+      },
+      conversationOwner: {
+        canvasId,
+        nodeId,
+        threadId,
+      },
+    },
+    opts.canvasId,
+  );
   return { nodeId, threadId };
 }

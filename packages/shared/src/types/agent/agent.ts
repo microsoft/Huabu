@@ -30,6 +30,21 @@ import type { AgentStreamEvent as ProtocolStreamEvent } from '@agenetes/protocol
 
 export type AgentMode = 'ask' | 'operate';
 
+export interface AgentConversationAnchor {
+  canvasId: string;
+  nodeId: string;
+}
+
+/**
+ * One visible chat presentation whose durable conversation may be owned by
+ * another Canvas. The owner controls history, execution, tools, and writes;
+ * the presentation anchor controls only where the conversation was opened.
+ */
+export interface AgentConversationView {
+  presentationAnchor: AgentConversationAnchor;
+  conversationOwner: AgentConversationAnchor & { threadId: string };
+}
+
 // ==================== Streaming Events ====================
 //
 // SSE events emitted by the unified `/api/agent` endpoint, modelled as a

@@ -73,9 +73,20 @@ beforeEach(() => {
   const sourceRoot = writeCanvas('Project A', 'canvas-a', [
     {
       id: 'node-source',
-      type: 'note',
+      type: 'question',
       position: { x: 10, y: 20 },
-      data: {},
+      data: {
+        threadId: 'thread-source',
+        status: 'running',
+        viewed: false,
+        agentMode: 'operate',
+        agentBinding: {
+          kind: 'external',
+          profileId: 'profile-source',
+          alias: 'Source Agent',
+        },
+        hasAuthoredContent: true,
+      },
     },
   ]);
   mkdirSync(path.join(sourceRoot, 'nodes'));
@@ -84,7 +95,7 @@ beforeEach(() => {
     [
       '---',
       'id: node-source',
-      'type: note',
+      'type: question',
       'label: Source note',
       'summary: Source summary',
       '---',
@@ -116,10 +127,19 @@ describe('World reference resolution', () => {
         referenceNodeId: 'node-ref-ok',
         status: 'ok',
         source: expect.objectContaining({
-          type: 'note',
+          type: 'question',
           label: 'Source note',
           summary: 'Source summary',
           preview: 'Source body',
+          threadId: 'thread-source',
+          status: 'running',
+          viewed: false,
+          agentMode: 'operate',
+          agentBinding: {
+            kind: 'external',
+            profileId: 'profile-source',
+            alias: 'Source Agent',
+          },
         }),
       }),
     );
@@ -141,6 +161,38 @@ describe('World reference resolution', () => {
     await expect(resolveWorldReferences('canvas-a')).rejects.toBeInstanceOf(
       WorldReferenceResolutionError,
     );
+  });
+
+  it('surfaces a question without a thread as malformed source data', async () => {
+    writeCanvas('Project A', 'canvas-a', [
+      {
+        id: 'node-source',
+        type: 'question',
+        position: { x: 10, y: 20 },
+        data: {},
+      },
+    ]);
+
+    const response = await resolveWorldReferences('canvas-world');
+    const reference = response.references.find(
+      (candidate) => candidate.referenceNodeId === 'node-ref-ok',
+    );
+
+    expect(reference).toMatchObject({
+      kind: 'nodeRef',
+      status: 'ok',
+      source: {
+        type: 'question',
+        status: 'idle',
+        viewed: false,
+        agentMode: 'ask',
+        agentBinding: { kind: 'internal' },
+        hasAuthoredContent: true,
+      },
+    });
+    expect(
+      reference?.kind === 'nodeRef' ? reference.source?.threadId : undefined,
+    ).toBeUndefined();
   });
 
   it('surfaces malformed source topology and sidecar data', async () => {

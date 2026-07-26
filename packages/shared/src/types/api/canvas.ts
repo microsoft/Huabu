@@ -8,6 +8,8 @@
 
 import { z } from 'zod';
 
+import { agentBindingSchema } from './agent.js';
+
 export interface GetCanvasResponse {
   canvasId: string;
   title: string | null;
@@ -25,6 +27,12 @@ const resolvedSourceNodeSchema = z
     summary: z.string().optional(),
     preview: z.string().optional(),
     rev: z.string().optional(),
+    threadId: z.string().min(1).optional(),
+    status: z.enum(['idle', 'running', 'done', 'error']).optional(),
+    viewed: z.boolean().optional(),
+    agentMode: z.enum(['ask', 'operate']).optional(),
+    agentBinding: agentBindingSchema.optional(),
+    hasAuthoredContent: z.boolean().optional(),
   })
   .strict();
 
