@@ -7,7 +7,6 @@ import {
 } from './geometry.js';
 import { getNodeSize } from '../utils/nodeSizes.js';
 
-
 import type {
   PreparedPortalSourcePosition,
   CanvasNodeId,

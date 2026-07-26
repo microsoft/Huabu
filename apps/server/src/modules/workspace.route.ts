@@ -6,10 +6,7 @@ import path from 'node:path';
 import { validatePathSchema, workspacePathSchema } from '@sediment/shared';
 
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
-import {
-  requireWorldCanvasId,
-  resetStorageCache,
-} from './storage/index.js';
+import { requireWorldCanvasId, resetStorageCache } from './storage/index.js';
 import {
   activateWorkspacePath,
   WorkspaceActivationInProgressError,

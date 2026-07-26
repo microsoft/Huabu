@@ -7,7 +7,6 @@ import {
 } from './geometry.js';
 import { applyContainerFit, computeContainerFit } from '../container/fit.js';
 
-
 import type { NestableNode } from '../container/tree.js';
 
 function resetEmptyPortal(
