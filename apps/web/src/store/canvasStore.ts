@@ -60,6 +60,7 @@ import {
   setSnapStructuredSuppressed,
   writeDragDecision,
 } from '@/handler/snap/snapSession';
+import { i18n } from '@/i18n';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { createIntentActionWindow } from './canvasStore/intentActionWindow';
@@ -76,7 +77,7 @@ import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
 import { useWorkspaceStore } from './workspaceStore';
-import { getCanvas, putCanvas } from '../api';
+import { ApiError, getCanvas, postCanvasExecute, putCanvas } from '../api';
 import { agentApi } from '../api/agent';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
@@ -100,6 +101,7 @@ import type {
   CanvasViewport,
   IntentContext,
   Point,
+  PortalNodePinUpdate,
   RecentAction,
   WireCanvasNode,
   WireSelectionNode,
@@ -108,6 +110,28 @@ import type {
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
 const NODE_CONTENT_DEBOUNCE_MS = 500;
+const nodeRefTopologySignatures = new Map<string, string>();
+
+function nodeRefTopologySignature(nodes: readonly Node[]): string {
+  return JSON.stringify(
+    nodes
+      .filter((node) => node.type === 'nodeRef')
+      .map((node) => {
+        const target = (
+          node.data as
+            | { target?: { canvasId?: unknown; nodeId?: unknown } }
+            | undefined
+        )?.target;
+        return [
+          node.id,
+          node.parentId ?? null,
+          typeof target?.canvasId === 'string' ? target.canvasId : null,
+          typeof target?.nodeId === 'string' ? target.nodeId : null,
+        ];
+      })
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  );
+}
 
 /**
  * Arm a single undo snapshot for a gesture: snapshot the current state and
@@ -460,6 +484,7 @@ type RFState = {
     dropPoint: { x: number; y: number };
   }) => void;
   deleteNodes: (nodeIds: string[]) => void;
+  setPortalNodePins: (updates: PortalNodePinUpdate[]) => Promise<boolean>;
   disconnectEdges: (edgeIds: string[]) => void;
   setNodeGeometry: (
     items: Array<{
@@ -877,6 +902,19 @@ const nodeContentQueue = createNodeContentQueue({
  */
 export async function drainPendingSaves(): Promise<void> {
   await structureScheduler.flushAsync();
+  while (
+    useCanvasStore.getState().isSaving ||
+    useCanvasStore.getState().pendingSave
+  ) {
+    await new Promise<void>((resolve) => {
+      const unsubscribe = useCanvasStore.subscribe((state) => {
+        if (!state.isSaving && !state.pendingSave) {
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
+  }
   await nodeContentQueue.flushAll();
 }
 
@@ -1353,8 +1391,9 @@ const useCanvasStore = create<RFState>()(
      *      batch; commit via `_setStateNoAutosave` and reconcile
      *      local `version` to `toVersion` so the NEXT user edit's
      *      autosave PUTs against the right baseline.
-     *   3. Snapshots for undo unconditionally; agent batches always
-     *      cross the undo boundary in the existing UX.
+     *   3. Ordinary agent batches snapshot for undo. Portal Pin/Unpin clears
+     *      history because protected reference topology cannot be restored by
+     *      the legacy full-state snapshot boundary.
      */
     applyDeltasFromAgent: (deltas, toVersion, pendingEffects) => {
       // Never let an incoming agent write clobber a
@@ -1407,9 +1446,20 @@ const useCanvasStore = create<RFState>()(
       const prevEdges = get().edges;
       const canvasId = get().canvasId;
 
-      // Snapshot for undo BEFORE mutating local state — agent batches
-      // are always undoable units in the existing UX.
-      canvasHistoryManager.takeSnapshot(prevNodes, prevEdges);
+      // Pin/Unpin uses a dedicated cross-Canvas command and cannot be
+      // faithfully restored by replaying a generic topology snapshot: a
+      // resurrected nodeRef would be rejected by the server ownership guard.
+      // Its product-level inverse is another Pin/Unpin operation.
+      const isPortalPinMutation = safeDeltas.some(
+        (delta) =>
+          (delta.type === 'INSERT_NODE' || delta.type === 'DELETE_NODE') &&
+          delta.node.type === 'nodeRef',
+      );
+      if (isPortalPinMutation) {
+        canvasHistoryManager.clear();
+      } else {
+        canvasHistoryManager.takeSnapshot(prevNodes, prevEdges);
+      }
 
       // Replay the structural diff. The shared helper tolerates
       // missing targets (REPLACE/DELETE against an already-absent
@@ -1432,11 +1482,16 @@ const useCanvasStore = create<RFState>()(
       // found". This delta-replay path bypasses the server executor entirely,
       // so we normalize here at the client state-producer boundary.
       const orderedNodes = normalizeTreeOrder(applied.nodes as NestableNode[]);
+      nodeRefTopologySignatures.set(
+        canvasId,
+        nodeRefTopologySignature(orderedNodes as Node[]),
+      );
 
       get()._setStateNoAutosave({
         nodes: orderedNodes as Node[],
         edges: applied.edges as Edge[],
         version: toVersion,
+        ...(isPortalPinMutation ? { canUndo: false, canRedo: false } : {}),
       });
 
       // Re-seed the content-CAS baseline for the nodes this agent write
@@ -1573,6 +1628,52 @@ const useCanvasStore = create<RFState>()(
       }
     },
 
+    setPortalNodePins: async (updates) => {
+      const callerCanvasId = get().canvasId;
+      if (!callerCanvasId || updates.length === 0) return false;
+      try {
+        await drainPendingSaves();
+        if (get().canvasId !== callerCanvasId || get().versionConflict) {
+          return false;
+        }
+        const response = await postCanvasExecute(callerCanvasId, {
+          commands: [{ type: 'SET_PORTAL_NODE_PINS', updates }],
+          originator: { source: 'ui' },
+        });
+        const current = get();
+        if (
+          current.canvasId === response.canvasId &&
+          current.version === response.fromVersion
+        ) {
+          current.applyDeltasFromAgent(
+            response.deltas as Delta[],
+            response.toVersion,
+            response.pendingEffects as Parameters<
+              typeof current.applyDeltasFromAgent
+            >[2],
+          );
+        } else if (
+          (response.deltas as Delta[]).some(
+            (delta) =>
+              (delta.type === 'INSERT_NODE' || delta.type === 'DELETE_NODE') &&
+              delta.node.type === 'nodeRef',
+          )
+        ) {
+          canvasHistoryManager.clearCanvas(response.canvasId);
+          nodeRefTopologySignatures.delete(response.canvasId);
+        }
+        return true;
+      } catch (error) {
+        toast(
+          error instanceof ApiError && error.code === 'WORLD_PORTAL_MISSING'
+            ? i18n.t('world.portalRefreshRequired')
+            : i18n.t('world.pinFailed'),
+          { tone: 'danger' },
+        );
+        return false;
+      }
+    },
+
     getAgentChatContext: (): AgentChatContext => {
       const { nodes } = get();
       const buildSelectedDetail = makeBuildSelectedDetail(nodes);
@@ -1695,6 +1796,16 @@ const useCanvasStore = create<RFState>()(
           reconcileQuestionStatus(state.nodes ?? []) as NestableNode[],
         ) as Node[];
         const loadedEdges = state.edges ?? [];
+        const loadedNodeRefSignature = nodeRefTopologySignature(loadedNodes);
+        const previousNodeRefSignature =
+          nodeRefTopologySignatures.get(targetId);
+        if (
+          previousNodeRefSignature !== undefined &&
+          previousNodeRefSignature !== loadedNodeRefSignature
+        ) {
+          canvasHistoryManager.clearCanvas(targetId);
+        }
+        nodeRefTopologySignatures.set(targetId, loadedNodeRefSignature);
         // Prefer this client's persistent UI state; fall back to whatever the
         // server still has from before viewport was moved client-side.
         // A corrupt entry on either side falls through to `null`, which
@@ -2879,10 +2990,30 @@ const useCanvasStore = create<RFState>()(
     },
 
     deleteNodes: (nodeIds) => {
+      const nodeRefs = get().nodes.filter(
+        (node) => nodeIds.includes(node.id) && node.type === 'nodeRef',
+      );
+      if (nodeRefs.length > 0) {
+        void get().setPortalNodePins(
+          nodeRefs.map((node) => {
+            const target = (
+              node.data as {
+                target: { canvasId: string; nodeId: string };
+              }
+            ).target;
+            return {
+              sourceCanvasId: target.canvasId as `canvas-${string}`,
+              sourceNodeIds: [target.nodeId as `node-${string}`],
+              pinned: false,
+            };
+          }),
+        );
+      }
       const { spaceTitles, spaceTitlesLoaded } = useWorkspaceStore.getState();
       const nodesById = new Map(get().nodes.map((node) => [node.id, node]));
       const deletableNodeIds = nodeIds.filter((nodeId) => {
         const node = nodesById.get(nodeId);
+        if (node?.type === 'nodeRef') return false;
         if (node?.type !== 'canvasRef') return true;
         const targetCanvasId = node.data.targetCanvasId;
         return (
@@ -2892,10 +3023,15 @@ const useCanvasStore = create<RFState>()(
         );
       });
       if (deletableNodeIds.length > 0) {
+        const nodeRefTopologyBefore = nodeRefTopologySignature(get().nodes);
         get().dispatchUiIntent({
           type: 'DELETE_NODES',
           nodeIds: deletableNodeIds,
         });
+        if (nodeRefTopologyBefore !== nodeRefTopologySignature(get().nodes)) {
+          canvasHistoryManager.clear();
+          set({ canUndo: false, canRedo: false });
+        }
       }
     },
 
@@ -3183,6 +3319,10 @@ const useCanvasStore = create<RFState>()(
     pasteNodes: (flowPosition, clipboardNodes, clipboardEdges, srcCanvasId) => {
       const dstCanvasId = get().canvasId;
       if (!dstCanvasId || clipboardNodes.length === 0) return;
+      clipboardNodes = clipboardNodes.filter(
+        (node) => node.type !== 'canvasRef' && node.type !== 'nodeRef',
+      );
+      if (clipboardNodes.length === 0) return;
 
       // ── Question-node conversation handling ─────────────────────────
       // A copied question node that already holds a conversation is

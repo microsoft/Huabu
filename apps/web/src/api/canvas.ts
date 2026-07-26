@@ -20,6 +20,8 @@ import type {
   PreprocessNodeRequest,
   PreprocessNodeResponse,
   RevealNodesFolderResponse,
+  PostCanvasExecuteRequest,
+  PostCanvasExecuteResponse,
 } from '@sediment/shared';
 
 /**
@@ -124,6 +126,17 @@ export async function getCanvas(
     console.error('Failed to get canvas:', error);
     return null;
   }
+}
+
+export async function postCanvasExecute(
+  canvasId: string,
+  request: PostCanvasExecuteRequest,
+): Promise<PostCanvasExecuteResponse> {
+  return apiFetch<PostCanvasExecuteResponse>(routes.canvasExecute(canvasId), {
+    method: 'POST',
+    json: request,
+    fallbackMessage: 'Failed to execute Space command',
+  });
 }
 
 export async function putCanvas(

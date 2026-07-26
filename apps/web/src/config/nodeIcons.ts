@@ -22,6 +22,7 @@ import {
   Mic,
   MessageCircleQuestionMark,
   PanelsTopLeft,
+  Pin,
 } from 'lucide-react';
 
 import type { CanvasNodeType, OfficeFormat } from '@sediment/shared';
@@ -55,6 +56,7 @@ export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
   web: Globe,
   frame: Frame,
   canvasRef: PanelsTopLeft,
+  nodeRef: Pin,
   sketch: Pencil,
   question: MessageCircleQuestionMark,
 };
@@ -89,6 +91,7 @@ export const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   web: 'Website',
   frame: 'Frame',
   canvasRef: 'Portal',
+  nodeRef: 'Pinned reference',
   sketch: 'Sketch',
   question: 'Agent Node',
 };

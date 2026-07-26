@@ -100,6 +100,7 @@ See `packages/shared/src/types/canvas/command.ts` for the full discriminated uni
 | Node lifecycle   | `CREATE_NODES`, `DELETE_NODES`                          |
 | Node editing     | `MERGE_NODE_DATA`, `CHANGE_NODE_TYPE`                   |
 | Structure        | `SET_NODE_PARENT`, `DISSOLVE_FRAME`, `SET_FRAME_LAYOUT` |
+| World projection | `SET_PORTAL_NODE_PINS`                                  |
 | Geometry         | `SET_NODE_GEOMETRY`                                     |
 | Selection / view | `SET_NODE_SELECTION`                                    |
 | Ordering         | `REORDER_NODES`                                         |
@@ -149,7 +150,7 @@ Node ids use `node-<uuid>`, edge ids use `edge-<uuid>`.
 The engine is shared, in `packages/shared/src/canvas-engine/`:
 
 - `executor.ts` — `executeCanvasCommands(execution, state) -> ExecutorOutput`
-- `commands/` — one handler per command type (17) + `index.ts` (`HANDLERS` registry + `COMMAND_META`) + `types.ts`
+- `commands/` — one handler per command type (18) + `index.ts` (`HANDLERS` registry + `COMMAND_META`) + `types.ts`
 - `postEffects.ts` — pure post-commit effects (edge reroute)
 - `interfaces.ts` — `CanvasReadState`, `CanvasWriteResult`; `delta.ts` / `diff.ts` — self-inverting delta types
 
@@ -198,6 +199,8 @@ Same engine runs both sides; the only authority is the server. `POST /api/canvas
 
 World `canvasRef` Portals add a host-level ownership policy before shared-engine execution. Only system reconciliation may create them; UI and agent batches cannot repoint them, manually resize them, or delete a Portal whose target is still a live Space. A broken Portal remains removable. Movement and ordinary Container parenting still use the same shared geometry and `SET_NODE_PARENT` semantics as other Canvas nodes.
 
+`SET_PORTAL_NODE_PINS` is the only creation/removal path for persistent `nodeRef` children. The server host router resolves the World and matching existing canonical Portals, validates pin sources while allowing broken-reference unpin, injects deterministic placement hints, and rejects a batch that mixes source-local commands with World mutation. A missing Portal is an actionable precondition error and is repaired only by the separate World-read reconciliation path. The shared handler deduplicates exact desired states, rejects contradictions, enforces one reference per source target, and Portal content-hug runs after pin membership or child geometry changes. `nodeRef` retains ordinary World-owned node behavior such as locking and visual style; the topology guard rejects copied source content rather than generic Canvas metadata.
+
 Two properties make the agent loop self-correcting:
 
 - **Per-command outcomes are visible.** Each command reports `applied` and, on failure, a typed `reason` in `results[]` (e.g. `CONNECT_NODES` → `invalid-target` when an endpoint is missing, `SET_NODE_PARENT` → `invalid-target` / `invalid-parent`). Commands are validated independently — the version bumps only if at least one command changed state; an all-rejected batch is a no-op (`toVersion === fromVersion`).
@@ -221,3 +224,5 @@ The parallel `IntentAction` union has been removed from `packages/shared/src/typ
 | [`apps/web/src/components/Nodes/note/NotePreview.tsx`](../../apps/web/src/components/Nodes/note/NotePreview.tsx)                           | Focus the editable note surface when expanded-view focus is requested.                |
 | [`apps/web/src/components/Nodes/text/TextNode.tsx`](../../apps/web/src/components/Nodes/text/TextNode.tsx)                                 | Consume inline-edit requests and focus the text textarea.                             |
 | [`packages/shared/src/canvas-engine/executor.ts`](../../packages/shared/src/canvas-engine/executor.ts)                                     | Execute host-agnostic canvas commands without web UI state.                           |
+| [`packages/shared/src/canvas-engine/commands/setPortalNodePins.ts`](../../packages/shared/src/canvas-engine/commands/setPortalNodePins.ts) | Apply idempotent World-local Portal pin state.                                        |
+| [`apps/server/src/modules/canvas/canvas-command-router.ts`](../../apps/server/src/modules/canvas/canvas-command-router.ts)                 | Route public Portal Pin commands to the workspace World.                              |

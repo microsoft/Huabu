@@ -472,6 +472,10 @@ export class CanvasHistoryRegistry {
     this.active.clear();
   }
 
+  clearCanvas(canvasId: string): void {
+    this.managers.get(canvasId)?.clear();
+  }
+
   syncServerAfterRestore(
     canvasId: string,
     prevNodes: Node[],

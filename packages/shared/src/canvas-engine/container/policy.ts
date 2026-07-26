@@ -14,7 +14,22 @@ export function canParentNode(
   parent: Node | undefined,
   child: Node | undefined,
 ): boolean {
-  return Boolean(
-    parent && child && parent.id !== child.id && isContainerNode(parent),
+  if (!parent || !child || parent.id === child.id || !isContainerNode(parent)) {
+    return false;
+  }
+  if (parent.type !== 'canvasRef') return child.type !== 'nodeRef';
+  if (child.type !== 'nodeRef') return false;
+
+  const portalTarget = (parent.data as { targetCanvasId?: unknown } | undefined)
+    ?.targetCanvasId;
+  const childTarget = (
+    child.data as
+      | { target?: { canvasId?: unknown; nodeId?: unknown } }
+      | undefined
+  )?.target;
+  return (
+    typeof portalTarget === 'string' &&
+    childTarget?.canvasId === portalTarget &&
+    typeof childTarget.nodeId === 'string'
   );
 }

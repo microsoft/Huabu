@@ -132,7 +132,7 @@ export function autoUnframeNodeByNonOverlap(
 
   const parentId = node.parentId;
   const parent = byId.get(parentId);
-  if (!parent) return nodes;
+  if (parent?.type !== 'frame') return nodes;
 
   const getAbs = createAbsolutePositionGetter(byId);
   const getRect = createRectGetter(byId, getAbs);

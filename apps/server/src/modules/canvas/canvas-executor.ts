@@ -55,7 +55,10 @@ import {
 
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';
-import { assertWorldPortalMutationsAllowed } from './world-portal-policy.js';
+import {
+  assertWorldPortalMutationsAllowed,
+  assertWorldPortalResultAllowed,
+} from './world-portal-policy.js';
 import { getLogger } from '../../utils/logger.js';
 import {
   getCanvasStore,
@@ -732,6 +735,7 @@ export async function executeOnServer(
     const sharedOut = applySharedPostEffectsFromWriteResult(writeResult);
     const finalNodes = writeResult.nodes;
     const finalEdges = sharedOut.edges;
+    assertWorldPortalResultAllowed(canvasId, prestateNodes, finalNodes);
 
     const deltas = diffCanvasState(
       { nodes: prestateNodes, edges: prestateEdges },

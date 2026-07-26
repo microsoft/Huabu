@@ -25,10 +25,8 @@ import { createId } from '@sediment/shared';
 
 import { getLogger } from '../../../../utils/logger.js';
 import { prepareAgentCanvasCommands } from '../../../canvas/agent-command-preparation.js';
-import {
-  CanvasNotFoundError,
-  executeOnServer,
-} from '../../../canvas/canvas-executor.js';
+import { executeCanvasCommandsOnHost } from '../../../canvas/canvas-command-router.js';
+import { CanvasNotFoundError } from '../../../canvas/canvas-executor.js';
 
 import type {
   BuiltInAgentOperationCommand,
@@ -112,7 +110,10 @@ export async function handleCanvasCommands(
   // chat agent path (default origin `ai-operate`) is the one that
   // benefits from server-side execution today; sketch joins in M3
   // when broadcast lands.
-  if (origin.type === 'sketch-recognized') {
+  if (
+    origin.type === 'sketch-recognized' &&
+    !annotated.some((command) => command.type === 'SET_PORTAL_NODE_PINS')
+  ) {
     return JSON.stringify({
       source: 'agent',
       canvasId: args.canvasId,
@@ -121,7 +122,7 @@ export async function handleCanvasCommands(
   }
 
   try {
-    const result = await executeOnServer({
+    const result = await executeCanvasCommandsOnHost({
       canvasId: args.canvasId,
       commands: annotated,
       originator: {
@@ -134,7 +135,7 @@ export async function handleCanvasCommands(
 
     return JSON.stringify({
       source: 'agent',
-      canvasId: args.canvasId,
+      canvasId: result.canvasId,
       runId,
       fromVersion: result.fromVersion,
       toVersion: result.toVersion,

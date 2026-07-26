@@ -63,6 +63,9 @@ const setNodeParent: CommandDefinition<Cmd> = {
         const parent = child?.parentId
           ? result.find((node) => node.id === child.parentId)
           : undefined;
+        if (child?.type === 'nodeRef' && parent?.type === 'canvasRef') {
+          return noop(state, 'invalid-parent');
+        }
         if (parent?.data?.locked) return noop(state, 'invalid-parent');
       }
     }

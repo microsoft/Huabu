@@ -37,6 +37,7 @@ import { Loading } from '@/components/Common/Loading';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import { CanvasRefNode } from '@/components/Nodes/canvasRef/CanvasRefNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
+import { NodeRefNode } from '@/components/Nodes/nodeRef/NodeRefNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
 import { OfficeNode } from '@/components/Nodes/office/OfficeNode';
 import { PDFNode } from '@/components/Nodes/pdf/PDFNode';
@@ -134,6 +135,7 @@ const nodeTypes = {
   office: OfficeNode,
   frame: FrameNode,
   canvasRef: CanvasRefNode,
+  nodeRef: NodeRefNode,
   sketch: SketchNode,
   question: QuestionNode,
 } as const;

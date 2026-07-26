@@ -18,14 +18,16 @@ import {
   preprocessNodeBodySchema,
   putCanvasBodySchema,
   putNodeContentBodySchema,
+  setPortalNodePinsCommandSchema,
 } from '@sediment/shared';
 import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
 import {
-  CanvasNotFoundError,
-  applyDeltasOnServer,
-  executeOnServer,
-} from './canvas-executor.js';
+  CanvasCommandRoutingError,
+  executeCanvasCommandsOnHost,
+  MissingWorldPortalError,
+} from './canvas-command-router.js';
+import { CanvasNotFoundError, applyDeltasOnServer } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { runWithExternalNoteWatcherSuspended } from './external-watcher.js';
@@ -1217,12 +1219,38 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         message: parsed.error.issues[0]?.message ?? 'Invalid request body',
       });
     }
+    if (parsed.data.originator.source === 'system') {
+      return reply.code(403).send({
+        message: 'System command origin is reserved for internal callers',
+      });
+    }
     const { commands, originator, runId } = parsed.data;
+    const validatedCommands: CanvasCommand[] = [];
+    for (const command of commands) {
+      if (
+        typeof command === 'object' &&
+        command !== null &&
+        'type' in command &&
+        command.type === 'SET_PORTAL_NODE_PINS'
+      ) {
+        const parsedCommand = setPortalNodePinsCommandSchema.safeParse(command);
+        if (!parsedCommand.success) {
+          return reply.code(400).send({
+            message:
+              parsedCommand.error.issues[0]?.message ??
+              'Invalid Portal Pin command',
+          });
+        }
+        validatedCommands.push(parsedCommand.data as CanvasCommand);
+      } else {
+        validatedCommands.push(command as CanvasCommand);
+      }
+    }
 
     try {
-      const out = await executeOnServer({
+      const out = await executeCanvasCommandsOnHost({
         canvasId,
-        commands: commands as CanvasCommand[],
+        commands: validatedCommands,
         originator,
         ...(runId ? { runId } : {}),
         // Derive review records only for thread-attributed (ACP) batches —
@@ -1251,6 +1279,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
       if (err instanceof WorldPortalMutationError) {
+        return reply.code(409).send({ message: err.message });
+      }
+      if (err instanceof MissingWorldPortalError) {
+        return reply
+          .code(409)
+          .send({ code: 'WORLD_PORTAL_MISSING', message: err.message });
+      }
+      if (err instanceof CanvasCommandRoutingError) {
         return reply.code(409).send({ message: err.message });
       }
       request.log.error({ canvasId, err }, 'Failed to execute canvas commands');

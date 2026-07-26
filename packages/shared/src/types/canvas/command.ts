@@ -134,6 +134,31 @@ export interface CanvasEdgeStylePatch {
   style: Partial<EdgeStyle>;
 }
 
+export interface PortalNodePinUpdate {
+  sourceCanvasId: PrefixedId<'canvas'>;
+  sourceNodeIds: CanvasNodeId[];
+  pinned: boolean;
+}
+
+export interface PreparedPortalSourcePosition {
+  sourceCanvasId: PrefixedId<'canvas'>;
+  sourceNodeId: CanvasNodeId;
+  position: Point;
+}
+
+export interface PreparedPortalNodePin {
+  sourceCanvasId: PrefixedId<'canvas'>;
+  sourceNodeId: CanvasNodeId;
+  portalId: CanvasNodeId;
+  nodeRefId: CanvasNodeId;
+  pinned: boolean;
+}
+
+export interface PreparedPortalNodePins {
+  pins: PreparedPortalNodePin[];
+  sourcePositions: PreparedPortalSourcePosition[];
+}
+
 /**
  * Shared executable canvas command schema.
  *
@@ -209,9 +234,24 @@ export type CanvasCommand =
       type: 'CHANGE_NODE_TYPE';
       nodeId: CanvasNodeId;
       to: 'text' | 'note';
+    }
+  | {
+      type: 'SET_PORTAL_NODE_PINS';
+      updates: PortalNodePinUpdate[];
     };
 
 export type CanvasCommandType = CanvasCommand['type'];
+
+/**
+ * Server-owned representation passed to the shared handler after host
+ * routing. It is deliberately not a member of the public CanvasCommand union.
+ */
+export type PreparedPortalNodePinsCommand = Extract<
+  CanvasCommand,
+  { type: 'SET_PORTAL_NODE_PINS' }
+> & {
+  prepared: PreparedPortalNodePins;
+};
 
 /**
  * Command types that are UI-only and excluded from the agent-facing schema.
@@ -259,6 +299,7 @@ export const AGENT_CANVAS_COMMAND_TYPES = [
   'ALIGN_NODES',
   'DISTRIBUTE_NODES',
   'SET_FRAME_LAYOUT',
+  'SET_PORTAL_NODE_PINS',
 ] as const satisfies readonly AgentCanvasCommandType[];
 
 // Compile-time guard: `AGENT_CANVAS_COMMAND_TYPES` must list every

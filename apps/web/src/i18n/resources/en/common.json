@@ -359,7 +359,12 @@
     "untitledSpace": "Untitled Space",
     "emptyPortal": "No nodes are pinned from this Space yet.",
     "missingSpace": "Missing Space",
-    "missingSpaceDescription": "This Portal's source Space no longer exists."
+    "missingSpaceDescription": "This Portal's source Space no longer exists.",
+    "pinnedNode": "Pinned node",
+    "pinSelected": "Pin selected nodes to World",
+    "unpinSelected": "Unpin selected nodes from World",
+    "pinFailed": "Failed to update World pins",
+    "portalRefreshRequired": "Refresh World before pinning nodes from this Space"
   },
   "node": {
     "untitled": "Untitled",
@@ -518,6 +523,7 @@
       "web": "Website",
       "frame": "Frame",
       "canvasRef": "Portal",
+      "nodeRef": "Pinned node",
       "sketch": "Sketch",
       "question": "Question"
     }

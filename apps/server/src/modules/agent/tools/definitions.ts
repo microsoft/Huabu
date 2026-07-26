@@ -151,6 +151,8 @@ export const canvasCommandsTool: ToolDefinition = {
 
 Batch **independent** commands together (fewer re-renders). **Dependency rule:** the server assigns every node/edge id, so a command can't reference a node created earlier in the **same call or turn** — its id isn't known yet. Create first, read the assigned ids from \`results[].nodes\`, then CONNECT / SET_NODE_PARENT them in a **follow-up call** (next turn). \`ALIGN_NODES\` / \`DISTRIBUTE_NODES\` touch only existing nodes, so they can ride along once you hold the ids.
 
+\`SET_PORTAL_NODE_PINS\` adds or removes symbolic references to source Space nodes inside their Project Portals. It never modifies or deletes the source nodes, and positions are assigned by the host.
+
 Supported command types: ${AGENT_CANVAS_COMMAND_TYPES.join(', ')}. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
 
 For worked multi-command recipes (group into frame, brainstorm-and-connect, merge/synthesize, restyle a cluster, tidy a row), \`read("skills/space/references/command-cookbook.md")\`; for diagram geometry and layout, \`read("skills/space/references/layout-recipes.md")\`.`,

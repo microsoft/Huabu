@@ -58,6 +58,8 @@ export interface CommandHandlerResult {
    * bypasses the per-frame filter.
    */
   affectedFrameIds?: string[];
+  /** Portal IDs whose direct nodeRef children changed geometry or membership. */
+  affectedPortalIds?: string[];
   /**
    * Frame IDs whose children's rendered size will only stabilise after
    * the next render cycle (e.g. clearing a pinned height to revert to

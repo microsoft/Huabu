@@ -37,6 +37,7 @@ import {
   type NestableNode,
 } from './frame/index.js';
 import { getFrameSizing } from './frame/sizing.js';
+import { fitPortals } from './portal/index.js';
 import {
   coerceProvenance,
   computeAiNoteProvenance,
@@ -114,6 +115,7 @@ export function executeCanvasCommands(
 
   // Aggregated parent frame IDs to refit at the end of the batch.
   const allAffectedFrameIds = new Set<string>();
+  const allAffectedPortalIds = new Set<string>();
 
   // Frames whose track count was explicitly (re)set this batch (via
   // `SET_FRAME_LAYOUT`). These use the `'fill'` empty-track policy so the
@@ -182,6 +184,11 @@ export function executeCanvasCommands(
           if (cmd.type === 'SET_FRAME_LAYOUT') fillFrameIds.add(id);
         }
       }
+      if (result.affectedPortalIds) {
+        for (const id of result.affectedPortalIds) {
+          allAffectedPortalIds.add(id);
+        }
+      }
     }
   }
 
@@ -244,6 +251,13 @@ export function executeCanvasCommands(
     if (fitTargets.size > 0) {
       currentNodes = fitFrames(currentNodes as NestableNode[], fitTargets);
     }
+  }
+
+  if (anyApplied && allAffectedPortalIds.size > 0) {
+    currentNodes = fitPortals(
+      currentNodes as NestableNode[],
+      allAffectedPortalIds,
+    );
   }
 
   // ------------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { useInternalNode } from '@xyflow/react';
-import { Trash2 } from 'lucide-react';
+import { Pin, PinOff, Trash2 } from 'lucide-react';
 import { memo, useCallback, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -7,6 +7,7 @@ import {
   ACCENT_NONE_TOKEN,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
   type FrameNodeData,
+  type NodeRefNodeData,
 } from '@sediment/shared';
 import { isAlwaysAutoHeightNodeType } from '@sediment/shared/canvas-engine';
 
@@ -20,6 +21,7 @@ import { NODE_ICON } from '@/config/nodeIcons';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 
 import type { CanvasNodeType, NodeData } from '@/components/Nodes/types';
@@ -85,6 +87,9 @@ export const NodeFloatingToolbar = memo(
     const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
     const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
     const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
+    const canvasId = useCanvasStore((s) => s.canvasId);
+    const setPortalNodePins = useCanvasStore((s) => s.setPortalNodePins);
+    const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
     const ingestion = useCanvasStore((s) => s.ingestionByNodeId[id]);
     const isNotMouse = useIsNotMouse();
     const isTextFlowNode = isAlwaysAutoHeightNodeType(type);
@@ -185,6 +190,8 @@ export const NodeFloatingToolbar = memo(
     const dispatchUiIntent = useCanvasStore((s) => s.dispatchUiIntent);
     const isFrame = type === 'frame';
     const isCanvasRef = type === 'canvasRef';
+    const isNodeRef = type === 'nodeRef';
+    const isReference = isCanvasRef || isNodeRef;
     const frameData = isFrame ? (data as FrameNodeData) : null;
     const frameSizing = frameData?.sizing ?? 'hug';
     const frameLayoutMode = frameData?.layoutMode ?? 'free';
@@ -351,6 +358,61 @@ export const NodeFloatingToolbar = memo(
           <>
             <FloatingToolbar.Divider />
             {actions}
+          </>
+        )}
+
+        {canvasId !== worldCanvasId && !isReference && (
+          <>
+            <FloatingToolbar.Divider />
+            <FloatingToolbar.ActionButton
+              title={t('world.pinSelected')}
+              onClick={() =>
+                void setPortalNodePins([
+                  {
+                    sourceCanvasId: canvasId as `canvas-${string}`,
+                    sourceNodeIds: [id as `node-${string}`],
+                    pinned: true,
+                  },
+                ])
+              }
+            >
+              <Pin />
+            </FloatingToolbar.ActionButton>
+            <FloatingToolbar.ActionButton
+              title={t('world.unpinSelected')}
+              onClick={() =>
+                void setPortalNodePins([
+                  {
+                    sourceCanvasId: canvasId as `canvas-${string}`,
+                    sourceNodeIds: [id as `node-${string}`],
+                    pinned: false,
+                  },
+                ])
+              }
+            >
+              <PinOff />
+            </FloatingToolbar.ActionButton>
+          </>
+        )}
+
+        {isNodeRef && (
+          <>
+            <FloatingToolbar.Divider />
+            <FloatingToolbar.ActionButton
+              title={t('world.unpinSelected')}
+              onClick={() => {
+                const target = (data as NodeRefNodeData).target;
+                void setPortalNodePins([
+                  {
+                    sourceCanvasId: target.canvasId as `canvas-${string}`,
+                    sourceNodeIds: [target.nodeId as `node-${string}`],
+                    pinned: false,
+                  },
+                ]);
+              }}
+            >
+              <PinOff />
+            </FloatingToolbar.ActionButton>
           </>
         )}
 

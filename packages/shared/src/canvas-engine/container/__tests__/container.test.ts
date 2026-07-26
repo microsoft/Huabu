@@ -22,11 +22,30 @@ function node(id: string, options: Partial<NestableNode> = {}): NestableNode {
 }
 
 describe('Container policy and reparenting', () => {
-  it('accepts Frame and Portal parents and rejects ordinary nodes', () => {
+  it('accepts only matching node references as Portal children', () => {
     const child = node('child');
     expect(canParentNode(node('frame', { type: 'frame' }), child)).toBe(true);
-    expect(canParentNode(node('portal', { type: 'canvasRef' }), child)).toBe(
-      true,
+    const portal = node('portal', {
+      type: 'canvasRef',
+      data: { targetCanvasId: 'canvas-a' },
+    });
+    const matchingRef = node('ref', {
+      type: 'nodeRef',
+      data: {
+        target: { canvasId: 'canvas-a', nodeId: 'node-a' },
+      },
+    });
+    const mismatchedRef = node('other-ref', {
+      type: 'nodeRef',
+      data: {
+        target: { canvasId: 'canvas-b', nodeId: 'node-b' },
+      },
+    });
+    expect(canParentNode(portal, child)).toBe(false);
+    expect(canParentNode(portal, matchingRef)).toBe(true);
+    expect(canParentNode(portal, mismatchedRef)).toBe(false);
+    expect(canParentNode(node('frame', { type: 'frame' }), matchingRef)).toBe(
+      false,
     );
     expect(canParentNode(node('note'), child)).toBe(false);
   });

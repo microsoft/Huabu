@@ -203,6 +203,22 @@ export function reconstructChangesFromCommands(
         }
         break;
       }
+      case 'SET_PORTAL_NODE_PINS': {
+        const updates = (cmd.updates ?? []) as Array<Record<string, unknown>>;
+        for (const update of updates) {
+          const sourceNodeIds = (update.sourceNodeIds ?? []) as string[];
+          const pinned = update.pinned === true;
+          changes.push({
+            id: `hist-${counter++}`,
+            tool: 'space_commands',
+            label: pinned ? 'Pinned to World' : 'Unpinned from World',
+            count: sourceNodeIds.length,
+            detail: update.sourceCanvasId as string,
+            revertible: false,
+          });
+        }
+        break;
+      }
       case 'ALIGN_NODES': {
         const nodeIds = (cmd.nodeIds ?? []) as string[];
         changes.push({

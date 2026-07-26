@@ -25,6 +25,16 @@ const commands: Array<Record<string, unknown>> = [
   { type: 'ALIGN_NODES', nodeIds: [NODE_1, NODE_2], direction: 'left' },
   { type: 'DISTRIBUTE_NODES', nodeIds: [NODE_1, NODE_2] },
   { type: 'SET_FRAME_LAYOUT', frameId: NODE_2, mode: 'column', gridCount: 2 },
+  {
+    type: 'SET_PORTAL_NODE_PINS',
+    updates: [
+      {
+        sourceCanvasId: 'canvas-00000000-0000-4000-8000-000000000001',
+        sourceNodeIds: [NODE_1],
+        pinned: true,
+      },
+    ],
+  },
 ];
 
 describe('reconstructChangesFromCommands', () => {

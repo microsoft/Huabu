@@ -157,6 +157,18 @@ export {
   moveNodeOutOfFrame,
 } from './frame/index.js';
 export {
+  NODE_REF_DEFAULT_HEIGHT,
+  NODE_REF_DEFAULT_WIDTH,
+  PORTAL_BOTTOM_PADDING,
+  PORTAL_DEFAULT_HEIGHT,
+  PORTAL_DEFAULT_WIDTH,
+  PORTAL_HEADER_INSET,
+  PORTAL_SIDE_PADDING,
+  fitPortalToChildren,
+  fitPortals,
+  placePortalNodeRef,
+} from './portal/index.js';
+export {
   DEFAULT_EDGE_STROKE_TOKEN,
   DEFAULT_EDGE_STROKE_WIDTH,
   applyEdgeStyle,

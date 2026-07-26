@@ -85,7 +85,9 @@ export const MultiSelectResizer = () => {
   // Drop nodes whose ancestor is also selected so a frame and its child
   // selected together are not double-scaled.
   const eligibleNodes = useMemo(() => {
-    if (selectedNodes.some((node) => node.type === 'canvasRef')) return [];
+    if (selectedNodes.some((node) => node.type === 'canvasRef')) {
+      return [];
+    }
     const selectedIds = new Set(selectedNodes.map((n) => n.id));
     return selectedNodes.filter(
       (n) => !n.parentId || !selectedIds.has(n.parentId),

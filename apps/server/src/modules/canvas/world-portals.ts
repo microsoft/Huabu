@@ -1,8 +1,13 @@
 import {
   createId,
   type CanvasCommand,
+  type CanvasNodeCreateInput,
   type CanvasNodeId,
 } from '@sediment/shared';
+import {
+  PORTAL_DEFAULT_HEIGHT,
+  PORTAL_DEFAULT_WIDTH,
+} from '@sediment/shared/canvas-engine';
 
 import { executeOnServer } from './canvas-executor.js';
 import {
@@ -11,8 +16,8 @@ import {
 } from '../storage/canvas-dirs.js';
 import { getCanvasStore } from '../storage/index.js';
 
-const PORTAL_WIDTH = 360;
-const PORTAL_HEIGHT = 240;
+const PORTAL_WIDTH = PORTAL_DEFAULT_WIDTH;
+const PORTAL_HEIGHT = PORTAL_DEFAULT_HEIGHT;
 const PORTAL_GAP = 80;
 const PORTAL_COLUMNS = 4;
 
@@ -23,7 +28,7 @@ interface Rect {
   height: number;
 }
 
-interface StoredNode {
+interface StoredWorldNode {
   id: string;
   type?: string;
   position: { x: number; y: number };
@@ -77,8 +82,8 @@ function dimension(
 }
 
 function absolutePosition(
-  node: StoredNode,
-  byId: ReadonlyMap<string, StoredNode>,
+  node: StoredWorldNode,
+  byId: ReadonlyMap<string, StoredWorldNode>,
 ): { x: number; y: number } {
   let x = node.position.x;
   let y = node.position.y;
@@ -99,15 +104,21 @@ function absolutePosition(
  * Ensure every live ordinary Space has exactly one canonical Portal in World.
  * Existing nodes and geometry are never changed; only missing Portals are added.
  */
-async function reconcileWorldPortalsOnce(): Promise<void> {
+interface WorldPortalReconciliationPlan {
+  worldCanvasId: string;
+  nodes: StoredWorldNode[];
+  inputs: CanvasNodeCreateInput[];
+}
+
+function planWorldPortalReconciliation(): WorldPortalReconciliationPlan {
   const worldCanvasId = requireWorldCanvasId();
   const world = getCanvasStore(worldCanvasId).read();
   if (!world) {
     throw new WorldPortalIntegrityError('World Canvas is not readable');
   }
 
-  const nodes = world.state.nodes as StoredNode[];
-  const portalByTarget = new Map<string, StoredNode>();
+  const nodes = world.state.nodes as StoredWorldNode[];
+  const portalByTarget = new Map<string, StoredWorldNode>();
 
   for (const node of nodes) {
     if (node.type !== 'canvasRef') continue;
@@ -130,8 +141,6 @@ async function reconcileWorldPortalsOnce(): Promise<void> {
   const spaces = listCanvasDirEntries()
     .filter((entry) => !portalByTarget.has(entry.id))
     .sort((a, b) => a.id.localeCompare(b.id));
-  if (spaces.length === 0) return;
-
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const occupied: Rect[] = nodes.map((node) => {
     const position = absolutePosition(node, byId);
@@ -143,7 +152,7 @@ async function reconcileWorldPortalsOnce(): Promise<void> {
     };
   });
 
-  const inputs = spaces.map((space) => {
+  const inputs: CanvasNodeCreateInput[] = spaces.map((space) => {
     const position = findOpenPortalSlot(occupied);
     occupied.push({
       ...position,
@@ -161,6 +170,13 @@ async function reconcileWorldPortalsOnce(): Promise<void> {
       selectOnCreate: false,
     };
   });
+
+  return { worldCanvasId, nodes, inputs };
+}
+
+async function reconcileWorldPortalsOnce(): Promise<void> {
+  const { worldCanvasId, inputs } = planWorldPortalReconciliation();
+  if (inputs.length === 0) return;
 
   const command: CanvasCommand = {
     type: 'CREATE_NODES',

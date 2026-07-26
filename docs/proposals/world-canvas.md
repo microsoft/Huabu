@@ -38,7 +38,7 @@ Workspace
 10. The World is stored at `<workspace>/.world/space.json`. Its `canvasId` is generated once and remains stable; it is exposed through `WorkspaceInfo.worldCanvasId` but omitted from ordinary Space listings.
 11. `canvasRef` remains a distinct node type and implements a minimum Container protocol shared with Frame; it does not reuse the `frame` type or inherit Frame-specific policy.
 12. `canvasRef` and `nodeRef` persist reference identity only. Source titles, node types, labels, previews, revisions, and missing states are resolved in batches as non-persistent read data.
-13. A pinned `nodeRef` is a real entry in the World `state.nodes` array, not renderer-private `canvasRef.data`. The first version limits it to resolved display, selection, dragging, and unpinning while retaining native World geometry, undo, delta/SSE, and future edge/promotion compatibility.
+13. A pinned `nodeRef` is a real entry in the World `state.nodes` array, not renderer-private `canvasRef.data`. It inherits ordinary node properties and behavior such as selection, dragging, locking, geometry history, delta/SSE, and future edge/promotion compatibility; the first version additionally supports resolved display and unpinning.
 14. A newly pinned `nodeRef` receives one-time anchor-relative placement derived from source Space geometry. Existing World positions never automatically follow source movement or reflow because another node is pinned.
 15. In the first version every `nodeRef` remains a child of its matching `canvasRef`; top-level promotion is deferred.
 16. Portal content-hug geometry is authoritative. A `canvasRef` automatically wraps its direct `nodeRef` children after Pin, Unpin, and child movement and is not manually resizable.
@@ -50,7 +50,7 @@ Workspace
 22. World Canvas and Space List are sibling workspace pages. Every live ordinary Space has exactly one canonical `canvasRef` in the World; a Portal may be empty when no source nodes have been pinned.
 23. Existing and newly created Spaces are reconciled into the World automatically. The system assigns an initial position only to a newly materialized Portal; once placed, its World geometry is user-owned and is never automatically rearranged because another Space appears or the World reopens.
 24. Cross-scope command routing lives in a server host layer above `executeOnServer()`. A routed execution still mutates exactly one Canvas, and one batch may not mix commands whose mutation scopes differ.
-25. A source-Space invocation of Pin or Unpin does not enter the active Space's Cmd/Ctrl+Z history or generic `ChangeReviewCard`. It reports the World mutation explicitly, and the user restores desired state through the inverse Pin/Unpin operation.
+25. First-version Pin and Unpin do not enter snapshot-based undo history in either scope because protected reference topology cannot be recreated through the legacy full-state restore boundary. Any mutation that changes `nodeRef` membership, including removal with a broken Portal subtree, invalidates the World history manager because its snapshots may retain obsolete identities, while an active source Space retains its independent history. The user restores desired pin state through the inverse Pin/Unpin operation.
 26. A `nodeRef` that targets a source agent/question node may act as a World presentation shortcut for that source-owned conversation. The visible UI anchor belongs to the World `nodeRef`, while thread history, agent binding, tools, context, and mutations remain owned by the target agent node and source Space.
 27. Source-owned conversations may execute headlessly while their Space is not rendered. The World does not load the source React Flow state; it presents the conversation through a resolved read model and addresses backend work by the source `{ canvasId, nodeId, threadId }`.
 28. A global user setting controls whether the World entry is visible and whether workspace navigation lands on World or Space List. Disabling the setting never deletes or resets World data.
@@ -124,7 +124,7 @@ The World and the existing Space List are sibling workspace pages. A global user
 
 The World is not a replacement storage index for the list, but its persisted topology automatically maintains one canonical `canvasRef` for every live ordinary Space.
 
-When the World capability is first used, reconciliation creates missing Portals for existing Spaces and gives only those new Portals deterministic initial positions. Creating another Space later creates its missing Portal on the next reconciliation without moving any existing Portal. Reloading the World likewise preserves every user-owned position. The implemented reconciliation runs before a World read, serializes concurrent reconciliation attempts, and rejects duplicate or malformed persisted Portal identities.
+When the World capability is first used, reconciliation creates missing Portals for existing Spaces and gives only those new Portals deterministic initial positions. Creating another Space later creates its missing Portal on the next reconciliation without moving any existing Portal. Reloading the World likewise preserves every user-owned position. The implemented reconciliation runs only before a World read, serializes concurrent reconciliation attempts, and rejects duplicate or malformed persisted Portal identities. Node-level Pin commands never invoke Portal reconciliation.
 
 A canonical Portal may be empty. Empty means that the Space exists but no source nodes currently have persistent `nodeRef` children; derived Portal chrome may still show the resolved project title, summary, and bounded statistics.
 
@@ -142,6 +142,7 @@ interface CanvasRefData {
 }
 
 interface NodeRefData {
+  type: 'nodeRef';
   target: {
     canvasId: string;
     nodeId: string;
@@ -149,7 +150,7 @@ interface NodeRefData {
 }
 ```
 
-This is not yet a proposed wire schema. Source identity is `{ canvasId, nodeId }`; a revision may accompany resolved read data or a write as a freshness/CAS token but must not become part of reference identity.
+This is the shipped reference payload. Source identity is `{ canvasId, nodeId }`; a revision may accompany resolved read data or a write as a freshness/CAS token but does not become part of reference identity. Ordinary World-owned node metadata such as lock state and visual style may coexist with the payload, but copied source-owned labels, previews, content, node types, and lifecycle state may not.
 
 A pinned `nodeRef` uses the existing React Flow node structure:
 
@@ -242,19 +243,20 @@ interface SetPortalNodePinsCommand {
 }
 ```
 
-The final schema must use the repository's canonical prefixed ID and zod-first API types. The shape above records semantics only.
+The shared zod-first agent schema now implements this shape with canonical `canvas-*` and `node-*` identifiers. The server injects resolved Portal IDs, fresh `nodeRef` IDs, and source-position hints only after public validation; those fields are not accepted on the wire or returned to callers.
 
 Each update identifies one source Space and a batch of canonical source nodes. The host resolves `sourceCanvasId` to the unique World `canvasRef` whose `targetCanvasId` matches it. `pinned: true` ensures each source node has a persistent `nodeRef` child under that Portal; `pinned: false` ensures that reference is absent.
 
 The grouped shape can update several canonical Portals in one command while still producing one World mutation. Exact duplicate desired states are deduplicated. If the same `{ sourceCanvasId, sourceNodeId }` appears with both `pinned: true` and `pinned: false`, the entire command is rejected before mutation.
 
-The first version's visible and durable effect is explicit pin state: the specified source nodes either have or do not have persistent `nodeRef` children inside their Portals.
+This phase ships the visible and durable explicit pin state: the specified source nodes either have or do not have persistent `nodeRef` children inside their Portals.
 
 The `NODE` segment in `SET_PORTAL_NODE_PINS` identifies what is pinned and avoids implying that the Portal itself is position-pinned. The command description exposed to agents should state: "Add or remove symbolic references to source Space nodes inside a Project Portal. This never modifies or deletes the source nodes."
 
-The shared handler should enforce World-local invariants:
+The shared handler enforces World-local invariants:
 
 - Every `sourceCanvasId` resolves to exactly one canonical `canvasRef`.
+- A missing canonical `canvasRef` rejects the entire command with an instruction to refresh the World; Pin never creates one implicitly.
 - Every pinned `sourceNodeId` exists in that source Canvas.
 - Unpin may target a missing source Canvas or node when a matching broken `nodeRef` remains in the World.
 - At most one pinned `nodeRef` exists per source node under one `canvasRef`.
@@ -263,11 +265,11 @@ The shared handler should enforce World-local invariants:
 - `pinned: false` removes only the `nodeRef`, never the canonical source node.
 - Newly pinned references receive deterministic Portal-local placement; callers and agents do not submit coordinates.
 
-The UI may define a `CanvasUiIntent` that reads the current selection and resolves it into explicit source refs. That intent must not implement pinning itself. Agents submit the same explicit command operands through their command boundary.
+The minimal UI toolbar reads the current selection and submits the same explicit command operands through `POST /api/canvas/:canvasId/execute`; it does not create or delete references locally. Agents submit the identical command through `space_commands`.
 
 The command executes against the World canvas because the durable mutation is the creation or removal of World nodes. Source-node existence and authorization are resolved by the server host router before the pure shared engine runs, and UI and agent callers converge at that routing boundary.
 
-Public invocation may originate from a source Space or the World, while a server host router above `executeOnServer()` resolves the workspace World and executes an isolated World mutation. A source caller supplies its current Canvas ID; a World caller reads `{ canvasId, nodeId }` from each selected `nodeRef.target`. The router resolves canonical Portals, validates source operands, prepares non-agent-facing placement hints, and returns the actual mutated World canvas identity.
+Public invocation may originate from a source Space or the World. [`canvas-command-router.ts`](../../apps/server/src/modules/canvas/canvas-command-router.ts) sits above `executeOnServer()`, resolves the workspace World and existing canonical Portals, validates source operands, prepares non-agent-facing placement hints, rejects mixed-scope batches, and returns the actual mutated World canvas identity. It does not repair World topology as a hidden side effect.
 
 The router rejects a batch that mixes source-local commands with World-mutating Portal Pin commands. The existing execution response, version transition, mutex, delta log, and SSE stream each describe one mutated Canvas and must not be widened into a cross-canvas transaction.
 
@@ -323,7 +325,7 @@ Source-Space edges do not participate in the first version. Pinning both endpoin
 
 World and project Spaces should use independent coordinate systems. A project's internal layout must not determine the size or geometry of its `canvasRef` in the World.
 
-The first version uses explicit activation: single click keeps normal selection semantics, while double-click, Enter on a selected `canvasRef`, or an Open action enters the target Space. Navigation switches to the target `/canvas/:canvasId`, activates its renderer, viewport, selection, undo stack, and sync stream, and exposes a `World > Project` breadcrumb for return.
+The first version uses explicit activation: single click keeps normal selection semantics, while double-click, Enter on a selected `canvasRef`, or an Open action enters the target Space. Navigation switches to the target `/canvas/:canvasId`, activates its renderer, viewport, selection, undo stack, and sync stream, and exposes a `World > Project` breadcrumb for return. Persisted `nodeRef` entries currently render as selectable, draggable identity placeholders until the later validated target-read phase.
 
 A subsequent increment adds a one-way camera push: before navigation, the World viewport animates the Portal bounds toward full-screen, then the existing route save blocker drains pending writes and performs the normal canvas switch. Returning restores the World viewport without requiring a reverse animation in that increment.
 
@@ -337,13 +339,14 @@ The web history manager is registered by canvas ID, so World/Space transitions r
 
 Each scope retains an independent undo and redo stack:
 
-- World Pin, Unpin, Portal geometry, `nodeRef` movement, and World edge changes enter the World history.
+- Portal geometry, `nodeRef` movement and locking, and World edge changes enter the World history through ordinary Canvas snapshots.
+- First-version Pin and Unpin do not enter undo history. Any actual `nodeRef` membership change clears the World history manager whether active or inactive because its snapshots may retain protected identities that no longer exist.
 - Source-node authored edits enter the source Space history after that Space is active.
 - Switching scope saves the current manager and restores the destination manager.
 - Cmd/Ctrl+Z and redo affect only the active scope.
 - No global ordering or atomic undo is defined across Canvas boundaries.
 
-When Pin or Unpin is invoked while a source Space remains active, the server-authoritative World mutation does not enter that Space's undo stack. Cmd/Ctrl+Z continues to affect only the active Space. The UI reports the result and updates derived pin indicators; restoring the desired state uses the inverse Pin/Unpin operation rather than pretending to restore an exact World snapshot.
+When Pin or Unpin is invoked while a source Space remains active, the server-authoritative World mutation does not enter or clear that Space's undo stack. Cmd/Ctrl+Z continues to affect only the active Space. The UI reports the result and updates derived pin indicators; restoring the desired state uses the inverse Pin/Unpin operation rather than pretending to restore an exact World snapshot. General multi-client history ordering and exact protected-node deletion restore are separate Canvas-history concerns outside this proposal.
 
 The same rule applies to source-Space agent invocation in the first version. Routed Portal Pin changes remain visible in the `space_commands` result but do not create source-scoped generic change-review records, because preview, staleness, and revert would otherwise be evaluated against the wrong Canvas.
 
