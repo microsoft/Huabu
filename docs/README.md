@@ -85,6 +85,7 @@ docs/
 | [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.         |
 | [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Sediment-owned Milkdown toolbar and semantic editor commands.             |
 | [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                          |
+| [world-canvas.md](./proposals/world-canvas.md)                                                     | Draft          | #346 workspace-level canvas, project portals, and cross-Space projection. |
 
 ### Shipped
 
