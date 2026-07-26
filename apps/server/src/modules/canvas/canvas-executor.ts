@@ -55,6 +55,7 @@ import {
 
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';
+import { assertWorldPortalMutationsAllowed } from './world-portal-policy.js';
 import { getLogger } from '../../utils/logger.js';
 import {
   getCanvasStore,
@@ -658,6 +659,13 @@ export async function executeOnServer(
       canvas.state.nodes as CanvasNode[],
     );
     const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];
+
+    assertWorldPortalMutationsAllowed(
+      canvasId,
+      commands,
+      prestateNodes,
+      originator.source,
+    );
 
     if (originator.source === 'agent') {
       // Order matters: fix explicit image resizes first (edits items in

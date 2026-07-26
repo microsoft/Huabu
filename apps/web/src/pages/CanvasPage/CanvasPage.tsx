@@ -7,6 +7,7 @@ import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
 import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
 
 import { Loading } from '../../components/Common/Loading';
+import { toast } from '../../components/Common/Toast';
 import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
 import { ChatPanel } from '../../components/Panels/ChatPanel';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
@@ -15,6 +16,7 @@ import useStore, { dismissVersionConflictToast } from '../../store/canvasStore';
 import { useCanvasSyncStore } from '../../store/canvasSyncStore';
 import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
 import { useToolStore } from '../../store/toolStore';
+import { useWorkspaceStore } from '../../store/workspaceStore';
 
 type NewCanvasPlacementIntent = {
   canvasId: string;
@@ -57,6 +59,8 @@ export default function CanvasPage() {
   const loadCanvas = useStore((s) => s.loadCanvas);
   const isLoading = useStore((s) => s.isLoading);
   const canvasNotFound = useStore((s) => s.canvasNotFound);
+  const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
+  const refreshSpaceTitles = useWorkspaceStore((s) => s.refreshSpaceTitles);
   const nodeCount = useStore((s) => s.nodes.length);
   // Subscribed so the very first render can detect a mismatch between the
   // URL canvas and whatever (stale or empty) canvas is currently in the
@@ -123,6 +127,14 @@ export default function CanvasPage() {
       void switchCanvas(canvasId);
     }
   }, [canvasId, storeCanvasId, loadCanvas, switchCanvas, navigate]);
+
+  useEffect(() => {
+    if (!canvasId || canvasId !== worldCanvasId) return;
+    void refreshSpaceTitles().catch((error) => {
+      console.error('Failed to load World Portal titles:', error);
+      toast(t('world.loadFailed'), { tone: 'danger' });
+    });
+  }, [canvasId, refreshSpaceTitles, t, worldCanvasId]);
 
   // Only a newly created canvas may opt into its input-appropriate creation
   // tool (Note for mouse, Sketch for pen/finger).
@@ -198,7 +210,7 @@ export default function CanvasPage() {
           </p>
         </div>
         <Link
-          to="/"
+          to="/spaces"
           className="bg-inverse text-fg-inverse hover:bg-inverse/90 inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />

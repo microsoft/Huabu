@@ -29,6 +29,11 @@ import {
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { runWithExternalNoteWatcherSuspended } from './external-watcher.js';
+import {
+  assertWorldPortalTopologyAllowed,
+  WorldPortalMutationError,
+} from './world-portal-policy.js';
+import { reconcileWorldPortals } from './world-portals.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
@@ -1058,6 +1063,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<GetCanvasResponse>;
   }>('/:canvasId', async function (request, reply) {
     const { canvasId } = request.params;
+    if (isWorldCanvasId(canvasId)) {
+      await reconcileWorldPortals();
+    }
     const store = getCanvasStore(canvasId);
     const canvas = store.read();
 
@@ -1095,6 +1103,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const { version: clientVersion, state, title } = parsed.data;
+    const incomingState = state as {
+      nodes?: NodeLike[];
+      edges?: unknown[];
+      [key: string]: unknown;
+    };
 
     const store = getCanvasStore(canvasId);
     const existing = store.read();
@@ -1105,6 +1118,19 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         message: 'Canvas version mismatch',
         serverVersion,
       } satisfies CanvasConflictResponse);
+    }
+
+    try {
+      assertWorldPortalTopologyAllowed(
+        canvasId,
+        (existing?.state.nodes ?? []) as NodeLike[],
+        incomingState.nodes ?? [],
+      );
+    } catch (error) {
+      if (error instanceof WorldPortalMutationError) {
+        return reply.code(409).send({ message: error.message });
+      }
+      throw error;
     }
 
     // Title rename (and the directory rename it implies) happens
@@ -1142,11 +1168,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const timestamp = nowMs();
     const nextVersion = serverVersion + 1;
 
-    const rawState = state as {
-      nodes?: NodeLike[];
-      edges?: unknown[];
-      [key: string]: unknown;
-    };
+    const rawState = incomingState;
 
     const slimNodes = stripNodesForCanvas(
       (rawState?.nodes ?? []) as NodeLike[],
@@ -1227,6 +1249,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     } catch (err) {
       if (err instanceof CanvasNotFoundError) {
         return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      if (err instanceof WorldPortalMutationError) {
+        return reply.code(409).send({ message: err.message });
       }
       request.log.error({ canvasId, err }, 'Failed to execute canvas commands');
       return reply.code(500).send({

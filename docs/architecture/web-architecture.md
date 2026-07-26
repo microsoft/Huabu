@@ -74,6 +74,16 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 7. **Design tokens only** — never raw hex / Tailwind palette / ShadCN aliases. The token declarations in [`apps/web/src/index.css`](../../apps/web/src/index.css) are authoritative; reusable UI contracts live in [`apps/web/src/components/Common/`](../../apps/web/src/components/Common/).
 8. **Development playgrounds** belong in `pages/playground/`, use route-level lazy imports, are registered only when `import.meta.env.DEV` is true, and live outside `WorkspaceGuardLayout` so visual testing does not require an active workspace.
 
+## Workspace routes and World
+
+`/` is the workspace landing redirect. When the persisted World setting is enabled it redirects to the hidden World through `/canvas/:worldCanvasId`; otherwise it redirects to `/spaces`. The ordinary Space List remains a sibling page at `/spaces`, and every Canvas scope, including World, continues to use the existing `CanvasPage` and `/canvas/:canvasId` route.
+
+The World setting currently defaults to enabled during feature development. Disabling it hides the World navigation entry and changes subsequent workspace landing to the Space List without deleting or resetting `.world`.
+
+`CanvasRefNode` renders a canonical Portal from persisted `targetCanvasId` plus one batched ordinary-Space title map loaded when World opens. Portal activation uses double-click, Enter while selected, or its Open action. A missing title after the Space list has loaded is rendered as an explicit broken reference; transient source titles are never persisted into World topology.
+
+The web keeps undo/redo managers in a registry keyed by `canvasId` while retaining one active Canvas store. Switching between World and a Space activates the target manager instead of clearing the scope being left; an authoritative reload of the already-active Canvas still clears that Canvas's stale history.
+
 The keyboard shortcut catalog may retain internal runtime bindings with `hidden: true`; `getKeyboardShortcutSections()` excludes them from the user-facing modal. Removed bindings must be deleted from the catalog rather than left as display-only entries.
 
 ---

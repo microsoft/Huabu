@@ -1,0 +1,183 @@
+import {
+  createId,
+  type CanvasCommand,
+  type CanvasNodeId,
+} from '@sediment/shared';
+
+import { executeOnServer } from './canvas-executor.js';
+import {
+  listCanvasDirEntries,
+  requireWorldCanvasId,
+} from '../storage/canvas-dirs.js';
+import { getCanvasStore } from '../storage/index.js';
+
+const PORTAL_WIDTH = 360;
+const PORTAL_HEIGHT = 240;
+const PORTAL_GAP = 80;
+const PORTAL_COLUMNS = 4;
+
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface StoredNode {
+  id: string;
+  type?: string;
+  position: { x: number; y: number };
+  parentId?: string;
+  data?: Record<string, unknown>;
+  style?: { width?: number | string; height?: number | string };
+}
+
+export class WorldPortalIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorldPortalIntegrityError';
+  }
+}
+
+let reconciliationQueue: Promise<void> = Promise.resolve();
+
+function overlaps(a: Rect, b: Rect): boolean {
+  return !(
+    a.x + a.width + PORTAL_GAP <= b.x ||
+    b.x + b.width + PORTAL_GAP <= a.x ||
+    a.y + a.height + PORTAL_GAP <= b.y ||
+    b.y + b.height + PORTAL_GAP <= a.y
+  );
+}
+
+function findOpenPortalSlot(occupied: readonly Rect[]): {
+  x: number;
+  y: number;
+} {
+  for (let slot = 0; ; slot += 1) {
+    const candidate = {
+      x: (slot % PORTAL_COLUMNS) * (PORTAL_WIDTH + PORTAL_GAP),
+      y: Math.floor(slot / PORTAL_COLUMNS) * (PORTAL_HEIGHT + PORTAL_GAP),
+      width: PORTAL_WIDTH,
+      height: PORTAL_HEIGHT,
+    };
+    if (!occupied.some((rect) => overlaps(candidate, rect))) {
+      return { x: candidate.x, y: candidate.y };
+    }
+  }
+}
+
+function dimension(
+  value: number | string | undefined,
+  fallback: number,
+): number {
+  const parsed =
+    typeof value === 'number' ? value : Number.parseFloat(value ?? '');
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function absolutePosition(
+  node: StoredNode,
+  byId: ReadonlyMap<string, StoredNode>,
+): { x: number; y: number } {
+  let x = node.position.x;
+  let y = node.position.y;
+  let parentId = node.parentId;
+  const visited = new Set<string>();
+  while (parentId && !visited.has(parentId)) {
+    visited.add(parentId);
+    const parent = byId.get(parentId);
+    if (!parent) break;
+    x += parent.position.x;
+    y += parent.position.y;
+    parentId = parent.parentId;
+  }
+  return { x, y };
+}
+
+/**
+ * Ensure every live ordinary Space has exactly one canonical Portal in World.
+ * Existing nodes and geometry are never changed; only missing Portals are added.
+ */
+async function reconcileWorldPortalsOnce(): Promise<void> {
+  const worldCanvasId = requireWorldCanvasId();
+  const world = getCanvasStore(worldCanvasId).read();
+  if (!world) {
+    throw new WorldPortalIntegrityError('World Canvas is not readable');
+  }
+
+  const nodes = world.state.nodes as StoredNode[];
+  const portalByTarget = new Map<string, StoredNode>();
+
+  for (const node of nodes) {
+    if (node.type !== 'canvasRef') continue;
+    const targetCanvasId = (
+      node.data as { targetCanvasId?: unknown } | undefined
+    )?.targetCanvasId;
+    if (typeof targetCanvasId !== 'string' || targetCanvasId.length === 0) {
+      throw new WorldPortalIntegrityError(
+        `Portal ${node.id} has no valid targetCanvasId`,
+      );
+    }
+    if (portalByTarget.has(targetCanvasId)) {
+      throw new WorldPortalIntegrityError(
+        `World contains duplicate Portals for Canvas ${targetCanvasId}`,
+      );
+    }
+    portalByTarget.set(targetCanvasId, node);
+  }
+
+  const spaces = listCanvasDirEntries()
+    .filter((entry) => !portalByTarget.has(entry.id))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  if (spaces.length === 0) return;
+
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const occupied: Rect[] = nodes.map((node) => {
+    const position = absolutePosition(node, byId);
+    return {
+      x: position.x,
+      y: position.y,
+      width: dimension(node.style?.width, 200),
+      height: dimension(node.style?.height, 100),
+    };
+  });
+
+  const inputs = spaces.map((space) => {
+    const position = findOpenPortalSlot(occupied);
+    occupied.push({
+      ...position,
+      width: PORTAL_WIDTH,
+      height: PORTAL_HEIGHT,
+    });
+    return {
+      id: createId('node') as CanvasNodeId,
+      nodeType: 'canvasRef' as const,
+      position,
+      size: { width: PORTAL_WIDTH, height: PORTAL_HEIGHT },
+      data: {
+        targetCanvasId: space.id,
+      },
+      selectOnCreate: false,
+    };
+  });
+
+  const command: CanvasCommand = {
+    type: 'CREATE_NODES',
+    nodes: inputs,
+  };
+  const result = await executeOnServer({
+    canvasId: worldCanvasId,
+    commands: [command],
+    originator: { source: 'system' },
+  });
+  if (!result.results[0]?.applied) {
+    throw new WorldPortalIntegrityError('Failed to create canonical Portals');
+  }
+}
+
+export function reconcileWorldPortals(): Promise<void> {
+  const result = reconciliationQueue.then(reconcileWorldPortalsOnce);
+  reconciliationQueue = result.catch(() => {});
+  return result;
+}

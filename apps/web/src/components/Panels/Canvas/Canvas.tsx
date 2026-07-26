@@ -35,6 +35,7 @@ import {
 import { resolveArtifactUrl } from '@/api/artifact';
 import { Loading } from '@/components/Common/Loading';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
+import { CanvasRefNode } from '@/components/Nodes/canvasRef/CanvasRefNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
 import { OfficeNode } from '@/components/Nodes/office/OfficeNode';
@@ -132,6 +133,7 @@ const nodeTypes = {
   pdf: PDFNode,
   office: OfficeNode,
   frame: FrameNode,
+  canvasRef: CanvasRefNode,
   sketch: SketchNode,
   question: QuestionNode,
 } as const;

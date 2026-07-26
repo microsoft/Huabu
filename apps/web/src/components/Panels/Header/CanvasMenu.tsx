@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 
 import { exportCanvas } from '../../../api/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
+import { useWorkspaceStore } from '../../../store/workspaceStore.ts';
 import { formatShortcut } from '../../../utils/platform.ts';
 import { Button } from '../../Common/Button.tsx';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
@@ -28,6 +29,7 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
   const canvasTitle = useCanvasStore((s) => s.canvasTitle);
   const tryRename = useCanvasStore((s) => s.tryRename);
   const canvasId = useCanvasStore((s) => s.canvasId);
+  const isWorld = useWorkspaceStore((s) => s.worldCanvasId === canvasId);
   const undo = useCanvasStore((s) => s.undo);
   const redo = useCanvasStore((s) => s.redo);
   const canUndo = useCanvasStore((s) => s.canUndo);
@@ -93,22 +95,28 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
       >
         {draftTitle || '\u00a0'}
       </span>
-      <input
-        ref={inputRef}
-        className="text-fg-default focus:shadow-bottom m-0 max-w-full min-w-8 overflow-hidden bg-transparent px-1 py-1 text-base font-medium text-ellipsis outline-none focus:rounded-md"
-        value={draftTitle}
-        onChange={(e) => setDraftTitle(e.target.value)}
-        onBlur={() => void commitTitle()}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            inputRef.current?.blur();
-          } else if (e.key === 'Escape') {
-            setDraftTitle(canvasTitle);
-            inputRef.current?.blur();
-          }
-        }}
-        aria-label={t('canvasHeader.titleAria')}
-      />
+      {isWorld ? (
+        <span className="text-fg-default truncate px-1 py-1 text-base font-medium">
+          {t('world.title')}
+        </span>
+      ) : (
+        <input
+          ref={inputRef}
+          className="text-fg-default focus:shadow-bottom m-0 max-w-full min-w-8 overflow-hidden bg-transparent px-1 py-1 text-base font-medium text-ellipsis outline-none focus:rounded-md"
+          value={draftTitle}
+          onChange={(e) => setDraftTitle(e.target.value)}
+          onBlur={() => void commitTitle()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              inputRef.current?.blur();
+            } else if (e.key === 'Escape') {
+              setDraftTitle(canvasTitle);
+              inputRef.current?.blur();
+            }
+          }}
+          aria-label={t('canvasHeader.titleAria')}
+        />
+      )}
 
       <DropdownMenu
         open={isOpen}

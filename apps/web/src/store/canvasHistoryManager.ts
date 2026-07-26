@@ -406,5 +406,90 @@ class CanvasHistoryManager {
   }
 }
 
-/** Singleton instance used by the canvas store. */
-export const canvasHistoryManager = new CanvasHistoryManager();
+export class CanvasHistoryRegistry {
+  private activeCanvasId: string | null = null;
+  private readonly managers = new Map<string, CanvasHistoryManager>();
+
+  private get active(): CanvasHistoryManager {
+    const key = this.activeCanvasId ?? '__unbound__';
+    let manager = this.managers.get(key);
+    if (!manager) {
+      manager = new CanvasHistoryManager();
+      this.managers.set(key, manager);
+    }
+    return manager;
+  }
+
+  /**
+   * Switch history scope. Returning to a previously visited Canvas restores
+   * its stacks. Authoritative reload callers may explicitly reset stale stacks.
+   */
+  activate(canvasId: string, reset = false): void {
+    this.activeCanvasId = canvasId;
+    if (!this.managers.has(canvasId)) {
+      this.managers.set(canvasId, new CanvasHistoryManager());
+    }
+    if (reset) this.active.clear();
+  }
+
+  get gestureSnapshotTaken(): boolean {
+    return this.active.gestureSnapshotTaken;
+  }
+
+  get canUndo(): boolean {
+    return this.active.canUndo;
+  }
+
+  get canRedo(): boolean {
+    return this.active.canRedo;
+  }
+
+  consumeGestureSnapshot(): void {
+    this.active.consumeGestureSnapshot();
+  }
+
+  markGestureSnapshot(pushed?: boolean): void {
+    this.active.markGestureSnapshot(pushed);
+  }
+
+  rollbackGestureSnapshot(): void {
+    this.active.rollbackGestureSnapshot();
+  }
+
+  takeSnapshot(nodes: Node[], edges: Edge[]): boolean {
+    return this.active.takeSnapshot(nodes, edges);
+  }
+
+  undo(nodes: Node[], edges: Edge[]): CanvasSnapshot | null {
+    return this.active.undo(nodes, edges);
+  }
+
+  redo(nodes: Node[], edges: Edge[]): CanvasSnapshot | null {
+    return this.active.redo(nodes, edges);
+  }
+
+  clear(): void {
+    this.active.clear();
+  }
+
+  syncServerAfterRestore(
+    canvasId: string,
+    prevNodes: Node[],
+    restoredNodes: Node[],
+    triggerPreprocessing: TriggerPreprocessingFn,
+  ): void {
+    this.active.syncServerAfterRestore(
+      canvasId,
+      prevNodes,
+      restoredNodes,
+      triggerPreprocessing,
+    );
+  }
+
+  trackDelete(canvasId: string, nodeId: string): AbortController {
+    return this.active.trackDelete(canvasId, nodeId);
+  }
+}
+
+/** Canvas-keyed history registry used by the single active canvas store. */
+export const canvasHistoryManager = new CanvasHistoryRegistry();

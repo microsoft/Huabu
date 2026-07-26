@@ -17,6 +17,7 @@ import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import { supportedLngs, type SupportedLanguage } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
 import { useToolStore, type InputModePreference } from '@/store/toolStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 
 /** Native language names, shown regardless of the active UI language. */
 const LANGUAGE_LABELS: Record<SupportedLanguage, string> = {
@@ -44,6 +45,8 @@ export const GeneralSettings: React.FC = () => {
   const { t, i18n } = useTranslation();
   const minimapEnabled = useCanvasStore((s) => s.minimapEnabled);
   const toggleMinimap = useCanvasStore((s) => s.toggleMinimap);
+  const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
+  const setWorldEnabled = useWorkspaceStore((s) => s.setWorldEnabled);
   const inputModePreference = useToolStore(
     (state) => state.inputModePreference,
   );
@@ -171,6 +174,20 @@ export const GeneralSettings: React.FC = () => {
             minimapEnabled
               ? t('settings.hideMiniMap')
               : t('settings.showMiniMap')
+          }
+        />
+      </SettingRow>
+      <SettingRow
+        title={t('settings.worldCanvas')}
+        description={t('settings.worldCanvasDescription')}
+      >
+        <Toggle
+          checked={worldEnabled}
+          onChange={setWorldEnabled}
+          label={
+            worldEnabled
+              ? t('settings.hideWorldCanvas')
+              : t('settings.showWorldCanvas')
           }
         />
       </SettingRow>

@@ -25,6 +25,7 @@ export const CANVAS_NODE_TYPES = [
   'audio',
   'web',
   'frame',
+  'canvasRef',
   'sketch',
   'question',
 ] as const;
@@ -446,6 +447,12 @@ export interface FrameNodeData extends BaseNodeData {
   sizing?: FrameSizing;
 }
 
+/** A World-owned Portal that points to an ordinary Space Canvas. */
+export interface CanvasRefNodeData extends BaseNodeData {
+  type: 'canvasRef';
+  targetCanvasId: string;
+}
+
 /**
  * One pen-down → pen-up trace inside a {@link SketchNodeData}.
  *
@@ -563,6 +570,7 @@ export type NodeData =
   | ImageNodeData
   | AudioNodeData
   | FrameNodeData
+  | CanvasRefNodeData
   | SketchNodeData
   | QuestionNodeData;
 
@@ -600,6 +608,10 @@ export function isAudioNode(data: NodeData): data is AudioNodeData {
 
 export function isFrameNode(data: NodeData): data is FrameNodeData {
   return data.type === 'frame';
+}
+
+export function isCanvasRefNode(data: NodeData): data is CanvasRefNodeData {
+  return data.type === 'canvasRef';
 }
 
 export function isSketchNode(data: NodeData): data is SketchNodeData {

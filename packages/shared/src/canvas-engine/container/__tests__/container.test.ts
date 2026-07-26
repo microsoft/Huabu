@@ -22,9 +22,12 @@ function node(id: string, options: Partial<NestableNode> = {}): NestableNode {
 }
 
 describe('Container policy and reparenting', () => {
-  it('accepts Frame parents and rejects ordinary nodes', () => {
+  it('accepts Frame and Portal parents and rejects ordinary nodes', () => {
     const child = node('child');
     expect(canParentNode(node('frame', { type: 'frame' }), child)).toBe(true);
+    expect(canParentNode(node('portal', { type: 'canvasRef' }), child)).toBe(
+      true,
+    );
     expect(canParentNode(node('note'), child)).toBe(false);
   });
 

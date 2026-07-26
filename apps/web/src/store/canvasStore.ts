@@ -75,6 +75,7 @@ import { createResizePreviewController } from './canvasStore/slices/resizePrevie
 import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
+import { useWorkspaceStore } from './workspaceStore';
 import { getCanvas, putCanvas } from '../api';
 import { agentApi } from '../api/agent';
 import { cloneArtifactToCanvas } from '../api/artifact';
@@ -676,7 +677,10 @@ type RFState = {
   undo: () => void;
   redo: () => void;
 
-  loadCanvas: (canvasId?: string) => Promise<void>;
+  loadCanvas: (
+    canvasId?: string,
+    options?: { resetHistory?: boolean },
+  ) => Promise<void>;
   switchCanvas: (canvasId: string) => Promise<void>;
   /**
    * Persist the canvas structure (geometry, parenthood, edges).
@@ -1639,7 +1643,7 @@ const useCanvasStore = create<RFState>()(
       };
     },
 
-    loadCanvas: async (canvasId?: string) => {
+    loadCanvas: async (canvasId, options) => {
       set({ isLoading: true, canvasNotFound: false, versionConflict: false });
       // Clear any stale "modified elsewhere" toast before we fetch a
       // fresh baseline — the warning is bound to the old version we're
@@ -1647,6 +1651,7 @@ const useCanvasStore = create<RFState>()(
       dismissVersionConflictToast();
       try {
         const targetId = canvasId ?? get().canvasId;
+        canvasHistoryManager.activate(targetId, options?.resetHistory);
         if (canvasId) {
           set({ canvasId: targetId });
         }
@@ -1672,8 +1677,6 @@ const useCanvasStore = create<RFState>()(
           // strips it from persisted topology for good.
           viewport?: CanvasViewport;
         };
-        canvasHistoryManager.clear();
-
         // Repair question nodes whose execution status drifted to a
         // stale non-terminal value (most often `idle`) while they
         // actually completed a run — the `status: 'done'` autosave can
@@ -1730,8 +1733,8 @@ const useCanvasStore = create<RFState>()(
           canvasTitle: response.title || 'Untitled',
           version: response.version,
           isLoading: false,
-          canUndo: false,
-          canRedo: false,
+          canUndo: canvasHistoryManager.canUndo,
+          canRedo: canvasHistoryManager.canRedo,
           ingestionByNodeId: {},
           pendingForkThreadIds: {},
         });
@@ -1813,8 +1816,6 @@ const useCanvasStore = create<RFState>()(
       intentActionWindow.clear();
       useToolStore.getState().resetForCanvasSwitch();
       useGesturePreviewStore.getState().resetCanvasScopedTransients();
-      canvasHistoryManager.clear();
-
       // Load the new canvas
       await get().loadCanvas(canvasId);
     },
@@ -2878,7 +2879,24 @@ const useCanvasStore = create<RFState>()(
     },
 
     deleteNodes: (nodeIds) => {
-      get().dispatchUiIntent({ type: 'DELETE_NODES', nodeIds });
+      const { spaceTitles, spaceTitlesLoaded } = useWorkspaceStore.getState();
+      const nodesById = new Map(get().nodes.map((node) => [node.id, node]));
+      const deletableNodeIds = nodeIds.filter((nodeId) => {
+        const node = nodesById.get(nodeId);
+        if (node?.type !== 'canvasRef') return true;
+        const targetCanvasId = node.data.targetCanvasId;
+        return (
+          spaceTitlesLoaded &&
+          typeof targetCanvasId === 'string' &&
+          !(targetCanvasId in spaceTitles)
+        );
+      });
+      if (deletableNodeIds.length > 0) {
+        get().dispatchUiIntent({
+          type: 'DELETE_NODES',
+          nodeIds: deletableNodeIds,
+        });
+      }
     },
 
     disconnectEdges: (edgeIds) => {

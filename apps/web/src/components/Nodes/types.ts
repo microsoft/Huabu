@@ -11,6 +11,7 @@ import type {
   ImageNodeData as SharedImageNodeData,
   AudioNodeData as SharedAudioNodeData,
   FrameNodeData as SharedFrameNodeData,
+  CanvasRefNodeData as SharedCanvasRefNodeData,
   SketchNodeData as SharedSketchNodeData,
   QuestionNodeData as SharedQuestionNodeData,
 } from '@sediment/shared';
@@ -45,6 +46,9 @@ export type CanvasAudioNodeData = SharedAudioNodeData & {
 export type CanvasFrameNodeData = SharedFrameNodeData & {
   [key: string]: unknown;
 };
+export type CanvasRefNodeData = SharedCanvasRefNodeData & {
+  [key: string]: unknown;
+};
 export type CanvasSketchNodeData = SharedSketchNodeData & {
   [key: string]: unknown;
 };
@@ -63,6 +67,7 @@ export type CanvasNodeData =
   | CanvasImageNodeData
   | CanvasAudioNodeData
   | CanvasFrameNodeData
+  | CanvasRefNodeData
   | CanvasSketchNodeData
   | CanvasQuestionNodeData;
 

@@ -124,11 +124,13 @@ The World and the existing Space List are sibling workspace pages. A global user
 
 The World is not a replacement storage index for the list, but its persisted topology automatically maintains one canonical `canvasRef` for every live ordinary Space.
 
-When the World capability is first used, reconciliation creates missing Portals for existing Spaces and gives only those new Portals deterministic initial positions. Creating another Space later creates its missing Portal on the next reconciliation without moving any existing Portal. Reloading the World likewise preserves every user-owned position.
+When the World capability is first used, reconciliation creates missing Portals for existing Spaces and gives only those new Portals deterministic initial positions. Creating another Space later creates its missing Portal on the next reconciliation without moving any existing Portal. Reloading the World likewise preserves every user-owned position. The implemented reconciliation runs before a World read, serializes concurrent reconciliation attempts, and rejects duplicate or malformed persisted Portal identities.
 
 A canonical Portal may be empty. Empty means that the Space exists but no source nodes currently have persistent `nodeRef` children; derived Portal chrome may still show the resolved project title, summary, and bounded statistics.
 
 Source deletion retains the already agreed symbolic-link behavior: its canonical Portal becomes broken rather than disappearing silently. A live canonical Portal cannot be hidden or removed independently of its Space; only a broken Portal may be removed explicitly. This keeps `live Space ⇔ one live canonical Portal` as a stable reconciliation invariant without hidden-state or suppression tombstones.
+
+The first implementation exposes `/spaces` as the explicit Space List sibling and keeps `/canvas/:canvasId` as the route for both World and ordinary Spaces. `/` redirects to World when the global setting is enabled and to `/spaces` otherwise. During feature development the setting defaults to enabled; the release default remains a pre-release product decision.
 
 ## 5. Reference-node working model
 
@@ -331,7 +333,7 @@ The transition remains a navigation affordance, not evidence that World and proj
 
 ### Undo across navigation
 
-The current web store owns one `canvasHistoryManager` and clears it in `switchCanvas()`. World navigation requires a history registry keyed by canvas ID so frequent World/Space transitions do not discard the scope being left.
+The web history manager is registered by canvas ID, so World/Space transitions retain the independent scope being left while an authoritative reload of the already-active Canvas clears only that Canvas's stale history.
 
 Each scope retains an independent undo and redo stack:
 

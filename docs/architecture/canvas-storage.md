@@ -44,6 +44,8 @@ Key points:
 - `listCanvases()` rescans the workspace on every call, skipping entries that start with `.` or lack `space.json`.
 - Workspace preparation creates exactly one hidden `.world/space.json` after migrations. Its generated `canvasId` remains stable, resolves through the normal `CanvasStore`, and is exposed separately as `WorkspaceInfo.worldCanvasId`; ordinary Canvas lists continue to omit it.
 - An established `.world` directory with a missing or malformed `space.json` is an integrity error. World identity is never silently regenerated, and the World cannot be deleted or directory-renamed through ordinary Space lifecycle operations.
+- Reading the World reconciles one canonical `canvasRef` Portal for every live ordinary Space. Reconciliation creates only missing Portals in deterministic open grid slots, preserves every existing node and position, rejects duplicate or malformed Portal identities, and leaves a broken Portal when its source Space is deleted.
+- Canonical Portal identity is server-owned: non-system commands cannot create or repoint a `canvasRef`, a live Portal cannot be deleted, and only a broken Portal may be removed. Portal geometry may move like ordinary World geometry, but its size is content-managed rather than manually resized.
 - Node filenames are `safe(label).md`; the node's stable id lives in the `id:` frontmatter field.
 - Artifacts live in `.artifacts/` (hidden) named `<artifactId><ext>`. No manifest file — the filename is the URL key.
 - Events are append-only JSONL (`events.jsonl`); each line is `{ ts: number, payload: RecentAction }`.

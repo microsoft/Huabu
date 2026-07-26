@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { create } from 'zustand';
 
 import { ApiError } from '../api/_client';
+import { listCanvases } from '../api/canvas';
 import {
   getWorkspaceInfo,
   putWorkspacePath,
@@ -15,6 +16,7 @@ import { i18n } from '../i18n';
 const FREE_PATH_KEY = 'sediment:workspace-path';
 const RECENT_PATHS_KEY = 'sediment:recent-workspaces';
 const MAX_RECENT = 5;
+const WORLD_ENABLED_KEY = 'sediment:world-enabled';
 
 /**
  * Storage backend abstraction. In Electron we delegate to the main
@@ -138,6 +140,11 @@ interface WorkspaceState {
   workspaceName: string | null;
   /** Stable hidden World canvas identity, or null before configuration. */
   worldCanvasId: string | null;
+  /** Whether World is exposed as the workspace landing page. */
+  worldEnabled: boolean;
+  /** Derived ordinary Space titles used by World Portal rendering. */
+  spaceTitles: Record<string, string | null>;
+  spaceTitlesLoaded: boolean;
   /** Recently used free-mode paths (most recent first). */
   recentWorkspaces: string[];
 
@@ -178,6 +185,8 @@ interface WorkspaceState {
    * the next list fetch lands).
    */
   setCanvasCount: (count: number | null) => void;
+  setWorldEnabled: (enabled: boolean) => void;
+  refreshSpaceTitles: () => Promise<void>;
 }
 
 /** Apply a fresh WorkspaceInfo snapshot to local state. */
@@ -188,6 +197,8 @@ function fromInfo(info: WorkspaceInfo): Partial<WorkspaceState> {
     workspacePath: info.path,
     workspaceName: info.name,
     worldCanvasId: info.worldCanvasId,
+    spaceTitles: {},
+    spaceTitlesLoaded: false,
     isReady: info.configured,
   };
 }
@@ -238,12 +249,34 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       : null,
   workspaceName: null,
   worldCanvasId: null,
+  worldEnabled:
+    typeof localStorage === 'undefined'
+      ? true
+      : localStorage.getItem(WORLD_ENABLED_KEY) !== 'false',
+  spaceTitles: {},
+  spaceTitlesLoaded: false,
   recentWorkspaces:
     typeof localStorage !== 'undefined' ? loadLocalStorageRecents() : [],
   isReady: false,
   isSyncing: false,
   error: null,
   canvasCount: null,
+
+  setWorldEnabled: (worldEnabled) => {
+    localStorage.setItem(WORLD_ENABLED_KEY, String(worldEnabled));
+    set({ worldEnabled });
+  },
+  refreshSpaceTitles: async () => {
+    set({ spaceTitlesLoaded: false });
+    const { canvases } = await listCanvases();
+    set({
+      canvasCount: canvases.length,
+      spaceTitles: Object.fromEntries(
+        canvases.map((canvas) => [canvas.canvasId, canvas.title]),
+      ),
+      spaceTitlesLoaded: true,
+    });
+  },
 
   init: async () => {
     set({ isSyncing: true, error: null });

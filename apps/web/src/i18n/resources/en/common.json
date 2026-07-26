@@ -225,6 +225,10 @@
     "showMiniMap": "Show MiniMap",
     "hideMiniMap": "Hide MiniMap",
     "miniMapDescription": "Display an overview of the Space in the bottom-right corner.",
+    "worldCanvas": "World Canvas",
+    "worldCanvasDescription": "Use World as the workspace landing page and show cross-Space Portals.",
+    "showWorldCanvas": "Show World Canvas",
+    "hideWorldCanvas": "Hide World Canvas",
     "inputMode": "Input mode",
     "inputModeDescription": "Choose the pointer that operates the canvas. Mouse mode ignores touchscreen and pen input.",
     "inputMode_mouse": "Mouse",
@@ -344,6 +348,18 @@
     "notFoundTitle": "Space not found",
     "notFoundDescription": "This Space doesn't exist or may have been deleted.",
     "backToList": "Back to Space list"
+  },
+  "world": {
+    "title": "World",
+    "openWorld": "Open World",
+    "openSpace": "Open",
+    "loadingSpace": "Loading Space…",
+    "loadingPortal": "Loading Portal…",
+    "loadFailed": "Failed to load World Portal details",
+    "untitledSpace": "Untitled Space",
+    "emptyPortal": "No nodes are pinned from this Space yet.",
+    "missingSpace": "Missing Space",
+    "missingSpaceDescription": "This Portal's source Space no longer exists."
   },
   "node": {
     "untitled": "Untitled",
@@ -501,6 +517,7 @@
       "audio": "Audio",
       "web": "Website",
       "frame": "Frame",
+      "canvasRef": "Portal",
       "sketch": "Sketch",
       "question": "Question"
     }
