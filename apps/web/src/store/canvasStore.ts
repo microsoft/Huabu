@@ -77,7 +77,13 @@ import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
 import { useWorkspaceStore } from './workspaceStore';
-import { ApiError, getCanvas, postCanvasExecute, putCanvas } from '../api';
+import {
+  ApiError,
+  getCanvas,
+  getWorldReferences,
+  postCanvasExecute,
+  putCanvas,
+} from '../api';
 import { agentApi } from '../api/agent';
 import { cloneArtifactToCanvas } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
@@ -105,12 +111,14 @@ import type {
   RecentAction,
   WireCanvasNode,
   WireSelectionNode,
+  ResolvedWorldReference,
 } from '@sediment/shared';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
 const NODE_CONTENT_DEBOUNCE_MS = 500;
 const nodeRefTopologySignatures = new Map<string, string>();
+let worldReferenceRefreshGeneration = 0;
 
 function nodeRefTopologySignature(nodes: readonly Node[]): string {
   return JSON.stringify(
@@ -332,6 +340,9 @@ type RFState = {
   version: number;
   isLoading: boolean;
   canvasNotFound: boolean;
+  worldReferences: Record<string, ResolvedWorldReference>;
+  worldReferenceError: string | null;
+  refreshWorldReferences: () => Promise<void>;
   isSaving: boolean;
   pendingSave: boolean;
 
@@ -1177,9 +1188,54 @@ const useCanvasStore = create<RFState>()(
     version: 0,
     isLoading: false,
     canvasNotFound: false,
+    worldReferences: {},
+    worldReferenceError: null,
     isSaving: false,
     pendingSave: false,
     versionConflict: false,
+
+    refreshWorldReferences: async () => {
+      const generation = ++worldReferenceRefreshGeneration;
+      const canvasId = get().canvasId;
+      const worldCanvasId = useWorkspaceStore.getState().worldCanvasId;
+      if (!canvasId || canvasId !== worldCanvasId) {
+        get()._setStateNoAutosave({
+          worldReferences: {},
+          worldReferenceError: null,
+        });
+        return;
+      }
+      try {
+        const response = await getWorldReferences(canvasId);
+        if (
+          get().canvasId !== canvasId ||
+          generation !== worldReferenceRefreshGeneration
+        ) {
+          return;
+        }
+        get()._setStateNoAutosave({
+          worldReferences: Object.fromEntries(
+            response.references.map((reference) => [
+              reference.referenceNodeId,
+              reference,
+            ]),
+          ),
+          worldReferenceError: null,
+        });
+      } catch (error) {
+        if (
+          get().canvasId !== canvasId ||
+          generation !== worldReferenceRefreshGeneration
+        ) {
+          return;
+        }
+        get()._setStateNoAutosave({
+          worldReferences: {},
+          worldReferenceError:
+            error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
 
     // Placeholder — the autoSaveMiddleware injects the real raw setter
     // that bypasses autosave scheduling. Calling it before middleware has
@@ -1662,6 +1718,9 @@ const useCanvasStore = create<RFState>()(
           canvasHistoryManager.clearCanvas(response.canvasId);
           nodeRefTopologySignatures.delete(response.canvasId);
         }
+        if (get().canvasId === response.canvasId) {
+          await get().refreshWorldReferences();
+        }
         return true;
       } catch (error) {
         toast(
@@ -1765,6 +1824,8 @@ const useCanvasStore = create<RFState>()(
             canvasNotFound: true,
             ingestionByNodeId: {},
             pendingForkThreadIds: {},
+            worldReferences: {},
+            worldReferenceError: null,
           });
           return;
         }
@@ -1848,7 +1909,10 @@ const useCanvasStore = create<RFState>()(
           canRedo: canvasHistoryManager.canRedo,
           ingestionByNodeId: {},
           pendingForkThreadIds: {},
+          worldReferences: {},
+          worldReferenceError: null,
         });
+        void get().refreshWorldReferences();
 
         // Seed each md-backed node's optimistic-concurrency baseline from
         // the authoritative content we just loaded, so the first edit

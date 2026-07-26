@@ -15,6 +15,57 @@ export interface GetCanvasResponse {
   state: unknown;
 }
 
+const canonicalCanvasIdSchema = z.string().regex(/^canvas-.+$/);
+const canonicalNodeIdSchema = z.string().regex(/^node-.+$/);
+
+const resolvedSourceNodeSchema = z
+  .object({
+    type: z.string().min(1),
+    label: z.string().optional(),
+    summary: z.string().optional(),
+    preview: z.string().optional(),
+    rev: z.string().optional(),
+  })
+  .strict();
+
+export const resolvedWorldReferenceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('canvasRef'),
+      referenceNodeId: canonicalNodeIdSchema,
+      targetCanvasId: canonicalCanvasIdSchema,
+      status: z.enum(['ok', 'canvas-missing']),
+      title: z.string().nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('nodeRef'),
+      referenceNodeId: canonicalNodeIdSchema,
+      target: z
+        .object({
+          canvasId: canonicalCanvasIdSchema,
+          nodeId: canonicalNodeIdSchema,
+        })
+        .strict(),
+      status: z.enum(['ok', 'canvas-missing', 'node-missing']),
+      source: resolvedSourceNodeSchema.optional(),
+    })
+    .strict(),
+]);
+export type ResolvedWorldReference = z.infer<
+  typeof resolvedWorldReferenceSchema
+>;
+
+export const getWorldReferencesResponseSchema = z
+  .object({
+    references: z.array(resolvedWorldReferenceSchema),
+  })
+  .strict();
+export type GetWorldReferencesResponse = z.infer<
+  typeof getWorldReferencesResponseSchema
+>;
+
 /** Body for `PUT /api/canvas/:canvasId`. */
 export const putCanvasBodySchema = z.object({
   version: z.number().int().nonnegative(),

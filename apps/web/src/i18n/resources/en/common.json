@@ -360,6 +360,7 @@
     "emptyPortal": "No nodes are pinned from this Space yet.",
     "missingSpace": "Missing Space",
     "missingSpaceDescription": "This Portal's source Space no longer exists.",
+    "missingNode": "Missing node",
     "pinnedNode": "Pinned node",
     "pinSelected": "Pin selected nodes to World",
     "unpinSelected": "Unpin selected nodes from World",

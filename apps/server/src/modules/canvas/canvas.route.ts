@@ -36,6 +36,10 @@ import {
   WorldPortalMutationError,
 } from './world-portal-policy.js';
 import { reconcileWorldPortals } from './world-portals.js';
+import {
+  resolveWorldReferences,
+  WorldReferenceResolutionError,
+} from './world-reference-resolver.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
@@ -76,6 +80,7 @@ import type {
   GetCanvasEventsResponse,
   GetCanvasResponse,
   GetNodeContentResponse,
+  GetWorldReferencesResponse,
   GetThreadChangesResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
@@ -1089,6 +1094,20 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         nodes: hydratedNodes,
       },
     });
+  });
+
+  fastify.get<{
+    Params: { canvasId: string };
+    Reply: ApiResult<GetWorldReferencesResponse>;
+  }>('/:canvasId/references', async function (request, reply) {
+    try {
+      return reply.send(await resolveWorldReferences(request.params.canvasId));
+    } catch (error) {
+      if (error instanceof WorldReferenceResolutionError) {
+        return reply.code(400).send({ message: error.message });
+      }
+      throw error;
+    }
   });
 
   // --- PUT Canvas ---

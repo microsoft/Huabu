@@ -360,6 +360,7 @@
     "emptyPortal": "尚未从该 Space 固定任何节点。",
     "missingSpace": "Space 已缺失",
     "missingSpaceDescription": "该 Portal 的源 Space 已不存在。",
+    "missingNode": "节点不存在",
     "pinnedNode": "已固定节点",
     "pinSelected": "将所选节点固定到 World",
     "unpinSelected": "从 World 取消固定所选节点",

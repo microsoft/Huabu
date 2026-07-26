@@ -1,0 +1,169 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const workspaceState = vi.hoisted(() => ({ path: '' }));
+
+vi.mock('../workspace.js', () => ({
+  getWorkspacePath: () => workspaceState.path,
+}));
+
+import {
+  resolveWorldReferences,
+  WorldReferenceResolutionError,
+} from './world-reference-resolver.js';
+import { refreshCanvasDirIndex } from '../storage/canvas-dirs.js';
+
+function writeCanvas(
+  directory: string,
+  canvasId: string,
+  nodes: unknown[],
+): string {
+  const root = path.join(workspaceState.path, directory);
+  mkdirSync(root, { recursive: true });
+  writeFileSync(
+    path.join(root, 'space.json'),
+    JSON.stringify({
+      canvasId,
+      title: directory,
+      version: 0,
+      state: { nodes, edges: [] },
+      createdAt: 1,
+      updatedAt: 1,
+    }),
+    'utf8',
+  );
+  return root;
+}
+
+beforeEach(() => {
+  workspaceState.path = mkdtempSync(
+    path.join(tmpdir(), 'sediment-world-references-'),
+  );
+  writeCanvas('.world', 'canvas-world', [
+    {
+      id: 'node-portal-a',
+      type: 'canvasRef',
+      position: { x: 0, y: 0 },
+      data: { targetCanvasId: 'canvas-a' },
+    },
+    {
+      id: 'node-ref-ok',
+      type: 'nodeRef',
+      position: { x: 0, y: 0 },
+      parentId: 'node-portal-a',
+      data: { target: { canvasId: 'canvas-a', nodeId: 'node-source' } },
+    },
+    {
+      id: 'node-ref-missing',
+      type: 'nodeRef',
+      position: { x: 0, y: 0 },
+      parentId: 'node-portal-a',
+      data: { target: { canvasId: 'canvas-a', nodeId: 'node-gone' } },
+    },
+    {
+      id: 'node-portal-gone',
+      type: 'canvasRef',
+      position: { x: 0, y: 0 },
+      data: { targetCanvasId: 'canvas-gone' },
+    },
+  ]);
+  const sourceRoot = writeCanvas('Project A', 'canvas-a', [
+    {
+      id: 'node-source',
+      type: 'note',
+      position: { x: 10, y: 20 },
+      data: {},
+    },
+  ]);
+  mkdirSync(path.join(sourceRoot, 'nodes'));
+  writeFileSync(
+    path.join(sourceRoot, 'nodes', 'Source note.md'),
+    [
+      '---',
+      'id: node-source',
+      'type: note',
+      'label: Source note',
+      'summary: Source summary',
+      '---',
+      'Source body',
+    ].join('\n'),
+    'utf8',
+  );
+  refreshCanvasDirIndex();
+});
+
+afterEach(() => {
+  rmSync(workspaceState.path, { recursive: true, force: true });
+});
+
+describe('World reference resolution', () => {
+  it('batch resolves live, missing-node, and missing-canvas references', async () => {
+    const response = await resolveWorldReferences('canvas-world');
+
+    expect(response.references).toContainEqual({
+      kind: 'canvasRef',
+      referenceNodeId: 'node-portal-a',
+      targetCanvasId: 'canvas-a',
+      status: 'ok',
+      title: 'Project A',
+    });
+    expect(response.references).toContainEqual(
+      expect.objectContaining({
+        kind: 'nodeRef',
+        referenceNodeId: 'node-ref-ok',
+        status: 'ok',
+        source: expect.objectContaining({
+          type: 'note',
+          label: 'Source note',
+          summary: 'Source summary',
+          preview: 'Source body',
+        }),
+      }),
+    );
+    expect(response.references).toContainEqual(
+      expect.objectContaining({
+        referenceNodeId: 'node-ref-missing',
+        status: 'node-missing',
+      }),
+    );
+    expect(response.references).toContainEqual(
+      expect.objectContaining({
+        referenceNodeId: 'node-portal-gone',
+        status: 'canvas-missing',
+      }),
+    );
+  });
+
+  it('rejects resolution outside World', async () => {
+    await expect(resolveWorldReferences('canvas-a')).rejects.toBeInstanceOf(
+      WorldReferenceResolutionError,
+    );
+  });
+
+  it('surfaces malformed source topology and sidecar data', async () => {
+    writeFileSync(
+      path.join(workspaceState.path, 'Project A', 'space.json'),
+      '{',
+      'utf8',
+    );
+    await expect(resolveWorldReferences('canvas-world')).rejects.toThrow();
+
+    const sourceRoot = writeCanvas('Project A', 'canvas-a', [
+      {
+        id: 'node-source',
+        type: 'note',
+        position: { x: 10, y: 20 },
+        data: {},
+      },
+    ]);
+    writeFileSync(
+      path.join(sourceRoot, 'nodes', 'Source note.md'),
+      '---\ninvalid: "\n---\nbody',
+      'utf8',
+    );
+    await expect(resolveWorldReferences('canvas-world')).rejects.toThrow();
+  });
+});

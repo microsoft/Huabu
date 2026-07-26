@@ -407,10 +407,17 @@ export const Canvas: React.FC<CanvasProps> = ({
     closeExpanded,
     frameNodesInRect,
     selectNodes,
+    refreshWorldReferences,
   } = useCanvasStore.getState();
   const { setPendingNodeType } = useToolStore.getState();
 
   const [isBoxSelecting, setIsBoxSelecting] = useState(false);
+
+  useEffect(() => {
+    const handleFocus = () => void refreshWorldReferences();
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [refreshWorldReferences]);
   const selectedNodeIds = useMemo(
     () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
     [nodes],

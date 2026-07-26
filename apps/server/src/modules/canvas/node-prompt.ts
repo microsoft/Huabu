@@ -52,6 +52,8 @@ export interface NodeInput {
   size?: { width: number; height: number };
   parentFrame?: { id: string; label?: string };
   style?: Record<string, unknown>;
+  targetCanvasId?: string;
+  target?: { canvasId: string; nodeId: string };
 }
 
 /** Agent-facing node shapes. `'ref'` (no rev) is deliberately excluded. */
@@ -134,6 +136,8 @@ export function describeNode(
       size: input.size ?? { width: 0, height: 0 },
       ...(input.parentFrame ? { parentFrame: input.parentFrame } : {}),
       ...(input.style ? { style: input.style } : {}),
+      ...(input.targetCanvasId ? { targetCanvasId: input.targetCanvasId } : {}),
+      ...(input.target ? { target: input.target } : {}),
     });
   }
   return buildAgentNodePreview(common);

@@ -53,6 +53,7 @@ import {
   type SnapshotNodesArgs,
 } from './handlers/snapshot-node.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
+import { resolveWorldReadCanvasId } from '../../canvas/world-target-access.js';
 
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { NodeOrigin } from '@sediment/shared';
@@ -108,6 +109,21 @@ export async function executeTool(
   };
   const withCanvasId = <T>(value: Record<string, unknown>, toolName: string) =>
     ({ ...value, canvasId: requireCanvasId(toolName) }) as unknown as T;
+  const withReadCanvasId = <T>(
+    value: Record<string, unknown>,
+    toolName: string,
+  ): T => {
+    const ownerCanvasId = requireCanvasId(toolName);
+    const requested = value.targetCanvasId;
+    if (requested !== undefined && typeof requested !== 'string') {
+      throw new Error('targetCanvasId must be a string');
+    }
+    const { targetCanvasId: _targetCanvasId, ...toolArgs } = value;
+    return {
+      ...toolArgs,
+      canvasId: resolveWorldReadCanvasId(ownerCanvasId, requested),
+    } as unknown as T;
+  };
 
   switch (name) {
     case 'web_search':
@@ -115,30 +131,36 @@ export async function executeTool(
 
     case 'get_space_outline':
       return handleGetCanvasOutline(
-        withCanvasId<GetCanvasOutlineArgs>(args, 'get_space_outline'),
+        withReadCanvasId<GetCanvasOutlineArgs>(args, 'get_space_outline'),
       );
 
     case 'inspect_nodes':
       return handleInspectNodes(
-        withCanvasId<InspectNodesArgs>(args, 'inspect_nodes'),
+        withReadCanvasId<InspectNodesArgs>(args, 'inspect_nodes'),
       );
 
     case 'inspect_edges':
       return handleInspectEdges(
-        withCanvasId<InspectEdgesArgs>(args, 'inspect_edges'),
+        withReadCanvasId<InspectEdgesArgs>(args, 'inspect_edges'),
       );
 
     case 'grep':
-      return handleGrep(withCanvasId<GrepArgs>(args, 'grep'));
+      return handleGrep(withReadCanvasId<GrepArgs>(args, 'grep'));
 
     case 'find':
-      return handleFind(withCanvasId<FindArgs>(args, 'find'));
+      return handleFind(withReadCanvasId<FindArgs>(args, 'find'));
 
     case 'ls':
-      return handleLs(withCanvasId<LsArgs>(args, 'ls'));
+      return handleLs(withReadCanvasId<LsArgs>(args, 'ls'));
 
-    case 'read':
-      return handleRead(withCanvasId<ReadArgs>(args, 'read'), context?.readSet);
+    case 'read': {
+      const ownerCanvasId = requireCanvasId('read');
+      const readArgs = withReadCanvasId<ReadArgs>(args, 'read');
+      return handleRead(
+        readArgs,
+        readArgs.canvasId === ownerCanvasId ? context?.readSet : undefined,
+      );
+    }
 
     case 'space_commands':
       return handleCanvasCommands(

@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { deleteNode, getCanvas, postCanvasExecute } = vi.hoisted(() => ({
-  deleteNode: vi.fn(),
-  getCanvas: vi.fn(),
-  postCanvasExecute: vi.fn(),
-}));
+const { deleteNode, getCanvas, getWorldReferences, postCanvasExecute } =
+  vi.hoisted(() => ({
+    deleteNode: vi.fn(),
+    getCanvas: vi.fn(),
+    getWorldReferences: vi.fn(),
+    postCanvasExecute: vi.fn(),
+  }));
 
 vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal<typeof CanvasApi>()),
   deleteNode,
   getCanvas,
+  getWorldReferences,
   postCanvasExecute,
 }));
 
@@ -36,6 +39,8 @@ function pendingEffects() {
 beforeEach(() => {
   postCanvasExecute.mockReset();
   getCanvas.mockReset();
+  getWorldReferences.mockReset();
+  getWorldReferences.mockResolvedValue({ references: [] });
   deleteNode.mockReset();
   deleteNode.mockResolvedValue(undefined);
   postCanvasExecute.mockImplementation(
@@ -84,6 +89,82 @@ beforeEach(() => {
 });
 
 describe('World Portal Pin history boundary', () => {
+  it('ignores an older reference refresh that completes last', async () => {
+    let resolveOlder:
+      | ((value: { references: Array<Record<string, unknown>> }) => void)
+      | undefined;
+    getWorldReferences
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOlder = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({
+        references: [
+          {
+            kind: 'nodeRef',
+            referenceNodeId: 'node-ref',
+            target: { canvasId: sourceCanvasId, nodeId: sourceNodeId },
+            status: 'ok',
+            source: { type: 'note', label: 'Newer' },
+          },
+        ],
+      });
+
+    const older = useCanvasStore.getState().refreshWorldReferences();
+    await useCanvasStore.getState().refreshWorldReferences();
+    resolveOlder?.({
+      references: [
+        {
+          kind: 'nodeRef',
+          referenceNodeId: 'node-ref',
+          target: { canvasId: sourceCanvasId, nodeId: sourceNodeId },
+          status: 'ok',
+          source: { type: 'note', label: 'Older' },
+        },
+      ],
+    });
+    await older;
+
+    expect(useCanvasStore.getState().worldReferences['node-ref']).toMatchObject(
+      {
+        source: { label: 'Newer' },
+      },
+    );
+  });
+
+  it('loads resolved node references into runtime-only state', async () => {
+    getCanvas.mockResolvedValueOnce({
+      canvasId: worldCanvasId,
+      title: 'World',
+      version: 0,
+      state: { nodes: [], edges: [] },
+    });
+    getWorldReferences.mockResolvedValueOnce({
+      references: [
+        {
+          kind: 'nodeRef',
+          referenceNodeId: 'node-ref',
+          target: { canvasId: sourceCanvasId, nodeId: sourceNodeId },
+          status: 'ok',
+          source: { type: 'note', label: 'Source note' },
+        },
+      ],
+    });
+
+    await useCanvasStore.getState().loadCanvas(worldCanvasId);
+
+    await vi.waitFor(() => {
+      expect(
+        useCanvasStore.getState().worldReferences['node-ref'],
+      ).toMatchObject({
+        status: 'ok',
+        source: { label: 'Source note' },
+      });
+    });
+  });
+
   it('clears stale World history after reference topology changes', async () => {
     canvasHistoryManager.takeSnapshot([], []);
     useCanvasStore.getState()._setStateNoAutosave({ canUndo: true });

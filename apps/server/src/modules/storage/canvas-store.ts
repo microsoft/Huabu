@@ -10,7 +10,7 @@ import {
   statSync,
   unlinkSync,
 } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
@@ -246,8 +246,12 @@ function nodeContentToMarkdown(c: NodeContent): string {
   return `${toFrontmatter(fm)}\n${content}`;
 }
 
-function markdownToNodeContent(nodeId: string, raw: string): NodeContent {
-  const { meta, content } = parseFrontmatter(raw);
+function markdownToNodeContent(
+  nodeId: string,
+  raw: string,
+  strict = false,
+): NodeContent {
+  const { meta, content } = parseFrontmatter(raw, { strict });
   for (const key of LEGACY_FRONTMATTER_KEYS) {
     delete meta[key];
   }
@@ -660,7 +664,9 @@ export class CanvasStore {
    * is still built in stable `readdirSync` order so the derived keys
    * match the previous synchronous implementation exactly.
    */
-  async readAllNodes(): Promise<Map<string, NodeContent>> {
+  async readAllNodes(options?: {
+    strict?: boolean;
+  }): Promise<Map<string, NodeContent>> {
     const contents = new Map<string, NodeContent>();
     const idx = new NameIndex<NodeFileEntry>();
     const duplicates = new Set<string>();
@@ -670,7 +676,10 @@ export class CanvasStore {
       const raws = await mapWithConcurrency(
         files,
         NODE_READ_CONCURRENCY,
-        (file) => readTextAsync(path.join(dir, file)),
+        (file) =>
+          options?.strict
+            ? readFile(path.join(dir, file), 'utf8')
+            : readTextAsync(path.join(dir, file)),
       );
       for (let i = 0; i < files.length; i++) {
         const raw = raws[i];
@@ -687,7 +696,7 @@ export class CanvasStore {
             ? rawId
             : file.replace(/\.md$/, '');
         addSidecarToIndex(idx, duplicates, this.canvasId, id, file);
-        contents.set(id, markdownToNodeContent(id, raw));
+        contents.set(id, markdownToNodeContent(id, raw, options?.strict));
       }
     }
     this.nodes = idx;

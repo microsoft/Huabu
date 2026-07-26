@@ -47,6 +47,7 @@ Key points:
 - Reading the World reconciles one canonical `canvasRef` Portal for every live ordinary Space. Reconciliation creates only missing Portals in deterministic open grid slots, preserves every existing node and position, rejects duplicate or malformed Portal identities, and leaves a broken Portal when its source Space is deleted.
 - Canonical Portal identity is server-owned: non-system commands cannot create or repoint a `canvasRef`, a live Portal cannot be deleted, and only a broken Portal may be removed. Portal geometry may move like ordinary World geometry, but its size is content-managed rather than manually resized.
 - A persistent `nodeRef` has no markdown sidecar and stores only `{ type: 'nodeRef', target: { canvasId, nodeId } }` plus World-owned React Flow geometry. It must remain a direct child of the matching `canvasRef`; `SET_PORTAL_NODE_PINS` is its sole create/remove path.
+- `GET /api/canvas/:worldCanvasId/references` batch-resolves Portal titles and pinned source-node display data without writing it into World topology. Results distinguish `ok`, `canvas-missing`, and `node-missing`; storage or parse failures remain request errors.
 - Node filenames are `safe(label).md`; the node's stable id lives in the `id:` frontmatter field.
 - Artifacts live in `.artifacts/` (hidden) named `<artifactId><ext>`. No manifest file — the filename is the URL key.
 - Events are append-only JSONL (`events.jsonl`); each line is `{ ts: number, payload: RecentAction }`.

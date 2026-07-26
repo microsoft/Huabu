@@ -7,6 +7,7 @@ import type {
   CanvasErrorCode,
   DeleteCanvasResponse,
   GetCanvasResponse,
+  GetWorldReferencesResponse,
   GetNodeContentResponse,
   PutCanvasRequest,
   PutCanvasResponse,
@@ -126,6 +127,17 @@ export async function getCanvas(
     console.error('Failed to get canvas:', error);
     return null;
   }
+}
+
+export async function getWorldReferences(
+  canvasId: string,
+): Promise<GetWorldReferencesResponse> {
+  return apiFetch<GetWorldReferencesResponse>(
+    routes.canvasReferences(canvasId),
+    {
+      fallbackMessage: 'Failed to resolve World references',
+    },
+  );
 }
 
 export async function postCanvasExecute(

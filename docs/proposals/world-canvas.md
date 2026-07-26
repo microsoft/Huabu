@@ -174,7 +174,7 @@ Neither `canvasRef` nor `nodeRef` creates a markdown sidecar in the first versio
 
 This separation is required by the current persistence path: the canvas structure PUT strips `label`, `src`, `summary`, and related content keys from every node before writing `space.json`, while normal nodes recover those fields from sidecars in the same canvas. Copying source display fields into World `nodeRef.data` would either be stripped with no World sidecar to restore them or persist under parallel field names and become stale duplicate state.
 
-The persistent World topology therefore carries only reference identity and World-owned presentation state. A separate non-persistent read model may expose resolved source canvas title, node type, label, preview, revision, and `missing` status. The exact API response shape remains an implementation detail until the read boundary is designed.
+The persistent World topology therefore carries only reference identity and World-owned presentation state. `GET /api/canvas/:worldCanvasId/references` returns a separate non-persistent batch read model with source Canvas title or source node type, label, summary, preview, revision, and `ok | canvas-missing | node-missing` status.
 
 `nodeRef.target` retains both `canvasId` and `nodeId` even while the node is parented under a matching `canvasRef`. A top-level promoted `nodeRef` must remain independently resolvable without deriving source identity from its former parent.
 
