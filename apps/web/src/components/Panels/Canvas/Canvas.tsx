@@ -46,6 +46,11 @@ import {
   resumeHeightCommits,
   suspendHeightCommits,
 } from '@/components/Nodes/shared/height/commitSuspension';
+import { destroyOffscreenMeasurer } from '@/components/Nodes/shared/height/measure/offscreenMeasurer';
+import {
+  startHeightPrewarm,
+  stopHeightPrewarm,
+} from '@/components/Nodes/shared/height/measure/prewarmQueue';
 import { TextNode } from '@/components/Nodes/text/TextNode';
 import {
   uploadFileToNodeInput,
@@ -484,6 +489,18 @@ export const Canvas: React.FC<CanvasProps> = ({
   useEffect(() => {
     if (isNotMouse && tool === 'pan') setTool('select');
   }, [isNotMouse, setTool, tool]);
+
+  // Measure notes the user has not reached yet. `onlyRenderVisibleElements`
+  // unmounts offscreen nodes, so this is the only way an unvisited note
+  // ever gets a real footprint — without it, arriving at one produces a
+  // visible (if bounded) correction.
+  useEffect(() => {
+    startHeightPrewarm();
+    return () => {
+      stopHeightPrewarm();
+      void destroyOffscreenMeasurer();
+    };
+  }, []);
 
   const handleSelectionStart = useCallback(() => {
     if (tool !== 'select') return;

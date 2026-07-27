@@ -415,9 +415,10 @@ resize gesture ─────────────────────�
 | `packages/shared/src/canvas-engine/commands/applyMeasuredHeight.ts` | Non-undoable derived-height command; writes hint and geometry together; collects frame ancestors.      |
 | `packages/shared/src/types/api/canvas.ts`                           | Derived-geometry batch write schema (zod + inferred type).                                             |
 | `apps/web/src/components/Nodes/shared/height/useAutoHeight.ts`      | Type-agnostic hook: intrinsic in, gated commit out. Used by note, text, and question.                  |
-| `apps/web/src/components/Nodes/shared/height/commitQueue.ts`        | Quantization, threshold, gesture suspension, coalescing.                                               |
-| `apps/web/src/components/Nodes/shared/height/measure/`              | `HeightMeasurer` interface, `inPlace`, `offscreen`, the D10 protocol, and the keyed cache.             |
-| `apps/web/src/components/Nodes/shared/height/prewarmQueue.ts`       | Viewport-priority scheduling of offscreen measurement; the Bar B mechanism.                            |
+| `apps/web/src/components/Nodes/shared/height/commitQueue.ts`        | No-op suppression, gesture suspension, per-node coalescing.                                            |
+| `apps/web/src/components/Nodes/shared/height/commitSuspension.ts`   | Dependency-free interaction counter; keeps the queue and `canvasStore` acyclic.                        |
+| `apps/web/src/components/Nodes/note/noteContentHost.ts`             | The box and the height reader shared by the mounted note and the offscreen measurer.                   |
+| `apps/web/src/components/Nodes/shared/height/measure/`              | Offscreen singleton measurer, the D10 stability protocol, and the prewarm queue.                       |
 | `apps/web/src/store/canvasStore/save/derivedGeometryQueue.ts`       | Batches hints to the derived-geometry endpoint; independent of the structure autosave.                 |
 | `apps/web/src/components/Nodes/note/NoteNode.tsx`                   | Renders from `style.height`; reports intrinsic height; no longer sizes itself.                         |
 | `apps/web/src/hooks/useTextAutoSize.ts`                             | Retained as the text/question _measurer_; its commit path moves to `useAutoHeight`.                    |
@@ -516,7 +517,7 @@ Manual: pan and zoom across a canvas containing notes that have never been viewe
 
 **Cross-client measurement divergence.** Two clients with different font availability may compute different intrinsic heights for the same `measuredFor` key. D9 makes this harmless rather than impossible: the persisted hint is advisory, each client materializes locally, and the 4 px quantization collapses minor divergence to the same committed value. The residual case is a divergence larger than one step that also changes parent frame geometry. The per-batch derived marker keeps that from broadcasting, but each client then holds a slightly different frame box until an authored write settles it. If that becomes visible in practice, the step size is the first tuning knob and [derived-frame-geometry.md](../backlog/derived-frame-geometry.md) is the second.
 
-**Offscreen fidelity.** Step 5's measurement must equal the in-place measurement within 1 px for stable text-only content, or it should not be enabled. Ship it in shadow mode first and compare against the in-place verifier.
+**Offscreen fidelity.** Step 5's measurement must equal the in-place measurement for the same content, or it should not be enabled. Shadow mode was considered and not built: the two surfaces instead share the box that produces the number — the same host classes and the same `readNoteIntrinsicHeight` reader — which is a structural guarantee rather than an empirical one, and it fails loudly (a compile error) rather than as drift. The empirical residue is bounded anyway, because an offscreen measurement is only ever used for a node that would otherwise have no measurement at all, and the in-place measurer overwrites it the moment the user arrives.
 
 ## Relationship to the stable-geometry proposal
 

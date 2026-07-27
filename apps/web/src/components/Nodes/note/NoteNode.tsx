@@ -24,6 +24,10 @@ import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { useTrackNoteFixedHeight } from './heightMemory';
 import {
+  NOTE_CONTENT_HOST_CLASS,
+  readNoteIntrinsicHeight,
+} from './noteContentHost';
+import {
   cancelMeasuredHeight,
   proposeMeasuredHeight,
 } from '../shared/height/commitQueue';
@@ -153,14 +157,12 @@ export const NoteNode = memo(
 
     const markdown = typeof data.content === 'string' ? data.content : '';
 
-    // Measure `.ProseMirror` (not host.scrollHeight): Crepe's block-edit
-    // plugin keeps an absolute-positioned `.milkdown-block-handle` at
-    // the bottom of `.milkdown`, which inflates host.scrollHeight by
-    // ~34px and leaves dead bg-surface below the text in auto mode.
-    // Add host's vertical padding back since `.ProseMirror` doesn't
-    // include it. Observation chain covers fixed-mode (host has
-    // h-full so its own size never changes) by also watching the
-    // first child + MutationObserver for editor (re)mounts.
+    // Measurement is shared with the offscreen measurer via
+    // `readNoteIntrinsicHeight`, so the two surfaces cannot answer
+    // differently for the same content. The observation chain below is
+    // what this surface adds: the host is `h-full`, so its own size never
+    // changes with content, and we have to watch the editor's root plus a
+    // MutationObserver for (re)mounts.
     useEffect(() => {
       const host = previewHostRef.current;
       if (!host) return;
@@ -171,17 +173,7 @@ export const NoteNode = memo(
       if (!hydrated) return;
 
       const measure = () => {
-        const prose = host.querySelector('.ProseMirror') as HTMLElement | null;
-        let contentH: number;
-        if (prose) {
-          const cs = getComputedStyle(host);
-          const padY =
-            (parseFloat(cs.paddingTop) || 0) +
-            (parseFloat(cs.paddingBottom) || 0);
-          contentH = prose.scrollHeight + padY;
-        } else {
-          contentH = host.scrollHeight;
-        }
+        const contentH = readNoteIntrinsicHeight(host);
         if (contentH > 0) setContentHeight(contentH);
         setHostHeight(host.clientHeight);
       };
@@ -440,7 +432,8 @@ export const NoteNode = memo(
                 <div
                   ref={previewHostRef}
                   className={clsx(
-                    'flex h-full flex-col rounded p-2',
+                    NOTE_CONTENT_HOST_CLASS,
+                    'h-full',
                     !hasAccent && 'bg-surface',
                   )}
                 >
