@@ -90,6 +90,11 @@ export function DocsLayout({ children }: { children: ReactNode }) {
 
   const closeSidebar = () => {
     setIsSidebarOpen(false);
+    // Clear inert synchronously so focus can land on the menu button:
+    // the passive effect that normally removes it runs after the next
+    // paint, but requestAnimationFrame fires before it.
+    mobileHeaderRef.current?.removeAttribute('inert');
+    mainRef.current?.removeAttribute('inert');
     window.requestAnimationFrame(() => menuButtonRef.current?.focus());
   };
 
@@ -118,7 +123,6 @@ export function DocsLayout({ children }: { children: ReactNode }) {
       {isSidebarOpen && (
         <button
           type="button"
-          aria-label="Close navigation"
           aria-hidden="true"
           tabIndex={-1}
           className="fixed inset-0 z-30 bg-black/40 lg:hidden"
@@ -134,7 +138,7 @@ export function DocsLayout({ children }: { children: ReactNode }) {
       />
       <main
         ref={mainRef}
-        className="min-h-full px-5 pt-14.25 lg:px-0 lg:pt-0 lg:pl-[calc(var(--docs-sidebar-right-edge)+var(--docs-gutter))] lg:pr-(--docs-gutter)"
+        className="min-h-full px-5 pt-14.25 lg:px-0 lg:pt-0 lg:pr-(--docs-gutter) lg:pl-[calc(var(--docs-sidebar-right-edge)+var(--docs-gutter))]"
       >
         {children}
       </main>
