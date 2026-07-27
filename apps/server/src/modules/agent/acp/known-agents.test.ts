@@ -60,6 +60,12 @@ describe('KNOWN_CLIS', () => {
         binary: 'agent',
         acpArgs: ['acp'],
       },
+      {
+        id: 'hermes',
+        displayName: 'Hermes Agent',
+        binary: 'hermes',
+        acpArgs: ['acp'],
+      },
     ]);
   });
 
@@ -101,6 +107,7 @@ describe('KNOWN_CLIS', () => {
         args: ['--yolo'],
         position: 'before-acp',
       },
+      hermes: null,
     });
 
     expect(

@@ -71,6 +71,9 @@ web_modules/
 !.env.example
 !apps/web/.env.production
 
+# electron-builder local env (update-feed owner/repo for local dist builds)
+electron-builder.env
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
