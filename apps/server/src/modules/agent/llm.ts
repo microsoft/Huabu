@@ -201,11 +201,13 @@ const CONFIG_FILE = getDataFilePath('llm-config.json');
 /**
  * Effective active configuration assembled from the persisted store —
  * the shape consumed by `buildModel` / `resolveApiKey` etc.
+ *
+ * Deliberately carries **no** `apiKey`: credentials are resolved from the
+ * SecretStore by provider id, never from `llm-config.json`.
  */
 interface PersistedConfig {
   provider: string;
   model: string;
-  apiKey?: string;
   baseUrl?: string;
   apiVersion?: string;
 }
@@ -218,6 +220,12 @@ interface PersistedConfig {
  */
 interface ProviderPersisted {
   model?: string;
+  /**
+   * Legacy only. Written by builds predating the SecretStore and never
+   * again; {@link loadPersistedStore} scrubs it on read and
+   * {@link savePersistedStore} scrubs it on write. Declared solely so both
+   * scrubs type-check — no code may read it.
+   */
   apiKey?: string;
   baseUrl?: string;
   apiVersion?: string;
@@ -283,6 +291,23 @@ interface UtilityConfigPersisted {
 }
 
 /**
+ * Drop legacy plaintext API keys from a parsed or about-to-be-written store.
+ *
+ * Builds predating the SecretStore wrote `apiKey` straight into
+ * `llm-config.json`, and those files still exist in old data directories.
+ * Applying this on both the read and the write boundary means a plaintext
+ * credential can never reach the model builders and can never be written
+ * back. Moving such a value into the encrypted store is owned exclusively by
+ * `apps/server/src/security/plaintext-secret-migration.ts`, which reads the
+ * file directly rather than through this module.
+ */
+function scrubLegacyApiKeys(store: PersistedStore): PersistedStore {
+  for (const entry of Object.values(store.providers)) delete entry.apiKey;
+  if (store.imageConfig) delete store.imageConfig.apiKey;
+  return store;
+}
+
+/**
  * Load + migrate the persisted store. Two migrations applied lazily:
  *  1. **Legacy single-config shape** `{ provider, model, apiKey,
  *     baseUrl, apiVersion, imageModel?, imageQuality? }` \u2192 the new
@@ -310,7 +335,6 @@ function loadPersistedStore(): PersistedStore {
       const provider = parsed.provider;
       const entry: ProviderPersisted = {};
       if (typeof parsed.model === 'string') entry.model = parsed.model;
-      if (typeof parsed.apiKey === 'string') entry.apiKey = parsed.apiKey;
       if (typeof parsed.baseUrl === 'string') entry.baseUrl = parsed.baseUrl;
       if (typeof parsed.apiVersion === 'string') {
         entry.apiVersion = parsed.apiVersion;
@@ -324,7 +348,7 @@ function loadPersistedStore(): PersistedStore {
       // Azure, but we mirror whatever was on disk so nothing is lost).
       const legacyImageConfig = extractLegacyImageConfig(parsed, entry);
       if (legacyImageConfig) store.imageConfig = legacyImageConfig;
-      return store;
+      return scrubLegacyApiKeys(store);
     }
 
     const providers =
@@ -360,7 +384,6 @@ function loadPersistedStore(): PersistedStore {
       const migrated: ImageConfigPersisted = { provider: 'azure-openai' };
       if (azureEntry.baseUrl) migrated.baseUrl = azureEntry.baseUrl;
       if (azureEntry.apiVersion) migrated.apiVersion = azureEntry.apiVersion;
-      if (azureEntry.apiKey) migrated.apiKey = azureEntry.apiKey;
       if (azureEntry.imageModel) migrated.model = azureEntry.imageModel;
       if (azureEntry.imageQuality) migrated.quality = azureEntry.imageQuality;
       store.imageConfig = migrated;
@@ -371,7 +394,7 @@ function loadPersistedStore(): PersistedStore {
       delete (azureEntry as { imageModel?: unknown }).imageModel;
       delete (azureEntry as { imageQuality?: unknown }).imageQuality;
     }
-    return store;
+    return scrubLegacyApiKeys(store);
   } catch {
     // Corrupted or missing file — fall through
     return { providers: {} };
@@ -403,15 +426,13 @@ function extractLegacyImageConfig(
   const migrated: ImageConfigPersisted = { provider: 'azure-openai' };
   if (chatEntry.baseUrl) migrated.baseUrl = chatEntry.baseUrl;
   if (chatEntry.apiVersion) migrated.apiVersion = chatEntry.apiVersion;
-  if (chatEntry.apiKey) migrated.apiKey = chatEntry.apiKey;
   if (imageModel) migrated.model = imageModel;
   if (imageQuality) migrated.quality = imageQuality;
   return migrated;
 }
 
 function savePersistedStore(store: PersistedStore): void {
-  for (const entry of Object.values(store.providers)) delete entry.apiKey;
-  if (store.imageConfig) delete store.imageConfig.apiKey;
+  scrubLegacyApiKeys(store);
   const dir = dirname(CONFIG_FILE);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -434,7 +455,6 @@ function buildPersistedConfig(
   return {
     provider: providerId,
     model: entry.model ?? '',
-    ...(entry.apiKey ? { apiKey: entry.apiKey } : {}),
     ...(entry.baseUrl ? { baseUrl: entry.baseUrl } : {}),
     ...(entry.apiVersion ? { apiVersion: entry.apiVersion } : {}),
   };
@@ -461,29 +481,28 @@ let activeConfig: PersistedConfig | null = null;
  */
 let cachedUtilityModel: Model<Api> | null = null;
 
-/** Resolve the API key for a provider from memory, persisted config, or env vars. */
-function resolveApiKey(
-  providerId: string,
-  explicitKey?: string,
-): string | null {
-  return (
-    getSecret(llmProviderApiKeySecretId(providerId)) ?? explicitKey ?? null
-  );
+/**
+ * Resolve the API key for a provider.
+ *
+ * The SecretStore is the only source: it covers UI-persisted credentials
+ * (encrypted file or Electron `safeStorage`) and deployment-owned environment
+ * variables. There is deliberately no caller-supplied or on-disk plaintext
+ * fallback — see {@link scrubLegacyApiKeys}.
+ */
+function resolveApiKey(providerId: string): string | null {
+  return getSecret(llmProviderApiKeySecretId(providerId));
 }
 
 /**
  * Resolve the API key for OAuth providers (async — may need token refresh).
  * Falls back to resolveApiKey for non-OAuth providers.
  */
-async function resolveApiKeyAsync(
-  providerId: string,
-  explicitKey?: string,
-): Promise<string | null> {
+async function resolveApiKeyAsync(providerId: string): Promise<string | null> {
   // OAuth providers (GitHub Copilot, OpenAI Codex) resolve an access token.
   if (isOAuthProvider(providerId)) {
     return getOAuthApiKey(providerId);
   }
-  return resolveApiKey(providerId, explicitKey);
+  return resolveApiKey(providerId);
 }
 
 /** Build a Model object for the active configuration. */
@@ -1016,7 +1035,7 @@ export async function setLLMConfig(
   const isOAuth = providerInfo?.authType === 'oauth';
   const authenticated = isOAuth
     ? await verifyOAuthCredentials(persisted.provider)
-    : !!resolveApiKey(persisted.provider, persisted.apiKey);
+    : !!resolveApiKey(persisted.provider);
 
   return {
     provider: persisted.provider,
@@ -1588,7 +1607,7 @@ export function getLLMModel(): Model<Api> {
   if (cachedModel) return cachedModel;
 
   const cfg = ensureConfig();
-  cachedApiKey = resolveApiKey(cfg.provider, cfg.apiKey);
+  cachedApiKey = resolveApiKey(cfg.provider);
 
   // For OAuth providers, resolveApiKey may return null (async refresh needed)
   // Sync check — the actual async resolution happens in llmStream/llmComplete
@@ -1615,7 +1634,7 @@ export function getLLMModel(): Model<Api> {
  */
 export async function ensureApiKey(): Promise<string> {
   const cfg = ensureConfig();
-  const key = await resolveApiKeyAsync(cfg.provider, cfg.apiKey);
+  const key = await resolveApiKeyAsync(cfg.provider);
   if (!key) {
     const provInfo = getProviderCatalog().find((p) => p.id === cfg.provider);
     throw new Error(
@@ -1649,7 +1668,7 @@ function getProviderSpecificOptions(
 
 /** Resolve (and OAuth-refresh) the API key for an arbitrary config. */
 async function ensureApiKeyFor(cfg: PersistedConfig): Promise<string> {
-  const key = await resolveApiKeyAsync(cfg.provider, cfg.apiKey);
+  const key = await resolveApiKeyAsync(cfg.provider);
   if (!key) {
     const provInfo = getProviderCatalog().find((p) => p.id === cfg.provider);
     throw new Error(

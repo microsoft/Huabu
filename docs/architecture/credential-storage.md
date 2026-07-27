@@ -35,6 +35,8 @@ Windows uses DPAPI, macOS uses Keychain, and Linux requires Secret Service or KW
 
 Non-secret provider configuration remains in `llm-config.json` and integration status is derived from the secure in-memory snapshot. Environment-variable fallbacks remain supported and are not migrated because they are deployment-owned configuration rather than UI-owned persisted values.
 
+`llm-config.json` is scrubbed of legacy plaintext `apiKey` fields on **both** the read and the write boundary, so a pre-`SecretStore` data directory can never feed a plaintext credential to the model builders and can never have one written back. Key resolution reads the secret store only; there is no caller-supplied or on-disk fallback. Moving a legacy value into the encrypted store is owned exclusively by the migration described below, which reads the file directly instead of through the config module.
+
 ## Standalone encrypted store
 
 `HUABU_SECRET_KEY` must be canonical Base64 encoding of exactly 32 random bytes. It is used directly as the AES-256 key; each credential entry receives a new random 12-byte IV and uses its stable secret ID as additional authenticated data. The file records its version, algorithm, non-secret key fingerprint, IV, authentication tag, and ciphertext for each entry.
