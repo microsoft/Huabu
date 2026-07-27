@@ -91,6 +91,10 @@ import { CanvasConflictError } from '../api/canvas';
 import { toast, dismissToast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
+import {
+  resumeHeightCommits,
+  suspendHeightCommits,
+} from '../components/Nodes/shared/height/commitSuspension';
 import { copyCanvasClipboard } from '../utils/io/clipboard';
 import { nodesToPlainText } from '../utils/io/nodeToPlainText';
 
@@ -2322,6 +2326,9 @@ const useCanvasStore = create<RFState>()(
       // Snapshot the true pre-drag positions before any intermediate
       // position updates are applied by ReactFlow.
       get().beginGesture('SET_NODE_GEOMETRY');
+      // A height correction landing mid-drag would move geometry under
+      // the user's hand. Hold them until the gesture settles.
+      suspendHeightCommits();
 
       // Record the pre-drag positions of the dragged nodes so
       // `onNodeDragStop` can tell whether the gesture actually moved
@@ -2348,6 +2355,7 @@ const useCanvasStore = create<RFState>()(
 
     onNodeResizeStart: () => {
       get().beginGesture('SET_NODE_GEOMETRY');
+      suspendHeightCommits();
     },
 
     onNodeDrag: (_event, draggedNode, draggedNodes) => {
@@ -2689,6 +2697,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     onNodeDragStop: (_event, _node, draggedNodes) => {
+      resumeHeightCommits();
       // Cancel any pending preview computation — the drag is over.
       if (_dragPreviewRafId !== null) {
         cancelAnimationFrame(_dragPreviewRafId);

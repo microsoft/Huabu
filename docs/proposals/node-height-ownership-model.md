@@ -247,8 +247,14 @@ Crucially, `APPLY_MEASURED_HEIGHT` is **not** a structure save. See [D9](#d9--de
 
 A singleton commit queue applies two gates before dispatching:
 
-1. **Threshold.** Discard when `|next - current| <= 2`, after quantizing the proposal (see D9). Kills sub-pixel `ResizeObserver` churn.
+1. **No-op suppression.** Discard when the proposal resolves to the layout height the node already has, _and_ the stored hint already carries the proposal's key. Kills sub-pixel `ResizeObserver` churn.
 2. **Gesture suspension.** While a zoom, pan, drag, or resize gesture is active, corrections accumulate in a pending map instead of dispatching. They flush once on settle. This alone removes mid-gesture movement even when a measurement is late.
+
+Gate 1's comparison is **exact**, not tolerance-based. An earlier revision specified `|next - current| <= 2`; implementing it showed that to be dead code, because the comparison happens after the 4 px quantization in `intrinsicToLayoutHeight` and no difference smaller than one step can survive to be compared. Quantization already _is_ the tolerance; a second one would only be a place for the two numbers to disagree.
+
+The second half of gate 1 is not optional. Geometry settling is insufficient on its own: content that changes without changing its height would leave the stored hint pointing at the old content, so the node would report `stale` and be re-measured on every load forever. The commit has to land to let provenance catch up, even when no pixel moves.
+
+Both gates are evaluated **at flush time against the live store**, never at enqueue time. A proposal held through a gesture may describe a node the user has since pinned, resized, or deleted.
 
 Gate 2 is what makes measurement latency invisible; gate 1 is what makes it cheap. Neither reduces the _number_ of corrections — that is Bar B's job, and it belongs to prewarming.
 

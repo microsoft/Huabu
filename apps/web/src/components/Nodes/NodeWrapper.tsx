@@ -29,6 +29,7 @@ import { cn } from '@/components/Common/cn.ts';
 import { Loading } from '@/components/Common/Loading';
 import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
+import { resumeHeightCommits } from '@/components/Nodes/shared/height/commitSuspension';
 import { NodeFloatingToolbar } from '@/components/Panels/Canvas/FloatingToolbars/NodeFloatingToolbar.tsx';
 import {
   AI_BADGE_MIN_SCREEN_WIDTH,
@@ -522,13 +523,17 @@ export const NodeWrapper = memo(
           {
             nodeId: id,
             size: resizeEndClearHeight
-              ? { width: finalSize.width, height: undefined }
+              ? { width: finalSize.width, height: 'auto' }
               : finalSize,
             position: positionChanged ? finalLocalPos : undefined,
           },
         ]);
 
         endSnapSession();
+        // Paired with the `suspendHeightCommits` in `onNodeResizeStart`.
+        // Released after the geometry commit so a queued correction is
+        // evaluated against the node's final width.
+        resumeHeightCommits();
       },
       [
         endResizePreview,

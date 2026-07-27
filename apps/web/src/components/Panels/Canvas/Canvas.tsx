@@ -42,6 +42,10 @@ import { NodeRefNode } from '@/components/Nodes/nodeRef/NodeRefNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
 import { OfficeNode } from '@/components/Nodes/office/OfficeNode';
 import { PDFNode } from '@/components/Nodes/pdf/PDFNode';
+import {
+  resumeHeightCommits,
+  suspendHeightCommits,
+} from '@/components/Nodes/shared/height/commitSuspension';
 import { TextNode } from '@/components/Nodes/text/TextNode';
 import {
   uploadFileToNodeInput,
@@ -1286,7 +1290,14 @@ export const Canvas: React.FC<CanvasProps> = ({
           setRfInstance(instance);
           fitInitialViewport(instance);
         }}
+        onMoveStart={() => {
+          // Pan and zoom both arrive here. A height correction committed
+          // mid-gesture would resize a node the user is moving past, so
+          // corrections queue up and land once the viewport settles.
+          suspendHeightCommits();
+        }}
         onMoveEnd={(_event, viewport) => {
+          resumeHeightCommits();
           // Mirror pan/zoom into localStorage (per canvas) so browser and
           // desktop restarts restore the same view. Does NOT participate in
           // the structure autosave.

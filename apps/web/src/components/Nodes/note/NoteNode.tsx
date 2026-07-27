@@ -23,11 +23,14 @@ import { isMac } from '@/utils/platform';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { useTrackNoteFixedHeight } from './heightMemory';
+import {
+  cancelMeasuredHeight,
+  proposeMeasuredHeight,
+} from '../shared/height/commitQueue';
 import { useHeightMode } from '../shared/height/useHeightMode';
 import { useDeferredHydration } from '../shared/nodeHydrationScheduler';
 
 import type { CanvasNoteNodeData } from '../types';
-import type { CanvasNodeId } from '@sediment/shared';
 
 export type NoteNodeType = Node<CanvasNoteNodeData, 'note'>;
 
@@ -58,7 +61,6 @@ export const NoteNode = memo(
     const { t } = useTranslation();
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
-    const applyMeasuredHeights = useCanvasStore((s) => s.applyMeasuredHeights);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const moveNoteBlockIntoNote = useCanvasStore(
       (s) => s.moveNoteBlockIntoNote,
@@ -226,28 +228,24 @@ export const NoteNode = memo(
     const isTruncated =
       contentHeight > 0 && hostHeight > 0 && contentHeight - hostHeight > 1;
 
-    // Report the measured intrinsic height as a *proposal*. The engine
-    // owns the conversion to a layout height and the write to
-    // `style.height`; nothing here sizes the node.
-    //
-    // Gated on a >1px delta to keep sub-pixel ResizeObserver jitter out of
-    // the store. Suspending these commits during gestures, and coalescing
-    // them across nodes, is the commit queue's job and lands next.
+    // Report the measured intrinsic height as a *proposal*. The queue
+    // decides whether it is worth committing and when; the engine owns
+    // the conversion to a layout height and the write to `style.height`.
+    // Nothing here sizes the node.
     useEffect(() => {
       if (contentHeight <= 0) return;
       if (isFixedHeight) return;
-      const stored = data.autoHeight;
-      if (stored && Math.abs(stored.intrinsicHeight - contentHeight) <= 1) {
-        return;
-      }
-      applyMeasuredHeights([
-        {
-          nodeId: id as CanvasNodeId,
-          intrinsicHeight: contentHeight,
-          measuredFor: autoHeightKey({ data } as unknown as Node),
-        },
-      ]);
-    }, [applyMeasuredHeights, contentHeight, data, id, isFixedHeight]);
+      proposeMeasuredHeight({
+        nodeId: id,
+        intrinsicHeight: contentHeight,
+        measuredFor: autoHeightKey({ data } as unknown as Node),
+      });
+    }, [contentHeight, data, id, isFixedHeight]);
+
+    // A pending proposal for an unmounting node describes a measurement
+    // nobody is waiting for. Dropping it also keeps a virtualization
+    // churn from flushing stale entries after the node is gone.
+    useEffect(() => () => cancelMeasuredHeight(id), [id]);
 
     // Markdown file missing on disk + no in-memory fallback → replace
     // the editor with a full-card placeholder.

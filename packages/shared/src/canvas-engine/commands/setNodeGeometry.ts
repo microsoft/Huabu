@@ -138,16 +138,19 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
           updated = materializeAutoHeight(updated);
         }
 
-        // Track the parent for a post-commit refit only when the child's
-        // height went back to content-driven and the parent frame's
-        // sizing policy opts into hug. The materialized height above is a
-        // cached measurement, not a fresh one, so the DOM may still settle
-        // on a different number for content edited since. Otherwise the
-        // executor's sync `fitFrames` pass is sufficient (or, for
-        // `sizing: 'manual'` parents, no refit at all — the user pinned
-        // that size deliberately).
+        // Track the parent for a *deferred* refit only for types whose
+        // height is genuinely unknown until the next render (`text`,
+        // `question`). A materializing type already carries a concrete
+        // height at this point, so its parent fits synchronously through
+        // `affectedFrameIds` below — there is no intermediate frame in
+        // which the note and its frame disagree.
+        //
+        // The parent must also opt into hug sizing; for `sizing: 'manual'`
+        // parents there is no refit at all, since the user pinned that
+        // size deliberately.
         if (
           wantsAutoHeight &&
+          !materializes &&
           updated.parentId &&
           !resizedFrameIds.has(updated.parentId) &&
           getFrameSizing(state.nodes.find((n) => n.id === updated.parentId)) ===
