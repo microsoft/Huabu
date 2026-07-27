@@ -225,18 +225,21 @@ export const NoteNode = memo(
     // the conversion to a layout height and the write to `style.height`.
     // Nothing here sizes the node.
     //
-    // Reported in fixed mode too. The hint describes the content, not who
-    // owns the box, and recording it is what lets a later switch to auto
-    // land on the right height in one step rather than collapsing to the
-    // policy minimum and expanding.
+    // Only in auto mode. A pinned note renders inside a box the user
+    // chose, and a measurement taken there cannot be trusted as the
+    // content's intrinsic height — worse, a wrong hint is
+    // self-confirming, because materializing it produces exactly the
+    // height the next measurement would be compared against.
+    // `setNoteHeightMode` measures offscreen instead when it needs one.
     useEffect(() => {
       if (contentHeight <= 0) return;
+      if (isFixedHeight) return;
       proposeMeasuredHeight({
         nodeId: id,
         intrinsicHeight: contentHeight,
         measuredFor: autoHeightKey({ data } as unknown as Node),
       });
-    }, [contentHeight, data, id]);
+    }, [contentHeight, data, id, isFixedHeight]);
 
     // A pending proposal for an unmounting node describes a measurement
     // nobody is waiting for. Dropping it also keeps a virtualization

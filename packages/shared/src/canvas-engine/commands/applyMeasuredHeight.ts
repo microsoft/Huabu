@@ -24,7 +24,7 @@
 
 import { noop, type CommandDefinition } from './types.js';
 import { intrinsicToLayoutHeight } from '../height/compute.js';
-import { getHeightPolicy, resolveHeightMode } from '../height/policy.js';
+import { resolveHeightMode } from '../height/policy.js';
 
 import type { CanvasCommand } from '../../index.js';
 import type { AutoHeightHint } from '../../types/canvas/node.js';
@@ -52,9 +52,10 @@ const applyMeasuredHeight: CommandDefinition<Cmd> = {
       const update = updates.get(node.id);
       if (!update) return node;
 
-      // A type that never auto-sizes has no use for a content
-      // measurement. Dropping it is correct, not an error.
-      if (getHeightPolicy(node.type).kind !== 'toggleable') return node;
+      // A measurement that lands after the user pinned the node, or on a
+      // type that never auto-sizes, describes a state that no longer
+      // exists. Dropping it is correct, not an error.
+      if (resolveHeightMode(node) !== 'auto') return node;
       if (
         !Number.isFinite(update.intrinsicHeight) ||
         update.intrinsicHeight <= 0
@@ -67,16 +68,6 @@ const applyMeasuredHeight: CommandDefinition<Cmd> = {
         measuredFor: update.measuredFor,
         ...(update.provisional ? { provisional: true } : {}),
       };
-
-      // A pinned node records the hint but keeps its geometry: the
-      // measurement describes the content, the user owns the box. The
-      // hint is what makes a later switch to auto land on the right
-      // height in one step instead of collapsing first.
-      if (resolveHeightMode(node) !== 'auto') {
-        if (isSameHint(node, hint)) return node;
-        changed = true;
-        return { ...node, data: { ...node.data, autoHeight: hint } };
-      }
 
       const style = (node.style ?? {}) as Record<string, unknown>;
       const width = typeof style.width === 'number' ? style.width : undefined;

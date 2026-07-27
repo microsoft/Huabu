@@ -63,6 +63,7 @@ import {
 import { i18n } from '@/i18n';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { measureMissingAutoHeights } from './canvasStore/height/measureMissingAutoHeights';
 import { createIntentActionWindow } from './canvasStore/intentActionWindow';
 import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
@@ -110,6 +111,7 @@ import type {
   CanvasCommandType,
   CanvasExecution,
   CanvasExecutionSource,
+  CanvasNodeId,
   CanvasNodeMeasuredHeightUpdate,
   CanvasNodeType,
   CanvasViewport,
@@ -3285,17 +3287,50 @@ const useCanvasStore = create<RFState>()(
       }
 
       if (items.length === 0) return;
-      // SET_NODE_GEOMETRY uses snapshot:'caller'; open a gesture so the
-      // batch is captured as one undo entry without warnings.
+
+      // Fixed → auto hands the height back to the renderer, which needs a
+      // measurement to hand back *to*. A pinned note has none: it renders
+      // inside a box the user chose, so nothing it reports there is a
+      // trustworthy intrinsic height. Measuring offscreen is exact and
+      // works even for a note that is zoomed out far enough never to have
+      // hydrated.
       //
-      // Fixed → auto hands the height back to the renderer. The engine
-      // materializes a concrete number from the note's stored measurement
-      // hint immediately, so the node never goes through an undefined
-      // height; it also emits a `deferredFitFrameIds` post-effect so the
-      // parent frame refits once the editor has reflowed and confirmed
-      // the cached number.
-      get().beginGesture('SET_NODE_GEOMETRY');
-      get().setNodeGeometry(items);
+      // The measurement and the toggle then land in one executor batch,
+      // so the node goes straight to its content height instead of
+      // collapsing to the policy minimum and expanding a frame later.
+      // Notes whose hint is already current skip the measurement.
+      void (async () => {
+        const measurements = await measureMissingAutoHeights(
+          mode === 'auto' ? items.map((item) => item.nodeId) : [],
+          get,
+        );
+
+        // SET_NODE_GEOMETRY uses snapshot:'caller'; open a gesture so the
+        // batch is captured as one undo entry without warnings. The
+        // measurement rides the same batch, so undo restores the pinned
+        // height in one step.
+        get().beginGesture('SET_NODE_GEOMETRY');
+        get().executeCommands(
+          [
+            {
+              type: 'SET_NODE_GEOMETRY',
+              items: items.map((item) => ({
+                nodeId: item.nodeId as CanvasNodeId,
+                size: item.size,
+              })),
+            },
+            ...(measurements.length > 0
+              ? [
+                  {
+                    type: 'APPLY_MEASURED_HEIGHT' as const,
+                    items: measurements,
+                  },
+                ]
+              : []),
+          ],
+          'ui',
+        );
+      })();
     },
 
     applyMeasuredHeights: (items) => {

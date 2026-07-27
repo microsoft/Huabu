@@ -99,9 +99,10 @@ describe('height commit queue — threshold', () => {
     expect(applyMeasuredHeights).toHaveBeenCalledTimes(1);
   });
 
-  it('still records a measurement for a node the user pinned mid-flight', () => {
-    // The hint describes the content, not who owns the box. Recording it
-    // is what lets a later switch to auto land in one step.
+  it('skips a node the user pinned while the measurement was in flight', () => {
+    // Nothing measured inside a box the user chose is a trustworthy
+    // intrinsic height. `setNoteHeightMode` measures offscreen when a
+    // pinned note needs one.
     proposeMeasuredHeight({
       nodeId: 'n1',
       intrinsicHeight: 400,
@@ -109,9 +110,7 @@ describe('height commit queue — threshold', () => {
     });
     storeNodes = [note({ data: { type: 'note', heightMode: 'fixed' } })];
     __flushHeightCommitsNow();
-    expect(applyMeasuredHeights).toHaveBeenCalledWith([
-      { nodeId: 'n1', intrinsicHeight: 400, measuredFor: 'k1' },
-    ]);
+    expect(applyMeasuredHeights).not.toHaveBeenCalled();
   });
 
   it('drops a measurement for a type that never auto-sizes', () => {

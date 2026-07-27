@@ -188,24 +188,24 @@ describe('APPLY_MEASURED_HEIGHT', () => {
     expect(writeResult.snapshotNeeded).toBe(false);
   });
 
-  it('records the hint on a pinned note without touching its geometry', () => {
-    // This is what makes a later switch to auto land in one step: the
-    // pinned note already knows what its content measures.
+  it('drops a measurement that lands after the user pinned the node', () => {
+    // Nothing measured inside a box the user chose is a trustworthy
+    // intrinsic height, and a wrong hint would be self-confirming.
+    // `setNoteHeightMode` measures offscreen when it needs one.
     const pinned = note('n1', {
       style: { width: 400, height: 700 },
       data: { type: 'note', content: CONTENT, heightMode: 'fixed' },
     } as Partial<CanvasNode>);
+    const start = [pinned];
 
     const { writeResult } = run(
       [{ type: 'APPLY_MEASURED_HEIGHT', items: [measurement] }],
-      [pinned],
+      start,
     );
 
+    expect(writeResult.nodes).toBe(start);
     expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(700);
-    expect(dataOf(writeResult.nodes, 'n1').autoHeight).toEqual({
-      intrinsicHeight: 260,
-      measuredFor: KEY,
-    });
+    expect(dataOf(writeResult.nodes, 'n1').autoHeight).toBeUndefined();
   });
 
   it('ignores a type that never auto-sizes', () => {
@@ -215,6 +215,33 @@ describe('APPLY_MEASURED_HEIGHT', () => {
       start,
     );
     expect(writeResult.nodes).toBe(start);
+  });
+
+  it('lands the toggle and the measurement in one batch', () => {
+    // What `setNoteHeightMode` emits for fixed → auto: the geometry
+    // command hands ownership back and materializes the policy minimum,
+    // then the measurement in the same batch takes it to the real
+    // height — so the node never paints collapsed.
+    const pinned = note('n1', {
+      style: { width: 400, height: 700 },
+      data: { type: 'note', content: CONTENT, heightMode: 'fixed' },
+    } as Partial<CanvasNode>);
+
+    const { writeResult } = run(
+      [
+        {
+          type: 'SET_NODE_GEOMETRY',
+          items: [
+            { nodeId: 'n1' as never, size: { width: 400, height: 'auto' } },
+          ],
+        },
+        { type: 'APPLY_MEASURED_HEIGHT', items: [measurement] },
+      ],
+      [pinned],
+    );
+
+    expect(dataOf(writeResult.nodes, 'n1').heightMode).toBe('auto');
+    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(268);
   });
 
   it('reuses node references for an unchanged re-measurement', () => {
