@@ -4,6 +4,8 @@ import { ChevronsDown, Fullscreen } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { autoHeightKey } from '@sediment/shared/canvas-engine';
+
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Loading } from '@/components/Common/Loading';
 import { MilkdownPreview } from '@/components/Milkdown';
@@ -20,11 +22,12 @@ import { isMac } from '@/utils/platform';
 
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
-import { NOTE_AUTO_HEIGHT_MIN } from './autoHeight';
 import { useTrackNoteFixedHeight } from './heightMemory';
+import { useHeightMode } from '../shared/height/useHeightMode';
 import { useDeferredHydration } from '../shared/nodeHydrationScheduler';
 
 import type { CanvasNoteNodeData } from '../types';
+import type { CanvasNodeId } from '@sediment/shared';
 
 export type NoteNodeType = Node<CanvasNoteNodeData, 'note'>;
 
@@ -55,7 +58,7 @@ export const NoteNode = memo(
     const { t } = useTranslation();
     const openExpanded = useCanvasStore((s) => s.openExpanded);
     const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
-    const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
+    const applyMeasuredHeights = useCanvasStore((s) => s.applyMeasuredHeights);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const moveNoteBlockIntoNote = useCanvasStore(
       (s) => s.moveNoteBlockIntoNote,
@@ -74,14 +77,14 @@ export const NoteNode = memo(
     const isMinimalLOD = useNodeLOD(id, 'note') === 'minimal';
     const viewportZoom = useStore((s) => s.transform[2]);
     const counterZoomScale = Math.min(3, Math.max(1, 1 / viewportZoom));
-    const hasFixedHeight = useStore(
-      (s) =>
-        (s.nodeLookup.get(id)?.style?.height as number | undefined) !==
-        undefined,
-    );
+    // Who owns the height — never inferred from whether a number is
+    // present, because after the ownership model an auto note carries one
+    // too. The body renders identically either way; this only drives the
+    // toggle's direction.
+    const isFixedHeight = useHeightMode(id) === 'fixed';
 
     // The wrapper hosts the height-measurement infrastructure and the
-    // fixed/auto layout shell; `MilkdownPreview` mounts the editor
+    // layout shell; `MilkdownPreview` mounts the editor
     // directly into it (light DOM). The ResizeObserver / MutationObserver
     // pair below re-attaches when Milkdown (re)mounts its content.
     const previewHostRef = useRef<HTMLDivElement>(null);
@@ -90,25 +93,22 @@ export const NoteNode = memo(
     // Both are kept in state so the truncation indicator re-evaluates when
     // either the content grows/shrinks or the user resizes the node.
     //
-    // `contentHeight` is seeded from the persisted `data.measuredHeight`
-    // hint so an auto-height note paints at its real size on the very
-    // first frame after mount — without the seed, the node would briefly
-    // collapse to `NOTE_AUTO_HEIGHT_MIN` while waiting for the editor to
-    // mount and the ResizeObserver to fire (visible flicker during
-    // virtualized remounts, zoom changes, and page reloads).
-    const seededHeight =
-      typeof data.measuredHeight === 'number' && data.measuredHeight > 0
-        ? data.measuredHeight
-        : 0;
-    const [contentHeight, setContentHeight] = useState(seededHeight);
+    // `contentHeight` is the node's *intrinsic* height: measured at the
+    // type's reference width, before the node's own scaling. It no longer
+    // sizes anything — it is a proposal, committed through
+    // `applyMeasuredHeights` and materialized back into `style.height` by
+    // the engine. Starting at 0 is safe precisely because of that: the
+    // store already holds a usable height before this component mounts.
+    const [contentHeight, setContentHeight] = useState(0);
     const [hostHeight, setHostHeight] = useState(0);
 
     // Defer the (expensive) Milkdown editor mount so a canvas full of
     // notes doesn't build every Crepe/ProseMirror instance inside one
     // blocking React commit on load. Until granted a turn by the shared
-    // scheduler we render a lightweight spinner placeholder, sized by
-    // the persisted `measuredHeight` seed so the node keeps its real
-    // footprint. The upgrade to the real editor is visually identical —
+    // scheduler we render a lightweight spinner placeholder. The node
+    // keeps its real footprint throughout, because the footprint comes
+    // from `style.height` rather than from anything rendered here. The
+    // upgrade to the real editor is visually identical —
     // only the timing of the build work changes. The `isMinimalLOD`
     // gate skips the queue entirely while the node is a semantic-zoom
     // placeholder; once zoom crosses back into full LOD the hook
@@ -132,9 +132,9 @@ export const NoteNode = memo(
     const handleToggleAutoHeight = useCallback(
       (e: React.MouseEvent) => {
         e.stopPropagation();
-        setNoteHeightMode([id], hasFixedHeight ? 'auto' : 'fixed');
+        setNoteHeightMode([id], isFixedHeight ? 'auto' : 'fixed');
       },
-      [hasFixedHeight, id, setNoteHeightMode],
+      [isFixedHeight, id, setNoteHeightMode],
     );
 
     const NoteActions = (
@@ -163,9 +163,9 @@ export const NoteNode = memo(
       const host = previewHostRef.current;
       if (!host) return;
       // While the spinner placeholder is showing there is no `.ProseMirror`
-      // to measure; skip entirely so we never persist the placeholder's
-      // height as the note's `measuredHeight`. The seeded `contentHeight`
-      // keeps the footprint correct until the real editor mounts.
+      // to measure; skip entirely so we never report the placeholder's
+      // height as the note's content height. The node keeps the footprint
+      // already stored in `style.height` until the real editor mounts.
       if (!hydrated) return;
 
       const measure = () => {
@@ -219,29 +219,35 @@ export const NoteNode = memo(
       };
     }, [hydrated]);
 
-    // Truncation only matters in fixed-height mode. Both heights are state,
-    // so this re-evaluates when the user resizes the node or the content
-    // reflows inside the editor.
+    // Truncation is no longer conditional on fixed mode. In auto mode it
+    // surfaces the window between "the content grew" and "the correction
+    // committed", which is the honest signal: the node really is showing
+    // less than it holds right now.
     const isTruncated =
-      hasFixedHeight &&
-      contentHeight > 0 &&
-      hostHeight > 0 &&
-      contentHeight - hostHeight > 1;
+      contentHeight > 0 && hostHeight > 0 && contentHeight - hostHeight > 1;
 
-    // Persist the measured intrinsic content height back into node data so
-    // the next mount (virtualization remount, zoom-triggered re-render,
-    // page reload) can seed `contentHeight` immediately and skip the
-    // first-frame collapse to `NOTE_AUTO_HEIGHT_MIN`.
+    // Report the measured intrinsic height as a *proposal*. The engine
+    // owns the conversion to a layout height and the write to
+    // `style.height`; nothing here sizes the node.
     //
-    // Silent patch (no undo entry) and gated on a >1px delta to avoid
-    // spamming the store with sub-pixel jitter from the ResizeObserver.
+    // Gated on a >1px delta to keep sub-pixel ResizeObserver jitter out of
+    // the store. Suspending these commits during gestures, and coalescing
+    // them across nodes, is the commit queue's job and lands next.
     useEffect(() => {
       if (contentHeight <= 0) return;
-      const persisted =
-        typeof data.measuredHeight === 'number' ? data.measuredHeight : 0;
-      if (Math.abs(persisted - contentHeight) <= 1) return;
-      patchNodeSilent(id, { measuredHeight: contentHeight });
-    }, [contentHeight, data.measuredHeight, id, patchNodeSilent]);
+      if (isFixedHeight) return;
+      const stored = data.autoHeight;
+      if (stored && Math.abs(stored.intrinsicHeight - contentHeight) <= 1) {
+        return;
+      }
+      applyMeasuredHeights([
+        {
+          nodeId: id as CanvasNodeId,
+          intrinsicHeight: contentHeight,
+          measuredFor: autoHeightKey({ data } as unknown as Node),
+        },
+      ]);
+    }, [applyMeasuredHeights, contentHeight, data, id, isFixedHeight]);
 
     // Markdown file missing on disk + no in-memory fallback → replace
     // the editor with a full-card placeholder.
@@ -408,44 +414,20 @@ export const NoteNode = memo(
           <>
             <div
               className={clsx(
-                'relative w-full',
+                'relative h-full w-full overflow-hidden',
                 !hasAccent && 'bg-surface',
-                hasFixedHeight && 'h-full overflow-hidden',
               )}
               onDragEnter={handleNoteDragEnter}
               onDragOver={handleNoteDragOver}
               onDragLeave={handleNoteDragLeave}
               onDrop={handleNoteDrop}
-              // In auto-height mode the inner content is visually scaled via
-              // CSS `transform: scale(scale)`, but transforms do NOT affect
-              // layout — the parent would only reserve the *unscaled* height
-              // and clip the bottom of the (visually larger) content. Reserve
-              // the scaled height explicitly so the node grows to fit.
-              //
-              // We also pin a `minHeight` from the very first paint (even
-              // before `contentHeight` has been measured) so the node never
-              // visibly collapses from the host's intrinsic min-height down
-              // to a smaller measured content height once the
-              // ResizeObserver fires.
-              style={
-                !hasFixedHeight
-                  ? {
-                      minHeight: NOTE_AUTO_HEIGHT_MIN,
-                      height:
-                        contentHeight > 0
-                          ? Math.max(contentHeight, NOTE_AUTO_HEIGHT_MIN) *
-                            scale
-                          : undefined,
-                    }
-                  : undefined
-              }
             >
               <div
                 style={{
                   transform: `scale(${scale})`,
                   transformOrigin: 'top left',
                   width: `${100 / scale}%`,
-                  ...(hasFixedHeight ? { height: `${100 / scale}%` } : {}),
+                  height: `${100 / scale}%`,
                 }}
               >
                 {/*
@@ -460,9 +442,8 @@ export const NoteNode = memo(
                 <div
                   ref={previewHostRef}
                   className={clsx(
-                    'rounded p-2',
+                    'flex h-full flex-col rounded p-2',
                     !hasAccent && 'bg-surface',
-                    hasFixedHeight ? 'flex h-full flex-col' : 'flex flex-col',
                   )}
                 >
                   {hydrated ? (
@@ -473,30 +454,12 @@ export const NoteNode = memo(
                     />
                   ) : (
                     // Lightweight placeholder while the editor mount is
-                    // deferred. Reuses the same skeleton shimmer the PDF
-                    // node shows while loading.
-                    //
-                    // Centering target differs by height mode: in fixed
-                    // mode the host already constrains to the node's visible
-                    // height, so fill it (`h-full`) and center within that
-                    // visible range. In auto mode there is no fixed height,
-                    // so seed `minHeight` from the persisted content height
-                    // to keep the node's footprint and center within it.
+                    // deferred. The host already constrains to the node's
+                    // layout height in both modes, so filling it is enough —
+                    // the footprint comes from `style.height`, never from
+                    // anything measured here.
                     <div
-                      className={clsx(
-                        'flex w-full items-center justify-center',
-                        hasFixedHeight && 'h-full',
-                      )}
-                      style={
-                        hasFixedHeight
-                          ? undefined
-                          : {
-                              minHeight:
-                                seededHeight > 0
-                                  ? seededHeight
-                                  : NOTE_AUTO_HEIGHT_MIN,
-                            }
-                      }
+                      className="flex h-full w-full items-center justify-center"
                       aria-hidden
                     >
                       {/* No shimmer in minimal LOD — the content is

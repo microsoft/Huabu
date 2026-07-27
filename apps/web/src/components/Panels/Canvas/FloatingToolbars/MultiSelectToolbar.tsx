@@ -11,6 +11,7 @@ import {
   getSelectionBounds,
   getNodeSize,
   isAlwaysAutoHeightNodeType,
+  resolveHeightMode,
 } from '@sediment/shared/canvas-engine';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
@@ -224,11 +225,12 @@ export const MultiSelectToolbar = () => {
   const noteAutoState = useMemo(() => {
     if (selectedNodes.length === 0) return null;
     if (!selectedNodes.every((n) => n.type === 'note')) return null;
-    const firstAuto =
-      (selectedNodes[0].style?.height as number | undefined) === undefined;
+    // Read ownership through the shared resolver: an auto note now
+    // carries a materialized `style.height`, so the presence of a number
+    // no longer distinguishes the two modes.
+    const firstAuto = resolveHeightMode(selectedNodes[0]) === 'auto';
     const allSame = selectedNodes.every(
-      (n) =>
-        ((n.style?.height as number | undefined) === undefined) === firstAuto,
+      (n) => (resolveHeightMode(n) === 'auto') === firstAuto,
     );
     return allSame ? { active: firstAuto } : null;
   }, [selectedNodes]);

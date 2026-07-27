@@ -1,20 +1,15 @@
 /**
- * @file Note-node auto-height constants and helpers.
+ * @file Note-node fixed-height seeding constants and helpers.
  *
  * Shared between `NoteNode` (corner "show all content" affordance) and
  * `NodeFloatingToolbar` (toolbar auto/fixed toggle). Keeping the seed
  * logic in one place ensures the two entry points stay in lock-step —
  * a previous duplication had the toolbar silently diverge from the node.
+ *
+ * The auto-height *minimum* is not here: it belongs to the shared height
+ * policy (`canvas-engine/height/policy.ts`), because the headless engine
+ * has to apply the identical floor when it materializes a height.
  */
-
-/**
- * Minimum visible height (px) for a note in auto-height mode. Applied on
- * the outer container so the node has a stable size from the very first
- * paint — without this, a brand-new note would briefly render at the
- * shadow host's intrinsic min-height and then visibly collapse to its
- * measured (small) content height once `ResizeObserver` fires.
- */
-export const NOTE_AUTO_HEIGHT_MIN = 50;
 
 /**
  * Default height (px) used when the user toggles a previously auto-sized

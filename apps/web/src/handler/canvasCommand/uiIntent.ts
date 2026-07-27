@@ -197,9 +197,10 @@ export type CanvasUiIntent =
       type: 'RESIZE_NODE';
       items: Array<{
         nodeId: string;
-        // `height` is optional: omit (or pass undefined) to clear any
-        // explicit height and let the node fall back to auto-sizing.
-        size?: { width: number; height?: number };
+        // `height: 'auto'` hands ownership back to the renderer, which
+        // materializes a concrete number from the node's stored
+        // measurement hint. Omitting it means the same thing.
+        size?: { width: number; height?: number | 'auto' };
         position?: { x: number; y: number };
       }>;
       /**

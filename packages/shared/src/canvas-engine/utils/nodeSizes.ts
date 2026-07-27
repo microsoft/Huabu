@@ -26,7 +26,7 @@ import type { Node } from '@xyflow/react';
 const DEFAULT_SIZES: Record<string, NodeSize> = {
   text: { width: 200 },
   // Note nodes auto-size by content height but have a minimum intrinsic
-  // height of ~50px (NOTE_AUTO_HEIGHT_MIN) plus borders/padding when empty.
+  // height of ~50px (the note policy's `minIntrinsicHeight`) plus borders/padding when empty.
   // Use 56px as a nominal default for layout calculations (matches the
   // minimum rendered height of an empty note at default zoom).
   note: { width: 400, height: 56 },

@@ -526,9 +526,10 @@ type RFState = {
   setNodeGeometry: (
     items: Array<{
       nodeId: string;
-      // `height` is optional: pass undefined to clear an explicit height
-      // and revert the node to content-driven auto-sizing.
-      size?: { width: number; height?: number };
+      // `height: 'auto'` hands ownership back to the renderer; the
+      // engine materializes a concrete number from the node's stored
+      // measurement hint. Omitting it means the same thing.
+      size?: { width: number; height?: number | 'auto' };
       position?: { x: number; y: number };
     }>,
   ) => void;
@@ -3200,7 +3201,7 @@ const useCanvasStore = create<RFState>()(
       const { nodes } = get();
       const items: Array<{
         nodeId: string;
-        size: { width: number; height?: number };
+        size: { width: number; height?: number | 'auto' };
       }> = [];
 
       for (const node of nodes) {
@@ -3219,7 +3220,7 @@ const useCanvasStore = create<RFState>()(
         if (mode === 'auto') {
           items.push({
             nodeId: node.id,
-            size: { width: w, height: undefined },
+            size: { width: w, height: 'auto' },
           });
         } else {
           // Auto → fixed: seed from remembered → measured (capped) → default.
@@ -3238,12 +3239,12 @@ const useCanvasStore = create<RFState>()(
       // SET_NODE_GEOMETRY uses snapshot:'caller'; open a gesture so the
       // batch is captured as one undo entry without warnings.
       //
-      // Fixed → auto clears the explicit height; the new content height
-      // is only known after the next render cycle (editor reflow +
-      // ReactFlow ResizeObserver). The `SET_NODE_GEOMETRY` handler
-      // detects the cleared height and emits a `deferredFitFrameIds`
-      // post-effect, which `runWebPostEffects` schedules for double-rAF
-      // refit — so this action doesn't need its own timing dance.
+      // Fixed → auto hands the height back to the renderer. The engine
+      // materializes a concrete number from the note's stored measurement
+      // hint immediately, so the node never goes through an undefined
+      // height; it also emits a `deferredFitFrameIds` post-effect so the
+      // parent frame refits once the editor has reflowed and confirmed
+      // the cached number.
       get().beginGesture('SET_NODE_GEOMETRY');
       get().setNodeGeometry(items);
     },

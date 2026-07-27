@@ -39,6 +39,8 @@ export type {
   NodeFontStyle,
   NodeTextDecoration,
   BaseNodeData,
+  AutoHeightHint,
+  HeightMode,
   BlockProvenance,
   DeletedBlockInfo,
   MarkdownProvenance,
