@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseDocument } from 'yaml';
 
 const FRONTMATTER_DELIMITER = '---';
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -17,20 +18,18 @@ const EXTERNAL_LINK_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
 const NON_PORTABLE_TEXT_PATTERN =
   /(?:file:\/\/|\/home\/|\/Users\/|[A-Za-z]:[\\/]|~\/)/;
 
-function parseScalar(value) {
-  const trimmed = value.trim();
-  const startsWithQuote = trimmed.startsWith('"') || trimmed.startsWith("'");
-  const endsWithQuote = trimmed.endsWith('"') || trimmed.endsWith("'");
-  if (startsWithQuote !== endsWithQuote) {
-    throw new Error('SKILL.md frontmatter contains an unterminated quote');
+function parseYamlObject(content, label) {
+  const document = parseDocument(content, { uniqueKeys: true });
+  if (document.errors.length > 0) {
+    throw new Error(
+      `${label} contains invalid YAML: ${document.errors[0].message}`,
+    );
   }
-  if (startsWithQuote && trimmed.at(0) !== trimmed.at(-1)) {
-    throw new Error('SKILL.md frontmatter contains mismatched quotes');
+  const value = document.toJS();
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must contain a YAML mapping`);
   }
-  if (startsWithQuote) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
+  return value;
 }
 
 export function parseSkillFrontmatter(content) {
@@ -45,29 +44,15 @@ export function parseSkillFrontmatter(content) {
     throw new Error('SKILL.md frontmatter is missing its closing delimiter');
   }
 
-  const values = {};
-  for (const line of lines.slice(1, closingIndex)) {
-    if (!line.trim()) continue;
-    if (line.includes('\t')) {
-      throw new Error('SKILL.md frontmatter must not contain tabs');
-    }
-    const match = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.+)$/.exec(line);
-    if (!match) {
-      throw new Error(`Unsupported SKILL.md frontmatter line: ${line}`);
-    }
-    const [, key, rawValue] = match;
-    if (Object.hasOwn(values, key)) {
-      throw new Error(`Duplicate SKILL.md frontmatter field: ${key}`);
-    }
-    values[key] = parseScalar(rawValue);
-  }
-
-  return values;
+  return parseYamlObject(
+    lines.slice(1, closingIndex).join('\n'),
+    'SKILL.md frontmatter',
+  );
 }
 
 function readManifestName(manifestContent) {
-  const match = /^name:\s*(.+?)\s*$/m.exec(manifestContent);
-  return match ? parseScalar(match[1]) : null;
+  const manifest = parseYamlObject(manifestContent, 'agentlet.yaml');
+  return typeof manifest.name === 'string' ? manifest.name : null;
 }
 
 function markdownLinks(content) {

@@ -56,12 +56,12 @@ test('accepts a portable skill package with a canonical prompt', () => {
 
 test('rejects malformed frontmatter', () => {
   const packageDir = createPackage(
-    validSkill().replace('name: example-agent', 'name:\texample-agent'),
+    validSkill().replace(
+      'name: example-agent',
+      'name: example-agent\nname: duplicate-agent',
+    ),
   );
-  assert.match(
-    validateSkillPackage(packageDir).join('\n'),
-    /must not contain tabs/,
-  );
+  assert.match(validateSkillPackage(packageDir).join('\n'), /invalid YAML/);
 });
 
 test('rejects unterminated frontmatter strings', () => {
@@ -71,10 +71,17 @@ test('rejects unterminated frontmatter strings', () => {
       'description: "Example capability',
     ),
   );
-  assert.match(
-    validateSkillPackage(packageDir).join('\n'),
-    /unterminated quote/,
+  assert.match(validateSkillPackage(packageDir).join('\n'), /invalid YAML/);
+});
+
+test('rejects invalid apostrophes in single-quoted frontmatter', () => {
+  const packageDir = createPackage(
+    validSkill().replace(
+      'description: "Example capability. Use when an example is requested. Do not use for unrelated work."',
+      "description: 'Use when asked. Don't use otherwise.'",
+    ),
   );
+  assert.match(validateSkillPackage(packageDir).join('\n'), /invalid YAML/);
 });
 
 test('rejects missing referenced files', () => {
