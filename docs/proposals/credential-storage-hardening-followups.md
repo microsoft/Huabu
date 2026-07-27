@@ -7,7 +7,7 @@ Last updated: 2026-07-27
 
 The 2026-07 credential-hardening pass fixed the fail-closed reads, OAuth logout truthfulness, and cross-write compensation in the credential subsystem ([`apps/server/src/security/`](../../apps/server/src/security/), [`apps/desktop/src/secure-secrets.ts`](../../apps/desktop/src/secure-secrets.ts)).
 
-Three items were **intentionally deferred** — each is correct-in-theory but low ROI right now. This doc keeps them visible and, more importantly, records the _trigger_ that should promote each from "deferred" to "do it", so we neither forget them nor do them prematurely.
+Three items were **intentionally deferred** — each is correct-in-theory but low ROI right now. A fourth was added later, when deleting the desktop half of the plaintext migration raised the question of whether the server half should follow. This doc keeps them visible and, more importantly, records the _trigger_ that should promote each from "deferred" to "do it", so we neither forget them nor do them prematurely.
 
 ## 1. Desktop bridge batch write is not atomic — LOW
 
@@ -42,6 +42,16 @@ Full fix: extract the pure contract — id constants, regex, `llmProviderApiKeyS
 Constraints (why it isn't just "share everything"): `@sediment/shared` is isomorphic (imported by web, zero node deps) → **no `fs` code may live there**. The two encrypted stores must **stay separate** (safeStorage opaque blob vs explicit AES-GCM formats differ). `apps/desktop` currently depends on neither `shared` nor `server`, and is compiled by plain `tsc` with no bundler, so consuming the raw-TypeScript `@sediment/shared` requires giving the desktop package a bundler first — that is the real cost.
 
 **Promote when** touching this subsystem again for any reason — fold the extraction into that change rather than adding a fourth hand-synced copy.
+
+## 4. Sunset the standalone plaintext migration — LOW
+
+[`plaintext-secret-migration.ts`](../../apps/server/src/security/plaintext-secret-migration.ts) still encrypts and scrubs legacy plaintext credentials on standalone startup, and [`secret-store.ts`](../../apps/server/src/security/secret-store.ts) refuses to boot when it detects them without a master key. Both only ever fire on data directories written before 2026-07-10; no shipped release and no container image ever produced such a directory, so the realistic population is a handful of local developer `data/` folders.
+
+Why deferred: it is now the **only** lifecycle handler for `integrations.json` and `oauth-credentials.json`. Nothing else in the codebase reads or writes those two files, so deleting the migration would leave a Tavily key, a RapidAPI key, and a Copilot refresh token sitting in cleartext on disk permanently — unread, unscrubbed, and unreported. `llm-config.json` does not have this problem: it is scrubbed on both the read and write boundary, so its legacy `apiKey` disappears on the next Settings save. Keeping the migration also costs nothing in drift risk now that the desktop copy is gone and this is the single implementation.
+
+Full fix (when we do decide to stop cleaning up pre-0.9 plaintext): do **not** delete silently. Split the detection out of the migration into a cheap field-presence check that does not depend on the `collect*` helpers, change the startup error to name the offending files and tell the operator to delete the fields and re-enter the credentials in Settings, and only then remove `migratePlaintextCredentials` and the three collectors. The startup gate is a security policy, not a migration step, and must outlive the migration.
+
+**Promote when** the migration's presence starts costing something concrete — e.g. it blocks a refactor of the secret-store initialization order, or a credential file format changes and the collectors would need updating to match.
 
 ## Not doing
 
