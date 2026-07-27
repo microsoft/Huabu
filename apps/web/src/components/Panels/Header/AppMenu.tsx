@@ -56,11 +56,15 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   const location = useLocation();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
-  const showCanvasListLink = location.pathname !== '/';
+  const showCanvasListLink = location.pathname !== '/spaces';
 
   const canChangeWorkspace = useWorkspaceStore(
     (s) => s.capabilities?.canChangeWorkspace ?? true,
   );
+  const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
+  const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
+  const onWorld =
+    worldCanvasId !== null && location.pathname === `/canvas/${worldCanvasId}`;
   const { create, openImportDialog, fileInputRef, onFileChange } =
     useCanvasActions();
   const openSettings = useSettingsUiStore((s) => s.open);
@@ -122,9 +126,16 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           </button>
         }
       >
+        {worldEnabled && worldCanvasId && !onWorld && (
+          <DropdownMenuItem
+            onClick={runAndClose(() => navigate(`/canvas/${worldCanvasId}`))}
+          >
+            {t('world.openWorld')}
+          </DropdownMenuItem>
+        )}
         {showCanvasListLink && (
           <>
-            <DropdownMenuItem onClick={runAndClose(() => navigate('/'))}>
+            <DropdownMenuItem onClick={runAndClose(() => navigate('/spaces'))}>
               {t('canvasPage.backToList')}
             </DropdownMenuItem>
             <div className="border-edge-default my-1 border-t" />

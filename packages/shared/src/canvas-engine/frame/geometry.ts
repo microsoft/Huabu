@@ -6,7 +6,7 @@
  * to the frame subsystem and intentionally omitted from the barrel.
  */
 
-import { getDescendantIds, type NestableNode } from './tree.js';
+import { getDescendantIds, type NestableNode } from '../container/tree.js';
 import { getNodeSize } from '../utils/nodeSizes.js';
 
 import type { XYPosition } from '@xyflow/react';

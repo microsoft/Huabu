@@ -1,7 +1,11 @@
 import { validateToolArguments } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
 
-import { canvasCommandsTool, inspectNodesTool } from './definitions.js';
+import {
+  canvasCommandsTool,
+  inspectNodesTool,
+  snapshotNodesTool,
+} from './definitions.js';
 
 describe('shared Zod tool schemas', () => {
   it('validate canonical canvas commands through pi-ai', () => {
@@ -91,6 +95,32 @@ describe('shared Zod tool schemas', () => {
         id: 'call-3',
         name: 'inspect_nodes',
         arguments: { ids: ['node-1'], limit: 201 },
+      }),
+    ).toThrow();
+  });
+
+  it('accepts World targets only on non-materializing read schemas', () => {
+    expect(
+      validateToolArguments(inspectNodesTool, {
+        type: 'toolCall',
+        id: 'call-world-read',
+        name: 'inspect_nodes',
+        arguments: {
+          targetCanvasId: 'canvas-source',
+          ids: ['node-1'],
+        },
+      }),
+    ).toMatchObject({ targetCanvasId: 'canvas-source' });
+
+    expect(() =>
+      validateToolArguments(snapshotNodesTool, {
+        type: 'toolCall',
+        id: 'call-world-snapshot',
+        name: 'snapshot_nodes',
+        arguments: {
+          targetCanvasId: 'canvas-source',
+          nodeIds: ['node-1'],
+        },
       }),
     ).toThrow();
   });

@@ -25,6 +25,9 @@ export const CANVAS_NODE_TYPES = [
   'audio',
   'web',
   'frame',
+  'canvasRef',
+  'frameRef',
+  'nodeRef',
   'sketch',
   'question',
 ] as const;
@@ -34,6 +37,7 @@ export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
  * Node kinds the agent is allowed to construct via `CREATE_NODES`.
  * Excludes:
  * - `sketch` — produced only by the freehand drawing tool.
+ * - `canvasRef` / `frameRef` / `nodeRef` — created only by World host operations.
  */
 export const AGENT_CREATABLE_NODE_TYPES = [
   'note',
@@ -446,6 +450,46 @@ export interface FrameNodeData extends BaseNodeData {
   sizing?: FrameSizing;
 }
 
+/** A World-owned Portal that points to an ordinary Space Canvas. */
+export interface CanvasRefNodeData extends BaseNodeData {
+  type: 'canvasRef';
+  targetCanvasId: string;
+}
+
+/** A World-owned symbolic reference to a node in an ordinary Space. */
+export interface NodeRefNodeData extends BaseNodeData {
+  type: 'nodeRef';
+  origin?: never;
+  label?: never;
+  labelSource?: never;
+  contentMissing?: never;
+  artifactMissing?: never;
+  contentDuplicate?: never;
+  duplicateFiles?: never;
+  frameSlot?: never;
+  target: {
+    canvasId: string;
+    nodeId: string;
+  };
+}
+
+/** A World-owned symbolic Container reference to a source Frame. */
+export interface FrameRefNodeData extends BaseNodeData {
+  type: 'frameRef';
+  origin?: never;
+  label?: never;
+  labelSource?: never;
+  contentMissing?: never;
+  artifactMissing?: never;
+  contentDuplicate?: never;
+  duplicateFiles?: never;
+  frameSlot?: never;
+  target: {
+    canvasId: string;
+    nodeId: string;
+  };
+}
+
 /**
  * One pen-down → pen-up trace inside a {@link SketchNodeData}.
  *
@@ -563,6 +607,9 @@ export type NodeData =
   | ImageNodeData
   | AudioNodeData
   | FrameNodeData
+  | CanvasRefNodeData
+  | FrameRefNodeData
+  | NodeRefNodeData
   | SketchNodeData
   | QuestionNodeData;
 
@@ -600,6 +647,18 @@ export function isAudioNode(data: NodeData): data is AudioNodeData {
 
 export function isFrameNode(data: NodeData): data is FrameNodeData {
   return data.type === 'frame';
+}
+
+export function isCanvasRefNode(data: NodeData): data is CanvasRefNodeData {
+  return data.type === 'canvasRef';
+}
+
+export function isNodeRefNode(data: NodeData): data is NodeRefNodeData {
+  return data.type === 'nodeRef';
+}
+
+export function isFrameRefNode(data: NodeData): data is FrameRefNodeData {
+  return data.type === 'frameRef';
 }
 
 export function isSketchNode(data: NodeData): data is SketchNodeData {

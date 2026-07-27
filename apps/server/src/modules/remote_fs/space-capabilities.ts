@@ -108,6 +108,16 @@ const COMMAND_EXAMPLES: Record<
     type: 'SET_NODE_GEOMETRY',
     items: [{ nodeId: 'node-123', position: { x: 200, y: 100 } }],
   },
+  SET_PORTAL_NODE_PINS: {
+    type: 'SET_PORTAL_NODE_PINS',
+    updates: [
+      {
+        sourceCanvasId: 'canvas-project',
+        sourceNodeIds: ['node-123'],
+        pinned: true,
+      },
+    ],
+  },
   REORDER_NODES: {
     type: 'REORDER_NODES',
     nodeIds: ['node-123'],

@@ -194,6 +194,16 @@ function SetupRoute() {
   return initialising ? <WorkspaceLoadingScreen /> : <WorkspaceSetupPage />;
 }
 
+function WorkspaceLanding() {
+  const worldEnabled = useWorkspaceStore((state) => state.worldEnabled);
+  const worldCanvasId = useWorkspaceStore((state) => state.worldCanvasId);
+  return worldEnabled && worldCanvasId ? (
+    <Navigate to={`/canvas/${worldCanvasId}`} replace />
+  ) : (
+    <Navigate to="/spaces" replace />
+  );
+}
+
 export default function App() {
   useInputModeListener();
   useDisableBrowserZoom();
@@ -226,7 +236,8 @@ export default function App() {
             {
               element: <WorkspaceGuardLayout />,
               children: [
-                { path: '/', element: <CanvasListPage /> },
+                { path: '/', element: <WorkspaceLanding /> },
+                { path: '/spaces', element: <CanvasListPage /> },
                 { path: '/canvas/:canvasId', element: <CanvasPage /> },
                 { path: '*', element: <Navigate to="/" replace /> },
               ],

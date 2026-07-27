@@ -49,6 +49,26 @@ export interface ToolDefinition extends Tool {
   executionMode?: ToolExecutionMode;
 }
 
+const targetCanvasIdSchema = Type.String({
+  pattern: '^canvas-.+$',
+  description:
+    'Optional source Space address for a cross-Space read. Available only when the conversation belongs to World, and only for a targetCanvasId exposed by a canonical canvasRef in the World outline.',
+});
+const targetCanvasIdProperty = Type.Optional(targetCanvasIdSchema);
+
+function withWorldReadTarget(schema: Tool['parameters']): Tool['parameters'] {
+  const objectSchema = schema as Tool['parameters'] & {
+    properties?: Record<string, unknown>;
+  };
+  return Type.Unsafe({
+    ...objectSchema,
+    properties: {
+      ...objectSchema.properties,
+      targetCanvasId: targetCanvasIdSchema,
+    },
+  });
+}
+
 // ==================== Web Search ====================
 
 export const webSearchParamsSchema = Type.Object({
@@ -102,22 +122,23 @@ export const webSearchTool: ToolDefinition = {
 // nodes, EdgeStyle on edges) plus derived spatial/topological
 // metadata.
 //
-// Every canvas tool is implicitly scoped to the current request's canvas
-// — there is no `canvasId` argument.
+// Every canvas tool defaults to the current request's canvas. A World-owned
+// conversation may explicitly address a source Space through targetCanvasId;
+// the executor validates it against the canonical Portal topology.
 
-export const getCanvasOutlineParamsSchema = zodToToolSchema(
-  getSpaceOutlineQueryParamsSchema,
+export const getCanvasOutlineParamsSchema = withWorldReadTarget(
+  zodToToolSchema(getSpaceOutlineQueryParamsSchema),
 );
 
 export const getCanvasOutlineTool: ToolDefinition = {
   name: 'get_space_outline',
   label: 'Get Space Outline',
-  description: `One-shot map of the whole Space. Returns JSON: { version, bbox, nodes: [{ id, type, label, filename, parentFrame?: { id, label? }, position, absolutePosition, size: { width, height }, style?, preview? }], edges: [{ id?, source, target }], spatial: { clusters: [{ frameId?, frameLabel?, nodeIds (reading-order), arrangement }] } }. Edges are topology-only here — for an edge's direction / line style / stroke / strokeWidth call \`inspect_edges\` instead. Call this once when you enter a Space to orient yourself; later, drill in with inspect_nodes / inspect_edges / read. Frame nodes are entries in \`nodes\` with type='frame' — group by \`parentFrame.id\` to recover the frame tree. Coordinates: \`position\` is parent-local (relative to \`parentFrame\`; absolute for root nodes); \`absolutePosition\` is the resolved world coordinate (read-only). Isolated nodes = all node ids minus the union of cluster nodeIds. \`preview\` and \`style\` are opt-in via the matching flags. For full content of any node, call read on the \`filename\` field ("nodes/*.md").`,
+  description: `One-shot map of the whole Space. Returns JSON: { version, bbox, nodes: [{ id, type, label, filename, parentFrame?: { id, label? }, position, absolutePosition, size: { width, height }, style?, preview?, targetCanvasId?, target? }], edges: [{ id?, source, target }], spatial: { clusters: [{ frameId?, frameLabel?, nodeIds (reading-order), arrangement }] } }. In World, canvasRef entries expose targetCanvasId and nodeRef entries expose target; pass a Portal's targetCanvasId to any read-only tool to inspect that source Space. The server rejects targets not represented by exactly one canonical Portal. Edges are topology-only here — for an edge's direction / line style / stroke / strokeWidth call \`inspect_edges\` instead. Call this once when you enter a Space to orient yourself; later, drill in with inspect_nodes / inspect_edges / read. Frame nodes are entries in \`nodes\` with type='frame' — group by \`parentFrame.id\` to recover the frame tree. Coordinates: \`position\` is parent-local (relative to \`parentFrame\`; absolute for root nodes); \`absolutePosition\` is the resolved world coordinate (read-only). Isolated nodes = all node ids minus the union of cluster nodeIds. \`preview\` and \`style\` are opt-in via the matching flags. For full content of any node, call read on the \`filename\` field ("nodes/*.md").`,
   parameters: getCanvasOutlineParamsSchema,
 };
 
-export const inspectNodesParamsSchema = zodToToolSchema(
-  inspectNodesQueryParamsSchema,
+export const inspectNodesParamsSchema = withWorldReadTarget(
+  zodToToolSchema(inspectNodesQueryParamsSchema),
 );
 
 export const inspectNodesTool: ToolDefinition = {
@@ -127,8 +148,8 @@ export const inspectNodesTool: ToolDefinition = {
   parameters: inspectNodesParamsSchema,
 };
 
-export const inspectEdgesParamsSchema = zodToToolSchema(
-  inspectEdgesQueryParamsSchema,
+export const inspectEdgesParamsSchema = withWorldReadTarget(
+  zodToToolSchema(inspectEdgesQueryParamsSchema),
 );
 
 export const inspectEdgesTool: ToolDefinition = {
@@ -150,6 +171,8 @@ export const canvasCommandsTool: ToolDefinition = {
   description: `Execute Space commands. Commands run in the order given; each command succeeds or fails independently, and every command's outcome — including a failure \`reason\` — is reported back in \`results[]\`. Always check it: a command is not guaranteed to succeed (e.g. CONNECT_NODES / SET_NODE_PARENT fail with \`invalid-target\` when an endpoint doesn't exist).
 
 Batch **independent** commands together (fewer re-renders). **Dependency rule:** the server assigns every node/edge id, so a command can't reference a node created earlier in the **same call or turn** — its id isn't known yet. Create first, read the assigned ids from \`results[].nodes\`, then CONNECT / SET_NODE_PARENT them in a **follow-up call** (next turn). \`ALIGN_NODES\` / \`DISTRIBUTE_NODES\` touch only existing nodes, so they can ride along once you hold the ids.
+
+\`SET_PORTAL_NODE_PINS\` adds or removes symbolic references to source Space nodes inside their Project Portals. It never modifies or deletes the source nodes, and positions are assigned by the host.
 
 Supported command types: ${AGENT_CANVAS_COMMAND_TYPES.join(', ')}. Field-level requirements (which fields each command takes) are described by this tool's parameter schema.
 
@@ -184,6 +207,7 @@ For worked multi-command recipes (group into frame, brainstorm-and-connect, merg
 // `handlers/fs-sandbox.ts`.
 
 export const readParamsSchema = Type.Object({
+  targetCanvasId: targetCanvasIdProperty,
   path: Type.String({
     description: 'File path relative to the current Space folder.',
   }),
@@ -203,7 +227,7 @@ export const readParamsSchema = Type.Object({
 export const readTool: ToolDefinition = {
   name: 'read',
   label: 'Read',
-  description: `Read the contents of a **single** file under the current Space folder — no globs (use find to enumerate, then read each match). Text files return JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }, truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging.
+  description: `Read the contents of a **single** file under the current Space folder — no globs (use find to enumerate, then read each match). In a World conversation, targetCanvasId may select a source Space exposed by a canonical Portal. Text files return JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }, truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging.
 
 Raster image artifacts (png / jpg / gif / webp, stored under \`.artifacts/\`) are returned **inline as vision content you can actually see** — so to view an inline \`![](<key>)\` image referenced in a note body, call \`read(".artifacts/<key>")\` (the file also shows up as \`.artifacts/<key>\` in find / grep / ls output). Other binary files (pdf / video / archives) are rejected with an error; use the node's \`src\` URL or the Space UI for those.
 
@@ -214,6 +238,7 @@ See 'skills/space/SKILL.md' for the Space folder layout, frontmatter fields per 
 };
 
 export const grepParamsSchema = Type.Object({
+  targetCanvasId: targetCanvasIdProperty,
   pattern: Type.String({
     description:
       'Search pattern. Treated as a regular expression by default; set literal=true for plain string matching.',
@@ -260,6 +285,7 @@ export const grepTool: ToolDefinition = {
 };
 
 export const findParamsSchema = Type.Object({
+  targetCanvasId: targetCanvasIdProperty,
   pattern: Type.String({
     description:
       'Glob pattern to match files, e.g. "*.md", "nodes/*.md", "**/*.json". Patterns without "/" auto-match at any depth.',
@@ -285,6 +311,7 @@ export const findTool: ToolDefinition = {
 };
 
 export const lsParamsSchema = Type.Object({
+  targetCanvasId: targetCanvasIdProperty,
   path: Type.Optional(
     Type.String({
       description:
@@ -378,7 +405,7 @@ export const snapshotNodesTool: ToolDefinition = {
   name: 'snapshot_nodes',
   label: 'Snapshot nodes',
   description:
-    "Snapshot Space nodes into PNG attachments — use the returned `src` as a vision attachment (so you can SEE the node) or as `generate_image.referenceArtifactSrcs`. Call this for any `image` / `sketch` node you've located via `get_space_outline` / `inspect_nodes`; `frame` is also accepted and recursively expands to its image/sketch children. For `note` / `text` / `pdf` / `video` use `read(\"nodes/<file>.md\")` instead — they have no still image.\n\nMultiple ids are spatially clustered per parent frame (edge-to-edge ≤ 200 px): nearby image+sketch nodes composite into ONE PNG (images as backdrop, strokes on top); distant ids stay separate. A single image id short-circuits to that node's original artifact (or a downscaled copy when its longest edge exceeds `maxPixels`), so pass one id at a time when you want full-resolution pixels — e.g. drilling into a member of an earlier cluster.\n\nTo see only PART of a sketch (e.g. a few lassoed strokes), pass `strokeSubsets: [{ nodeId, strokeIds }]` (a KEEP list) — that node then renders only those strokes; others render in full. If none of the listed ids still exist, the tool returns a stale-selection error instead of rendering the whole sketch.\n\nReturns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists every contributing node. The chat route already auto-snapshots the user's selection on your first turn (keys appear in user-message metadata), so don't re-snapshot the same selection unless you need full-res single-image pixels or a smaller `maxPixels` retry.",
+    "Snapshot current-Space nodes into PNG attachments — use the returned `src` as a vision attachment (so you can SEE the node) or as `generate_image.referenceArtifactSrcs`. This tool materializes cache artifacts and therefore remains scoped to the conversation owner; in World, use read with a validated targetCanvasId to view a source image inline. Call this for any `image` / `sketch` node you've located via `get_space_outline` / `inspect_nodes`; `frame` is also accepted and recursively expands to its image/sketch children. For `note` / `text` / `pdf` / `video` use `read(\"nodes/<file>.md\")` instead — they have no still image.\n\nMultiple ids are spatially clustered per parent frame (edge-to-edge ≤ 200 px): nearby image+sketch nodes composite into ONE PNG (images as backdrop, strokes on top); distant ids stay separate. A single image id short-circuits to that node's original artifact (or a downscaled copy when its longest edge exceeds `maxPixels`), so pass one id at a time when you want full-resolution pixels — e.g. drilling into a member of an earlier cluster.\n\nTo see only PART of a sketch (e.g. a few lassoed strokes), pass `strokeSubsets: [{ nodeId, strokeIds }]` (a KEEP list) — that node then renders only those strokes; others render in full. If none of the listed ids still exist, the tool returns a stale-selection error instead of rendering the whole sketch.\n\nReturns `Array<{src, width, height, originNodeIds}>`; `originNodeIds` lists every contributing node. The chat route already auto-snapshots the user's selection on your first turn (keys appear in user-message metadata), so don't re-snapshot the same selection unless you need full-res single-image pixels or a smaller `maxPixels` retry.",
   parameters: snapshotNodesParamsSchema,
 };
 

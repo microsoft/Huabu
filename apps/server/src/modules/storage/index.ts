@@ -10,9 +10,12 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import {
+  getWorldCanvasId,
+  isWorldCanvasId,
   listCanvasDirEntries,
   refreshCanvasDirIndex,
   registerCanvasDir,
+  requireWorldCanvasId,
   suggestCanvasDir,
 } from './canvas-dirs.js';
 import { CanvasStore } from './canvas-store.js';
@@ -25,6 +28,7 @@ import type { CanvasFile } from './canvas-store.js';
 import type { CanvasSummary } from '@sediment/shared';
 
 export { CanvasStore } from './canvas-store.js';
+export { getWorldCanvasId, isWorldCanvasId, requireWorldCanvasId };
 export {
   withCanvasMutex,
   updateNode,

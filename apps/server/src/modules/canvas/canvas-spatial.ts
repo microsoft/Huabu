@@ -200,6 +200,21 @@ function spatialNodeInput(
     ...(typeof rawData?.['src'] === 'string'
       ? { src: rawData['src'] as string }
       : {}),
+    ...(typeof rawData?.['targetCanvasId'] === 'string'
+      ? { targetCanvasId: rawData['targetCanvasId'] }
+      : {}),
+    ...(rawData?.['target'] &&
+    typeof rawData['target'] === 'object' &&
+    typeof (rawData['target'] as Record<string, unknown>)['canvasId'] ===
+      'string' &&
+    typeof (rawData['target'] as Record<string, unknown>)['nodeId'] === 'string'
+      ? {
+          target: {
+            canvasId: (rawData['target'] as Record<string, string>)['canvasId'],
+            nodeId: (rawData['target'] as Record<string, string>)['nodeId'],
+          },
+        }
+      : {}),
     position: raw?.position,
     absolutePosition: { x: s.rect.x, y: s.rect.y },
     size: { width: s.rect.width, height: s.rect.height },

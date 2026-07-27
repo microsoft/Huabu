@@ -23,11 +23,18 @@ const alignNodesDef: CommandDefinition<Cmd> = {
     );
     if (!result) return noop(state);
 
-    // Declare affected parent frames; the executor performs a single
-    // `fitFrames` pass at end of batch.
+    // Declare affected Containers for their type-specific fit passes.
     const affectedFrameIds = new Set<string>();
+    const affectedPortalIds = new Set<string>();
+    const byId = new Map(result.map((node) => [node.id, node]));
     for (const n of result) {
-      if (targetIds.has(n.id) && n.parentId) affectedFrameIds.add(n.parentId);
+      if (!targetIds.has(n.id) || !n.parentId) continue;
+      const parentType = byId.get(n.parentId)?.type;
+      if (parentType === 'canvasRef' || parentType === 'frameRef') {
+        affectedPortalIds.add(n.parentId);
+      } else {
+        affectedFrameIds.add(n.parentId);
+      }
     }
 
     return {
@@ -36,6 +43,9 @@ const alignNodesDef: CommandDefinition<Cmd> = {
       edges: state.edges,
       ...(affectedFrameIds.size > 0
         ? { affectedFrameIds: Array.from(affectedFrameIds) }
+        : {}),
+      ...(affectedPortalIds.size > 0
+        ? { affectedPortalIds: Array.from(affectedPortalIds) }
         : {}),
     };
   },

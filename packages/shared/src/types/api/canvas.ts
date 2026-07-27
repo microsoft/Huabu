@@ -8,12 +8,85 @@
 
 import { z } from 'zod';
 
+import { agentBindingSchema } from './agent.js';
+
 export interface GetCanvasResponse {
   canvasId: string;
   title: string | null;
   version: number;
   state: unknown;
 }
+
+const canonicalCanvasIdSchema = z.string().regex(/^canvas-.+$/);
+const canonicalNodeIdSchema = z.string().regex(/^node-.+$/);
+
+const resolvedSourceNodeSchema = z
+  .object({
+    type: z.string().min(1),
+    label: z.string().optional(),
+    summary: z.string().optional(),
+    preview: z.string().optional(),
+    rev: z.string().optional(),
+    threadId: z.string().min(1).optional(),
+    status: z.enum(['idle', 'running', 'done', 'error']).optional(),
+    viewed: z.boolean().optional(),
+    agentMode: z.enum(['ask', 'operate']).optional(),
+    agentBinding: agentBindingSchema.optional(),
+    hasAuthoredContent: z.boolean().optional(),
+  })
+  .strict();
+
+export const resolvedWorldReferenceSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('canvasRef'),
+      referenceNodeId: canonicalNodeIdSchema,
+      targetCanvasId: canonicalCanvasIdSchema,
+      status: z.enum(['ok', 'canvas-missing']),
+      title: z.string().nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('nodeRef'),
+      referenceNodeId: canonicalNodeIdSchema,
+      target: z
+        .object({
+          canvasId: canonicalCanvasIdSchema,
+          nodeId: canonicalNodeIdSchema,
+        })
+        .strict(),
+      status: z.enum(['ok', 'canvas-missing', 'node-missing']),
+      source: resolvedSourceNodeSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('frameRef'),
+      referenceNodeId: canonicalNodeIdSchema,
+      target: z
+        .object({
+          canvasId: canonicalCanvasIdSchema,
+          nodeId: canonicalNodeIdSchema,
+        })
+        .strict(),
+      status: z.enum(['ok', 'canvas-missing', 'node-missing']),
+      source: resolvedSourceNodeSchema.optional(),
+    })
+    .strict(),
+]);
+export type ResolvedWorldReference = z.infer<
+  typeof resolvedWorldReferenceSchema
+>;
+
+export const getWorldReferencesResponseSchema = z
+  .object({
+    references: z.array(resolvedWorldReferenceSchema),
+  })
+  .strict();
+export type GetWorldReferencesResponse = z.infer<
+  typeof getWorldReferencesResponseSchema
+>;
 
 /** Body for `PUT /api/canvas/:canvasId`. */
 export const putCanvasBodySchema = z.object({
@@ -194,6 +267,7 @@ export type CanvasErrorCode =
   | 'CANVAS_VERSION_CONFLICT'
   | 'INVALID_REQUEST'
   | 'CANVAS_NOT_FOUND'
+  | 'WORLD_PORTAL_MISSING'
   | 'NODE_FILE_DELETE_FAILED';
 
 /**

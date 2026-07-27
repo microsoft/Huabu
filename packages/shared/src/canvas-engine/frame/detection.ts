@@ -17,7 +17,7 @@ import {
   createAbsolutePositionGetter,
   indexById,
   type NestableNode,
-} from './tree.js';
+} from '../container/tree.js';
 
 /**
  * Pure predicate: would the given node be unframed under the current

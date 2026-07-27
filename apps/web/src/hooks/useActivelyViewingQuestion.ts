@@ -19,7 +19,9 @@ import { usePanelStore } from '@/store/panelStore';
 /** Reactive form — use inside render logic. */
 export function useActivelyViewingQuestionNode(nodeId: string): boolean {
   const anchored = useChatStore(
-    (s) => s.viewingQuestionThread?.nodeId === nodeId,
+    (s) =>
+      s.viewingQuestionThread?.presentationAnchor.nodeId === nodeId ||
+      s.viewingQuestionThread?.conversationOwner.nodeId === nodeId,
   );
   const panelExpanded = usePanelStore((s) => !s.isRightCollapsed);
   return anchored && panelExpanded;
@@ -37,7 +39,10 @@ export function isActivelyViewingQuestion(match: {
   const viewing = useChatStore.getState().viewingQuestionThread;
   if (!viewing) return false;
   const matches =
-    (match.nodeId !== undefined && viewing.nodeId === match.nodeId) ||
-    (match.threadId !== undefined && viewing.threadId === match.threadId);
+    (match.nodeId !== undefined &&
+      (viewing.presentationAnchor.nodeId === match.nodeId ||
+        viewing.conversationOwner.nodeId === match.nodeId)) ||
+    (match.threadId !== undefined &&
+      viewing.conversationOwner.threadId === match.threadId);
   return matches && !usePanelStore.getState().isRightCollapsed;
 }

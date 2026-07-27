@@ -55,6 +55,10 @@ import {
 
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';
+import {
+  assertWorldPortalMutationsAllowed,
+  assertWorldPortalResultAllowed,
+} from './world-portal-policy.js';
 import { getLogger } from '../../utils/logger.js';
 import {
   getCanvasStore,
@@ -659,6 +663,13 @@ export async function executeOnServer(
     );
     const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];
 
+    assertWorldPortalMutationsAllowed(
+      canvasId,
+      commands,
+      prestateNodes,
+      originator.source,
+    );
+
     if (originator.source === 'agent') {
       // Order matters: fix explicit image resizes first (edits items in
       // place), then let the merge pass append geometry for src-swaps that
@@ -724,6 +735,7 @@ export async function executeOnServer(
     const sharedOut = applySharedPostEffectsFromWriteResult(writeResult);
     const finalNodes = writeResult.nodes;
     const finalEdges = sharedOut.edges;
+    assertWorldPortalResultAllowed(canvasId, prestateNodes, finalNodes);
 
     const deltas = diffCanvasState(
       { nodes: prestateNodes, edges: prestateEdges },

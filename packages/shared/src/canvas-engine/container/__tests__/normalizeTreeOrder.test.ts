@@ -15,6 +15,7 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { isContainerNode } from '../policy.js';
 import { normalizeTreeOrder, type NestableNode } from '../tree.js';
 
 function node(id: string, overrides: Partial<NestableNode> = {}): NestableNode {
@@ -52,6 +53,7 @@ function isValid(nodes: NestableNode[]): boolean {
     const parentIndex = index.get(n.parentId);
     // Parent must be present and strictly before the child.
     if (parentIndex === undefined || parentIndex >= i) return false;
+    if (!isContainerNode(byId.get(n.parentId))) return false;
     if (byId.get(n.parentId)?.type === 'frame' && n.zIndex !== -1) return false;
   }
   return true;
@@ -104,6 +106,22 @@ describe('normalizeTreeOrder — repair pass', () => {
     const out = normalizeTreeOrder(nodes);
     expect(out).not.toBe(nodes);
     expect(out[0].parentId).toBeUndefined();
+    expect(isValid(out)).toBe(true);
+  });
+
+  it('drops a parentId that points to a non-Container node', () => {
+    const nodes = [
+      node('parent', { position: { x: 100, y: 50 } }),
+      node('child', {
+        parentId: 'parent',
+        position: { x: 20, y: 30 },
+      }),
+    ];
+    const out = normalizeTreeOrder(nodes);
+    expect(out).not.toBe(nodes);
+    const child = out.find((candidate) => candidate.id === 'child');
+    expect(child?.parentId).toBeUndefined();
+    expect(child?.position).toEqual({ x: 120, y: 80 });
     expect(isValid(out)).toBe(true);
   });
 

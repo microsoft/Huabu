@@ -71,9 +71,18 @@ function openConflictThread(threadId: string, canvasId: string): void {
   if (questionNode) {
     const binding = (questionNode.data as { agentBinding?: AgentBinding })
       .agentBinding;
-    useChatStore
-      .getState()
-      .openQuestionThread(questionNode.id, threadId, binding, canvasId);
+    useChatStore.getState().openQuestionThread(
+      {
+        presentationAnchor: { canvasId, nodeId: questionNode.id },
+        conversationOwner: {
+          canvasId,
+          nodeId: questionNode.id,
+          threadId,
+        },
+      },
+      binding,
+      canvasId,
+    );
   }
 }
 
@@ -146,7 +155,7 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
               // meaningful once we've settled.
               if (canvasStore.isLoading) return;
               if (event.data.version !== canvasStore.version) {
-                void canvasStore.loadCanvas(canvasId);
+                void canvasStore.loadCanvas(canvasId, { resetHistory: true });
               }
               return;
             }
@@ -167,7 +176,7 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
               // is mid-editing and let autosave's 409 path arbitrate (C3).
               // Incremental gap-heal (delta-log backfill) is deferred to P2.
               if (canvasStore.pendingContentNodeIds().length === 0) {
-                void canvasStore.loadCanvas(canvasId);
+                void canvasStore.loadCanvas(canvasId, { resetHistory: true });
               }
             }
             // else: stale/older update — ignore.

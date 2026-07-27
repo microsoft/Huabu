@@ -10,7 +10,7 @@ import {
   statSync,
   unlinkSync,
 } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
@@ -21,6 +21,7 @@ import {
   refreshCanvasDirIndex,
   registerCanvasDir,
   renameCanvasDirOnDisk,
+  isWorldCanvasId,
   unregisterCanvasDir,
 } from './canvas-dirs.js';
 import { parseFrontmatter, toFrontmatter } from './frontmatter.js';
@@ -178,6 +179,7 @@ export type RenameSelfResult =
   | { ok: true; dirName: string }
   | { ok: false; reason: 'conflict'; conflictWith: string }
   | { ok: false; reason: 'not-found' }
+  | { ok: false; reason: 'forbidden' }
   | { ok: false; reason: 'fs-error'; message: string };
 
 /**
@@ -244,8 +246,12 @@ function nodeContentToMarkdown(c: NodeContent): string {
   return `${toFrontmatter(fm)}\n${content}`;
 }
 
-function markdownToNodeContent(nodeId: string, raw: string): NodeContent {
-  const { meta, content } = parseFrontmatter(raw);
+function markdownToNodeContent(
+  nodeId: string,
+  raw: string,
+  strict = false,
+): NodeContent {
+  const { meta, content } = parseFrontmatter(raw, { strict });
   for (const key of LEGACY_FRONTMATTER_KEYS) {
     delete meta[key];
   }
@@ -392,7 +398,7 @@ export class CanvasStore {
 
     const dirName = path.basename(canvasRoot(this.canvasId));
     const expectedDir = toSafeFilename(file.title, this.canvasId);
-    if (dirName && dirName !== expectedDir) {
+    if (!isWorldCanvasId(this.canvasId) && dirName && dirName !== expectedDir) {
       const next: CanvasFile = {
         ...file,
         title: dirName,
@@ -438,6 +444,9 @@ export class CanvasStore {
    * throwing so the route layer can map it to a 409.
    */
   renameSelf(newTitle: string | null): RenameSelfResult {
+    if (isWorldCanvasId(this.canvasId)) {
+      return { ok: false, reason: 'forbidden' };
+    }
     const desired = toSafeFilename(newTitle, this.canvasId);
     if (!existsSync(canvasRoot(this.canvasId))) {
       return { ok: false, reason: 'not-found' };
@@ -655,7 +664,9 @@ export class CanvasStore {
    * is still built in stable `readdirSync` order so the derived keys
    * match the previous synchronous implementation exactly.
    */
-  async readAllNodes(): Promise<Map<string, NodeContent>> {
+  async readAllNodes(options?: {
+    strict?: boolean;
+  }): Promise<Map<string, NodeContent>> {
     const contents = new Map<string, NodeContent>();
     const idx = new NameIndex<NodeFileEntry>();
     const duplicates = new Set<string>();
@@ -665,7 +676,10 @@ export class CanvasStore {
       const raws = await mapWithConcurrency(
         files,
         NODE_READ_CONCURRENCY,
-        (file) => readTextAsync(path.join(dir, file)),
+        (file) =>
+          options?.strict
+            ? readFile(path.join(dir, file), 'utf8')
+            : readTextAsync(path.join(dir, file)),
       );
       for (let i = 0; i < files.length; i++) {
         const raw = raws[i];
@@ -682,7 +696,7 @@ export class CanvasStore {
             ? rawId
             : file.replace(/\.md$/, '');
         addSidecarToIndex(idx, duplicates, this.canvasId, id, file);
-        contents.set(id, markdownToNodeContent(id, raw));
+        contents.set(id, markdownToNodeContent(id, raw, options?.strict));
       }
     }
     this.nodes = idx;
@@ -1322,6 +1336,9 @@ export class CanvasStore {
 
   /** Recursively delete the entire canvas directory. */
   destroy(): boolean {
+    if (isWorldCanvasId(this.canvasId)) {
+      throw new Error('World canvas cannot be deleted');
+    }
     const root = canvasRoot(this.canvasId);
     if (!existsSync(root)) {
       unregisterCanvasDir(this.canvasId);

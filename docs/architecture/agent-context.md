@@ -78,6 +78,14 @@ The envelope splits "where the user pointed this turn" into orthogonal parts ([e
 
 Key differences: **selection / anchor point at existing canvas nodes** (enriched with a `preview` via node-ref; content via tools); **attachment is a one-off off-canvas asset** (content inlined directly). Anchor is "a single focus point + neighbourhood"; selection is "a set of node metadata".
 
+### 4.1 Cross-Canvas conversation ownership
+
+The web models an open anchored conversation with `AgentConversationView`, which separates a `presentationAnchor` from a `conversationOwner`. Ordinary question nodes use the same Canvas/node for both addresses. A World `nodeRef` uses the World reference as its presentation anchor and the source question's `{ canvasId, nodeId, threadId }` as its owner.
+
+History, reconnect, `/api/agent`, tools, lifecycle writes, binding/mode, and change records use the conversation owner's Canvas. A World-owned selection is not meaningful in the source Canvas, so a headless turn sends the source question as `anchorNodeId` and sends `selectedNodes: []`.
+
+The World reference resolver also exposes whether the source question has authored sidecar content. Headless first-turn composition requires both `status: idle` and no authored content, preventing stale topology status from overwriting an existing question.
+
 For both selection and anchor, the server enriches each node into an agent-facing object via the shared `describeNode` assembler (see §5) — `filename` (`nodes/<safeLabel>.md`) + `preview` (ladder `summary > content[:120] > src`) + `rev`, plus the parent label for frames. **No content / geometry sent** — content via `read("nodes/<id>.md")`, layout/style via `inspect_nodes`.
 
 ---

@@ -18,22 +18,34 @@ import {
   preprocessNodeBodySchema,
   putCanvasBodySchema,
   putNodeContentBodySchema,
+  setPortalNodePinsCommandSchema,
 } from '@sediment/shared';
 import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
 import {
-  CanvasNotFoundError,
-  applyDeltasOnServer,
-  executeOnServer,
-} from './canvas-executor.js';
+  CanvasCommandRoutingError,
+  executeCanvasCommandsOnHost,
+  MissingWorldPortalError,
+} from './canvas-command-router.js';
+import { CanvasNotFoundError, applyDeltasOnServer } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { runWithExternalNoteWatcherSuspended } from './external-watcher.js';
+import {
+  assertWorldPortalTopologyAllowed,
+  WorldPortalMutationError,
+} from './world-portal-policy.js';
+import { reconcileWorldPortals } from './world-portals.js';
+import {
+  resolveWorldReferences,
+  WorldReferenceResolutionError,
+} from './world-reference-resolver.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import {
+  isWorldCanvasId,
   refreshCanvasDirIndex,
   registerCanvasDir,
   suggestCanvasDir,
@@ -68,6 +80,7 @@ import type {
   GetCanvasEventsResponse,
   GetCanvasResponse,
   GetNodeContentResponse,
+  GetWorldReferencesResponse,
   GetThreadChangesResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
@@ -555,6 +568,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<DeleteCanvasResponse>;
   }>('/:canvasId', async function (request, reply) {
     const { canvasId } = request.params;
+    if (isWorldCanvasId(canvasId)) {
+      return reply
+        .code(403)
+        .send({ message: 'World canvas cannot be deleted' });
+    }
     // Suspend the external-note watcher across the directory delete: on
     // Windows a live `fs.watch` handle inside the canvas subtree makes
     // `rmSync` fail with EPERM (same root cause as the rename path).
@@ -1052,6 +1070,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<GetCanvasResponse>;
   }>('/:canvasId', async function (request, reply) {
     const { canvasId } = request.params;
+    if (isWorldCanvasId(canvasId)) {
+      await reconcileWorldPortals();
+    }
     const store = getCanvasStore(canvasId);
     const canvas = store.read();
 
@@ -1075,6 +1096,20 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     });
   });
 
+  fastify.get<{
+    Params: { canvasId: string };
+    Reply: ApiResult<GetWorldReferencesResponse>;
+  }>('/:canvasId/references', async function (request, reply) {
+    try {
+      return reply.send(await resolveWorldReferences(request.params.canvasId));
+    } catch (error) {
+      if (error instanceof WorldReferenceResolutionError) {
+        return reply.code(400).send({ message: error.message });
+      }
+      throw error;
+    }
+  });
+
   // --- PUT Canvas ---
 
   fastify.put<{
@@ -1089,6 +1124,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const { version: clientVersion, state, title } = parsed.data;
+    const incomingState = state as {
+      nodes?: NodeLike[];
+      edges?: unknown[];
+      [key: string]: unknown;
+    };
 
     const store = getCanvasStore(canvasId);
     const existing = store.read();
@@ -1099,6 +1139,19 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         message: 'Canvas version mismatch',
         serverVersion,
       } satisfies CanvasConflictResponse);
+    }
+
+    try {
+      assertWorldPortalTopologyAllowed(
+        canvasId,
+        (existing?.state.nodes ?? []) as NodeLike[],
+        incomingState.nodes ?? [],
+      );
+    } catch (error) {
+      if (error instanceof WorldPortalMutationError) {
+        return reply.code(409).send({ message: error.message });
+      }
+      throw error;
     }
 
     // Title rename (and the directory rename it implies) happens
@@ -1119,6 +1172,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           conflictWith: renameResult.conflictWith,
         } satisfies CanvasConflictResponse);
       }
+      if (!renameResult.ok && renameResult.reason === 'forbidden') {
+        return reply
+          .code(403)
+          .send({ message: 'World canvas cannot be renamed' });
+      }
       if (!renameResult.ok && renameResult.reason === 'fs-error') {
         request.log.error(
           { canvasId, err: renameResult.message },
@@ -1131,11 +1189,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const timestamp = nowMs();
     const nextVersion = serverVersion + 1;
 
-    const rawState = state as {
-      nodes?: NodeLike[];
-      edges?: unknown[];
-      [key: string]: unknown;
-    };
+    const rawState = incomingState;
 
     const slimNodes = stripNodesForCanvas(
       (rawState?.nodes ?? []) as NodeLike[],
@@ -1184,12 +1238,38 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         message: parsed.error.issues[0]?.message ?? 'Invalid request body',
       });
     }
+    if (parsed.data.originator.source === 'system') {
+      return reply.code(403).send({
+        message: 'System command origin is reserved for internal callers',
+      });
+    }
     const { commands, originator, runId } = parsed.data;
+    const validatedCommands: CanvasCommand[] = [];
+    for (const command of commands) {
+      if (
+        typeof command === 'object' &&
+        command !== null &&
+        'type' in command &&
+        command.type === 'SET_PORTAL_NODE_PINS'
+      ) {
+        const parsedCommand = setPortalNodePinsCommandSchema.safeParse(command);
+        if (!parsedCommand.success) {
+          return reply.code(400).send({
+            message:
+              parsedCommand.error.issues[0]?.message ??
+              'Invalid Portal Pin command',
+          });
+        }
+        validatedCommands.push(parsedCommand.data as CanvasCommand);
+      } else {
+        validatedCommands.push(command as CanvasCommand);
+      }
+    }
 
     try {
-      const out = await executeOnServer({
+      const out = await executeCanvasCommandsOnHost({
         canvasId,
-        commands: commands as CanvasCommand[],
+        commands: validatedCommands,
         originator,
         ...(runId ? { runId } : {}),
         // Derive review records only for thread-attributed (ACP) batches —
@@ -1216,6 +1296,17 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     } catch (err) {
       if (err instanceof CanvasNotFoundError) {
         return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      if (err instanceof WorldPortalMutationError) {
+        return reply.code(409).send({ message: err.message });
+      }
+      if (err instanceof MissingWorldPortalError) {
+        return reply
+          .code(409)
+          .send({ code: 'WORLD_PORTAL_MISSING', message: err.message });
+      }
+      if (err instanceof CanvasCommandRoutingError) {
+        return reply.code(409).send({ message: err.message });
       }
       request.log.error({ canvasId, err }, 'Failed to execute canvas commands');
       return reply.code(500).send({

@@ -9,7 +9,7 @@
  * plugin, so injecting the plugin directly needs no Bearer token.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -46,7 +46,7 @@ vi.mock('../agent/agenetes/drivers.js', () => ({
 
 import rfsRoutes from './rfs.route.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
-import { getCanvasStore } from '../storage/index.js';
+import { getCanvasStore, resetStorageCache } from '../storage/index.js';
 import { toSafeFilename } from '../storage/naming.js';
 import { setWorkspacePath } from '../workspace.js';
 
@@ -410,6 +410,69 @@ describe('SNAPSHOT_NODES Space query', () => {
 });
 
 describe('POST /api/rfs/:canvasId/execute', () => {
+  it('returns an actionable error when World reconciliation is required', async () => {
+    const writeCanvas = (
+      directory: string,
+      canvasId: string,
+      nodes: unknown[],
+    ) => {
+      const root = join(tmp, directory);
+      mkdirSync(root, { recursive: true });
+      writeFileSync(
+        join(root, 'space.json'),
+        JSON.stringify({
+          canvasId,
+          title: directory,
+          version: 0,
+          state: { nodes, edges: [] },
+          createdAt: 1,
+          updatedAt: 1,
+        }),
+      );
+    };
+    writeCanvas('.world', 'canvas-world', []);
+    writeCanvas('Project', 'canvas-source', [
+      {
+        id: 'node-source',
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: {},
+      },
+    ]);
+    resetStorageCache();
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/canvas-source/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          commands: [
+            {
+              type: 'SET_PORTAL_NODE_PINS',
+              updates: [
+                {
+                  sourceCanvasId: 'canvas-source',
+                  sourceNodeIds: ['node-source'],
+                  pinned: true,
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        code: 'WORLD_PORTAL_MISSING',
+      });
+      expect(response.json().message).toMatch(/refresh the World/i);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('attributes change-review records to the host thread only when the header is present', async () => {
     seedNote('c1', 'node-1', 'Alpha', 'existing body');
     const app = await buildApp();

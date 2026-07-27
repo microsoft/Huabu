@@ -38,7 +38,7 @@ const canvasDirs = vi.hoisted(() => ({
 
 vi.mock('../storage/canvas-dirs.js', () => ({
   refreshCanvasDirIndex: canvasDirs.refresh,
-  listCanvasDirEntries: () => canvasDirs.list(),
+  listAllCanvasDirEntries: () => canvasDirs.list(),
 }));
 
 /** Build a fresh fake FSWatcher whose `.on(...)` chain is a no-op. */

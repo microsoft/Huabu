@@ -6,7 +6,7 @@ import path from 'node:path';
 import { validatePathSchema, workspacePathSchema } from '@sediment/shared';
 
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
-import { resetStorageCache } from './storage/index.js';
+import { requireWorldCanvasId, resetStorageCache } from './storage/index.js';
 import {
   activateWorkspacePath,
   WorkspaceActivationInProgressError,
@@ -160,6 +160,7 @@ function buildWorkspaceState(): WorkspaceInfo {
     path: configured && !managed ? getWorkspacePath() : null,
     // Display label (basename). Safe to send in either mode.
     name: configured ? getWorkspaceName() : null,
+    worldCanvasId: configured ? requireWorldCanvasId() : null,
     capabilities: {
       canChangeWorkspace: !managed,
       nativePicker: !managed && canShowNativePicker(),

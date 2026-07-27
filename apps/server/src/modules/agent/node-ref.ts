@@ -102,6 +102,10 @@ export interface AgentNodePreview extends AgentNodeRef {
  *  - inspect_nodes results
  */
 export interface AgentNodeOutline extends AgentNodePreview {
+  /** Cross-Space address exposed by a World canvasRef. */
+  targetCanvasId?: string;
+  /** Persistent source identity exposed by a World nodeRef. */
+  target?: { canvasId: string; nodeId: string };
   /** Parent frame, when the node lives inside one. */
   parentFrame?: { id: string; label?: string };
   /**
@@ -134,6 +138,8 @@ export interface NodeRefInput {
   id: string;
   type: CanvasNodeType;
   label?: string;
+  targetCanvasId?: string;
+  target?: { canvasId: string; nodeId: string };
 }
 
 /**
@@ -156,6 +162,8 @@ export interface NodePreviewInput extends NodeRefInput {
  * consumer needs them; everything else is optional.
  */
 export interface NodeOutlineInput extends NodePreviewInput {
+  targetCanvasId?: string;
+  target?: { canvasId: string; nodeId: string };
   parentFrame?: { id: string; label?: string };
   position: { x: number; y: number };
   /**
@@ -271,5 +279,7 @@ export function buildAgentNodeOutline(
   };
   if (input.parentFrame) out.parentFrame = input.parentFrame;
   if (input.style) out.style = input.style;
+  if (input.targetCanvasId) out.targetCanvasId = input.targetCanvasId;
+  if (input.target) out.target = input.target;
   return out;
 }

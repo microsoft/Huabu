@@ -35,7 +35,10 @@ import {
 import { resolveArtifactUrl } from '@/api/artifact';
 import { Loading } from '@/components/Common/Loading';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
+import { CanvasRefNode } from '@/components/Nodes/canvasRef/CanvasRefNode';
+import { FrameRefNode } from '@/components/Nodes/frameRef/FrameRefNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
+import { NodeRefNode } from '@/components/Nodes/nodeRef/NodeRefNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
 import { OfficeNode } from '@/components/Nodes/office/OfficeNode';
 import { PDFNode } from '@/components/Nodes/pdf/PDFNode';
@@ -132,6 +135,9 @@ const nodeTypes = {
   pdf: PDFNode,
   office: OfficeNode,
   frame: FrameNode,
+  canvasRef: CanvasRefNode,
+  frameRef: FrameRefNode,
+  nodeRef: NodeRefNode,
   sketch: SketchNode,
   question: QuestionNode,
 } as const;
@@ -403,10 +409,17 @@ export const Canvas: React.FC<CanvasProps> = ({
     closeExpanded,
     frameNodesInRect,
     selectNodes,
+    refreshWorldReferences,
   } = useCanvasStore.getState();
   const { setPendingNodeType } = useToolStore.getState();
 
   const [isBoxSelecting, setIsBoxSelecting] = useState(false);
+
+  useEffect(() => {
+    const handleFocus = () => void refreshWorldReferences();
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [refreshWorldReferences]);
   const selectedNodeIds = useMemo(
     () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
     [nodes],

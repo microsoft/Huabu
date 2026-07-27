@@ -173,21 +173,22 @@ Add the header `X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID` so your edits are attr
 
 The accepted command set is:
 
-| Command             | Purpose                                                                                 |
-| ------------------- | --------------------------------------------------------------------------------------- |
-| `CREATE_NODES`      | Create one or more nodes; Huabu assigns node IDs.                                       |
-| `DELETE_NODES`      | Delete nodes and their incident edges.                                                  |
-| `MERGE_NODE_DATA`   | Patch node label, content, source, or visual style; content writes require `expectRev`. |
-| `SET_NODE_PARENT`   | Move nodes into a frame or back to the root.                                            |
-| `DISSOLVE_FRAME`    | Remove a frame while keeping its children in the Space.                                 |
-| `SET_NODE_GEOMETRY` | Change node position and/or size.                                                       |
-| `REORDER_NODES`     | Change node z-order.                                                                    |
-| `CONNECT_NODES`     | Create edges between existing nodes; Huabu assigns edge IDs.                            |
-| `DISCONNECT_EDGES`  | Remove edges by ID or endpoint pair.                                                    |
-| `SET_EDGE_STYLE`    | Patch edge direction, line shape, dash style, stroke, width, or label.                  |
-| `ALIGN_NODES`       | Align existing nodes along one axis.                                                    |
-| `DISTRIBUTE_NODES`  | Evenly space three or more existing nodes.                                              |
-| `SET_FRAME_LAYOUT`  | Configure a frame's free, column, or row layout.                                        |
+| Command                | Purpose                                                                                 |
+| ---------------------- | --------------------------------------------------------------------------------------- |
+| `CREATE_NODES`         | Create one or more nodes; Huabu assigns node IDs.                                       |
+| `DELETE_NODES`         | Delete nodes and their incident edges.                                                  |
+| `MERGE_NODE_DATA`      | Patch node label, content, source, or visual style; content writes require `expectRev`. |
+| `SET_NODE_PARENT`      | Move nodes into a frame or back to the root.                                            |
+| `DISSOLVE_FRAME`       | Remove a frame while keeping its children in the Space.                                 |
+| `SET_NODE_GEOMETRY`    | Change node position and/or size.                                                       |
+| `REORDER_NODES`        | Change node z-order.                                                                    |
+| `CONNECT_NODES`        | Create edges between existing nodes; Huabu assigns edge IDs.                            |
+| `DISCONNECT_EDGES`     | Remove edges by ID or endpoint pair.                                                    |
+| `SET_EDGE_STYLE`       | Patch edge direction, line shape, dash style, stroke, width, or label.                  |
+| `ALIGN_NODES`          | Align existing nodes along one axis.                                                    |
+| `DISTRIBUTE_NODES`     | Evenly space three or more existing nodes.                                              |
+| `SET_FRAME_LAYOUT`     | Configure a frame's free, column, or row layout.                                        |
+| `SET_PORTAL_NODE_PINS` | Pin or unpin source nodes in the workspace World Canvas.                                |
 
 This table is only a navigation summary. For the complete contract of one command—including required fields, parameter types, enums, limits, semantic constraints, result description, and a valid example—fetch its capability:
 

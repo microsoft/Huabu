@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
 
 import { wouldAutoFrame, wouldUnframe } from '../detection.js';
 
-import type { NestableNode } from '../tree.js';
+import type { NestableNode } from '../../container/tree.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 

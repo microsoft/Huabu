@@ -12,6 +12,8 @@ Runtime Home-folder activation prepares and migrates the selected directory in a
 
 ```
 <workspace>/
+  .world/                         # hidden workspace-owned World Canvas
+    space.json                    # stable generated canvasId; normal Canvas topology
   setting/                        # user-owned, cross-canvas
     user.md                     # workspace memory (user preferences)
     skills/<id>/SKILL.md          # user / memory-agent authored skills
@@ -38,8 +40,14 @@ Runtime Home-folder activation prepares and migrates the selected directory in a
 
 Key points:
 
-- The **directory name** is derived from the canvas title via `toSafeFilename(title)`, not from `canvasId`. The stable `canvasId` only lives inside `space.json`.
+- An ordinary Space **directory name** is derived from its title via `toSafeFilename(title)`, not from `canvasId`. The stable `canvasId` only lives inside `space.json`; the World is the reserved `.world` exception.
 - `listCanvases()` rescans the workspace on every call, skipping entries that start with `.` or lack `space.json`.
+- Workspace preparation creates exactly one hidden `.world/space.json` after migrations. Its generated `canvasId` remains stable, resolves through the normal `CanvasStore`, and is exposed separately as `WorkspaceInfo.worldCanvasId`; ordinary Canvas lists continue to omit it.
+- An established `.world` directory with a missing or malformed `space.json` is an integrity error. World identity is never silently regenerated, and the World cannot be deleted or directory-renamed through ordinary Space lifecycle operations.
+- Reading the World reconciles one canonical `canvasRef` Portal for every live ordinary Space. Reconciliation creates only missing Portals in deterministic open grid slots, preserves every existing node and position, rejects duplicate or malformed Portal identities, and leaves a broken Portal when its source Space is deleted.
+- Canonical Portal identity is server-owned: non-system commands cannot create or repoint a `canvasRef`, a live Portal cannot be deleted, and only a broken Portal may be removed. Portal geometry may move like ordinary World geometry, but its size is content-managed rather than manually resized.
+- Persistent `frameRef` and `nodeRef` nodes have no markdown sidecars and store only their respective type plus `{ target: { canvasId, nodeId } }` and World-owned React Flow state. A `frameRef` is a Container snapshot of a source Frame, may recursively own matching `frameRef` / `nodeRef` descendants, and never reconciles later source hierarchy changes; direct references remain children of the matching `canvasRef`. `SET_PORTAL_NODE_PINS` is their sole create/remove path.
+- `GET /api/canvas/:worldCanvasId/references` batch-resolves Portal titles and pinned source-node display data for both reference types without writing it into World topology. Results distinguish `ok`, `canvas-missing`, and `node-missing`; storage or parse failures remain request errors.
 - Node filenames are `safe(label).md`; the node's stable id lives in the `id:` frontmatter field.
 - Artifacts live in `.artifacts/` (hidden) named `<artifactId><ext>`. No manifest file — the filename is the URL key.
 - Events are append-only JSONL (`events.jsonl`); each line is `{ ts: number, payload: RecentAction }`.

@@ -110,7 +110,7 @@ export function WindowChrome() {
   //   - Inside a canvas ("/canvas/:id"): show the live canvas title.
   //   - Anywhere else (setup, playgrounds, docs): fall back to APP_NAME
   //     so the bar never looks empty.
-  const onCanvasListRoute = location.pathname === '/';
+  const onCanvasListRoute = location.pathname === '/spaces';
   const onWorkspaceSetupRoute = location.pathname === '/setup';
   const showAppMenu = onCanvasListRoute || onWorkspaceSetupRoute;
   const onCanvasRoute = location.pathname.startsWith('/canvas/');

@@ -66,6 +66,7 @@ import { runAgent, type StreamEvent } from '../agent/agent.service.js';
 import { isPromptDebugEnabled } from '../agent/conversation/prompt/debug-prompt.js';
 import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
+import { MissingWorldPortalError } from '../canvas/canvas-command-router.js';
 import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
@@ -381,6 +382,11 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           return reply
             .code(404)
             .send(rfsError('Canvas not found.', 'canvas_not_found'));
+        }
+        if (error instanceof MissingWorldPortalError) {
+          return reply
+            .code(409)
+            .send(rfsError(error.message, 'WORLD_PORTAL_MISSING'));
         }
         request.log.error(
           { err: error, canvasId: request.params.canvasId },

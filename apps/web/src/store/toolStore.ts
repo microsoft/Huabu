@@ -17,7 +17,7 @@ import type { CanvasNodeType } from '@sediment/shared';
  */
 export type PendingNodeType = Exclude<
   CanvasNodeType,
-  'image' | 'pdf' | 'video' | 'web'
+  'image' | 'pdf' | 'video' | 'web' | 'canvasRef' | 'frameRef'
 > | null;
 
 /**

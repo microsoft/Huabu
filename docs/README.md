@@ -87,18 +87,19 @@ docs/
 
 ### Shipped
 
-| Doc                                                                                                  | Summary                                                                      |
-| ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| [agent-reachback-rfs.md](./proposals/agent-reachback-rfs.md)                                         | Canvas-scoped RFS file plane, ask-agent control plane, and skill bootstrap.  |
-| [agenetes-agentlet-gateway-consolidation.md](./proposals/agenetes-agentlet-gateway-consolidation.md) | Agenetes-owned stateless Agentlet Gateway and ACP placement.                 |
-| [agenetes-thread-rehydration-and-forking.md](./proposals/agenetes-thread-rehydration-and-forking.md) | Durable-thread recovery and driver-owned rehydration.                        |
-| [agent-request-render-resolution.md](./proposals/agent-request-render-resolution.md)                 | Generic agent submission and input boundary.                                 |
-| [canvas-pointer-router.md](./proposals/canvas-pointer-router.md)                                     | Unified pointer routing and recognizer takeover priority.                    |
-| [layered-architecture.md](./proposals/layered-architecture.md)                                       | Interaction-, protocol-, and task-driven architecture layers.                |
-| [node-write-unification-plan.md](./proposals/node-write-unification-plan.md)                         | Unified authored-content persistence and revision handling.                  |
-| [pi-harness-driver-refactor-plan.md](./proposals/pi-harness-driver-refactor-plan.md)                 | Agenetes harness driver boundary.                                            |
-| [question-node-zoom-lod-avatar.md](./proposals/question-node-zoom-lod-avatar.md)                     | Continuous zoom takeover: question node's agent mark stands in at deep zoom. |
-| [unified-external-agent-settings.md](./proposals/unified-external-agent-settings.md)                 | Unified command-backed and manifest-backed Agent Profiles.                   |
+| Doc                                                                                                  | Summary                                                                                              |
+| ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| [agent-reachback-rfs.md](./proposals/agent-reachback-rfs.md)                                         | Canvas-scoped RFS file plane, ask-agent control plane, and skill bootstrap.                          |
+| [agenetes-agentlet-gateway-consolidation.md](./proposals/agenetes-agentlet-gateway-consolidation.md) | Agenetes-owned stateless Agentlet Gateway and ACP placement.                                         |
+| [agenetes-thread-rehydration-and-forking.md](./proposals/agenetes-thread-rehydration-and-forking.md) | Durable-thread recovery and driver-owned rehydration.                                                |
+| [agent-request-render-resolution.md](./proposals/agent-request-render-resolution.md)                 | Generic agent submission and input boundary.                                                         |
+| [canvas-pointer-router.md](./proposals/canvas-pointer-router.md)                                     | Unified pointer routing and recognizer takeover priority.                                            |
+| [layered-architecture.md](./proposals/layered-architecture.md)                                       | Interaction-, protocol-, and task-driven architecture layers.                                        |
+| [node-write-unification-plan.md](./proposals/node-write-unification-plan.md)                         | Unified authored-content persistence and revision handling.                                          |
+| [world-canvas.md](./proposals/world-canvas.md)                                                       | Workspace-level World Canvas, project Portals, pinned references, and headless source conversations. |
+| [pi-harness-driver-refactor-plan.md](./proposals/pi-harness-driver-refactor-plan.md)                 | Agenetes harness driver boundary.                                                                    |
+| [question-node-zoom-lod-avatar.md](./proposals/question-node-zoom-lod-avatar.md)                     | Continuous zoom takeover: question node's agent mark stands in at deep zoom.                         |
+| [unified-external-agent-settings.md](./proposals/unified-external-agent-settings.md)                 | Unified command-backed and manifest-backed Agent Profiles.                                           |
 
 When a proposal ships, set `Status: Shipped`, record the merge PR or commit, update the corresponding architecture document, and retain the proposal's stable path.
 

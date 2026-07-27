@@ -7,6 +7,7 @@ import type {
   CanvasErrorCode,
   DeleteCanvasResponse,
   GetCanvasResponse,
+  GetWorldReferencesResponse,
   GetNodeContentResponse,
   PutCanvasRequest,
   PutCanvasResponse,
@@ -20,6 +21,8 @@ import type {
   PreprocessNodeRequest,
   PreprocessNodeResponse,
   RevealNodesFolderResponse,
+  PostCanvasExecuteRequest,
+  PostCanvasExecuteResponse,
 } from '@sediment/shared';
 
 /**
@@ -124,6 +127,28 @@ export async function getCanvas(
     console.error('Failed to get canvas:', error);
     return null;
   }
+}
+
+export async function getWorldReferences(
+  canvasId: string,
+): Promise<GetWorldReferencesResponse> {
+  return apiFetch<GetWorldReferencesResponse>(
+    routes.canvasReferences(canvasId),
+    {
+      fallbackMessage: 'Failed to resolve World references',
+    },
+  );
+}
+
+export async function postCanvasExecute(
+  canvasId: string,
+  request: PostCanvasExecuteRequest,
+): Promise<PostCanvasExecuteResponse> {
+  return apiFetch<PostCanvasExecuteResponse>(routes.canvasExecute(canvasId), {
+    method: 'POST',
+    json: request,
+    fallbackMessage: 'Failed to execute Space command',
+  });
 }
 
 export async function putCanvas(

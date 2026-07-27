@@ -74,6 +74,20 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 7. **Design tokens only** — never raw hex / Tailwind palette / ShadCN aliases. The token declarations in [`apps/web/src/index.css`](../../apps/web/src/index.css) are authoritative; reusable UI contracts live in [`apps/web/src/components/Common/`](../../apps/web/src/components/Common/).
 8. **Development playgrounds** belong in `pages/playground/`, use route-level lazy imports, are registered only when `import.meta.env.DEV` is true, and live outside `WorkspaceGuardLayout` so visual testing does not require an active workspace.
 
+## Workspace routes and World
+
+`/` is the workspace landing redirect. When the persisted World setting is enabled it redirects to the hidden World through `/canvas/:worldCanvasId`; otherwise it redirects to `/spaces`. The ordinary Space List remains a sibling page at `/spaces`, and every Canvas scope, including World, continues to use the existing `CanvasPage` and `/canvas/:canvasId` route.
+
+The World setting defaults to disabled. Enabling it exposes the World navigation entry and changes subsequent workspace landing to World without deleting or resetting `.world`.
+
+`CanvasRefNode` renders a canonical Portal from persisted `targetCanvasId` plus one batched ordinary-Space title map loaded when World opens. Portal activation uses double-click, Enter while selected, or its Open action. A missing title after the Space list has loaded is rendered as an explicit broken reference; transient source titles are never persisted into World topology.
+
+`FrameRefNode` and `NodeRefNode` keep persistent target identity separate from a runtime `worldReferences` map populated by the batch reference endpoint. A `frameRef` renders as a World Container around its recursively pinned snapshot descendants; a `nodeRef` renders the referenced leaf card. The resolved source projection includes label/type/summary/preview/revision and, for question nodes, thread/lifecycle/mode/binding fields. References render source details or an explicit missing-Space/missing-node placeholder and refresh on World load, shortcut open, window focus, headless turn start/end, and active-World Pin/Unpin completion. Source-Space single/multi-selection toolbars expose explicit Pin and Unpin actions, while World selections expose Unpin for selected reference entries. These actions drain pending, in-flight, and coalesced structure writes before calling the server command boundary and never construct positions, hierarchy, or references in web state.
+
+Opening a resolved question `nodeRef` leaves World as the active Canvas and points the ordinary single ChatPanel at an `AgentConversationView`: the World `nodeRef` is the presentation anchor while the source question Canvas/node/thread is the conversation owner. Owner-aware helpers route history, reconnect, agent streams, lifecycle mutations, binding/mode, and change-record loads to the source. Headless turns send no World selection. Source changes are not previewed against World; the review notice opens the source Space and restores the same conversation there.
+
+The web keeps undo/redo managers in a registry keyed by `canvasId` while retaining one active Canvas store. Switching between World and a Space activates the target manager instead of clearing the scope being left; an authoritative reload of the already-active Canvas still clears that Canvas's stale history. First-version Pin/Unpin does not create a snapshot entry: any actual `frameRef` / `nodeRef` membership or hierarchy change, including recursive adoption or removal with a broken Portal subtree, clears the corresponding World manager because the protected identities cannot be recreated through legacy full-state restore. A routed mutation received while a source Space is active leaves that Space's independent history unchanged.
+
 The keyboard shortcut catalog may retain internal runtime bindings with `hidden: true`; `getKeyboardShortcutSections()` excludes them from the user-facing modal. Removed bindings must be deleted from the catalog rather than left as display-only entries.
 
 ---
@@ -122,12 +136,12 @@ To make array order authoritative we render with
 [`<ReactFlow zIndexMode="manual">`](../../apps/web/src/components/Panels/Canvas/Canvas.tsx)
 and derive every `zIndex` ourselves in the **render layer**:
 
-- [`assignNodeZIndices`](../../packages/shared/src/canvas-engine/frame/zorder.ts)
+- [`assignNodeZIndices`](../../packages/shared/src/canvas-engine/container/zorder.ts)
   — a depth-first walk of the parent/child forest (parents before children,
   siblings in array order) assigns each node a contiguous z. Children land
   immediately above their frame; a later sibling out-ranks the whole preceding
   subtree.
-- [`edgeZIndex`](../../packages/shared/src/canvas-engine/frame/zorder.ts) — an
+- [`edgeZIndex`](../../packages/shared/src/canvas-engine/container/zorder.ts) — an
   edge floats at the z of its highest **framed** endpoint (0 when both endpoints
   are top-level), mirroring React Flow's old auto-mode edge behaviour, which
   manual mode otherwise drops. `Canvas.tsx` writes this onto `edge.zIndex`; the
@@ -172,12 +186,13 @@ The native macOS Help menu and the Windows/Linux in-app application menu reuse t
 
 ## Code entry points
 
-| File/dir                                                                       | Responsibility                                                                                |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| [`apps/web/src/App.tsx`](../../apps/web/src/App.tsx)                           | Product router; deliberately has no handbook route.                                           |
-| [`apps/web/src/config/handbook.ts`](../../apps/web/src/config/handbook.ts)     | Validate and open the canonical external handbook URL.                                        |
-| [`apps/web/src/hooks/useElectron.ts`](../../apps/web/src/hooks/useElectron.ts) | Typed Electron bridge access, fixed support operations, and copied system-information format. |
-| [`apps/desktop/src/preload.ts`](../../apps/desktop/src/preload.ts)             | Narrow sandbox bridge for native menu and diagnostics operations.                             |
-| [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts)                   | Electron window security, external URLs, and fixed diagnostics IPC handlers.                  |
-| [`scripts/start-web.mjs`](../../scripts/start-web.mjs)                         | Production-style web launcher and dynamic Server port selection.                              |
-| [`scripts/dev-ports.mjs`](../../scripts/dev-ports.mjs)                         | Shared loopback/wildcard-aware development port selection.                                    |
+| File/dir                                                                                   | Responsibility                                                                                |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| [`apps/web/src/App.tsx`](../../apps/web/src/App.tsx)                                       | Product router; deliberately has no handbook route.                                           |
+| [`apps/web/src/config/handbook.ts`](../../apps/web/src/config/handbook.ts)                 | Validate and open the canonical external handbook URL.                                        |
+| [`apps/web/src/hooks/useElectron.ts`](../../apps/web/src/hooks/useElectron.ts)             | Typed Electron bridge access, fixed support operations, and copied system-information format. |
+| [`apps/web/src/store/conversationOwner.ts`](../../apps/web/src/store/conversationOwner.ts) | Generic presentation-anchor/conversation-owner routing and owner-aware lifecycle writes.      |
+| [`apps/desktop/src/preload.ts`](../../apps/desktop/src/preload.ts)                         | Narrow sandbox bridge for native menu and diagnostics operations.                             |
+| [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts)                               | Electron window security, external URLs, and fixed diagnostics IPC handlers.                  |
+| [`scripts/start-web.mjs`](../../scripts/start-web.mjs)                                     | Production-style web launcher and dynamic Server port selection.                              |
+| [`scripts/dev-ports.mjs`](../../scripts/dev-ports.mjs)                                     | Shared loopback/wildcard-aware development port selection.                                    |

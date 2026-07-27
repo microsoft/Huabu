@@ -93,9 +93,55 @@ describe('resolveAddNodes', () => {
     if (create?.type !== 'CREATE_NODES') return;
     expect(create.nodes[0]).not.toHaveProperty('selectOnCreate');
   });
+
+  it.each(['nodeRef', 'frameRef'] satisfies CanvasNodeType[])(
+    'does not generically create %s references',
+    (nodeType) => {
+      const resolution = resolveAddNodes(
+        {
+          type: 'ADD_NODES',
+          inputs: [
+            {
+              id: 'node-ref-copy',
+              nodeType,
+              data: {
+                target: { canvasId: 'canvas-source', nodeId: 'node-source' },
+              },
+            },
+          ],
+        },
+        ui,
+      );
+      expect(resolution.commands).toEqual([]);
+    },
+  );
 });
 
 describe('resolvePasteClipboard', () => {
+  it.each(['nodeRef', 'frameRef'] satisfies CanvasNodeType[])(
+    'does not paste %s reference nodes',
+    (type) => {
+      const source = {
+        id: 'node-ref-source',
+        type,
+        position: { x: 0, y: 0 },
+        data: {
+          type,
+          target: { canvasId: 'canvas-source', nodeId: 'node-source' },
+        },
+      } as unknown as Node;
+      const resolution = resolvePasteClipboard(
+        {
+          type: 'PASTE_CLIPBOARD',
+          clipboardNodes: [source],
+          clipboardEdges: [],
+        },
+        { nodes: [source], edges: [] },
+      );
+      expect(resolution.commands).toEqual([]);
+    },
+  );
+
   it('assigns fresh ids to pasted sketch strokes', () => {
     const source = {
       id: 'sketch-source',

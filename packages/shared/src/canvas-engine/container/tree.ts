@@ -1,5 +1,5 @@
 /**
- * Frame Tree - Hierarchy & coordinate primitives
+ * Container Tree - Hierarchy & coordinate primitives
  *
  * Pure topology helpers for the canvas node forest:
  * - Node lookup / ordering invariants required by React Flow.
@@ -10,6 +10,8 @@
  * generic parent/child graph and is reused by the detection, mutation, and
  * fit submodules.
  */
+
+import { isContainerNode } from './policy.js';
 
 import type { Node, XYPosition } from '@xyflow/react';
 
@@ -60,6 +62,7 @@ export function hasLiveParent(
  */
 export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
   const byId = indexById(nodes);
+  const getOriginalAbs = createAbsolutePositionGetter(byId);
   const originalIndex = new Map(nodes.map((n, i) => [n.id, i] as const));
 
   // Fast path: if the array already satisfies every invariant this function
@@ -70,26 +73,30 @@ export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
   // remap, no second index, no sort, no result array. Invariants checked:
   //   1. every `parentId` resolves to a present node (no dangling link);
   //   2. each parent appears strictly before its child in the array;
-  //   3. frame children carry `zIndex === -1`, and top-level non-frame nodes
-  //      do NOT carry the frame `zIndex`.
+  //   3. Container children carry `zIndex === -1`, and top-level
+  //      non-Container nodes do not carry that nested zIndex.
   // Any violation (or a cycle, which makes rule 2 unsatisfiable) falls
   // through to the full repair pass below.
   let alreadyValid = true;
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i];
     if (!n.parentId) {
-      if (n.type !== 'frame' && n.zIndex === -1) {
+      if (!isContainerNode(n) && n.zIndex === -1) {
         alreadyValid = false;
         break;
       }
       continue;
     }
     const parentIndex = originalIndex.get(n.parentId);
-    if (parentIndex === undefined || parentIndex >= i) {
+    if (
+      parentIndex === undefined ||
+      parentIndex >= i ||
+      !isContainerNode(byId.get(n.parentId))
+    ) {
       alreadyValid = false;
       break;
     }
-    if (byId.get(n.parentId)?.type === 'frame' && n.zIndex !== -1) {
+    if (isContainerNode(byId.get(n.parentId)) && n.zIndex !== -1) {
       alreadyValid = false;
       break;
     }
@@ -107,18 +114,23 @@ export function normalizeTreeOrder(nodes: NestableNode[]): NestableNode[] {
       }
       return n;
     }
-    if (!byId.has(n.parentId)) {
+    const liveParent = byId.get(n.parentId);
+    if (!liveParent || !isContainerNode(liveParent)) {
       const { parentId: _parentId, ...rest } = n;
+      const detached =
+        liveParent && !isContainerNode(liveParent)
+          ? { ...rest, position: getOriginalAbs(n.id) ?? n.position }
+          : rest;
       // Also strip frame-level zIndex when the parent disappears.
-      if (rest.zIndex === -1 && rest.type !== 'frame') {
-        const { zIndex: _zIndex, ...clean } = rest;
+      if (detached.zIndex === -1 && !isContainerNode(detached)) {
+        const { zIndex: _zIndex, ...clean } = detached;
         return clean;
       }
-      return rest;
+      return detached;
     }
     // Ensure child nodes of a frame share the frame's zIndex.
     const parent = byId.get(n.parentId);
-    if (parent?.type === 'frame' && n.zIndex !== -1) {
+    if (isContainerNode(parent) && n.zIndex !== -1) {
       return { ...n, zIndex: -1 };
     }
     return n;

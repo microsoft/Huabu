@@ -2,6 +2,7 @@ import clsx from 'clsx';
 import { ArrowLeft, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 
 import { getQuestionNodeStatus } from '@sediment/shared';
 
@@ -29,6 +30,10 @@ import {
   useChatStore,
 } from '@/store/chatStore';
 import { findPendingPermissionRequest } from '@/store/chatTypes';
+import {
+  isHeadlessConversation,
+  resolveConversationOwnerSource,
+} from '@/store/conversationOwner';
 import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
 import { usePanelStore } from '@/store/panelStore';
@@ -52,7 +57,6 @@ import { MessageList } from '../../Messages/MessageList';
 import { SidebarPanel } from '../SidebarPanel';
 
 import type {
-  AgentBinding,
   AgentIcon,
   AgentMode,
   IntentCandidate,
@@ -66,6 +70,7 @@ interface ChatPanelProps {
 
 export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [input, setInput] = useState('');
   const setLastAction = useChatStore((state) => state.setLastAction);
 
@@ -74,6 +79,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // sync by `useAgentStream.startStream`, which calls
   // `setLastAction(agentMode)` on every send.
   const lastAction = useChatStore((state) => state.lastAction);
+  const canvasId = useCanvasStore((state) => state.canvasId);
 
   // When the panel is replaying a question node's thread, the mode is a
   // property of that NODE (`data.agentMode`), not the canvas-level
@@ -86,28 +92,40 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // (their mode is ACP-managed), so they pin to ask. Falls back to ask
   // for legacy nodes that pre-date the `@` picker.
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
-  const viewingQuestionNodeId = viewingQuestionThread?.nodeId;
+  const activeConversationView =
+    viewingQuestionThread?.presentationAnchor.canvasId === canvasId
+      ? viewingQuestionThread
+      : null;
+  const viewingQuestionNodeId =
+    activeConversationView?.conversationOwner.nodeId;
+  const ownerCanvasId =
+    activeConversationView?.conversationOwner.canvasId || canvasId;
+  const headlessConversation = isHeadlessConversation(activeConversationView);
+  const conversationOwnerSource = useCanvasStore((state) =>
+    resolveConversationOwnerSource(
+      state.canvasId,
+      state.nodes,
+      state.worldReferences,
+      activeConversationView,
+    ),
+  );
+  const ownerScopeReady =
+    !headlessConversation || conversationOwnerSource !== undefined;
   // "Composing" = the viewed question node has never been authored/run yet
   // (its status is still `idle`), so the binding is still mutable and the mode
   // follows the user's inline pick (`lastAction`) rather than the node's
   // not-yet-written `agentMode`. Derived from the node itself — the single
   // source of truth — rather than a stored `compose` flag. Replay (already-run
   // node) keeps deriving from the node.
-  const isComposingQuestion = useCanvasStore((s) => {
-    if (!viewingQuestionNodeId) return false;
-    const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
-    return node ? getQuestionNodeStatus(node.data) === 'idle' : false;
-  });
-  const questionReplayMode = useCanvasStore((s) => {
-    if (!viewingQuestionNodeId) return undefined;
-    const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
-    if (!node) return undefined;
-    const d = node.data as {
-      agentBinding?: AgentBinding;
-      agentMode?: AgentMode;
-    };
+  const isComposingQuestion =
+    !headlessConversation &&
+    !!viewingQuestionNodeId &&
+    getQuestionNodeStatus(conversationOwnerSource) === 'idle';
+  const questionReplayMode = (() => {
+    if (!viewingQuestionNodeId || !conversationOwnerSource) return undefined;
+    const d = conversationOwnerSource;
     return d.agentBinding?.kind === 'external' ? 'ask' : (d.agentMode ?? 'ask');
-  });
+  })();
   // Bind-time avatar snapshot of the viewing question node, used as the
   // fallback icon in the agent chip when the bound external Profile no
   // longer exists — mirrors how the canvas node preserves its identity.
@@ -122,20 +140,15 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // when replaying so the header reflects *which* question is open rather
   // than a generic "Question Replay". Empty while composing a brand-new
   // node (no content authored yet) — the title falls back accordingly.
-  const viewingQuestionLabel = useCanvasStore((s) => {
-    if (!viewingQuestionNodeId) return undefined;
-    const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
-    const d = node?.data as { label?: string } | undefined;
-    const label = typeof d?.label === 'string' ? d.label.trim() : '';
-    return label || undefined;
-  });
-  const isViewingUserNamedQuestion = useCanvasStore((s) => {
-    if (!viewingQuestionNodeId) return false;
-    const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
-    return node?.data?.labelSource === 'user';
-  });
+  const viewingQuestionLabel =
+    typeof conversationOwnerSource?.label === 'string'
+      ? conversationOwnerSource.label.trim() || undefined
+      : undefined;
+  const isViewingUserNamedQuestion = headlessConversation
+    ? !!viewingQuestionLabel
+    : conversationOwnerSource?.labelSource === 'user';
   const tryRename = useCanvasStore((s) => s.tryRename);
-  const canRenameQuestion = !!viewingQuestionNodeId;
+  const canRenameQuestion = !!viewingQuestionNodeId && !headlessConversation;
   const [isEditingQuestionTitle, setIsEditingQuestionTitle] = useState(false);
   const [draftQuestionTitle, setDraftQuestionTitle] = useState(
     viewingQuestionLabel ?? '',
@@ -181,7 +194,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const updateMessage = useChatStore((state) => state.updateMessage);
   const clearMessages = useChatStore((state) => state.clearMessages);
   const threadId = useChatStore((state) => state.threadId);
-  const canvasId = useCanvasStore((state) => state.canvasId);
   const addNode = useCanvasStore((state) => state.addNode);
   const llmConfig = useLLMStore((state) => state.config);
   const llmModels = useLLMStore((state) => state.models);
@@ -214,6 +226,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // <alias>" — the user can recreate the profile in Settings to
   // bring the binding back to life.
   useEffect(() => {
+    if (headlessConversation) return;
     if (!isHistoryLoaded) return;
     if (messages.length > 0) return;
     if (!acpProfilesLoaded) return;
@@ -230,6 +243,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     agentBinding,
     acpProfiles,
     canvasId,
+    headlessConversation,
     setAgentBinding,
   ]);
 
@@ -239,9 +253,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // now also broadcasts its changes to the per-thread card.
   const loadThreadChanges = useAcpThreadChangesStore((s) => s.load);
   useEffect(() => {
-    if (!canvasId || !threadId) return;
-    void loadThreadChanges(canvasId, threadId);
-  }, [canvasId, threadId, loadThreadChanges]);
+    if (!ownerScopeReady || !ownerCanvasId || !threadId) return;
+    void loadThreadChanges(ownerCanvasId, threadId);
+  }, [ownerScopeReady, ownerCanvasId, threadId, loadThreadChanges]);
 
   // Whether the per-thread change card is currently showing, so the
   // chat input can merge with it into one connected box.
@@ -286,8 +300,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const acpSlash = useAcpSlashCommands({
     threadId,
     binding: agentBinding,
-    canvasId,
-    enabled: acpExternalReachable,
+    canvasId: ownerCanvasId,
+    enabled: ownerScopeReady && acpExternalReachable,
   });
   const internalSlash = useInternalSlashCommands({
     binding: agentBinding,
@@ -329,8 +343,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   } = useAcpSessionMeta({
     threadId,
     binding: agentBinding,
-    canvasId,
-    enabled: acpExternalReachable,
+    canvasId: ownerCanvasId,
+    enabled: ownerScopeReady && acpExternalReachable,
     autoEnsureOnCacheMiss:
       activeExternalProfile?.launch.kind !== 'agent-team-manifest',
   });
@@ -348,10 +362,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // configOptions; only active for internal bindings.
   const builtinThreadSettings = useBuiltinThreadSettings({
     threadId,
-    canvasId,
+    canvasId: ownerCanvasId,
     provider: llmConfig?.provider,
     defaultModelId: llmConfig?.model,
-    enabled: agentBinding.kind !== 'external',
+    enabled: ownerScopeReady && agentBinding.kind !== 'external',
     threadHasMessages: messages.length > 0,
   });
 
@@ -405,9 +419,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     () => ({
       profileId:
         agentBinding.kind === 'external' ? agentBinding.profileId : undefined,
-      canvasId: canvasId ?? undefined,
+      canvasId: ownerCanvasId ?? undefined,
     }),
-    [agentBinding, canvasId],
+    [agentBinding, ownerCanvasId],
   );
 
   const handleAcpSelectMode = useCallback(
@@ -501,12 +515,27 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   // Question thread replay mode
   const closeQuestionThread = useChatStore((s) => s.closeQuestionThread);
+  const openQuestionThreadInOwnerCanvas = useChatStore(
+    (s) => s.openQuestionThreadInOwnerCanvas,
+  );
   // Bind canvasId so closing also drops the per-canvas replay pointer
   // in `questionReplayByCanvas` — otherwise a refresh would re-open the
   // replay the user just dismissed.
   const handleCloseQuestionThread = useCallback(() => {
     closeQuestionThread(canvasId || undefined);
   }, [closeQuestionThread, canvasId]);
+  const openOwnerSpaceForReview = useCallback(() => {
+    if (!viewingQuestionThread || !headlessConversation) return;
+    const owner = viewingQuestionThread.conversationOwner;
+    openQuestionThreadInOwnerCanvas(viewingQuestionThread, agentBinding);
+    navigate(`/canvas/${owner.canvasId}`);
+  }, [
+    agentBinding,
+    headlessConversation,
+    navigate,
+    openQuestionThreadInOwnerCanvas,
+    viewingQuestionThread,
+  ]);
 
   // Sketch cluster inspector mode (mutually exclusive with question
   // replay). When set, MessageList renders synthesized messages built from
@@ -718,7 +747,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // place; it never mints a new thread (that is `NewChatMenu`'s job).
   const threadHasUserMessage = messages.some((m) => m.role === 'user');
   const agentSelectorEditable =
-    !viewingSketchCluster && !threadHasUserMessage && !isLoading;
+    !headlessConversation &&
+    !viewingSketchCluster &&
+    !threadHasUserMessage &&
+    !isLoading;
   const handleSelectAgent = useCallback(
     (choice: AgentChoice) => {
       if (isLoading) return;
@@ -912,8 +944,22 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                 />
               </div>
             ) : null}
-            {canvasId && threadId ? (
-              <ChangeReviewCard canvasId={canvasId} threadId={threadId} />
+            {ownerCanvasId && threadId && !headlessConversation ? (
+              <ChangeReviewCard canvasId={ownerCanvasId} threadId={threadId} />
+            ) : null}
+            {headlessConversation && hasThreadChanges ? (
+              <div className="border-edge-default bg-surface -mb-px flex items-center justify-between gap-3 rounded-t-2xl border border-b-0 px-3 py-2 text-xs">
+                <span className="text-fg-muted">
+                  {t('world.sourceChangesAvailable')}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={openOwnerSpaceForReview}
+                >
+                  {t('world.openSpaceForReview')}
+                </Button>
+              </div>
             ) : null}
             <ChatInput
               value={input}

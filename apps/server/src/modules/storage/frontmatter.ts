@@ -35,7 +35,10 @@ export function toFrontmatter(meta: Record<string, unknown>): string {
  * Parse YAML frontmatter from a string. Returns an empty `meta` and the
  * raw input as `content` when no frontmatter block is found.
  */
-export function parseFrontmatter(raw: string): {
+export function parseFrontmatter(
+  raw: string,
+  options?: { strict?: boolean },
+): {
   meta: Record<string, unknown>;
   content: string;
 } {
@@ -65,7 +68,8 @@ export function parseFrontmatter(raw: string): {
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       meta = parsed as Record<string, unknown>;
     }
-  } catch {
+  } catch (error) {
+    if (options?.strict) throw error;
     meta = {};
   }
 

@@ -25,10 +25,19 @@ export const SourceCount = () => {
   // the subject of this very thread, so selecting it should not add it as
   // a context source — exclude it from both the count and the tooltip.
   const viewingQuestionNodeId = useChatStore(
-    (s) => s.viewingQuestionThread?.nodeId,
+    (s) => s.viewingQuestionThread?.conversationOwner.nodeId,
   );
+  const headlessConversation = useChatStore((s) => {
+    const view = s.viewingQuestionThread;
+    return (
+      !!view &&
+      (view.presentationAnchor.canvasId !== view.conversationOwner.canvasId ||
+        view.presentationAnchor.nodeId !== view.conversationOwner.nodeId)
+    );
+  });
 
   const selectedNodes = useMemo(() => {
+    if (headlessConversation) return [];
     const nodeSelected = nodes.filter(
       (n) => n.selected && n.id !== viewingQuestionNodeId,
     );
@@ -45,7 +54,7 @@ export const SourceCount = () => {
       }
     }
     return result;
-  }, [nodes, strokeSelection, viewingQuestionNodeId]);
+  }, [headlessConversation, nodes, strokeSelection, viewingQuestionNodeId]);
 
   const count = selectedNodes.length;
 

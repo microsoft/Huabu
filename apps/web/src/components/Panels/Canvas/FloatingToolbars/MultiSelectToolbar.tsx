@@ -1,4 +1,4 @@
-import { Sparkles, Trash2 } from 'lucide-react';
+import { Pin, PinOff, Sparkles, Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -22,6 +22,7 @@ import { useIsNotMouse } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 import { useIntentStore } from '@/store/intentStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
@@ -51,6 +52,9 @@ export const MultiSelectToolbar = () => {
   const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
   const beginGesture = useCanvasStore((s) => s.beginGesture);
   const deleteNodes = useCanvasStore((s) => s.deleteNodes);
+  const canvasId = useCanvasStore((s) => s.canvasId);
+  const setPortalNodePins = useCanvasStore((s) => s.setPortalNodePins);
+  const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
   const requestSketchRecognition = useIntentStore(
     (s) => s.requestSketchRecognition,
   );
@@ -59,6 +63,40 @@ export const MultiSelectToolbar = () => {
   const selectedNodes = useMemo(
     () => nodes.filter((n) => n.selected) as CanvasNode[],
     [nodes],
+  );
+  const selectedNodeRefUpdates = useMemo(() => {
+    const nodeIdsByCanvas = new Map<string, `node-${string}`[]>();
+    for (const node of selectedNodes) {
+      if (node.type !== 'nodeRef' && node.type !== 'frameRef') continue;
+      const target = (
+        node.data as {
+          target: { canvasId: string; nodeId: string };
+        }
+      ).target;
+      const nodeIds = nodeIdsByCanvas.get(target.canvasId) ?? [];
+      nodeIds.push(target.nodeId as `node-${string}`);
+      nodeIdsByCanvas.set(target.canvasId, nodeIds);
+    }
+    return [...nodeIdsByCanvas].map(([sourceCanvasId, sourceNodeIds]) => ({
+      sourceCanvasId: sourceCanvasId as `canvas-${string}`,
+      sourceNodeIds,
+      pinned: false as const,
+    }));
+  }, [selectedNodes]);
+  const canPinSourceSelection =
+    canvasId !== worldCanvasId &&
+    selectedNodes.length > 0 &&
+    selectedNodes.every(
+      (node) =>
+        node.type !== 'canvasRef' &&
+        node.type !== 'frameRef' &&
+        node.type !== 'nodeRef',
+    );
+  const hasPortalSelection = selectedNodes.some(
+    (node) => node.type === 'canvasRef',
+  );
+  const hasManagedSizeSelection = selectedNodes.some(
+    (node) => node.type === 'canvasRef' || node.type === 'frameRef',
   );
 
   // Edges whose endpoints are both in the node selection participate in
@@ -215,54 +253,56 @@ export const MultiSelectToolbar = () => {
       <FloatingToolbar.Divider />
 
       {/* Size editor: set width / height of every selected node. */}
-      <FloatingToolbar.SizePicker
-        width={commonSize.width}
-        height={textFlowSelection ? null : commonSize.height}
-        showHeight={!textFlowSelection && !hasMixedTextAndBoxSelection}
-        onApply={({ width, height }) => {
-          if (selectedNodes.length === 0) return;
-          if (width === undefined && height === undefined) return;
-          // Resolve per-node via the shared helper, which:
-          //  - falls back to each node's existing width when only height
-          //    was edited (and skips nodes whose width can't be resolved);
-          //  - preserves each node's pinned-vs-auto height state when the
-          //    user didn't enter a height.
-          const items = selectedNodes
-            .map((node): GeometryToolbarItem | null => {
-              const resolved = resolveGeometryEdit(node, {
-                width,
-                height,
-              });
-              if (!resolved) return null;
-              return {
-                nodeId: node.id as CanvasNodeId,
-                size: {
-                  width: resolved.width,
-                  height: resolved.height,
-                },
-              };
-            })
-            .filter((item): item is GeometryToolbarItem => item !== null);
-          if (items.length === 0) return;
-          // SET_NODE_GEOMETRY uses snapshot:'caller' — open a gesture so
-          // the resize folds into one undo entry and the store doesn't warn.
-          beginGesture('SET_NODE_GEOMETRY');
-          setNodeGeometry(
-            items.map(({ nodeId, size }) => ({
-              nodeId,
-              size,
-            })),
-          );
-        }}
-        heightAuto={
-          noteAutoState
-            ? {
-                active: noteAutoState.active,
-                onToggle: toggleNotesAutoHeight,
-              }
-            : undefined
-        }
-      />
+      {!hasManagedSizeSelection && (
+        <FloatingToolbar.SizePicker
+          width={commonSize.width}
+          height={textFlowSelection ? null : commonSize.height}
+          showHeight={!textFlowSelection && !hasMixedTextAndBoxSelection}
+          onApply={({ width, height }) => {
+            if (selectedNodes.length === 0) return;
+            if (width === undefined && height === undefined) return;
+            // Resolve per-node via the shared helper, which:
+            //  - falls back to each node's existing width when only height
+            //    was edited (and skips nodes whose width can't be resolved);
+            //  - preserves each node's pinned-vs-auto height state when the
+            //    user didn't enter a height.
+            const items = selectedNodes
+              .map((node): GeometryToolbarItem | null => {
+                const resolved = resolveGeometryEdit(node, {
+                  width,
+                  height,
+                });
+                if (!resolved) return null;
+                return {
+                  nodeId: node.id as CanvasNodeId,
+                  size: {
+                    width: resolved.width,
+                    height: resolved.height,
+                  },
+                };
+              })
+              .filter((item): item is GeometryToolbarItem => item !== null);
+            if (items.length === 0) return;
+            // SET_NODE_GEOMETRY uses snapshot:'caller' — open a gesture so
+            // the resize folds into one undo entry and the store doesn't warn.
+            beginGesture('SET_NODE_GEOMETRY');
+            setNodeGeometry(
+              items.map(({ nodeId, size }) => ({
+                nodeId,
+                size,
+              })),
+            );
+          }}
+          heightAuto={
+            noteAutoState
+              ? {
+                  active: noteAutoState.active,
+                  onToggle: toggleNotesAutoHeight,
+                }
+              : undefined
+          }
+        />
+      )}
 
       {textFlowSelection && (
         <FloatingToolbar.NumberInput
@@ -299,43 +339,95 @@ export const MultiSelectToolbar = () => {
         </>
       )}
 
+      {canPinSourceSelection && (
+        <>
+          <FloatingToolbar.Divider />
+          <FloatingToolbar.ActionButton
+            title={t('world.pinSelected')}
+            onClick={() =>
+              void setPortalNodePins([
+                {
+                  sourceCanvasId: canvasId as `canvas-${string}`,
+                  sourceNodeIds: selectedNodes.map(
+                    (node) => node.id as `node-${string}`,
+                  ),
+                  pinned: true,
+                },
+              ])
+            }
+          >
+            <Pin />
+          </FloatingToolbar.ActionButton>
+          <FloatingToolbar.ActionButton
+            title={t('world.unpinSelected')}
+            onClick={() =>
+              void setPortalNodePins([
+                {
+                  sourceCanvasId: canvasId as `canvas-${string}`,
+                  sourceNodeIds: selectedNodes.map(
+                    (node) => node.id as `node-${string}`,
+                  ),
+                  pinned: false,
+                },
+              ])
+            }
+          >
+            <PinOff />
+          </FloatingToolbar.ActionButton>
+        </>
+      )}
+
+      {selectedNodeRefUpdates.length > 0 && (
+        <>
+          <FloatingToolbar.Divider />
+          <FloatingToolbar.ActionButton
+            title={t('world.unpinSelected')}
+            onClick={() => void setPortalNodePins(selectedNodeRefUpdates)}
+          >
+            <PinOff />
+          </FloatingToolbar.ActionButton>
+        </>
+      )}
+
       <FloatingToolbar.Divider />
 
       {/* Accent color for selected nodes and the edges between them. */}
-      <FloatingToolbar.ColorPicker
-        colors={accentPickerOptions}
-        value={commonAccent}
-        onSelect={(token) => {
-          const accent = token === ACCENT_NONE ? null : token;
-          if (selectedNodes.length === 0) return;
+      {!hasPortalSelection && (
+        <FloatingToolbar.ColorPicker
+          colors={accentPickerOptions}
+          value={commonAccent}
+          onSelect={(token) => {
+            const accent = token === ACCENT_NONE ? null : token;
+            if (selectedNodes.length === 0) return;
 
-          executeCommands([
-            {
-              type: 'MERGE_NODE_DATA',
-              patches: selectedNodes.map((node) => ({
-                nodeId: node.id as CanvasNodeId,
-                patch: {
-                  style: { ...node.data?.style, accent },
-                },
-              })),
-            },
-            ...(selectedInternalEdges.length > 0
-              ? [
-                  {
-                    type: 'SET_EDGE_STYLE' as const,
-                    edges: selectedInternalEdges.map((edge) => ({
-                      edge: edge.id as CanvasEdgeId,
-                      style: {
-                        stroke: accent ?? DEFAULT_EDGE_STROKE_TOKEN,
-                      },
-                    })),
+            executeCommands([
+              {
+                type: 'MERGE_NODE_DATA',
+                patches: selectedNodes.map((node) => ({
+                  nodeId: node.id as CanvasNodeId,
+                  patch: {
+                    style: { ...node.data?.style, accent },
                   },
-                ]
-              : []),
-          ]);
-        }}
-        title={t('toolbar.accentColor')}
-      />
+                })),
+              },
+              ...(selectedInternalEdges.length > 0
+                ? [
+                    {
+                      type: 'SET_EDGE_STYLE' as const,
+                      edges: selectedInternalEdges.map((edge) => ({
+                        edge: edge.id as CanvasEdgeId,
+                        style: {
+                          stroke: accent ?? DEFAULT_EDGE_STROKE_TOKEN,
+                        },
+                      })),
+                    },
+                  ]
+                : []),
+            ]);
+          }}
+          title={t('toolbar.accentColor')}
+        />
+      )}
 
       {/* Non-mouse only: mouse users have keyboard Delete / Backspace. */}
       {isNotMouse && (
