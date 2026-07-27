@@ -6,11 +6,17 @@ export const SECRET_IDS = {
   codexOAuth: 'oauth:openai-codex:credentials',
 } as const;
 
+const LLM_PROVIDER_ID_PATTERN = /^[a-z0-9._-]{1,64}$/i;
+
 export function llmProviderApiKeySecretId(provider: string): string {
+  if (!LLM_PROVIDER_ID_PATTERN.test(provider)) {
+    throw new Error('Invalid LLM provider id');
+  }
   return `llm:provider:${provider}:api-key`;
 }
 
-const LLM_PROVIDER_SECRET_PATTERN = /^llm:provider:([a-z0-9._-]+):api-key$/i;
+const LLM_PROVIDER_SECRET_PATTERN =
+  /^llm:provider:([a-z0-9._-]{1,64}):api-key$/i;
 
 export function parseLlmProviderApiKeySecretId(id: string): string | null {
   return LLM_PROVIDER_SECRET_PATTERN.exec(id)?.[1] ?? null;
