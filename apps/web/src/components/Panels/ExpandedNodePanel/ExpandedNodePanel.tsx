@@ -185,6 +185,7 @@ export const ExpandedNodePanel = ({
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const openExpandedCanvas = useCanvasStore((s) => s.openExpanded);
+  const selectCanvasNodes = useCanvasStore((s) => s.selectNodes);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   // Routed through `tryRename` so a sibling-label collision triggers the
   // shared alert + revert flow (same path used by the layer tree and
@@ -224,9 +225,10 @@ export const ExpandedNodePanel = ({
     (nodeId: string) => {
       setOpenNeighborDirection(null);
       openExpandedCanvas(nodeId);
+      selectCanvasNodes([nodeId]);
       panelRef.current?.focus({ preventScroll: true });
     },
-    [openExpandedCanvas],
+    [openExpandedCanvas, selectCanvasNodes],
   );
 
   useEffect(() => {

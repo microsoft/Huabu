@@ -108,6 +108,12 @@ describe('ExpandedNodePanel edge navigation', () => {
 
     expect(useCanvasStore.getState().expandedNodeId).toBe('b');
     expect(useCanvasStore.getState().expandMode).toBe('replace');
+    expect(
+      useCanvasStore
+        .getState()
+        .nodes.filter((node) => node.selected)
+        .map((node) => node.id),
+    ).toEqual(['b']);
   });
 
   it('releases a direct-navigation button so arrow navigation can continue', () => {
@@ -164,6 +170,12 @@ describe('ExpandedNodePanel edge navigation', () => {
     act(() => (document.activeElement as HTMLButtonElement).click());
     expect(useCanvasStore.getState().expandedNodeId).toBe('b');
     expect(useCanvasStore.getState().expandMode).toBe('split');
+    expect(
+      useCanvasStore
+        .getState()
+        .nodes.filter((node) => node.selected)
+        .map((node) => node.id),
+    ).toEqual(['b']);
     expect(document.activeElement).toBe(
       container?.querySelector('[data-search-scope="node"]'),
     );

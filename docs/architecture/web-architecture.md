@@ -90,7 +90,7 @@ The web keeps undo/redo managers in a registry keyed by `canvasId` while retaini
 
 The keyboard shortcut catalog may retain internal runtime bindings with `hidden: true`; `getKeyboardShortcutSections()` excludes them from the user-facing modal. Removed bindings must be deleted from the catalog rather than left as display-only entries.
 
-The Expanded Node Panel derives upstream and downstream navigation from the active Canvas edges without adding persisted navigation state: incoming-edge sources are upstream, outgoing-edge targets are downstream, and neighbors follow Canvas node order after missing endpoints, self-loops, and duplicates are removed. Bare Left/Right Arrow actions switch directly when one neighbor exists or open a deterministic chooser when several exist. Editable controls, search, menus, media controls, and embedded viewers retain arrow-key ownership. Switching reuses `openExpanded`, preserves split/replace mode, and does not select or reveal the destination on the Canvas.
+The Expanded Node Panel derives upstream and downstream navigation from the active Canvas edges without adding persisted navigation state: incoming-edge sources are upstream, outgoing-edge targets are downstream, and neighbors follow Canvas node order after missing endpoints, self-loops, and duplicates are removed. Bare Left/Right Arrow actions switch directly when one neighbor exists or open a deterministic chooser when several exist. Editable controls, search, menus, media controls, and embedded viewers retain arrow-key ownership. Switching reuses `openExpanded`, replaces the Canvas selection with the destination node, preserves split/replace mode, and does not pan or zoom to reveal the destination.
 
 ---
 
