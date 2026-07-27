@@ -11,8 +11,6 @@
  *       - Windows installer icon + BrowserWindow icon on Win32
  *   apps/web/public/favicon.png             256x256 PNG
  *       - Browser favicon fallback when SVG isn't supported
- *   apps/docs/public/favicon.png            256x256 PNG
- *       - Documentation favicon fallback when SVG isn't supported
  *
  * The SVG-encoded `favicon.svg` is the same artwork as `logo.svg` and is
  * already kept in sync by hand; this script does NOT touch it (writing it
@@ -36,7 +34,6 @@ import sharp from 'sharp';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const RESOURCES = join(HERE, '..', 'build-resources');
 const WEB_PUBLIC = join(HERE, '..', '..', 'web', 'public');
-const DOCS_PUBLIC = join(HERE, '..', '..', 'docs', 'public');
 const SOURCE_SVG = join(RESOURCES, 'logo.svg');
 
 /**
@@ -107,8 +104,6 @@ async function main() {
   const png256 = await renderPng(256);
   await writeFile(join(WEB_PUBLIC, 'favicon.png'), png256);
   console.log(`✓ web/public/favicon.png          (${png256.length} bytes)`);
-  await writeFile(join(DOCS_PUBLIC, 'favicon.png'), png256);
-  console.log(`✓ docs/public/favicon.png         (${png256.length} bytes)`);
 
   // BILINEAR is the highest-quality resize option png2icons exposes;
   // the third arg (0) disables PNG re-compression (input is already

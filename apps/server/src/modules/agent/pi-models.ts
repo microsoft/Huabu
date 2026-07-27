@@ -131,7 +131,7 @@ async function withProviderLock<T>(
  * resolved on demand via `read()` during `getAuth()`, which does not depend
  * on `list()`.
  */
-const credentialStore: CredentialStore = {
+export const credentialStore: CredentialStore = {
   read(providerId: string): Promise<Credential | undefined> {
     return Promise.resolve(readCredential(providerId));
   },
@@ -151,6 +151,12 @@ const credentialStore: CredentialStore = {
     return withProviderLock(providerId, async () => {
       const current = readCredential(providerId);
       const next = await fn(current);
+      // CredentialStore contract: `fn` returning undefined means "leave the
+      // entry unchanged" — NOT delete. pi-ai's locked OAuth refresh returns
+      // undefined when a concurrent request already rotated the token, so
+      // writing through here would wipe the freshly-refreshed credential and
+      // force a re-login. Deletion has its own path (`delete()`).
+      if (next === undefined) return current;
       await writeCredential(providerId, next);
       return next;
     });

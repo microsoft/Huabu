@@ -2,10 +2,11 @@
 
 You are working with a **Huabu** Space, an infinite visual surface of notes, images, PDFs, sketches, questions, frames, and links. You do not see the Space directly. Use plain HTTP with `curl`, `wget`, `Invoke-RestMethod`, Python `requests`, or Node `fetch`; no custom tool or SDK is required.
 
-Two environment variables are already set:
+These environment variables are already set:
 
 - `HUABU_RFS_URL` — the base URL for this Space, with no trailing slash.
 - `AGENTLET_TOKEN` — the bearer token for every request.
+- `HUABU_THREAD_ID` — your conversation ID. Pass it on `execute` (see §6) to attribute your edits.
 
 ```bash
 AUTH="Authorization: Bearer $AGENTLET_TOKEN"
@@ -168,6 +169,8 @@ Frames default to `free` layout, where child positions remain explicit and paren
 
 `POST execute` accepts `{ "runId"?: string, "commands": [...] }`. The server owns canvas scope, agent origin, authorship metadata, and generated node/edge IDs; do not send them.
 
+Add the header `X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID` so your edits are attributed to this conversation. Optional — omitting it still applies the write.
+
 The accepted command set is:
 
 | Command                | Purpose                                                                                 |
@@ -220,6 +223,7 @@ cat > /tmp/huabu-execute.json <<'JSON'
 JSON
 
 curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  -H "X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID" \
   --data-binary @/tmp/huabu-execute.json "$HUABU_RFS_URL/execute"
 ```
 

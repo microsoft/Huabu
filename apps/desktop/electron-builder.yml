@@ -157,6 +157,13 @@ linux:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  # Space-free installer name. The default nsis artifactName contains
+  # spaces ("Huabu Setup X.Y.Z.exe"); GitHub rewrites spaces to dots in
+  # release asset names, which then no longer match the hyphenated URL
+  # electron-builder records in latest.yml, so electron-updater 404s on
+  # download. A hyphenated name keeps the on-disk file, the uploaded
+  # asset, and the latest.yml URL identical.
+  artifactName: ${productName}-Setup-${version}.${ext}
 
 dmg:
   window:

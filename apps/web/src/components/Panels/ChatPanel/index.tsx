@@ -57,6 +57,7 @@ import { MessageList } from '../../Messages/MessageList';
 import { SidebarPanel } from '../SidebarPanel';
 
 import type {
+  AgentIcon,
   AgentMode,
   IntentCandidate,
   IntentEpisode,
@@ -125,6 +126,15 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     const d = conversationOwnerSource;
     return d.agentBinding?.kind === 'external' ? 'ask' : (d.agentMode ?? 'ask');
   })();
+  // Bind-time avatar snapshot of the viewing question node, used as the
+  // fallback icon in the agent chip when the bound external Profile no
+  // longer exists — mirrors how the canvas node preserves its identity.
+  const viewingQuestionAgentIcon = useCanvasStore((s) => {
+    if (!viewingQuestionNodeId) return undefined;
+    const node = s.nodes.find((n) => n.id === viewingQuestionNodeId);
+    const d = node?.data as { agentIcon?: AgentIcon } | undefined;
+    return d?.agentIcon;
+  });
 
   // The viewing question node's authored label, used as the panel title
   // when replaying so the header reflects *which* question is open rather
@@ -971,6 +981,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                   onSelect={handleSelectAgent}
                   onRefreshProfiles={refreshAcpProfiles}
                   disabled={!isHistoryLoaded}
+                  fallbackIcon={viewingQuestionAgentIcon}
                 />
               }
               acpSelectorsSlot={

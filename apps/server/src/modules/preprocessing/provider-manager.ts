@@ -21,6 +21,30 @@ import { resolveArtifactImageUrl } from '../artifact/utils.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 
+/**
+ * Whether an error from an LLM / provider call is a transient connectivity or
+ * auth-refresh failure (gateway down, OAuth token refresh failed, network
+ * blip, rate limit) rather than a genuine "the model ran but produced nothing
+ * usable" outcome.
+ *
+ * Transient failures are rethrown so the preprocessing pipeline records a
+ * retryable `ENRICH_FAILED` diagnostic and does NOT mark the enrich
+ * capabilities as done — instead of silently returning `undefined`, which is
+ * indistinguishable from "this node has no content worth enriching" and would
+ * permanently freeze the node without a label / summary. Genuine empty or
+ * unparseable model output stays non-transient (returns `undefined`).
+ */
+export function isTransientProviderError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    /please log in|authentication failed|oauth/i.test(message) ||
+    /fetch failed|network|socket hang up|timeout|timed out|econn|etimedout|enotfound|eai_again/i.test(
+      message,
+    ) ||
+    /\b(401|403|408|425|429|500|502|503|504)\b/.test(message)
+  );
+}
+
 export class ProviderManager {
   /**
    * Generate a short semantic label for an image using LLM vision.
@@ -75,7 +99,9 @@ export class ProviderManager {
         return text;
       }
       return undefined;
-    } catch {
+    } catch (err) {
+      // A transient outage must not be swallowed into a clean skip.
+      if (isTransientProviderError(err)) throw err;
       return undefined;
     }
   }
@@ -106,7 +132,8 @@ export class ProviderManager {
         return text;
       }
       return undefined;
-    } catch {
+    } catch (err) {
+      if (isTransientProviderError(err)) throw err;
       return undefined;
     }
   }
@@ -172,7 +199,8 @@ export class ProviderManager {
       }
 
       return { label, summary, keywords };
-    } catch {
+    } catch (err) {
+      if (isTransientProviderError(err)) throw err;
       return undefined;
     }
   }

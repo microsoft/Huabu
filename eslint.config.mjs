@@ -46,8 +46,6 @@ export default typescriptEslint.config(
           './tsconfig.base.json',
           './apps/server/tsconfig.json',
           './apps/desktop/tsconfig.json',
-          './apps/docs/tsconfig.json',
-          './apps/docs/tsconfig.node.json',
           './apps/web/tsconfig.json',
           './apps/web/tsconfig.node.json',
           './packages/shared/tsconfig.json',
@@ -64,7 +62,6 @@ export default typescriptEslint.config(
             './tsconfig.base.json',
             './apps/server/tsconfig.json',
             './apps/desktop/tsconfig.json',
-            './apps/docs/tsconfig.json',
             './apps/web/tsconfig.json',
             './packages/shared/tsconfig.json',
             './external/agenetes/packages/protocol/tsconfig.json',
@@ -170,7 +167,6 @@ export default typescriptEslint.config(
       'apps/server/src/**/*.{js,mjs,cjs}',
       'apps/desktop/src/**/*.{ts,tsx}',
       'apps/desktop/scripts/**/*.{js,mjs,cjs}',
-      'apps/docs/scripts/**/*.{js,mjs,cjs}',
       'packages/shared/src/**/*.{ts,tsx}',
       'external/agenetes/packages/*/src/**/*.{ts,tsx}',
       'vite.config.ts',
@@ -237,11 +233,8 @@ export default typescriptEslint.config(
     },
   },
   {
-    // Browser Env (Web and Docs Apps)
-    files: [
-      'apps/docs/src/**/*.{ts,tsx,js,jsx}',
-      'apps/web/src/**/*.{ts,tsx,js,jsx}',
-    ],
+    // Browser Env (Web App)
+    files: ['apps/web/src/**/*.{ts,tsx,js,jsx}'],
     plugins: {
       react: reactPlugin,
       'react-hooks': reactHooksPlugin,

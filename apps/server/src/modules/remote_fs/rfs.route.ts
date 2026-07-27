@@ -35,6 +35,7 @@ import {
   createId,
   rfsAgentHeadersSchema,
   rfsAgentRequestSchema,
+  rfsExecuteHeadersSchema,
   rfsExecuteRequestSchema,
   spaceQuerySchema,
   type RfsAgentEventMode,
@@ -361,9 +362,20 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           );
       }
 
+      // Best-effort change attribution: when the agent forwards its
+      // injected `HUABU_THREAD_ID` via `X-Huabu-Host-Thread-Id`, tag the
+      // batch to that host conversation so its change-review card fills.
+      // Absent / malformed → the write still applies, just unattributed.
+      const parsedHeaders = rfsExecuteHeadersSchema.safeParse(request.headers);
+      const hostThreadId = parsedHeaders.success
+        ? parsedHeaders.data['x-huabu-host-thread-id']
+        : undefined;
+
       try {
         return reply.send(
-          await executeRfsCommands(request.params.canvasId, parsed.data),
+          await executeRfsCommands(request.params.canvasId, parsed.data, {
+            hostThreadId,
+          }),
         );
       } catch (error) {
         if (error instanceof CanvasNotFoundError) {

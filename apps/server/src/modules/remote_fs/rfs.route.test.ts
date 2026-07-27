@@ -473,6 +473,71 @@ describe('POST /api/rfs/:canvasId/execute', () => {
     }
   });
 
+  it('attributes change-review records to the host thread only when the header is present', async () => {
+    seedNote('c1', 'node-1', 'Alpha', 'existing body');
+    const app = await buildApp();
+    try {
+      const payload = {
+        commands: [
+          {
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                nodeType: 'note',
+                data: { label: 'Attributed', content: '# Attributed' },
+                position: { x: 120, y: 80 },
+              },
+            ],
+          },
+        ],
+      };
+
+      // With the host-thread header → records persisted to that thread's sidecar.
+      const attributed = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: {
+          'content-type': 'application/json',
+          'x-huabu-host-thread-id': 'thread-abc',
+        },
+        payload,
+      });
+      expect(attributed.statusCode).toBe(200);
+      expect(getCanvasStore('c1').readChanges('thread-abc')).toHaveLength(1);
+
+      // Without the header → no attribution, no records written.
+      const unattributed = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload,
+      });
+      expect(unattributed.statusCode).toBe(200);
+      expect(getCanvasStore('c1').readChanges('thread-xyz')).toHaveLength(0);
+
+      // A malformed filesystem ID is ignored: the write still applies, but
+      // no change-review sidecar is attributed to it.
+      const malformed = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: {
+          'content-type': 'application/json',
+          'x-huabu-host-thread-id': 'thread/invalid',
+        },
+        payload,
+      });
+      expect(malformed.statusCode).toBe(200);
+      expect(
+        malformed.json<{ affected: { nodeIds: string[] } }>().affected.nodeIds,
+      ).toHaveLength(1);
+      expect(getCanvasStore('c1').readChanges('thread-invalid')).toHaveLength(
+        0,
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it('executes adjacent requests independently when they reuse a runId', async () => {
     const anchorFile = seedNote('c1', 'node-1', 'Alpha', 'existing body');
     agentMocks.runAgent.mockImplementation(() => {

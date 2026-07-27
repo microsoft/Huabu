@@ -361,7 +361,17 @@ export function useCanvasLasso({
       }
       pendingRef.current = null;
       endCanvasGesture(event.pointerId);
-      if (!screenPoints) return;
+      if (!screenPoints) {
+        // A plain click (press-release below the lasso activation
+        // distance) on an empty lasso-start target is a deselect gesture:
+        // clear any retained lasso selection so tapping empty canvas
+        // deselects, like the Select tool and most canvas apps. Without
+        // this the only way to drop a selection was drawing a fresh empty
+        // loop, which made deselecting hard.
+        onSelect([], []);
+        cancel();
+        return;
+      }
 
       const finalScreenPoints = appendPoint(screenPoints, {
         x: event.clientX,

@@ -1,7 +1,9 @@
 # Model Role Routing (per-task model selection)
 
-Status: Proposed
-Last updated: 2026-07-09
+Status: Partly shipped
+Last updated: 2026-07-24
+
+The tier configuration, role resolver, Utility settings, and automatic cheapest-eligible selection described here have shipped. Per-role overrides remain deferred. The current runtime contract is documented in [agent-architecture.md](../architecture/agent-architecture.md); this proposal preserves the design history.
 
 ## Goal
 

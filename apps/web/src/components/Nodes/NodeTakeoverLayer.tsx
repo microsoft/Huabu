@@ -3,6 +3,7 @@ import { memo, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useNodeTakeover } from '@/hooks/useNodeTakeover';
+import { useTakeoverMarkDrag } from '@/hooks/useTakeoverMarkDrag';
 import { useNodeCollapseStore } from '@/store/nodeCollapseStore';
 
 import type { TakeoverState } from '@/config/nodeTakeover';
@@ -32,9 +33,12 @@ export interface NodeTakeoverLayerProps {
  *     card body fades out once the takeover band starts; the mark lives in this
  *     separate portal so it is not faded with the card.
  *
- * It has NO interaction vocabulary: the mark owns its own click + gating; the
- * engine only forwards a double-click. Memoised + self-subscribed, so
- * continuous zoom re-renders only this small overlay, never the node body.
+ * It has ONE interaction concern of its own — pointer-drag of the node —
+ * because moving the collapsed node needs the React Flow instance + store
+ * that live here, not in the presentational mark (see `useTakeoverMarkDrag`).
+ * The mark still owns its own click + gating; the engine only forwards a
+ * double-click. Memoised + self-subscribed, so continuous zoom re-renders
+ * only this small overlay, never the node body.
  */
 export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
   nodeId,
@@ -46,6 +50,7 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
     useNodeTakeover(nodeId);
   const domNode = useStore((s) => s.domNode);
   const internalNode = useInternalNode(nodeId);
+  const markDrag = useTakeoverMarkDrag(nodeId);
   const setMark = useNodeCollapseStore((s) => s.setMark);
   const rendererEl = useMemo(
     () => domNode?.querySelector('.react-flow__renderer') ?? null,
@@ -98,7 +103,19 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
       {/* Centre the mark on the interpolated point; the mark's own size (from
           state.size) shrinks it continuously as the node collapses. */}
       <div
+        // `nopan` opts this portal out of React Flow's zoom/pan filter
+        // (`event.target.closest('.nopan')`). The portal is a direct child of
+        // `.react-flow__renderer`, the element d3-zoom binds `dblclick.zoom`
+        // to, so without this a double-click on the mark would zoom the canvas
+        // — a React `stopPropagation` runs at the React root, too late to beat
+        // that native handler.
+        className="nopan"
         onDoubleClick={onActivate}
+        onPointerDown={markDrag.onPointerDown}
+        onPointerMove={markDrag.onPointerMove}
+        onPointerUp={markDrag.onPointerUp}
+        onPointerCancel={markDrag.onPointerCancel}
+        onClickCapture={markDrag.onClickCapture}
         style={{
           transform: 'translate(-50%, -50%)',
           pointerEvents: 'auto',

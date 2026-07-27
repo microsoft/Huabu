@@ -2,15 +2,17 @@
 /**
  * Dev orchestrator.
  *
- * Starts `shared` (tsc -w), `server`, and the standalone `docs` app in
- * parallel, polls their TCP ports until they accept connections, then starts
- * `web` with the actual handbook URL injected. This avoids the cold-start
+ * Starts `shared` (tsc -w) and `server` in parallel, polls the Server TCP port
+ * until it accepts connections, then starts `web`. This avoids the cold-start
  * window where Vite is already proxying `/api/*` while the server is still
  * booting (which surfaces as harmless but noisy ECONNREFUSED logs).
  *
- * Port resolution mirrors apps/web/vite.config.ts:
+ * Environment resolution mirrors apps/web/vite.config.ts:
  *   process.env  >  apps/web/.env  >  <repo-root>/.env
- * Docs additionally reads DOCS_PORT and avoids the configured web port.
+ * Each preferred port (server, web) is then probed with findAvailablePort
+ * and slid to the next free one if occupied, and the resolved ports are
+ * injected into every consumer so the Vite proxy target stays in sync with
+ * wherever each service actually bound.
  */
 import { spawnSync } from 'node:child_process';
 import net from 'node:net';
@@ -54,9 +56,10 @@ const env = loadEnv(
 );
 
 const SERVER_PORT = Number.parseInt(env.SERVER_PORT || env.PORT || '3001', 10);
-const SERVER_HOST = '127.0.0.1';
 const WEB_PORT = Number.parseInt(env.WEB_PORT || env.VITE_PORT || '5173', 10);
-const DOCS_PORT = Number.parseInt(env.DOCS_PORT || '5174', 10);
+const SERVER_HOST = '127.0.0.1';
+const HANDBOOK_URL =
+  env.VITE_HANDBOOK_URL || 'https://microsoft.github.io/Huabu/docs/';
 // How long to wait for the server to accept connections before giving up.
 // Cold starts (first tsx/esbuild compile, Windows Defender scanning a fresh
 // node_modules, or a loaded machine) can blow past a tight window, so the
@@ -276,36 +279,47 @@ function spawnAgentletWatch(filter, label) {
   return child;
 }
 
-const docsPort = await findAvailablePort(
-  DOCS_PORT,
-  new Set([SERVER_PORT, WEB_PORT]),
-);
-if (docsPort !== DOCS_PORT) {
+// Resolve actually-free ports before spawning anything (mirrors
+// scripts/dev-desktop.mjs). If a stale server/vite is still holding the
+// preferred port, slide to the next free one instead of crashing the
+// server or letting Vite's strictPort abort — and propagate the resolved
+// ports to every consumer so the Vite proxy target stays in sync with
+// wherever each service actually bound.
+const serverPort = await findAvailablePort(SERVER_PORT);
+if (serverPort !== SERVER_PORT) {
   console.warn(
-    `[dev] Docs port ${DOCS_PORT} is in use or reserved; using ${docsPort} instead.`,
+    `[dev] Server port ${SERVER_PORT} is in use; using ${serverPort} instead.`,
+  );
+}
+const webPort = await findAvailablePort(WEB_PORT, new Set([serverPort]));
+if (webPort !== WEB_PORT) {
+  console.warn(
+    `[dev] Web port ${WEB_PORT} is in use or reserved; using ${webPort} instead.`,
   );
 }
 
-console.log('[dev] starting agentlet watcher + shared + server + docs …');
+console.log('[dev] starting agentlet watcher + shared + server …');
 // `predev` already populated protocol dist; this watcher keeps it current for
 // the daemon bundle and Agenetes Gateway consumers during development.
 spawnAgentletWatch('@agentlet/protocol', 'agentlet/protocol');
 spawnPnpmDev('@sediment/shared', 'shared');
-spawnPnpmDev('@sediment/server', 'server');
-spawnPnpmDev('@sediment/docs', 'docs', {
-  DOCS_PORT: String(docsPort),
+spawnPnpmDev('@sediment/server', 'server', {
+  SERVER_PORT: String(serverPort),
 });
 
 try {
-  await Promise.all([
-    waitForPort(SERVER_HOST, SERVER_PORT, READY_TIMEOUT_MS),
-    waitForPort(SERVER_HOST, docsPort, READY_TIMEOUT_MS),
-  ]);
+  await waitForPort(SERVER_HOST, serverPort, READY_TIMEOUT_MS);
   console.log(
-    `[dev] server is up at http://${SERVER_HOST}:${SERVER_PORT}, docs up at http://${SERVER_HOST}:${docsPort}/docs/; starting web …`,
+    `[dev] server is up at http://${SERVER_HOST}:${serverPort}; starting web on :${webPort} …`,
   );
+  // Pass the resolved ports through env so vite.config.ts binds the port we
+  // already probed as free (its strictPort would otherwise abort) and its
+  // `/api/*` proxy target follows the server wherever it actually bound.
   spawnPnpmDev('@sediment/web', 'web', {
-    VITE_HANDBOOK_URL: `http://${SERVER_HOST}:${docsPort}/docs/`,
+    SERVER_PORT: String(serverPort),
+    WEB_PORT: String(webPort),
+    VITE_PORT: String(webPort),
+    VITE_HANDBOOK_URL: HANDBOOK_URL,
   });
 } catch (err) {
   console.error('[dev]', err);
