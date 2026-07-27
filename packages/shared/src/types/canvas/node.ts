@@ -270,6 +270,71 @@ export interface BaseNodeData {
    * of the layout pass (especially the "no empty track" rebalance).
    */
   frameSlot?: number;
+  /**
+   * Who owns this node's height.
+   *
+   * - `'auto'` — the height is derived from rendered content. The number
+   *   in `style.height` is materialized from {@link autoHeight}, not
+   *   authored, and carries no authority on disk.
+   * - `'fixed'` — the height in `style.height` is authored geometry (a
+   *   creation default or a resize gesture) and content never moves it.
+   *
+   * Authored state: toggling it is a user intent, so it participates in
+   * the structure diff, bumps `canvas.version`, and is undoable.
+   *
+   * Only meaningful for node types whose policy `kind` is `'toggleable'`
+   * (today: `note`). Always-content and always-manual types ignore it.
+   * Absent on nodes persisted before the field existed, where "auto" was
+   * encoded as the *absence* of `style.height`; `resolveHeightMode`
+   * owns that fallback.
+   */
+  heightMode?: HeightMode;
+  /**
+   * Cached measurement backing an auto height.
+   *
+   * Derived state, not content: it is a convergent cache that any client
+   * can recompute, so it must not bump `canvas.version` or broadcast.
+   * Its purpose is to give the node a correct footprint before it has
+   * ever been rendered — on first paint, after virtualization remount,
+   * and in the headless engine, which has no DOM to measure with.
+   */
+  autoHeight?: AutoHeightHint;
+}
+
+/** Who owns a node's height. See {@link BaseNodeData.heightMode}. */
+export type HeightMode = 'auto' | 'fixed';
+
+/**
+ * A measurement of a node's content height, together with proof of what
+ * it was measured against.
+ *
+ * Advisory, not authoritative. It does not promise that two clients
+ * render the same height — font availability, browser version, and DPR
+ * are deliberately outside the key — only that a client opening the
+ * canvas starts from a plausible size instead of collapsing and then
+ * jumping. Each client re-materializes locally and corrects if needed.
+ */
+export interface AutoHeightHint {
+  /**
+   * Content height in CSS pixels at the node type's reference width,
+   * before any width scaling or chrome. The conversion to the number
+   * written to `style.height` lives in `intrinsicToLayoutHeight`.
+   */
+  intrinsicHeight: number;
+  /**
+   * The `AutoHeightKey` this measurement is valid for — the rendering
+   * pipeline version plus the node's content revision. The literal
+   * `'legacy'` marks a height inherited from an older representation:
+   * a usable footprint with no proof of what it describes, always
+   * reported as stale.
+   */
+  measuredFor: string;
+  /**
+   * The measurement was committed before the content had fully settled
+   * (typically undecoded images). Treated as stale so the node is
+   * re-measured, but kept because a provisional footprint beats none.
+   */
+  provisional?: boolean;
 }
 
 /** Note node: rich Markdown content authored on the canvas */

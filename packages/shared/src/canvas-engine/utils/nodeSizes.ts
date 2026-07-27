@@ -12,6 +12,11 @@
  * create-node commands.
  */
 
+import {
+  isAlwaysAutoHeightType,
+  isAutoHeightByDefaultType,
+} from '../height/policy.js';
+
 import type { NodeSize } from '../../index.js';
 import type { Node } from '@xyflow/react';
 
@@ -43,14 +48,15 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
   question: { width: 200, height: 80 },
 };
 
-const DEFAULT_AUTO_HEIGHT_NODE_TYPES = new Set(['text', 'note', 'question']);
-const ALWAYS_AUTO_HEIGHT_NODE_TYPES = new Set(['text', 'question']);
-
-/** True when top-level `style.height` should never be used as pinned geometry. */
+/**
+ * True when top-level `style.height` should never be used as pinned geometry.
+ *
+ * Thin alias over the height policy table, kept because the name is used
+ * across the engine and the web layer.
+ */
 export function isAlwaysAutoHeightNodeType(nodeType: string): boolean {
-  return ALWAYS_AUTO_HEIGHT_NODE_TYPES.has(nodeType);
+  return isAlwaysAutoHeightType(nodeType);
 }
-
 /**
  * Return the canonical default size hints for a node type.
  * These are used as layout fallbacks when creating nodes or calculating
@@ -86,7 +92,7 @@ export function getNodeCreationStyle(
     typeof size.height === 'number' &&
     (opts.heightIsExplicit
       ? !isAlwaysAutoHeightNodeType(nodeType)
-      : !DEFAULT_AUTO_HEIGHT_NODE_TYPES.has(nodeType));
+      : !isAutoHeightByDefaultType(nodeType));
 
   return shouldWriteHeight
     ? { width: size.width, height: size.height }

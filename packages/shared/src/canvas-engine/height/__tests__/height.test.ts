@@ -1,0 +1,400 @@
+import { describe, expect, it } from 'vitest';
+
+import { nodeRevisionOf } from '../../change.js';
+import {
+  getNodeCreationStyle,
+  isAlwaysAutoHeightNodeType,
+} from '../../utils/nodeSizes.js';
+import {
+  HEIGHT_LAYOUT_VERSION,
+  HEIGHT_QUANTIZATION_STEP,
+  LEGACY_MEASURED_FOR,
+  autoHeightKey,
+  getHeightRefWidth,
+  intrinsicToLayoutHeight,
+  isAlwaysAutoHeightType,
+  isAutoHeightByDefaultType,
+  materializeAutoHeight,
+  materializeAutoHeights,
+  quantizeHeight,
+  readAutoHeightHint,
+  resolveHeightMode,
+} from '../index.js';
+
+import type { Node } from '@xyflow/react';
+
+/**
+ * The values the height policy table replaced. Kept here verbatim so the
+ * table is pinned to the behaviour that shipped before it existed — this
+ * suite is the proof that introducing the table changed nothing.
+ */
+const LEGACY_ALWAYS_AUTO = new Set(['text', 'question']);
+const LEGACY_AUTO_BY_DEFAULT = new Set(['text', 'note', 'question']);
+const LEGACY_REF_WIDTHS: Record<string, number> = {
+  note: 400,
+  web: 400,
+  pdf: 400,
+  office: 400,
+};
+
+const ALL_NODE_TYPES = [
+  'text',
+  'note',
+  'question',
+  'web',
+  'pdf',
+  'office',
+  'video',
+  'image',
+  'audio',
+  'frame',
+  'sketch',
+  'canvasRef',
+  'frameRef',
+  'nodeRef',
+  'unknown-future-type',
+];
+
+function node(partial: Partial<Node> & { type: string }): Node {
+  return {
+    id: 'n1',
+    position: { x: 0, y: 0 },
+    data: {},
+    ...partial,
+  } as Node;
+}
+
+describe('height policy table', () => {
+  it('reproduces the legacy always-auto-height type set', () => {
+    for (const type of ALL_NODE_TYPES) {
+      expect([type, isAlwaysAutoHeightType(type)]).toEqual([
+        type,
+        LEGACY_ALWAYS_AUTO.has(type),
+      ]);
+    }
+  });
+
+  it('reproduces the legacy auto-height-by-default type set', () => {
+    for (const type of ALL_NODE_TYPES) {
+      expect([type, isAutoHeightByDefaultType(type)]).toEqual([
+        type,
+        LEGACY_AUTO_BY_DEFAULT.has(type),
+      ]);
+    }
+  });
+
+  it('reproduces the legacy reference widths', () => {
+    for (const type of ALL_NODE_TYPES) {
+      expect([type, getHeightRefWidth(type)]).toEqual([
+        type,
+        LEGACY_REF_WIDTHS[type],
+      ]);
+    }
+  });
+
+  it('keeps nodeSizes behaviour unchanged', () => {
+    for (const type of ALL_NODE_TYPES) {
+      expect(isAlwaysAutoHeightNodeType(type)).toBe(
+        LEGACY_ALWAYS_AUTO.has(type),
+      );
+      expect(getNodeCreationStyle(type, { width: 400, height: 300 })).toEqual(
+        LEGACY_AUTO_BY_DEFAULT.has(type)
+          ? { width: 400 }
+          : { width: 400, height: 300 },
+      );
+      expect(
+        getNodeCreationStyle(
+          type,
+          { width: 400, height: 300 },
+          { heightIsExplicit: true },
+        ),
+      ).toEqual(
+        LEGACY_ALWAYS_AUTO.has(type)
+          ? { width: 400 }
+          : { width: 400, height: 300 },
+      );
+    }
+  });
+});
+
+describe('resolveHeightMode', () => {
+  it('is always auto for content-driven types, whatever is stored', () => {
+    expect(
+      resolveHeightMode(
+        node({ type: 'text', style: { height: 200 }, data: {} }),
+      ),
+    ).toBe('auto');
+    expect(
+      resolveHeightMode(
+        node({ type: 'question', data: { heightMode: 'fixed' } }),
+      ),
+    ).toBe('auto');
+  });
+
+  it('is always fixed for manual types', () => {
+    expect(resolveHeightMode(node({ type: 'image' }))).toBe('fixed');
+    expect(
+      resolveHeightMode(node({ type: 'pdf', data: { heightMode: 'auto' } })),
+    ).toBe('fixed');
+  });
+
+  it('prefers the stored flag on toggleable types', () => {
+    expect(
+      resolveHeightMode(
+        node({
+          type: 'note',
+          data: { heightMode: 'auto' },
+          style: { height: 300 },
+        }),
+      ),
+    ).toBe('auto');
+    expect(
+      resolveHeightMode(node({ type: 'note', data: { heightMode: 'fixed' } })),
+    ).toBe('fixed');
+  });
+
+  it('infers the legacy encoding when the flag is absent', () => {
+    expect(resolveHeightMode(node({ type: 'note' }))).toBe('auto');
+    expect(resolveHeightMode(node({ type: 'note', style: {} }))).toBe('auto');
+    expect(
+      resolveHeightMode(node({ type: 'note', style: { height: 320 } })),
+    ).toBe('fixed');
+  });
+});
+
+describe('intrinsicToLayoutHeight', () => {
+  it('quantizes to the step so sub-step differences collapse', () => {
+    expect(quantizeHeight(100)).toBe(100);
+    expect(quantizeHeight(100.4)).toBe(100 + HEIGHT_QUANTIZATION_STEP);
+    expect(intrinsicToLayoutHeight(201, 'note', 400)).toBe(
+      intrinsicToLayoutHeight(203, 'note', 400),
+    );
+  });
+
+  it('applies the minimum before scaling', () => {
+    // Note minimum is 50 unscaled; at half width the scale clamp is 0.5.
+    expect(intrinsicToLayoutHeight(10, 'note', 400)).toBe(52);
+    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(28);
+  });
+
+  it('scales with width for types that have a reference width', () => {
+    expect(intrinsicToLayoutHeight(200, 'note', 800)).toBe(400);
+    expect(intrinsicToLayoutHeight(200, 'note', 400)).toBe(200);
+  });
+
+  it('does not scale types without a reference width', () => {
+    expect(intrinsicToLayoutHeight(200, 'text', 800)).toBe(200);
+    expect(intrinsicToLayoutHeight(200, 'text', undefined)).toBe(200);
+  });
+
+  it('clamps the scale factor from below', () => {
+    // 100px wide is a quarter of the reference width, but the clamp is 0.5.
+    expect(intrinsicToLayoutHeight(200, 'note', 100)).toBe(100);
+  });
+});
+
+describe('readAutoHeightHint', () => {
+  const content = '# hello';
+  const currentKey = `${HEIGHT_LAYOUT_VERSION}:${nodeRevisionOf({ content })}`;
+
+  it('reports missing when nothing is stored', () => {
+    expect(readAutoHeightHint(node({ type: 'note' }))).toEqual({
+      freshness: 'missing',
+    });
+  });
+
+  it('reports missing for a malformed or non-positive hint', () => {
+    for (const autoHeight of [
+      null,
+      42,
+      { measuredFor: currentKey },
+      { intrinsicHeight: 0, measuredFor: currentKey },
+      { intrinsicHeight: Number.NaN, measuredFor: currentKey },
+      { intrinsicHeight: 120 },
+    ]) {
+      expect(
+        readAutoHeightHint(node({ type: 'note', data: { autoHeight } }))
+          .freshness,
+      ).toBe('missing');
+    }
+  });
+
+  it('reports current only when the key matches', () => {
+    const read = readAutoHeightHint(
+      node({
+        type: 'note',
+        data: {
+          content,
+          autoHeight: { intrinsicHeight: 120, measuredFor: currentKey },
+        },
+      }),
+    );
+    expect(read.freshness).toBe('current');
+    expect(read.hint?.intrinsicHeight).toBe(120);
+  });
+
+  it('reports stale after the content changes', () => {
+    expect(
+      readAutoHeightHint(
+        node({
+          type: 'note',
+          data: {
+            content: '# changed',
+            autoHeight: { intrinsicHeight: 120, measuredFor: currentKey },
+          },
+        }),
+      ).freshness,
+    ).toBe('stale');
+  });
+
+  it('reports stale after the layout version is bumped', () => {
+    expect(
+      readAutoHeightHint(
+        node({
+          type: 'note',
+          data: {
+            content,
+            autoHeight: {
+              intrinsicHeight: 120,
+              measuredFor: `${HEIGHT_LAYOUT_VERSION + 1}:${nodeRevisionOf({ content })}`,
+            },
+          },
+        }),
+      ).freshness,
+    ).toBe('stale');
+  });
+
+  it('never reports the legacy sentinel as current', () => {
+    const read = readAutoHeightHint(
+      node({
+        type: 'note',
+        data: {
+          content,
+          autoHeight: {
+            intrinsicHeight: 260,
+            measuredFor: LEGACY_MEASURED_FOR,
+          },
+        },
+      }),
+    );
+    expect(read.freshness).toBe('stale');
+    // ...but the footprint is still usable as a seed.
+    expect(read.hint?.intrinsicHeight).toBe(260);
+  });
+
+  it('treats a provisional measurement as stale even under the current key', () => {
+    expect(
+      readAutoHeightHint(
+        node({
+          type: 'note',
+          data: {
+            content,
+            autoHeight: {
+              intrinsicHeight: 120,
+              measuredFor: currentKey,
+              provisional: true,
+            },
+          },
+        }),
+      ).freshness,
+    ).toBe('stale');
+  });
+
+  it('keys on src as well as content, matching nodeRevisionOf', () => {
+    expect(autoHeightKey(node({ type: 'note', data: { content } }))).not.toBe(
+      autoHeightKey(node({ type: 'note', data: { content, src: 'a.png' } })),
+    );
+  });
+});
+
+describe('materializeAutoHeight', () => {
+  const content = '# hello';
+  const currentKey = `${HEIGHT_LAYOUT_VERSION}:${nodeRevisionOf({ content })}`;
+
+  it('gives an unmeasured auto node a positive height', () => {
+    const result = materializeAutoHeight(node({ type: 'note' }));
+    expect((result.style as { height: number }).height).toBeGreaterThan(0);
+    expect(result.measured?.height).toBe(
+      (result.style as { height: number }).height,
+    );
+  });
+
+  it('materializes from the stored hint', () => {
+    const result = materializeAutoHeight(
+      node({
+        type: 'note',
+        style: { width: 400 },
+        data: {
+          content,
+          autoHeight: { intrinsicHeight: 260, measuredFor: currentKey },
+        },
+      }),
+    );
+    expect((result.style as { height: number }).height).toBe(260);
+  });
+
+  it('materializes a stale hint too — a seed beats a collapse', () => {
+    const result = materializeAutoHeight(
+      node({
+        type: 'note',
+        style: { width: 400 },
+        data: {
+          content: '# changed',
+          autoHeight: { intrinsicHeight: 260, measuredFor: currentKey },
+        },
+      }),
+    );
+    expect((result.style as { height: number }).height).toBe(260);
+  });
+
+  it('leaves fixed nodes alone', () => {
+    const fixed = node({
+      type: 'note',
+      style: { height: 321 },
+      data: { heightMode: 'fixed' },
+    });
+    expect(materializeAutoHeight(fixed)).toBe(fixed);
+
+    const image = node({ type: 'image', style: { height: 300 } });
+    expect(materializeAutoHeight(image)).toBe(image);
+  });
+
+  it('returns the same reference when the geometry already agrees', () => {
+    const settled = materializeAutoHeight(
+      node({
+        type: 'note',
+        style: { width: 400 },
+        data: {
+          content,
+          autoHeight: { intrinsicHeight: 260, measuredFor: currentKey },
+        },
+      }),
+    );
+    expect(materializeAutoHeight(settled)).toBe(settled);
+  });
+
+  it('overwrites a stale measured height left behind by a mode toggle', () => {
+    const result = materializeAutoHeight(
+      node({
+        type: 'note',
+        style: { width: 400 },
+        measured: { width: 400, height: 800 },
+        data: {
+          heightMode: 'auto',
+          content,
+          autoHeight: { intrinsicHeight: 260, measuredFor: currentKey },
+        },
+      }),
+    );
+    expect(result.measured?.height).toBe(260);
+    expect(result.measured?.width).toBe(400);
+  });
+
+  it('preserves the array reference when no node changes', () => {
+    const nodes = [
+      node({ id: 'a', type: 'image', style: { height: 300 } }),
+      materializeAutoHeight(node({ id: 'b', type: 'note' })),
+    ];
+    expect(materializeAutoHeights(nodes)).toBe(nodes);
+  });
+});
