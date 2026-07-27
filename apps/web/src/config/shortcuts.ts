@@ -71,6 +71,8 @@ const COMBO_DISPLAY_TOKEN: Record<string, string> = {
   '-': 'Minus',
   '=': 'Equal',
   Escape: 'Esc',
+  ArrowLeft: '←',
+  ArrowRight: '→',
 };
 
 /**
@@ -158,6 +160,18 @@ export const SHORTCUTS: ShortcutDef[] = [
     id: 'view.zoomOut',
     combo: { mod: true, key: ['-', '_'] },
     descriptionKey: 'shortcuts.items.zoomOut',
+    section: SECTION.layout,
+  },
+  {
+    id: 'node.navigateUpstream',
+    combo: { key: 'ArrowLeft' },
+    descriptionKey: 'shortcuts.items.navigateUpstream',
+    section: SECTION.layout,
+  },
+  {
+    id: 'node.navigateDownstream',
+    combo: { key: 'ArrowRight' },
+    descriptionKey: 'shortcuts.items.navigateDownstream',
     section: SECTION.layout,
   },
 

@@ -1,16 +1,40 @@
 import clsx from 'clsx';
-import { ArrowLeft, Bot, Columns2, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  Bot,
+  ChevronLeft,
+  ChevronRight,
+  Columns2,
+  X,
+} from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { formatShortcutById, matchesShortcut } from '@/config/shortcuts.ts';
+
 import { InPreviewSearchBar } from './InPreviewSearchBar.tsx';
+import {
+  getExpandedNodeNeighbors,
+  isExpandedNodeNavigationBlocked,
+  type ExpandedNodeDirection,
+} from './navigation';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useChatStore } from '../../../store/chatStore.ts';
 import { usePreviewStore } from '../../../store/previewStore.ts';
 import { Button } from '../../Common/Button.tsx';
+import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
 import { Input } from '../../Common/Input.tsx';
 import { NodePreviewContent } from '../../Nodes/NodePreviewContent.tsx';
 import { PreviewHeaderSlotContext } from '../../Nodes/PreviewHeaderSlot.tsx';
+
+import type { Node } from '@xyflow/react';
 
 /* ------------------------------------------------------------------ */
 /*  ExpandedNodePanel – inline panel that replaces or sits beside     */
@@ -20,6 +44,132 @@ import { PreviewHeaderSlotContext } from '../../Nodes/PreviewHeaderSlot.tsx';
 type ExpandedNodePanelProps = {
   isChatCollapsed?: boolean;
   onToggleChat?: () => void;
+};
+
+type ConnectedNodeControlProps = {
+  direction: ExpandedNodeDirection;
+  neighbors: Node[];
+  open: boolean;
+  title: string;
+  menuLabel: string;
+  untitledLabel: string;
+  onOpenChange: (open: boolean) => void;
+  onSelect: (nodeId: string) => void;
+};
+
+const ConnectedNodeControl = ({
+  direction,
+  neighbors,
+  open,
+  title,
+  menuLabel,
+  untitledLabel,
+  onOpenChange,
+  onSelect,
+}: ConnectedNodeControlProps) => {
+  const Icon = direction === 'incoming' ? ChevronLeft : ChevronRight;
+  const hasMultiple = neighbors.length > 1;
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(open);
+  const restoreTriggerFocusRef = useRef(true);
+
+  useEffect(() => {
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (wasOpen && !open) {
+      if (restoreTriggerFocusRef.current) {
+        triggerRef.current?.focus({ preventScroll: true });
+      }
+      restoreTriggerFocusRef.current = true;
+    }
+  }, [open]);
+
+  const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.key !== 'ArrowDown' &&
+      event.key !== 'ArrowUp' &&
+      event.key !== 'Home' &&
+      event.key !== 'End'
+    ) {
+      return;
+    }
+
+    const items = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitem"]',
+      ),
+    );
+    if (items.length === 0) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const currentIndex = items.indexOf(
+      document.activeElement as HTMLButtonElement,
+    );
+    if (event.key === 'Home') {
+      items[0].focus();
+    } else if (event.key === 'End') {
+      items.at(-1)?.focus();
+    } else {
+      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      const nextIndex =
+        currentIndex === -1
+          ? 0
+          : (currentIndex + delta + items.length) % items.length;
+      items[nextIndex].focus();
+    }
+  };
+
+  return (
+    <DropdownMenu
+      open={open}
+      onOpenChange={(nextOpen) => onOpenChange(hasMultiple && nextOpen)}
+      align="bottom-left"
+      className="min-w-48"
+      trigger={
+        <Button
+          ref={triggerRef}
+          variant="ghost"
+          size="sm"
+          title={title}
+          tooltipPlacement="bottom"
+          disabled={neighbors.length === 0}
+          aria-label={title}
+          aria-haspopup={hasMultiple ? 'menu' : undefined}
+          onClick={(event) => {
+            if (neighbors.length !== 1) return;
+            event.preventDefault();
+            event.currentTarget.blur();
+            onSelect(neighbors[0].id);
+          }}
+        >
+          <Icon />
+          <span aria-hidden="true">{neighbors.length}</span>
+        </Button>
+      }
+    >
+      <div role="menu" aria-label={menuLabel} onKeyDown={handleMenuKeyDown}>
+        {neighbors.map((neighbor, index) => {
+          const label =
+            typeof neighbor.data.label === 'string' && neighbor.data.label
+              ? neighbor.data.label
+              : untitledLabel;
+          return (
+            <DropdownMenuItem
+              key={neighbor.id}
+              autoFocus={index === 0}
+              onClick={() => {
+                restoreTriggerFocusRef.current = false;
+                onSelect(neighbor.id);
+              }}
+            >
+              {label}
+            </DropdownMenuItem>
+          );
+        })}
+      </div>
+    </DropdownMenu>
+  );
 };
 
 export const ExpandedNodePanel = ({
@@ -33,6 +183,8 @@ export const ExpandedNodePanel = ({
   const closeExpandedCanvas = useCanvasStore((s) => s.closeExpanded);
   const setCanvasExpandMode = useCanvasStore((s) => s.setExpandMode);
   const nodes = useCanvasStore((s) => s.nodes);
+  const edges = useCanvasStore((s) => s.edges);
+  const openExpandedCanvas = useCanvasStore((s) => s.openExpanded);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   // Routed through `tryRename` so a sibling-label collision triggers the
   // shared alert + revert flow (same path used by the layer tree and
@@ -50,6 +202,36 @@ export const ExpandedNodePanel = ({
     if (!expandedNodeId) return null;
     return nodes.find((n) => n.id === expandedNodeId) ?? null;
   }, [expandedNodeId, nodes]);
+  const incomingNeighbors = useMemo(
+    () =>
+      expandedNodeId
+        ? getExpandedNodeNeighbors(nodes, edges, expandedNodeId, 'incoming')
+        : [],
+    [edges, expandedNodeId, nodes],
+  );
+  const outgoingNeighbors = useMemo(
+    () =>
+      expandedNodeId
+        ? getExpandedNodeNeighbors(nodes, edges, expandedNodeId, 'outgoing')
+        : [],
+    [edges, expandedNodeId, nodes],
+  );
+  const [openNeighborDirection, setOpenNeighborDirection] =
+    useState<ExpandedNodeDirection | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const selectNeighbor = useCallback(
+    (nodeId: string) => {
+      setOpenNeighborDirection(null);
+      openExpandedCanvas(nodeId);
+      panelRef.current?.focus({ preventScroll: true });
+    },
+    [openExpandedCanvas],
+  );
+
+  useEffect(() => {
+    setOpenNeighborDirection(null);
+  }, [expandedNodeId]);
 
   // Priority: Preview > Node
   // If preview is open, show it. Otherwise show node (if any).
@@ -117,14 +299,35 @@ export const ExpandedNodePanel = ({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         activeItem.close();
+        return;
+      }
+      if (!activeItem.isNode || isExpandedNodeNavigationBlocked(e.target)) {
+        return;
+      }
+
+      const direction = matchesShortcut(e, 'node.navigateUpstream')
+        ? 'incoming'
+        : matchesShortcut(e, 'node.navigateDownstream')
+          ? 'outgoing'
+          : null;
+      if (!direction) return;
+
+      const neighbors =
+        direction === 'incoming' ? incomingNeighbors : outgoingNeighbors;
+      if (neighbors.length === 0) return;
+
+      e.preventDefault();
+      if (neighbors.length === 1) {
+        selectNeighbor(neighbors[0].id);
+      } else {
+        setOpenNeighborDirection(direction);
       }
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeItem]);
+  }, [activeItem, incomingNeighbors, outgoingNeighbors, selectNeighbor]);
 
-  const panelRef = useRef<HTMLDivElement>(null);
   // Scroll container of the preview body. Stored in component state
   // (not a plain ref) so that mounting the div triggers a re-render —
   // `InPreviewSearchBar` receives this as a prop and would otherwise
@@ -230,6 +433,8 @@ export const ExpandedNodePanel = ({
   const isReplace = activeItem.expandMode === 'replace';
 
   const backTitle = activeItem.isNode ? 'Back to Canvas' : 'Close Preview';
+  const upstreamShortcut = formatShortcutById('node.navigateUpstream');
+  const downstreamShortcut = formatShortcutById('node.navigateDownstream');
 
   // Inline rename is available only when the panel is hosting a real
   // canvas node (previews are intentionally read-only).
@@ -267,6 +472,7 @@ export const ExpandedNodePanel = ({
   return (
     <div
       ref={panelRef}
+      tabIndex={-1}
       data-search-scope="node"
       data-search-node-id={previewNodeId}
       className="border-edge-default bg-surface flex h-full w-full flex-col overflow-hidden border-l"
@@ -347,6 +553,43 @@ export const ExpandedNodePanel = ({
               </span>
             )}
           </div>
+
+          {activeItem.isNode ? (
+            <div className="flex shrink-0 items-center gap-1">
+              <div
+                aria-hidden="true"
+                className="bg-edge-default mx-1 h-5 w-px"
+              />
+              <ConnectedNodeControl
+                direction="incoming"
+                neighbors={incomingNeighbors}
+                open={openNeighborDirection === 'incoming'}
+                title={t('node.navigateUpstream', {
+                  shortcut: upstreamShortcut,
+                })}
+                menuLabel={t('node.chooseUpstream')}
+                untitledLabel={t('node.untitled')}
+                onOpenChange={(open) =>
+                  setOpenNeighborDirection(open ? 'incoming' : null)
+                }
+                onSelect={selectNeighbor}
+              />
+              <ConnectedNodeControl
+                direction="outgoing"
+                neighbors={outgoingNeighbors}
+                open={openNeighborDirection === 'outgoing'}
+                title={t('node.navigateDownstream', {
+                  shortcut: downstreamShortcut,
+                })}
+                menuLabel={t('node.chooseDownstream')}
+                untitledLabel={t('node.untitled')}
+                onOpenChange={(open) =>
+                  setOpenNeighborDirection(open ? 'outgoing' : null)
+                }
+                onSelect={selectNeighbor}
+              />
+            </div>
+          ) : null}
         </div>
 
         {/* Right: mode toggle + close */}
