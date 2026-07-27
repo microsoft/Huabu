@@ -1421,6 +1421,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const { canvasId } = request.params;
       const parsed = postCanvasEventsBodySchema.safeParse(request.body);
       if (!parsed.success) {
+        request.log.warn(
+          { canvasId, issues: parsed.error.issues },
+          'Invalid canvas events request body',
+        );
         return reply.code(400).send({
           message: parsed.error.issues[0]?.message ?? 'Invalid request body',
         });

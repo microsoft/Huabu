@@ -55,6 +55,8 @@ export const MultiSelectToolbar = () => {
   const canvasId = useCanvasStore((s) => s.canvasId);
   const setPortalNodePins = useCanvasStore((s) => s.setPortalNodePins);
   const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
+  const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
+  const pinnedSourceNodeIds = useCanvasStore((s) => s.pinnedSourceNodeIds);
   const requestSketchRecognition = useIntentStore(
     (s) => s.requestSketchRecognition,
   );
@@ -84,6 +86,7 @@ export const MultiSelectToolbar = () => {
     }));
   }, [selectedNodes]);
   const canPinSourceSelection =
+    worldEnabled &&
     canvasId !== worldCanvasId &&
     selectedNodes.length > 0 &&
     selectedNodes.every(
@@ -92,6 +95,31 @@ export const MultiSelectToolbar = () => {
         node.type !== 'frameRef' &&
         node.type !== 'nodeRef',
     );
+  // Pin state across the selection. When every node agrees the toolbar
+  // collapses into one toggle; a mixed selection keeps both actions so
+  // "pin all" and "unpin all" stay expressible.
+  const sourcePinState = useMemo(() => {
+    if (!canPinSourceSelection) return null;
+    const pinnedCount = selectedNodes.filter(
+      (node) => pinnedSourceNodeIds[node.id] === true,
+    ).length;
+    if (pinnedCount === 0) return 'none' as const;
+    if (pinnedCount === selectedNodes.length) return 'all' as const;
+    return 'mixed' as const;
+  }, [canPinSourceSelection, pinnedSourceNodeIds, selectedNodes]);
+  const pinSelection = useCallback(
+    (pinned: boolean) =>
+      void setPortalNodePins([
+        {
+          sourceCanvasId: canvasId as `canvas-${string}`,
+          sourceNodeIds: selectedNodes.map(
+            (node) => node.id as `node-${string}`,
+          ),
+          pinned,
+        },
+      ]),
+    [canvasId, selectedNodes, setPortalNodePins],
+  );
   const hasPortalSelection = selectedNodes.some(
     (node) => node.type === 'canvasRef',
   );
@@ -339,41 +367,37 @@ export const MultiSelectToolbar = () => {
         </>
       )}
 
-      {canPinSourceSelection && (
+      {sourcePinState && (
         <>
           <FloatingToolbar.Divider />
-          <FloatingToolbar.ActionButton
-            title={t('world.pinSelected')}
-            onClick={() =>
-              void setPortalNodePins([
-                {
-                  sourceCanvasId: canvasId as `canvas-${string}`,
-                  sourceNodeIds: selectedNodes.map(
-                    (node) => node.id as `node-${string}`,
-                  ),
-                  pinned: true,
-                },
-              ])
-            }
-          >
-            <Pin />
-          </FloatingToolbar.ActionButton>
-          <FloatingToolbar.ActionButton
-            title={t('world.unpinSelected')}
-            onClick={() =>
-              void setPortalNodePins([
-                {
-                  sourceCanvasId: canvasId as `canvas-${string}`,
-                  sourceNodeIds: selectedNodes.map(
-                    (node) => node.id as `node-${string}`,
-                  ),
-                  pinned: false,
-                },
-              ])
-            }
-          >
-            <PinOff />
-          </FloatingToolbar.ActionButton>
+          {sourcePinState === 'mixed' ? (
+            <>
+              <FloatingToolbar.ActionButton
+                title={t('world.pinSelected')}
+                onClick={() => pinSelection(true)}
+              >
+                <Pin />
+              </FloatingToolbar.ActionButton>
+              <FloatingToolbar.ActionButton
+                title={t('world.unpinSelected')}
+                onClick={() => pinSelection(false)}
+              >
+                <PinOff />
+              </FloatingToolbar.ActionButton>
+            </>
+          ) : (
+            <FloatingToolbar.ToggleButton
+              active={sourcePinState === 'all'}
+              title={
+                sourcePinState === 'all'
+                  ? t('world.unpinSelected')
+                  : t('world.pinSelected')
+              }
+              onClick={() => pinSelection(sourcePinState !== 'all')}
+            >
+              {sourcePinState === 'all' ? <PinOff /> : <Pin />}
+            </FloatingToolbar.ToggleButton>
+          )}
         </>
       )}
 

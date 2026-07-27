@@ -354,6 +354,17 @@ type RFState = {
   canvasNotFound: boolean;
   worldReferences: Record<string, ResolvedWorldReference>;
   worldReferenceError: string | null;
+  /**
+   * Source-Space projection of World pin state: the ids of *this* canvas'
+   * nodes that currently have a `nodeRef` / `frameRef` in the World.
+   *
+   * Populated only while an ordinary Space is active and the World feature
+   * is enabled — the World canvas itself uses `worldReferences` instead.
+   * Refreshed on the same boundaries as `worldReferences` (canvas load,
+   * window focus, Pin/Unpin completion) per the World Canvas proposal's
+   * boundary-driven freshness rule.
+   */
+  pinnedSourceNodeIds: Record<string, true>;
   refreshWorldReferences: () => Promise<void>;
   isSaving: boolean;
   pendingSave: boolean;
@@ -1202,6 +1213,7 @@ const useCanvasStore = create<RFState>()(
     canvasNotFound: false,
     worldReferences: {},
     worldReferenceError: null,
+    pinnedSourceNodeIds: {},
     isSaving: false,
     pendingSave: false,
     versionConflict: false,
@@ -1209,20 +1221,42 @@ const useCanvasStore = create<RFState>()(
     refreshWorldReferences: async () => {
       const generation = ++worldReferenceRefreshGeneration;
       const canvasId = get().canvasId;
-      const worldCanvasId = useWorkspaceStore.getState().worldCanvasId;
-      if (!canvasId || canvasId !== worldCanvasId) {
+      const { worldCanvasId, worldEnabled } = useWorkspaceStore.getState();
+      const isWorld = canvasId !== '' && canvasId === worldCanvasId;
+      // Source Spaces only need pin state while the World feature is on;
+      // `worldCanvasId` is workspace metadata that exists either way.
+      if (!canvasId || (!isWorld && (!worldEnabled || !worldCanvasId))) {
         get()._setStateNoAutosave({
           worldReferences: {},
           worldReferenceError: null,
+          pinnedSourceNodeIds: {},
         });
         return;
       }
       try {
-        const response = await getWorldReferences(canvasId);
+        const response = await getWorldReferences(
+          isWorld ? canvasId : (worldCanvasId as string),
+        );
         if (
           get().canvasId !== canvasId ||
           generation !== worldReferenceRefreshGeneration
         ) {
+          return;
+        }
+        if (!isWorld) {
+          // Derive which of this Space's nodes are pinned by filtering the
+          // World's references down to the ones targeting this canvas.
+          const pinnedSourceNodeIds: Record<string, true> = {};
+          for (const reference of response.references) {
+            if (reference.kind === 'canvasRef') continue;
+            if (reference.target.canvasId !== canvasId) continue;
+            pinnedSourceNodeIds[reference.target.nodeId] = true;
+          }
+          get()._setStateNoAutosave({
+            worldReferences: {},
+            worldReferenceError: null,
+            pinnedSourceNodeIds,
+          });
           return;
         }
         get()._setStateNoAutosave({
@@ -1233,6 +1267,7 @@ const useCanvasStore = create<RFState>()(
             ]),
           ),
           worldReferenceError: null,
+          pinnedSourceNodeIds: {},
         });
       } catch (error) {
         if (
@@ -1241,10 +1276,17 @@ const useCanvasStore = create<RFState>()(
         ) {
           return;
         }
+        if (!isWorld) {
+          // A failed source-side probe only costs pin affordances; it is not
+          // the World's broken-reference banner state.
+          get()._setStateNoAutosave({ pinnedSourceNodeIds: {} });
+          return;
+        }
         get()._setStateNoAutosave({
           worldReferences: {},
           worldReferenceError:
             error instanceof Error ? error.message : String(error),
+          pinnedSourceNodeIds: {},
         });
       }
     },
@@ -1724,14 +1766,16 @@ const useCanvasStore = create<RFState>()(
           canvasHistoryManager.clearCanvas(response.canvasId);
           nodeRefTopologySignatures.delete(response.canvasId);
         }
-        if (get().canvasId === response.canvasId) {
-          await get().refreshWorldReferences();
-        }
+        // Refresh unconditionally: a Pin invoked from a source Space
+        // mutates the World (`response.canvasId` is the World), while the
+        // active canvas still needs its derived pin state re-read. The
+        // refresh itself is scope-aware and generation-guarded.
+        await get().refreshWorldReferences();
         return true;
       } catch (error) {
         toast(
           error instanceof ApiError && error.code === 'WORLD_PORTAL_MISSING'
-            ? i18n.t('world.portalRefreshRequired')
+            ? i18n.t('world.pinSourceMissing')
             : i18n.t('world.pinFailed'),
           { tone: 'danger' },
         );
@@ -1832,6 +1876,7 @@ const useCanvasStore = create<RFState>()(
             pendingForkThreadIds: {},
             worldReferences: {},
             worldReferenceError: null,
+            pinnedSourceNodeIds: {},
           });
           return;
         }
@@ -1917,6 +1962,7 @@ const useCanvasStore = create<RFState>()(
           pendingForkThreadIds: {},
           worldReferences: {},
           worldReferenceError: null,
+          pinnedSourceNodeIds: {},
         });
         void get().refreshWorldReferences();
 

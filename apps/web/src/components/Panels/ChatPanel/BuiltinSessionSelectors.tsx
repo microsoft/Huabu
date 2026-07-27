@@ -9,13 +9,10 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Select, type SelectOption } from '../../Common/Select';
+import { SessionSelectorPill } from './SessionSelectorPill';
 
+import type { SelectOption } from '../../Common/Select';
 import type { LLMModelInfo } from '@sediment/shared';
-
-// Match AcpSessionSelectors' compact trigger so both agent kinds render an
-// identical toolbar row.
-const COMPACT_TRIGGER_CLASS = 'px-1.5 py-0.5 gap-1';
 
 interface BuiltinSessionSelectorsProps {
   /** The active provider's models (capability + labels). */
@@ -74,32 +71,20 @@ export function BuiltinSessionSelectors({
 
   return (
     <>
-      <Select<string>
+      <SessionSelectorPill<string>
         options={modelOptions}
         value={currentModelId ?? ''}
         onChange={(next) => void onSelectModel(next)}
         disabled={disabled}
         title={t('chat.model')}
-        variant="ghost"
-        shape="pill"
-        tone="neutral"
-        size="sm"
-        align="top-left"
-        className={COMPACT_TRIGGER_CLASS}
       />
       {effortOptions.length > 0 ? (
-        <Select<string>
+        <SessionSelectorPill<string>
           options={effortOptions}
           value={currentReasoningEffort ?? 'off'}
           onChange={(next) => void onSelectReasoningEffort(next)}
           disabled={disabled}
           title={t('chat.reasoningEffort')}
-          variant="ghost"
-          shape="pill"
-          tone="neutral"
-          size="sm"
-          align="top-left"
-          className={COMPACT_TRIGGER_CLASS}
         />
       ) : null}
     </>

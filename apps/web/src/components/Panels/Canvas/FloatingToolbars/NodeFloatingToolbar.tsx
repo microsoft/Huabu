@@ -91,6 +91,10 @@ export const NodeFloatingToolbar = memo(
     const canvasId = useCanvasStore((s) => s.canvasId);
     const setPortalNodePins = useCanvasStore((s) => s.setPortalNodePins);
     const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
+    const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
+    const isPinnedToWorld = useCanvasStore(
+      (s) => s.pinnedSourceNodeIds[id] === true,
+    );
     const ingestion = useCanvasStore((s) => s.ingestionByNodeId[id]);
     const isNotMouse = useIsNotMouse();
     const isTextFlowNode = isAlwaysAutoHeightNodeType(type);
@@ -364,37 +368,31 @@ export const NodeFloatingToolbar = memo(
           </>
         )}
 
-        {canvasId !== worldCanvasId && !isReference && (
+        {/* World Pin is a single stateful toggle: the highlighted state
+            tells the user this node already has a World reference. Only
+            meaningful while the World feature is enabled — `worldCanvasId`
+            alone is workspace metadata that exists regardless of the
+            user-facing toggle. */}
+        {worldEnabled && canvasId !== worldCanvasId && !isReference && (
           <>
             <FloatingToolbar.Divider />
-            <FloatingToolbar.ActionButton
-              title={t('world.pinSelected')}
+            <FloatingToolbar.ToggleButton
+              active={isPinnedToWorld}
+              title={
+                isPinnedToWorld ? t('world.unpinNode') : t('world.pinNode')
+              }
               onClick={() =>
                 void setPortalNodePins([
                   {
                     sourceCanvasId: canvasId as `canvas-${string}`,
                     sourceNodeIds: [id as `node-${string}`],
-                    pinned: true,
+                    pinned: !isPinnedToWorld,
                   },
                 ])
               }
             >
-              <Pin />
-            </FloatingToolbar.ActionButton>
-            <FloatingToolbar.ActionButton
-              title={t('world.unpinSelected')}
-              onClick={() =>
-                void setPortalNodePins([
-                  {
-                    sourceCanvasId: canvasId as `canvas-${string}`,
-                    sourceNodeIds: [id as `node-${string}`],
-                    pinned: false,
-                  },
-                ])
-              }
-            >
-              <PinOff />
-            </FloatingToolbar.ActionButton>
+              {isPinnedToWorld ? <PinOff /> : <Pin />}
+            </FloatingToolbar.ToggleButton>
           </>
         )}
 

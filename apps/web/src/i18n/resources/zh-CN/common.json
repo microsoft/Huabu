@@ -370,8 +370,10 @@
     "openSpaceForReview": "打开 Space 审阅",
     "pinSelected": "将所选节点固定到 World",
     "unpinSelected": "从 World 取消固定所选节点",
+    "pinNode": "固定到 World",
+    "unpinNode": "从 World 取消固定",
     "pinFailed": "更新 World 固定节点失败",
-    "portalRefreshRequired": "请先刷新 World，再固定该 Space 中的节点"
+    "pinSourceMissing": "无法固定：该 Space 已不存在"
   },
   "node": {
     "untitled": "未命名",

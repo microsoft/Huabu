@@ -95,6 +95,7 @@ import useCanvasStore from '../../../store/canvasStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
 import { usePreviewStore } from '../../../store/previewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
+import { useWorkspaceStore } from '../../../store/workspaceStore.ts';
 import {
   canMoveSedimentPayload,
   canReadSedimentPayload,
@@ -414,6 +415,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   const { setPendingNodeType } = useToolStore.getState();
 
   const [isBoxSelecting, setIsBoxSelecting] = useState(false);
+
+  // Turning the World feature on/off changes whether this Space resolves
+  // its derived pin state at all, so re-run the boundary refresh.
+  const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
+  useEffect(() => {
+    void refreshWorldReferences();
+  }, [worldEnabled, refreshWorldReferences]);
 
   useEffect(() => {
     const handleFocus = () => void refreshWorldReferences();

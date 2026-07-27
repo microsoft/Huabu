@@ -115,7 +115,7 @@ The World and the existing Space List are sibling workspace pages. A global user
 
 The World is not a replacement storage index for the list, but its persisted topology automatically maintains one canonical `canvasRef` for every live ordinary Space.
 
-When the World capability is first used, reconciliation creates missing Portals for existing Spaces and gives only those new Portals deterministic initial positions. Creating another Space later creates its missing Portal on the next reconciliation without moving any existing Portal. Reloading the World likewise preserves every user-owned position. The implemented reconciliation runs only before a World read, serializes concurrent reconciliation attempts, and rejects duplicate or malformed persisted Portal identities. Node-level Pin commands never invoke Portal reconciliation.
+When the World capability is first used, reconciliation creates missing Portals for existing Spaces and gives only those new Portals deterministic initial positions. Creating another Space later creates its missing Portal on the next reconciliation without moving any existing Portal. Reloading the World likewise preserves every user-owned position. The implemented reconciliation runs before a World read and before a Portal Pin whose source Space has no Portal yet, serializes concurrent reconciliation attempts, and rejects duplicate or malformed persisted Portal identities. Pin therefore never requires the user to visit the World first, while still creating no topology of its own: it can only restore the standing `live Space ⇔ one live canonical Portal` invariant.
 
 A canonical Portal may be empty. Empty means that the Space exists but no source nodes currently have persistent `frameRef` or `nodeRef` descendants; derived Portal chrome may still show the resolved project title, summary, and bounded statistics.
 
@@ -265,7 +265,7 @@ The `NODE` segment in `SET_PORTAL_NODE_PINS` identifies what is pinned and avoid
 The shared handler enforces World-local invariants:
 
 - Every `sourceCanvasId` resolves to exactly one canonical `canvasRef`.
-- A missing canonical `canvasRef` rejects the entire command with an instruction to refresh the World; Pin never creates one implicitly.
+- A missing canonical `canvasRef` triggers the standard World reconciliation once; the command is rejected only when the source Canvas is still not a live Space afterwards. Pin never invents Portal topology of its own.
 - Every pinned `sourceNodeId` exists in that source Canvas.
 - Pinning a source Frame traverses its current descendants recursively, creates `frameRef` for Frame nodes and `nodeRef` for other nodes, preserves source hierarchy among newly materialized references, and adopts already-pinned descendants into that hierarchy while preserving their absolute World positions.
 - Pinning a non-Frame source under an already-pinned source ancestor uses the nearest matching `frameRef`; it never creates an ancestor reference implicitly.
@@ -278,9 +278,11 @@ The shared handler enforces World-local invariants:
 
 The minimal UI toolbar reads the current selection and submits the same explicit command operands through `POST /api/canvas/:canvasId/execute`; it does not create or delete references locally. Agents submit the identical command through `space_commands`.
 
+Because pin state is explicit and durable, a source Space can derive it: while the World setting is enabled, an active Space resolves the World's references and keeps the subset targeting its own nodes. The selection toolbar therefore presents Pin as one stateful toggle rather than two competing actions, so the current pin state is visible before acting. A mixed multi-selection keeps separate Pin-all and Unpin-all actions because no single toggle state describes it.
+
 The command executes against the World canvas because the durable mutation is the creation or removal of World nodes. Source-node existence and authorization are resolved by the server host router before the pure shared engine runs, and UI and agent callers converge at that routing boundary.
 
-Public invocation may originate from a source Space or the World. [`canvas-command-router.ts`](../../apps/server/src/modules/canvas/canvas-command-router.ts) sits above `executeOnServer()`, resolves the workspace World and existing canonical Portals, validates source operands, prepares non-agent-facing placement hints, rejects mixed-scope batches, and returns the actual mutated World canvas identity. It does not repair World topology as a hidden side effect.
+Public invocation may originate from a source Space or the World. [`canvas-command-router.ts`](../../apps/server/src/modules/canvas/canvas-command-router.ts) sits above `executeOnServer()`, resolves the workspace World and existing canonical Portals, validates source operands, prepares non-agent-facing placement hints, rejects mixed-scope batches, and returns the actual mutated World canvas identity. Its only World-topology repair is delegating to the shared idempotent Portal reconciliation when a pinned source Space has no Portal; it never fabricates Portals, references, or parentage outside that invariant.
 
 The router rejects a batch that mixes source-local commands with World-mutating Portal Pin commands. The existing execution response, version transition, mutex, delta log, and SSE stream each describe one mutated Canvas and must not be widened into a cross-canvas transaction.
 
