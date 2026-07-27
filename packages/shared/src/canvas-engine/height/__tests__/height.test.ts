@@ -203,9 +203,11 @@ describe('intrinsicToLayoutHeight', () => {
 
   it('adds the node shell inset after scaling, not before', () => {
     // The shell border lives outside the scaled container, so doubling
-    // the width doubles the content but not the 6px chrome.
-    expect(intrinsicToLayoutHeight(200, 'note', 400)).toBe(208);
-    expect(intrinsicToLayoutHeight(200, 'note', 800)).toBe(408);
+    // the width doubles the content but not the 6px chrome. The same
+    // 6px also narrows the content box, which is why the scale at the
+    // reference width is 394/400 rather than 1.
+    expect(intrinsicToLayoutHeight(200, 'note', 400)).toBe(204);
+    expect(intrinsicToLayoutHeight(200, 'note', 800)).toBe(404);
   });
 
   it('applies the minimum before scaling', () => {
@@ -362,8 +364,8 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    // 260 content + 6 shell chrome, quantized up to the 4px step.
-    expect((result.style as { height: number }).height).toBe(268);
+    // 260 content, scaled by 394/400, plus 6px shell chrome, quantized.
+    expect((result.style as { height: number }).height).toBe(264);
   });
 
   it('materializes a stale hint too — a seed beats a collapse', () => {
@@ -377,7 +379,7 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    expect((result.style as { height: number }).height).toBe(268);
+    expect((result.style as { height: number }).height).toBe(264);
   });
 
   it('leaves fixed nodes alone', () => {
@@ -419,7 +421,7 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    expect(result.measured?.height).toBe(268);
+    expect(result.measured?.height).toBe(264);
     expect(result.measured?.width).toBe(400);
   });
 

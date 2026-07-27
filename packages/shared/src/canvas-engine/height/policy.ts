@@ -61,19 +61,28 @@ export interface HeightPolicy {
 const MANUAL_POLICY: HeightPolicy = { kind: 'manual' };
 
 /**
- * Vertical chrome (px) the node shell adds around a node's body.
+ * Vertical and horizontal chrome (px) the node shell adds around a
+ * node's body.
  *
  * `NodeWrapper` gives every non-sketch node root a 3px transparent
  * border, and `box-sizing: border-box` means that border eats into the
- * height the store assigned. The body is `h-full` inside it, so a layout
- * height computed from content alone leaves the body 6px short — enough
- * to clip the last line and light up the truncation affordance on a node
- * that is supposed to fit its content exactly.
+ * geometry the store assigned — on *both* axes. The body is `h-full
+ * w-full` inside it.
  *
- * It is applied *after* width scaling because the border lives outside
- * the scaled container, in canvas space.
+ * Vertically this is why a layout height computed from content alone
+ * leaves the body 6px short, clipping the last line and lighting up the
+ * truncation affordance on a node meant to fit exactly.
+ *
+ * Horizontally it is why the content's layout width is the node's width
+ * *minus* this, which is what {@link contentScaleFor} has to divide by
+ * so that the logical layout width lands on the reference width exactly.
+ * Get that wrong and the same markdown wraps differently depending on
+ * where it was measured.
+ *
+ * Applied outside the scaled container, so it is canvas-space px and is
+ * never multiplied by the content scale.
  */
-const NODE_SHELL_INSET_Y = 6;
+export const NODE_SHELL_INSET = 6;
 
 /**
  * Height policy per node type. Types absent from this table are `manual`.
@@ -89,7 +98,7 @@ const HEIGHT_POLICIES: Readonly<Record<string, HeightPolicy>> = {
     kind: 'toggleable',
     refWidth: 400,
     minIntrinsicHeight: 50,
-    insetY: NODE_SHELL_INSET_Y,
+    insetY: NODE_SHELL_INSET,
   },
   text: { kind: 'content' },
   question: { kind: 'content' },

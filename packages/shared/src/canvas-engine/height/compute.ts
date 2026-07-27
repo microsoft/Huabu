@@ -11,7 +11,11 @@
  * and any future server-side layout pass all agree without sharing a DOM.
  */
 
-import { getHeightPolicy, type HeightPolicy } from './policy.js';
+import {
+  getHeightPolicy,
+  NODE_SHELL_INSET,
+  type HeightPolicy,
+} from './policy.js';
 
 /**
  * Lower bound on the width/refWidth scale factor. Mirrors the clamp in
@@ -45,6 +49,15 @@ export function quantizeHeight(height: number): number {
 /**
  * Scale factor a node's content renders at, given its current width.
  * `1` for node types whose content does not scale with width.
+ *
+ * Divides the node's *content* width — its box minus the shell border —
+ * rather than its outer width. That is what makes the logical layout
+ * width land on `refWidth` exactly at every node size: the scaled
+ * container is `100/scale%` of a box the border has already narrowed, so
+ * dividing by the outer width would leave the content laying out a few
+ * pixels short and, worse, by a *different* amount at each node width.
+ * Content measured at one width would then wrap differently at another,
+ * which is precisely what an intrinsic height must not depend on.
  */
 export function contentScaleFor(
   policy: HeightPolicy,
@@ -54,7 +67,7 @@ export function contentScaleFor(
   if (!refWidth || typeof width !== 'number' || !Number.isFinite(width)) {
     return 1;
   }
-  return Math.max(MIN_CONTENT_SCALE, width / refWidth);
+  return Math.max(MIN_CONTENT_SCALE, (width - NODE_SHELL_INSET) / refWidth);
 }
 
 /**
