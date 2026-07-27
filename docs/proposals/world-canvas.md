@@ -121,7 +121,7 @@ A canonical Portal may be empty. Empty means that the Space exists but no source
 
 Source deletion retains the already agreed symbolic-link behavior: its canonical Portal becomes broken rather than disappearing silently. A live canonical Portal cannot be hidden or removed independently of its Space; only a broken Portal may be removed explicitly. This keeps `live Space ⇔ one live canonical Portal` as a stable reconciliation invariant without hidden-state or suppression tombstones.
 
-The first implementation exposes `/spaces` as the explicit Space List sibling and keeps `/canvas/:canvasId` as the route for both World and ordinary Spaces. `/` redirects to World when the global setting is enabled and to `/spaces` otherwise. During feature development the setting defaults to enabled; the release default remains a pre-release product decision.
+The first implementation exposes `/spaces` as the explicit Space List sibling and keeps `/canvas/:canvasId` as the route for both World and ordinary Spaces. `/` redirects to World when the global setting is enabled and to `/spaces` otherwise. The setting defaults to disabled so existing users continue landing on the Space List until they opt into World.
 
 ## 5. Reference-node working model
 

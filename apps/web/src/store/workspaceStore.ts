@@ -251,8 +251,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   worldCanvasId: null,
   worldEnabled:
     typeof localStorage === 'undefined'
-      ? true
-      : localStorage.getItem(WORLD_ENABLED_KEY) !== 'false',
+      ? false
+      : localStorage.getItem(WORLD_ENABLED_KEY) === 'true',
   spaceTitles: {},
   spaceTitlesLoaded: false,
   recentWorkspaces:

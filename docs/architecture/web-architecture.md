@@ -78,7 +78,7 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 
 `/` is the workspace landing redirect. When the persisted World setting is enabled it redirects to the hidden World through `/canvas/:worldCanvasId`; otherwise it redirects to `/spaces`. The ordinary Space List remains a sibling page at `/spaces`, and every Canvas scope, including World, continues to use the existing `CanvasPage` and `/canvas/:canvasId` route.
 
-The World setting currently defaults to enabled during feature development. Disabling it hides the World navigation entry and changes subsequent workspace landing to the Space List without deleting or resetting `.world`.
+The World setting defaults to disabled. Enabling it exposes the World navigation entry and changes subsequent workspace landing to World without deleting or resetting `.world`.
 
 `CanvasRefNode` renders a canonical Portal from persisted `targetCanvasId` plus one batched ordinary-Space title map loaded when World opens. Portal activation uses double-click, Enter while selected, or its Open action. A missing title after the Space list has loaded is rendered as an explicit broken reference; transient source titles are never persisted into World topology.
 
