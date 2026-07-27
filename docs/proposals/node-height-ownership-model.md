@@ -125,6 +125,17 @@ heightMode?: 'auto' | 'fixed';
 
 This is the direct answer to the objection that D1 conflates user-owned and renderer-owned geometry. It does not: ownership moves into a dedicated field that says so explicitly, which is strictly more expressive than encoding it as the absence of a value. Absence cannot distinguish "renderer owns this" from "nobody has measured this yet" — which is precisely the ambiguity that produces the current bug.
 
+The same objection is sometimes raised in the opposite direction: why not keep a single slot and let `style.height` hold the string `'auto'`? Because mode and value are orthogonal, and one slot cannot hold both facts at once.
+
+|         | value = ⊥    | value = 812                 |
+| ------- | ------------ | --------------------------- |
+| `auto`  | a note today | **what this proposal adds** |
+| `fixed` | —            | a note the user has resized |
+
+The top-right cell is the entire fix: _this note is auto-sized, and it is currently 812 px, even though nothing has ever rendered it_. Encoding the mode in the value slot makes that cell permanently unreachable.
+
+`'auto'` would also not be inert in the meantime. [`getNodeSize`](../../packages/shared/src/canvas-engine/utils/nodeSizes.ts) parses a string height with `parseFloat`, so `'auto'` yields `NaN`, falls through the `??` chain, and resolves to `0` — byte-for-byte identical to the absent value it was meant to improve on.
+
 A single resolver replaces all eight inline checks:
 
 ```ts
@@ -170,19 +181,53 @@ export function intrinsicToLayoutHeight(
 ): number;
 ```
 
-Used by three callers and only three: the measurement commit, the auto ← fixed toggle in `setNoteHeightMode`, and load-time materialization.
+Used by three callers and only three: the `SET_AUTO_HEIGHT` measurement commit, the `height: 'auto'` branch of `SET_NODE_GEOMETRY` (D5), and load-time materialization.
 
-### D5 — Derived corrections are their own command
+### D5 — Two commands, split by authorship rather than by value
 
-A new engine command `SET_AUTO_HEIGHT` — not a reuse of `SET_NODE_GEOMETRY`, which is `snapshot: 'caller'` and would put every automatic pixel correction into the undo stack.
+Height changes arrive from two different places. The line between them is **who caused the change**, not what value was written.
+
+| Change                        | Frequency | Authored | Undoable | Command                        |
+| ----------------------------- | --------- | -------- | -------- | ------------------------------ |
+| User drags a note to a height | low       | yes      | yes      | `SET_NODE_GEOMETRY` (number)   |
+| User switches a note to auto  | low       | yes      | yes      | `SET_NODE_GEOMETRY` (`'auto'`) |
+| Content changed, re-measured  | **high**  | no       | **no**   | `SET_AUTO_HEIGHT`              |
+
+#### `SET_NODE_GEOMETRY` gains an explicit `'auto'`
+
+`CanvasNodeGeometryUpdate.size.height` widens from `number` to `number | 'auto'`.
+
+This is not a new capability, only an honest spelling of one that already exists: [`setNodeGeometry.ts`](../../packages/shared/src/canvas-engine/commands/setNodeGeometry.ts) already treats any non-numeric height as `heightCleared` and deletes `style.height`. The comment on that branch states the defect outright — _"the new content height is unknown until the next render"_.
+
+Under this proposal the branch stops deleting and starts resolving: `'auto'` writes `data.heightMode = 'auto'` and immediately materializes a concrete height from the node's hint. The `heightCleared` path disappears, and with it the last place where the engine deliberately leaves a height undefined.
+
+Because this type is agent-visible, the zod schema validating `SET_NODE_GEOMETRY` on the server widens with it. That is intended: "make this note fit its content" is a legitimate authored intent, and it is the only height intent an agent should be able to express.
+
+#### `SET_AUTO_HEIGHT` carries the derived correction
 
 ```ts
-meta: { snapshot: 'none', requiresEdgeReroute: true }
+meta: { snapshot: 'no', requiresEdgeReroute: true }
 ```
 
-The handler accepts `{ nodeId, height }[]`, ignores any node whose `resolveHeightMode` is not `auto`, and writes `style.height` **and** `measured.height` together. Mirroring into `measured` is required for the same reason [`setNodeGeometry.ts`](../../packages/shared/src/canvas-engine/commands/setNodeGeometry.ts) already mirrors width: `getNodeSize` reads `measured` first, and the end-of-batch `fitFrames` pass runs before React Flow's `ResizeObserver` has reconciled the DOM.
+The handler accepts `{ nodeId, intrinsicHeight, measuredFor, provisional? }[]`, ignores any node whose `resolveHeightMode` is not `auto`, and writes the hint and the materialized geometry in a single step — `data.autoHeight`, `style.height`, and `measured.height` together — so geometry and its provenance can never disagree. Mirroring into `measured` is required for the same reason `setNodeGeometry.ts` already mirrors width: `getNodeSize` reads `measured` first, and the end-of-batch `fitFrames` pass runs before React Flow's `ResizeObserver` has reconciled the DOM.
 
 Because the height is known at commit time rather than "after the next render", the `deferredFitFrameIds` double-rAF path can be dropped for note auto-height. Parents are added to `affectedFrameIds` and fit synchronously in the same batch, so there is no intermediate frame where a note and its parent frame disagree.
+
+With the mode toggle absorbed by `SET_NODE_GEOMETRY`, and load-time materialization being a pure array transform applied before the nodes enter the store, `SET_AUTO_HEIGHT` has exactly **one** caller: the measurement commit.
+
+#### Why a command at all, when the value is derived
+
+A derived value has no business in the undo stack, in `canvas.version`, or in the realtime broadcast — and this command is in none of them. But bypassing the executor entirely would buy nothing and cost the cascade.
+
+It buys nothing because [`structureDirtyDetector.ts`](../../apps/web/src/store/canvasStore/save/structureDirtyDetector.ts) compares node snapshots and has no idea what produced them. A plain store mutation would need the identical D9 exemption. Undo is already off via `snapshot: 'no'`.
+
+It costs the cascade because a height change must refit parent hug frames, reroute edges, and mirror into portals. Handlers do not call `fitFrames` themselves — they declare `affectedFrameIds`, and the executor runs a single end-of-batch pass filtered per-frame by `data.sizing`. Re-implementing that gating in a bespoke store path duplicates real policy and loses batching exactly where it matters most: the prewarm queue commits many notes at once, which must produce one refit pass rather than N. Reusing `MERGE_NODE_DATA` to write only the hint fails for the same reason — it declares no `affectedFrameIds` at all, so the parent frame would never follow.
+
+The executor is therefore used for its **cascade**, with its other semantics switched off one by one. That is only possible because they are configured per command type — which is also why this cannot be a flag on `SET_NODE_GEOMETRY`: `snapshot` is a property of the type, not of an item, so a single type cannot be both undoable and not.
+
+This is not a new pattern. [`setNodeSelection.ts`](../../packages/shared/src/canvas-engine/commands/setNodeSelection.ts) is already `snapshot: 'no'` with its written field (`selected`) exempted from the dirty detector — the same three-part shape, differing only in that `selected` is top-level while `autoHeight` lives in `data` and therefore needs its own exemption set (Step 6).
+
+It also carries a directly transferable lesson. `setNodeSelection` reuses the original node reference whenever the visible flag is unchanged, and returns the original array when the batch was a no-op, because every downstream `React.memo` and xyflow reconciliation relies on reference identity. `SET_AUTO_HEIGHT` is at least as hot, and **must** do the same; `materializeAutoHeights` already establishes the pattern.
 
 Crucially, `SET_AUTO_HEIGHT` is **not** a structure save. See [D9](#d9--derived-geometry-is-a-convergent-cache-not-shared-state) for how it reaches disk.
 
@@ -300,6 +345,8 @@ This leaves an unresolved separation — a hug frame's box is stored as authored
 
 Persistence uses a dedicated derived-geometry write channel rather than the canvas structure PUT: a small endpoint whose contract lives in [`packages/shared/src/types/api/canvas.ts`](../../packages/shared/src/types/api/canvas.ts) per [api-design.md](../architecture/api-design.md), accepting a batch of hints and merging them into node `data` **without** touching `canvas.version` and **without** publishing an update. The server's only validation is a freshness check: reject a hint whose `measuredFor` does not match the node's current on-disk content, because such a hint describes content the server no longer has.
 
+The materialized `style.height` is persisted alongside the hint rather than stripped for auto nodes at the serialization boundary. It is redundant — it is a pure function of the hint, the node type, and the reference width — but the redundancy is safe in the direction that matters: load-time materialization always recomputes from the hint and overwrites, so a stale persisted height can never win. What it buys is that a reader which does not run materialization sees a slightly outdated number instead of zero. Stripping it would instead add an asymmetric write-time transform to a boundary that already maintains `NODE_CONTENT_KEYS` in three separate places, where one missed site is a silent bug. The hint is the truth; `style.height` is a durable cache of it.
+
 The persisted hint is an **advisory seed, not a guarantee**. It exists to do two things: stop a cold-starting client from collapsing an unmeasured note to the policy minimum, and give the headless engine a real number for auto-layout. It does not promise that two clients render the same note at the same height — they may not, because font availability, browser version, and device pixel ratio all affect the measurement and none of them are captured by the key, deliberately. The key's job is detecting content and renderer-layout staleness, not proving cross-device determinism.
 
 Last-writer-wins is therefore safe not because the writers agree, but because the worst case is a marginally different seed that each client corrects locally on its next measurement. Nothing reads the hint expecting authority.
@@ -344,7 +391,7 @@ resize gesture ─────────────────────�
 | `packages/shared/src/canvas-engine/height/compute.ts`          | Pure `intrinsicToLayoutHeight()`, including the 4 px quantization.                                     |
 | `packages/shared/src/canvas-engine/height/freshness.ts`        | `AutoHeightHint`, `HEIGHT_LAYOUT_VERSION`, `autoHeightKey()`, `readAutoHeightHint()`.                  |
 | `packages/shared/src/canvas-engine/height/materialize.ts`      | `materializeAutoHeights(nodes)` — hint → `style.height`. Shared by web load and server-side hydration. |
-| `packages/shared/src/canvas-engine/commands/setAutoHeight.ts`  | Non-undoable derived-height command; mirrors into `measured`; collects frame ancestors.                |
+| `packages/shared/src/canvas-engine/commands/setAutoHeight.ts`  | Non-undoable derived-height command; writes hint and geometry together; collects frame ancestors.      |
 | `packages/shared/src/types/api/canvas.ts`                      | Derived-geometry batch write schema (zod + inferred type).                                             |
 | `apps/web/src/components/Nodes/shared/height/useAutoHeight.ts` | Type-agnostic hook: intrinsic in, gated commit out. Used by note, text, and question.                  |
 | `apps/web/src/components/Nodes/shared/height/commitQueue.ts`   | Quantization, threshold, gesture suspension, coalescing.                                               |
@@ -387,9 +434,9 @@ Each step is independently mergeable and independently verifiable. Steps 1–5 s
 
 **Step 1 — Contract.** `heightMode`, `AutoHeightHint`, `autoHeightKey`, `HEIGHT_LAYOUT_VERSION`, `policy.ts`, `compute.ts` (including the 4 px quantization), `freshness.ts`, `materialize.ts`. Pure additions, zero behaviour change. Unit tests for legacy mode inference, freshness resolution, and the equivalence of the policy table with the constants it replaces.
 
-**Step 2 — Authority.** `SET_AUTO_HEIGHT`, the store action, and load-time normalization + materialization. Heights now exist in the store, but the note still renders from its own measurement. Verifiable by asserting `style.height` is numeric for every note after load.
+**Step 2 — Authority.** `SET_AUTO_HEIGHT`, the `height: 'auto'` widening of `SET_NODE_GEOMETRY` and its server-side schema, the store action, and load-time normalization + materialization. Heights now exist in the store, but the note still renders from its own measurement. Verifiable by asserting `style.height` is numeric for every note after load, and that a measurement commit adds no undo entry.
 
-**Step 3 — Inversion.** Note body switches to `h-full`; all eight mode checks move to `resolveHeightMode`; `heightMemory` guard added; `setNoteHeightMode` auto branch writes a concrete height. Rendering stops being a cause of geometry change. What remains is a bounded, at-most-once-per-content-change correction — Bar A is close but not yet met, because corrections can still land mid-gesture.
+**Step 3 — Inversion.** Note body switches to `h-full`; all eight mode checks move to `resolveHeightMode`; `heightMemory` guard added; `setNoteHeightMode` dispatches `SET_NODE_GEOMETRY` with `height: 'auto'` instead of clearing the height. Rendering stops being a cause of geometry change. What remains is a bounded, at-most-once-per-content-change correction — Bar A is close but not yet met, because corrections can still land mid-gesture.
 
 **Step 4 — Gating.** Commit queue with quantization, threshold, and gesture suspension. Drop `deferredFitFrameIds` for note auto-height. **Bar A is met here** and should be locked down with the automated assertions below.
 
