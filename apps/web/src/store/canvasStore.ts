@@ -66,6 +66,7 @@ import { canvasHistoryManager } from './canvasHistoryManager';
 import { createIntentActionWindow } from './canvasStore/intentActionWindow';
 import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
+import { warmupNodeHeights } from './canvasStore/load/warmupNodeHeights';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
 import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
 import { createNodeContentQueue } from './canvasStore/save/nodeContentQueue';
@@ -217,6 +218,22 @@ function readViewportFromStorage(canvasId: string): CanvasViewport | null {
     // Private mode / disabled storage falls back to fitView.
     return null;
   }
+}
+
+/**
+ * Canvas-space point the user will be looking at once the restored
+ * viewport is applied. A canvas with no stored viewport does a one-shot
+ * `fitView` instead, so the origin is as good a guess as any.
+ */
+function viewportCentreOf(viewport: CanvasViewport | null): {
+  x: number;
+  y: number;
+} {
+  if (!viewport || viewport.zoom <= 0) return { x: 0, y: 0 };
+  return {
+    x: (window.innerWidth / 2 - viewport.x) / viewport.zoom,
+    y: (window.innerHeight / 2 - viewport.y) / viewport.zoom,
+  };
 }
 
 function writeViewportToStorage(
@@ -1959,6 +1976,17 @@ const useCanvasStore = create<RFState>()(
             ? state.viewport
             : null;
         const loadedViewport = storedViewport ?? legacyServerViewport;
+        // Measure never-measured notes *before* the canvas is shown.
+        // Normalization gives them their policy minimum, which on a
+        // canvas saved before the height model means every note paints
+        // collapsed and then expands as it mounts. The load is already
+        // showing a loading state; spending a bounded slice of it here
+        // buys a canvas that is correct on its first frame. Whatever the
+        // budget does not cover falls through to the prewarm queue.
+        const warmedNodes = await warmupNodeHeights(loadedNodes, {
+          canvasId: targetId,
+          centre: viewportCentreOf(loadedViewport),
+        });
         // An authoritative node replacement invalidates every transient that
         // points at the previous in-memory geometry. This applies both to a
         // different-canvas switch and to a same-canvas SSE gap/snapshot heal:
@@ -1977,7 +2005,7 @@ const useCanvasStore = create<RFState>()(
         // reset here too (the no-autosave setter skips the middleware's
         // availability sync).
         get()._setStateNoAutosave({
-          nodes: loadedNodes,
+          nodes: warmedNodes,
           edges: loadedEdges,
           viewport: loadedViewport,
           canvasTitle: response.title || 'Untitled',
@@ -1993,11 +2021,23 @@ const useCanvasStore = create<RFState>()(
         });
         void get().refreshWorldReferences();
 
+        // Warmup hints were folded in before the commit, and a load
+        // deliberately never schedules a save — so without this they
+        // would live only in memory and every open would re-measure the
+        // same notes. Schedule one save so the canvas warms up exactly
+        // once. This rides the structure save because that is where
+        // every other derived height goes today; Step 6 of the height
+        // model moves them all onto a dedicated channel that touches
+        // neither `version` nor the broadcast.
+        if (warmedNodes !== loadedNodes) {
+          structureScheduler.schedule();
+        }
+
         // Seed each md-backed node's optimistic-concurrency baseline from
         // the authoritative content we just loaded, so the first edit
         // carries the correct `expectRev` and the per-node content CAS can
         // catch a concurrent (cross-tab / cross-device / agent) write.
-        nodeContentQueue.seedBaselines(loadedNodes);
+        nodeContentQueue.seedBaselines(warmedNodes);
 
         // If the user left a question-replay open on this canvas in a
         // previous session and that question node has since been
@@ -2007,14 +2047,14 @@ const useCanvasStore = create<RFState>()(
           .getState()
           .validateQuestionReplay(
             targetId,
-            new Set(loadedNodes.map((n) => n.id)),
+            new Set(warmedNodes.map((n) => n.id)),
           );
 
         // Backfill: any node with an empty label gets re-queued so the
         // server can regenerate one. The server's preprocessing
         // dispatcher decides per node profile whether there's any
         // actual work to do, so we don't filter by type here.
-        for (const node of loadedNodes) {
+        for (const node of warmedNodes) {
           const data = node.data as Record<string, unknown> | undefined;
           const label = typeof data?.label === 'string' ? data.label : '';
           if (label.trim().length > 0) continue;
