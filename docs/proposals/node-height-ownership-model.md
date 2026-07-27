@@ -170,7 +170,7 @@ export function intrinsicToLayoutHeight(
 ): number;
 ```
 
-Used by three callers and only three: the measurement commit, the auto ← fixed toggle in `setNoteHeightMode`, and the load-time migration.
+Used by three callers and only three: the measurement commit, the auto ← fixed toggle in `setNoteHeightMode`, and load-time materialization.
 
 ### D5 — Derived corrections are their own command
 
@@ -230,7 +230,7 @@ interface AutoHeightHint {
   /** Content height at the type's reference width, excluding node chrome. */
   intrinsicHeight: number;
   /** Identity of the inputs this height was measured against. */
-  measuredFor: AutoHeightKey | 'legacy';
+  measuredFor: AutoHeightKey;
   /** Settled before fonts or images finished; re-measure on next load. */
   provisional?: boolean;
 }
@@ -243,7 +243,7 @@ export function autoHeightKey(node: Node): AutoHeightKey;
 
 The usability check is one comparison: `hint.measuredFor === autoHeightKey(node)`.
 
-`'legacy'` is a sentinel that never matches. It means "there is a usable footprint here, but no proof of what it describes" — the honest representation of a value inherited from `data.measuredHeight`, which carried no revision. It is not a value that can be produced by measurement.
+There is no sentinel for "a height of unknown provenance", because nothing is ever allowed to write one. A hint exists only where a measurement produced it. The absence of a hint is itself the honest representation of an unproven height, and it is what the `missing` freshness value reports.
 
 The key deliberately has no separate fields. Consumers only ever compare it for equality — nothing downstream needs to know _whether_ the content or the renderer layout changed, only that the height no longer applies. Splitting it would create two fields that must always be read together, which is the shape of a future bug.
 
@@ -267,7 +267,7 @@ export function readAutoHeightHint(node: Node): {
 
 `stale` and `missing` both still materialize a usable number — the stale hint's height, or the policy minimum. The difference is only that they enqueue a re-measurement. Nothing downstream branches on freshness; only the measurement queue does.
 
-Freshness is never fabricated. A hint may only claim a real `AutoHeightKey` if a measurement produced it under that key. Stamping an inherited value with the current key would reintroduce, in the migration path, exactly the defect this decision exists to prevent.
+Freshness is never fabricated. A hint may only claim an `AutoHeightKey` that a measurement produced it under. The design has no path that synthesizes one — not even for backwards compatibility, which is why no legacy height is carried forward into the new field.
 
 ### D9 — Derived geometry is a convergent cache, not shared state
 
@@ -292,7 +292,7 @@ This is accepted rather than engineered away, for three reasons:
 - [`fitFrameToChildren`](../../packages/shared/src/canvas-engine/frame/fit.ts) short-circuits to the same node array reference when the frame already fits, so a refit that changes nothing costs nothing and trips no gate. Only a real size change propagates.
 - Once prewarming lands, a runtime correction almost always follows a content change — which already bumped the version. The refit rides along with a write that was going to happen anyway, instead of being an extra one.
 
-The pathological case is the one-time bulk correction of legacy data on first load after migration. That is handled as migration, not as ordinary operation: refit locally, persist once, do not broadcast.
+The pathological case is the first load of an existing canvas, where every note is unproven at once and the prewarm queue corrects them in bulk. That is handled as a one-time normalization rather than as ordinary operation: refit locally, persist once, do not broadcast.
 
 This leaves an unresolved separation — a hug frame's box is stored as authored geometry but is in practice derived from its children. Making that distinction explicit, so that derived frame geometry is materialized locally like node height, is the right long-term answer and is deliberately out of scope here. It should be its own proposal.
 
@@ -354,23 +354,22 @@ resize gesture ─────────────────────�
 | `apps/web/src/components/Nodes/note/NoteNode.tsx`              | Renders from `style.height`; reports intrinsic height; no longer sizes itself.                         |
 | `apps/web/src/hooks/useTextAutoSize.ts`                        | Retained as the text/question _measurer_; its commit path moves to `useAutoHeight`.                    |
 
-## Migration
+## Normalization of existing canvases
 
-Migration is lazy and happens in canvas load normalization; no eager workspace rewrite.
+There is no data migration. Nothing is copied out of the old representation into the new one, and no eager workspace rewrite happens.
 
-For each node without `data.heightMode`: infer the mode from the presence of `style.height` (per `resolveHeightMode`'s legacy branch) and write it explicitly. For an inferred-auto node, seed `data.autoHeight` from the legacy `data.measuredHeight` with `measuredFor: 'legacy'`.
+What does happen is lazy normalization at canvas load: for each node without `data.heightMode`, infer the mode from the presence of `style.height` (per `resolveHeightMode`'s legacy branch) and write it explicitly. That is a statement of ownership, not a height.
 
-The sentinel is the whole point. The legacy value carries no revision, so there is no evidence it corresponds to the node's current content — an agent may have rewritten that note long after the height was recorded. Stamping it with the current `autoHeightKey()` would fabricate exactly the freshness this design exists to detect, and would silently mark a possibly-wrong height as authoritative. Instead the value is kept as a footprint, `readAutoHeightHint` reports it as `stale`, and the node enters the measurement queue like any other unproven node.
+Existing notes therefore start with **no** hint. `readAutoHeightHint` reports `missing`, they materialize at the policy minimum, and the prewarm queue — which prioritizes `missing` over `stale` — measures them. From the second load onwards each note has a real, key-stamped hint and the question never arises again.
 
-Because `data.measuredHeight` is already persisted for notes, most existing notes migrate to a plausible footprint on first load rather than collapsing. Notes without it land on `NOTE_AUTO_HEIGHT_MIN`, are marked `missing`, and carry the largest potential correction — which is why the prewarm queue prioritizes them.
+Seeding the hint from the existing `data.measuredHeight` was considered and rejected. The value itself is sound — it is genuinely persisted and is already an intrinsic, pre-scale height — but it carries no revision, so there is no evidence it still corresponds to the node's content; an agent may have rewritten the note long after the height was recorded. Carrying it forward would mean either fabricating a key, which is precisely the defect D8 exists to prevent, or inventing a sentinel and a write that dirties every node on first load, producing exactly the canvas-wide structure save D9 exists to avoid. Since Step 5 ships in the same release as Steps 2–4, the only thing the seed would buy is a shorter first-open window on each existing canvas — not worth a second, weaker provenance path through the design.
 
 ### Retiring `data.measuredHeight`
 
-The legacy field is superseded by `data.autoHeight` and is removed in three moves:
+The legacy field is superseded by `data.autoHeight` and is never read by the new code. It is removed in two moves:
 
-1. **Step 2** — read once during migration as the `'legacy'` seed described above. Still written by the note body, so a downgrade remains safe.
-2. **Step 3** — stop writing it. The note body no longer sizes itself, so its only writer disappears naturally.
-3. **Step 7** — delete the field from [`node.ts`](../../packages/shared/src/types/canvas/node.ts) and drop the migration read.
+1. **Step 3** — stop writing it. The note body no longer sizes itself, so its only writer disappears naturally.
+2. **Step 7** — delete the field from [`node.ts`](../../packages/shared/src/types/canvas/node.ts). Values left on disk are inert from Step 3 onwards.
 
 This also discharges the TODO already recorded on the field's own TSDoc: it warns that the value rides the whole-node JSON to disk, churns on every zoom and edit, and should either be stripped at the persistence boundary or promoted into a shared `viewHints` sub-object once a second view-only field appears. `data.autoHeight` _is_ that sub-object, with the content revision the original field lacked.
 
@@ -380,15 +379,15 @@ Two guards are mandatory:
 
 `useTrackNoteFixedHeight` in [`heightMemory.ts`](../../apps/web/src/components/Nodes/note/heightMemory.ts) currently records _any_ numeric `style.height`. After D1 that would record auto heights and destroy the fixed → auto → fixed round-trip. It must be gated on `resolveHeightMode(node) === 'fixed'`.
 
-The migration must never convert an auto node to fixed merely because it now carries a number. This is the inverse of the inference rule and is the single most likely way to get the migration wrong.
+The migration must never convert an auto node to fixed merely because it now carries a number. This is the inverse of the inference rule and is the single most likely way to get normalization wrong.
 
 ## Rollout
 
-Each step is independently mergeable and independently verifiable.
+Each step is independently mergeable and independently verifiable. Steps 1–5 ship together, which is what allows normalization to carry no data forward.
 
-**Step 1 — Contract.** `heightMode`, `AutoHeightHint`, `autoHeightKey`, `HEIGHT_LAYOUT_VERSION`, `policy.ts`, `compute.ts` (including the 4 px quantization), `freshness.ts`, `materialize.ts`. Pure additions, zero behaviour change. Unit tests for legacy inference, the `'legacy'` sentinel, and freshness resolution.
+**Step 1 — Contract.** `heightMode`, `AutoHeightHint`, `autoHeightKey`, `HEIGHT_LAYOUT_VERSION`, `policy.ts`, `compute.ts` (including the 4 px quantization), `freshness.ts`, `materialize.ts`. Pure additions, zero behaviour change. Unit tests for legacy mode inference, freshness resolution, and the equivalence of the policy table with the constants it replaces.
 
-**Step 2 — Authority.** `SET_AUTO_HEIGHT`, the store action, and the load-time migration + materialization. Heights now exist in the store, but the note still renders from its own measurement. Verifiable by asserting `style.height` is numeric for every note after load.
+**Step 2 — Authority.** `SET_AUTO_HEIGHT`, the store action, and load-time normalization + materialization. Heights now exist in the store, but the note still renders from its own measurement. Verifiable by asserting `style.height` is numeric for every note after load.
 
 **Step 3 — Inversion.** Note body switches to `h-full`; all eight mode checks move to `resolveHeightMode`; `heightMemory` guard added; `setNoteHeightMode` auto branch writes a concrete height. Rendering stops being a cause of geometry change. What remains is a bounded, at-most-once-per-content-change correction — Bar A is close but not yet met, because corrections can still land mid-gesture.
 
@@ -420,7 +419,7 @@ Automated:
 12. An inbound delta carrying an auto node's `style.height` does not move local geometry; the value is re-materialized from the local hint.
 13. A measurement in flight does not suppress or conflict with a concurrent remote content update to the same node, and does not mark the node dirty.
 14. Converting a note to another node type clears `data.autoHeight` rather than leaving a hint measured at the previous type's reference width.
-15. A migrated node seeded from `data.measuredHeight` reports `stale`, never `current`, and is enqueued for re-measurement on first load.
+15. Load-time normalization writes `heightMode` but never `data.autoHeight`: a note carrying only the legacy `data.measuredHeight` reports `missing`, and no code path produces a hint that was not measured.
 16. Two measurements whose intrinsic heights differ by less than the quantization step produce the same committed `style.height`, and the second produces no write at all.
 
 Instrumented (Bar B):

@@ -8,10 +8,9 @@
  * correct one.
  *
  * The rule this module exists to enforce: **freshness is never
- * fabricated**. A hint may only claim a key it was actually measured
- * under. Anything inherited from an older representation is stamped
- * {@link LEGACY_MEASURED_FOR}, which matches no key and therefore always
- * reports `stale`.
+ * fabricated**. A hint may only claim a key a measurement actually
+ * produced it under, which is why nothing else in the codebase is
+ * allowed to synthesize one.
  */
 
 import { nodeRevisionOf } from '../change.js';
@@ -28,17 +27,6 @@ import type { Node } from '@xyflow/react';
  * load, which costs one re-measurement per node and nothing else.
  */
 export const HEIGHT_LAYOUT_VERSION = 1;
-
-/**
- * Sentinel `measuredFor` value for a hint whose provenance is unknown —
- * currently only heights inherited from the legacy `data.measuredHeight`
- * field during migration.
- *
- * It deliberately matches no {@link AutoHeightKey}, so such a hint gives
- * the node a plausible footprint on load while still being reported as
- * `stale` and queued for re-measurement.
- */
-export const LEGACY_MEASURED_FOR = 'legacy';
 
 /**
  * Identity of the thing an intrinsic height was measured against.

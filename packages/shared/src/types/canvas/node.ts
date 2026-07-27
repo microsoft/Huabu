@@ -323,10 +323,9 @@ export interface AutoHeightHint {
   intrinsicHeight: number;
   /**
    * The `AutoHeightKey` this measurement is valid for — the rendering
-   * pipeline version plus the node's content revision. The literal
-   * `'legacy'` marks a height inherited from an older representation:
-   * a usable footprint with no proof of what it describes, always
-   * reported as stale.
+   * pipeline version plus the node's content revision. Only a real
+   * measurement may set it, so a hint can never claim to describe
+   * content it was not measured against.
    */
   measuredFor: string;
   /**

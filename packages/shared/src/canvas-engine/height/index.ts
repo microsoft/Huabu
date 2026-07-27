@@ -34,7 +34,6 @@ export {
   type AutoHeightHintRead,
   type AutoHeightKey,
   HEIGHT_LAYOUT_VERSION,
-  LEGACY_MEASURED_FOR,
   autoHeightKey,
   readAutoHeightHint,
 } from './freshness.js';

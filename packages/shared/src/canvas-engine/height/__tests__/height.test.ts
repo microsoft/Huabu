@@ -8,7 +8,6 @@ import {
 import {
   HEIGHT_LAYOUT_VERSION,
   HEIGHT_QUANTIZATION_STEP,
-  LEGACY_MEASURED_FOR,
   autoHeightKey,
   getHeightRefWidth,
   intrinsicToLayoutHeight,
@@ -264,7 +263,7 @@ describe('readAutoHeightHint', () => {
     ).toBe('stale');
   });
 
-  it('never reports the legacy sentinel as current', () => {
+  it('reports stale for a key it cannot recognise at all', () => {
     const read = readAutoHeightHint(
       node({
         type: 'note',
@@ -272,7 +271,7 @@ describe('readAutoHeightHint', () => {
           content,
           autoHeight: {
             intrinsicHeight: 260,
-            measuredFor: LEGACY_MEASURED_FOR,
+            measuredFor: 'not-a-key',
           },
         },
       }),
