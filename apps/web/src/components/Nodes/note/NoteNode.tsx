@@ -27,6 +27,7 @@ import {
   NOTE_CONTENT_HOST_CLASS,
   readNoteIntrinsicHeight,
 } from './noteContentHost';
+import { useAutoHeightInvariant } from './useAutoHeightInvariant';
 import {
   cancelMeasuredHeight,
   proposeMeasuredHeight,
@@ -246,6 +247,15 @@ export const NoteNode = memo(
     // churn from flushing stale entries after the node is gone.
     useEffect(() => () => cancelMeasuredHeight(id), [id]);
 
+    // Dev-only: an auto note that still does not fit once the commit
+    // queue has settled means the measurement disagrees with the layout.
+    useAutoHeightInvariant(
+      id,
+      previewHostRef,
+      hydrated && !isFixedHeight,
+      contentHeight,
+    );
+
     // Markdown file missing on disk + no in-memory fallback → replace
     // the editor with a full-card placeholder.
     const isContentMissing = data.contentMissing && !markdown.trim();
@@ -438,6 +448,12 @@ export const NoteNode = memo(
                 */}
                 <div
                   ref={previewHostRef}
+                  // Stable hook for the auto-height end-to-end assertion.
+                  // The box this marks is the one a measurement is taken
+                  // from, so a test that checks "content fits" has to
+                  // find exactly it — not a utility class that a restyle
+                  // could rename out from under it.
+                  data-note-content-host=""
                   className={clsx(
                     NOTE_CONTENT_HOST_CLASS,
                     'h-full',
