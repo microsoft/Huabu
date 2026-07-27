@@ -369,6 +369,11 @@
   .agent-status-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
+  /* 7 examples leave one trailing cell empty in a 4-col layout; let
+     the last card fill it so the grey grid background never shows. */
+  .agent-status-example:last-child {
+    grid-column: span 2;
+  }
 }
 
 @media (max-width: 760px) {
