@@ -61,6 +61,21 @@ export interface HeightPolicy {
 const MANUAL_POLICY: HeightPolicy = { kind: 'manual' };
 
 /**
+ * Vertical chrome (px) the node shell adds around a node's body.
+ *
+ * `NodeWrapper` gives every non-sketch node root a 3px transparent
+ * border, and `box-sizing: border-box` means that border eats into the
+ * height the store assigned. The body is `h-full` inside it, so a layout
+ * height computed from content alone leaves the body 6px short — enough
+ * to clip the last line and light up the truncation affordance on a node
+ * that is supposed to fit its content exactly.
+ *
+ * It is applied *after* width scaling because the border lives outside
+ * the scaled container, in canvas space.
+ */
+const NODE_SHELL_INSET_Y = 6;
+
+/**
  * Height policy per node type. Types absent from this table are `manual`.
  *
  * `refWidth` values match the creation defaults in
@@ -69,12 +84,12 @@ const MANUAL_POLICY: HeightPolicy = { kind: 'manual' };
  */
 const HEIGHT_POLICIES: Readonly<Record<string, HeightPolicy>> = {
   // The note body measures `.ProseMirror` plus the host's own vertical
-  // padding, so no further inset is added on top of the scaled result.
+  // padding, so the only thing left to add is the node shell itself.
   note: {
     kind: 'toggleable',
     refWidth: 400,
     minIntrinsicHeight: 50,
-    insetY: 0,
+    insetY: NODE_SHELL_INSET_Y,
   },
   text: { kind: 'content' },
   question: { kind: 'content' },

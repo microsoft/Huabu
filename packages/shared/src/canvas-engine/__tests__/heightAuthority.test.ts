@@ -64,12 +64,12 @@ describe("SET_NODE_GEOMETRY height: 'auto'", () => {
 
     expect(styleOf(writeResult.nodes, 'n1')).toEqual({
       width: 400,
-      height: 260,
+      height: 268,
     });
     expect(dataOf(writeResult.nodes, 'n1').heightMode).toBe('auto');
     // `getNodeSize` reads `measured` first, so the mirror must agree.
     expect(writeResult.nodes.find((n) => n.id === 'n1')?.measured?.height).toBe(
-      260,
+      268,
     );
   });
 
@@ -111,7 +111,7 @@ describe("SET_NODE_GEOMETRY height: 'auto'", () => {
 
     expect(styleOf(writeResult.nodes, 'n1')).toEqual({
       width: 800,
-      height: 400,
+      height: 408,
     });
   });
 
@@ -169,9 +169,9 @@ describe('APPLY_MEASURED_HEIGHT', () => {
       ],
     );
 
-    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(260);
+    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(268);
     expect(writeResult.nodes.find((n) => n.id === 'n1')?.measured?.height).toBe(
-      260,
+      268,
     );
     expect(dataOf(writeResult.nodes, 'n1').autoHeight).toEqual({
       intrinsicHeight: 260,

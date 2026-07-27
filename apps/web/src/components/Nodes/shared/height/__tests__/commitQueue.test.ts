@@ -28,7 +28,7 @@ function note(overrides: Partial<Node> = {}): Node {
     id: 'n1',
     type: 'note',
     position: { x: 0, y: 0 },
-    style: { width: 400, height: 260 },
+    style: { width: 400, height: 264 },
     data: { type: 'note', heightMode: 'auto' },
     ...overrides,
   } as Node;
@@ -44,7 +44,7 @@ beforeEach(() => {
 describe('height commit queue — threshold', () => {
   it('collapses sub-quantization jitter to no write at all', () => {
     // Same content (same key), re-measured 2px taller. Both 256 and 258
-    // resolve to a layout height of 260, which is what the node already
+    // resolve to a layout height of 264, which is what the node already
     // has — so quantization, not a tolerance, is what makes
     // ResizeObserver jitter free rather than merely cheap.
     storeNodes = [

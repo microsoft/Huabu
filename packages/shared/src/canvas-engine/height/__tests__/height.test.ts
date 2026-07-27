@@ -165,20 +165,22 @@ describe('intrinsicToLayoutHeight', () => {
   it('quantizes to the step so sub-step differences collapse', () => {
     expect(quantizeHeight(100)).toBe(100);
     expect(quantizeHeight(100.4)).toBe(100 + HEIGHT_QUANTIZATION_STEP);
-    expect(intrinsicToLayoutHeight(201, 'note', 400)).toBe(
-      intrinsicToLayoutHeight(203, 'note', 400),
+    expect(intrinsicToLayoutHeight(199, 'note', 400)).toBe(
+      intrinsicToLayoutHeight(201, 'note', 400),
     );
+  });
+
+  it('adds the node shell inset after scaling, not before', () => {
+    // The shell border lives outside the scaled container, so doubling
+    // the width doubles the content but not the 6px chrome.
+    expect(intrinsicToLayoutHeight(200, 'note', 400)).toBe(208);
+    expect(intrinsicToLayoutHeight(200, 'note', 800)).toBe(408);
   });
 
   it('applies the minimum before scaling', () => {
     // Note minimum is 50 unscaled; at half width the scale clamp is 0.5.
-    expect(intrinsicToLayoutHeight(10, 'note', 400)).toBe(52);
-    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(28);
-  });
-
-  it('scales with width for types that have a reference width', () => {
-    expect(intrinsicToLayoutHeight(200, 'note', 800)).toBe(400);
-    expect(intrinsicToLayoutHeight(200, 'note', 400)).toBe(200);
+    expect(intrinsicToLayoutHeight(10, 'note', 400)).toBe(56);
+    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(32);
   });
 
   it('does not scale types without a reference width', () => {
@@ -188,7 +190,7 @@ describe('intrinsicToLayoutHeight', () => {
 
   it('clamps the scale factor from below', () => {
     // 100px wide is a quarter of the reference width, but the clamp is 0.5.
-    expect(intrinsicToLayoutHeight(200, 'note', 100)).toBe(100);
+    expect(intrinsicToLayoutHeight(200, 'note', 100)).toBe(108);
   });
 });
 
@@ -329,7 +331,8 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    expect((result.style as { height: number }).height).toBe(260);
+    // 260 content + 6 shell chrome, quantized up to the 4px step.
+    expect((result.style as { height: number }).height).toBe(268);
   });
 
   it('materializes a stale hint too — a seed beats a collapse', () => {
@@ -343,7 +346,7 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    expect((result.style as { height: number }).height).toBe(260);
+    expect((result.style as { height: number }).height).toBe(268);
   });
 
   it('leaves fixed nodes alone', () => {
@@ -385,7 +388,7 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    expect(result.measured?.height).toBe(260);
+    expect(result.measured?.height).toBe(268);
     expect(result.measured?.width).toBe(400);
   });
 
