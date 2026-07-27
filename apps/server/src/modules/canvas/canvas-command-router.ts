@@ -18,6 +18,7 @@ import {
   type ExecuteOnServerInput,
   type ExecuteOnServerOutput,
 } from './canvas-executor.js';
+import { reconcileWorldPortals } from './world-portals.js';
 import { createKeyedMutex } from '../../utils/keyed-mutex.js';
 import {
   listCanvasDirEntries,
@@ -49,7 +50,7 @@ export class CanvasCommandRoutingError extends Error {
 export class MissingWorldPortalError extends CanvasCommandRoutingError {
   constructor(canvasId: string) {
     super(
-      `No canonical Portal exists for Canvas ${canvasId}; refresh the World before pinning`,
+      `Canvas ${canvasId} is not a live Space, so it owns no canonical Portal`,
     );
     this.name = 'MissingWorldPortalError';
   }
@@ -192,6 +193,34 @@ function assertConsistentDesiredStates(
 }
 
 /**
+ * Make sure every pinned source Space already owns its canonical Portal.
+ *
+ * Portals are maintained by World reconciliation, which used to run only
+ * before a World read — so pinning from a Space that had never been seen in
+ * an open World was rejected even though nothing was actually wrong.
+ * Reconciling here restores the documented `live Space ⇔ one live canonical
+ * Portal` invariant instead of inventing topology for this command, and is
+ * skipped entirely once the Portals exist. Anything still missing afterwards
+ * is a source Space that does not exist on disk.
+ */
+async function ensureCanonicalPortals(
+  worldCanvasId: string,
+  commands: readonly PortalCommand[],
+): Promise<void> {
+  const world = getCanvasStore(worldCanvasId).read() as StoredCanvas | null;
+  const targets = new Set<string>();
+  for (const node of (world?.state.nodes ?? []) as NestableNode[]) {
+    const target = portalTarget(node);
+    if (target) targets.add(target);
+  }
+  const missing = commands.some((command) =>
+    command.updates.some((update) => !targets.has(update.sourceCanvasId)),
+  );
+  if (!missing) return;
+  await reconcileWorldPortals();
+}
+
+/**
  * Resolve workspace-owned mutations before entering the per-Canvas executor.
  */
 export async function executeCanvasCommandsOnHost(
@@ -223,6 +252,7 @@ async function executeCanvasCommandsOnHostInternal(
       executeCanvasCommandsOnHostInternal(input, true),
     );
   }
+  await ensureCanonicalPortals(worldCanvasId, portalCommands);
   const world = getCanvasStore(worldCanvasId).read() as StoredCanvas | null;
   if (!world || !Array.isArray(world.state.nodes)) {
     throw new CanvasCommandRoutingError('World Canvas is unavailable');

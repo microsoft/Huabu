@@ -73,7 +73,7 @@ beforeEach(() => {
     },
   );
 
-  useWorkspaceStore.setState({ worldCanvasId });
+  useWorkspaceStore.setState({ worldCanvasId, worldEnabled: false });
   canvasHistoryManager.activate(worldCanvasId, true);
   useCanvasStore.getState()._setStateNoAutosave({
     canvasId: worldCanvasId,
@@ -85,6 +85,10 @@ beforeEach(() => {
     isSaving: false,
     pendingSave: false,
     isLoading: true,
+    versionConflict: false,
+    worldReferences: {},
+    worldReferenceError: null,
+    pinnedSourceNodeIds: {},
   });
 });
 
@@ -162,6 +166,114 @@ describe('World Portal Pin history boundary', () => {
         status: 'ok',
         source: { label: 'Source note' },
       });
+    });
+  });
+
+  it('derives pin state for the active source Space only', async () => {
+    useWorkspaceStore.setState({ worldEnabled: true });
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: sourceCanvasId,
+    });
+    getWorldReferences.mockResolvedValueOnce({
+      references: [
+        {
+          kind: 'canvasRef',
+          referenceNodeId: 'node-portal',
+          target: { canvasId: sourceCanvasId },
+          status: 'ok',
+          source: { title: 'Source Space' },
+        },
+        {
+          kind: 'nodeRef',
+          referenceNodeId: 'node-ref',
+          target: { canvasId: sourceCanvasId, nodeId: sourceNodeId },
+          status: 'ok',
+          source: { type: 'note', label: 'Source note' },
+        },
+        {
+          kind: 'frameRef',
+          referenceNodeId: 'node-frame-ref',
+          target: { canvasId: sourceCanvasId, nodeId: 'node-frame' },
+          status: 'ok',
+          source: { type: 'frame', label: 'Source frame' },
+        },
+        {
+          kind: 'nodeRef',
+          referenceNodeId: 'node-other-ref',
+          target: { canvasId: 'canvas-other', nodeId: 'node-other' },
+          status: 'ok',
+          source: { type: 'note', label: 'Other note' },
+        },
+      ],
+    });
+
+    await useCanvasStore.getState().refreshWorldReferences();
+
+    expect(getWorldReferences).toHaveBeenCalledWith(worldCanvasId);
+    expect(useCanvasStore.getState().pinnedSourceNodeIds).toEqual({
+      [sourceNodeId]: true,
+      'node-frame': true,
+    });
+    expect(useCanvasStore.getState().worldReferences).toEqual({});
+  });
+
+  it('clears source pin state without requesting World when disabled', async () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: sourceCanvasId,
+      pinnedSourceNodeIds: { [sourceNodeId]: true },
+    });
+
+    await useCanvasStore.getState().refreshWorldReferences();
+
+    expect(getWorldReferences).not.toHaveBeenCalled();
+    expect(useCanvasStore.getState().pinnedSourceNodeIds).toEqual({});
+  });
+
+  it('refreshes source pin state after a routed World mutation', async () => {
+    useWorkspaceStore.setState({ worldEnabled: true });
+    useCanvasStore.getState()._setStateNoAutosave({
+      canvasId: sourceCanvasId,
+    });
+    getWorldReferences.mockResolvedValueOnce({
+      references: [
+        {
+          kind: 'nodeRef',
+          referenceNodeId: 'node-ref',
+          target: { canvasId: sourceCanvasId, nodeId: sourceNodeId },
+          status: 'ok',
+          source: { type: 'note', label: 'Source note' },
+        },
+      ],
+    });
+
+    await useCanvasStore.getState().setPortalNodePins([
+      {
+        sourceCanvasId,
+        sourceNodeIds: [sourceNodeId],
+        pinned: true,
+      },
+    ]);
+
+    expect(postCanvasExecute).toHaveBeenCalledWith(
+      sourceCanvasId,
+      expect.objectContaining({
+        commands: [
+          {
+            type: 'SET_PORTAL_NODE_PINS',
+            updates: [
+              {
+                sourceCanvasId,
+                sourceNodeIds: [sourceNodeId],
+                pinned: true,
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(getWorldReferences).toHaveBeenCalledWith(worldCanvasId);
+    expect(useCanvasStore.getState().pinnedSourceNodeIds).toEqual({
+      [sourceNodeId]: true,
     });
   });
 

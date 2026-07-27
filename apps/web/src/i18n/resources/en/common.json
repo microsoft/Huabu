@@ -370,8 +370,10 @@
     "openSpaceForReview": "Open Space to review",
     "pinSelected": "Pin selected nodes to World",
     "unpinSelected": "Unpin selected nodes from World",
+    "pinNode": "Pin to World",
+    "unpinNode": "Unpin from World",
     "pinFailed": "Failed to update World pins",
-    "portalRefreshRequired": "Refresh World before pinning nodes from this Space"
+    "pinSourceMissing": "Cannot pin: this Space no longer exists"
   },
   "node": {
     "untitled": "Untitled",

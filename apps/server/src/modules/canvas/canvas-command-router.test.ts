@@ -13,7 +13,10 @@ import {
   assertWorldPortalTopologyAllowed,
   WorldPortalMutationError,
 } from './world-portal-policy.js';
-import { reconcileWorldPortals } from './world-portals.js';
+import {
+  reconcileWorldPortals,
+  WorldPortalIntegrityError,
+} from './world-portals.js';
 import { refreshCanvasDirIndex } from '../storage/canvas-dirs.js';
 import { getCanvasStore, resetStorageCache } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
@@ -488,8 +491,38 @@ describe('workspace canvas command routing', () => {
     expect(getCanvasStore('canvas-world').read()?.version).toBe(beforeVersion);
   });
 
-  it('requires World reconciliation before pinning', async () => {
+  it('creates a missing canonical Portal on demand before pinning', async () => {
     writeCanvas('.world', 'canvas-world');
+    resetStorageCache();
+
+    await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [pin('canvas-a', ['node-a' as CanvasNodeId])],
+      originator: { source: 'ui' },
+    });
+
+    const worldNodes = getCanvasStore('canvas-world').read()?.state
+      .nodes as TestStoredNode[];
+    expect(
+      worldNodes.some(
+        (node) =>
+          node.type === 'canvasRef' &&
+          (node.data as { targetCanvasId?: string } | undefined)
+            ?.targetCanvasId === 'canvas-a',
+      ),
+    ).toBe(true);
+    expect(referenceFor('node-a')).toBeDefined();
+  });
+
+  it('preserves Portal reconciliation integrity errors', async () => {
+    writeCanvas('.world', 'canvas-world', [
+      {
+        id: 'node-malformed-portal',
+        type: 'canvasRef',
+        position: { x: 0, y: 0 },
+        data: {},
+      },
+    ]);
     resetStorageCache();
 
     await expect(
@@ -498,12 +531,22 @@ describe('workspace canvas command routing', () => {
         commands: [pin('canvas-a', ['node-a' as CanvasNodeId])],
         originator: { source: 'ui' },
       }),
-    ).rejects.toThrow(
-      'No canonical Portal exists for Canvas canvas-a; refresh the World before pinning',
-    );
+    ).rejects.toBeInstanceOf(WorldPortalIntegrityError);
+  });
 
-    expect(getCanvasStore('canvas-world').read()?.version).toBe(0);
-    expect(getCanvasStore('canvas-world').read()?.state.nodes).toEqual([]);
+  it('rejects pinning from a Space that no longer exists', async () => {
+    writeCanvas('.world', 'canvas-world');
+    resetStorageCache();
+
+    await expect(
+      executeCanvasCommandsOnHost({
+        canvasId: 'canvas-missing',
+        commands: [pin('canvas-missing', ['node-a' as CanvasNodeId])],
+        originator: { source: 'ui' },
+      }),
+    ).rejects.toThrow(
+      'Canvas canvas-missing is not a live Space, so it owns no canonical Portal',
+    );
   });
 
   it('routes several Portals into one World version transition', async () => {
