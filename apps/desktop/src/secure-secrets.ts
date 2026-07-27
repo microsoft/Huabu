@@ -8,11 +8,19 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+/**
+ * Whitelist of secret ids the main process accepts over the utility-process
+ * bridge. This must stay in sync with `SECRET_IDS` in
+ * `apps/server/src/security/secret-ids.ts`; an id known only to the server is
+ * rejected before it ever reaches `safeStorage`. The parity test in
+ * `secure-secrets.test.ts` fails the build when the two drift apart.
+ */
 export const DESKTOP_SECRET_IDS = {
   imageApiKey: 'llm:image:api-key',
   tavilyApiKey: 'integration:tavily:api-key',
   rapidApiKey: 'integration:rapidapi:api-key',
   copilotOAuth: 'oauth:github-copilot:credentials',
+  codexOAuth: 'oauth:openai-codex:credentials',
 } as const;
 
 export function desktopLlmProviderApiKeySecretId(provider: string): string {

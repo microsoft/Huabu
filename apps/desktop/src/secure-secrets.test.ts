@@ -8,7 +8,13 @@ import {
   DESKTOP_SECRET_IDS,
   DesktopSecureSecretStore,
   desktopLlmProviderApiKeySecretId,
+  isDesktopSecretId,
 } from './secure-secrets';
+import {
+  isSecretId,
+  llmProviderApiKeySecretId,
+  SECRET_IDS as SERVER_SECRET_IDS,
+} from '../../server/src/security/secret-ids';
 
 const directories: string[] = [];
 const codec = {
@@ -167,4 +173,46 @@ describe('DesktopSecureSecretStore', () => {
   // DesktopSecureSecretStore.setMany.
   // See docs/proposals/credential-storage-hardening-followups.md (item 1).
   it.todo('applies a multi-key batch write atomically via a batch IPC message');
+});
+
+// The secret-id contract is hand-duplicated between the server and this
+// package because apps/desktop is compiled by plain tsc and cannot consume the
+// raw-TypeScript @sediment/shared package. Drift is silent and severe: an id
+// the server writes but the main process does not whitelist is rejected as
+// "Invalid secure credential mutation" long before safeStorage is reached.
+// See docs/proposals/credential-storage-hardening-followups.md (item 3) for
+// the permanent fix.
+describe('secret-id parity with the server contract', () => {
+  it('accepts every server secret id', () => {
+    for (const id of Object.values(SERVER_SECRET_IDS)) {
+      expect(isDesktopSecretId(id), `server id not whitelisted: ${id}`).toBe(
+        true,
+      );
+    }
+  });
+
+  it('exposes exactly the server secret id set', () => {
+    expect(Object.entries(DESKTOP_SECRET_IDS).sort()).toEqual(
+      Object.entries(SERVER_SECRET_IDS).sort(),
+    );
+  });
+
+  it('derives provider api-key ids identically to the server', () => {
+    for (const provider of ['openai', 'azure-openai', 'a.b_c-1']) {
+      expect(desktopLlmProviderApiKeySecretId(provider)).toBe(
+        llmProviderApiKeySecretId(provider),
+      );
+      expect(isDesktopSecretId(llmProviderApiKeySecretId(provider))).toBe(true);
+    }
+  });
+
+  it('rejects ids the server also rejects', () => {
+    for (const id of [
+      '',
+      'oauth:unknown:credentials',
+      'llm:provider::api-key',
+    ]) {
+      expect(isDesktopSecretId(id)).toBe(isSecretId(id));
+    }
+  });
 });

@@ -1,7 +1,7 @@
 # Credential storage — deferred hardening follow-ups
 
 Status: Draft
-Last updated: 2026-07-10
+Last updated: 2026-07-27
 
 ## Context
 
@@ -32,6 +32,8 @@ Full fix: extract `savePersistedStore` (and the config read) into an injectable 
 Secret-id constants, the provider-id regex, id generators, and the collect/scrub migration logic are duplicated across [`secret-ids.ts`](../../apps/server/src/security/secret-ids.ts) + [`plaintext-secret-migration.ts`](../../apps/server/src/security/plaintext-secret-migration.ts) and [`secure-secrets.ts`](../../apps/desktop/src/secure-secrets.ts). They have already drifted three times (azure guard, fsync discipline, fail-open reads).
 
 The dangerous class is **id drift**: desktop encrypts under one id string while the server reads another → the key silently "disappears", the hardest failure to trace.
+
+This has since happened in production: the Codex OAuth id was added to the server but not to the desktop whitelist, so every Codex login failed with `Credential store modify failed for openai-codex` ([microsoft/Huabu#40](https://github.com/microsoft/Huabu/issues/40)). A parity test in [`secure-secrets.test.ts`](../../apps/desktop/src/secure-secrets.test.ts) now fails the desktop test run when the two id sets, the provider-id derivation, or the accept/reject decisions diverge, and CI runs that suite explicitly. That is a drift _detector_, not a drift _eliminator_ — the extraction below is still the real fix.
 
 Full fix: extract the pure contract — id constants, regex, `llmProviderApiKeySecretId`, `isSecretId`, and a pure `planMigration(parsedJson)` with the azure rule expressed as data — into a **zero-dependency subpath** of `@sediment/shared` (e.g. `@sediment/shared/security`), imported by both apps.
 

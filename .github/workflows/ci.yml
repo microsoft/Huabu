@@ -53,3 +53,11 @@ jobs:
 
       - name: i18n parity
         run: pnpm run check:i18n
+
+      # Narrow on purpose: the desktop suite guards the hand-duplicated
+      # credential contract between apps/server and apps/desktop, whose drift
+      # is invisible to lint/typecheck and only surfaces in packaged Electron
+      # builds (see docs/proposals/credential-storage-hardening-followups.md).
+      # Widen to `pnpm -r test` once every package's suite is green.
+      - name: Desktop credential contract tests
+        run: pnpm --filter @sediment/desktop test

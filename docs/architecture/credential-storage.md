@@ -1,6 +1,6 @@
 # Credential Storage
 
-> Credential persistence for Electron and standalone server deployments. Last updated: 2026-07-24
+> Credential persistence for Electron and standalone server deployments. Last updated: 2026-07-27
 
 ## Runtime backends
 
@@ -14,6 +14,8 @@ All server modules use a single synchronous-read, asynchronous-write `SecretStor
 | Electron with an external development server  | External server's own backend                     | Electron does not migrate or expose its local secure store because it does not own the external process.                                                                                                                  |
 
 Electron enables the bridge with `HUABU_SECRET_BRIDGE=1`; the server waits for a `secret:init` snapshot over `utilityProcess` messaging before binding its HTTP port, and settings mutations are acknowledged only after Electron has encrypted and atomically persisted the new value.
+
+The main process validates every bridged mutation against its own secret-id whitelist before touching `safeStorage`, so an id the server knows but Electron does not is rejected with `Invalid secure credential mutation`. That whitelist is a hand-maintained duplicate of the server contract because `apps/desktop` is compiled by plain `tsc` and cannot consume the raw-TypeScript `@sediment/shared` package. A parity test in [`apps/desktop/src/secure-secrets.test.ts`](../../apps/desktop/src/secure-secrets.test.ts) asserts the two id sets, the provider-id derivation, and the accept/reject decisions match, so adding a secret id on only one side fails the desktop test run. That suite is wired into the `quality` job in [`ci.yml`](../../.github/workflows/ci.yml), so the drift cannot reach a release even though nobody edits the desktop package when adding a server-side secret id. De-duplicating the contract outright is tracked in [`credential-storage-hardening-followups.md`](../proposals/credential-storage-hardening-followups.md) (item 3).
 
 The `pi-ai` credential adapter preserves the `CredentialStore.modify` contract during concurrent OAuth refresh: a returned credential replaces the stored value, while `undefined` leaves the current value unchanged because another locked caller may already have refreshed it. Credential removal is performed only through `delete`; treating a no-op `modify` as deletion would erase a freshly rotated Copilot credential when several requests observe expiry together.
 
@@ -59,6 +61,7 @@ Standalone startup applies the same ordering when `HUABU_SECRET_KEY` is configur
 | [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts)                                                               | `safeStorage` availability policy and utility-process secret bridge host.    |
 | [`apps/server/src/security/desktop-secret-bridge.ts`](../../apps/server/src/security/desktop-secret-bridge.ts)             | Server startup handshake, in-memory snapshot, and acknowledged mutation RPC. |
 | [`apps/server/src/security/secret-store.ts`](../../apps/server/src/security/secret-store.ts)                               | Runtime backend selection, environment fallback, and module-facing facade.   |
+| [`apps/server/src/security/secret-ids.ts`](../../apps/server/src/security/secret-ids.ts)                                   | Canonical secret-id constants, provider-id derivation, and id validation.    |
 | [`apps/server/src/security/encrypted-file-secret-store.ts`](../../apps/server/src/security/encrypted-file-secret-store.ts) | Standalone AES-256-GCM persistence and authenticated read-back verification. |
 | [`apps/server/src/security/environment-secret-store.ts`](../../apps/server/src/security/environment-secret-store.ts)       | Read-only deployment environment fallback.                                   |
 | [`apps/server/src/security/plaintext-secret-migration.ts`](../../apps/server/src/security/plaintext-secret-migration.ts)   | Standalone legacy plaintext discovery, encryption, verification, and scrub.  |
