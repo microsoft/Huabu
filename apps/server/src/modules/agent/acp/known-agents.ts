@@ -154,4 +154,22 @@ export const KNOWN_CLIS: readonly KnownCli[] = [
     },
     installHint: 'Install from https://cursor.com/docs/cli/installation',
   },
+  {
+    id: 'hermes',
+    displayName: 'Hermes Agent',
+    // Hermes ships a native stdio ACP server reached via the `acp`
+    // subcommand. It has no argument-based blanket auto-approval mode —
+    // permissions and session modes are handled inside Hermes itself —
+    // so `autoApprove` is null and no launch-command toggle is exposed.
+    binary: 'hermes',
+    acpArgs: ['acp'],
+    autoApprove: null,
+    // The `hermes` bin ignores `--version`/`--help` and launches its
+    // interactive agent on any invocation, blocking on stdin instead of
+    // printing a version. Skip the probe so detection doesn't burn the
+    // full timeout (and spawn a full agent) on every request.
+    skipVersionProbe: true,
+    installHint:
+      'Install from https://hermes-agent.nousresearch.com/docs/user-guide/features/acp',
+  },
 ];
