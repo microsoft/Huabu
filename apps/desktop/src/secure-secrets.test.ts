@@ -4,16 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import {
-  DESKTOP_SECRET_IDS,
-  DesktopSecureSecretStore,
-  isDesktopSecretId,
-} from './secure-secrets';
-import {
-  isSecretId,
-  llmProviderApiKeySecretId,
-  SECRET_IDS as SERVER_SECRET_IDS,
-} from '../../server/src/security/secret-ids';
+import { DesktopSecureSecretStore, isDesktopSecretId } from './secure-secrets';
 
 const directories: string[] = [];
 const codec = {
@@ -36,15 +27,15 @@ afterEach(() => {
 describe('DesktopSecureSecretStore', () => {
   it('encrypts values at rest and round-trips them through the vault', () => {
     const dataDir = createDataDir();
-    const id = llmProviderApiKeySecretId('openai');
+    const id = 'llm:provider:openai:api-key';
     const store = new DesktopSecureSecretStore(dataDir, codec);
 
     store.set(id, 'chat-secret');
-    store.set(DESKTOP_SECRET_IDS.copilotOAuth, 'refresh-secret');
+    store.set('oauth:github-copilot:credentials', 'refresh-secret');
 
     expect(store.snapshot()).toEqual({
       [id]: 'chat-secret',
-      [DESKTOP_SECRET_IDS.copilotOAuth]: 'refresh-secret',
+      'oauth:github-copilot:credentials': 'refresh-secret',
     });
     const encrypted = readFileSync(
       join(dataDir, 'secure-secrets.json'),
@@ -61,7 +52,7 @@ describe('DesktopSecureSecretStore', () => {
 
   it('removes an entry when a null value is written', () => {
     const dataDir = createDataDir();
-    const id = llmProviderApiKeySecretId('openai');
+    const id = 'llm:provider:openai:api-key';
     const store = new DesktopSecureSecretStore(dataDir, codec);
 
     store.set(id, 'chat-secret');
@@ -79,7 +70,7 @@ describe('DesktopSecureSecretStore', () => {
     };
     const store = new DesktopSecureSecretStore(dataDir, brokenCodec);
 
-    expect(() => store.set(DESKTOP_SECRET_IDS.tavilyApiKey, 'keep-me')).toThrow(
+    expect(() => store.set('integration:tavily:api-key', 'keep-me')).toThrow(
       'Secure credential encryption verification failed',
     );
   });
@@ -117,41 +108,39 @@ describe('DesktopSecureSecretStore', () => {
   it.todo('applies a multi-key batch write atomically via a batch IPC message');
 });
 
-// The secret-id contract is hand-duplicated between the server and this
-// package because apps/desktop is compiled by plain tsc and cannot consume the
-// raw-TypeScript @sediment/shared package. Drift is silent and severe: an id
-// the server writes but the main process does not whitelist is rejected as
-// "Invalid secure credential mutation" long before safeStorage is reached.
-// See docs/proposals/credential-storage-hardening-followups.md (item 3) for
-// the permanent fix.
-describe('secret-id parity with the server contract', () => {
-  it('accepts every server secret id', () => {
-    for (const id of Object.values(SERVER_SECRET_IDS)) {
-      expect(isDesktopSecretId(id), `server id not whitelisted: ${id}`).toBe(
-        true,
-      );
+// The bridge validates ids by shape, not against a copy of the server's
+// `SECRET_IDS`. These cases pin the shape wide enough to cover every id the
+// server can generate today (and any future one following the same scheme)
+// while still rejecting junk. See docs/architecture/credential-storage.md.
+describe('isDesktopSecretId', () => {
+  it('accepts every id shape the server can generate', () => {
+    for (const id of [
+      'llm:image:api-key',
+      'llm:provider:openai:api-key',
+      'llm:provider:azure-openai:api-key',
+      'llm:provider:a.b_c-1:api-key',
+      'integration:tavily:api-key',
+      'integration:rapidapi:api-key',
+      'oauth:github-copilot:credentials',
+      'oauth:openai-codex:credentials',
+    ]) {
+      expect(isDesktopSecretId(id), `rejected a valid id: ${id}`).toBe(true);
     }
   });
 
-  it('exposes exactly the server secret id set', () => {
-    expect(Object.entries(DESKTOP_SECRET_IDS).sort()).toEqual(
-      Object.entries(SERVER_SECRET_IDS).sort(),
-    );
-  });
-
-  it('derives provider api-key ids identically to the server', () => {
-    for (const provider of ['openai', 'azure-openai', 'a.b_c-1']) {
-      expect(isDesktopSecretId(llmProviderApiKeySecretId(provider))).toBe(true);
-    }
-  });
-
-  it('rejects ids the server also rejects', () => {
+  it('rejects malformed, foreign, or oversized ids', () => {
     for (const id of [
       '',
-      'oauth:unknown:credentials',
+      'llm',
       'llm:provider::api-key',
+      'llm:a:b:c:d',
+      'whatever:x:y',
+      '../../etc/passwd',
+      `llm:x:${'a'.repeat(300)}`,
     ]) {
-      expect(isDesktopSecretId(id)).toBe(isSecretId(id));
+      expect(isDesktopSecretId(id), `accepted an invalid id: ${id}`).toBe(
+        false,
+      );
     }
   });
 });

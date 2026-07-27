@@ -10,8 +10,6 @@
   },
   "include": ["src"],
   // Tests are run by vitest, never emitted into `dist/` (and therefore never
-  // shipped inside app.asar). Excluding them also lets a test import the
-  // server's secret-id contract for parity checking without violating
-  // `rootDir`.
+  // shipped inside app.asar).
   "exclude": ["src/**/*.test.ts"]
 }

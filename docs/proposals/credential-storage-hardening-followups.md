@@ -27,19 +27,17 @@ Why deferred: `savePersistedStore` → `writeFileSync` plus the module-level pin
 
 Full fix: extract `savePersistedStore` (and the config read) into an injectable seam, then test both "config write fails → key restored" and "config write + rollback both fail → partial-commit error + log". Tracked as `it.todo` in [`llm.settings.test.ts`](../../apps/server/src/modules/agent/llm.settings.test.ts).
 
-## 3. De-duplicate the secret-id contract — MEDIUM (highest anti-drift value)
+## 3. De-duplicate the secret-id contract — RESOLVED BY DESIGN CHANGE
 
-Secret-id constants, the provider-id regex, and the accept/reject decision are duplicated across [`secret-ids.ts`](../../apps/server/src/security/secret-ids.ts) and [`secure-secrets.ts`](../../apps/desktop/src/secure-secrets.ts).
+Originally: secret-id constants and the provider-id regex were duplicated across [`secret-ids.ts`](../../apps/server/src/security/secret-ids.ts) and [`secure-secrets.ts`](../../apps/desktop/src/secure-secrets.ts), and the dangerous class was **id drift** — desktop rejects an id the server writes, so the credential silently never persists. That happened in production: the Codex OAuth id was added to the server but not to the desktop whitelist, and every Codex login failed with `Credential store modify failed for openai-codex` ([microsoft/Huabu#40](https://github.com/microsoft/Huabu/issues/40)).
 
-The dangerous class that remains is **id drift**: desktop encrypts under one id string while the server reads another → the key silently "disappears", the hardest failure to trace.
+The duplication was never load-bearing on its own. It existed because the original `safeStorage` change put the plaintext-credential migration inside Electron main, which had to _generate_ ids and therefore needed the full set as values. Once that migration was deleted, desktop stopped producing ids and only validated them — but the list stayed.
 
-This has since happened in production: the Codex OAuth id was added to the server but not to the desktop whitelist, so every Codex login failed with `Credential store modify failed for openai-codex` ([microsoft/Huabu#40](https://github.com/microsoft/Huabu/issues/40)). A parity test in [`secure-secrets.test.ts`](../../apps/desktop/src/secure-secrets.test.ts) now fails the desktop test run when the two id sets, the provider-id derivation, or the accept/reject decisions diverge, and CI runs that suite explicitly. That is a drift _detector_, not a drift _eliminator_ — the extraction below is still the real fix.
+Resolution: `isDesktopSecretId` now matches by **shape** instead of enumerating the server's ids. Since the server process already holds every decrypted secret from the `secret:init` snapshot, an exact list added no confidentiality — only vault hygiene, which shape validation preserves. Nothing needs syncing between the two packages any more, so the drift class is eliminated rather than merely detected. See [`credential-storage.md`](../architecture/credential-storage.md).
 
-Full fix: extract the pure contract — id constants, regex, `llmProviderApiKeySecretId`, `isSecretId` — into a **zero-dependency subpath** of `@sediment/shared` (e.g. `@sediment/shared/security`), imported by both apps.
+Residual: adding a _new namespace_ (beyond `llm` / `integration` / `oauth`) still requires a desktop change. That is an explicit architectural step rather than something a routine secret addition can silently miss.
 
-Constraints (why it isn't just "share everything"): `@sediment/shared` is isomorphic (imported by web, zero node deps) → **no `fs` code may live there**. The two encrypted stores must **stay separate** (safeStorage opaque blob vs explicit AES-GCM formats differ). `apps/desktop` currently depends on neither `shared` nor `server`, and is compiled by plain `tsc` with no bundler, so consuming the raw-TypeScript `@sediment/shared` requires giving the desktop package a bundler first — that is the real cost.
-
-**Promote when** touching this subsystem again for any reason — fold the extraction into that change rather than adding a fourth hand-synced copy.
+Extraction into a zero-dependency `@sediment/shared/security` subpath is no longer motivated by drift risk. Should it ever be revisited, the constraints still hold: `@sediment/shared` is isomorphic (imported by web, zero node deps) → **no `fs` code may live there**; the two encrypted stores must **stay separate** (safeStorage opaque blob vs explicit AES-GCM formats differ); and `apps/desktop` is compiled by plain `tsc` with no bundler, so consuming the raw-TypeScript package requires giving it a bundler first.
 
 ## Not doing
 

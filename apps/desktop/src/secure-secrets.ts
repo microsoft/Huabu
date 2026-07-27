@@ -8,33 +8,32 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-/**
- * Whitelist of secret ids the main process accepts over the utility-process
- * bridge. This must stay in sync with `SECRET_IDS` in
- * `apps/server/src/security/secret-ids.ts`; an id known only to the server is
- * rejected before it ever reaches `safeStorage`. The parity test in
- * `secure-secrets.test.ts` fails the build when the two drift apart.
- */
-export const DESKTOP_SECRET_IDS = {
-  imageApiKey: 'llm:image:api-key',
-  tavilyApiKey: 'integration:tavily:api-key',
-  rapidApiKey: 'integration:rapidapi:api-key',
-  copilotOAuth: 'oauth:github-copilot:credentials',
-  codexOAuth: 'oauth:openai-codex:credentials',
-} as const;
+/** Hard cap so a malformed id cannot bloat the vault's key space. */
+const MAX_SECRET_ID_LENGTH = 256;
 
 /**
- * The main process only ever *validates* secret ids; the server owns id
- * generation (`llmProviderApiKeySecretId`). The provider pattern below must
- * therefore stay compatible with the server's generator — see the parity test
- * in `secure-secrets.test.ts`.
+ * Shape of a bridged secret id: a known namespace followed by one to three
+ * `:`-separated segments (`llm:image:api-key` has two, the per-provider
+ * `llm:provider:<id>:api-key` has three).
+ */
+const SECRET_ID_SHAPE = /^(llm|integration|oauth)(:[a-z0-9._-]{1,64}){1,3}$/i;
+
+/**
+ * Validate a secret id arriving over the utility-process bridge.
+ *
+ * Deliberately a *structural* check rather than an exact copy of the server's
+ * `SECRET_IDS`. The server process already receives every decrypted secret in
+ * the `secret:init` snapshot, so enumerating ids here buys no confidentiality;
+ * it only keeps junk out of the vault. An exact list bought that marginal
+ * hygiene at the price of a recurring outage class — a server-side id the
+ * desktop package forgot to mirror is rejected as `Invalid secure credential
+ * mutation` and the credential silently never persists (see
+ * microsoft/Huabu#40). Matching on shape keeps the hygiene and removes the
+ * hand-synced duplication entirely: new server secrets are accepted as long
+ * as they follow the established naming scheme.
  */
 export function isDesktopSecretId(value: string): boolean {
-  return (
-    Object.values(DESKTOP_SECRET_IDS).includes(
-      value as (typeof DESKTOP_SECRET_IDS)[keyof typeof DESKTOP_SECRET_IDS],
-    ) || /^llm:provider:[a-z0-9._-]+:api-key$/i.test(value)
-  );
+  return value.length <= MAX_SECRET_ID_LENGTH && SECRET_ID_SHAPE.test(value);
 }
 
 export interface SafeStorageCodec {
