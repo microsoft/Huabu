@@ -4,6 +4,11 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  fitPortalToChildren,
+  fitPortals,
+} from '@sediment/shared/canvas-engine';
+
 const workspaceState = vi.hoisted(() => ({ path: '' }));
 
 vi.mock('../workspace.js', () => ({
@@ -23,6 +28,7 @@ import { refreshCanvasDirIndex } from '../storage/canvas-dirs.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
+import type { NestableNode } from '@sediment/shared/canvas-engine';
 
 function writeCanvas(
   directory: string,
@@ -231,5 +237,202 @@ describe('World Portal reconciliation', () => {
         ],
       ),
     ).toThrow(WorldPortalMutationError);
+  });
+
+  it('allows a nested reference subtree to leave with its broken Portal', async () => {
+    const previous = [
+      {
+        id: 'node-portal',
+        type: 'canvasRef',
+        position: { x: 0, y: 0 },
+        style: { width: 360, height: 240 },
+        measured: { width: 360, height: 240 },
+        data: { type: 'canvasRef', targetCanvasId: 'canvas-a' },
+      },
+      {
+        id: 'node-frame-ref',
+        type: 'frameRef',
+        parentId: 'node-portal',
+        position: { x: 24, y: 56 },
+        style: { width: 200, height: 160 },
+        measured: { width: 200, height: 160 },
+        data: {
+          type: 'frameRef',
+          target: { canvasId: 'canvas-a', nodeId: 'node-frame' },
+        },
+      },
+      {
+        id: 'node-child-ref',
+        type: 'nodeRef',
+        parentId: 'node-frame-ref',
+        position: { x: 20, y: 20 },
+        style: { width: 180, height: 96 },
+        measured: { width: 180, height: 96 },
+        data: {
+          type: 'nodeRef',
+          target: { canvasId: 'canvas-a', nodeId: 'node-child' },
+        },
+      },
+    ];
+    rmSync(path.join(workspaceState.path, 'Project A'), {
+      recursive: true,
+      force: true,
+    });
+    refreshCanvasDirIndex();
+
+    expect(() =>
+      assertWorldPortalTopologyAllowed('canvas-world', previous, []),
+    ).not.toThrow();
+  });
+
+  it('rejects a manually resized frameRef behind an apparently fitted Portal', () => {
+    const raw = [
+      {
+        id: 'node-portal',
+        type: 'canvasRef',
+        position: { x: 0, y: 0 },
+        style: { width: 360, height: 240 },
+        measured: { width: 360, height: 240 },
+        data: { type: 'canvasRef', targetCanvasId: 'canvas-a' },
+      },
+      {
+        id: 'node-frame-ref',
+        type: 'frameRef',
+        parentId: 'node-portal',
+        position: { x: 24, y: 56 },
+        style: { width: 200, height: 160 },
+        measured: { width: 200, height: 160 },
+        data: {
+          type: 'frameRef',
+          target: { canvasId: 'canvas-a', nodeId: 'node-frame' },
+        },
+      },
+      {
+        id: 'node-child-ref',
+        type: 'nodeRef',
+        parentId: 'node-frame-ref',
+        position: { x: 20, y: 20 },
+        style: { width: 180, height: 96 },
+        measured: { width: 180, height: 96 },
+        data: {
+          type: 'nodeRef',
+          target: { canvasId: 'canvas-a', nodeId: 'node-child' },
+        },
+      },
+    ] as NestableNode[];
+    const canonical = fitPortals(raw, ['node-frame-ref', 'node-portal']);
+    expect(() =>
+      assertWorldPortalTopologyAllowed(
+        'canvas-world',
+        canonical,
+        structuredClone(canonical),
+      ),
+    ).not.toThrow();
+
+    const resized = structuredClone(canonical);
+    const frameRef = resized.find((node) => node.id === 'node-frame-ref');
+    if (!frameRef) throw new Error('Missing frameRef');
+    frameRef.style = {
+      ...frameRef.style,
+      width: Number(frameRef.style?.width) + 100,
+    };
+    frameRef.measured = {
+      ...frameRef.measured,
+      width: Number(frameRef.measured?.width) + 100,
+    };
+    const apparentlyFitted = fitPortalToChildren(resized, 'node-portal');
+
+    expect(() =>
+      assertWorldPortalTopologyAllowed(
+        'canvas-world',
+        canonical,
+        apparentlyFitted,
+      ),
+    ).toThrow('Frame reference size is managed by its contents');
+  });
+
+  it('rejects resizing an empty frameRef through a full-state write', () => {
+    const raw = [
+      {
+        id: 'node-portal',
+        type: 'canvasRef',
+        position: { x: 0, y: 0 },
+        style: { width: 360, height: 240 },
+        measured: { width: 360, height: 240 },
+        data: { type: 'canvasRef', targetCanvasId: 'canvas-a' },
+      },
+      {
+        id: 'node-frame-ref',
+        type: 'frameRef',
+        parentId: 'node-portal',
+        position: { x: 24, y: 56 },
+        style: { width: 200, height: 160 },
+        measured: { width: 200, height: 160 },
+        data: {
+          type: 'frameRef',
+          target: { canvasId: 'canvas-a', nodeId: 'node-frame' },
+        },
+      },
+    ] as NestableNode[];
+    const canonical = fitPortals(raw, ['node-frame-ref', 'node-portal']);
+    const resized = structuredClone(canonical);
+    const frameRef = resized.find((node) => node.id === 'node-frame-ref');
+    if (!frameRef) throw new Error('Missing frameRef');
+    frameRef.style = {
+      ...frameRef.style,
+      width: Number(frameRef.style?.width) + 100,
+    };
+    const apparentlyFitted = fitPortalToChildren(resized, 'node-portal');
+
+    expect(() =>
+      assertWorldPortalTopologyAllowed(
+        'canvas-world',
+        canonical,
+        apparentlyFitted,
+      ),
+    ).toThrow('Frame reference size is managed by its contents');
+  });
+
+  it('rejects cyclic frameRef topology without hanging during fit', () => {
+    const cyclic = [
+      {
+        id: 'node-portal',
+        type: 'canvasRef',
+        position: { x: 0, y: 0 },
+        style: { width: 360, height: 240 },
+        measured: { width: 360, height: 240 },
+        data: { type: 'canvasRef', targetCanvasId: 'canvas-a' },
+      },
+      {
+        id: 'node-frame-a',
+        type: 'frameRef',
+        parentId: 'node-frame-b',
+        position: { x: 0, y: 0 },
+        style: { width: 200, height: 160 },
+        data: {
+          type: 'frameRef',
+          target: { canvasId: 'canvas-a', nodeId: 'node-source-a' },
+        },
+      },
+      {
+        id: 'node-frame-b',
+        type: 'frameRef',
+        parentId: 'node-frame-a',
+        position: { x: 0, y: 0 },
+        style: { width: 200, height: 160 },
+        data: {
+          type: 'frameRef',
+          target: { canvasId: 'canvas-a', nodeId: 'node-source-b' },
+        },
+      },
+    ];
+
+    expect(() =>
+      assertWorldPortalTopologyAllowed(
+        'canvas-world',
+        cyclic,
+        structuredClone(cyclic),
+      ),
+    ).toThrow('World reference hierarchy is cyclic');
   });
 });

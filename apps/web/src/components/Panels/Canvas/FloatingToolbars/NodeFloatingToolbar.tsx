@@ -7,6 +7,7 @@ import {
   ACCENT_NONE_TOKEN,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
   type FrameNodeData,
+  type FrameRefNodeData,
   type NodeRefNodeData,
 } from '@sediment/shared';
 import { isAlwaysAutoHeightNodeType } from '@sediment/shared/canvas-engine';
@@ -190,8 +191,10 @@ export const NodeFloatingToolbar = memo(
     const dispatchUiIntent = useCanvasStore((s) => s.dispatchUiIntent);
     const isFrame = type === 'frame';
     const isCanvasRef = type === 'canvasRef';
+    const isFrameRef = type === 'frameRef';
     const isNodeRef = type === 'nodeRef';
-    const isReference = isCanvasRef || isNodeRef;
+    const isReference = isCanvasRef || isFrameRef || isNodeRef;
+    const isSourceReference = isFrameRef || isNodeRef;
     const frameData = isFrame ? (data as FrameNodeData) : null;
     const frameSizing = frameData?.sizing ?? 'hug';
     const frameLayoutMode = frameData?.layoutMode ?? 'free';
@@ -273,7 +276,7 @@ export const NodeFloatingToolbar = memo(
           />
         )}
 
-        {!isCanvasRef && (
+        {!isCanvasRef && !isFrameRef && (
           <FloatingToolbar.SizePicker
             width={currentWidth}
             height={isTextFlowNode ? null : currentHeight}
@@ -395,13 +398,14 @@ export const NodeFloatingToolbar = memo(
           </>
         )}
 
-        {isNodeRef && (
+        {isSourceReference && (
           <>
             <FloatingToolbar.Divider />
             <FloatingToolbar.ActionButton
               title={t('world.unpinSelected')}
               onClick={() => {
-                const target = (data as NodeRefNodeData).target;
+                const target = (data as FrameRefNodeData | NodeRefNodeData)
+                  .target;
                 void setPortalNodePins([
                   {
                     sourceCanvasId: target.canvasId as `canvas-${string}`,

@@ -26,6 +26,7 @@ export const CANVAS_NODE_TYPES = [
   'web',
   'frame',
   'canvasRef',
+  'frameRef',
   'nodeRef',
   'sketch',
   'question',
@@ -36,7 +37,7 @@ export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
  * Node kinds the agent is allowed to construct via `CREATE_NODES`.
  * Excludes:
  * - `sketch` — produced only by the freehand drawing tool.
- * - `canvasRef` / `nodeRef` — created only by World host operations.
+ * - `canvasRef` / `frameRef` / `nodeRef` — created only by World host operations.
  */
 export const AGENT_CREATABLE_NODE_TYPES = [
   'note',
@@ -472,6 +473,23 @@ export interface NodeRefNodeData extends BaseNodeData {
   };
 }
 
+/** A World-owned symbolic Container reference to a source Frame. */
+export interface FrameRefNodeData extends BaseNodeData {
+  type: 'frameRef';
+  origin?: never;
+  label?: never;
+  labelSource?: never;
+  contentMissing?: never;
+  artifactMissing?: never;
+  contentDuplicate?: never;
+  duplicateFiles?: never;
+  frameSlot?: never;
+  target: {
+    canvasId: string;
+    nodeId: string;
+  };
+}
+
 /**
  * One pen-down → pen-up trace inside a {@link SketchNodeData}.
  *
@@ -590,6 +608,7 @@ export type NodeData =
   | AudioNodeData
   | FrameNodeData
   | CanvasRefNodeData
+  | FrameRefNodeData
   | NodeRefNodeData
   | SketchNodeData
   | QuestionNodeData;
@@ -636,6 +655,10 @@ export function isCanvasRefNode(data: NodeData): data is CanvasRefNodeData {
 
 export function isNodeRefNode(data: NodeData): data is NodeRefNodeData {
   return data.type === 'nodeRef';
+}
+
+export function isFrameRefNode(data: NodeData): data is FrameRefNodeData {
+  return data.type === 'frameRef';
 }
 
 export function isSketchNode(data: NodeData): data is SketchNodeData {

@@ -146,6 +146,12 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
     capabilities: [],
     watchFields: [],
   },
+  frameRef: {
+    nodeType: 'frameRef',
+    bodyOwnership: 'derived',
+    capabilities: [],
+    watchFields: [],
+  },
   nodeRef: {
     nodeType: 'nodeRef',
     bodyOwnership: 'derived',

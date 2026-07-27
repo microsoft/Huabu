@@ -1,7 +1,4 @@
-import {
-  fitPortalToChildren,
-  getDescendantIds,
-} from '@sediment/shared/canvas-engine';
+import { fitPortals, getDescendantIds } from '@sediment/shared/canvas-engine';
 
 import {
   isWorldCanvasId,
@@ -55,7 +52,7 @@ function nodeRefTarget(
   const target = node.data?.target as
     | { canvasId?: unknown; nodeId?: unknown }
     | undefined;
-  return node.type === 'nodeRef' &&
+  return (node.type === 'nodeRef' || node.type === 'frameRef') &&
     typeof target?.canvasId === 'string' &&
     typeof target.nodeId === 'string'
     ? { canvasId: target.canvasId, nodeId: target.nodeId }
@@ -64,7 +61,7 @@ function nodeRefTarget(
 
 function hasValidNodeRefData(node: StoredNode): boolean {
   return Object.entries(node.data ?? {}).every(([key, value]) => {
-    if (key === 'type') return value === 'nodeRef';
+    if (key === 'type') return value === node.type;
     if (key === 'target') {
       return (
         nodeRefTarget(node) !== null &&
@@ -99,6 +96,21 @@ function hasOnlyWorldNodeRefPatch(
   );
 }
 
+function ancestorPortal(
+  node: StoredNode,
+  byId: ReadonlyMap<string | undefined, StoredNode>,
+): StoredNode | null {
+  const visited = new Set<string | undefined>([node.id]);
+  let parent = node.parentId ? byId.get(node.parentId) : undefined;
+  while (parent) {
+    if (visited.has(parent.id)) return null;
+    visited.add(parent.id);
+    if (parent.type === 'canvasRef') return parent;
+    parent = parent.parentId ? byId.get(parent.parentId) : undefined;
+  }
+  return null;
+}
+
 /**
  * Validate the legacy full-state PUT boundary against the same Portal
  * ownership contract enforced for command execution.
@@ -111,11 +123,13 @@ export function assertWorldPortalTopologyAllowed(
   const previousNodes = storedNodes(previousNodesInput);
   const nextNodes = storedNodes(nextNodesInput);
   const nextPortals = nextNodes.filter((node) => node.type === 'canvasRef');
-  const nextNodeRefs = nextNodes.filter((node) => node.type === 'nodeRef');
+  const nextNodeRefs = nextNodes.filter(
+    (node) => node.type === 'nodeRef' || node.type === 'frameRef',
+  );
   if (!isWorldCanvasId(canvasId)) {
     if (nextPortals.length > 0 || nextNodeRefs.length > 0) {
       throw new WorldPortalMutationError(
-        'Portals and node references may only exist in the World Canvas',
+        'Portals and references may only exist in the World Canvas',
       );
     }
     return;
@@ -123,21 +137,51 @@ export function assertWorldPortalTopologyAllowed(
 
   const previousById = new Map(previousNodes.map((node) => [node.id, node]));
   const nextById = new Map(nextNodes.map((node) => [node.id, node]));
-  const portalById = new Map(nextPortals.map((portal) => [portal.id, portal]));
-  let fittedNodes = nextNodes as unknown as NestableNode[];
-  for (const portal of nextPortals) {
-    if (portal.id) fittedNodes = fitPortalToChildren(fittedNodes, portal.id);
-  }
+  const nextFrameRefs = nextNodeRefs.filter((node) => node.type === 'frameRef');
+  const fitTargets = [...nextFrameRefs, ...nextPortals]
+    .map((node) => node.id)
+    .filter((id): id is string => typeof id === 'string');
+  const fittedNodes = fitPortals(
+    nextNodes as unknown as NestableNode[],
+    fitTargets,
+  );
   const fittedById = new Map(fittedNodes.map((node) => [node.id, node]));
   const seenNodeRefTargets = new Set<string>();
   for (const nodeRef of nextNodeRefs) {
     const target = nodeRefTarget(nodeRef);
-    const parent = nodeRef.parentId
-      ? portalById.get(nodeRef.parentId)
-      : undefined;
-    if (!target || portalTarget(parent ?? {}) !== target.canvasId) {
+    let parent = nodeRef.parentId ? nextById.get(nodeRef.parentId) : undefined;
+    const visited = new Set([nodeRef.id]);
+    let matchingPortal = false;
+    while (parent?.id) {
+      if (visited.has(parent.id)) {
+        throw new WorldPortalMutationError(
+          'World reference hierarchy is cyclic',
+        );
+      }
+      visited.add(parent.id);
+      const parentReference = nodeRefTarget(parent);
+      if (
+        parent.type === 'frameRef' &&
+        parentReference?.canvasId !== target?.canvasId
+      ) {
+        break;
+      }
+      const parentCanvasId = portalTarget(parent);
+      if (parentCanvasId) {
+        matchingPortal = parentCanvasId === target?.canvasId;
+        break;
+      }
+      parent = parent.parentId ? nextById.get(parent.parentId) : undefined;
+    }
+    if (
+      !target ||
+      !matchingPortal ||
+      (nodeRef.parentId &&
+        nextById.get(nodeRef.parentId)?.type !== 'canvasRef' &&
+        nextById.get(nodeRef.parentId)?.type !== 'frameRef')
+    ) {
       throw new WorldPortalMutationError(
-        `Node reference ${nodeRef.id} must be parented to its matching Portal`,
+        `Reference ${nodeRef.id} must be under its matching Portal`,
       );
     }
     if (!hasValidNodeRefData(nodeRef)) {
@@ -153,9 +197,9 @@ export function assertWorldPortalTopologyAllowed(
     }
     seenNodeRefTargets.add(targetKey);
     const previous = previousById.get(nodeRef.id);
-    if (!previous || previous.type !== 'nodeRef') {
+    if (!previous || previous.type !== nodeRef.type) {
       throw new WorldPortalMutationError(
-        'Node references may only be created by Portal Pin commands',
+        'References may only be created by Portal Pin commands',
       );
     }
     const previousTarget = nodeRefTarget(previous);
@@ -166,6 +210,31 @@ export function assertWorldPortalTopologyAllowed(
     ) {
       throw new WorldPortalMutationError(
         'A node reference cannot be repointed',
+      );
+    }
+  }
+
+  for (const frameRef of nextFrameRefs) {
+    const fitted = frameRef.id ? fittedById.get(frameRef.id) : undefined;
+    const hasChildren = nextNodes.some((node) => node.parentId === frameRef.id);
+    const previous = frameRef.id ? previousById.get(frameRef.id) : undefined;
+    if (
+      !fitted ||
+      (hasChildren
+        ? portalDimension(fitted, 'width') !==
+            portalDimension(frameRef, 'width') ||
+          portalDimension(fitted, 'height') !==
+            portalDimension(frameRef, 'height') ||
+          JSON.stringify(portalPosition(fitted)) !==
+            JSON.stringify(portalPosition(frameRef))
+        : !previous ||
+          portalDimension(previous, 'width') !==
+            portalDimension(frameRef, 'width') ||
+          portalDimension(previous, 'height') !==
+            portalDimension(frameRef, 'height'))
+    ) {
+      throw new WorldPortalMutationError(
+        'Frame reference size is managed by its contents',
       );
     }
   }
@@ -218,21 +287,21 @@ export function assertWorldPortalTopologyAllowed(
     const previousNodeRef = nodeRefTarget(previous);
     if (previousNodeRef) {
       const next = nextById.get(previous.id);
-      const previousParent = previous.parentId
-        ? previousById.get(previous.parentId)
-        : undefined;
-      const parentTarget = previousParent ? portalTarget(previousParent) : null;
+      const previousPortal = ancestorPortal(previous, previousById);
+      const ancestorTarget = previousPortal
+        ? portalTarget(previousPortal)
+        : null;
       const removesBrokenPortalSubtree =
-        parentTarget !== null &&
-        !liveCanvasIds.has(parentTarget) &&
-        previousParent?.id !== undefined &&
-        !nextById.has(previousParent.id);
+        ancestorTarget !== null &&
+        !liveCanvasIds.has(ancestorTarget) &&
+        previousPortal?.id !== undefined &&
+        !nextById.has(previousPortal.id);
       if (!next && !removesBrokenPortalSubtree) {
         throw new WorldPortalMutationError(
           'Node references must be removed with SET_PORTAL_NODE_PINS',
         );
       }
-      if (next && next.type !== 'nodeRef') {
+      if (next && next.type !== 'nodeRef' && next.type !== 'frameRef') {
         throw new WorldPortalMutationError(
           'A node reference cannot change node type',
         );
@@ -293,11 +362,14 @@ export function assertWorldPortalMutationsAllowed(
     if (
       command.type === 'CREATE_NODES' &&
       command.nodes.some(
-        (node) => node.nodeType === 'nodeRef' || node.nodeType === 'canvasRef',
+        (node) =>
+          node.nodeType === 'nodeRef' ||
+          node.nodeType === 'frameRef' ||
+          node.nodeType === 'canvasRef',
       )
     ) {
       throw new WorldPortalMutationError(
-        'Portals and node references have dedicated creation commands',
+        'Portals and references have dedicated creation commands',
       );
     }
   }
@@ -324,7 +396,7 @@ export function assertWorldPortalMutationsAllowed(
       const deletesNodeRefDirectly = command.nodeIds.some((nodeId) => {
         const node = byId.get(nodeId);
         return (
-          node?.type === 'nodeRef' &&
+          (node?.type === 'nodeRef' || node?.type === 'frameRef') &&
           (!node.parentId || !deletedIds.has(node.parentId))
         );
       });
@@ -352,7 +424,8 @@ export function assertWorldPortalMutationsAllowed(
       const mutatesNodeRefData = command.patches.some((entry) => {
         const node = byId.get(entry.nodeId);
         return (
-          node?.type === 'nodeRef' && !hasOnlyWorldNodeRefPatch(entry.patch)
+          (node?.type === 'nodeRef' || node?.type === 'frameRef') &&
+          !hasOnlyWorldNodeRefPatch(entry.patch)
         );
       });
       if (mutatesNodeRefData) {
@@ -375,7 +448,11 @@ export function assertWorldPortalMutationsAllowed(
 
     if (command.type === 'DISSOLVE_FRAME') {
       const target = byId.get(command.frameId);
-      if (target?.type === 'canvasRef' || target?.type === 'nodeRef') {
+      if (
+        target?.type === 'canvasRef' ||
+        target?.type === 'nodeRef' ||
+        target?.type === 'frameRef'
+      ) {
         throw new WorldPortalMutationError(
           'Portals and node references cannot be dissolved',
         );
@@ -384,7 +461,11 @@ export function assertWorldPortalMutationsAllowed(
 
     if (command.type === 'CHANGE_NODE_TYPE') {
       const target = byId.get(command.nodeId);
-      if (target?.type === 'canvasRef' || target?.type === 'nodeRef') {
+      if (
+        target?.type === 'canvasRef' ||
+        target?.type === 'nodeRef' ||
+        target?.type === 'frameRef'
+      ) {
         throw new WorldPortalMutationError(
           'Portals and node references cannot change node type',
         );
@@ -392,12 +473,15 @@ export function assertWorldPortalMutationsAllowed(
     }
 
     if (command.type === 'SET_NODE_GEOMETRY') {
-      const resizesPortal = command.items.some(
-        (item) => item.size && byId.get(item.nodeId)?.type === 'canvasRef',
+      const resizesManagedContainer = command.items.some(
+        (item) =>
+          item.size &&
+          (byId.get(item.nodeId)?.type === 'canvasRef' ||
+            byId.get(item.nodeId)?.type === 'frameRef'),
       );
-      if (resizesPortal) {
+      if (resizesManagedContainer) {
         throw new WorldPortalMutationError(
-          'Portal size is managed by its contents',
+          'Portal and frame reference sizes are managed by their contents',
         );
       }
     }

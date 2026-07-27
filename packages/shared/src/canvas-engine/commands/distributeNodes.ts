@@ -25,7 +25,8 @@ const distributeNodes: CommandDefinition<Cmd> = {
     const byId = new Map(result.map((node) => [node.id, node]));
     for (const n of result) {
       if (!targetIds.has(n.id) || !n.parentId) continue;
-      if (byId.get(n.parentId)?.type === 'canvasRef') {
+      const parentType = byId.get(n.parentId)?.type;
+      if (parentType === 'canvasRef' || parentType === 'frameRef') {
         affectedPortalIds.add(n.parentId);
       } else {
         affectedFrameIds.add(n.parentId);

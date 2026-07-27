@@ -15,13 +15,14 @@ export function moveNodeIntoContainer(
   nodes: NestableNode[],
   nodeId: string,
   containerId: string,
+  options: { ignoreContainerLock?: boolean } = {},
 ): NestableNode[] {
   const byId = indexById(nodes);
   const node = byId.get(nodeId);
   const container = byId.get(containerId);
 
   if (!canParentNode(container, node)) return nodes;
-  if (container?.data?.locked) return nodes;
+  if (container?.data?.locked && !options.ignoreContainerLock) return nodes;
   if (node?.parentId === containerId) return nodes;
 
   const descendants = new Set(getDescendantIds(nodes, nodeId));
@@ -44,6 +45,48 @@ export function moveNodeIntoContainer(
       : candidate,
   );
   return normalizeTreeOrder(nextNodes);
+}
+
+export function syncInheritedContainerLocks(
+  nodes: NestableNode[],
+  rootId: string,
+): NestableNode[] {
+  const byId = indexById(nodes);
+  const affected = new Set([rootId, ...getDescendantIds(nodes, rootId)]);
+  return nodes.map((node) => {
+    if (!affected.has(node.id)) return node;
+    const visited = new Set<string>([node.id]);
+    let parentId = node.parentId;
+    let inherited = false;
+    while (parentId) {
+      if (visited.has(parentId)) break;
+      visited.add(parentId);
+      const parent = byId.get(parentId);
+      if (!parent) break;
+      if (parent.data?.locked === true) {
+        inherited = true;
+        break;
+      }
+      parentId = parent.parentId;
+    }
+    const hasMarker = node.data?.__dragDisabledByFrameLock === true;
+    if (inherited) {
+      if (hasMarker && node.draggable === false) return node;
+      return {
+        ...node,
+        draggable: false,
+        data: { ...node.data, __dragDisabledByFrameLock: true },
+      };
+    }
+    if (!hasMarker) return node;
+    const { __dragDisabledByFrameLock: _marker, ...data } = node.data ?? {};
+    void _marker;
+    return {
+      ...node,
+      draggable: node.data?.locked === true ? false : true,
+      data,
+    };
+  });
 }
 
 /**

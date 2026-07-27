@@ -36,6 +36,7 @@ import { resolveArtifactUrl } from '@/api/artifact';
 import { Loading } from '@/components/Common/Loading';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import { CanvasRefNode } from '@/components/Nodes/canvasRef/CanvasRefNode';
+import { FrameRefNode } from '@/components/Nodes/frameRef/FrameRefNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
 import { NodeRefNode } from '@/components/Nodes/nodeRef/NodeRefNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
@@ -135,6 +136,7 @@ const nodeTypes = {
   office: OfficeNode,
   frame: FrameNode,
   canvasRef: CanvasRefNode,
+  frameRef: FrameRefNode,
   nodeRef: NodeRefNode,
   sketch: SketchNode,
   question: QuestionNode,

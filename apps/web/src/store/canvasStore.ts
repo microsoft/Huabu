@@ -123,7 +123,7 @@ let worldReferenceRefreshGeneration = 0;
 function nodeRefTopologySignature(nodes: readonly Node[]): string {
   return JSON.stringify(
     nodes
-      .filter((node) => node.type === 'nodeRef')
+      .filter((node) => node.type === 'nodeRef' || node.type === 'frameRef')
       .map((node) => {
         const target = (
           node.data as
@@ -132,12 +132,24 @@ function nodeRefTopologySignature(nodes: readonly Node[]): string {
         )?.target;
         return [
           node.id,
+          node.type,
           node.parentId ?? null,
           typeof target?.canvasId === 'string' ? target.canvasId : null,
           typeof target?.nodeId === 'string' ? target.nodeId : null,
         ];
       })
       .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  );
+}
+
+function isWorldReferenceTopologyDelta(delta: Delta): boolean {
+  if (delta.type === 'INSERT_NODE' || delta.type === 'DELETE_NODE') {
+    return delta.node.type === 'nodeRef' || delta.node.type === 'frameRef';
+  }
+  if (delta.type !== 'REPLACE_NODE') return false;
+  return (
+    nodeRefTopologySignature([delta.prev]) !==
+    nodeRefTopologySignature([delta.next])
   );
 }
 
@@ -1507,9 +1519,7 @@ const useCanvasStore = create<RFState>()(
       // resurrected nodeRef would be rejected by the server ownership guard.
       // Its product-level inverse is another Pin/Unpin operation.
       const isPortalPinMutation = safeDeltas.some(
-        (delta) =>
-          (delta.type === 'INSERT_NODE' || delta.type === 'DELETE_NODE') &&
-          delta.node.type === 'nodeRef',
+        isWorldReferenceTopologyDelta,
       );
       if (isPortalPinMutation) {
         canvasHistoryManager.clear();
@@ -1709,11 +1719,7 @@ const useCanvasStore = create<RFState>()(
             >[2],
           );
         } else if (
-          (response.deltas as Delta[]).some(
-            (delta) =>
-              (delta.type === 'INSERT_NODE' || delta.type === 'DELETE_NODE') &&
-              delta.node.type === 'nodeRef',
-          )
+          (response.deltas as Delta[]).some(isWorldReferenceTopologyDelta)
         ) {
           canvasHistoryManager.clearCanvas(response.canvasId);
           nodeRefTopologySignatures.delete(response.canvasId);
@@ -3054,12 +3060,14 @@ const useCanvasStore = create<RFState>()(
     },
 
     deleteNodes: (nodeIds) => {
-      const nodeRefs = get().nodes.filter(
-        (node) => nodeIds.includes(node.id) && node.type === 'nodeRef',
+      const sourceRefs = get().nodes.filter(
+        (node) =>
+          nodeIds.includes(node.id) &&
+          (node.type === 'nodeRef' || node.type === 'frameRef'),
       );
-      if (nodeRefs.length > 0) {
+      if (sourceRefs.length > 0) {
         void get().setPortalNodePins(
-          nodeRefs.map((node) => {
+          sourceRefs.map((node) => {
             const target = (
               node.data as {
                 target: { canvasId: string; nodeId: string };
@@ -3077,7 +3085,7 @@ const useCanvasStore = create<RFState>()(
       const nodesById = new Map(get().nodes.map((node) => [node.id, node]));
       const deletableNodeIds = nodeIds.filter((nodeId) => {
         const node = nodesById.get(nodeId);
-        if (node?.type === 'nodeRef') return false;
+        if (node?.type === 'nodeRef' || node?.type === 'frameRef') return false;
         if (node?.type !== 'canvasRef') return true;
         const targetCanvasId = node.data.targetCanvasId;
         return (
@@ -3384,7 +3392,10 @@ const useCanvasStore = create<RFState>()(
       const dstCanvasId = get().canvasId;
       if (!dstCanvasId || clipboardNodes.length === 0) return;
       clipboardNodes = clipboardNodes.filter(
-        (node) => node.type !== 'canvasRef' && node.type !== 'nodeRef',
+        (node) =>
+          node.type !== 'canvasRef' &&
+          node.type !== 'frameRef' &&
+          node.type !== 'nodeRef',
       );
       if (clipboardNodes.length === 0) return;
 

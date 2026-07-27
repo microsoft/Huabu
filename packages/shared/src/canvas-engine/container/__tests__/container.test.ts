@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { alignNodes } from '../../utils/alignment.js';
 import {
   applyContainerFit,
   canParentNode,
@@ -44,6 +45,15 @@ describe('Container policy and reparenting', () => {
     expect(canParentNode(portal, child)).toBe(false);
     expect(canParentNode(portal, matchingRef)).toBe(true);
     expect(canParentNode(portal, mismatchedRef)).toBe(false);
+    const frameRef = node('frame-ref', {
+      type: 'frameRef',
+      data: {
+        target: { canvasId: 'canvas-a', nodeId: 'node-frame' },
+      },
+    });
+    expect(canParentNode(portal, frameRef)).toBe(true);
+    expect(canParentNode(frameRef, matchingRef)).toBe(true);
+    expect(canParentNode(frameRef, mismatchedRef)).toBe(false);
     expect(canParentNode(node('frame', { type: 'frame' }), matchingRef)).toBe(
       false,
     );
@@ -74,6 +84,28 @@ describe('Container policy and reparenting', () => {
     expect(detachedChild).toMatchObject({
       position: { x: 120, y: 80 },
     });
+  });
+
+  it('moves a selected frameRef without independently moving its descendants', () => {
+    const nodes = [
+      node('frame-ref', {
+        type: 'frameRef',
+        position: { x: 100, y: 50 },
+        style: { width: 200, height: 100 },
+      }),
+      node('child', {
+        type: 'nodeRef',
+        parentId: 'frame-ref',
+        position: { x: 20, y: 30 },
+      }),
+      node('peer', { position: { x: 0, y: 0 } }),
+    ];
+
+    const aligned = alignNodes(nodes, 'left', ['frame-ref', 'child', 'peer']);
+
+    expect(
+      aligned?.find((candidate) => candidate.id === 'child')?.position,
+    ).toEqual({ x: 20, y: 30 });
   });
 });
 

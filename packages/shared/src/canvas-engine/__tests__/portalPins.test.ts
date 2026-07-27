@@ -76,6 +76,77 @@ function pinCommand(
 }
 
 describe('SET_PORTAL_NODE_PINS', () => {
+  it('creates and recursively removes a fitted frameRef snapshot', () => {
+    const frameSource = 'node-source-frame' as CanvasNodeId;
+    const frameRefId = 'node-frame-ref' as CanvasNodeId;
+    const childRefId = 'node-child-ref' as CanvasNodeId;
+    const internal: PreparedPortalNodePins = {
+      pins: [
+        {
+          sourceCanvasId,
+          sourceNodeId: frameSource,
+          portalId,
+          nodeRefId: frameRefId,
+          referenceType: 'frameRef',
+          parentRefId: portalId,
+          size: { width: 300, height: 200 },
+          pinned: true,
+        },
+        {
+          sourceCanvasId,
+          sourceNodeId: sourceA,
+          portalId,
+          nodeRefId: childRefId,
+          referenceType: 'nodeRef',
+          parentRefId: frameRefId,
+          position: { x: 80, y: 60 },
+          pinned: true,
+        },
+      ],
+      sourcePositions: [
+        {
+          sourceCanvasId,
+          sourceNodeId: frameSource,
+          position: { x: 20, y: 30 },
+        },
+      ],
+    };
+    const pinned = run(pinCommand([frameSource], internal)).writeResult
+      .nodes as NestableNode[];
+    const frameRef = pinned.find((node) => node.id === frameRefId);
+    const childRef = pinned.find((node) => node.id === childRefId);
+    expect(frameRef).toMatchObject({
+      type: 'frameRef',
+      parentId: portalId,
+      data: {
+        type: 'frameRef',
+        target: { canvasId: sourceCanvasId, nodeId: frameSource },
+      },
+    });
+    expect(childRef?.parentId).toBe(frameRefId);
+    expect(getAbsolutePosition(pinned, childRefId)).toBeTruthy();
+
+    const removed = run(
+      pinCommand(
+        [frameSource],
+        {
+          pins: [{ ...internal.pins[0], pinned: false }],
+          sourcePositions: [],
+        },
+        false,
+      ),
+      pinned,
+    );
+    expect(
+      removed.writeResult.nodes.some(
+        (node) => node.id === frameRefId || node.id === childRefId,
+      ),
+    ).toBe(false);
+    expect(removed.pendingEffects.deletedNodeIds).toEqual(
+      expect.arrayContaining([frameRefId, childRefId]),
+    );
+  });
+
   it('uses strict canonical IDs on the public agent schema', () => {
     const valid = {
       type: 'SET_PORTAL_NODE_PINS',
@@ -193,6 +264,224 @@ describe('SET_PORTAL_NODE_PINS', () => {
     );
 
     expect(nodeRef).toMatchObject({
+      draggable: false,
+      data: { __dragDisabledByFrameLock: true },
+    });
+  });
+
+  it('propagates an ancestor lock through a fresh frameRef subtree', () => {
+    const frameSource = 'node-source-frame' as CanvasNodeId;
+    const frameRefId = 'node-frame-ref' as CanvasNodeId;
+    const childRefId = 'node-child-ref' as CanvasNodeId;
+    const lockedPortal = {
+      ...portal(),
+      data: {
+        type: 'canvasRef' as const,
+        targetCanvasId: sourceCanvasId,
+        locked: true,
+      },
+    };
+    const output = run(
+      pinCommand([frameSource], {
+        pins: [
+          {
+            sourceCanvasId,
+            sourceNodeId: frameSource,
+            portalId,
+            nodeRefId: frameRefId,
+            referenceType: 'frameRef',
+            parentRefId: portalId,
+            pinned: true,
+          },
+          {
+            sourceCanvasId,
+            sourceNodeId: sourceA,
+            portalId,
+            nodeRefId: childRefId,
+            referenceType: 'nodeRef',
+            parentRefId: frameRefId,
+            position: { x: 20, y: 30 },
+            pinned: true,
+          },
+        ],
+        sourcePositions: [
+          {
+            sourceCanvasId,
+            sourceNodeId: frameSource,
+            position: { x: 0, y: 0 },
+          },
+        ],
+      }),
+      [lockedPortal],
+    );
+
+    for (const id of [frameRefId, childRefId]) {
+      expect(
+        output.writeResult.nodes.find((node) => node.id === id),
+      ).toMatchObject({
+        draggable: false,
+        data: { __dragDisabledByFrameLock: true },
+      });
+    }
+  });
+
+  it('adopts an existing reference into a locked frameRef', () => {
+    const outerSource = 'node-source-outer' as CanvasNodeId;
+    const innerSource = 'node-source-inner' as CanvasNodeId;
+    const outerRefId = 'node-outer-ref' as CanvasNodeId;
+    const innerRefId = 'node-inner-ref' as CanvasNodeId;
+    const childRefId = 'node-child-ref' as CanvasNodeId;
+    const nodes: CanvasNode[] = [
+      portal(),
+      {
+        id: innerRefId,
+        type: 'frameRef',
+        parentId: portalId,
+        position: { x: 40, y: 60 },
+        style: { width: 240, height: 180 },
+        data: {
+          type: 'frameRef',
+          target: { canvasId: sourceCanvasId, nodeId: innerSource },
+          locked: true,
+        },
+      },
+      {
+        id: childRefId,
+        type: 'nodeRef',
+        parentId: portalId,
+        position: { x: 320, y: 220 },
+        style: { width: 180, height: 96 },
+        data: {
+          type: 'nodeRef',
+          target: { canvasId: sourceCanvasId, nodeId: sourceA },
+        },
+      },
+    ];
+    const childAbsoluteBefore = getAbsolutePosition(
+      nodes as NestableNode[],
+      childRefId,
+    );
+    const output = run(
+      pinCommand([outerSource], {
+        pins: [
+          {
+            sourceCanvasId,
+            sourceNodeId: outerSource,
+            portalId,
+            nodeRefId: outerRefId,
+            referenceType: 'frameRef',
+            parentRefId: portalId,
+            pinned: true,
+          },
+          {
+            sourceCanvasId,
+            sourceNodeId: innerSource,
+            portalId,
+            nodeRefId: innerRefId,
+            referenceType: 'frameRef',
+            parentRefId: outerRefId,
+            position: { x: 40, y: 60 },
+            pinned: true,
+          },
+          {
+            sourceCanvasId,
+            sourceNodeId: sourceA,
+            portalId,
+            nodeRefId: childRefId,
+            referenceType: 'nodeRef',
+            parentRefId: innerRefId,
+            position: { x: 20, y: 30 },
+            pinned: true,
+          },
+        ],
+        sourcePositions: [
+          {
+            sourceCanvasId,
+            sourceNodeId: outerSource,
+            position: { x: 0, y: 0 },
+          },
+        ],
+      }),
+      nodes,
+    );
+    const result = output.writeResult.nodes as NestableNode[];
+    const child = result.find((node) => node.id === childRefId);
+
+    expect(output.commandResults[0]).toMatchObject({ applied: true });
+    expect(child).toMatchObject({
+      parentId: innerRefId,
+      draggable: false,
+      data: { __dragDisabledByFrameLock: true },
+    });
+    expect(getAbsolutePosition(result, childRefId)).toEqual(
+      childAbsoluteBefore,
+    );
+  });
+
+  it('preserves an inner frameRef lock when its outer frameRef is unlocked', () => {
+    const outerRefId = 'node-outer-ref' as CanvasNodeId;
+    const innerRefId = 'node-inner-ref' as CanvasNodeId;
+    const childRefId = 'node-child-ref' as CanvasNodeId;
+    const nodes: CanvasNode[] = [
+      portal(),
+      {
+        id: outerRefId,
+        type: 'frameRef',
+        parentId: portalId,
+        position: { x: 20, y: 30 },
+        data: {
+          type: 'frameRef',
+          target: { canvasId: sourceCanvasId, nodeId: 'node-source-outer' },
+        },
+      },
+      {
+        id: innerRefId,
+        type: 'frameRef',
+        parentId: outerRefId,
+        position: { x: 20, y: 30 },
+        data: {
+          type: 'frameRef',
+          target: { canvasId: sourceCanvasId, nodeId: 'node-source-inner' },
+        },
+      },
+      {
+        id: childRefId,
+        type: 'nodeRef',
+        parentId: innerRefId,
+        position: { x: 20, y: 30 },
+        data: {
+          type: 'nodeRef',
+          target: { canvasId: sourceCanvasId, nodeId: sourceA },
+        },
+      },
+    ];
+    const lockInner = run(
+      {
+        type: 'SET_NODE_LOCKED',
+        items: [{ nodeId: innerRefId, locked: true }],
+      },
+      nodes,
+    ).writeResult.nodes;
+    const lockOuter = run(
+      {
+        type: 'SET_NODE_LOCKED',
+        items: [{ nodeId: outerRefId, locked: true }],
+      },
+      lockInner,
+    ).writeResult.nodes;
+    const unlockOuter = run(
+      {
+        type: 'SET_NODE_LOCKED',
+        items: [{ nodeId: outerRefId, locked: false }],
+      },
+      lockOuter,
+    ).writeResult.nodes;
+
+    expect(unlockOuter.find((node) => node.id === innerRefId)).toMatchObject({
+      draggable: false,
+      data: { locked: true },
+    });
+    expect(unlockOuter.find((node) => node.id === childRefId)).toMatchObject({
       draggable: false,
       data: { __dragDisabledByFrameLock: true },
     });

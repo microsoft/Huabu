@@ -1,5 +1,9 @@
 import { noop, type CommandDefinition } from './types.js';
-import { getDescendantIds, type NestableNode } from '../frame/index.js';
+import {
+  getDescendantIds,
+  syncInheritedContainerLocks,
+  type NestableNode,
+} from '../container/index.js';
 
 import type { CanvasCommand } from '../../index.js';
 
@@ -9,7 +13,7 @@ import type { CanvasCommand } from '../../index.js';
  * When locked the node itself becomes non-draggable on the canvas.
  * It remains selectable so pointer events (e.g. double-click to expand)
  * still work; resize and content editing are blocked at the component level.
- * For frame nodes, all descendant nodes additionally become non-draggable.
+ * For Container nodes, all descendant nodes additionally become non-draggable.
  * Unlocking reverses all of the above.
  */
 function toggleNodeLock(nodes: NestableNode[], nodeId: string): NestableNode[] {
@@ -22,7 +26,7 @@ function toggleNodeLock(nodes: NestableNode[], nodeId: string): NestableNode[] {
   const flagKey = '__dragDisabledByFrameLock';
   const descendantIds = new Set(getDescendantIds(nodes, nodeId));
 
-  return nodes.map((n) => {
+  const updated = nodes.map((n) => {
     if (n.id === nodeId) {
       if (nextLocked) {
         const { selectable: _s, ...rest } = n;
@@ -72,10 +76,11 @@ function toggleNodeLock(nodes: NestableNode[], nodeId: string): NestableNode[] {
 
     return {
       ...n,
-      draggable: true,
+      draggable: n.data?.locked === true ? false : true,
       data: restData,
     };
   });
+  return syncInheritedContainerLocks(updated, nodeId);
 }
 
 type Cmd = Extract<CanvasCommand, { type: 'SET_NODE_LOCKED' }>;

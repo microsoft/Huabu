@@ -48,6 +48,10 @@ export function fitPortalToChildren(
   portalId: string,
 ): NestableNode[] {
   const portal = nodes.find((node) => node.id === portalId);
+  if (portal?.type === 'frameRef') {
+    const fit = computeContainerFit(nodes, portalId);
+    return fit ? applyContainerFit(nodes, fit) : nodes;
+  }
   if (portal?.type !== 'canvasRef') return nodes;
 
   const fit = computeContainerFit(nodes, portalId, {
@@ -70,7 +74,38 @@ export function fitPortals(
   portalIds: Iterable<string>,
 ): NestableNode[] {
   let result = nodes;
-  for (const portalId of portalIds) {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const targets = new Set(portalIds);
+  for (const id of [...targets]) {
+    const visited = new Set([id]);
+    let parentId = byId.get(id)?.parentId;
+    while (parentId) {
+      if (visited.has(parentId)) break;
+      visited.add(parentId);
+      const parent = byId.get(parentId);
+      if (
+        !parent ||
+        (parent.type !== 'frameRef' && parent.type !== 'canvasRef')
+      ) {
+        break;
+      }
+      targets.add(parent.id);
+      parentId = parent.parentId;
+    }
+  }
+  const depth = (id: string): number => {
+    let value = 0;
+    const visited = new Set([id]);
+    let parentId = byId.get(id)?.parentId;
+    while (parentId) {
+      if (visited.has(parentId)) break;
+      visited.add(parentId);
+      value += 1;
+      parentId = byId.get(parentId)?.parentId;
+    }
+    return value;
+  };
+  for (const portalId of [...targets].sort((a, b) => depth(b) - depth(a))) {
     result = fitPortalToChildren(result, portalId);
   }
   return result;

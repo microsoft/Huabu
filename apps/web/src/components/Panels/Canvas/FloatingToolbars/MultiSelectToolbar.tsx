@@ -67,7 +67,7 @@ export const MultiSelectToolbar = () => {
   const selectedNodeRefUpdates = useMemo(() => {
     const nodeIdsByCanvas = new Map<string, `node-${string}`[]>();
     for (const node of selectedNodes) {
-      if (node.type !== 'nodeRef') continue;
+      if (node.type !== 'nodeRef' && node.type !== 'frameRef') continue;
       const target = (
         node.data as {
           target: { canvasId: string; nodeId: string };
@@ -87,10 +87,16 @@ export const MultiSelectToolbar = () => {
     canvasId !== worldCanvasId &&
     selectedNodes.length > 0 &&
     selectedNodes.every(
-      (node) => node.type !== 'canvasRef' && node.type !== 'nodeRef',
+      (node) =>
+        node.type !== 'canvasRef' &&
+        node.type !== 'frameRef' &&
+        node.type !== 'nodeRef',
     );
   const hasPortalSelection = selectedNodes.some(
     (node) => node.type === 'canvasRef',
+  );
+  const hasManagedSizeSelection = selectedNodes.some(
+    (node) => node.type === 'canvasRef' || node.type === 'frameRef',
   );
 
   // Edges whose endpoints are both in the node selection participate in
@@ -247,7 +253,7 @@ export const MultiSelectToolbar = () => {
       <FloatingToolbar.Divider />
 
       {/* Size editor: set width / height of every selected node. */}
-      {!hasPortalSelection && (
+      {!hasManagedSizeSelection && (
         <FloatingToolbar.SizePicker
           width={commonSize.width}
           height={textFlowSelection ? null : commonSize.height}

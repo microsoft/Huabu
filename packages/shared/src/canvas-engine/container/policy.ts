@@ -6,7 +6,11 @@ import type { Node } from '@xyflow/react';
  * Frames and World Portals are the persistent Container types.
  */
 export function isContainerNode(node: Pick<Node, 'type'> | undefined): boolean {
-  return node?.type === 'frame' || node?.type === 'canvasRef';
+  return (
+    node?.type === 'frame' ||
+    node?.type === 'canvasRef' ||
+    node?.type === 'frameRef'
+  );
 }
 
 /** Return whether `child` may be parented by `parent`. */
@@ -17,11 +21,18 @@ export function canParentNode(
   if (!parent || !child || parent.id === child.id || !isContainerNode(parent)) {
     return false;
   }
-  if (parent.type !== 'canvasRef') return child.type !== 'nodeRef';
-  if (child.type !== 'nodeRef') return false;
+  if (parent.type === 'frame') {
+    return child.type !== 'nodeRef' && child.type !== 'frameRef';
+  }
+  if (parent.type !== 'canvasRef' && parent.type !== 'frameRef') return false;
+  if (child.type !== 'nodeRef' && child.type !== 'frameRef') return false;
 
-  const portalTarget = (parent.data as { targetCanvasId?: unknown } | undefined)
-    ?.targetCanvasId;
+  const portalTarget =
+    parent.type === 'canvasRef'
+      ? (parent.data as { targetCanvasId?: unknown } | undefined)
+          ?.targetCanvasId
+      : (parent.data as { target?: { canvasId?: unknown } } | undefined)?.target
+          ?.canvasId;
   const childTarget = (
     child.data as
       | { target?: { canvasId?: unknown; nodeId?: unknown } }

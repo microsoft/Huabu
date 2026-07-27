@@ -183,6 +183,50 @@ describe('World Portal Pin history boundary', () => {
     expect(useCanvasStore.getState().canRedo).toBe(false);
   });
 
+  it('clears stale World history when a nodeRef becomes a frameRef', async () => {
+    const previous = {
+      id: 'node-ref',
+      type: 'nodeRef' as const,
+      position: { x: 0, y: 0 },
+      data: {
+        type: 'nodeRef' as const,
+        target: { canvasId: sourceCanvasId, nodeId: sourceNodeId },
+      },
+    };
+    const next = {
+      ...previous,
+      type: 'frameRef' as const,
+      data: { ...previous.data, type: 'frameRef' as const },
+    };
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [previous],
+      version: 0,
+      canUndo: true,
+    });
+    canvasHistoryManager.takeSnapshot([previous], []);
+    postCanvasExecute.mockResolvedValueOnce({
+      canvasId: worldCanvasId,
+      fromVersion: 0,
+      toVersion: 1,
+      deltas: [{ type: 'REPLACE_NODE', prev: previous, next }],
+      results: [],
+      commands: [],
+      pendingEffects: pendingEffects(),
+    });
+
+    await useCanvasStore.getState().setPortalNodePins([
+      {
+        sourceCanvasId,
+        sourceNodeIds: [sourceNodeId],
+        pinned: true,
+      },
+    ]);
+
+    expect(useCanvasStore.getState().nodes[0]?.type).toBe('frameRef');
+    expect(canvasHistoryManager.canUndo).toBe(false);
+    expect(useCanvasStore.getState().canUndo).toBe(false);
+  });
+
   it('waits for an active structure save before pinning', async () => {
     useCanvasStore.getState()._setStateNoAutosave({ isSaving: true });
 

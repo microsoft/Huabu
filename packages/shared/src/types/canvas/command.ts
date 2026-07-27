@@ -151,6 +151,10 @@ export interface PreparedPortalNodePin {
   sourceNodeId: CanvasNodeId;
   portalId: CanvasNodeId;
   nodeRefId: CanvasNodeId;
+  referenceType?: 'nodeRef' | 'frameRef';
+  parentRefId?: CanvasNodeId;
+  position?: Point;
+  size?: NodeSize;
   pinned: boolean;
 }
 

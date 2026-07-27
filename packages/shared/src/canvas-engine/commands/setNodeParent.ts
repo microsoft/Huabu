@@ -27,6 +27,7 @@ const setNodeParent: CommandDefinition<Cmd> = {
     // whether to actually run.
     const mutatedNodes: Node[] = [];
     const affectedFrameIds = new Set<string>();
+    const affectedPortalIds = new Set<string>();
     const parentId = cmd.parentId as string | null;
 
     // Whole-command validation gate. A missing target node or a missing
@@ -63,7 +64,10 @@ const setNodeParent: CommandDefinition<Cmd> = {
         const parent = child?.parentId
           ? result.find((node) => node.id === child.parentId)
           : undefined;
-        if (child?.type === 'nodeRef' && parent?.type === 'canvasRef') {
+        if (
+          (child?.type === 'nodeRef' || child?.type === 'frameRef') &&
+          (parent?.type === 'canvasRef' || parent?.type === 'frameRef')
+        ) {
           return noop(state, 'invalid-parent');
         }
         if (parent?.data?.locked) return noop(state, 'invalid-parent');
@@ -90,12 +94,30 @@ const setNodeParent: CommandDefinition<Cmd> = {
           affectedFrameIds.add(parentId);
         }
         if (
+          result.find((candidate) => candidate.id === parentId)?.type ===
+            'frameRef' ||
+          result.find((candidate) => candidate.id === parentId)?.type ===
+            'canvasRef'
+        ) {
+          affectedPortalIds.add(parentId);
+        }
+        if (
           prevParentId &&
           prevParentId !== parentId &&
           result.find((candidate) => candidate.id === prevParentId)?.type ===
             'frame'
         ) {
           affectedFrameIds.add(prevParentId);
+        }
+        if (
+          prevParentId &&
+          prevParentId !== parentId &&
+          ['frameRef', 'canvasRef'].includes(
+            result.find((candidate) => candidate.id === prevParentId)?.type ??
+              '',
+          )
+        ) {
+          affectedPortalIds.add(prevParentId);
         }
         // Queue affected frames for label re-resolution.
         const targetFrame = result.find((n) => n.id === parentId);
@@ -140,6 +162,9 @@ const setNodeParent: CommandDefinition<Cmd> = {
       mutatedNodes,
       ...(affectedFrameIds.size > 0
         ? { affectedFrameIds: Array.from(affectedFrameIds) }
+        : {}),
+      ...(affectedPortalIds.size > 0
+        ? { affectedPortalIds: Array.from(affectedPortalIds) }
         : {}),
     };
   },

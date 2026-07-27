@@ -528,6 +528,7 @@
       "web": "网页",
       "frame": "框架",
       "canvasRef": "Portal",
+      "frameRef": "已固定框架",
       "nodeRef": "已固定节点",
       "sketch": "手绘",
       "question": "问题"

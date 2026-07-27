@@ -187,7 +187,10 @@ export default function resolveAddNodes(
     return { commands: [], trace: [] };
   }
   const creatableInputs = intent.inputs.filter(
-    (input) => input.nodeType !== 'canvasRef' && input.nodeType !== 'nodeRef',
+    (input) =>
+      input.nodeType !== 'canvasRef' &&
+      input.nodeType !== 'frameRef' &&
+      input.nodeType !== 'nodeRef',
   );
   if (creatableInputs.length === 0) {
     return { commands: [], trace: [] };

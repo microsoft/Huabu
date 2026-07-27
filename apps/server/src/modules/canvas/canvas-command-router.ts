@@ -9,6 +9,7 @@ import {
 } from '@sediment/shared';
 import {
   createAbsolutePositionGetter,
+  getNodeSize,
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
 
@@ -17,6 +18,7 @@ import {
   type ExecuteOnServerInput,
   type ExecuteOnServerOutput,
 } from './canvas-executor.js';
+import { createKeyedMutex } from '../../utils/keyed-mutex.js';
 import {
   listCanvasDirEntries,
   requireWorldCanvasId,
@@ -24,6 +26,7 @@ import {
 import { getCanvasStore } from '../storage/index.js';
 
 type PortalCommand = Extract<CanvasCommand, { type: 'SET_PORTAL_NODE_PINS' }>;
+const withPortalRoutingMutex = createKeyedMutex<string>();
 
 interface StoredCanvas {
   state: {
@@ -64,7 +67,7 @@ function portalTarget(node: NestableNode | undefined): string | null {
     : null;
 }
 
-function nodeRefTarget(
+function referenceTarget(
   node: NestableNode,
 ): { canvasId: string; nodeId: string } | null {
   const target = (
@@ -72,11 +75,67 @@ function nodeRefTarget(
       | { target?: { canvasId?: unknown; nodeId?: unknown } }
       | undefined
   )?.target;
-  return node.type === 'nodeRef' &&
+  return (node.type === 'nodeRef' || node.type === 'frameRef') &&
     typeof target?.canvasId === 'string' &&
     typeof target.nodeId === 'string'
     ? { canvasId: target.canvasId, nodeId: target.nodeId }
     : null;
+}
+
+function sourceNodeById(
+  source: SourceState,
+  nodeId: string,
+): NestableNode | null {
+  return source.nodes.find((node) => node.id === nodeId) ?? null;
+}
+
+function sourceFrameAncestors(
+  source: SourceState,
+  node: NestableNode,
+): NestableNode[] {
+  const byId = new Map(
+    source.nodes.map((candidate) => [candidate.id, candidate]),
+  );
+  const ancestors: NestableNode[] = [];
+  const seen = new Set<string>([node.id]);
+  let parentId = node.parentId;
+  while (parentId) {
+    if (seen.has(parentId)) {
+      throw new CanvasCommandRoutingError(
+        'Source Canvas contains a parent cycle',
+      );
+    }
+    seen.add(parentId);
+    const parent = byId.get(parentId);
+    if (!parent) break;
+    if (parent.type === 'frame') ancestors.push(parent);
+    parentId = parent.parentId;
+  }
+  return ancestors;
+}
+
+function sourceSubtree(
+  source: SourceState,
+  root: NestableNode,
+): NestableNode[] {
+  const result: NestableNode[] = [];
+  const visited = new Set<string>();
+  const visit = (node: NestableNode): void => {
+    if (visited.has(node.id)) {
+      throw new CanvasCommandRoutingError(
+        'Source Canvas contains a parent cycle',
+      );
+    }
+    visited.add(node.id);
+    result.push(node);
+    for (const child of source.nodes.filter(
+      (candidate) => candidate.parentId === node.id,
+    )) {
+      visit(child);
+    }
+  };
+  visit(root);
+  return result;
 }
 
 function sourceStateOf(canvas: StoredCanvas | null): SourceState | null {
@@ -138,6 +197,13 @@ function assertConsistentDesiredStates(
 export async function executeCanvasCommandsOnHost(
   input: ExecuteOnServerInput,
 ): Promise<ExecuteOnServerOutput> {
+  return executeCanvasCommandsOnHostInternal(input, false);
+}
+
+async function executeCanvasCommandsOnHostInternal(
+  input: ExecuteOnServerInput,
+  routingLockHeld: boolean,
+): Promise<ExecuteOnServerOutput> {
   const portalCommands = input.commands.filter(
     (command): command is PortalCommand =>
       command.type === 'SET_PORTAL_NODE_PINS',
@@ -152,6 +218,11 @@ export async function executeCanvasCommandsOnHost(
   assertConsistentDesiredStates(portalCommands);
 
   const worldCanvasId = requireWorldCanvasId();
+  if (!routingLockHeld) {
+    return withPortalRoutingMutex(worldCanvasId, () =>
+      executeCanvasCommandsOnHostInternal(input, true),
+    );
+  }
   const world = getCanvasStore(worldCanvasId).read() as StoredCanvas | null;
   if (!world || !Array.isArray(world.state.nodes)) {
     throw new CanvasCommandRoutingError('World Canvas is unavailable');
@@ -169,17 +240,55 @@ export async function executeCanvasCommandsOnHost(
     }
     portalByCanvasId.set(targetCanvasId, node);
   }
-  const portalById = new Map(
-    [...portalByCanvasId.values()].map((portal) => [portal.id, portal]),
-  );
+  const worldById = new Map(worldNodes.map((node) => [node.id, node]));
   const seenNodeRefTargets = new Set<string>();
+  const existingReferenceByTarget = new Map<string, NestableNode>();
   for (const node of worldNodes) {
-    if (node.type !== 'nodeRef') continue;
-    const target = nodeRefTarget(node);
-    const parent = node.parentId ? portalById.get(node.parentId) : undefined;
-    if (!target || portalTarget(parent) !== target.canvasId) {
+    if (node.type !== 'nodeRef' && node.type !== 'frameRef') continue;
+    const target = referenceTarget(node);
+    if (!target) {
       throw new CanvasCommandRoutingError(
-        `Node reference ${node.id} is not parented to its matching Portal`,
+        `Reference ${node.id} has no valid target`,
+      );
+    }
+    const seenAncestors = new Set<string>([node.id]);
+    let parentId = node.parentId;
+    const directParent = parentId ? worldById.get(parentId) : undefined;
+    if (
+      directParent?.type !== 'canvasRef' &&
+      directParent?.type !== 'frameRef'
+    ) {
+      throw new CanvasCommandRoutingError(
+        `Reference ${node.id} has an invalid parent`,
+      );
+    }
+    let matchingPortal = false;
+    while (parentId) {
+      if (seenAncestors.has(parentId)) {
+        throw new CanvasCommandRoutingError(
+          'World reference hierarchy is cyclic',
+        );
+      }
+      seenAncestors.add(parentId);
+      const parent = worldById.get(parentId);
+      if (!parent) break;
+      const parentTarget = referenceTarget(parent);
+      if (
+        parent.type === 'frameRef' &&
+        parentTarget?.canvasId !== target.canvasId
+      ) {
+        break;
+      }
+      const canvasId = portalTarget(parent);
+      if (canvasId) {
+        matchingPortal = canvasId === target.canvasId;
+        break;
+      }
+      parentId = parent.parentId;
+    }
+    if (!matchingPortal) {
+      throw new CanvasCommandRoutingError(
+        `Reference ${node.id} is not under its matching Portal`,
       );
     }
     const key = pinKey(target.canvasId, target.nodeId);
@@ -189,6 +298,7 @@ export async function executeCanvasCommandsOnHost(
       );
     }
     seenNodeRefTargets.add(key);
+    existingReferenceByTarget.set(key, node);
   }
 
   const liveCanvasIds = new Set(
@@ -237,7 +347,7 @@ export async function executeCanvasCommandsOnHost(
     { canvasId: string; nodeId: string }
   >();
   for (const node of worldNodes) {
-    const target = nodeRefTarget(node);
+    const target = referenceTarget(node);
     if (target)
       positionTargets.set(pinKey(target.canvasId, target.nodeId), target);
   }
@@ -266,6 +376,30 @@ export async function executeCanvasCommandsOnHost(
     });
   }
 
+  const preparedReferenceByTarget = new Map(existingReferenceByTarget);
+  const removePreparedSubtree = (rootId: string): void => {
+    const removedIds = new Set([rootId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const reference of preparedReferenceByTarget.values()) {
+        if (
+          reference.parentId &&
+          removedIds.has(reference.parentId) &&
+          !removedIds.has(reference.id)
+        ) {
+          removedIds.add(reference.id);
+          changed = true;
+        }
+      }
+    }
+    for (const [targetKey, reference] of preparedReferenceByTarget) {
+      if (removedIds.has(reference.id)) {
+        preparedReferenceByTarget.delete(targetKey);
+      }
+    }
+  };
+
   const commands = portalCommands.map((command): CanvasCommand => {
     const pins: PreparedPortalNodePin[] = [];
     const seen = new Set<string>();
@@ -278,13 +412,144 @@ export async function executeCanvasCommandsOnHost(
         if (!portal) {
           throw new MissingWorldPortalError(update.sourceCanvasId);
         }
-        pins.push({
-          sourceCanvasId: update.sourceCanvasId,
-          sourceNodeId,
-          portalId: portal.id as CanvasNodeId,
-          nodeRefId: createId('node') as CanvasNodeId,
-          pinned: requested.get(key) ?? update.pinned,
-        });
+        const desiredPinned = requested.get(key) ?? update.pinned;
+        const source = readSource(update.sourceCanvasId);
+        const sourceNode = source ? sourceNodeById(source, sourceNodeId) : null;
+        const existing = preparedReferenceByTarget.get(key);
+        if (!desiredPinned || !source || !sourceNode) {
+          pins.push({
+            sourceCanvasId: update.sourceCanvasId,
+            sourceNodeId,
+            portalId: portal.id as CanvasNodeId,
+            nodeRefId: (existing?.id ?? createId('node')) as CanvasNodeId,
+            referenceType:
+              existing?.type === 'frameRef' ? 'frameRef' : 'nodeRef',
+            parentRefId: (existing?.parentId ?? portal.id) as CanvasNodeId,
+            pinned: false,
+          });
+          if (existing) removePreparedSubtree(existing.id);
+          continue;
+        }
+        if (sourceNode.type === 'frame' && existing?.type === 'frameRef') {
+          pins.push({
+            sourceCanvasId: update.sourceCanvasId,
+            sourceNodeId,
+            portalId: portal.id as CanvasNodeId,
+            nodeRefId: existing.id as CanvasNodeId,
+            referenceType: 'frameRef',
+            parentRefId: (existing.parentId ?? portal.id) as CanvasNodeId,
+            pinned: true,
+          });
+          continue;
+        }
+
+        const projected =
+          sourceNode.type === 'frame'
+            ? sourceSubtree(source, sourceNode)
+            : [sourceNode];
+        const projectedIds = new Map<string, CanvasNodeId>();
+        for (const projectedNode of projected) {
+          const projectedKey = pinKey(update.sourceCanvasId, projectedNode.id);
+          projectedIds.set(
+            projectedNode.id,
+            (preparedReferenceByTarget.get(projectedKey)?.id ??
+              createId('node')) as CanvasNodeId,
+          );
+        }
+
+        for (const projectedNode of projected) {
+          const projectedKey = pinKey(update.sourceCanvasId, projectedNode.id);
+          if (requested.get(projectedKey) === false) {
+            throw new CanvasCommandRoutingError(
+              `Conflicting pin states for ${update.sourceCanvasId}/${projectedNode.id}`,
+            );
+          }
+          seen.add(projectedKey);
+          let parentRefId = portal.id as CanvasNodeId;
+          let position: Point | undefined;
+          if (projectedNode.id !== sourceNodeId) {
+            const projectedParentId = projectedNode.parentId
+              ? projectedIds.get(projectedNode.parentId)
+              : undefined;
+            if (projectedParentId) {
+              parentRefId = projectedParentId;
+              position = projectedNode.position;
+            }
+          } else {
+            const nearestExistingAncestor = sourceFrameAncestors(
+              source,
+              sourceNode,
+            ).find((ancestor) =>
+              preparedReferenceByTarget.has(
+                pinKey(update.sourceCanvasId, ancestor.id),
+              ),
+            );
+            if (nearestExistingAncestor) {
+              const ancestorRef = preparedReferenceByTarget.get(
+                pinKey(update.sourceCanvasId, nearestExistingAncestor.id),
+              );
+              if (ancestorRef?.type === 'frameRef') {
+                parentRefId = ancestorRef.id as CanvasNodeId;
+                const nodeAbs = source.absolutePosition(projectedNode.id);
+                const ancestorAbs = source.absolutePosition(
+                  nearestExistingAncestor.id,
+                );
+                if (nodeAbs && ancestorAbs) {
+                  position = {
+                    x: nodeAbs.x - ancestorAbs.x,
+                    y: nodeAbs.y - ancestorAbs.y,
+                  };
+                }
+              }
+            }
+          }
+          const size = getNodeSize(projectedNode);
+          const projectedRefId = projectedIds.get(projectedNode.id);
+          if (!projectedRefId) {
+            throw new CanvasCommandRoutingError(
+              `No reference ID was prepared for ${projectedNode.id}`,
+            );
+          }
+          pins.push({
+            sourceCanvasId: update.sourceCanvasId,
+            sourceNodeId: projectedNode.id as CanvasNodeId,
+            portalId: portal.id as CanvasNodeId,
+            nodeRefId: projectedRefId,
+            referenceType:
+              projectedNode.type === 'frame' ? 'frameRef' : 'nodeRef',
+            parentRefId,
+            ...(position ? { position } : {}),
+            ...(projectedNode.type === 'frame'
+              ? {
+                  size: {
+                    width: size.width || 400,
+                    height: size.height || 300,
+                  },
+                }
+              : {}),
+            pinned: true,
+          });
+          const existingProjected = preparedReferenceByTarget.get(projectedKey);
+          const referenceType =
+            projectedNode.type === 'frame' ? 'frameRef' : 'nodeRef';
+          preparedReferenceByTarget.set(projectedKey, {
+            ...(existingProjected ?? {}),
+            id: projectedRefId,
+            type: referenceType,
+            parentId: parentRefId,
+            position: existingProjected?.position ??
+              position ??
+              projectedNode.position ?? { x: 0, y: 0 },
+            data: {
+              ...(existingProjected?.data ?? {}),
+              type: referenceType,
+              target: {
+                canvasId: update.sourceCanvasId,
+                nodeId: projectedNode.id,
+              },
+            },
+          });
+        }
       }
     }
     return {

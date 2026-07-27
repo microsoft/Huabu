@@ -528,6 +528,7 @@
       "web": "Website",
       "frame": "Frame",
       "canvasRef": "Portal",
+      "frameRef": "Pinned frame",
       "nodeRef": "Pinned node",
       "sketch": "Sketch",
       "question": "Question"

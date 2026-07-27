@@ -41,6 +41,7 @@ export type LayerFilterLabelKey =
   | 'layers.filterLabels.web'
   | 'layers.filterLabels.frame'
   | 'layers.filterLabels.canvasRef'
+  | 'layers.filterLabels.frameRef'
   | 'layers.filterLabels.nodeRef'
   | 'layers.filterLabels.sketch'
   | 'layers.filterLabels.question';
@@ -90,6 +91,7 @@ const FILTER_LABEL_KEY_BY_TYPE: Record<CanvasNodeType, LayerFilterLabelKey> = {
   web: 'layers.filterLabels.web',
   frame: 'layers.filterLabels.frame',
   canvasRef: 'layers.filterLabels.canvasRef',
+  frameRef: 'layers.filterLabels.frameRef',
   nodeRef: 'layers.filterLabels.nodeRef',
   sketch: 'layers.filterLabels.sketch',
   question: 'layers.filterLabels.question',

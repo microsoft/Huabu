@@ -29,7 +29,10 @@ export default function resolvePasteClipboard(
 ): UiIntentResolution {
   const { nodes } = ui;
   const clipboard = intent.clipboardNodes?.filter(
-    (node) => node.type !== 'canvasRef' && node.type !== 'nodeRef',
+    (node) =>
+      node.type !== 'canvasRef' &&
+      node.type !== 'frameRef' &&
+      node.type !== 'nodeRef',
   );
   if (!clipboard || clipboard.length === 0) {
     return { commands: [], trace: [] };

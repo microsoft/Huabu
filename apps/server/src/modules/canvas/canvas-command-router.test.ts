@@ -3,6 +3,8 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { getAbsolutePosition } from '@sediment/shared/canvas-engine';
+
 import {
   CanvasCommandRoutingError,
   executeCanvasCommandsOnHost,
@@ -17,6 +19,7 @@ import { getCanvasStore, resetStorageCache } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
+import type { NestableNode } from '@sediment/shared/canvas-engine';
 
 let workspace: string;
 let sequence = 0;
@@ -24,6 +27,9 @@ let sequence = 0;
 interface TestStoredNode {
   id: string;
   type?: string;
+  parentId?: string;
+  position?: { x: number; y: number };
+  style?: Record<string, unknown>;
   data?: Record<string, unknown>;
 }
 
@@ -57,6 +63,58 @@ function pin(
     type: 'SET_PORTAL_NODE_PINS',
     updates: [{ sourceCanvasId, sourceNodeIds, pinned }],
   };
+}
+
+function writeNestedFrameSource(includeLaterChild = false): void {
+  writeCanvas('Project A', 'canvas-a', [
+    {
+      id: 'node-outer',
+      type: 'frame',
+      position: { x: 10, y: 20 },
+      style: { width: 500, height: 400 },
+      data: { type: 'frame' },
+    },
+    {
+      id: 'node-inner',
+      type: 'frame',
+      parentId: 'node-outer',
+      position: { x: 100, y: 80 },
+      style: { width: 250, height: 200 },
+      data: { type: 'frame' },
+    },
+    {
+      id: 'node-inner-child',
+      type: 'note',
+      parentId: 'node-inner',
+      position: { x: 30, y: 40 },
+      style: { width: 100, height: 80 },
+      data: { type: 'note' },
+    },
+    ...(includeLaterChild
+      ? [
+          {
+            id: 'node-later-child',
+            type: 'note',
+            parentId: 'node-inner',
+            position: { x: 150, y: 80 },
+            style: { width: 80, height: 60 },
+            data: { type: 'note' },
+          },
+        ]
+      : []),
+  ]);
+  resetStorageCache();
+}
+
+function referenceFor(sourceNodeId: string): TestStoredNode | undefined {
+  return (
+    getCanvasStore('canvas-world').read()?.state.nodes as TestStoredNode[]
+  ).find(
+    (node) =>
+      (node.type === 'nodeRef' || node.type === 'frameRef') &&
+      (node.data?.target as { nodeId?: string } | undefined)?.nodeId ===
+        sourceNodeId,
+  );
 }
 
 beforeEach(async () => {
@@ -97,6 +155,284 @@ afterEach(() => {
 });
 
 describe('workspace canvas command routing', () => {
+  it('snapshots nested Frames, adopts refs, and recursively unpins World hierarchy', async () => {
+    writeCanvas('Project A', 'canvas-a', [
+      {
+        id: 'node-frame',
+        type: 'frame',
+        position: { x: 10, y: 20 },
+        style: { width: 500, height: 400 },
+        data: { type: 'frame' },
+      },
+      {
+        id: 'node-child',
+        type: 'note',
+        parentId: 'node-frame',
+        position: { x: 40, y: 60 },
+        style: { width: 100, height: 80 },
+        data: { type: 'note' },
+      },
+      {
+        id: 'node-nested',
+        type: 'frame',
+        parentId: 'node-frame',
+        position: { x: 220, y: 120 },
+        style: { width: 200, height: 160 },
+        data: { type: 'frame' },
+      },
+      {
+        id: 'node-leaf',
+        type: 'note',
+        parentId: 'node-nested',
+        position: { x: 20, y: 30 },
+        style: { width: 80, height: 60 },
+        data: { type: 'note' },
+      },
+    ]);
+    resetStorageCache();
+
+    await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [pin('canvas-a', ['node-child' as CanvasNodeId])],
+      originator: { source: 'ui' },
+    });
+    let worldNodes = getCanvasStore('canvas-world').read()?.state
+      .nodes as TestStoredNode[];
+    const adopted = worldNodes.find(
+      (node) =>
+        node.data?.target &&
+        (node.data.target as { nodeId?: string }).nodeId === 'node-child',
+    );
+    const adoptedAbs = getAbsolutePosition(
+      worldNodes as NestableNode[],
+      adopted?.id ?? '',
+    );
+
+    const first = await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [pin('canvas-a', ['node-frame' as CanvasNodeId])],
+      originator: { source: 'ui' },
+    });
+    expect(first.toVersion).toBe(first.fromVersion + 1);
+    worldNodes = getCanvasStore('canvas-world').read()?.state
+      .nodes as TestStoredNode[];
+    const references = worldNodes.filter(
+      (node) => node.type === 'nodeRef' || node.type === 'frameRef',
+    );
+    expect(references).toHaveLength(4);
+    const frameRef = references.find(
+      (node) =>
+        node.type === 'frameRef' &&
+        (node.data?.target as { nodeId?: string })?.nodeId === 'node-frame',
+    );
+    const nestedRef = references.find(
+      (node) =>
+        node.type === 'frameRef' &&
+        (node.data?.target as { nodeId?: string })?.nodeId === 'node-nested',
+    );
+    const adoptedAfter = references.find((node) => node.id === adopted?.id);
+    const leafRef = references.find(
+      (node) =>
+        (node.data?.target as { nodeId?: string })?.nodeId === 'node-leaf',
+    );
+    expect(adoptedAfter?.parentId).toBe(frameRef?.id);
+    expect(nestedRef?.parentId).toBe(frameRef?.id);
+    expect(leafRef?.parentId).toBe(nestedRef?.id);
+    expect(
+      getAbsolutePosition(worldNodes as NestableNode[], adoptedAfter?.id ?? ''),
+    ).toEqual(adoptedAbs);
+
+    const idempotent = await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [pin('canvas-a', ['node-frame' as CanvasNodeId])],
+      originator: { source: 'ui' },
+    });
+    expect(idempotent.toVersion).toBe(idempotent.fromVersion);
+
+    writeCanvas('Project A', 'canvas-a', []);
+    resetStorageCache();
+    await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [pin('canvas-a', ['node-frame' as CanvasNodeId], false)],
+      originator: { source: 'ui' },
+    });
+    expect(
+      (
+        getCanvasStore('canvas-world').read()?.state.nodes as TestStoredNode[]
+      ).filter((node) => node.type === 'nodeRef' || node.type === 'frameRef'),
+    ).toHaveLength(0);
+  });
+
+  it('parents a later single Pin to the nearest existing frameRef', async () => {
+    writeCanvas('Project A', 'canvas-a', [
+      {
+        id: 'node-frame',
+        type: 'frame',
+        position: { x: 10, y: 20 },
+        style: { width: 300, height: 200 },
+        data: { type: 'frame' },
+      },
+    ]);
+    resetStorageCache();
+    await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [pin('canvas-a', ['node-frame' as CanvasNodeId])],
+      originator: { source: 'ui' },
+    });
+
+    writeCanvas('Project A', 'canvas-a', [
+      {
+        id: 'node-frame',
+        type: 'frame',
+        position: { x: 10, y: 20 },
+        style: { width: 300, height: 200 },
+        data: { type: 'frame' },
+      },
+      {
+        id: 'node-later',
+        type: 'note',
+        parentId: 'node-frame',
+        position: { x: 70, y: 50 },
+        style: { width: 100, height: 80 },
+        data: { type: 'note' },
+      },
+    ]);
+    resetStorageCache();
+    await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [pin('canvas-a', ['node-later' as CanvasNodeId])],
+      originator: { source: 'ui' },
+    });
+
+    const nodes = getCanvasStore('canvas-world').read()?.state
+      .nodes as TestStoredNode[];
+    const frameRef = nodes.find((node) => node.type === 'frameRef');
+    const child = nodes.find(
+      (node) =>
+        node.type === 'nodeRef' &&
+        (node.data?.target as { nodeId?: string })?.nodeId === 'node-later',
+    );
+    expect(child?.parentId).toBe(frameRef?.id);
+  });
+
+  it('keeps an explicitly re-pinned nested Frame under its outer frameRef', async () => {
+    writeNestedFrameSource();
+    await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [pin('canvas-a', ['node-outer' as CanvasNodeId])],
+      originator: { source: 'ui' },
+    });
+    const outerRef = referenceFor('node-outer');
+    const innerRef = referenceFor('node-inner');
+    expect(innerRef?.parentId).toBe(outerRef?.id);
+
+    const repeated = await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [pin('canvas-a', ['node-inner' as CanvasNodeId])],
+      originator: { source: 'ui' },
+    });
+    expect(repeated.toVersion).toBe(repeated.fromVersion);
+    expect(referenceFor('node-inner')?.parentId).toBe(outerRef?.id);
+  });
+
+  it('does not reconcile later source descendants when re-pinning a frameRef', async () => {
+    writeNestedFrameSource();
+    await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [pin('canvas-a', ['node-outer' as CanvasNodeId])],
+      originator: { source: 'ui' },
+    });
+
+    writeNestedFrameSource(true);
+    const repeated = await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [pin('canvas-a', ['node-outer' as CanvasNodeId])],
+      originator: { source: 'ui' },
+    });
+
+    expect(repeated.toVersion).toBe(repeated.fromVersion);
+    expect(referenceFor('node-later-child')).toBeUndefined();
+  });
+
+  it('serializes concurrent Frame and descendant Pins before preparation', async () => {
+    writeNestedFrameSource();
+
+    await Promise.all([
+      executeCanvasCommandsOnHost({
+        canvasId: 'canvas-a',
+        commands: [pin('canvas-a', ['node-outer' as CanvasNodeId])],
+        originator: { source: 'ui' },
+      }),
+      executeCanvasCommandsOnHost({
+        canvasId: 'canvas-a',
+        commands: [pin('canvas-a', ['node-inner-child' as CanvasNodeId])],
+        originator: { source: 'ui' },
+      }),
+    ]);
+
+    expect(referenceFor('node-inner-child')?.parentId).toBe(
+      referenceFor('node-inner')?.id,
+    );
+  });
+
+  it('keeps outer then nested Frame Pins ordered within one batch', async () => {
+    writeNestedFrameSource();
+    const output = await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [
+        pin('canvas-a', ['node-outer' as CanvasNodeId]),
+        pin('canvas-a', ['node-inner' as CanvasNodeId]),
+      ],
+      originator: { source: 'ui' },
+    });
+
+    expect(output.results).toHaveLength(2);
+    expect(output.results[0]).toMatchObject({ applied: true });
+    expect(output.results[1]).toMatchObject({ applied: false });
+    expect(referenceFor('node-inner')?.parentId).toBe(
+      referenceFor('node-outer')?.id,
+    );
+  });
+
+  it('adopts nested then outer Frame Pins ordered in reverse within one batch', async () => {
+    writeNestedFrameSource();
+    const output = await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [
+        pin('canvas-a', ['node-inner' as CanvasNodeId]),
+        pin('canvas-a', ['node-outer' as CanvasNodeId]),
+      ],
+      originator: { source: 'ui' },
+    });
+
+    expect(output.results).toHaveLength(2);
+    expect(output.results.every((result) => result.applied)).toBe(true);
+    expect(referenceFor('node-inner')?.parentId).toBe(
+      referenceFor('node-outer')?.id,
+    );
+  });
+
+  it('adopts a descendant listed before its Frame in one command', async () => {
+    writeNestedFrameSource();
+    await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [
+        pin('canvas-a', [
+          'node-inner-child' as CanvasNodeId,
+          'node-outer' as CanvasNodeId,
+        ]),
+      ],
+      originator: { source: 'ui' },
+    });
+
+    expect(referenceFor('node-inner-child')?.parentId).toBe(
+      referenceFor('node-inner')?.id,
+    );
+    expect(referenceFor('node-inner')?.parentId).toBe(
+      referenceFor('node-outer')?.id,
+    );
+  });
+
   it('validates every source before mutating pins', async () => {
     await expect(
       executeCanvasCommandsOnHost({
@@ -116,6 +452,40 @@ describe('workspace canvas command routing', () => {
     ).filter((node) => node.type === 'nodeRef');
     expect(refs).toHaveLength(0);
     expect(getCanvasStore('canvas-world').read()?.version).toBe(1);
+  });
+
+  it('rejects a Frame Pin mixed with an explicit descendant Unpin', async () => {
+    writeCanvas('Project A', 'canvas-a', [
+      {
+        id: 'node-frame',
+        type: 'frame',
+        position: { x: 0, y: 0 },
+        style: { width: 300, height: 200 },
+        data: { type: 'frame' },
+      },
+      {
+        id: 'node-child',
+        type: 'note',
+        parentId: 'node-frame',
+        position: { x: 20, y: 30 },
+        data: { type: 'note' },
+      },
+    ]);
+    resetStorageCache();
+    const beforeVersion = getCanvasStore('canvas-world').read()?.version;
+
+    await expect(
+      executeCanvasCommandsOnHost({
+        canvasId: 'canvas-a',
+        commands: [
+          pin('canvas-a', ['node-frame' as CanvasNodeId]),
+          pin('canvas-a', ['node-child' as CanvasNodeId], false),
+        ],
+        originator: { source: 'ui' },
+      }),
+    ).rejects.toThrow('Conflicting pin states');
+
+    expect(getCanvasStore('canvas-world').read()?.version).toBe(beforeVersion);
   });
 
   it('requires World reconciliation before pinning', async () => {
@@ -542,5 +912,67 @@ describe('workspace canvas command routing', () => {
         withoutNodeRef,
       ),
     ).toThrow('Node references must be removed with SET_PORTAL_NODE_PINS');
+  });
+
+  it('allows moving but rejects manually resizing a frameRef', async () => {
+    writeCanvas('Project A', 'canvas-a', [
+      {
+        id: 'node-frame',
+        type: 'frame',
+        position: { x: 10, y: 20 },
+        style: { width: 300, height: 200 },
+        data: { type: 'frame' },
+      },
+    ]);
+    resetStorageCache();
+    await executeCanvasCommandsOnHost({
+      canvasId: 'canvas-a',
+      commands: [pin('canvas-a', ['node-frame' as CanvasNodeId])],
+      originator: { source: 'ui' },
+    });
+    const frameRef = (
+      getCanvasStore('canvas-world').read()?.state.nodes as TestStoredNode[]
+    ).find((node) => node.type === 'frameRef');
+    if (!frameRef) throw new Error('Missing frameRef');
+
+    await expect(
+      executeCanvasCommandsOnHost({
+        canvasId: 'canvas-world',
+        commands: [
+          {
+            type: 'SET_NODE_GEOMETRY',
+            items: [
+              {
+                nodeId: frameRef.id as CanvasNodeId,
+                position: { x: 80, y: 90 },
+              },
+            ],
+          },
+        ],
+        originator: { source: 'ui' },
+      }),
+    ).resolves.toMatchObject({
+      results: [expect.objectContaining({ applied: true })],
+    });
+
+    await expect(
+      executeCanvasCommandsOnHost({
+        canvasId: 'canvas-world',
+        commands: [
+          {
+            type: 'SET_NODE_GEOMETRY',
+            items: [
+              {
+                nodeId: frameRef.id as CanvasNodeId,
+                size: { width: 500, height: 400 },
+              },
+            ],
+          },
+        ],
+        originator: { source: 'agent' },
+      }),
+    ).rejects.toThrow(
+      'Portal and frame reference sizes are managed by their contents',
+    );
   });
 });

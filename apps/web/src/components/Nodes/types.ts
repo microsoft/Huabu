@@ -12,6 +12,7 @@ import type {
   AudioNodeData as SharedAudioNodeData,
   FrameNodeData as SharedFrameNodeData,
   CanvasRefNodeData as SharedCanvasRefNodeData,
+  FrameRefNodeData as SharedFrameRefNodeData,
   NodeRefNodeData as SharedNodeRefNodeData,
   SketchNodeData as SharedSketchNodeData,
   QuestionNodeData as SharedQuestionNodeData,
@@ -50,6 +51,9 @@ export type CanvasFrameNodeData = SharedFrameNodeData & {
 export type CanvasRefNodeData = SharedCanvasRefNodeData & {
   [key: string]: unknown;
 };
+export type FrameRefNodeData = SharedFrameRefNodeData & {
+  [key: string]: unknown;
+};
 export type NodeRefNodeData = SharedNodeRefNodeData & {
   [key: string]: unknown;
 };
@@ -72,6 +76,7 @@ export type CanvasNodeData =
   | CanvasAudioNodeData
   | CanvasFrameNodeData
   | CanvasRefNodeData
+  | FrameRefNodeData
   | NodeRefNodeData
   | CanvasSketchNodeData
   | CanvasQuestionNodeData;

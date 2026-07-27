@@ -60,6 +60,20 @@ export const resolvedWorldReferenceSchema = z.discriminatedUnion('kind', [
       source: resolvedSourceNodeSchema.optional(),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal('frameRef'),
+      referenceNodeId: canonicalNodeIdSchema,
+      target: z
+        .object({
+          canvasId: canonicalCanvasIdSchema,
+          nodeId: canonicalNodeIdSchema,
+        })
+        .strict(),
+      status: z.enum(['ok', 'canvas-missing', 'node-missing']),
+      source: resolvedSourceNodeSchema.optional(),
+    })
+    .strict(),
 ]);
 export type ResolvedWorldReference = z.infer<
   typeof resolvedWorldReferenceSchema

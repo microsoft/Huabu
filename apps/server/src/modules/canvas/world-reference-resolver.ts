@@ -58,7 +58,7 @@ export async function resolveWorldReferences(
         );
       }
       sourceCanvasIds.add(targetCanvasId);
-    } else if (node.type === 'nodeRef') {
+    } else if (node.type === 'nodeRef' || node.type === 'frameRef') {
       const target = node.data?.target as Record<string, unknown> | undefined;
       if (
         typeof target?.canvasId !== 'string' ||
@@ -102,13 +102,14 @@ export async function resolveWorldReferences(
       });
       continue;
     }
-    if (node.type !== 'nodeRef') continue;
+    if (node.type !== 'nodeRef' && node.type !== 'frameRef') continue;
 
     const target = node.data?.target as { canvasId: string; nodeId: string };
+    const kind = node.type;
     const source = sources.get(target.canvasId);
     if (!source?.canvas) {
       references.push({
-        kind: 'nodeRef',
+        kind,
         referenceNodeId: node.id as `node-${string}`,
         target: {
           canvasId: target.canvasId as `canvas-${string}`,
@@ -124,7 +125,7 @@ export async function resolveWorldReferences(
     );
     if (!sourceNode) {
       references.push({
-        kind: 'nodeRef',
+        kind,
         referenceNodeId: node.id as `node-${string}`,
         target: {
           canvasId: target.canvasId as `canvas-${string}`,
@@ -151,7 +152,7 @@ export async function resolveWorldReferences(
         ? agentBindingSchema.safeParse(sourceData.agentBinding)
         : null;
     references.push({
-      kind: 'nodeRef',
+      kind,
       referenceNodeId: node.id as `node-${string}`,
       target: {
         canvasId: target.canvasId as `canvas-${string}`,

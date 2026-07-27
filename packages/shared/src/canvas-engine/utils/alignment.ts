@@ -2,8 +2,9 @@ import { getLayoutNodeSize } from './nodeSizes.js';
 import {
   getAbsolutePosition,
   getDescendantIds,
+  isContainerNode,
   type NestableNode,
-} from '../frame/index.js';
+} from '../container/index.js';
 
 import type { Node } from '@xyflow/react';
 
@@ -27,22 +28,27 @@ function getAbsPos(nodes: Node[], n: Node): { x: number; y: number } {
 
 /**
  * Given the full selected list, return only the nodes that should be
- * independently repositioned – i.e. exclude descendants of any selected frame
- * because those travel with the frame as a single unit.
+ * independently repositioned – i.e. exclude descendants of any selected
+ * Container because those travel with the Container as a single unit.
  */
 function getAlignParticipants(nodes: Node[], selected: Node[]): Node[] {
-  const selectedFrameIds = selected
-    .filter((n) => n.type === 'frame')
+  const selectedContainerIds = selected
+    .filter((node) => isContainerNode(node as NestableNode))
     .map((n) => n.id);
 
-  const descendantsOfSelectedFrames = new Set<string>();
-  for (const fid of selectedFrameIds) {
-    for (const did of getDescendantIds(nodes as NestableNode[], fid)) {
-      descendantsOfSelectedFrames.add(did);
+  const descendantsOfSelectedContainers = new Set<string>();
+  for (const containerId of selectedContainerIds) {
+    for (const descendantId of getDescendantIds(
+      nodes as NestableNode[],
+      containerId,
+    )) {
+      descendantsOfSelectedContainers.add(descendantId);
     }
   }
 
-  return selected.filter((n) => !descendantsOfSelectedFrames.has(n.id));
+  return selected.filter(
+    (node) => !descendantsOfSelectedContainers.has(node.id),
+  );
 }
 
 // ── Public API ─────────────────────────────────────────────────────────

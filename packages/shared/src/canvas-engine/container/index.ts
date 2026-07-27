@@ -8,7 +8,11 @@ export {
 } from './tree.js';
 
 export { canParentNode, isContainerNode } from './policy.js';
-export { moveNodeIntoContainer, moveNodeOutOfContainer } from './mutation.js';
+export {
+  moveNodeIntoContainer,
+  moveNodeOutOfContainer,
+  syncInheritedContainerLocks,
+} from './mutation.js';
 
 export type {
   ContainerFitResult,

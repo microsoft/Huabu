@@ -64,6 +64,13 @@ beforeEach(() => {
       data: { target: { canvasId: 'canvas-a', nodeId: 'node-gone' } },
     },
     {
+      id: 'node-frame-ref',
+      type: 'frameRef',
+      position: { x: 0, y: 0 },
+      parentId: 'node-portal-a',
+      data: { target: { canvasId: 'canvas-a', nodeId: 'node-frame' } },
+    },
+    {
       id: 'node-portal-gone',
       type: 'canvasRef',
       position: { x: 0, y: 0 },
@@ -87,6 +94,12 @@ beforeEach(() => {
         },
         hasAuthoredContent: true,
       },
+    },
+    {
+      id: 'node-frame',
+      type: 'frame',
+      position: { x: 100, y: 100 },
+      data: { type: 'frame' },
     },
   ]);
   mkdirSync(path.join(sourceRoot, 'nodes'));
@@ -147,6 +160,14 @@ describe('World reference resolution', () => {
       expect.objectContaining({
         referenceNodeId: 'node-ref-missing',
         status: 'node-missing',
+      }),
+    );
+    expect(response.references).toContainEqual(
+      expect.objectContaining({
+        kind: 'frameRef',
+        referenceNodeId: 'node-frame-ref',
+        status: 'ok',
+        source: expect.objectContaining({ type: 'frame' }),
       }),
     );
     expect(response.references).toContainEqual(

@@ -112,7 +112,7 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
       }
       if (updated.parentId && !resizedFrameIds.has(updated.parentId)) {
         const parent = state.nodes.find((node) => node.id === updated.parentId);
-        if (parent?.type === 'canvasRef') {
+        if (parent?.type === 'canvasRef' || parent?.type === 'frameRef') {
           affectedPortalIds.add(parent.id);
         } else {
           affectedFrameIds.add(updated.parentId);
