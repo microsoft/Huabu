@@ -15,7 +15,7 @@ Three items were **intentionally deferred** — each is correct-in-theory but lo
 
 Why deferred: the sole multi-secret caller is `setIntegrationsConfig` (Tavily + RapidAPI). Those keys are independent and the write is idempotent, so a partial commit is self-healing on retry — not data loss, not a security issue, and a narrow failure window.
 
-Full fix: add a `secret:mutateMany` IPC message; Electron main builds the full `entries` map and calls `DesktopSecureSecretStore.setMany` for a single atomic file replacement.
+Full fix: add a `secret:mutateMany` IPC message; Electron main builds the full `entries` map and hands it to a new `DesktopSecureSecretStore.setMany` for a single atomic file replacement.
 
 **Promote when** any of: (a) a new multi-secret write whose keys are _coupled_ (one changes → the other must, or logic breaks); (b) a non-retryable / non-idempotent batch write; (c) a real user report of a desktop partial-commit.
 

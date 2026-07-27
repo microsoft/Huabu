@@ -102,7 +102,7 @@ describe('DesktopSecureSecretStore', () => {
 
   // Deferred: desktop multi-key writes go through ElectronSecretStore.setMany,
   // which currently loops one IPC round-trip per key (not atomic). A real
-  // atomic batch needs a `secret:mutateMany` bridge message routed to
+  // atomic batch needs a `secret:mutateMany` bridge message routed to a new
   // DesktopSecureSecretStore.setMany.
   // See docs/proposals/credential-storage-hardening-followups.md (item 1).
   it.todo('applies a multi-key batch write atomically via a batch IPC message');
