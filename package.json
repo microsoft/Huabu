@@ -18,6 +18,8 @@
     "build:desktop:win": "pnpm run build:agentlet && pnpm run build:agenetes && pnpm --filter @sediment/shared build && pnpm --filter @sediment/server bundle && pnpm --filter @sediment/web build && pnpm --filter @sediment/desktop dist:win",
     "build:desktop:linux": "pnpm run build:agentlet && pnpm run build:agenetes && pnpm --filter @sediment/shared build && pnpm --filter @sediment/server bundle && pnpm --filter @sediment/web build && pnpm --filter @sediment/desktop dist:linux",
     "check:i18n": "node scripts/check-i18n-parity.mjs",
+    "check:agent-team-skills": "node scripts/check-agent-team-skills.mjs",
+    "test:agent-team-skills": "node --test scripts/check-agent-team-skills.test.mjs",
     "vision:ocr": "node scripts/test-azure-vision.mjs",
     "subtree:pull:agentlet": "git subtree pull --prefix=external/agentlet agentlet-upstream main --squash",
     "subtree:push:agentlet": "git subtree push --prefix=external/agentlet agentlet-upstream main",

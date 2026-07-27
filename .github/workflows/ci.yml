@@ -53,3 +53,6 @@ jobs:
 
       - name: i18n parity
         run: pnpm run check:i18n
+
+      - name: Agent Team skills
+        run: pnpm run test:agent-team-skills && pnpm run check:agent-team-skills
