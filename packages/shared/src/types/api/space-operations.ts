@@ -65,11 +65,11 @@ const nodeIdSchema = z
 const nodeSizeSchema = z
   .object({
     width: z.number().positive(),
-    height: z.number().positive().optional(),
+    height: z.union([z.number().positive(), z.literal('auto')]).optional(),
   })
   .strict()
   .describe(
-    "Node bounding box. Set `width`; leave `height` unset for auto-sized types: `image` derives height from the image's aspect ratio, and `text` / `question` are content-driven and must not be pinned. Other node types honour an explicit `height`.",
+    'Node bounding box. Set `width`. Height: pass a number to pin it, or "auto" to make the node size itself to its content (`note` only — this is the one way to say "fit this note to its text"). `image` derives height from the image\'s aspect ratio, and `text` / `question` are always content-driven, so leave `height` unset for those.',
   );
 
 const accentTokenSchema = z

@@ -7,6 +7,7 @@
  */
 
 import alignNodes from './alignNodes.js';
+import applyMeasuredHeight from './applyMeasuredHeight.js';
 import changeNodeType from './changeNodeType.js';
 import connectNodes from './connectNodes.js';
 import createNodes from './createNodes.js';
@@ -48,6 +49,7 @@ export const HANDLERS: HandlerMap = {
   DISSOLVE_FRAME: dissolveFrame.handler,
   SET_NODE_GEOMETRY: setNodeGeometry.handler,
   SET_NODE_SELECTION: setNodeSelection.handler,
+  APPLY_MEASURED_HEIGHT: applyMeasuredHeight.handler,
   REORDER_NODES: reorderNodes.handler,
   SET_NODE_LOCKED: setNodeLocked.handler,
   CONNECT_NODES: connectNodes.handler,
@@ -72,6 +74,7 @@ export const COMMAND_META: Record<CanvasCommandType, CommandMeta> = {
   DISSOLVE_FRAME: dissolveFrame.meta,
   SET_NODE_GEOMETRY: setNodeGeometry.meta,
   SET_NODE_SELECTION: setNodeSelection.meta,
+  APPLY_MEASURED_HEIGHT: applyMeasuredHeight.meta,
   REORDER_NODES: reorderNodes.meta,
   SET_NODE_LOCKED: setNodeLocked.meta,
   CONNECT_NODES: connectNodes.meta,

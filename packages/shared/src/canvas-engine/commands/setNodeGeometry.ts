@@ -1,10 +1,27 @@
 import { noop, type CommandDefinition } from './types.js';
 import { getFrameSizing } from '../frame/sizing.js';
+import { materializeAutoHeight } from '../height/materialize.js';
+import { getHeightPolicy } from '../height/policy.js';
 import { isAlwaysAutoHeightNodeType } from '../utils/nodeSizes.js';
 
 import type { CanvasCommand } from '../../index.js';
+import type { HeightMode } from '../../types/canvas/node.js';
+import type { Node } from '@xyflow/react';
 
 type Cmd = Extract<CanvasCommand, { type: 'SET_NODE_GEOMETRY' }>;
+
+/**
+ * Record who owns the node's height, but only for types where that is a
+ * real choice. Always-content and always-manual types derive their mode
+ * from the policy table, so writing the field would add a second, silently
+ * divergent source for the same fact.
+ */
+function withHeightMode(node: Node, mode: HeightMode): Node['data'] {
+  const data = node.data ?? {};
+  if (getHeightPolicy(node.type).kind !== 'toggleable') return data;
+  if ((data as { heightMode?: unknown }).heightMode === mode) return data;
+  return { ...data, heightMode: mode };
+}
 
 const setNodeGeometry: CommandDefinition<Cmd> = {
   meta: {
@@ -52,18 +69,28 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         updated = { ...updated, position: update.position };
       }
       if (update.size) {
-        const forceAutoHeight = isAlwaysAutoHeightNodeType(updated.type ?? '');
         const nextStyle = {
           ...updated.style,
           width: update.size.width,
         };
-        const heightCleared =
-          forceAutoHeight || typeof update.size.height !== 'number';
-        if (!heightCleared) {
-          nextStyle.height = update.size.height;
-        } else {
-          delete nextStyle.height;
-        }
+
+        // A height is authored only when it arrives as a number on a type
+        // the user is allowed to pin. `'auto'` is the explicit spelling of
+        // renderer ownership; an omitted height means the same thing, and
+        // is kept as a synonym because that is what callers have always
+        // meant by it.
+        const wantsAutoHeight =
+          isAlwaysAutoHeightNodeType(updated.type ?? '') ||
+          typeof update.size.height !== 'number';
+        // Only `toggleable` types (today: `note`) carry a materialized
+        // auto height. `text` / `question` are content-driven through a
+        // separate mechanism and still express "auto" as the absence of a
+        // top-level height; unifying them is a later step, and writing a
+        // number here would pin a nominal default over content they size
+        // themselves.
+        const materializes =
+          wantsAutoHeight &&
+          getHeightPolicy(updated.type).kind === 'toggleable';
 
         // Mirror the explicitly-set dimensions into `measured` so the
         // executor's end-of-batch `fitFrames` pass sees the new size.
@@ -72,11 +99,6 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         // `style`, and ReactFlow's ResizeObserver hasn't reconciled the
         // DOM yet at this point. The RO will re-write the same number on
         // the next frame, so there's no jitter.
-        //
-        // For `height: undefined` (clearing a pinned height to revert to
-        // content-driven sizing, e.g. note auto-fit) we leave `measured.height`
-        // alone — the new content height is unknown until the next render,
-        // and overwriting with 0 here would briefly collapse the node.
         const prevMeasured = (updated.measured ?? {}) as {
           width?: number;
           height?: number;
@@ -85,23 +107,47 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
           ...prevMeasured,
           width: update.size.width,
         };
-        if (!heightCleared) {
-          nextMeasured.height = update.size.height;
+        if (wantsAutoHeight) {
+          // A content-driven type has no number to offer until it renders;
+          // leaving `measured.height` alone avoids briefly collapsing it.
+          // For materializing types the height is filled in below.
+          delete nextStyle.height;
+        } else {
+          nextStyle.height = update.size.height as number;
+          nextMeasured.height = update.size.height as number;
         }
 
         updated = {
           ...updated,
+          data: withHeightMode(updated, wantsAutoHeight ? 'auto' : 'fixed'),
           style: nextStyle,
           measured: nextMeasured,
         };
 
+        // Handing the height back to the renderer no longer leaves it
+        // undefined: the stored measurement hint is materialized into a
+        // concrete number right here, so every geometry consumer sees a
+        // usable footprint even for a node that has never rendered. When
+        // no hint exists yet the policy minimum stands in until a
+        // measurement arrives.
+        //
+        // This also covers a width-only change on an auto note: its
+        // content is transform-scaled by `width / refWidth`, so the
+        // layout height follows the new width.
+        if (materializes) {
+          updated = materializeAutoHeight(updated);
+        }
+
         // Track the parent for a post-commit refit only when the child's
-        // height was cleared and the parent frame's sizing policy opts
-        // into hug. Otherwise the executor's sync `fitFrames` pass is
-        // sufficient (or, for `sizing: 'manual'` parents, no refit at
-        // all — the user pinned that size deliberately).
+        // height went back to content-driven and the parent frame's
+        // sizing policy opts into hug. The materialized height above is a
+        // cached measurement, not a fresh one, so the DOM may still settle
+        // on a different number for content edited since. Otherwise the
+        // executor's sync `fitFrames` pass is sufficient (or, for
+        // `sizing: 'manual'` parents, no refit at all — the user pinned
+        // that size deliberately).
         if (
-          heightCleared &&
+          wantsAutoHeight &&
           updated.parentId &&
           !resizedFrameIds.has(updated.parentId) &&
           getFrameSizing(state.nodes.find((n) => n.id === updated.parentId)) ===

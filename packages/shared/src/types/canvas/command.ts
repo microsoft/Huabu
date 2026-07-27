@@ -33,6 +33,24 @@ export interface NodeSize {
   height?: number;
 }
 
+/**
+ * Size accepted by `SET_NODE_GEOMETRY`.
+ *
+ * Widens {@link NodeSize} with `'auto'`, the explicit spelling of "hand
+ * the height back to the renderer". It is not "unset": the engine records
+ * `data.heightMode = 'auto'` and immediately materializes a concrete
+ * number from the node's stored measurement hint, so `style.height` stays
+ * usable for a node that has never rendered. Omitting `height` means the
+ * same thing and is kept as a synonym for existing callers.
+ *
+ * Deliberately separate from {@link NodeSize}, which also describes stored
+ * and default geometry where a non-numeric height would be meaningless.
+ */
+export interface NodeGeometrySize {
+  width: number;
+  height?: number | 'auto';
+}
+
 /** Single source of truth for `CanvasAlignDirection`. */
 export const CANVAS_ALIGN_DIRECTIONS = [
   'left',
@@ -114,12 +132,39 @@ export interface CanvasNodeGeometryUpdate {
    * coordinate space of `CanvasNodeCreateInput.position`.
    */
   position?: Point;
-  size?: NodeSize;
+  size?: NodeGeometrySize;
 }
 
 export interface CanvasNodeLockUpdate {
   nodeId: CanvasNodeId;
   locked: boolean;
+}
+
+/**
+ * A completed content measurement for one auto-height node.
+ *
+ * Derived data, not authored intent: it reports what the renderer found,
+ * so it never enters undo history and never bumps `canvas.version`.
+ */
+export interface CanvasNodeMeasuredHeightUpdate {
+  nodeId: CanvasNodeId;
+  /**
+   * Content height in px at the node type's reference width, before
+   * width scaling and before node chrome.
+   */
+  intrinsicHeight: number;
+  /**
+   * The `AutoHeightKey` this measurement was taken under (see
+   * `canvas-engine/height/freshness.ts`). Stored with the hint so a later
+   * reader can prove whether it still describes the node's content.
+   */
+  measuredFor: string;
+  /**
+   * The measurement settled before its inputs did (undecoded images, a
+   * timeout). Still far better than no footprint, but always re-measured
+   * on the next load rather than trusted.
+   */
+  provisional?: boolean;
 }
 
 export interface CanvasEdgeCreateInput {
@@ -203,6 +248,23 @@ export type CanvasCommand =
   | { type: 'SET_NODE_LOCKED'; items: CanvasNodeLockUpdate[] }
   | {
       /**
+       * Apply a completed content measurement to auto-height nodes.
+       *
+       * Split from `SET_NODE_GEOMETRY` by authorship, not by value: a
+       * geometry write says *who owns* the height, this one says *what it
+       * currently is*. Its dominant trigger is a content edit, not a
+       * preceding geometry command. Non-undoable and excluded from the
+       * agent schema, because only a renderer can produce the input.
+       *
+       * Items targeting a node whose resolved height mode is not `auto`
+       * are ignored rather than rejected — a measurement that lands after
+       * the user pinned the node is stale, not invalid.
+       */
+      type: 'APPLY_MEASURED_HEIGHT';
+      items: CanvasNodeMeasuredHeightUpdate[];
+    }
+  | {
+      /**
        * Set a frame's child-layout mode. When switching into `column`
        * or `row`, the engine auto-assigns each child to a track and
        * resizes the frame to fit its content; when switching to `free`
@@ -259,12 +321,14 @@ export type PreparedPortalNodePinsCommand = Extract<
 
 /**
  * Command types that are UI-only and excluded from the agent-facing schema.
- * These depend on ephemeral view state or user-controlled protection.
+ * These depend on ephemeral view state, user-controlled protection, or a
+ * browser measurement the agent has no way to produce.
  */
 export const UI_ONLY_CANVAS_COMMAND_TYPES = [
   'SET_NODE_LOCKED',
   'SET_NODE_SELECTION',
   'CHANGE_NODE_TYPE',
+  'APPLY_MEASURED_HEIGHT',
 ] as const;
 export type UiOnlyCanvasCommandType =
   (typeof UI_ONLY_CANVAS_COMMAND_TYPES)[number];

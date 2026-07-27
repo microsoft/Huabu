@@ -64,6 +64,7 @@ import { i18n } from '@/i18n';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { createIntentActionWindow } from './canvasStore/intentActionWindow';
+import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
 import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
@@ -104,6 +105,7 @@ import type {
   CanvasCommandType,
   CanvasExecution,
   CanvasExecutionSource,
+  CanvasNodeMeasuredHeightUpdate,
   CanvasNodeType,
   CanvasViewport,
   IntentContext,
@@ -609,6 +611,19 @@ type RFState = {
    * gesture so it collapses into a single undo entry.
    */
   setNoteHeightMode: (nodeIds: string[], mode: 'auto' | 'fixed') => void;
+  /**
+   * Apply completed content measurements to auto-height nodes.
+   *
+   * Derived geometry, not user intent: the batch takes no undo snapshot
+   * and needs no `beginGesture`. Items targeting a node the user has
+   * since pinned are dropped by the handler rather than rejected here.
+   *
+   * Callers pass an intrinsic height (measured at the node type's
+   * reference width, excluding chrome) together with the
+   * `AutoHeightKey` it was measured under, so a later reader can tell
+   * whether it still describes the node's content.
+   */
+  applyMeasuredHeights: (items: CanvasNodeMeasuredHeightUpdate[]) => void;
   /** Take a pre-resize snapshot so the final SET_NODE_GEOMETRY can be undone. */
   onNodeResizeStart: () => void;
   rfInstance: ReactFlowInstance | null;
@@ -1905,9 +1920,15 @@ const useCanvasStore = create<RFState>()(
         // first mount. This is a defensive boundary guard on untrusted
         // on-disk state — see the same invariant enforced in
         // `applyDeltasFromAgent`.
-        const loadedNodes = normalizeTreeOrder(
-          reconcileQuestionStatus(state.nodes ?? []) as NestableNode[],
-        ) as Node[];
+        // Give every toggleable-height node an explicit `heightMode` and
+        // a numeric `style.height` materialized from its stored
+        // measurement hint, so geometry no longer depends on whether the
+        // node has ever been rendered. See `normalizeNodeHeights`.
+        const loadedNodes = normalizeNodeHeights(
+          normalizeTreeOrder(
+            reconcileQuestionStatus(state.nodes ?? []) as NestableNode[],
+          ) as Node[],
+        );
         const loadedEdges = state.edges ?? [];
         const loadedNodeRefSignature = nodeRefTopologySignature(loadedNodes);
         const previousNodeRefSignature =
@@ -3225,6 +3246,14 @@ const useCanvasStore = create<RFState>()(
       // refit — so this action doesn't need its own timing dance.
       get().beginGesture('SET_NODE_GEOMETRY');
       get().setNodeGeometry(items);
+    },
+
+    applyMeasuredHeights: (items) => {
+      if (items.length === 0) return;
+      get().executeCommands(
+        [{ type: 'APPLY_MEASURED_HEIGHT', items }],
+        'system',
+      );
     },
 
     updateNodeData: (nodeId, patch) => {

@@ -123,6 +123,8 @@ export type {
   CanvasNodeParentUpdate,
   CanvasNodeGeometryUpdate,
   CanvasNodeLockUpdate,
+  CanvasNodeMeasuredHeightUpdate,
+  NodeGeometrySize,
   CanvasEdgeCreateInput,
   CanvasEdgeStylePatch,
   PortalNodePinUpdate,
