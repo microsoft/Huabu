@@ -19,7 +19,7 @@ The main process validates every bridged mutation against its own secret-id whit
 
 The `pi-ai` credential adapter preserves the `CredentialStore.modify` contract during concurrent OAuth refresh: a returned credential replaces the stored value, while `undefined` leaves the current value unchanged because another locked caller may already have refreshed it. Credential removal is performed only through `delete`; treating a no-op `modify` as deletion would erase a freshly rotated Copilot credential when several requests observe expiry together.
 
-The source workflows `pnpm dev` and `pnpm dev:desktop` run the server as an external development process, so they use the standalone backend rather than Electron `safeStorage`. They require a stable `HUABU_SECRET_KEY` when the Settings UI persists credentials, when legacy plaintext credentials need migration, or when an encrypted credential file already exists.
+The source workflows `pnpm dev` and `pnpm dev:desktop` run the server as an external development process, so they use the standalone backend rather than Electron `safeStorage`. They require a stable `HUABU_SECRET_KEY` when the Settings UI persists credentials or when an encrypted credential file already exists.
 
 For standalone deployments, the encrypted primary backend wins over the environment fallback. Writes target only the primary backend, and the application never writes to `.env`. The one deliberate `process.env` mutation is at startup: `initializeSecretStore()` reads `HUABU_SECRET_KEY` once, parses it into the in-memory `EncryptedFileSecretStore` master key, then deletes `process.env.HUABU_SECRET_KEY` so the raw key can never be inherited by a forked child process (the agentlet daemon and the external agents it spawns). This is defense in depth alongside the agentlet transport's `HUABU_` namespace strip — see [`agent-reachback.md`](./agent-reachback.md) ("Environment injection and isolation"). A `.env` file is merely one way `dotenv` can populate `process.env` during startup.
 
@@ -35,7 +35,7 @@ Windows uses DPAPI, macOS uses Keychain, and Linux requires Secret Service or KW
 
 Non-secret provider configuration remains in `llm-config.json` and integration status is derived from the secure in-memory snapshot. Environment-variable fallbacks remain supported and are not migrated because they are deployment-owned configuration rather than UI-owned persisted values.
 
-`llm-config.json` is scrubbed of legacy plaintext `apiKey` fields on **both** the read and the write boundary, so a pre-`SecretStore` data directory can never feed a plaintext credential to the model builders and can never have one written back. Key resolution reads the secret store only; there is no caller-supplied or on-disk fallback. Moving a legacy value into the encrypted store is owned exclusively by the migration described below, which reads the file directly instead of through the config module.
+Key resolution reads the secret store only; there is no caller-supplied or on-disk plaintext fallback.
 
 ## Standalone encrypted store
 
@@ -43,15 +43,7 @@ Non-secret provider configuration remains in `llm-config.json` and integration s
 
 Every mutation constructs a new encrypted snapshot, atomically replaces the file, reads it back, authenticates and decrypts every entry, and only then publishes the new in-memory snapshot. A wrong key, malformed file, modified ciphertext, or authentication failure aborts startup or rejects the write.
 
-The standalone server may run without `HUABU_SECRET_KEY` when it has no encrypted file and no legacy plaintext credentials. This environment-only mode supports headless and container deployments but deliberately rejects Settings writes. If an encrypted file or legacy plaintext credential exists without a key, startup fails with an actionable error instead of silently discarding or persisting credentials insecurely.
-
-## Automatic plaintext migration
-
-Plaintext migration exists only in the standalone server. When `HUABU_SECRET_KEY` is configured, startup collects legacy fields from `llm-config.json`, `integrations.json`, and `oauth-credentials.json`, writes missing values to `encrypted-secrets.json`, verifies the authenticated file, and then removes only the plaintext fields. Repeated migration is idempotent, and existing encrypted values win over stale plaintext from an interrupted earlier attempt.
-
-Without a master key the standalone server still _detects_ legacy plaintext and refuses to start, rather than booting in environment-only mode and leaving the operator's credentials readable on disk indefinitely.
-
-Electron no longer migrates. Plaintext credentials were written only by desktop builds predating the `safeStorage` store (2026-07-10, before the first `v0.9.x` release), so the migration served no shipped version and was deleted along with its duplicate of the collect/scrub rules. Electron's data directory is therefore only ever read as the versioned `secure-secrets.json` vault.
+The standalone server may run without `HUABU_SECRET_KEY` when it has no encrypted file. This environment-only mode supports headless and container deployments but deliberately rejects Settings writes. If an encrypted file exists without a key, startup fails with an actionable error instead of silently discarding credentials.
 
 ## Code entry points
 
@@ -64,7 +56,6 @@ Electron no longer migrates. Plaintext credentials were written only by desktop 
 | [`apps/server/src/security/secret-ids.ts`](../../apps/server/src/security/secret-ids.ts)                                   | Canonical secret-id constants, provider-id derivation, and id validation.    |
 | [`apps/server/src/security/encrypted-file-secret-store.ts`](../../apps/server/src/security/encrypted-file-secret-store.ts) | Standalone AES-256-GCM persistence and authenticated read-back verification. |
 | [`apps/server/src/security/environment-secret-store.ts`](../../apps/server/src/security/environment-secret-store.ts)       | Read-only deployment environment fallback.                                   |
-| [`apps/server/src/security/plaintext-secret-migration.ts`](../../apps/server/src/security/plaintext-secret-migration.ts)   | Standalone legacy plaintext discovery, encryption, verification, and scrub.  |
 | [`apps/server/src/security/secret-ids.ts`](../../apps/server/src/security/secret-ids.ts)                                   | Stable credential identifiers used by server modules.                        |
 | [`apps/server/src/modules/agent/llm.ts`](../../apps/server/src/modules/agent/llm.ts)                                       | Chat, utility, and image API-key resolution.                                 |
 | [`apps/server/src/modules/agent/oauth.ts`](../../apps/server/src/modules/agent/oauth.ts)                                   | Copilot OAuth credential persistence.                                        |
