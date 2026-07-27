@@ -159,6 +159,39 @@ describe('resolveHeightMode', () => {
       resolveHeightMode(node({ type: 'note', style: { height: 320 } })),
     ).toBe('fixed');
   });
+
+  it('reads a measurement hint as proof of renderer ownership', () => {
+    // A hint only exists where a measurement produced it, and
+    // measurements only run on auto nodes. Falling through to the
+    // legacy height check here would convert every measured note to
+    // `fixed` on its next load.
+    expect(
+      resolveHeightMode(
+        node({
+          type: 'note',
+          style: { height: 268 },
+          data: {
+            autoHeight: { intrinsicHeight: 260, measuredFor: 'k1' },
+          },
+        }),
+      ),
+    ).toBe('auto');
+  });
+
+  it('still lets an explicit flag override a stored hint', () => {
+    expect(
+      resolveHeightMode(
+        node({
+          type: 'note',
+          style: { height: 700 },
+          data: {
+            heightMode: 'fixed',
+            autoHeight: { intrinsicHeight: 260, measuredFor: 'k1' },
+          },
+        }),
+      ),
+    ).toBe('fixed');
+  });
 });
 
 describe('intrinsicToLayoutHeight', () => {

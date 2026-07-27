@@ -1,5 +1,7 @@
 import { noop, type CommandDefinition } from './types.js';
 import { createId, type CanvasCommand } from '../../index.js';
+import { materializeAutoHeight } from '../height/materialize.js';
+import { getHeightPolicy } from '../height/policy.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
 import {
   getNodeCreationStyle,
@@ -108,7 +110,19 @@ const createNodes: CommandDefinition<Cmd> = {
           ? { ...inputStyle, accent: defaultAccent }
           : inputStyle;
 
-      const node: Node = {
+      // A toggleable-height type records its owner explicitly at birth.
+      // Without it the node carries a materialized number and no
+      // ownership, and `resolveHeightMode`'s legacy fallback would read
+      // that number as a pinned height on the next load.
+      const isToggleableHeight =
+        getHeightPolicy(nodeType).kind === 'toggleable';
+      const heightMode = isToggleableHeight
+        ? typeof geometryStyle.height === 'number'
+          ? 'fixed'
+          : 'auto'
+        : undefined;
+
+      const rawNode: Node = {
         id: nodeId,
         type: nodeType,
         position: input.position ?? { x: 0, y: 0 },
@@ -117,11 +131,26 @@ const createNodes: CommandDefinition<Cmd> = {
           ...(Object.keys(styleWithAccent).length > 0
             ? { style: styleWithAccent }
             : {}),
+          ...(heightMode ? { heightMode } : {}),
           label,
           type: nodeType,
         },
         style: geometryStyle,
       };
+
+      // Materialize immediately so the node has a real footprint before
+      // anything has rendered it. The end-of-batch `fitFrames` pass and
+      // the grid solver run in this same batch, and a height of 0 would
+      // fit the parent frame to nothing and then jump when the node
+      // mounts.
+      //
+      // Only toggleable types: `text` / `question` size themselves
+      // through a separate mechanism that still expresses auto as the
+      // absence of a height, and pinning a nominal default over content
+      // they measure themselves would be a regression.
+      const node: Node = isToggleableHeight
+        ? materializeAutoHeight(rawNode)
+        : rawNode;
 
       // ---------------------------------------------------------------
       // 3. Assign parent frame and queue its label for resolution.
