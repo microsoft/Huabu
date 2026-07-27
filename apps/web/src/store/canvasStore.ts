@@ -85,12 +85,15 @@ import {
   putCanvas,
 } from '../api';
 import { agentApi } from '../api/agent';
-import { cloneArtifactToCanvas } from '../api/artifact';
+import { cloneArtifactToCanvas, resolveArtifactUrl } from '../api/artifact';
 import { CanvasConflictError } from '../api/canvas';
 import { toast, dismissToast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
-import { copyToClipboard } from '../utils/io/clipboard';
+import {
+  copyImageToClipboard,
+  copyToClipboard,
+} from '../utils/io/clipboard';
 
 import type {
   FrameFitPreview,
@@ -3382,6 +3385,19 @@ const useCanvasStore = create<RFState>()(
         __sediment_edges__: clonedEdges,
         __sediment_canvas_id__: get().canvasId,
       });
+      const copiedImageSrc =
+        cloned.length === 1 &&
+        cloned[0].type === 'image' &&
+        typeof cloned[0].data?.src === 'string'
+          ? cloned[0].data.src
+          : undefined;
+      if (copiedImageSrc) {
+        void copyImageToClipboard(
+          payload,
+          resolveArtifactUrl(copiedImageSrc, get().canvasId ?? undefined),
+        );
+        return;
+      }
       // `copyToClipboard` guards against `navigator.clipboard` being
       // undefined (insecure contexts, older browsers) and falls back to
       // a hidden textarea + `document.execCommand('copy')`.

@@ -74,6 +74,8 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 7. **Design tokens only** — never raw hex / Tailwind palette / ShadCN aliases. The token declarations in [`apps/web/src/index.css`](../../apps/web/src/index.css) are authoritative; reusable UI contracts live in [`apps/web/src/components/Common/`](../../apps/web/src/components/Common/).
 8. **Development playgrounds** belong in `pages/playground/`, use route-level lazy imports, are registered only when `import.meta.env.DEV` is true, and live outside `WorkspaceGuardLayout` so visual testing does not require an active workspace.
 
+Canvas copy always keeps the serialized node payload in `text/plain` so Huabu-to-Huabu paste can preserve node identity and artifact ownership. When the copied set contains exactly one image node, the clipboard also carries an `image/png` representation for pasting into external applications; unsupported Clipboard APIs, inaccessible sources, and image conversion failures fall back to the serialized node payload.
+
 ## Workspace routes and World
 
 `/` is the workspace landing redirect. When the persisted World setting is enabled it redirects to the hidden World through `/canvas/:worldCanvasId`; otherwise it redirects to `/spaces`. The ordinary Space List remains a sibling page at `/spaces`, and every Canvas scope, including World, continues to use the existing `CanvasPage` and `/canvas/:canvasId` route.

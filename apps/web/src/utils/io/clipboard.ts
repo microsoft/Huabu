@@ -98,3 +98,52 @@ export const copyToClipboard = async (text: string) => {
   document.execCommand('copy');
   document.body.removeChild(textarea);
 };
+
+async function fetchImageAsPng(src: string): Promise<Blob> {
+  const response = await fetch(src);
+  if (!response.ok) throw new Error('Failed to fetch clipboard image');
+
+  const source = await response.blob();
+  if (source.type === 'image/png') return source;
+
+  const bitmap = await createImageBitmap(source);
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Canvas 2D context is unavailable');
+    context.drawImage(bitmap, 0, 0);
+
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error('Failed to encode clipboard image'));
+      }, 'image/png');
+    });
+  } finally {
+    bitmap.close();
+  }
+}
+
+/** Write one image for external apps while retaining Huabu's node payload. */
+export async function copyImageToClipboard(
+  text: string,
+  imageSrc: string,
+): Promise<void> {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+    await copyToClipboard(text);
+    return;
+  }
+
+  try {
+    const item = new ClipboardItem({
+      'text/plain': new Blob([text], { type: 'text/plain' }),
+      'image/png': fetchImageAsPng(imageSrc),
+    });
+    await navigator.clipboard.write([item]);
+  } catch {
+    await copyToClipboard(text);
+  }
+}
