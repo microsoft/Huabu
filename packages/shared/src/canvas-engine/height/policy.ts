@@ -144,12 +144,11 @@ export type { HeightMode };
  * is the only reason the fallback exists; once a node has been normalised
  * on load it is never consulted again.
  *
- * The fallback checks the measurement hint *before* the height, because
- * the legacy encoding stopped being true the moment auto heights became
- * materialized. A hint only exists where a measurement produced it, and
- * measurements only ever run on auto nodes — so a hint is positive proof
- * of renderer ownership, and reading the number alone would silently
- * convert every measured note to `fixed` on its next load.
+ * The fallback is consulted only for nodes that predate the field —
+ * creation and load normalization both write it explicitly, so anything
+ * this codebase produces carries an owner. Notably it must *not* read
+ * the measurement hint as evidence: a pinned note records one too, since
+ * the hint describes the content rather than who owns the box.
  *
  * A `content` node is always auto regardless of what is stored, because a
  * stale `style.height` on such a node is a leftover, not an intent.
@@ -159,13 +158,9 @@ export function resolveHeightMode(node: Node): HeightMode {
   if (policy.kind === 'content') return 'auto';
   if (policy.kind === 'manual') return 'fixed';
 
-  const data = node.data as
-    | { heightMode?: unknown; autoHeight?: unknown }
-    | undefined;
-  const stored = data?.heightMode;
+  const stored = (node.data as { heightMode?: unknown } | undefined)
+    ?.heightMode;
   if (stored === 'auto' || stored === 'fixed') return stored;
-
-  if (data?.autoHeight) return 'auto';
 
   const height = (node.style as { height?: unknown } | undefined)?.height;
   return typeof height === 'number' && Number.isFinite(height)

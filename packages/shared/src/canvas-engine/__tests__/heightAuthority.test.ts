@@ -188,21 +188,33 @@ describe('APPLY_MEASURED_HEIGHT', () => {
     expect(writeResult.snapshotNeeded).toBe(false);
   });
 
-  it('drops a measurement that lands after the user pinned the node', () => {
+  it('records the hint on a pinned note without touching its geometry', () => {
+    // This is what makes a later switch to auto land in one step: the
+    // pinned note already knows what its content measures.
     const pinned = note('n1', {
       style: { width: 400, height: 700 },
       data: { type: 'note', content: CONTENT, heightMode: 'fixed' },
     } as Partial<CanvasNode>);
-    const start = [pinned];
 
+    const { writeResult } = run(
+      [{ type: 'APPLY_MEASURED_HEIGHT', items: [measurement] }],
+      [pinned],
+    );
+
+    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(700);
+    expect(dataOf(writeResult.nodes, 'n1').autoHeight).toEqual({
+      intrinsicHeight: 260,
+      measuredFor: KEY,
+    });
+  });
+
+  it('ignores a type that never auto-sizes', () => {
+    const start = [note('n1', { type: 'image', data: { type: 'image' } })];
     const { writeResult } = run(
       [{ type: 'APPLY_MEASURED_HEIGHT', items: [measurement] }],
       start,
     );
-
     expect(writeResult.nodes).toBe(start);
-    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(700);
-    expect(dataOf(writeResult.nodes, 'n1').autoHeight).toBeUndefined();
   });
 
   it('reuses node references for an unchanged re-measurement', () => {

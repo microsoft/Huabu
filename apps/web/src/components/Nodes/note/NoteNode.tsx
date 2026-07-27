@@ -224,15 +224,19 @@ export const NoteNode = memo(
     // decides whether it is worth committing and when; the engine owns
     // the conversion to a layout height and the write to `style.height`.
     // Nothing here sizes the node.
+    //
+    // Reported in fixed mode too. The hint describes the content, not who
+    // owns the box, and recording it is what lets a later switch to auto
+    // land on the right height in one step rather than collapsing to the
+    // policy minimum and expanding.
     useEffect(() => {
       if (contentHeight <= 0) return;
-      if (isFixedHeight) return;
       proposeMeasuredHeight({
         nodeId: id,
         intrinsicHeight: contentHeight,
         measuredFor: autoHeightKey({ data } as unknown as Node),
       });
-    }, [contentHeight, data, id, isFixedHeight]);
+    }, [contentHeight, data, id]);
 
     // A pending proposal for an unmounting node describes a measurement
     // nobody is waiting for. Dropping it also keeps a virtualization

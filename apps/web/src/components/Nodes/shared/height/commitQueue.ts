@@ -29,6 +29,7 @@
  */
 
 import {
+  getHeightPolicy,
   intrinsicToLayoutHeight,
   resolveHeightMode,
 } from '@sediment/shared/canvas-engine';
@@ -97,9 +98,13 @@ function flushHeightCommits(): void {
   for (const proposal of pending.values()) {
     const node = nodes.find((n) => n.id === proposal.nodeId);
     if (!node) continue;
-    // The user pinned the node while the measurement was in flight. The
-    // proposal describes a state that no longer exists.
-    if (resolveHeightMode(node) !== 'auto') continue;
+    if (getHeightPolicy(node.type).kind !== 'toggleable') continue;
+
+    // A pinned note still records what its content measures. The hint
+    // describes the content, not who owns the height — and without it,
+    // switching a pinned note to auto would have nothing to materialize
+    // from and would collapse to the policy minimum before expanding.
+    const ownsGeometry = resolveHeightMode(node) === 'auto';
 
     const style = node.style as
       | { width?: unknown; height?: unknown }
@@ -113,7 +118,8 @@ function flushHeightCommits(): void {
     const current =
       typeof style?.height === 'number' ? style.height : undefined;
 
-    const geometrySettled = current !== undefined && next === current;
+    const geometrySettled =
+      !ownsGeometry || (current !== undefined && next === current);
     // Geometry being settled is not enough to skip: if the content changed
     // without changing the height, the stored hint still points at the old
     // content and would be re-measured on every load forever. Commit so

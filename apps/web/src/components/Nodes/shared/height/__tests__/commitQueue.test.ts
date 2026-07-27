@@ -99,13 +99,28 @@ describe('height commit queue — threshold', () => {
     expect(applyMeasuredHeights).toHaveBeenCalledTimes(1);
   });
 
-  it('skips a node the user pinned while the measurement was in flight', () => {
+  it('still records a measurement for a node the user pinned mid-flight', () => {
+    // The hint describes the content, not who owns the box. Recording it
+    // is what lets a later switch to auto land in one step.
     proposeMeasuredHeight({
       nodeId: 'n1',
       intrinsicHeight: 400,
       measuredFor: 'k1',
     });
     storeNodes = [note({ data: { type: 'note', heightMode: 'fixed' } })];
+    __flushHeightCommitsNow();
+    expect(applyMeasuredHeights).toHaveBeenCalledWith([
+      { nodeId: 'n1', intrinsicHeight: 400, measuredFor: 'k1' },
+    ]);
+  });
+
+  it('drops a measurement for a type that never auto-sizes', () => {
+    proposeMeasuredHeight({
+      nodeId: 'n1',
+      intrinsicHeight: 400,
+      measuredFor: 'k1',
+    });
+    storeNodes = [note({ type: 'image', data: { type: 'image' } })];
     __flushHeightCommitsNow();
     expect(applyMeasuredHeights).not.toHaveBeenCalled();
   });
@@ -233,8 +248,18 @@ describe('height commit queue — gesture suspension', () => {
       intrinsicHeight: 400,
       measuredFor: 'k1',
     });
-    // The gesture was a resize that pinned the node.
-    storeNodes = [note({ data: { type: 'note', heightMode: 'fixed' } })];
+    // Something else settled the node to this exact state during the
+    // gesture, so by the time the queue drains there is nothing to do.
+    storeNodes = [
+      note({
+        style: { width: 400, height: 408 },
+        data: {
+          type: 'note',
+          heightMode: 'auto',
+          autoHeight: { intrinsicHeight: 400, measuredFor: 'k1' },
+        },
+      }),
+    ];
     resumeHeightCommits();
     __flushHeightCommitsNow();
     expect(applyMeasuredHeights).not.toHaveBeenCalled();

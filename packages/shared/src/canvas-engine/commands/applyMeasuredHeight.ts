@@ -24,7 +24,7 @@
 
 import { noop, type CommandDefinition } from './types.js';
 import { intrinsicToLayoutHeight } from '../height/compute.js';
-import { resolveHeightMode } from '../height/policy.js';
+import { getHeightPolicy, resolveHeightMode } from '../height/policy.js';
 
 import type { CanvasCommand } from '../../index.js';
 import type { AutoHeightHint } from '../../types/canvas/node.js';
@@ -52,15 +52,30 @@ const applyMeasuredHeight: CommandDefinition<Cmd> = {
       const update = updates.get(node.id);
       if (!update) return node;
 
-      // A measurement that lands after the user pinned the node, or on a
-      // type that never auto-sizes, describes a state that no longer
-      // exists. Dropping it is correct, not an error.
-      if (resolveHeightMode(node) !== 'auto') return node;
+      // A type that never auto-sizes has no use for a content
+      // measurement. Dropping it is correct, not an error.
+      if (getHeightPolicy(node.type).kind !== 'toggleable') return node;
       if (
         !Number.isFinite(update.intrinsicHeight) ||
         update.intrinsicHeight <= 0
       ) {
         return node;
+      }
+
+      const hint: AutoHeightHint = {
+        intrinsicHeight: update.intrinsicHeight,
+        measuredFor: update.measuredFor,
+        ...(update.provisional ? { provisional: true } : {}),
+      };
+
+      // A pinned node records the hint but keeps its geometry: the
+      // measurement describes the content, the user owns the box. The
+      // hint is what makes a later switch to auto land on the right
+      // height in one step instead of collapsing first.
+      if (resolveHeightMode(node) !== 'auto') {
+        if (isSameHint(node, hint)) return node;
+        changed = true;
+        return { ...node, data: { ...node.data, autoHeight: hint } };
       }
 
       const style = (node.style ?? {}) as Record<string, unknown>;
@@ -70,12 +85,6 @@ const applyMeasuredHeight: CommandDefinition<Cmd> = {
         node.type,
         width,
       );
-
-      const hint: AutoHeightHint = {
-        intrinsicHeight: update.intrinsicHeight,
-        measuredFor: update.measuredFor,
-        ...(update.provisional ? { provisional: true } : {}),
-      };
 
       const measured = node.measured as
         | { width?: number; height?: number }

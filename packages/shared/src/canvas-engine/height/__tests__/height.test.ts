@@ -160,22 +160,20 @@ describe('resolveHeightMode', () => {
     ).toBe('fixed');
   });
 
-  it('reads a measurement hint as proof of renderer ownership', () => {
-    // A hint only exists where a measurement produced it, and
-    // measurements only run on auto nodes. Falling through to the
-    // legacy height check here would convert every measured note to
-    // `fixed` on its next load.
+  it('does not read a measurement hint as evidence of ownership', () => {
+    // A pinned note records a hint too — it describes the content, not
+    // who owns the box — so the hint cannot stand in for the flag.
     expect(
       resolveHeightMode(
         node({
           type: 'note',
-          style: { height: 268 },
+          style: { height: 700 },
           data: {
             autoHeight: { intrinsicHeight: 260, measuredFor: 'k1' },
           },
         }),
       ),
-    ).toBe('auto');
+    ).toBe('fixed');
   });
 
   it('still lets an explicit flag override a stored hint', () => {
@@ -185,12 +183,12 @@ describe('resolveHeightMode', () => {
           type: 'note',
           style: { height: 700 },
           data: {
-            heightMode: 'fixed',
+            heightMode: 'auto',
             autoHeight: { intrinsicHeight: 260, measuredFor: 'k1' },
           },
         }),
       ),
-    ).toBe('fixed');
+    ).toBe('auto');
   });
 });
 
