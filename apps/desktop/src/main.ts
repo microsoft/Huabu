@@ -1121,7 +1121,6 @@ app.whenReady().then(async () => {
       }
       const dataDir = join(app.getPath('userData'), 'data');
       secureSecretStore = new DesktopSecureSecretStore(dataDir, safeStorage);
-      secureSecretStore.migratePlaintextFiles();
     }
 
     // Augment PATH from the user's login shell BEFORE forking the

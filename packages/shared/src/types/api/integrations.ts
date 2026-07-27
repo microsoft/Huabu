@@ -20,7 +20,7 @@ import { z } from 'zod';
  * Read-only status of stored integration credentials, returned by
  * `GET /api/integrations/config`. Contains no plaintext secrets — only
  * a boolean per integration indicating whether a key has been saved to
- * the server's `data/integrations.json`.
+ * the server's SecretStore.
  */
 export interface IntegrationsConfig {
   /** Whether a Tavily (web search) API key has been saved. */

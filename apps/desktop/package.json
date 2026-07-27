@@ -7,6 +7,7 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run src",
     "icons:build": "node scripts/build-icons.mjs",
     "dist": "pnpm run build && electron-builder --publish never",

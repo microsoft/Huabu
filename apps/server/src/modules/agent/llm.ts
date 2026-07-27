@@ -201,24 +201,29 @@ const CONFIG_FILE = getDataFilePath('llm-config.json');
 /**
  * Effective active configuration assembled from the persisted store —
  * the shape consumed by `buildModel` / `resolveApiKey` etc.
+ *
+ * Deliberately carries **no** `apiKey`: credentials are resolved from the
+ * SecretStore by provider id, never from `llm-config.json`.
  */
 interface PersistedConfig {
   provider: string;
   model: string;
-  apiKey?: string;
   baseUrl?: string;
   apiVersion?: string;
 }
 
 /**
- * Per-provider persisted fields. Stored in a map keyed by provider id so
- * switching providers doesn't wipe the previous provider's credentials
- * (e.g. switching from Azure → OpenAI → Azure restores the Azure
- * endpoint / deployment / key / api version exactly as you left them).
+ * Per-provider **non-secret** persisted fields. Stored in a map keyed by
+ * provider id so switching providers doesn't wipe the previous provider's
+ * settings (e.g. switching from Azure → OpenAI → Azure restores the Azure
+ * endpoint / deployment / api version exactly as you left them).
+ *
+ * The provider's api key is deliberately absent: it lives in the SecretStore
+ * under {@link llmProviderApiKeySecretId}, so it survives the same switch
+ * without ever being written to `llm-config.json`.
  */
 interface ProviderPersisted {
   model?: string;
-  apiKey?: string;
   baseUrl?: string;
   apiVersion?: string;
 }
@@ -244,7 +249,6 @@ interface ImageConfigPersisted {
    */
   modelFamily?: ImageModelFamily;
   apiVersion?: string;
-  apiKey?: string;
   quality?: 'low' | 'medium' | 'high' | 'auto';
 }
 
@@ -264,9 +268,9 @@ interface PersistedStore {
    * Utility-tier model config (labeling / summaries / keywords). Lives at
    * the top level, independent of `active`. Absent (or `provider` unset)
    * means "follow the chat model". Note: **no `apiKey` here** — the
-   * utility model's credential is resolved from the shared `providers` map
-   * keyed by `provider`, so a key entered in the utility panel is stored
-   * once and reused whether the same provider drives chat or utility.
+   * utility model's credential is resolved from the SecretStore by
+   * `provider`, so a key entered in the utility panel is stored once and
+   * reused whether the same provider drives chat or utility.
    */
   utilityConfig?: UtilityConfigPersisted;
 }
@@ -284,7 +288,7 @@ interface UtilityConfigPersisted {
 
 /**
  * Load + migrate the persisted store. Two migrations applied lazily:
- *  1. **Legacy single-config shape** `{ provider, model, apiKey,
+ *  1. **Legacy single-config shape** `{ provider, model,
  *     baseUrl, apiVersion, imageModel?, imageQuality? }` \u2192 the new
  *     `{ active, providers: { [id]: \u2026 } }` map shape, with image
  *     fields lifted into the new top-level `imageConfig`.
@@ -310,7 +314,6 @@ function loadPersistedStore(): PersistedStore {
       const provider = parsed.provider;
       const entry: ProviderPersisted = {};
       if (typeof parsed.model === 'string') entry.model = parsed.model;
-      if (typeof parsed.apiKey === 'string') entry.apiKey = parsed.apiKey;
       if (typeof parsed.baseUrl === 'string') entry.baseUrl = parsed.baseUrl;
       if (typeof parsed.apiVersion === 'string') {
         entry.apiVersion = parsed.apiVersion;
@@ -360,7 +363,6 @@ function loadPersistedStore(): PersistedStore {
       const migrated: ImageConfigPersisted = { provider: 'azure-openai' };
       if (azureEntry.baseUrl) migrated.baseUrl = azureEntry.baseUrl;
       if (azureEntry.apiVersion) migrated.apiVersion = azureEntry.apiVersion;
-      if (azureEntry.apiKey) migrated.apiKey = azureEntry.apiKey;
       if (azureEntry.imageModel) migrated.model = azureEntry.imageModel;
       if (azureEntry.imageQuality) migrated.quality = azureEntry.imageQuality;
       store.imageConfig = migrated;
@@ -381,7 +383,7 @@ function loadPersistedStore(): PersistedStore {
 /**
  * Build an {@link ImageConfigPersisted} from a legacy top-level
  * config blob, falling back to the migrated chat entry's
- * endpoint / apiVersion / apiKey when the legacy file already has
+ * endpoint / apiVersion when the legacy file already has
  * an `imageModel` / `imageQuality` but no dedicated image
  * credentials. Returns `null` when there is nothing image-related
  * to migrate.
@@ -403,15 +405,12 @@ function extractLegacyImageConfig(
   const migrated: ImageConfigPersisted = { provider: 'azure-openai' };
   if (chatEntry.baseUrl) migrated.baseUrl = chatEntry.baseUrl;
   if (chatEntry.apiVersion) migrated.apiVersion = chatEntry.apiVersion;
-  if (chatEntry.apiKey) migrated.apiKey = chatEntry.apiKey;
   if (imageModel) migrated.model = imageModel;
   if (imageQuality) migrated.quality = imageQuality;
   return migrated;
 }
 
 function savePersistedStore(store: PersistedStore): void {
-  for (const entry of Object.values(store.providers)) delete entry.apiKey;
-  if (store.imageConfig) delete store.imageConfig.apiKey;
   const dir = dirname(CONFIG_FILE);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -434,7 +433,6 @@ function buildPersistedConfig(
   return {
     provider: providerId,
     model: entry.model ?? '',
-    ...(entry.apiKey ? { apiKey: entry.apiKey } : {}),
     ...(entry.baseUrl ? { baseUrl: entry.baseUrl } : {}),
     ...(entry.apiVersion ? { apiVersion: entry.apiVersion } : {}),
   };
@@ -450,7 +448,6 @@ function loadPersistedConfig(): PersistedConfig | null {
 // ==================== Runtime State ====================
 
 let cachedModel: Model<Api> | null = null;
-let cachedApiKey: string | null = null;
 let activeConfig: PersistedConfig | null = null;
 
 /**
@@ -461,29 +458,28 @@ let activeConfig: PersistedConfig | null = null;
  */
 let cachedUtilityModel: Model<Api> | null = null;
 
-/** Resolve the API key for a provider from memory, persisted config, or env vars. */
-function resolveApiKey(
-  providerId: string,
-  explicitKey?: string,
-): string | null {
-  return (
-    getSecret(llmProviderApiKeySecretId(providerId)) ?? explicitKey ?? null
-  );
+/**
+ * Resolve the API key for a provider.
+ *
+ * The SecretStore is the only source: it covers UI-persisted credentials
+ * (encrypted file or Electron `safeStorage`) and deployment-owned environment
+ * variables. There is deliberately no caller-supplied or on-disk plaintext
+ * fallback.
+ */
+function resolveApiKey(providerId: string): string | null {
+  return getSecret(llmProviderApiKeySecretId(providerId));
 }
 
 /**
  * Resolve the API key for OAuth providers (async — may need token refresh).
  * Falls back to resolveApiKey for non-OAuth providers.
  */
-async function resolveApiKeyAsync(
-  providerId: string,
-  explicitKey?: string,
-): Promise<string | null> {
+async function resolveApiKeyAsync(providerId: string): Promise<string | null> {
   // OAuth providers (GitHub Copilot, OpenAI Codex) resolve an access token.
   if (isOAuthProvider(providerId)) {
     return getOAuthApiKey(providerId);
   }
-  return resolveApiKey(providerId, explicitKey);
+  return resolveApiKey(providerId);
 }
 
 /** Build a Model object for the active configuration. */
@@ -936,8 +932,9 @@ export async function setLLMConfig(
     }
   }
 
-  // Build the merged entry. `apiKey` / `baseUrl` / `apiVersion` semantics:
-  // omitted (undefined) → keep previous; empty string → clear.
+  // Build the merged entry. `baseUrl` / `apiVersion` semantics: omitted
+  // (undefined) → keep previous; empty string → clear. The same rule applies
+  // to `apiKey`, which is written to the SecretStore rather than this entry.
   const entry: ProviderPersisted = { ...existingEntry, model: resolvedModel };
   // The api key lives in the secret store while the rest lives in a plain
   // config file — two subsystems that cannot be written atomically. Snapshot
@@ -949,7 +946,6 @@ export async function setLLMConfig(
     apiKeySecretId = llmProviderApiKeySecretId(update.provider);
     previousApiKey = getPersistedSecret(apiKeySecretId);
     await setSecret(apiKeySecretId, update.apiKey || null);
-    delete entry.apiKey;
   }
   if (update.baseUrl !== undefined) {
     if (update.baseUrl) entry.baseUrl = update.baseUrl;
@@ -1000,7 +996,6 @@ export async function setLLMConfig(
   };
   activeConfig = persisted;
   cachedModel = null;
-  cachedApiKey = null;
   if (
     persisted.provider === 'openai' &&
     (update.apiKey !== undefined || update.baseUrl !== undefined)
@@ -1016,7 +1011,7 @@ export async function setLLMConfig(
   const isOAuth = providerInfo?.authType === 'oauth';
   const authenticated = isOAuth
     ? await verifyOAuthCredentials(persisted.provider)
-    : !!resolveApiKey(persisted.provider, persisted.apiKey);
+    : !!resolveApiKey(persisted.provider);
 
   return {
     provider: persisted.provider,
@@ -1085,7 +1080,6 @@ export async function setImageConfig(
   }
   if (update.apiKey !== undefined) {
     await setSecret(SECRET_IDS.imageApiKey, update.apiKey || null);
-    delete next.apiKey;
   }
   if (update.quality !== undefined) {
     // Enum schema rejects empty strings, so a present value always
@@ -1188,7 +1182,7 @@ export function getConfiguredImageModelFamily(): ImageModelFamily {
  *
  * No `apiKey` is attached — it is resolved per-provider at call time via
  * {@link resolveApiKey} / {@link resolveApiKeyAsync}, so the key entered in
- * the utility panel (stored in the shared `providers` map) is reused.
+ * the utility panel (stored in the SecretStore) is reused.
  */
 function loadUtilityPersistedConfig(): PersistedConfig | null {
   const u = loadPersistedStore().utilityConfig;
@@ -1240,9 +1234,10 @@ export async function getUtilityConfig(): Promise<LLMUtilityConfig> {
  * explicit > previously-saved > first built-in default. `baseUrl` /
  * `apiVersion` follow the omit=keep / empty=clear rule.
  *
- * The optional `apiKey` is written into the **shared** `providers` map
- * (not into `utilityConfig`), so entering a key here authenticates that
- * provider for both chat and utility (v1.5 inline-key flow).
+ * The optional `apiKey` is written into the **shared** per-provider
+ * SecretStore entry (not into `utilityConfig`), so entering a key here
+ * authenticates that provider for both chat and utility (v1.5 inline-key
+ * flow).
  */
 export async function setUtilityConfig(
   update: LLMUtilityConfigUpdate,
@@ -1292,8 +1287,6 @@ export async function setUtilityConfig(
       llmProviderApiKeySecretId(update.provider),
       update.apiKey || null,
     );
-    const entry = store.providers[update.provider];
-    if (entry) delete entry.apiKey;
   }
 
   savePersistedStore(store);
@@ -1588,11 +1581,11 @@ export function getLLMModel(): Model<Api> {
   if (cachedModel) return cachedModel;
 
   const cfg = ensureConfig();
-  cachedApiKey = resolveApiKey(cfg.provider, cfg.apiKey);
+  const apiKey = resolveApiKey(cfg.provider);
 
   // For OAuth providers, resolveApiKey may return null (async refresh needed)
   // Sync check — the actual async resolution happens in llmStream/llmComplete
-  if (!cachedApiKey) {
+  if (!apiKey) {
     const provInfo = getProviderCatalog().find((p) => p.id === cfg.provider);
     if (provInfo?.authType !== 'oauth') {
       throw new Error(
@@ -1615,7 +1608,7 @@ export function getLLMModel(): Model<Api> {
  */
 export async function ensureApiKey(): Promise<string> {
   const cfg = ensureConfig();
-  const key = await resolveApiKeyAsync(cfg.provider, cfg.apiKey);
+  const key = await resolveApiKeyAsync(cfg.provider);
   if (!key) {
     const provInfo = getProviderCatalog().find((p) => p.id === cfg.provider);
     throw new Error(
@@ -1625,7 +1618,6 @@ export async function ensureApiKey(): Promise<string> {
           : `Set the API key in .env or configure via Settings.`),
     );
   }
-  cachedApiKey = key;
   return key;
 }
 
@@ -1649,7 +1641,7 @@ function getProviderSpecificOptions(
 
 /** Resolve (and OAuth-refresh) the API key for an arbitrary config. */
 async function ensureApiKeyFor(cfg: PersistedConfig): Promise<string> {
-  const key = await resolveApiKeyAsync(cfg.provider, cfg.apiKey);
+  const key = await resolveApiKeyAsync(cfg.provider);
   if (!key) {
     const provInfo = getProviderCatalog().find((p) => p.id === cfg.provider);
     throw new Error(

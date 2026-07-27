@@ -11,10 +11,6 @@ import {
   parseServerMasterKey,
 } from './encrypted-file-secret-store.js';
 import { EnvironmentSecretStore } from './environment-secret-store.js';
-import {
-  hasPlaintextCredentials,
-  migratePlaintextCredentials,
-} from './plaintext-secret-migration.js';
 
 import type { SecretStore } from './secret-store-types.js';
 
@@ -51,7 +47,6 @@ export async function initializeSecretStore(): Promise<void> {
       parseServerMasterKey(encodedKey),
     );
     await store.initialize();
-    await migratePlaintextCredentials(dataDir, store);
     primaryStore = store;
     initialized = true;
     return;
@@ -60,11 +55,6 @@ export async function initializeSecretStore(): Promise<void> {
   if (existsSync(encryptedPath)) {
     throw new Error(
       'HUABU_SECRET_KEY is required to decrypt the existing standalone credential store',
-    );
-  }
-  if (hasPlaintextCredentials(dataDir)) {
-    throw new Error(
-      'Legacy plaintext credentials were found. Set HUABU_SECRET_KEY to migrate them securely.',
     );
   }
 

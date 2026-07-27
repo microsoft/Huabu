@@ -8,5 +8,8 @@
     "rootDir": "src",
     "types": ["node"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Tests are run by vitest, never emitted into `dist/` (and therefore never
+  // shipped inside app.asar).
+  "exclude": ["src/**/*.test.ts"]
 }
