@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   DESKTOP_SECRET_IDS,
   DesktopSecureSecretStore,
-  desktopLlmProviderApiKeySecretId,
   isDesktopSecretId,
 } from './secure-secrets';
 import {
@@ -35,97 +34,53 @@ afterEach(() => {
 });
 
 describe('DesktopSecureSecretStore', () => {
-  it('migrates all legacy credentials and removes their plaintext fields', () => {
+  it('encrypts values at rest and round-trips them through the vault', () => {
     const dataDir = createDataDir();
-    writeFileSync(
-      join(dataDir, 'llm-config.json'),
-      JSON.stringify({
-        active: 'openai',
-        providers: { openai: { model: 'gpt', apiKey: 'chat-secret' } },
-        imageConfig: { provider: 'azure-openai', apiKey: 'image-secret' },
-      }),
-    );
-    writeFileSync(
-      join(dataDir, 'integrations.json'),
-      JSON.stringify({
-        tavilyApiKey: 'tavily-secret',
-        rapidApiKey: 'rapid-secret',
-      }),
-    );
-    writeFileSync(
-      join(dataDir, 'oauth-credentials.json'),
-      JSON.stringify({ refresh: 'refresh-secret', access: 'access-secret' }),
-    );
-
+    const id = llmProviderApiKeySecretId('openai');
     const store = new DesktopSecureSecretStore(dataDir, codec);
-    store.migratePlaintextFiles();
-    store.migratePlaintextFiles();
 
-    expect(store.snapshot()).toMatchObject({
-      [desktopLlmProviderApiKeySecretId('openai')]: 'chat-secret',
-      [DESKTOP_SECRET_IDS.imageApiKey]: 'image-secret',
-      [DESKTOP_SECRET_IDS.tavilyApiKey]: 'tavily-secret',
-      [DESKTOP_SECRET_IDS.rapidApiKey]: 'rapid-secret',
+    store.set(id, 'chat-secret');
+    store.set(DESKTOP_SECRET_IDS.copilotOAuth, 'refresh-secret');
+
+    expect(store.snapshot()).toEqual({
+      [id]: 'chat-secret',
+      [DESKTOP_SECRET_IDS.copilotOAuth]: 'refresh-secret',
     });
-    const llm = JSON.parse(
-      readFileSync(join(dataDir, 'llm-config.json'), 'utf-8'),
-    );
-    expect(llm.providers.openai.apiKey).toBeUndefined();
-    expect(llm.imageConfig.apiKey).toBeUndefined();
-    expect(
-      JSON.parse(readFileSync(join(dataDir, 'integrations.json'), 'utf-8')),
-    ).toEqual({});
-    expect(
-      JSON.parse(
-        readFileSync(join(dataDir, 'oauth-credentials.json'), 'utf-8'),
-      ),
-    ).toEqual({});
     const encrypted = readFileSync(
       join(dataDir, 'secure-secrets.json'),
       'utf-8',
     );
     expect(encrypted).not.toContain('chat-secret');
     expect(encrypted).not.toContain('refresh-secret');
-  });
 
-  it('keeps an existing encrypted value and scrubs stale plaintext', () => {
-    const dataDir = createDataDir();
-    const store = new DesktopSecureSecretStore(dataDir, codec);
-    const id = desktopLlmProviderApiKeySecretId('openai');
-    store.set(id, 'new-secret');
-    writeFileSync(
-      join(dataDir, 'llm-config.json'),
-      JSON.stringify({
-        active: 'openai',
-        providers: { openai: { apiKey: 'stale-secret' } },
-      }),
+    // A reopened store must see exactly what the previous one persisted.
+    expect(new DesktopSecureSecretStore(dataDir, codec).snapshot()).toEqual(
+      store.snapshot(),
     );
-
-    store.migratePlaintextFiles();
-    store.set(id, 'newest-secret');
-
-    expect(store.snapshot()[id]).toBe('newest-secret');
-    expect(
-      JSON.parse(readFileSync(join(dataDir, 'llm-config.json'), 'utf-8'))
-        .providers.openai.apiKey,
-    ).toBeUndefined();
   });
 
-  it('retains plaintext when encrypted-value verification fails', () => {
+  it('removes an entry when a null value is written', () => {
     const dataDir = createDataDir();
-    const configPath = join(dataDir, 'integrations.json');
-    writeFileSync(configPath, JSON.stringify({ tavilyApiKey: 'keep-me' }));
+    const id = llmProviderApiKeySecretId('openai');
+    const store = new DesktopSecureSecretStore(dataDir, codec);
+
+    store.set(id, 'chat-secret');
+    store.set(id, null);
+
+    expect(store.snapshot()).toEqual({});
+    expect(new DesktopSecureSecretStore(dataDir, codec).snapshot()).toEqual({});
+  });
+
+  it('rejects a write whose encryption does not survive a decrypt check', () => {
+    const dataDir = createDataDir();
     const brokenCodec = {
       encryptString: (value: string) => Buffer.from(value, 'utf-8'),
       decryptString: () => 'wrong-value',
     };
     const store = new DesktopSecureSecretStore(dataDir, brokenCodec);
 
-    expect(() => store.migratePlaintextFiles()).toThrow(
-      'Secure credential migration verification failed',
-    );
-    expect(JSON.parse(readFileSync(configPath, 'utf-8')).tavilyApiKey).toBe(
-      'keep-me',
+    expect(() => store.set(DESKTOP_SECRET_IDS.tavilyApiKey, 'keep-me')).toThrow(
+      'Secure credential encryption verification failed',
     );
   });
 
@@ -152,19 +107,6 @@ describe('DesktopSecureSecretStore', () => {
     expect(() => new DesktopSecureSecretStore(dataDir, codec)).toThrow(
       /unsupported secure credential file version/i,
     );
-  });
-
-  it('fails closed on a corrupt legacy config instead of skipping migration', () => {
-    const dataDir = createDataDir();
-    const configPath = join(dataDir, 'llm-config.json');
-    writeFileSync(configPath, '{ broken');
-    const store = new DesktopSecureSecretStore(dataDir, codec);
-
-    expect(() => store.migratePlaintextFiles()).toThrow(
-      /corrupted credential file/i,
-    );
-    // The corrupt plaintext must be left untouched, not silently dropped.
-    expect(readFileSync(configPath, 'utf-8')).toBe('{ broken');
   });
 
   // Deferred: desktop multi-key writes go through ElectronSecretStore.setMany,
@@ -199,9 +141,6 @@ describe('secret-id parity with the server contract', () => {
 
   it('derives provider api-key ids identically to the server', () => {
     for (const provider of ['openai', 'azure-openai', 'a.b_c-1']) {
-      expect(desktopLlmProviderApiKeySecretId(provider)).toBe(
-        llmProviderApiKeySecretId(provider),
-      );
       expect(isDesktopSecretId(llmProviderApiKeySecretId(provider))).toBe(true);
     }
   });

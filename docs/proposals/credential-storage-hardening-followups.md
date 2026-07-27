@@ -27,17 +27,19 @@ Why deferred: `savePersistedStore` → `writeFileSync` plus the module-level pin
 
 Full fix: extract `savePersistedStore` (and the config read) into an injectable seam, then test both "config write fails → key restored" and "config write + rollback both fail → partial-commit error + log". Tracked as `it.todo` in [`llm.settings.test.ts`](../../apps/server/src/modules/agent/llm.settings.test.ts).
 
-## 3. De-duplicate the secret-id contract + migration rules — MEDIUM (highest anti-drift value)
+## 3. De-duplicate the secret-id contract — MEDIUM (highest anti-drift value)
 
-Secret-id constants, the provider-id regex, id generators, and the collect/scrub migration logic are duplicated across [`secret-ids.ts`](../../apps/server/src/security/secret-ids.ts) + [`plaintext-secret-migration.ts`](../../apps/server/src/security/plaintext-secret-migration.ts) and [`secure-secrets.ts`](../../apps/desktop/src/secure-secrets.ts). They have already drifted three times (azure guard, fsync discipline, fail-open reads).
+Secret-id constants, the provider-id regex, and the accept/reject decision are duplicated across [`secret-ids.ts`](../../apps/server/src/security/secret-ids.ts) and [`secure-secrets.ts`](../../apps/desktop/src/secure-secrets.ts).
 
-The dangerous class is **id drift**: desktop encrypts under one id string while the server reads another → the key silently "disappears", the hardest failure to trace.
+The collect/scrub migration rules used to be duplicated as well and had drifted three ways (azure precedence, fsync discipline, fail-open reads). That copy is gone: Electron's plaintext migration was deleted once release history showed no shipped desktop version had ever written plaintext credentials. Two of those three drifts disappeared with it; the third (fail-open vs fail-closed JSON reads) now only affects the vault-read path.
+
+The dangerous class that remains is **id drift**: desktop encrypts under one id string while the server reads another → the key silently "disappears", the hardest failure to trace.
 
 This has since happened in production: the Codex OAuth id was added to the server but not to the desktop whitelist, so every Codex login failed with `Credential store modify failed for openai-codex` ([microsoft/Huabu#40](https://github.com/microsoft/Huabu/issues/40)). A parity test in [`secure-secrets.test.ts`](../../apps/desktop/src/secure-secrets.test.ts) now fails the desktop test run when the two id sets, the provider-id derivation, or the accept/reject decisions diverge, and CI runs that suite explicitly. That is a drift _detector_, not a drift _eliminator_ — the extraction below is still the real fix.
 
-Full fix: extract the pure contract — id constants, regex, `llmProviderApiKeySecretId`, `isSecretId`, and a pure `planMigration(parsedJson)` with the azure rule expressed as data — into a **zero-dependency subpath** of `@sediment/shared` (e.g. `@sediment/shared/security`), imported by both apps.
+Full fix: extract the pure contract — id constants, regex, `llmProviderApiKeySecretId`, `isSecretId` — into a **zero-dependency subpath** of `@sediment/shared` (e.g. `@sediment/shared/security`), imported by both apps.
 
-Constraints (why it isn't just "share everything"): `@sediment/shared` is isomorphic (imported by web, zero node deps) → **no `fs` code may live there**. The two encrypted stores must **stay separate** (safeStorage opaque blob vs explicit AES-GCM formats differ). `apps/desktop` currently depends on neither `shared` nor `server`, so adding a `@sediment/shared` dependency (subpath only) is the real cost.
+Constraints (why it isn't just "share everything"): `@sediment/shared` is isomorphic (imported by web, zero node deps) → **no `fs` code may live there**. The two encrypted stores must **stay separate** (safeStorage opaque blob vs explicit AES-GCM formats differ). `apps/desktop` currently depends on neither `shared` nor `server`, and is compiled by plain `tsc` with no bundler, so consuming the raw-TypeScript `@sediment/shared` requires giving the desktop package a bundler first — that is the real cost.
 
 **Promote when** touching this subsystem again for any reason — fold the extraction into that change rather than adding a fourth hand-synced copy.
 

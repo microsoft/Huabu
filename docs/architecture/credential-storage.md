@@ -45,19 +45,17 @@ The standalone server may run without `HUABU_SECRET_KEY` when it has no encrypte
 
 ## Automatic plaintext migration
 
-Before Electron starts its managed server, the main process scans `llm-config.json`, `integrations.json`, and `oauth-credentials.json` in its data directory.
+Plaintext migration exists only in the standalone server. When `HUABU_SECRET_KEY` is configured, startup collects legacy fields from `llm-config.json`, `integrations.json`, and `oauth-credentials.json`, writes missing values to `encrypted-secrets.json`, verifies the authenticated file, and then removes only the plaintext fields. Repeated migration is idempotent, and existing encrypted values win over stale plaintext from an interrupted earlier attempt.
 
-Migration encrypts all discovered LLM provider keys, image keys, Tavily/RapidAPI keys, and GitHub Copilot OAuth credentials into `secure-secrets.json`, writes the encrypted file atomically, reads it back, and verifies every migrated value can be decrypted before removing plaintext fields from the legacy files.
+Without a master key the standalone server still _detects_ legacy plaintext and refuses to start, rather than booting in environment-only mode and leaving the operator's credentials readable on disk indefinitely.
 
-An existing encrypted value wins over stale plaintext left by an interrupted migration. If encryption, persistence, or verification fails, plaintext source fields are not removed; startup fails rather than silently losing credentials or falling back to insecure Electron storage.
-
-Standalone startup applies the same ordering when `HUABU_SECRET_KEY` is configured: it collects legacy fields, writes missing values to `encrypted-secrets.json`, verifies the authenticated file, and then removes only the plaintext fields. Repeated migration is idempotent, and existing encrypted values win over stale plaintext from an interrupted earlier attempt.
+Electron no longer migrates. Plaintext credentials were written only by desktop builds predating the `safeStorage` store (2026-07-10, before the first `v0.9.x` release), so the migration served no shipped version and was deleted along with its duplicate of the collect/scrub rules. Electron's data directory is therefore only ever read as the versioned `secure-secrets.json` vault.
 
 ## Code entry points
 
 | File                                                                                                                       | Responsibility                                                               |
 | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| [`apps/desktop/src/secure-secrets.ts`](../../apps/desktop/src/secure-secrets.ts)                                           | Electron encrypted file, migration, verification, and plaintext scrubbing.   |
+| [`apps/desktop/src/secure-secrets.ts`](../../apps/desktop/src/secure-secrets.ts)                                           | Electron encrypted vault, secret-id whitelist, and write verification.       |
 | [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts)                                                               | `safeStorage` availability policy and utility-process secret bridge host.    |
 | [`apps/server/src/security/desktop-secret-bridge.ts`](../../apps/server/src/security/desktop-secret-bridge.ts)             | Server startup handshake, in-memory snapshot, and acknowledged mutation RPC. |
 | [`apps/server/src/security/secret-store.ts`](../../apps/server/src/security/secret-store.ts)                               | Runtime backend selection, environment fallback, and module-facing facade.   |
