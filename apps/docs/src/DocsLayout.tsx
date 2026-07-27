@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { Github, Menu, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 
 import { withBasePath } from './basePath';
@@ -10,7 +10,14 @@ import { cn } from './components/cn';
 import { Search } from './components/Search';
 import { groups, pinnedItems, type DocsItem } from './navigation';
 
-import type { CSSProperties, ReactNode } from 'react';
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+  RefObject,
+} from 'react';
+
+const desktopLayoutQuery = '(min-width: 64rem)';
 
 /**
  * Shell for every page on the standalone handbook site.
@@ -36,6 +43,11 @@ import type { CSSProperties, ReactNode } from 'react';
  */
 export function DocsLayout({ children }: { children: ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const mobileHeaderRef = useRef<HTMLElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
+  const sidebarCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
   const { pathname } = useLocation();
 
   // Close the mobile drawer on navigation so tapping a link doesn't
@@ -44,25 +56,42 @@ export function DocsLayout({ children }: { children: ReactNode }) {
     setIsSidebarOpen(false);
   }, [pathname]);
 
-  // Lock body scroll while the mobile drawer is open.
+  // Keep the closed mobile drawer out of the tab order. Crossing into
+  // the desktop layout also closes it so body scroll is restored.
   useEffect(() => {
+    const mediaQuery = window.matchMedia(desktopLayoutQuery);
+    const syncLayout = () => {
+      if (mediaQuery.matches) {
+        setIsSidebarOpen(false);
+        sidebarRef.current?.removeAttribute('inert');
+      } else {
+        sidebarRef.current?.toggleAttribute('inert', !isSidebarOpen);
+      }
+    };
+
+    syncLayout();
+    mediaQuery.addEventListener('change', syncLayout);
+    return () => mediaQuery.removeEventListener('change', syncLayout);
+  }, [isSidebarOpen]);
+
+  // Isolate the open drawer, lock body scroll, and move focus into it.
+  useEffect(() => {
+    mobileHeaderRef.current?.toggleAttribute('inert', isSidebarOpen);
+    mainRef.current?.toggleAttribute('inert', isSidebarOpen);
     if (!isSidebarOpen) return;
+
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    sidebarCloseButtonRef.current?.focus();
     return () => {
       document.body.style.overflow = previousOverflow;
     };
   }, [isSidebarOpen]);
 
-  // Close on Escape for keyboard users.
-  useEffect(() => {
-    if (!isSidebarOpen) return;
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsSidebarOpen(false);
-    };
-    document.addEventListener('keydown', handleKey);
-    return () => document.removeEventListener('keydown', handleKey);
-  }, [isSidebarOpen]);
+  const closeSidebar = () => {
+    setIsSidebarOpen(false);
+    window.requestAnimationFrame(() => menuButtonRef.current?.focus());
+  };
 
   return (
     <div
@@ -78,36 +107,64 @@ export function DocsLayout({ children }: { children: ReactNode }) {
         } as CSSProperties
       }
     >
-      <MobileHeader onOpen={() => setIsSidebarOpen(true)} />
+      <MobileHeader
+        headerRef={mobileHeaderRef}
+        menuButtonRef={menuButtonRef}
+        isSidebarOpen={isSidebarOpen}
+        onOpen={() => setIsSidebarOpen(true)}
+      />
 
       {/* Backdrop for the mobile drawer. */}
       {isSidebarOpen && (
         <button
           type="button"
           aria-label="Close navigation"
+          aria-hidden="true"
+          tabIndex={-1}
           className="fixed inset-0 z-30 bg-black/40 lg:hidden"
-          onClick={() => setIsSidebarOpen(false)}
+          onClick={closeSidebar}
         />
       )}
 
       <DocsSidebar
+        sidebarRef={sidebarRef}
+        closeButtonRef={sidebarCloseButtonRef}
         isOpen={isSidebarOpen}
-        onClose={() => setIsSidebarOpen(false)}
+        onClose={closeSidebar}
       />
-      <main className="min-h-full px-5 pt-14.25 lg:px-0 lg:pt-0 lg:pl-[calc(var(--docs-sidebar-right-edge)+var(--docs-gutter))] lg:pr-(--docs-gutter)">
+      <main
+        ref={mainRef}
+        className="min-h-full px-5 pt-14.25 lg:px-0 lg:pt-0 lg:pl-[calc(var(--docs-sidebar-right-edge)+var(--docs-gutter))] lg:pr-(--docs-gutter)"
+      >
         {children}
       </main>
     </div>
   );
 }
 
-function MobileHeader({ onOpen }: { onOpen: () => void }) {
+function MobileHeader({
+  headerRef,
+  menuButtonRef,
+  isSidebarOpen,
+  onOpen,
+}: {
+  headerRef: RefObject<HTMLElement>;
+  menuButtonRef: RefObject<HTMLButtonElement>;
+  isSidebarOpen: boolean;
+  onOpen: () => void;
+}) {
   return (
-    <header className="fixed top-0 right-0 left-0 z-20 flex items-center gap-3 border-b border-gray-200 bg-white/90 px-4 py-3 backdrop-blur lg:hidden">
+    <header
+      ref={headerRef}
+      className="fixed top-0 right-0 left-0 z-20 flex items-center gap-3 border-b border-gray-200 bg-white/90 px-4 py-3 backdrop-blur lg:hidden"
+    >
       <button
+        ref={menuButtonRef}
         type="button"
         onClick={onOpen}
         aria-label="Open navigation"
+        aria-controls="docs-sidebar"
+        aria-expanded={isSidebarOpen}
         className="flex h-9 w-9 items-center justify-center rounded-md text-gray-700 transition-colors hover:bg-gray-100"
       >
         <Menu aria-hidden="true" className="h-5 w-5" />
@@ -139,16 +196,51 @@ const sidebarLinkClass = ({ isActive }: { isActive: boolean }) =>
   );
 
 function DocsSidebar({
+  sidebarRef,
+  closeButtonRef,
   isOpen,
   onClose,
 }: {
+  sidebarRef: RefObject<HTMLElement>;
+  closeButtonRef: RefObject<HTMLButtonElement>;
   isOpen: boolean;
   onClose: () => void;
 }) {
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (!isOpen) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+
+    const focusable = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => !element.hidden && element.offsetParent !== null);
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  };
+
   return (
     <aside
+      id="docs-sidebar"
+      ref={sidebarRef}
+      aria-label="Handbook navigation"
+      onKeyDown={handleKeyDown}
       className={cn(
-        'fixed top-4 bottom-4 left-4 z-40 flex w-60 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_2px_12px_rgba(0,0,0,0.04)] transition-transform duration-200 ease-out lg:z-20 lg:translate-x-0',
+        'fixed top-4 bottom-4 left-4 z-40 flex w-60 flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-[0_2px_12px_rgba(0,0,0,0.04)] transition-transform duration-200 ease-out motion-reduce:transition-none lg:z-20 lg:translate-x-0',
         isOpen ? 'translate-x-0' : '-translate-x-[calc(100%+1rem)]',
       )}
     >
@@ -169,6 +261,7 @@ function DocsSidebar({
             Handbook
           </Link>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label="Close navigation"
