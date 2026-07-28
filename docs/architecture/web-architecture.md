@@ -74,7 +74,22 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 7. **Design tokens only** — never raw hex / Tailwind palette / ShadCN aliases. The token declarations in [`apps/web/src/index.css`](../../apps/web/src/index.css) are authoritative; reusable UI contracts live in [`apps/web/src/components/Common/`](../../apps/web/src/components/Common/).
 8. **Development playgrounds** belong in `pages/playground/`, use route-level lazy imports, are registered only when `import.meta.env.DEV` is true, and live outside `WorkspaceGuardLayout` so visual testing does not require an active workspace.
 
-Canvas copy always keeps the serialized node payload in `text/plain` so Huabu-to-Huabu paste can preserve node identity and artifact ownership. When the copied set contains exactly one image node, the clipboard also carries an `image/png` representation for pasting into external applications; unsupported Clipboard APIs, inaccessible sources, and image conversion failures fall back to the serialized node payload.
+### Clipboard contract
+
+Canvas copy carries Huabu's serialized node payload so that pasting back into Huabu preserves node identity and artifact ownership. The payload always rides in `text/html`; the other representations exist for applications outside Huabu:
+
+| Selection              | `text/plain`                       | `text/html`                                                     | `image/png` |
+| ---------------------- | ---------------------------------- | --------------------------------------------------------------- | ----------- |
+| Exactly one image node | —                                  | `<img src="data:…" data-sediment-nodes="<base64 payload>">`     | the image   |
+| Anything else          | readable text (omitted when empty) | `<span data-sediment-nodes="<base64 payload>">same text</span>` | —           |
+
+The payload moved out of `text/plain` because plain-text targets outside Huabu would otherwise receive raw JSON. `text/html` was chosen over a `web ` custom format because custom formats are Chromium-only on the read side, while `DataTransfer.getData('text/html')` works synchronously in every browser — which matters because all paste entry points are synchronous `paste` handlers. The image is inlined as a `data:` URL rather than linked by artifact URL because rich-text targets often prefer `text/html` over `image/png` and cannot reach Huabu's local API origin. A single image node writes no `text/plain` at all, so pasting it outside Huabu produces an image and nothing else.
+
+The readable text is produced by [`nodesToPlainText`](../../apps/web/src/utils/io/nodeToPlainText.ts): `note` / `text` / `question` paste their `content`, `web` pastes its `src`, file-backed and container nodes paste their label, and `image` / `sketch` / `nodeRef` / `frameRef` contribute nothing. Multi-node selections join the non-empty parts with a blank line. Non-image copies repeat that same text inside the `text/html` element so rich-text targets do not paste an empty element; newlines become `<br>` there, because rich-text targets prefer `text/html` and HTML would otherwise collapse a multi-line note into one line.
+
+All representations are written through a single `ClipboardItem` by `copyCanvasClipboard`. One copy gesture only authorizes one clipboard write, so writing `text/plain` first as a safety net makes the real write fail with `NotAllowedError` and silently drops the image.
+
+Read paths must go through `readSedimentClipboardPayload` (or `readSedimentClipboardPayloadAsync` on the Clipboard-API fallback path), which prefers `text/html` and falls back to `text/plain`. The fallback keeps clipboard contents written by older builds working. Unsupported Clipboard APIs, inaccessible sources, and image conversion failures all fall back to writing the serialized node payload to `text/plain`, which degrades external pastes to JSON but keeps Huabu-to-Huabu paste working.
 
 ## Workspace routes and World
 

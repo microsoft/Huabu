@@ -90,10 +90,8 @@ import { CanvasConflictError } from '../api/canvas';
 import { toast, dismissToast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
-import {
-  copyImageToClipboard,
-  copyToClipboard,
-} from '../utils/io/clipboard';
+import { copyCanvasClipboard } from '../utils/io/clipboard';
+import { nodesToPlainText } from '../utils/io/nodeToPlainText';
 
 import type {
   FrameFitPreview,
@@ -3374,34 +3372,36 @@ const useCanvasStore = create<RFState>()(
           ...(e.data ? { data: JSON.parse(JSON.stringify(e.data)) } : {}),
         }));
 
-      // Write serialized node + edge data to system clipboard. Edges are
-      // optional; older paste handlers that only know `__sediment_nodes__`
-      // will still produce valid results (just without the connections).
-      // `__sediment_canvas_id__` lets cross-canvas paste recover the
-      // source canvas — required since `data.src` now stores only the
-      // bare artifact key, not a full canvas-scoped URL.
+      // The serialized payload rides in `text/html` so that pasting back into
+      // Huabu preserves node identity, while foreign applications receive an
+      // image or readable text instead of JSON. See the clipboard contract in
+      // `docs/architecture/web-architecture.md`.
       const payload = JSON.stringify({
         __sediment_nodes__: cloned,
         __sediment_edges__: clonedEdges,
         __sediment_canvas_id__: get().canvasId,
       });
-      const copiedImageSrc =
+      const singleImage =
         cloned.length === 1 &&
         cloned[0].type === 'image' &&
         typeof cloned[0].data?.src === 'string'
-          ? cloned[0].data.src
+          ? {
+              src: resolveArtifactUrl(
+                cloned[0].data.src,
+                get().canvasId ?? undefined,
+              ),
+              label:
+                typeof cloned[0].data?.label === 'string'
+                  ? cloned[0].data.label
+                  : undefined,
+            }
           : undefined;
-      if (copiedImageSrc) {
-        void copyImageToClipboard(
-          payload,
-          resolveArtifactUrl(copiedImageSrc, get().canvasId ?? undefined),
-        );
-        return;
-      }
-      // `copyToClipboard` guards against `navigator.clipboard` being
-      // undefined (insecure contexts, older browsers) and falls back to
-      // a hidden textarea + `document.execCommand('copy')`.
-      void copyToClipboard(payload);
+
+      void copyCanvasClipboard({
+        payload,
+        plainText: nodesToPlainText(cloned),
+        image: singleImage,
+      });
     },
 
     pasteNodes: (flowPosition, clipboardNodes, clipboardEdges, srcCanvasId) => {
