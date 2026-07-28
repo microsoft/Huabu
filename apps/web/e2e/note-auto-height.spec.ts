@@ -79,28 +79,46 @@ async function measureOverflows(page: Page): Promise<number[]> {
   });
 }
 
+/**
+ * Paste every fixture, one at a time, waiting for each note to appear.
+ *
+ * Sequencing matters. Firing all the pastes and asserting the total
+ * afterwards is racy — the count settled at 5 of 6 — and it also hides
+ * *which* fixture failed to land. Waiting after each keeps the failure
+ * pointed at the paste that caused it.
+ *
+ * Everything lands at one point. Overlapping notes measure exactly the
+ * same as spread-out ones, and keeping them at the viewport centre means
+ * virtualization cannot unmount one and turn a measurement assertion
+ * into a missing-element error.
+ */
+async function pasteAllFixtures(page: Page): Promise<string[]> {
+  const names = Object.keys(FIXTURES);
+  const centre = await paneCenter(page);
+  await page.mouse.move(centre.x, centre.y);
+
+  for (const [index, name] of names.entries()) {
+    await pasteNote(page, FIXTURES[name]);
+    await expect(
+      page.locator('.react-flow__node'),
+      `fixture "${name}" did not create a note`,
+    ).toHaveCount(index + 1);
+  }
+
+  // Editor mounts are deferred one per frame by the hydration scheduler.
+  await expect(
+    page.locator('[data-note-content-host] .ProseMirror'),
+  ).toHaveCount(names.length);
+  return names;
+}
+
 test.describe('note auto height', () => {
   test('every auto note fits the content it was measured from', async ({
     page,
   }) => {
     await openNewCanvas(page);
+    const names = await pasteAllFixtures(page);
 
-    // Paste is positioned at the pointer, so move between notes to keep
-    // them from stacking into one another.
-    const centre = await paneCenter(page);
-    const names = Object.keys(FIXTURES);
-
-    for (const [index, name] of names.entries()) {
-      await page.mouse.move(centre.x - 300 + index * 120, centre.y - 200);
-      await pasteNote(page, FIXTURES[name]);
-    }
-
-    await expect(page.locator('.react-flow__node')).toHaveCount(names.length);
-    // Editor mounts are deferred one per frame by the hydration
-    // scheduler, so wait for every note to have a real editor.
-    await expect(page.locator('.react-flow__node .ProseMirror')).toHaveCount(
-      names.length,
-    );
     // Measurement is asynchronous by design: propose, queue, commit.
     await page.waitForTimeout(1500);
 
@@ -133,14 +151,7 @@ test.describe('note auto height', () => {
     });
 
     await openNewCanvas(page);
-    const centre = await paneCenter(page);
-    for (const [index, markdown] of Object.values(FIXTURES).entries()) {
-      await page.mouse.move(centre.x - 300 + index * 120, centre.y - 200);
-      await pasteNote(page, markdown);
-    }
-    await expect(page.locator('.react-flow__node .ProseMirror')).toHaveCount(
-      Object.keys(FIXTURES).length,
-    );
+    await pasteAllFixtures(page);
     await page.waitForTimeout(2000);
 
     expect(violations, violations.join('\n')).toHaveLength(0);
