@@ -41,26 +41,25 @@ docs/
 
 ## Architecture — current system reference
 
-| Doc                                                                             | What it covers                                                                                                     |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| [agent-architecture.md](./architecture/agent-architecture.md)                   | Server-side agent runtime, tools, skills, SSE protocol.                                                            |
-| [agent-context.md](./architecture/agent-context.md)                             | How canvas state gets shaped into `AgentChatContext` / `IntentContext` and reaches the model.                      |
-| [agent-reachback.md](./architecture/agent-reachback.md)                         | Huabu Reachback Tool (HRT) — how external agents read/write the Space out-of-band.                                 |
-| [agent-teams-as-extensions.md](./architecture/agent-teams-as-extensions.md)     | Product/vision: managed Agent Teams as Huabu's "plugin system".                                                    |
-| [api-design.md](./architecture/api-design.md)                                   | **Authoritative** rules for every HTTP / SSE endpoint, zod-first wire contracts.                                   |
-| [canvas-command-architecture.md](./architecture/canvas-command-architecture.md) | `CanvasUiIntent` / `CanvasCommand` / `CanvasExecution` three-layer model.                                          |
-| [canvas-input-interactions.md](./architecture/canvas-input-interactions.md)     | Mouse, touch, and pen preference resolution, gesture ownership, and multi-touch arbitration.                       |
-| [canvas-zoom-rendering.md](./architecture/canvas-zoom-rendering.md)             | Node LOD, Frame/edge label readability, and interaction chrome across canvas zoom.                                 |
-| [canvas-storage.md](./architecture/canvas-storage.md)                           | On-disk layout of a canvas (`space.json`, `nodes/`, `.artifacts/`, `memory/`).                                     |
-| [canvas-action-log.md](./architecture/canvas-action-log.md)                     | Persistent `events.jsonl` user-action trail; consumed by the memory curator.                                       |
-| [canvas-realtime-sync.md](./architecture/canvas-realtime-sync.md)               | Multi-agent real-time sync: SSE broadcast, dirty-node conflict model, per-thread change-review card.               |
-| [credential-storage.md](./architecture/credential-storage.md)                   | Electron OS-protected credentials, utility-process bridge, migration, and standalone fallback.                     |
-| [desktop-auto-update.md](./architecture/desktop-auto-update.md)                 | Desktop auto-update: electron-updater lifecycle, env-driven update feed, required release artifacts.               |
-| [agent-memory.md](./architecture/agent-memory.md)                               | Three-layer memory (workspace / canvas / skill); **Shipped**.                                                      |
-| [question-node.md](./architecture/question-node.md)                             | Question node: a content node that anchors a chat thread, runs the agent with its spatial neighbourhood.           |
-| [node-preprocessing.md](./architecture/node-preprocessing.md)                   | Unified 6-stage preprocessing pipeline; per-node profiles decide extract / enrich / persist.                       |
-| [sketch-node.md](./architecture/sketch-node.md)                                 | Sketch nodes: data model, explicit-trigger lifecycle, and the cluster → context → vision-LLM recognition pipeline. |
-| [web-architecture.md](./architecture/web-architecture.md)                       | Frontend (`apps/web/src/`) layout, dependency rules, and conventions.                                              |
+| Doc                                                                             | What it covers                                                                                           |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | --- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | --- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| [agent-architecture.md](./architecture/agent-architecture.md)                   | Server-side agent runtime, tools, skills, SSE protocol.                                                  |
+| [agent-context.md](./architecture/agent-context.md)                             | How canvas state gets shaped into `AgentChatContext` / `IntentContext` and reaches the model.            |
+| [agent-reachback.md](./architecture/agent-reachback.md)                         | Huabu Reachback Tool (HRT) — how external agents read/write the Space out-of-band.                       |
+| [agent-teams-as-extensions.md](./architecture/agent-teams-as-extensions.md)     | Product/vision: managed Agent Teams as Huabu's "plugin system".                                          |
+| [api-design.md](./architecture/api-design.md)                                   | **Authoritative** rules for every HTTP / SSE endpoint, zod-first wire contracts.                         |
+| [canvas-command-architecture.md](./architecture/canvas-command-architecture.md) | `CanvasUiIntent` / `CanvasCommand` / `CanvasExecution` three-layer model.                                |
+| [canvas-input-interactions.md](./architecture/canvas-input-interactions.md)     | Mouse, touch, and pen preference resolution, gesture ownership, and multi-touch arbitration.             |
+| [canvas-zoom-rendering.md](./architecture/canvas-zoom-rendering.md)             | Node LOD, Frame/edge label readability, and interaction chrome across canvas zoom.                       |
+| [canvas-storage.md](./architecture/canvas-storage.md)                           | On-disk layout of a canvas (`space.json`, `nodes/`, `.artifacts/`, `memory/`).                           |
+| [canvas-action-log.md](./architecture/canvas-action-log.md)                     | Persistent `events.jsonl` user-action trail; consumed by the memory curator.                             |
+| [canvas-realtime-sync.md](./architecture/canvas-realtime-sync.md)               | Multi-agent real-time sync: SSE broadcast, dirty-node conflict model, per-thread change-review card.     |
+| [credential-storage.md](./architecture/credential-storage.md)                   | Electron OS-protected credentials, utility-process bridge, migration, and standalone fallback.           |
+| [desktop-auto-update.md](./architecture/desktop-auto-update.md)                 | Desktop auto-update: electron-updater lifecycle, env-driven update feed, required release artifacts.     |
+| [agent-memory.md](./architecture/agent-memory.md)                               | Three-layer memory (workspace / canvas / skill); **Shipped**.                                            |
+| [question-node.md](./architecture/question-node.md)                             | Question node: a content node that anchors a chat thread, runs the agent with its spatial neighbourhood. |
+| [node-preprocessing.md](./architecture/node-preprocessing.md)                   | Unified 6-stage preprocessing pipeline; per-node profiles decide extract / enrich / persist.             |     | [node-auto-height.md](./architecture/node-auto-height.md) | Who owns a node's height, how content height is measured, and how a derived height reaches geometry. |     | [sketch-node.md](./architecture/sketch-node.md) | Sketch nodes: data model, explicit-trigger lifecycle, and the cluster → context → vision-LLM recognition pipeline. |
+| [web-architecture.md](./architecture/web-architecture.md)                       | Frontend (`apps/web/src/`) layout, dependency rules, and conventions.                                    |
 
 ---
 

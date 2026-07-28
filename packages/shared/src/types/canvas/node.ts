@@ -354,30 +354,6 @@ export interface NoteNodeData extends BaseNodeData {
    * ignores any value that does not parse as `MarkdownProvenance`.
    */
   provenance?: MarkdownProvenance;
-  /**
-   * Last measured intrinsic content height (in CSS pixels, unscaled) of the
-   * rendered note body. Persisted as a paint hint so the node can render at
-   * its real auto-mode height on the very first frame after mount —
-   * including after React Flow virtualization unmounts/remounts the node
-   * during zoom/pan, or after a page reload — instead of briefly flashing
-   * at the fallback minimum height before the ResizeObserver fires.
-   *
-   * Written silently (no undo entry) by the note renderer; safe to omit.
-   *
-   * TODO(view-hint-strip): This is a pure render cache, not content
-   * semantics. It currently rides along with the rest of NodeData through
-   * the existing persistence pipeline (canvas.filestore writes the whole
-   * node JSON to vault). That's harmless today, but if the vault ever
-   * gets committed to git or diffed by external tools, the value will
-   * churn on every zoom/edit and pollute diffs. When that happens, strip
-   * this field at the persistence boundary in
-   * `apps/server/src/modules/canvas/canvas.filestore.ts` (delete it from
-   * each note node before `JSON.stringify`). If a second view-only field
-   * appears (e.g. PDF last-page, image decoded size), promote both into a
-   * shared `viewHints` sub-object on `BaseNodeData` and strip that
-   * sub-object once instead.
-   */
-  measuredHeight?: number;
 }
 
 /** Text node: simple styled text (not ingested) */

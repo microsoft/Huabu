@@ -1,7 +1,9 @@
 # Node Height Ownership Model
 
-Status: Proposed
-Last updated: 2026-07-27
+Status: Partly shipped
+Last updated: 2026-07-28
+
+> Steps 1–5 and most of Step 7 have shipped; the current behaviour is documented in [node-auto-height.md](../architecture/node-auto-height.md), which is authoritative. **Step 6 (sync isolation) is outstanding** and belongs with the multi-user co-editing work. Moving `text` / `question` onto the model is deferred and needs its own proposal — see the note at the end of the rollout.
 
 > Related: [note-auto-height-stable-geometry.md](./note-auto-height-stable-geometry.md) attacks the same symptom and reaches several of the same conclusions independently. This revision adopts its freshness and stability mechanisms (see [D8](#d8--freshness-is-a-key-not-a-timestamp), [D10](#d10--measurement-is-bounded-and-may-be-provisional)) while keeping a different storage decision. See [Relationship to the stable-geometry proposal](#relationship-to-the-stable-geometry-proposal).
 
@@ -468,9 +470,20 @@ This step also carries the one user-visible consequence of the model: because a 
 
 **Step 6 — Sync isolation.** Value-aware structure diffing for auto `style.height` and `data.autoHeight`, the per-batch derived marker in the executor (so a refit caused by a derived batch does not bump the version or broadcast), the derived-geometry endpoint and its batching queue, and re-materializing rather than trusting inbound deltas. This is the rest of the D9 work and it is the prerequisite for enabling multi-user co-editing on canvases containing auto notes.
 
-**Step 7 — Unification.** Move text/question onto `useAutoHeight`, retaining `textMeasure`-based measurement as their `HeightMeasurer`. Retire `resizeEndClearHeight` and delete `data.measuredHeight`. Fold the contract into `docs/architecture/`.
+**Step 7 — Unification.** Retire `resizeEndClearHeight`, delete `data.measuredHeight`, drop the measurement hint on type conversion, and fold the contract into `docs/architecture/`.
 
 Steps 1–4 deliver Bar A. Step 5 delivers Bar B and is required, not optional. Step 6 must land before, or together with, multi-user co-editing. Step 7 is the maintainability payoff and can be scheduled independently.
+
+### What actually shipped
+
+Steps 1–5 shipped as written, with three corrections found in use, all of the same shape — the box being measured was not the box the browser laid out. The node shell's 3px border was missing from the layout height, then missing from the content _width_ (which also made the intrinsic height depend on node width, breaking the premise that lets a hint be cached at all), and a leading heading's top margin collapsed out of the measured element. Each is now covered by the invariant in [node-auto-height.md](../architecture/node-auto-height.md) §10.
+
+Two decisions changed under contact:
+
+- **No `HeightMeasurer` interface.** The offscreen measurer is a concrete module and the mounted note measures inline. A second implementation would be the thing that justifies the interface, and `text` / `question` did not become one.
+- **Fixed → auto measures on demand.** D8 assumed the toggle could materialize from a stored hint, but a pinned note has none — and measuring one in its pinned box produces a hint that is _self-confirming_, since materializing it yields exactly the number the next measurement is compared against. The toggle measures offscreen and lands both commands in one batch instead.
+
+Of Step 7, everything except the `text` / `question` move has shipped. That move is **deferred and needs its own proposal**: those types auto-size their _width_, carry scale as `data.style.fontSize` rather than a transform, and measure synchronously via canvas 2D with no DOM. The likely conclusion is that they should materialize `style.height` **without** a hint at all — a hint exists to make an expensive asynchronous measurement cacheable, and theirs is neither. Forcing them onto `AutoHeightHint` would require `fontSize` and `width` in the key, which is exactly how a self-confirming wrong value gets built.
 
 ## Validation
 
