@@ -156,4 +156,33 @@ test.describe('note auto height', () => {
 
     expect(violations, violations.join('\n')).toHaveLength(0);
   });
+
+  test('a narrow note still fits its content', async ({ page }) => {
+    // A note narrower than the reference width is the case a legibility
+    // floor on the content scale used to break: once the floor engaged,
+    // the content laid out narrower than the width its height had been
+    // measured at, so the note rendered short. Nothing keeps a tiny note
+    // readable except semantic zoom, which replaces the body outright.
+    await openNewCanvas(page);
+    const centre = await paneCenter(page);
+    await page.mouse.move(centre.x, centre.y);
+    await pasteNote(page, FIXTURES['wrapping paragraph']);
+    await expect(page.locator('.react-flow__node')).toHaveCount(1);
+
+    // Narrow it through the toolbar's width input, then hand the height
+    // back to the renderer — typing a width pins the height too.
+    const node = page.locator('.react-flow__node').first();
+    await node.click();
+    const widthInput = page.getByLabel('Width', { exact: true });
+    await widthInput.fill('155');
+    await widthInput.press('Enter');
+    await page.getByRole('button', { name: 'Fit height to content' }).click();
+    await page.waitForTimeout(2000);
+
+    const [overflow] = await measureOverflows(page);
+    expect(
+      overflow,
+      `narrow note overflows its box by ${Math.round(overflow)}px`,
+    ).toBeLessThanOrEqual(1);
+  });
 });

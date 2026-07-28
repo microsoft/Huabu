@@ -101,7 +101,6 @@ export {
   type HeightPolicy,
   HEIGHT_LAYOUT_VERSION,
   HEIGHT_QUANTIZATION_STEP,
-  MIN_CONTENT_SCALE,
   autoHeightKey,
   contentScaleFor,
   getHeightPolicy,

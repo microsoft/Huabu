@@ -52,6 +52,23 @@ export interface HeightPolicy {
    * accounts for the node's own padding.
    */
   insetY?: number;
+  /**
+   * Floor on the content scale, so a very narrow node keeps its content
+   * legible instead of shrinking without limit.
+   *
+   * Only meaningful for types whose height is **not** derived from the
+   * scale. A floor and a derived height are in direct conflict: once the
+   * floor engages, the content stops shrinking and starts laying out
+   * *narrower* than the reference width, so an intrinsic height measured
+   * at that reference no longer applies and the node renders short.
+   *
+   * `manual` types are unaffected because their box is the user's; the
+   * scale only decides how large the content is drawn inside it. `note`
+   * deliberately has no floor — semantic zoom already replaces its body
+   * with a placeholder long before the text would become unreadable, so
+   * the floor would buy nothing and cost the invariant.
+   */
+  minContentScale?: number;
 }
 
 /**
@@ -94,6 +111,8 @@ export const NODE_SHELL_INSET = 6;
 const HEIGHT_POLICIES: Readonly<Record<string, HeightPolicy>> = {
   // The note body measures `.ProseMirror` plus the host's own vertical
   // padding, so the only thing left to add is the node shell itself.
+  // No `minContentScale`: its height is derived from the scale, and a
+  // floor would make the content lay out narrower than `refWidth`.
   note: {
     kind: 'toggleable',
     refWidth: 400,
@@ -102,9 +121,11 @@ const HEIGHT_POLICIES: Readonly<Record<string, HeightPolicy>> = {
   },
   text: { kind: 'content' },
   question: { kind: 'content' },
-  web: { kind: 'manual', refWidth: 400 },
-  pdf: { kind: 'manual', refWidth: 400 },
-  office: { kind: 'manual', refWidth: 400 },
+  // Manual-height types: the box is the user's, so the scale is purely a
+  // rendering decision and a legibility floor costs nothing.
+  web: { kind: 'manual', refWidth: 400, minContentScale: 0.5 },
+  pdf: { kind: 'manual', refWidth: 400, minContentScale: 0.5 },
+  office: { kind: 'manual', refWidth: 400, minContentScale: 0.5 },
 };
 
 /** Height policy for a node type. Never `undefined`. */

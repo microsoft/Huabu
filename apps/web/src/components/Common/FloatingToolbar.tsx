@@ -639,21 +639,23 @@ function ToolbarSizePicker({
   // states — highlighted (info tone) when auto is active, muted when
   // pinned.
   const autoLabel = t('toolbar.size.auto');
-  const modeToggle = (icon: ReactNode) =>
-    auto ? (
-      <Tooltip
-        content={
-          autoActive
-            ? isBothAxes
-              ? t('toolbar.size.switchManual')
-              : t('toolbar.size.switchFixedHeight')
-            : isBothAxes
-              ? t('toolbar.size.fitSize')
-              : t('toolbar.size.fitHeight')
-        }
-      >
+  const modeToggle = (icon: ReactNode) => {
+    if (!auto) return null;
+    const description = autoActive
+      ? isBothAxes
+        ? t('toolbar.size.switchManual')
+        : t('toolbar.size.switchFixedHeight')
+      : isBothAxes
+        ? t('toolbar.size.fitSize')
+        : t('toolbar.size.fitHeight');
+    return (
+      <Tooltip content={description}>
         <button
           type="button"
+          // An icon-only control needs a name of its own: a tooltip is
+          // not one, and this is the only affordance that reports which
+          // side owns the size.
+          aria-label={description}
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => {
             e.stopPropagation();
@@ -667,7 +669,8 @@ function ToolbarSizePicker({
           {icon}
         </button>
       </Tooltip>
-    ) : null;
+    );
+  };
 
   const widthInput = (
     <ToolbarNumberInput

@@ -23,7 +23,6 @@ export {
 
 export {
   HEIGHT_QUANTIZATION_STEP,
-  MIN_CONTENT_SCALE,
   contentScaleFor,
   intrinsicToLayoutHeight,
   quantizeHeight,

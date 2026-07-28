@@ -18,11 +18,15 @@ import {
 } from './policy.js';
 
 /**
- * Lower bound on the width/refWidth scale factor. Mirrors the clamp in
- * the web `useNodeScale` hook: a very narrow node keeps its content
- * legible rather than shrinking without limit.
+ * Absolute floor on the content scale, used when a type declares no
+ * legibility floor of its own.
+ *
+ * Not a readability setting — that is {@link HeightPolicy.minContentScale},
+ * and a type whose height derives from the scale deliberately has none.
+ * This only keeps a zero or negative width (a node narrower than its own
+ * border) from producing a scale of zero and a height of zero.
  */
-export const MIN_CONTENT_SCALE = 0.5;
+const MIN_ABSOLUTE_SCALE = 0.01;
 
 /**
  * Quantization step (px) applied to every committed auto height.
@@ -58,6 +62,12 @@ export function quantizeHeight(height: number): number {
  * pixels short and, worse, by a *different* amount at each node width.
  * Content measured at one width would then wrap differently at another,
  * which is precisely what an intrinsic height must not depend on.
+ *
+ * The legibility floor is per type rather than global, because it is a
+ * rendering policy that a derived height cannot tolerate: once it
+ * engages the content stops shrinking and starts laying out narrower
+ * than `refWidth`, so a height measured at that reference no longer
+ * applies. See {@link HeightPolicy.minContentScale}.
  */
 export function contentScaleFor(
   policy: HeightPolicy,
@@ -67,7 +77,8 @@ export function contentScaleFor(
   if (!refWidth || typeof width !== 'number' || !Number.isFinite(width)) {
     return 1;
   }
-  return Math.max(MIN_CONTENT_SCALE, (width - NODE_SHELL_INSET) / refWidth);
+  const scale = (width - NODE_SHELL_INSET) / refWidth;
+  return Math.max(policy.minContentScale ?? MIN_ABSOLUTE_SCALE, scale);
 }
 
 /**

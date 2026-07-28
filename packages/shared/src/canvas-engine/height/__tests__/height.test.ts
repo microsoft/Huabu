@@ -9,6 +9,8 @@ import {
   HEIGHT_LAYOUT_VERSION,
   HEIGHT_QUANTIZATION_STEP,
   autoHeightKey,
+  contentScaleFor,
+  getHeightPolicy,
   getHeightRefWidth,
   intrinsicToLayoutHeight,
   isAlwaysAutoHeightType,
@@ -221,9 +223,31 @@ describe('intrinsicToLayoutHeight', () => {
     expect(intrinsicToLayoutHeight(200, 'text', undefined)).toBe(200);
   });
 
-  it('clamps the scale factor from below', () => {
-    // 100px wide is a quarter of the reference width, but the clamp is 0.5.
-    expect(intrinsicToLayoutHeight(200, 'note', 100)).toBe(108);
+  it('does not floor the scale for a type whose height derives from it', () => {
+    // A note keeps shrinking all the way down. A floor would make its
+    // content lay out narrower than the reference width, so a height
+    // measured at that reference would no longer apply and the node
+    // would render short. Semantic zoom, not this, is what keeps a tiny
+    // note readable — it swaps the body for a placeholder.
+    expect(contentScaleFor(getHeightPolicy('note'), 100)).toBeCloseTo(0.235);
+    expect(intrinsicToLayoutHeight(200, 'note', 100)).toBe(56);
+  });
+
+  it('floors the scale for manual types, whose box the user owns', () => {
+    // Their height is authored, so the scale is purely a rendering
+    // decision and a legibility floor costs nothing.
+    expect(contentScaleFor(getHeightPolicy('pdf'), 100)).toBe(0.5);
+    expect(contentScaleFor(getHeightPolicy('web'), 100)).toBe(0.5);
+    expect(contentScaleFor(getHeightPolicy('office'), 100)).toBe(0.5);
+  });
+
+  it('keeps the logical layout width at the reference width', () => {
+    // The premise the whole hint cache rests on: content measured at one
+    // node width wraps identically at any other.
+    for (const width of [80, 155, 206, 400, 800, 1600]) {
+      const scale = contentScaleFor(getHeightPolicy('note'), width);
+      expect((width - 6) / scale).toBeCloseTo(400);
+    }
   });
 });
 

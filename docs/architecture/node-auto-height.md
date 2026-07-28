@@ -21,6 +21,8 @@ The governing rule is that **rendering never causes a geometry change**. Zoom, p
 
 Intrinsic → layout is one pure function, [`intrinsicToLayoutHeight`](../../packages/shared/src/canvas-engine/height/compute.ts): clamp to the type's minimum, scale by the node's width, add the node shell's chrome, quantize to a 4 px step. The order mirrors the DOM — the minimum applies unscaled, the chrome is outside the scaled container and so is added after.
 
+The scale divides the node's **content** width, its box minus the shell border, so the logical layout width lands on `refWidth` exactly at every node size. That is the premise the whole hint cache rests on: content measured at one node width wraps identically at any other. A legibility floor on the scale would break it — once engaged, the content stops shrinking and starts laying out _narrower_ than the reference, so `note` deliberately has none. Semantic zoom already replaces a tiny note's body with a placeholder long before its text would become unreadable. `HeightPolicy.minContentScale` carries the floor for the `manual` types, whose box is the user's and whose scale is therefore purely a rendering decision.
+
 ## 3. Ownership
 
 `data.heightMode` records who owns `style.height`. It is authored state: toggling it is a user intent, it participates in the structure diff, and it is undoable.
@@ -117,7 +119,6 @@ Unit tests cannot cover this class: the failures live in CSS layout, and happy-d
 
 ## 11. Known limits
 
-- **Narrow notes.** `MIN_CONTENT_SCALE` clamps the content scale at `0.5`, so a note narrower than ~206 px lays its content out at less than the reference width. Its intrinsic height is then measured under a width it does not use, and the note renders short.
 - **`text` / `question` are not on this model.** They size themselves synchronously through [`useTextAutoSize`](../../apps/web/src/hooks/useTextAutoSize.ts) and never write `style.height`, so `getNodeSize` returns `0` for one that has not rendered.
 - **No sync isolation.** A derived height currently bumps `canvas.version` and broadcasts like any other structural write. [`node-height-ownership-model.md`](../proposals/node-height-ownership-model.md) §D9 specifies the value-aware structure diff, the per-batch derived marker, and the dedicated write channel that close this; they are a prerequisite for multi-user co-editing on canvases containing auto notes.
 - **Late-decoding media.** A note whose image has not decoded cannot reach its final height; it commits provisionally and re-measures on the next load.
