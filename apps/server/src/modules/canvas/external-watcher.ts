@@ -1,4 +1,5 @@
-import { readFile, stat } from 'node:fs/promises';
+import { watch as watchFs, type FSWatcher as NativeFSWatcher } from 'node:fs';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import chokidar, { type FSWatcher } from 'chokidar';
@@ -10,16 +11,25 @@ import {
 } from '../storage/canvas-dirs.js';
 import { parseFrontmatter } from '../storage/frontmatter.js';
 import { getCanvasStore } from '../storage/index.js';
-import { WORLD_CANVAS_DIR_NAME } from '../storage/paths.js';
+import {
+  SPACE_JSON_FILENAME,
+  WORLD_CANVAS_DIR_NAME,
+} from '../storage/paths.js';
 import { getWorkspacePath, isWorkspaceConfigured } from '../workspace.js';
 
+import type { CanvasFile } from '../storage/index.js';
 import type { ExternalNoteEvent, ExternalNoteItem } from '@sediment/shared';
 
 type Listener = (event: ExternalNoteEvent) => void;
 
+const INITIAL_SCAN_CONCURRENCY = 8;
+
 const pendingByCanvas = new Map<string, Map<string, ExternalNoteItem>>();
 const listenersByCanvas = new Map<string, Set<Listener>>();
+const initialScansByCanvas = new Map<string, Promise<void>>();
 let watcher: FSWatcher | null = null;
+let nodeWatchers: NativeFSWatcher[] = [];
+const pendingNodeEvents = new Map<string, NodeJS.Timeout>();
 
 function resolvePath(
   absPath: string,
@@ -31,7 +41,6 @@ function resolvePath(
   const parts = absPath.slice(prefix.length).split(path.sep);
   if (parts.length !== 3 || parts[1] !== 'nodes') return null;
   if (!parts[2].endsWith('.md')) return null;
-  refreshCanvasDirIndex();
   for (const entry of listAllCanvasDirEntries()) {
     if (entry.filename === parts[0]) {
       return { canvasId: entry.id, relativePath: `nodes/${parts[2]}` };
@@ -40,8 +49,7 @@ function resolvePath(
   return null;
 }
 
-function canvasNoteIds(canvasId: string): Set<string> {
-  const canvas = getCanvasStore(canvasId).read();
+function noteIdsFromCanvas(canvas: CanvasFile | null): Set<string> {
   const ids = new Set<string>();
   if (!canvas) return ids;
   for (const n of canvas.state.nodes) {
@@ -51,10 +59,40 @@ function canvasNoteIds(canvasId: string): Set<string> {
   return ids;
 }
 
+function canvasNoteIds(canvasId: string): Set<string> {
+  return noteIdsFromCanvas(getCanvasStore(canvasId).read());
+}
+
+async function readInitialCanvasNoteIds(absPath: string): Promise<Set<string>> {
+  try {
+    const canvasRoot = path.dirname(path.dirname(absPath));
+    const raw = await readFile(
+      path.join(canvasRoot, SPACE_JSON_FILENAME),
+      'utf8',
+    );
+    return noteIdsFromCanvas(JSON.parse(raw) as CanvasFile);
+  } catch {
+    return new Set();
+  }
+}
+
+function cachedInitialCanvasNoteIds(
+  canvasId: string,
+  absPath: string,
+  cache: Map<string, Promise<Set<string>>>,
+): Promise<Set<string>> {
+  const cached = cache.get(canvasId);
+  if (cached) return cached;
+  const pending = readInitialCanvasNoteIds(absPath);
+  cache.set(canvasId, pending);
+  return pending;
+}
+
 async function buildItem(
   absPath: string,
   canvasId: string,
   relativePath: string,
+  initialNoteIdsByCanvas?: Map<string, Promise<Set<string>>>,
 ): Promise<ExternalNoteItem | null> {
   try {
     const [raw, st] = await Promise.all([
@@ -64,7 +102,16 @@ async function buildItem(
     const { meta } = parseFrontmatter(raw);
     const rawId = meta['id'];
     const noteId = typeof rawId === 'string' && rawId ? rawId : undefined;
-    if (noteId && canvasNoteIds(canvasId).has(noteId)) return null;
+    if (noteId) {
+      const known = initialNoteIdsByCanvas
+        ? await cachedInitialCanvasNoteIds(
+            canvasId,
+            absPath,
+            initialNoteIdsByCanvas,
+          )
+        : canvasNoteIds(canvasId);
+      if (known.has(noteId)) return null;
+    }
     return {
       relativePath,
       fileName: path.basename(absPath),
@@ -88,11 +135,18 @@ function emit(canvasId: string, event: ExternalNoteEvent): void {
   }
 }
 
-async function handleAdd(absPath: string): Promise<void> {
-  const resolved = resolvePath(absPath);
-  if (!resolved) return;
-  const { canvasId, relativePath } = resolved;
-  const item = await buildItem(absPath, canvasId, relativePath);
+async function addResolvedItem(
+  absPath: string,
+  canvasId: string,
+  relativePath: string,
+  initialNoteIdsByCanvas?: Map<string, Promise<Set<string>>>,
+): Promise<void> {
+  const item = await buildItem(
+    absPath,
+    canvasId,
+    relativePath,
+    initialNoteIdsByCanvas,
+  );
   if (!item) return;
   let map = pendingByCanvas.get(canvasId);
   if (!map) {
@@ -113,23 +167,97 @@ function handleUnlink(absPath: string): void {
   emit(canvasId, { type: 'removed', data: { relativePath } });
 }
 
+function closeNodeWatchers(): void {
+  for (const timer of pendingNodeEvents.values()) clearTimeout(timer);
+  pendingNodeEvents.clear();
+  for (const nodeWatcher of nodeWatchers) nodeWatcher.close();
+  nodeWatchers = [];
+}
+
+function armNodeWatchers(): void {
+  closeNodeWatchers();
+  const ws = getWorkspacePath();
+  for (const entry of listAllCanvasDirEntries()) {
+    const nodesPath = path.join(ws, entry.filename, 'nodes');
+    try {
+      const nodeWatcher = watchFs(
+        nodesPath,
+        { persistent: true, encoding: 'utf8' },
+        (_eventType, filename) => {
+          if (!filename) return;
+          const basename = path.basename(filename);
+          if (basename !== filename || !basename.endsWith('.md')) return;
+          const absPath = path.join(nodesPath, basename);
+          const relativePath = `nodes/${basename}`;
+          const pending = pendingNodeEvents.get(absPath);
+          if (pending) clearTimeout(pending);
+          pendingNodeEvents.set(
+            absPath,
+            setTimeout(() => {
+              pendingNodeEvents.delete(absPath);
+              void stat(absPath)
+                .then((fileStat) => {
+                  if (fileStat.isFile()) {
+                    return addResolvedItem(absPath, entry.id, relativePath);
+                  }
+                })
+                .catch(() => handleUnlink(absPath));
+            }, 170),
+          );
+        },
+      );
+      nodeWatcher.on('error', (err: unknown) => {
+        getLogger('external-note-watcher').warn(
+          { err, nodesPath },
+          'external note directory watcher error (ignored)',
+        );
+      });
+      nodeWatchers.push(nodeWatcher);
+    } catch (err) {
+      getLogger('external-note-watcher').warn(
+        { err, nodesPath },
+        'external note directory watcher could not start (ignored)',
+      );
+    }
+  }
+}
+
+async function closeWatcherHandles(): Promise<void> {
+  const activeWatcher = watcher;
+  watcher = null;
+  closeNodeWatchers();
+  if (activeWatcher) await activeWatcher.close().catch(() => undefined);
+}
+
 /**
- * Build and wire a chokidar watcher against the active workspace, storing
- * it in the module-level `watcher`. Pending state is left untouched so the
- * caller decides whether a fresh scan should clear it (workspace switch) or
- * preserve it (resume after a self-write suspension). No-op when no
- * workspace is configured.
+ * Watch top-level Space lifecycle changes with Chokidar and note-directory
+ * changes with native `fs.watch`, which registers without crawling existing
+ * files. Pending state is left untouched so the caller decides whether a
+ * fresh scan should clear it or preserve it across self-write suspension.
  */
 function armWatcher(): void {
   if (!isWorkspaceConfigured()) return;
   const ws = getWorkspacePath();
-  // chokidar v5 removed glob support, so watch the workspace root and
-  // filter via `ignored` + `resolvePath()` in the event handlers. Depth
-  // is capped at 2 so we never descend into `nodes/` siblings or
-  // hidden subdirs by accident.
+  let initialScanComplete = false;
+  const invalidateForTopLevelDirectory = (candidate: string): void => {
+    if (!initialScanComplete) return;
+    const relative = path.relative(path.resolve(ws), path.resolve(candidate));
+    if (
+      !relative ||
+      relative === '..' ||
+      relative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relative) ||
+      relative.includes(path.sep)
+    ) {
+      return;
+    }
+    refreshCanvasDirIndex();
+    armNodeWatchers();
+  };
+  armNodeWatchers();
   watcher = chokidar.watch(ws, {
-    ignoreInitial: false,
-    depth: 2,
+    ignoreInitial: true,
+    depth: 0,
     ignored: (candidate: string) => {
       const basename = path.basename(candidate);
       if (!basename.startsWith('.')) return false;
@@ -138,11 +266,13 @@ function armWatcher(): void {
         path.join(path.resolve(ws), WORLD_CANVAS_DIR_NAME)
       );
     },
-    awaitWriteFinish: { stabilityThreshold: 120, pollInterval: 50 },
   });
   watcher
-    .on('add', (abs: string) => void handleAdd(abs))
-    .on('unlink', (abs: string) => handleUnlink(abs))
+    .on('addDir', invalidateForTopLevelDirectory)
+    .on('unlinkDir', invalidateForTopLevelDirectory)
+    .on('ready', () => {
+      initialScanComplete = true;
+    })
     // Swallow watcher errors. When a canvas directory is deleted while
     // chokidar is mid-scan (common on virtual/network filesystems such as
     // Google Drive), readdirp can emit a transient EINVAL/ENOENT `lstat`
@@ -181,11 +311,9 @@ function enqueueLifecycle(task: () => Promise<void>): Promise<void> {
  */
 export async function resetExternalNoteWatcher(): Promise<void> {
   return enqueueLifecycle(async () => {
-    if (watcher) {
-      await watcher.close().catch(() => undefined);
-      watcher = null;
-    }
+    await closeWatcherHandles();
     pendingByCanvas.clear();
+    initialScansByCanvas.clear();
     armWatcher();
   });
 }
@@ -200,11 +328,9 @@ export async function resetExternalNoteWatcher(): Promise<void> {
  */
 export async function closeExternalNoteWatcher(): Promise<void> {
   return enqueueLifecycle(async () => {
-    if (watcher) {
-      await watcher.close().catch(() => undefined);
-      watcher = null;
-    }
+    await closeWatcherHandles();
     pendingByCanvas.clear();
+    initialScansByCanvas.clear();
   });
 }
 
@@ -244,11 +370,8 @@ export async function runWithExternalNoteWatcherSuspended<T>(
 ): Promise<T> {
   if (suspendDepth === 0) {
     // Only re-arm on exit if a watcher was actually running on entry.
-    armAfterResume = watcher !== null;
-    if (watcher) {
-      await watcher.close().catch(() => undefined);
-      watcher = null;
-    }
+    armAfterResume = watcher !== null || nodeWatchers.length > 0;
+    await closeWatcherHandles();
   }
   suspendDepth++;
   try {
@@ -289,6 +412,56 @@ export function snapshotExternalNotes(canvasId: string): ExternalNoteItem[] {
     out.push(item);
   }
   return out.sort((a, b) => b.mtime - a.mtime);
+}
+
+async function scanExternalNotes(canvasId: string): Promise<void> {
+  if (!isWorkspaceConfigured()) return;
+  const entry = listAllCanvasDirEntries().find(
+    (candidate) => candidate.id === canvasId,
+  );
+  if (!entry) return;
+  const nodesPath = path.join(getWorkspacePath(), entry.filename, 'nodes');
+  let notePaths: string[];
+  try {
+    const entries = await readdir(nodesPath, { withFileTypes: true });
+    notePaths = entries
+      .filter(
+        (candidate) => candidate.isFile() && candidate.name.endsWith('.md'),
+      )
+      .map((candidate) => path.join(nodesPath, candidate.name));
+  } catch {
+    return;
+  }
+
+  const initialNoteIdsByCanvas = new Map<string, Promise<Set<string>>>();
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIndex < notePaths.length) {
+      const notePath = notePaths[nextIndex++];
+      if (notePath) {
+        await addResolvedItem(
+          notePath,
+          canvasId,
+          `nodes/${path.basename(notePath)}`,
+          initialNoteIdsByCanvas,
+        );
+      }
+    }
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(INITIAL_SCAN_CONCURRENCY, notePaths.length) },
+      () => worker(),
+    ),
+  );
+}
+
+export function ensureExternalNotesScanned(canvasId: string): Promise<void> {
+  const existing = initialScansByCanvas.get(canvasId);
+  if (existing) return existing;
+  const pending = scanExternalNotes(canvasId);
+  initialScansByCanvas.set(canvasId, pending);
+  return pending;
 }
 
 export function subscribeExternalNotes(

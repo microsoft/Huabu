@@ -10,6 +10,7 @@ import {
 } from '@sediment/shared';
 
 import {
+  ensureExternalNotesScanned,
   snapshotExternalNotes,
   subscribeExternalNotes,
   takeExternalNote,
@@ -39,6 +40,7 @@ const externalRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       reply.raw.flushHeaders?.();
       reply.raw.write(': ok\n\n');
 
+      await ensureExternalNotesScanned(canvasId);
       writeSSE(reply.raw, {
         type: 'snapshot',
         data: { items: snapshotExternalNotes(canvasId) },

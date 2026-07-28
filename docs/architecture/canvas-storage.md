@@ -1,6 +1,6 @@
 # Canvas Storage Architecture
 
-> Last updated: 2026-07-23
+> Last updated: 2026-07-28
 
 ## 1. Overview
 
@@ -42,6 +42,7 @@ Key points:
 
 - An ordinary Space **directory name** is derived from its title via `toSafeFilename(title)`, not from `canvasId`. The stable `canvasId` only lives inside `space.json`; the World is the reserved `.world` exception.
 - `listCanvases()` rescans the workspace on every call, skipping entries that start with `.` or lack `space.json`.
+- The external-note watcher uses Chokidar only at workspace depth zero for top-level Space lifecycle changes and registers native `fs.watch` handles on existing `nodes/` directories, avoiding a workspace-wide initial file crawl. Opening a Space's external-note stream triggers one lazy scan for that Space, limited to eight concurrent file reads with one asynchronous topology read for filtering known note ids; subsequent native events read the latest topology. Only a real top-level Space directory add/remove invalidates the shared directory index and rebuilds the native watcher set; note events never force a synchronous full-workspace rescan.
 - Workspace preparation creates exactly one hidden `.world/space.json` after migrations. Its generated `canvasId` remains stable, resolves through the normal `CanvasStore`, and is exposed separately as `WorkspaceInfo.worldCanvasId`; ordinary Canvas lists continue to omit it.
 - An established `.world` directory with a missing or malformed `space.json` is an integrity error. World identity is never silently regenerated, and the World cannot be deleted or directory-renamed through ordinary Space lifecycle operations.
 - Reading the World reconciles one canonical `canvasRef` Portal for every live ordinary Space; a Portal Pin whose source Space has no Portal yet runs the same reconciliation first, so pinning never depends on the user having opened the World. Reconciliation creates only missing Portals in deterministic open grid slots, preserves every existing node and position, rejects duplicate or malformed Portal identities, and leaves a broken Portal when its source Space is deleted.
