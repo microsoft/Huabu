@@ -7,6 +7,7 @@ import { usePreviewStore } from '@/store/previewStore';
 
 import { ExpandedNodePanel } from './ExpandedNodePanel';
 
+import type { EdgeDirection } from '@sediment/shared';
 import type { Edge, Node } from '@xyflow/react';
 
 (
@@ -54,8 +55,18 @@ function canvasNode(id: string, label: string): Node {
   };
 }
 
-function edge(id: string, source: string, target: string): Edge {
-  return { id, source, target };
+function edge(
+  id: string,
+  source: string,
+  target: string,
+  direction: EdgeDirection = 'forward',
+): Edge {
+  return {
+    id,
+    source,
+    target,
+    data: { edgeStyle: { direction } },
+  };
 }
 
 function renderPanel(nodes: Node[], edges: Edge[], mode: 'replace' | 'split') {
@@ -97,6 +108,48 @@ afterEach(() => {
 });
 
 describe('ExpandedNodePanel edge navigation', () => {
+  it('groups available relationships behind one menu', () => {
+    renderPanel(
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
+      [edge('a-b', 'a', 'b')],
+      'split',
+    );
+
+    const navigationButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Connected node navigation"]',
+    );
+    expect(navigationButton).not.toBeNull();
+
+    act(() => navigationButton?.click());
+
+    expect(document.querySelector('[role="menu"]')?.textContent).toContain(
+      'Destinations',
+    );
+    expect(document.querySelector('[role="menu"]')?.textContent).not.toContain(
+      'Sources',
+    );
+  });
+
+  it('navigates an edge without arrows through the neutral control', () => {
+    renderPanel(
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
+      [edge('a-b', 'a', 'b', 'none')],
+      'split',
+    );
+
+    const navigationButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Connected node navigation"]',
+    );
+    expect(navigationButton).not.toBeNull();
+
+    act(() => navigationButton?.click());
+    const connectedItem =
+      document.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    act(() => connectedItem?.click());
+
+    expect(useCanvasStore.getState().expandedNodeId).toBe('b');
+  });
+
   it('opens a sole downstream neighbor and preserves replace mode', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
@@ -116,26 +169,27 @@ describe('ExpandedNodePanel edge navigation', () => {
     ).toEqual(['b']);
   });
 
-  it('releases a direct-navigation button so arrow navigation can continue', () => {
+  it('releases the relationship menu so arrow navigation can continue', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('a-b', 'a', 'b')],
       'split',
     );
-    const downstreamButton = Array.from(
-      container?.querySelectorAll<HTMLButtonElement>('button') ?? [],
-    ).find((button) =>
-      button.getAttribute('aria-label')?.startsWith('Navigate downstream'),
+    const navigationButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Connected node navigation"]',
     );
-    expect(downstreamButton).toBeDefined();
+    expect(navigationButton).not.toBeNull();
 
     act(() => {
-      downstreamButton?.focus();
-      downstreamButton?.click();
+      navigationButton?.focus();
+      navigationButton?.click();
     });
+    const downstreamItem =
+      document.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    act(() => downstreamItem?.click());
 
     expect(useCanvasStore.getState().expandedNodeId).toBe('b');
-    expect(document.activeElement).not.toBe(downstreamButton);
+    expect(document.activeElement).not.toBe(navigationButton);
 
     dispatchArrow(document.body, 'ArrowLeft');
     expect(useCanvasStore.getState().expandedNodeId).toBe('a');
@@ -191,10 +245,8 @@ describe('ExpandedNodePanel edge navigation', () => {
       [edge('a-b', 'a', 'b'), edge('a-c', 'a', 'c')],
       'split',
     );
-    const downstreamButton = Array.from(
-      container?.querySelectorAll<HTMLButtonElement>('button') ?? [],
-    ).find((button) =>
-      button.getAttribute('aria-label')?.startsWith('Navigate downstream'),
+    const navigationButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Connected node navigation"]',
     );
 
     dispatchArrow(window, 'ArrowRight');
@@ -207,7 +259,7 @@ describe('ExpandedNodePanel edge navigation', () => {
     });
 
     expect(document.querySelector('[role="menu"]')).toBeNull();
-    expect(document.activeElement).toBe(downstreamButton);
+    expect(document.activeElement).toBe(navigationButton);
   });
 
   it('does not capture arrow keys from editable controls', () => {

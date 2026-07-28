@@ -5,12 +5,23 @@ import {
   isExpandedNodeNavigationBlocked,
 } from './navigation';
 
+import type { EdgeDirection } from '@sediment/shared';
 import type { Edge, Node } from '@xyflow/react';
 
 const nodes = ['a', 'b', 'c', 'd'].map((id) => ({ id }) as Pick<Node, 'id'>);
 
-function edge(source: string, target: string, id = `${source}-${target}`) {
-  return { id, source, target } as Pick<Edge, 'id' | 'source' | 'target'>;
+function edge(
+  source: string,
+  target: string,
+  id = `${source}-${target}`,
+  direction: EdgeDirection = 'forward',
+) {
+  return {
+    id,
+    source,
+    target,
+    data: { edgeStyle: { direction } },
+  } as Edge;
 }
 
 describe('getExpandedNodeNeighbors', () => {
@@ -54,6 +65,37 @@ describe('getExpandedNodeNeighbors', () => {
     ).toEqual(['b', 'c']);
     expect(
       getExpandedNodeNeighbors(nodes, edges, 'a', 'outgoing').map(
+        (node) => node.id,
+      ),
+    ).toEqual(['b']);
+  });
+
+  it('follows the displayed arrow direction', () => {
+    const edges = [
+      edge('a', 'b', 'forward', 'forward'),
+      edge('a', 'c', 'backward', 'backward'),
+      edge('a', 'd', 'both', 'both'),
+    ];
+
+    expect(
+      getExpandedNodeNeighbors(nodes, edges, 'a', 'incoming').map(
+        (node) => node.id,
+      ),
+    ).toEqual(['c', 'd']);
+    expect(
+      getExpandedNodeNeighbors(nodes, edges, 'a', 'outgoing').map(
+        (node) => node.id,
+      ),
+    ).toEqual(['b', 'd']);
+  });
+
+  it('keeps edges without arrows in a neutral connected group', () => {
+    const edges = [edge('a', 'b', 'none', 'none')];
+
+    expect(getExpandedNodeNeighbors(nodes, edges, 'a', 'incoming')).toEqual([]);
+    expect(getExpandedNodeNeighbors(nodes, edges, 'a', 'outgoing')).toEqual([]);
+    expect(
+      getExpandedNodeNeighbors(nodes, edges, 'a', 'undirected').map(
         (node) => node.id,
       ),
     ).toEqual(['b']);

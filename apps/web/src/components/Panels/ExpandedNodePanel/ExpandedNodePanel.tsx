@@ -1,12 +1,5 @@
 import clsx from 'clsx';
-import {
-  ArrowLeft,
-  Bot,
-  ChevronLeft,
-  ChevronRight,
-  Columns2,
-  X,
-} from 'lucide-react';
+import { Bot, Columns2, TableOfContents, X } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -17,6 +10,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { getNodeIcon } from '@/config/nodeIcons.ts';
 import { formatShortcutById, matchesShortcut } from '@/config/shortcuts.ts';
 
 import { InPreviewSearchBar } from './InPreviewSearchBar.tsx';
@@ -46,10 +40,15 @@ type ExpandedNodePanelProps = {
   onToggleChat?: () => void;
 };
 
-type ConnectedNodeControlProps = {
-  direction: ExpandedNodeDirection;
-  neighbors: Node[];
+type ConnectedNodeMenuProps = {
+  groups: Array<{
+    direction: ExpandedNodeDirection;
+    label: string;
+    neighbors: Node[];
+    shortcut?: string;
+  }>;
   open: boolean;
+  focusDirection: ExpandedNodeDirection | null;
   title: string;
   menuLabel: string;
   untitledLabel: string;
@@ -57,18 +56,16 @@ type ConnectedNodeControlProps = {
   onSelect: (nodeId: string) => void;
 };
 
-const ConnectedNodeControl = ({
-  direction,
-  neighbors,
+const ConnectedNodeMenu = ({
+  groups,
   open,
+  focusDirection,
   title,
   menuLabel,
   untitledLabel,
   onOpenChange,
   onSelect,
-}: ConnectedNodeControlProps) => {
-  const Icon = direction === 'incoming' ? ChevronLeft : ChevronRight;
-  const hasMultiple = neighbors.length > 1;
+}: ConnectedNodeMenuProps) => {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const wasOpenRef = useRef(open);
   const restoreTriggerFocusRef = useRef(true);
@@ -123,48 +120,64 @@ const ConnectedNodeControl = ({
   return (
     <DropdownMenu
       open={open}
-      onOpenChange={(nextOpen) => onOpenChange(hasMultiple && nextOpen)}
+      onOpenChange={onOpenChange}
       align="bottom-left"
-      className="min-w-48"
+      className="min-w-56"
       trigger={
         <Button
           ref={triggerRef}
           variant="ghost"
           size="sm"
+          iconOnly
           title={title}
           tooltipPlacement="bottom"
-          disabled={neighbors.length === 0}
           aria-label={title}
-          aria-haspopup={hasMultiple ? 'menu' : undefined}
-          onClick={(event) => {
-            if (neighbors.length !== 1) return;
-            event.preventDefault();
-            event.currentTarget.blur();
-            onSelect(neighbors[0].id);
-          }}
+          aria-haspopup="menu"
         >
-          <Icon />
-          <span aria-hidden="true">{neighbors.length}</span>
+          <TableOfContents />
         </Button>
       }
     >
       <div role="menu" aria-label={menuLabel} onKeyDown={handleMenuKeyDown}>
-        {neighbors.map((neighbor, index) => {
-          const label =
-            typeof neighbor.data.label === 'string' && neighbor.data.label
-              ? neighbor.data.label
-              : untitledLabel;
+        {groups.map((group, groupIndex) => {
           return (
-            <DropdownMenuItem
-              key={neighbor.id}
-              autoFocus={index === 0}
-              onClick={() => {
-                restoreTriggerFocusRef.current = false;
-                onSelect(neighbor.id);
-              }}
+            <div
+              key={group.direction}
+              className={clsx(
+                groupIndex > 0 && 'border-edge-default mt-1 border-t pt-1',
+              )}
             >
-              {label}
-            </DropdownMenuItem>
+              <div className="text-fg-subtle flex items-center justify-between gap-4 px-3 py-1 text-[10px] font-medium uppercase">
+                <span>{group.label}</span>
+                {group.shortcut && (
+                  <span className="text-fg-muted text-xs font-semibold normal-case">
+                    {group.shortcut}
+                  </span>
+                )}
+              </div>
+              {group.neighbors.map((neighbor, index) => {
+                const NodeTypeIcon = getNodeIcon(neighbor.type, neighbor.data);
+                const label =
+                  typeof neighbor.data.label === 'string' && neighbor.data.label
+                    ? neighbor.data.label
+                    : untitledLabel;
+                return (
+                  <DropdownMenuItem
+                    key={neighbor.id}
+                    icon={<NodeTypeIcon size={13} strokeWidth={1.5} />}
+                    autoFocus={
+                      group.direction === focusDirection && index === 0
+                    }
+                    onClick={() => {
+                      restoreTriggerFocusRef.current = false;
+                      onSelect(neighbor.id);
+                    }}
+                  >
+                    {label}
+                  </DropdownMenuItem>
+                );
+              })}
+            </div>
           );
         })}
       </div>
@@ -216,6 +229,45 @@ export const ExpandedNodePanel = ({
         ? getExpandedNodeNeighbors(nodes, edges, expandedNodeId, 'outgoing')
         : [],
     [edges, expandedNodeId, nodes],
+  );
+  const undirectedNeighbors = useMemo(
+    () =>
+      expandedNodeId
+        ? getExpandedNodeNeighbors(nodes, edges, expandedNodeId, 'undirected')
+        : [],
+    [edges, expandedNodeId, nodes],
+  );
+  const sourceShortcut = formatShortcutById('node.navigateUpstream');
+  const destinationShortcut = formatShortcutById('node.navigateDownstream');
+  const connectedNodeGroups = useMemo(
+    () =>
+      [
+        {
+          direction: 'incoming' as const,
+          label: t('node.sourceNodes'),
+          neighbors: incomingNeighbors,
+          shortcut: sourceShortcut,
+        },
+        {
+          direction: 'undirected' as const,
+          label: t('node.neighborNodes'),
+          neighbors: undirectedNeighbors,
+        },
+        {
+          direction: 'outgoing' as const,
+          label: t('node.destinationNodes'),
+          neighbors: outgoingNeighbors,
+          shortcut: destinationShortcut,
+        },
+      ].filter((group) => group.neighbors.length > 0),
+    [
+      destinationShortcut,
+      incomingNeighbors,
+      outgoingNeighbors,
+      sourceShortcut,
+      t,
+      undirectedNeighbors,
+    ],
   );
   const [openNeighborDirection, setOpenNeighborDirection] =
     useState<ExpandedNodeDirection | null>(null);
@@ -434,10 +486,6 @@ export const ExpandedNodePanel = ({
 
   const isReplace = activeItem.expandMode === 'replace';
 
-  const backTitle = activeItem.isNode ? 'Back to Canvas' : 'Close Preview';
-  const upstreamShortcut = formatShortcutById('node.navigateUpstream');
-  const downstreamShortcut = formatShortcutById('node.navigateDownstream');
-
   // Inline rename is available only when the panel is hosting a real
   // canvas node (previews are intentionally read-only).
   const canEditTitle = activeItem.isNode && !!expandedNodeId;
@@ -481,24 +529,31 @@ export const ExpandedNodePanel = ({
     >
       {/* Header bar */}
       <div className="border-edge-default bg-surface flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3">
-        {/* Left: back button (replace mode) + title (inline-editable for
-            node mode, read-only for previews). Content-sized so short
+        {/* Left: node identity and node-specific actions, followed by
+            connected-node navigation. Content-sized so short
             labels hug their text — the title region must not stretch,
             otherwise the trailing divider gets pushed far away from
             the action group and the header reads as having a giant
             empty middle. */}
         <div className="flex min-w-0 items-center gap-2">
-          {isReplace && (
-            <Button
-              variant="ghost"
-              iconOnly
-              size="sm"
-              title={backTitle}
-              tooltipPlacement="bottom"
-              onClick={activeItem.close}
-            >
-              <ArrowLeft />
-            </Button>
+          {activeItem.isNode && connectedNodeGroups.length > 0 && (
+            <ConnectedNodeMenu
+              groups={connectedNodeGroups}
+              open={openNeighborDirection !== null}
+              focusDirection={openNeighborDirection}
+              title={t('node.connectedNodeNavigation')}
+              menuLabel={t('node.connectedNodeNavigation')}
+              untitledLabel={t('node.untitled')}
+              onOpenChange={(open) =>
+                setOpenNeighborDirection(
+                  open
+                    ? (openNeighborDirection ??
+                        connectedNodeGroups[0].direction)
+                    : null,
+                )
+              }
+              onSelect={selectNeighbor}
+            />
           )}
 
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
@@ -555,62 +610,10 @@ export const ExpandedNodePanel = ({
               </span>
             )}
           </div>
-
-          {activeItem.isNode ? (
-            <div className="flex shrink-0 items-center gap-1">
-              <div
-                aria-hidden="true"
-                className="bg-edge-default mx-1 h-5 w-px"
-              />
-              <ConnectedNodeControl
-                direction="incoming"
-                neighbors={incomingNeighbors}
-                open={openNeighborDirection === 'incoming'}
-                title={t('node.navigateUpstream', {
-                  shortcut: upstreamShortcut,
-                })}
-                menuLabel={t('node.chooseUpstream')}
-                untitledLabel={t('node.untitled')}
-                onOpenChange={(open) =>
-                  setOpenNeighborDirection(open ? 'incoming' : null)
-                }
-                onSelect={selectNeighbor}
-              />
-              <ConnectedNodeControl
-                direction="outgoing"
-                neighbors={outgoingNeighbors}
-                open={openNeighborDirection === 'outgoing'}
-                title={t('node.navigateDownstream', {
-                  shortcut: downstreamShortcut,
-                })}
-                menuLabel={t('node.chooseDownstream')}
-                untitledLabel={t('node.untitled')}
-                onOpenChange={(open) =>
-                  setOpenNeighborDirection(open ? 'outgoing' : null)
-                }
-                onSelect={selectNeighbor}
-              />
-            </div>
-          ) : null}
         </div>
 
-        {/* Right: mode toggle + close */}
+        {/* Right: node-specific actions followed by view-level controls. */}
         <div className="text-fg-muted flex items-center gap-1">
-          {/* Divider separating the title region from the action group
-              so the header reads as two clear zones (identity ↔
-              actions). Always visible — even a bare preview still has
-              the universal mode-toggle + close buttons on this side.
-              Padding matches the inner header-slot divider below so
-              the spacing rhythm reads as a single coherent grid. */}
-          <div aria-hidden="true" className="bg-edge-default mx-1 h-5 w-px" />
-          {/* Per-preview action slot (filled via portal by NotePreview
-              and friends). Sits to the LEFT of the universal Bot /
-              mode / close buttons so preview-specific controls feel
-              like first-class header actions while remaining visually
-              grouped on their own. The trailing divider is
-              auto-hidden via `peer-empty:hidden` when the slot has
-              no contributed actions, so we never render a stray
-              vertical line. */}
           <div
             ref={setHeaderSlotEl}
             className="peer flex items-center gap-1 empty:hidden"
