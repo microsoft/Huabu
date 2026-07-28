@@ -17,7 +17,11 @@ import { isSnapSessionActive } from '../../handler/snap/snapSession';
 import useCanvasStore from '../../store/canvasStore';
 import { useGesturePreviewStore } from '../../store/gesturePreviewStore';
 import { useIntentStore } from '../../store/intentStore';
-import { parseSedimentClipboard } from '../../utils/io/clipboard';
+import {
+  parseSedimentClipboard,
+  readSedimentClipboardPayload,
+  readSedimentClipboardPayloadAsync,
+} from '../../utils/io/clipboard';
 import { looksLikeUrl } from '../../utils/io/media';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
@@ -313,10 +317,10 @@ export function useCanvasShortcuts(
 
           // Native paste didn't fire — use Clipboard API as fallback
           try {
-            const sysText = await navigator.clipboard.readText();
+            const sysPayload = await readSedimentClipboardPayloadAsync();
 
             // Check for serialized canvas nodes
-            const parsed = parseSedimentClipboard(sysText);
+            const parsed = parseSedimentClipboard(sysPayload);
             if (parsed) {
               pasteNodes(
                 getFlowPos(),
@@ -346,7 +350,7 @@ export function useCanvasShortcuts(
             }
 
             // Plain text / URLs
-            const trimmed = sysText?.trim();
+            const trimmed = sysPayload?.trim();
             if (trimmed) {
               pasteText(trimmed);
             }
@@ -402,8 +406,10 @@ export function useCanvasShortcuts(
 
       const text = dt.getData('text/plain');
 
-      // Check for serialized canvas nodes
-      const parsed = parseSedimentClipboard(text);
+      // Check for serialized canvas nodes. Single-image copies carry the
+      // payload in `text/html` and keep `text/plain` human-readable, so the
+      // payload has to be read through the helper rather than from `text`.
+      const parsed = parseSedimentClipboard(readSedimentClipboardPayload(dt));
       if (parsed) {
         e.preventDefault();
         pasteNodes(

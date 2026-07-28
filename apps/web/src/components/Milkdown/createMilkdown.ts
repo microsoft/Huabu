@@ -45,7 +45,10 @@ import { fingerprintMarkdownKeys } from '@sediment/shared/canvas-engine';
 import { toast } from '@/components/Common/Toast';
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import { fingerprintBlocks, type BlockSnapshot } from '@/utils/blockProvenance';
-import { parseSedimentImageClipboard } from '@/utils/io/clipboard';
+import {
+  parseSedimentImageClipboard,
+  readSedimentClipboardPayload,
+} from '@/utils/io/clipboard';
 
 import { normalizeMathDelimiters } from './markdownUtils';
 
@@ -1826,7 +1829,7 @@ export async function createMilkdown(
                 paste: (view, event) => {
                   const clipboardEvent = event as ClipboardEvent;
                   const clipboard = parseSedimentImageClipboard(
-                    clipboardEvent.clipboardData?.getData('text/plain'),
+                    readSedimentClipboardPayload(clipboardEvent.clipboardData),
                   );
                   if (!clipboard) return false;
 

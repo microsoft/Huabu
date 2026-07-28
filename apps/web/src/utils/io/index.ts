@@ -1,10 +1,14 @@
 export {
   copyToClipboard,
+  copyCanvasClipboard,
   parseSedimentClipboard,
   parseSedimentImageClipboard,
+  type CanvasClipboardCopy,
   type SedimentClipboard,
   type SedimentClipboardImage,
 } from './clipboard';
+
+export { nodesToPlainText, type PlainTextNode } from './nodeToPlainText';
 
 export {
   SEDIMENT_DND_MIME,
