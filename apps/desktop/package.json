@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
-    "electron": "^43.2.0",
+    "electron": "43.1.1",
     "electron-builder": "^26.0.0",
     "png2icons": "^2.0.1",
     "sharp": "^0.34.5",
