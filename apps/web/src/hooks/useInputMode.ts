@@ -47,7 +47,7 @@ export function useIsNotMouse(): boolean {
   return lastPointer !== 'mouse';
 }
 
-function detectTouchCapability(): boolean {
+export function detectTouchCapability(): boolean {
   if (typeof navigator === 'undefined' || typeof window === 'undefined') {
     return false;
   }

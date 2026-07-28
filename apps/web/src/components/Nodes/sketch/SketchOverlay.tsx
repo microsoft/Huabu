@@ -11,7 +11,10 @@ import {
   updateCanvasGesture,
   type CanvasPointerType,
 } from '@/handler/canvasGestureSession';
-import { useEffectiveInputMode } from '@/hooks/useInputMode';
+import {
+  detectTouchCapability,
+  useEffectiveInputMode,
+} from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { useToolStore } from '@/store/toolStore';
@@ -41,6 +44,57 @@ import type { ReactFlowInstance } from '@xyflow/react';
  */
 const PREVIEW_CLEAR_DELAY_FRAMES = 2;
 export const CANCEL_SKETCH_GESTURE_EVENT = 'sediment:cancel-sketch-gesture';
+
+/**
+ * Whether this device can produce touch / stylus input. Reuses the input
+ * system's existing capability check (`detectTouchCapability` — the same
+ * `maxTouchPoints > 0` / `(any-pointer: coarse)` signal `useEffectiveInputMode`
+ * relies on). Cached at module load.
+ *
+ * It gates the raw-touch drawing engine below. The gate is a *device
+ * capability*, not the live pointer mode, on purpose: iPadOS Safari drops some
+ * Apple-Pencil contacts before they ever fire a pointer event, so the live
+ * pointer-mode signal (derived from those very events) can't be used to decide
+ * whether to attach the touch engine — the dropped first stroke would never
+ * turn it on. Desktop mouse-only devices never fire touch events, so attaching
+ * the engine there is a harmless no-op.
+ */
+const isTouchDevice = detectTouchCapability();
+
+/**
+ * Capture-method stub for the synthetic pointer built from a raw `Touch`: a
+ * touch is already implicitly captured to its target, so pointer-capture calls
+ * are no-ops (and would otherwise throw with a non-pointer id). Typed `unknown`
+ * so it doubles as an identity marker: a pointer event whose `currentTarget`
+ * is this stub came from the iPad touch engine, not the browser.
+ */
+const POINTER_CAPTURE_STUB: unknown = {
+  setPointerCapture: () => {},
+  releasePointerCapture: () => {},
+  hasPointerCapture: () => false,
+};
+
+/**
+ * Build a minimal synthetic `React.PointerEvent` (pointerType `'pen'`) from a
+ * raw `Touch`, so the iPad raw-touch engine can replay Apple-Pencil contacts
+ * through the existing pointer handlers unchanged. Only the fields those
+ * handlers read are populated.
+ */
+function synthPenPointer(t: Touch): React.PointerEvent {
+  const force = (t as Touch & { force?: number }).force;
+  const pressure = typeof force === 'number' && force > 0 ? force : 0.5;
+  return {
+    pointerId: t.identifier,
+    pointerType: 'pen',
+    clientX: t.clientX,
+    clientY: t.clientY,
+    pressure,
+    button: 0,
+    buttons: 1,
+    isPrimary: true,
+    currentTarget: POINTER_CAPTURE_STUB,
+  } as unknown as React.PointerEvent;
+}
 
 /**
  * Run `cb` after `frames` animation frames have elapsed. Used to defer
@@ -193,6 +247,11 @@ export function SketchOverlay({
     (pointerType: string) => {
       // The mouse always draws; other pointers follow the input-mode routing.
       if (pointerType === 'mouse') return true;
+      // On a touch device the raw-touch engine drives the pen and already
+      // knows the contact is a stylus draw, so accept pen unconditionally —
+      // otherwise a first stroke can be rejected before `useEffectiveInputMode`
+      // has observed the pen.
+      if (isTouchDevice && pointerType === 'pen') return true;
       if (inputMode === 'mouse') return false;
       return inputMode === 'pen'
         ? pointerType === 'pen'
@@ -310,6 +369,17 @@ export function SketchOverlay({
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
+      // On iPad the raw-touch engine owns the pen; ignore the browser's
+      // synthesized pointer-pen events (whose currentTarget is the real DOM
+      // element) so a contact isn't handled twice. The touch engine replays
+      // stylus contacts as synthetic pen events carrying the capture stub as
+      // currentTarget, and those DO pass through.
+      if (
+        isTouchDevice &&
+        e.pointerType === 'pen' &&
+        e.currentTarget !== POINTER_CAPTURE_STUB
+      )
+        return;
       // Middle mouse button → start a viewport pan instead of a stroke.
       // We have to handle this here because the overlay sits on top of
       // ReactFlow and swallows the event before its built-in panOnDrag
@@ -361,6 +431,12 @@ export function SketchOverlay({
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent) => {
+      if (
+        isTouchDevice &&
+        e.pointerType === 'pen' &&
+        e.currentTarget !== POINTER_CAPTURE_STUB
+      )
+        return;
       if (tryUpdatePan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
       if (e.pointerType === 'mouse' && e.buttons !== 1) return;
@@ -377,6 +453,12 @@ export function SketchOverlay({
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
+      if (
+        isTouchDevice &&
+        e.pointerType === 'pen' &&
+        e.currentTarget !== POINTER_CAPTURE_STUB
+      )
+        return;
       if (tryEndPan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
       const phase = updateCanvasGesture(e.pointerId, {
@@ -608,6 +690,12 @@ export function SketchOverlay({
 
   const handleEraserPointerDown = useCallback(
     (e: React.PointerEvent) => {
+      if (
+        isTouchDevice &&
+        e.pointerType === 'pen' &&
+        e.currentTarget !== POINTER_CAPTURE_STUB
+      )
+        return;
       // Middle mouse button → viewport pan (see handlePointerDown).
       if (tryStartPan(e)) return;
       // Only the primary button (left mouse / pen tip / first touch) erases.
@@ -652,6 +740,12 @@ export function SketchOverlay({
 
   const handleEraserPointerMove = useCallback(
     (e: React.PointerEvent) => {
+      if (
+        isTouchDevice &&
+        e.pointerType === 'pen' &&
+        e.currentTarget !== POINTER_CAPTURE_STUB
+      )
+        return;
       // Always update the visual indicator position first, regardless of
       // whether this move belongs to a middle-mouse pan. Otherwise the
       // indicator stays frozen at the pre-pan position throughout the
@@ -670,6 +764,12 @@ export function SketchOverlay({
 
   const handleEraserPointerUp = useCallback(
     (e: React.PointerEvent) => {
+      if (
+        isTouchDevice &&
+        e.pointerType === 'pen' &&
+        e.currentTarget !== POINTER_CAPTURE_STUB
+      )
+        return;
       if (tryEndPan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
       const phase = updateCanvasGesture(e.pointerId, {
@@ -697,6 +797,13 @@ export function SketchOverlay({
 
   const handlePointerCancel = useCallback(
     (e: React.PointerEvent) => {
+      if (
+        isTouchDevice &&
+        e.pointerType === 'pen' &&
+        e.currentTarget !== POINTER_CAPTURE_STUB
+      ) {
+        return;
+      }
       if (e.pointerId !== activePointerIdRef.current) return;
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
@@ -740,6 +847,107 @@ export function SketchOverlay({
     return `url("data:image/svg+xml;utf8,${svg}") ${center} ${center}, crosshair`;
   }, [resolvedColor, strokeSize, zoom]);
 
+  // iPad raw-touch pen engine. WebKit drops light/fast Apple-Pencil contacts
+  // from the synthesized pointer stream (see docs/proposals/ipad-ink-adaptation
+  // §3.4), so on iPad we capture the raw, non-passive `touch` stream on the
+  // overlay and `preventDefault()` to claim the contact, replaying each stylus
+  // touch into the EXISTING pointer handlers via a synthetic pen event — so all
+  // commit / merge / erase logic is reused verbatim. Finger and mouse keep
+  // using the React pointer handlers unchanged. Handlers are read through refs
+  // so the listeners stay attached across renders; the overlay `<div>` is
+  // reused across draw/erase, so `overlayRef` is stable.
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const drawHandlersRef = useRef({
+    down: handlePointerDown,
+    move: handlePointerMove,
+    up: handlePointerUp,
+    cancel: handlePointerCancel,
+  });
+  drawHandlersRef.current = {
+    down: handlePointerDown,
+    move: handlePointerMove,
+    up: handlePointerUp,
+    cancel: handlePointerCancel,
+  };
+  const eraseHandlersRef = useRef({
+    down: handleEraserPointerDown,
+    move: handleEraserPointerMove,
+    up: handleEraserPointerUp,
+    cancel: handlePointerCancel,
+  });
+  eraseHandlersRef.current = {
+    down: handleEraserPointerDown,
+    move: handleEraserPointerMove,
+    up: handleEraserPointerUp,
+    cancel: handlePointerCancel,
+  };
+
+  useEffect(() => {
+    if (!isTouchDevice) return;
+    const el = overlayRef.current;
+    if (!el) return;
+    const isStylusTouch = (t: Touch) => {
+      const tt = (t as Touch & { touchType?: string }).touchType;
+      return tt === undefined || tt === 'stylus';
+    };
+    const dispatch = (key: 'down' | 'move' | 'up' | 'cancel', t: Touch) => {
+      const set =
+        modeRef.current === 'erase'
+          ? eraseHandlersRef.current
+          : drawHandlersRef.current;
+      set[key](synthPenPointer(t));
+    };
+    const onStart = (e: TouchEvent) => {
+      for (const t of Array.from(e.changedTouches)) {
+        if (!isStylusTouch(t)) continue;
+        e.preventDefault();
+        dispatch('down', t);
+      }
+    };
+    const onMove = (e: TouchEvent) => {
+      for (const t of Array.from(e.changedTouches)) {
+        if (!isStylusTouch(t)) continue;
+        e.preventDefault();
+        dispatch('move', t);
+      }
+    };
+    const onEnd = (e: TouchEvent) => {
+      for (const t of Array.from(e.changedTouches)) {
+        if (isStylusTouch(t)) dispatch('up', t);
+      }
+    };
+    const onCancel = (e: TouchEvent) => {
+      for (const t of Array.from(e.changedTouches)) {
+        if (isStylusTouch(t)) dispatch('cancel', t);
+      }
+    };
+    const opts = { passive: false } as const;
+    el.addEventListener('touchstart', onStart, opts);
+    el.addEventListener('touchmove', onMove, opts);
+    el.addEventListener('touchend', onEnd, opts);
+    el.addEventListener('touchcancel', onCancel, opts);
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onCancel);
+    };
+  }, []);
+
+  // On touch devices, claim the overlay's gesture recognizers so the browser
+  // never reinterprets a Pencil contact as scroll / selection / callout.
+  const touchDrawStyle = (
+    isTouchDevice
+      ? {
+          touchAction: 'none',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          WebkitTouchCallout: 'none',
+        }
+      : undefined
+  ) as React.CSSProperties | undefined;
+
   if (mode === 'erase') {
     // Eraser indicator and hit area are both defined in screen-space px
     // (`eraserScreenRadius`), so they match exactly and stay constant on
@@ -748,7 +956,7 @@ export function SketchOverlay({
       <div
         ref={overlayRef}
         className="absolute inset-0 z-4"
-        style={{ cursor: 'none' }}
+        style={{ cursor: 'none', ...touchDrawStyle }}
         onPointerDown={handleEraserPointerDown}
         onPointerMove={handleEraserPointerMove}
         onPointerUp={handleEraserPointerUp}
@@ -776,7 +984,7 @@ export function SketchOverlay({
     <div
       ref={overlayRef}
       className="absolute inset-0 z-4"
-      style={{ cursor: dotCursor }}
+      style={{ cursor: dotCursor, ...touchDrawStyle }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
