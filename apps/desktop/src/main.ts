@@ -74,6 +74,36 @@ const IS_DEV = !app.isPackaged;
 const IS_DEV_ORCHESTRATOR = Boolean(process.env.EXTERNAL_SERVER_URL?.trim());
 
 /**
+ * Resolve the user-facing Electron app name — the value that anchors
+ * `app.getPath('userData' | 'logs' | 'sessionData')` AND the key behind
+ * `requestSingleInstanceLock()` (see below).
+ *
+ * - Packaged install / `start:desktop` → always `Huabu`. A single global
+ *   instance is intentional: these share one `<userData>/data` tree, so
+ *   two of them at once fight over port 3001 and the same `workspace.json`
+ *   (the exact failure the single-instance lock guards against).
+ *
+ * - `dev:desktop` (HMR orchestrator) → `Huabu Dev`, OPTIONALLY suffixed
+ *   with a per-instance tag from `HUABU_INSTANCE`. This lets several
+ *   working copies (different repo checkouts) run `dev:desktop` in
+ *   PARALLEL: each distinct tag yields a distinct app name, hence a
+ *   distinct userData tree AND a distinct single-instance lock, so they
+ *   no longer collide. `scripts/dev-desktop.mjs` defaults the tag to the
+ *   repo folder name; unset (e.g. bare `electron .`) falls back to plain
+ *   `Huabu Dev`, preserving the prior behaviour.
+ *
+ * The tag is sanitised to a filesystem/display-safe subset so it can be
+ * embedded in a directory name without surprises.
+ */
+function resolveAppName(): string {
+  if (!IS_DEV_ORCHESTRATOR) return 'Huabu';
+  const rawTag = process.env.HUABU_INSTANCE?.trim();
+  if (!rawTag) return 'Huabu Dev';
+  const safeTag = rawTag.replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, '');
+  return safeTag ? `Huabu Dev (${safeTag})` : 'Huabu Dev';
+}
+
+/**
  * Set the user-facing Electron app name, which also anchors
  * `app.getPath('logs' | 'userData' | 'sessionData')`.
  *
@@ -110,7 +140,34 @@ const IS_DEV_ORCHESTRATOR = Boolean(process.env.EXTERNAL_SERVER_URL?.trim());
  *
  * Must be invoked before `app.whenReady()` to take effect.
  */
-app.setName(IS_DEV_ORCHESTRATOR ? 'Huabu Dev' : 'Huabu');
+app.setName(resolveAppName());
+
+/**
+ * Enforce a single running instance per app-name scope.
+ *
+ * Without this, launching Huabu again (double-clicking the installed app
+ * a second time, or running `start:desktop` while the installed app is
+ * open) forks a SECOND Fastify server. The two servers then fight over
+ * the preferred port (3001) and, worse, share the same
+ * `<userData>/data` tree — same `workspace.json`, same canvas DB. When
+ * one instance later shuts its server down, any window still pointed at
+ * `127.0.0.1:3001` starts getting `503 (server closing)` and then
+ * `ERR_CONNECTION_REFUSED`.
+ *
+ * The lock is keyed on `app.getName()`, so it isolates by scope
+ * automatically: a packaged install / `start:desktop` (`Huabu`) and the
+ * HMR dev orchestrator (`Huabu Dev`) hold DIFFERENT locks and can still
+ * run side by side. A second instance in the SAME scope fails to get the
+ * lock and quits immediately, after asking the primary to surface its
+ * window (see the `second-instance` handler below).
+ *
+ * Must run before `app.whenReady()` so the redundant instance exits
+ * before doing any startup work (port allocation, server fork, etc.).
+ */
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
 
 /**
  * Resolve the on-disk path to a runtime icon asset.
@@ -1060,6 +1117,14 @@ function createWindow(port: number): void {
 // ── App lifecycle ────────────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  // A redundant instance (lost the single-instance lock above) is on its
+  // way out via `app.quit()`; `whenReady` can still fire before that
+  // settles. Bail before doing any startup work so we don't fork a
+  // second server or touch the shared `<userData>/data` tree.
+  if (!gotSingleInstanceLock) {
+    return;
+  }
+
   // Per-platform application menu. macOS gets a native menu bar (the
   // platform-conventional home for workspace-level actions); Windows /
   // Linux keep it cleared and rely on the custom title bar's `AppMenu`
@@ -1208,6 +1273,24 @@ app.whenReady().then(async () => {
 // macOS: re-create window when dock icon is clicked and no windows are open.
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0 && serverPort > 0) {
+    createWindow(serverPort);
+  }
+});
+
+// A second launch in the same app-name scope hits this handler in the
+// PRIMARY instance (the redundant one already quit after failing to get
+// the lock). Restore + focus the existing window so the extra launch
+// feels like "bring the running app forward" instead of silently doing
+// nothing.
+app.on('second-instance', () => {
+  const win = mainWindow;
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  } else if (serverPort > 0) {
+    // Window was closed (Windows/Linux keep the app alive only while a
+    // window exists, but a race is possible) — recreate it.
     createWindow(serverPort);
   }
 });

@@ -42,6 +42,15 @@ import { NodeRefNode } from '@/components/Nodes/nodeRef/NodeRefNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
 import { OfficeNode } from '@/components/Nodes/office/OfficeNode';
 import { PDFNode } from '@/components/Nodes/pdf/PDFNode';
+import {
+  resumeHeightCommits,
+  suspendHeightCommits,
+} from '@/components/Nodes/shared/height/commitSuspension';
+import { destroyOffscreenMeasurer } from '@/components/Nodes/shared/height/measure/offscreenMeasurer';
+import {
+  startHeightPrewarm,
+  stopHeightPrewarm,
+} from '@/components/Nodes/shared/height/measure/prewarmQueue';
 import { TextNode } from '@/components/Nodes/text/TextNode';
 import {
   uploadFileToNodeInput,
@@ -480,6 +489,18 @@ export const Canvas: React.FC<CanvasProps> = ({
   useEffect(() => {
     if (isNotMouse && tool === 'pan') setTool('select');
   }, [isNotMouse, setTool, tool]);
+
+  // Measure notes the user has not reached yet. `onlyRenderVisibleElements`
+  // unmounts offscreen nodes, so this is the only way an unvisited note
+  // ever gets a real footprint — without it, arriving at one produces a
+  // visible (if bounded) correction.
+  useEffect(() => {
+    startHeightPrewarm();
+    return () => {
+      stopHeightPrewarm();
+      void destroyOffscreenMeasurer();
+    };
+  }, []);
 
   const handleSelectionStart = useCallback(() => {
     if (tool !== 'select') return;
@@ -1286,7 +1307,14 @@ export const Canvas: React.FC<CanvasProps> = ({
           setRfInstance(instance);
           fitInitialViewport(instance);
         }}
+        onMoveStart={() => {
+          // Pan and zoom both arrive here. A height correction committed
+          // mid-gesture would resize a node the user is moving past, so
+          // corrections queue up and land once the viewport settles.
+          suspendHeightCommits();
+        }}
         onMoveEnd={(_event, viewport) => {
+          resumeHeightCommits();
           // Mirror pan/zoom into localStorage (per canvas) so browser and
           // desktop restarts restore the same view. Does NOT participate in
           // the structure autosave.

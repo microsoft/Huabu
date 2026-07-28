@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { getNodeFontFit, refitFont } from '@/utils/node/fontFit';
 import {
-  TEXT_ACCENT_BORDER,
   TEXT_NODE_PADDING_X,
   TEXT_NODE_PADDING_Y,
 } from '@/utils/node/nodeFontConfig';
@@ -166,8 +165,8 @@ describe('resize-preview controller — child font refit', () => {
     });
     const fit = getNodeFontFit(child);
     expect(fit).toMatchObject({
-      insetX: TEXT_NODE_PADDING_X + TEXT_ACCENT_BORDER,
-      insetY: TEXT_NODE_PADDING_Y + TEXT_ACCENT_BORDER,
+      insetX: TEXT_NODE_PADDING_X,
+      insetY: TEXT_NODE_PADDING_Y,
     });
 
     controller.captureFrameResizeSnapshot('frame');

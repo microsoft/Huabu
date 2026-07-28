@@ -85,8 +85,11 @@ const HANDBOOK_URL =
 // Cold starts (first tsx/esbuild compile, Windows Defender scanning a fresh
 // node_modules, or a loaded machine) can blow past a tight window, so the
 // default is generous and overridable via DEV_SERVER_READY_TIMEOUT_MS.
+// Server + Vite cold-compile in parallel here, so on Windows the server's
+// first tsx/esbuild compile has been observed landing right on the old 120s
+// edge — 180s leaves headroom without masking a genuine hang.
 const READY_TIMEOUT_MS = Number.parseInt(
-  env.DEV_SERVER_READY_TIMEOUT_MS || '120000',
+  env.DEV_SERVER_READY_TIMEOUT_MS || '180000',
   10,
 );
 const POLL_INTERVAL_MS = 250;
@@ -307,7 +310,9 @@ async function main() {
   const serverPort = await findAvailablePort(SERVER_PORT);
   if (serverPort !== SERVER_PORT) {
     console.warn(
-      `[dev-desktop] Server port ${SERVER_PORT} is in use; using ${serverPort} instead.`,
+      `[dev-desktop] Server port ${SERVER_PORT} is in use (often the installed ` +
+        `Huabu desktop app running in the background); using ${serverPort} ` +
+        `instead. Quit that app to free ${SERVER_PORT} if you prefer the default.`,
     );
   }
   const vitePort = await findAvailablePort(VITE_PORT);
@@ -368,6 +373,13 @@ async function main() {
     WEB_DEV_SERVER_URL: `http://${HOST}:${vitePort}`,
     EXTERNAL_SERVER_URL: `http://${HOST}:${serverPort}`,
     HUABU_DATA_DIR: serverDataDir,
+    // Per-repo instance tag so several checkouts can run `dev:desktop` in
+    // parallel without colliding. It flows into the Electron app name
+    // (`Huabu Dev (<tag>)`) in apps/desktop/src/main.ts, which in turn
+    // partitions each instance's `userData` tree AND its
+    // single-instance lock. Defaults to this repo's folder name;
+    // override with HUABU_INSTANCE to pin a stable tag.
+    HUABU_INSTANCE: env.HUABU_INSTANCE || path.basename(repoRoot),
   };
   // VS Code's task terminal sometimes leaks this and it would make
   // `electron .` run as a plain Node process instead of an Electron app.

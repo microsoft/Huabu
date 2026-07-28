@@ -18,6 +18,7 @@ import {
   FLOATING_TOOLBAR_CLASS,
 } from '@/components/Common/FloatingToolbar';
 import { Tooltip } from '@/components/Common/Tooltip';
+import { useHeightMode } from '@/components/Nodes/shared/height/useHeightMode';
 import { NODE_ICON } from '@/config/nodeIcons';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
@@ -156,9 +157,15 @@ export const NodeFloatingToolbar = memo(
     // ─── Note: fit-height ↔ H input linkage ────────────────────────────
     //
     // For note nodes, the H input shares state with the dedicated
-    // auto-fit toggle (mirrors `handleToggleAutoHeight` in NoteNode):
-    //  - Auto mode  → `style.height` is undefined, node grows with content.
-    //  - Fixed mode → `style.height` is a pinned number.
+    // auto-fit toggle (mirrors `handleToggleAutoHeight` in NoteNode).
+    // Ownership is read through the shared resolver rather than from the
+    // presence of `style.height`: an auto note carries a materialized
+    // number too, so the old `=== undefined` check would report every
+    // note as pinned.
+    //
+    // This indicator is also how the user learns that dragging the resize
+    // handle pinned the height — an implicit auto → fixed flip that would
+    // otherwise be invisible.
     //
     // Both this toggle and the corner "show all content" affordance in
     // NoteNode observe the same store state, so they stay in sync
@@ -168,10 +175,9 @@ export const NodeFloatingToolbar = memo(
     // toolbar doesn't need to track it locally — `setNoteHeightMode`
     // reads from the same map regardless of which entry point triggers
     // the toggle.
-    const styleHeight = internalNode?.style?.height as number | undefined;
-
     const beginGesture = useCanvasStore((s) => s.beginGesture);
-    const isNoteAutoHeight = type === 'note' && styleHeight === undefined;
+    const heightMode = useHeightMode(id);
+    const isNoteAutoHeight = type === 'note' && heightMode === 'auto';
     const toggleNoteAutoHeight = useCallback(() => {
       setNoteHeightMode([id], isNoteAutoHeight ? 'fixed' : 'auto');
     }, [id, isNoteAutoHeight, setNoteHeightMode]);

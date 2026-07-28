@@ -126,7 +126,7 @@ describe('staleness scoping (per-change fingerprintKeys)', () => {
       summary: 'greeting',
       keywords: ['hello'],
       labelSource: 'auto',
-      measuredHeight: 1305,
+      autoHeight: { intrinsicHeight: 1305, measuredFor: '1:abc' },
     });
     expect(fingerprintNodeFields(afterPreprocess, rec.fingerprintKeys!)).toBe(
       rec.appliedFingerprint,

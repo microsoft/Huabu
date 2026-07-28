@@ -21,6 +21,10 @@
 import { useStore } from '@xyflow/react';
 import { useEffect } from 'react';
 
+import { resolveHeightMode } from '@sediment/shared/canvas-engine';
+
+import type { Node } from '@xyflow/react';
+
 const memory = new Map<string, number>();
 
 /**
@@ -38,14 +42,27 @@ export function getNoteFixedHeight(nodeId: string): number | undefined {
 }
 
 /**
- * Mount-scoped tracker that records `style.height` into the shared
- * memory whenever the given note holds a pinned (numeric) height.
+ * The height a node has *pinned by the user*, or `undefined` when its
+ * height is renderer-owned.
  *
- * Skips writes when the node is in auto mode (`style.height` cleared)
- * so the most recently observed pinned value is preserved across
- * auto ↔ fixed round-trips. Captures values from any source — toolbar
- * input, drag-resize handle, programmatic `setNodeGeometry`, undo /
- * redo — because it only watches the resolved store value.
+ * Extracted from the hook because this is the rule that is easy to get
+ * wrong and expensive when wrong: gating on the presence of a number
+ * instead of on ownership would record materialized auto heights and
+ * silently destroy the fixed → auto → fixed round-trip.
+ */
+export function pinnedHeightOf(node: Node | undefined): number | undefined {
+  if (!node || resolveHeightMode(node) !== 'fixed') return undefined;
+  const height = node.style?.height;
+  return typeof height === 'number' && height > 0 ? height : undefined;
+}
+
+/**
+ * Mount-scoped tracker that records `style.height` into the shared
+ * memory whenever the given note's height is user-owned.
+ *
+ * Captures values from any source — toolbar input, drag-resize handle,
+ * programmatic `setNodeGeometry`, undo / redo — because it only watches
+ * the resolved store value.
  *
  * Intended to be called once from `NoteNode` for each note node. The
  * single mount point is enough because every entry path that pins a
@@ -53,12 +70,11 @@ export function getNoteFixedHeight(nodeId: string): number | undefined {
  * regardless of which UI triggered it.
  */
 export function useTrackNoteFixedHeight(nodeId: string): void {
-  const styleHeight = useStore(
-    (s) => s.nodeLookup.get(nodeId)?.style?.height as number | undefined,
+  const pinnedHeight = useStore((s) =>
+    pinnedHeightOf(s.nodeLookup.get(nodeId)),
   );
   useEffect(() => {
-    if (typeof styleHeight === 'number') {
-      recordNoteFixedHeight(nodeId, styleHeight);
-    }
-  }, [nodeId, styleHeight]);
+    if (pinnedHeight === undefined) return;
+    recordNoteFixedHeight(nodeId, pinnedHeight);
+  }, [nodeId, pinnedHeight]);
 }

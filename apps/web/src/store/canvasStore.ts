@@ -63,8 +63,11 @@ import {
 import { i18n } from '@/i18n';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { measureMissingAutoHeights } from './canvasStore/height/measureMissingAutoHeights';
 import { createIntentActionWindow } from './canvasStore/intentActionWindow';
+import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
+import { warmupNodeHeights } from './canvasStore/load/warmupNodeHeights';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
 import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
 import { createNodeContentQueue } from './canvasStore/save/nodeContentQueue';
@@ -90,6 +93,10 @@ import { CanvasConflictError } from '../api/canvas';
 import { toast, dismissToast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
+import {
+  resumeHeightCommits,
+  suspendHeightCommits,
+} from '../components/Nodes/shared/height/commitSuspension';
 import { copyCanvasClipboard } from '../utils/io/clipboard';
 import { nodesToPlainText } from '../utils/io/nodeToPlainText';
 
@@ -104,6 +111,8 @@ import type {
   CanvasCommandType,
   CanvasExecution,
   CanvasExecutionSource,
+  CanvasNodeId,
+  CanvasNodeMeasuredHeightUpdate,
   CanvasNodeType,
   CanvasViewport,
   IntentContext,
@@ -211,6 +220,22 @@ function readViewportFromStorage(canvasId: string): CanvasViewport | null {
     // Private mode / disabled storage falls back to fitView.
     return null;
   }
+}
+
+/**
+ * Canvas-space point the user will be looking at once the restored
+ * viewport is applied. A canvas with no stored viewport does a one-shot
+ * `fitView` instead, so the origin is as good a guess as any.
+ */
+function viewportCentreOf(viewport: CanvasViewport | null): {
+  x: number;
+  y: number;
+} {
+  if (!viewport || viewport.zoom <= 0) return { x: 0, y: 0 };
+  return {
+    x: (window.innerWidth / 2 - viewport.x) / viewport.zoom,
+    y: (window.innerHeight / 2 - viewport.y) / viewport.zoom,
+  };
 }
 
 function writeViewportToStorage(
@@ -524,9 +549,10 @@ type RFState = {
   setNodeGeometry: (
     items: Array<{
       nodeId: string;
-      // `height` is optional: pass undefined to clear an explicit height
-      // and revert the node to content-driven auto-sizing.
-      size?: { width: number; height?: number };
+      // `height: 'auto'` hands ownership back to the renderer; the
+      // engine materializes a concrete number from the node's stored
+      // measurement hint. Omitting it means the same thing.
+      size?: { width: number; height?: number | 'auto' };
       position?: { x: number; y: number };
     }>,
   ) => void;
@@ -609,6 +635,19 @@ type RFState = {
    * gesture so it collapses into a single undo entry.
    */
   setNoteHeightMode: (nodeIds: string[], mode: 'auto' | 'fixed') => void;
+  /**
+   * Apply completed content measurements to auto-height nodes.
+   *
+   * Derived geometry, not user intent: the batch takes no undo snapshot
+   * and needs no `beginGesture`. Items targeting a node the user has
+   * since pinned are dropped by the handler rather than rejected here.
+   *
+   * Callers pass an intrinsic height (measured at the node type's
+   * reference width, excluding chrome) together with the
+   * `AutoHeightKey` it was measured under, so a later reader can tell
+   * whether it still describes the node's content.
+   */
+  applyMeasuredHeights: (items: CanvasNodeMeasuredHeightUpdate[]) => void;
   /** Take a pre-resize snapshot so the final SET_NODE_GEOMETRY can be undone. */
   onNodeResizeStart: () => void;
   rfInstance: ReactFlowInstance | null;
@@ -1905,9 +1944,15 @@ const useCanvasStore = create<RFState>()(
         // first mount. This is a defensive boundary guard on untrusted
         // on-disk state — see the same invariant enforced in
         // `applyDeltasFromAgent`.
-        const loadedNodes = normalizeTreeOrder(
-          reconcileQuestionStatus(state.nodes ?? []) as NestableNode[],
-        ) as Node[];
+        // Give every toggleable-height node an explicit `heightMode` and
+        // a numeric `style.height` materialized from its stored
+        // measurement hint, so geometry no longer depends on whether the
+        // node has ever been rendered. See `normalizeNodeHeights`.
+        const loadedNodes = normalizeNodeHeights(
+          normalizeTreeOrder(
+            reconcileQuestionStatus(state.nodes ?? []) as NestableNode[],
+          ) as Node[],
+        );
         const loadedEdges = state.edges ?? [];
         const loadedNodeRefSignature = nodeRefTopologySignature(loadedNodes);
         const previousNodeRefSignature =
@@ -1933,6 +1978,19 @@ const useCanvasStore = create<RFState>()(
             ? state.viewport
             : null;
         const loadedViewport = storedViewport ?? legacyServerViewport;
+        // Measure never-measured notes *before* the canvas is shown.
+        // Normalization gives them their policy minimum, which on a
+        // canvas saved before the height model means every note paints
+        // collapsed and then expands as it mounts. The load is already
+        // showing a loading state; spending a bounded slice of it here
+        // buys a canvas that is correct on its first frame. Whatever the
+        // budget does not cover falls through to the prewarm queue.
+        const warmedCanvas = await warmupNodeHeights(loadedNodes, {
+          canvasId: targetId,
+          edges: loadedEdges,
+          centre: viewportCentreOf(loadedViewport),
+        });
+        const warmedNodes = warmedCanvas.nodes;
         // An authoritative node replacement invalidates every transient that
         // points at the previous in-memory geometry. This applies both to a
         // different-canvas switch and to a same-canvas SSE gap/snapshot heal:
@@ -1951,8 +2009,8 @@ const useCanvasStore = create<RFState>()(
         // reset here too (the no-autosave setter skips the middleware's
         // availability sync).
         get()._setStateNoAutosave({
-          nodes: loadedNodes,
-          edges: loadedEdges,
+          nodes: warmedNodes,
+          edges: warmedCanvas.edges,
           viewport: loadedViewport,
           canvasTitle: response.title || 'Untitled',
           version: response.version,
@@ -1967,11 +2025,23 @@ const useCanvasStore = create<RFState>()(
         });
         void get().refreshWorldReferences();
 
+        // Warmup hints were folded in before the commit, and a load
+        // deliberately never schedules a save — so without this they
+        // would live only in memory and every open would re-measure the
+        // same notes. Schedule one save so the canvas warms up exactly
+        // once. This rides the structure save because that is where
+        // every other derived height goes today; Step 6 of the height
+        // model moves them all onto a dedicated channel that touches
+        // neither `version` nor the broadcast.
+        if (warmedNodes !== loadedNodes) {
+          structureScheduler.schedule();
+        }
+
         // Seed each md-backed node's optimistic-concurrency baseline from
         // the authoritative content we just loaded, so the first edit
         // carries the correct `expectRev` and the per-node content CAS can
         // catch a concurrent (cross-tab / cross-device / agent) write.
-        nodeContentQueue.seedBaselines(loadedNodes);
+        nodeContentQueue.seedBaselines(warmedNodes);
 
         // If the user left a question-replay open on this canvas in a
         // previous session and that question node has since been
@@ -1981,14 +2051,14 @@ const useCanvasStore = create<RFState>()(
           .getState()
           .validateQuestionReplay(
             targetId,
-            new Set(loadedNodes.map((n) => n.id)),
+            new Set(warmedNodes.map((n) => n.id)),
           );
 
         // Backfill: any node with an empty label gets re-queued so the
         // server can regenerate one. The server's preprocessing
         // dispatcher decides per node profile whether there's any
         // actual work to do, so we don't filter by type here.
-        for (const node of loadedNodes) {
+        for (const node of warmedNodes) {
           const data = node.data as Record<string, unknown> | undefined;
           const label = typeof data?.label === 'string' ? data.label : '';
           if (label.trim().length > 0) continue;
@@ -2300,6 +2370,9 @@ const useCanvasStore = create<RFState>()(
       // Snapshot the true pre-drag positions before any intermediate
       // position updates are applied by ReactFlow.
       get().beginGesture('SET_NODE_GEOMETRY');
+      // A height correction landing mid-drag would move geometry under
+      // the user's hand. Hold them until the gesture settles.
+      suspendHeightCommits();
 
       // Record the pre-drag positions of the dragged nodes so
       // `onNodeDragStop` can tell whether the gesture actually moved
@@ -2326,6 +2399,7 @@ const useCanvasStore = create<RFState>()(
 
     onNodeResizeStart: () => {
       get().beginGesture('SET_NODE_GEOMETRY');
+      suspendHeightCommits();
     },
 
     onNodeDrag: (_event, draggedNode, draggedNodes) => {
@@ -2667,6 +2741,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     onNodeDragStop: (_event, _node, draggedNodes) => {
+      resumeHeightCommits();
       // Cancel any pending preview computation — the drag is over.
       if (_dragPreviewRafId !== null) {
         cancelAnimationFrame(_dragPreviewRafId);
@@ -3179,7 +3254,7 @@ const useCanvasStore = create<RFState>()(
       const { nodes } = get();
       const items: Array<{
         nodeId: string;
-        size: { width: number; height?: number };
+        size: { width: number; height?: number | 'auto' };
       }> = [];
 
       for (const node of nodes) {
@@ -3198,7 +3273,7 @@ const useCanvasStore = create<RFState>()(
         if (mode === 'auto') {
           items.push({
             nodeId: node.id,
-            size: { width: w, height: undefined },
+            size: { width: w, height: 'auto' },
           });
         } else {
           // Auto → fixed: seed from remembered → measured (capped) → default.
@@ -3214,17 +3289,58 @@ const useCanvasStore = create<RFState>()(
       }
 
       if (items.length === 0) return;
-      // SET_NODE_GEOMETRY uses snapshot:'caller'; open a gesture so the
-      // batch is captured as one undo entry without warnings.
+
+      // Fixed → auto hands the height back to the renderer, which needs a
+      // measurement to hand back *to*. A pinned note has none: it renders
+      // inside a box the user chose, so nothing it reports there is a
+      // trustworthy intrinsic height. Measuring offscreen is exact and
+      // works even for a note that is zoomed out far enough never to have
+      // hydrated.
       //
-      // Fixed → auto clears the explicit height; the new content height
-      // is only known after the next render cycle (editor reflow +
-      // ReactFlow ResizeObserver). The `SET_NODE_GEOMETRY` handler
-      // detects the cleared height and emits a `deferredFitFrameIds`
-      // post-effect, which `runWebPostEffects` schedules for double-rAF
-      // refit — so this action doesn't need its own timing dance.
-      get().beginGesture('SET_NODE_GEOMETRY');
-      get().setNodeGeometry(items);
+      // The measurement and the toggle then land in one executor batch,
+      // so the node goes straight to its content height instead of
+      // collapsing to the policy minimum and expanding a frame later.
+      // Notes whose hint is already current skip the measurement.
+      void (async () => {
+        const measurements = await measureMissingAutoHeights(
+          mode === 'auto' ? items.map((item) => item.nodeId) : [],
+          get,
+        );
+
+        // SET_NODE_GEOMETRY uses snapshot:'caller'; open a gesture so the
+        // batch is captured as one undo entry without warnings. The
+        // measurement rides the same batch, so undo restores the pinned
+        // height in one step.
+        get().beginGesture('SET_NODE_GEOMETRY');
+        get().executeCommands(
+          [
+            {
+              type: 'SET_NODE_GEOMETRY',
+              items: items.map((item) => ({
+                nodeId: item.nodeId as CanvasNodeId,
+                size: item.size,
+              })),
+            },
+            ...(measurements.length > 0
+              ? [
+                  {
+                    type: 'APPLY_MEASURED_HEIGHT' as const,
+                    items: measurements,
+                  },
+                ]
+              : []),
+          ],
+          'ui',
+        );
+      })();
+    },
+
+    applyMeasuredHeights: (items) => {
+      if (items.length === 0) return;
+      get().executeCommands(
+        [{ type: 'APPLY_MEASURED_HEIGHT', items }],
+        'system',
+      );
     },
 
     updateNodeData: (nodeId, patch) => {

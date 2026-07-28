@@ -22,7 +22,6 @@ import {
   getTextNodeFontOpts,
   QUESTION_NODE_PADDING,
   QUESTION_NODE_PLACEHOLDER,
-  TEXT_ACCENT_BORDER,
   TEXT_NODE_PADDING_X,
   TEXT_NODE_PADDING_Y,
   TEXT_NODE_PLACEHOLDER,
@@ -48,9 +47,14 @@ export interface NodeFontFit {
   placeholder: string;
   /** Pretext font options matching the node's own measurement path. */
   fontOpts: FontOpts;
-  /** Horizontal padding + border inset per side. */
+  /**
+   * Horizontal inset per side — the body's padding, and nothing else.
+   * The node shell's border is deliberately excluded, exactly as in
+   * `useTextAutoSize`: the body is sized to the node's outer width, so
+   * the text lays out at `width - 2 * paddingX` regardless of the border.
+   */
   insetX: number;
-  /** Vertical padding + border inset per side. */
+  /** Vertical inset per side. Same rule as {@link NodeFontFit.insetX}. */
   insetY: number;
 }
 
@@ -68,7 +72,6 @@ export function getNodeFontFit(node: Node): NodeFontFit | null {
       fontFamily?: string;
       fontWeight?: string;
       fontStyle?: string;
-      accent?: unknown;
     };
   };
   const style = data.style ?? {};
@@ -78,8 +81,8 @@ export function getNodeFontFit(node: Node): NodeFontFit | null {
       text: typeof data.content === 'string' ? data.content : '',
       placeholder: TEXT_NODE_PLACEHOLDER,
       fontOpts: getTextNodeFontOpts(style),
-      insetX: TEXT_NODE_PADDING_X + (style.accent ? TEXT_ACCENT_BORDER : 0),
-      insetY: TEXT_NODE_PADDING_Y + (style.accent ? TEXT_ACCENT_BORDER : 0),
+      insetX: TEXT_NODE_PADDING_X,
+      insetY: TEXT_NODE_PADDING_Y,
     };
   }
 

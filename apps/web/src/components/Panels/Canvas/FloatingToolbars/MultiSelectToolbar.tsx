@@ -11,6 +11,7 @@ import {
   getSelectionBounds,
   getNodeSize,
   isAlwaysAutoHeightNodeType,
+  resolveHeightMode,
 } from '@sediment/shared/canvas-engine';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
@@ -34,7 +35,7 @@ const ACCENT_NONE = ACCENT_NONE_TOKEN;
 
 interface GeometryToolbarItem {
   nodeId: CanvasNodeId;
-  size: { width: number; height: number | undefined };
+  size: { width: number; height: number | 'auto' | undefined };
 }
 
 /**
@@ -224,11 +225,12 @@ export const MultiSelectToolbar = () => {
   const noteAutoState = useMemo(() => {
     if (selectedNodes.length === 0) return null;
     if (!selectedNodes.every((n) => n.type === 'note')) return null;
-    const firstAuto =
-      (selectedNodes[0].style?.height as number | undefined) === undefined;
+    // Read ownership through the shared resolver: an auto note now
+    // carries a materialized `style.height`, so the presence of a number
+    // no longer distinguishes the two modes.
+    const firstAuto = resolveHeightMode(selectedNodes[0]) === 'auto';
     const allSame = selectedNodes.every(
-      (n) =>
-        ((n.style?.height as number | undefined) === undefined) === firstAuto,
+      (n) => (resolveHeightMode(n) === 'auto') === firstAuto,
     );
     return allSame ? { active: firstAuto } : null;
   }, [selectedNodes]);
@@ -292,8 +294,9 @@ export const MultiSelectToolbar = () => {
             // Resolve per-node via the shared helper, which:
             //  - falls back to each node's existing width when only height
             //    was edited (and skips nodes whose width can't be resolved);
-            //  - preserves each node's pinned-vs-auto height state when the
-            //    user didn't enter a height.
+            //  - reads each node's height *ownership* when the user didn't
+            //    enter a height, so a width-only edit never pins an auto
+            //    node (its `style.height` is a number in both modes).
             const items = selectedNodes
               .map((node): GeometryToolbarItem | null => {
                 const resolved = resolveGeometryEdit(node, {

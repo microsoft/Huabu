@@ -1,15 +1,9 @@
-import useCanvasStore from '@/store/canvasStore';
+import {
+  contentScaleFor,
+  getHeightPolicy,
+} from '@sediment/shared/canvas-engine';
 
-/**
- * Reference widths at which each node type renders at its "natural"
- * (unscaled) content size.  These match the default creation dimensions.
- */
-const REF_WIDTHS: Record<string, number> = {
-  note: 400,
-  web: 400,
-  pdf: 400,
-  office: 400,
-};
+import useCanvasStore from '@/store/canvasStore';
 
 /**
  * Returns a scale factor based on the node's current width relative to its
@@ -17,15 +11,21 @@ const REF_WIDTHS: Record<string, number> = {
  * `transform: scale(factor)` so text and layout scale proportionally when
  * the node is resized.
  *
+ * Delegates to the shared `contentScaleFor` rather than recomputing the
+ * ratio: the headless conversion from an intrinsic content height to a
+ * node layout height has to apply the identical factor, and a second
+ * formula here is a second place for it to drift — including the node
+ * shell inset, which is easy to forget and changes where text wraps.
+ *
  * At the default creation size the scale is 1.  Clamped to min 0.5.
  */
 export function useNodeScale(nodeId: string, nodeType: string): number {
-  const refWidth = REF_WIDTHS[nodeType];
+  const policy = getHeightPolicy(nodeType);
 
   return useCanvasStore((state) => {
-    if (!refWidth) return 1;
+    if (!policy.refWidth) return 1;
     const node = state.nodes.find((n) => n.id === nodeId);
-    const w = (node?.style?.width as number | undefined) ?? refWidth;
-    return Math.max(0.5, w / refWidth);
+    const width = node?.style?.width as number | undefined;
+    return contentScaleFor(policy, width);
   });
 }

@@ -1,4 +1,5 @@
 import { noop, type CommandDefinition } from './types.js';
+import { getHeightPolicy } from '../height/policy.js';
 import { stripMarkdown } from '../utils/markdown.js';
 import { isAlwaysAutoHeightNodeType } from '../utils/nodeSizes.js';
 
@@ -21,6 +22,17 @@ type Cmd = Extract<CanvasCommand, { type: 'CHANGE_NODE_TYPE' }>;
  * Sizing: `note` may pin top-level `style.height`; `text` is always
  * content-height and uses `data.style.fontSize` for scale. Conversion preserves
  * width, but drops height whenever the target type is always auto-height.
+ *
+ * The stored auto-height measurement is dropped unconditionally. A hint
+ * proves what it was measured against, and a conversion invalidates that
+ * proof in a way the key cannot express: the reference width and the
+ * rendering pipeline are properties of the node *type*, deliberately kept
+ * out of the key because they are constants — constants of a type the
+ * node no longer is. Carrying it across would leave a plausible-looking
+ * number that nothing can detect as wrong, and a wrong hint is
+ * self-confirming: materializing it produces exactly the height the next
+ * measurement would be compared against. Dropping it costs one
+ * re-measurement.
  */
 const NOTE_ONLY_DATA_KEYS = ['provenance'] as const;
 
@@ -43,7 +55,14 @@ const changeNodeType: CommandDefinition<Cmd> = {
 
       const data = { ...((n.data ?? {}) as Record<string, unknown>) };
       data.type = cmd.to;
+      // Measured against the source type's reference width and renderer.
+      // See the note on the file's doc comment.
+      delete data.autoHeight;
       if (cmd.to === 'text') {
+        // `text` is always content-driven, so an ownership flag on it is
+        // a field `resolveHeightMode` ignores and a later conversion back
+        // could misread.
+        delete data.heightMode;
         for (const key of NOTE_ONLY_DATA_KEYS) {
           delete data[key];
         }
@@ -80,6 +99,17 @@ const changeNodeType: CommandDefinition<Cmd> = {
         nextStyle.height = nextHeight;
       } else {
         delete nextStyle.height;
+      }
+
+      // Record ownership to match the height actually written, rather
+      // than leaving `resolveHeightMode` to infer it from the number.
+      // The height above was chosen to preserve the visual footprint, and
+      // with the hint dropped an `auto` node would materialize to the
+      // policy minimum instead — a visible collapse on a conversion whose
+      // whole point is that nothing appears to move.
+      if (getHeightPolicy(cmd.to).kind === 'toggleable') {
+        data.heightMode =
+          typeof nextStyle.height === 'number' ? 'fixed' : 'auto';
       }
 
       return {

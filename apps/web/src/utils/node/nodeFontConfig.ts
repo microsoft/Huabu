@@ -24,8 +24,6 @@ export const FONT_FAMILY_CSS: Record<NodeFontFamily, string> = {
 export const TEXT_NODE_PADDING_X = 12;
 /** Vertical padding inside a TextNode (px on the top and bottom). */
 export const TEXT_NODE_PADDING_Y = 4;
-/** Border width NodeWrapper applies when an accent is set (`border-3`). */
-export const TEXT_ACCENT_BORDER = 3;
 
 /** Padding inside a QuestionNode (px on each side). */
 export const QUESTION_NODE_PADDING = 12;

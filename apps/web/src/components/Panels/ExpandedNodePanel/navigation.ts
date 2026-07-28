@@ -1,12 +1,13 @@
 import { isEditableTarget } from '@/hooks/shortcuts';
 
+import type { EdgeStyle } from '@sediment/shared';
 import type { Edge, Node } from '@xyflow/react';
 
-export type ExpandedNodeDirection = 'incoming' | 'outgoing';
+export type ExpandedNodeDirection = 'incoming' | 'undirected' | 'outgoing';
 
 export function getExpandedNodeNeighbors<T extends Pick<Node, 'id'>>(
   nodes: readonly T[],
-  edges: readonly Pick<Edge, 'source' | 'target'>[],
+  edges: readonly Pick<Edge, 'source' | 'target' | 'data'>[],
   nodeId: string,
   direction: ExpandedNodeDirection,
 ): T[] {
@@ -14,10 +15,36 @@ export function getExpandedNodeNeighbors<T extends Pick<Node, 'id'>>(
 
   for (const edge of edges) {
     if (edge.source === edge.target) continue;
-    if (direction === 'incoming' && edge.target === nodeId) {
-      neighborIds.add(edge.source);
-    } else if (direction === 'outgoing' && edge.source === nodeId) {
-      neighborIds.add(edge.target);
+
+    const edgeDirection = (edge.data?.edgeStyle as EdgeStyle | undefined)
+      ?.direction;
+    const isUndirected = edgeDirection == null || edgeDirection === 'none';
+    if (direction === 'undirected') {
+      if (!isUndirected) continue;
+      if (edge.source === nodeId) neighborIds.add(edge.target);
+      if (edge.target === nodeId) neighborIds.add(edge.source);
+      continue;
+    }
+
+    const followsEndpoints =
+      edgeDirection === 'forward' || edgeDirection === 'both';
+    const reversesEndpoints =
+      edgeDirection === 'backward' || edgeDirection === 'both';
+
+    if (direction === 'incoming') {
+      if (followsEndpoints && edge.target === nodeId) {
+        neighborIds.add(edge.source);
+      }
+      if (reversesEndpoints && edge.source === nodeId) {
+        neighborIds.add(edge.target);
+      }
+    } else {
+      if (followsEndpoints && edge.source === nodeId) {
+        neighborIds.add(edge.target);
+      }
+      if (reversesEndpoints && edge.target === nodeId) {
+        neighborIds.add(edge.source);
+      }
     }
   }
 

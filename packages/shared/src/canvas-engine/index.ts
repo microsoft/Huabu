@@ -94,6 +94,29 @@ export {
 } from './utils/constants.js';
 export { stripMarkdown } from './utils/markdown.js';
 export {
+  type AutoHeightFreshness,
+  type AutoHeightHintRead,
+  type AutoHeightKey,
+  type HeightKind,
+  type HeightPolicy,
+  HEIGHT_LAYOUT_VERSION,
+  HEIGHT_QUANTIZATION_STEP,
+  NODE_SHELL_INSET,
+  autoHeightKey,
+  contentScaleFor,
+  getHeightPolicy,
+  getHeightRefWidth,
+  intrinsicToLayoutHeight,
+  isAlwaysAutoHeightType,
+  isAutoHeightByDefaultType,
+  materializeAutoHeight,
+  materializeAutoHeights,
+  quantizeHeight,
+  readAutoHeightHint,
+  resolveAutoLayoutHeight,
+  resolveHeightMode,
+} from './height/index.js';
+export {
   getNodeDefaultSize,
   isAlwaysAutoHeightNodeType,
   getNodeSize,

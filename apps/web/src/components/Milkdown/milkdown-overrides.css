@@ -128,6 +128,21 @@
   /* Zero the 60px×120px editor padding; parents already provide their
      own padding (e.g. AIMessage's chat card uses `px-4`). */
   padding: 0;
+  /* Establish a block formatting context so a leading child's
+     `margin-top` cannot collapse out of this box.
+
+     This is a measurement requirement, not a style one. Headings carry
+     `margin-top` (paragraphs use padding instead), and with no padding
+     or border here that margin escapes to the nearest ancestor that has
+     some — the note's content host. It still renders, so the content
+     really is that much taller, but `scrollHeight` stops counting it,
+     and the note's auto height is read from exactly that. A note
+     starting with a heading therefore came out ~12px short.
+
+     `flow-root` changes no pixel of the rendered result: the margin
+     occupies the same space either way, it just now does so inside the
+     box we measure. */
+  display: flow-root;
 }
 
 .milkdown .ProseMirror p {

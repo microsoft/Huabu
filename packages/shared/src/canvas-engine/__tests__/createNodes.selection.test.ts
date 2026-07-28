@@ -45,7 +45,18 @@ describe('CREATE_NODES selection', () => {
 
     expect(nodes.find((n) => n.id === 'created-note')?.style).toEqual({
       width: 400,
+      // Materialized from the note policy's minimum, not pinned: a
+      // created note must have a real footprint for the same-batch frame
+      // fit and grid solver, and its ownership is recorded explicitly.
+      height: 56,
     });
+    expect(
+      (
+        nodes.find((n) => n.id === 'created-note')?.data as {
+          heightMode?: string;
+        }
+      ).heightMode,
+    ).toBe('auto');
     expect(nodes.find((n) => n.id === 'created-question')?.style).toEqual({
       width: 200,
     });

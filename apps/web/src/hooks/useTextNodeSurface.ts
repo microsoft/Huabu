@@ -20,7 +20,6 @@
  *   baseFontSize: 16,
  *   paddingX: NODE_PADDING,
  *   paddingY: NODE_PADDING,
- *   borderInset,
  *   fontOpts,
  *   placeholder: 'Type...',
  * });
@@ -65,7 +64,6 @@ export interface UseTextNodeSurfaceOpts {
   baseFontSize?: number;
   paddingX: number;
   paddingY: number;
-  borderInset?: number;
   fontOpts: FontOpts;
   placeholder?: string;
 }
@@ -106,7 +104,6 @@ export function useTextNodeSurface(
     baseFontSize = 16,
     paddingX,
     paddingY,
-    borderInset = 0,
     fontOpts,
     placeholder = 'Type...',
   } = opts;
@@ -125,7 +122,6 @@ export function useTextNodeSurface(
     baseFontSize,
     paddingX,
     paddingY,
-    borderInset,
     fontOpts,
     placeholder,
     width,
