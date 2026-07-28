@@ -10,7 +10,6 @@ import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore.ts';
 import {
   FONT_FAMILY_CSS,
   getTextNodeFontOpts,
-  TEXT_ACCENT_BORDER as ACCENT_BORDER,
   TEXT_NODE_PADDING_X as NODE_PADDING_X,
   TEXT_NODE_PADDING_Y as NODE_PADDING_Y,
   TEXT_NODE_PLACEHOLDER,
@@ -81,8 +80,6 @@ export const TextNode = memo(
 
     const fontOpts = getTextNodeFontOpts(style);
 
-    const borderInset = style.accent ? ACCENT_BORDER : 0;
-
     // ------------------------------------------------------------------
     // Shared surface (auto-size + draft state + wrapper/body prop bundles)
     // ------------------------------------------------------------------
@@ -94,7 +91,6 @@ export const TextNode = memo(
       baseFontSize: 16,
       paddingX: NODE_PADDING_X,
       paddingY: NODE_PADDING_Y,
-      borderInset,
       fontOpts,
       placeholder: TEXT_NODE_PLACEHOLDER,
     });

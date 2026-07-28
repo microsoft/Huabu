@@ -14,6 +14,7 @@ export {
   type HeightKind,
   type HeightMode,
   type HeightPolicy,
+  NODE_SHELL_INSET,
   getHeightPolicy,
   getHeightRefWidth,
   isAlwaysAutoHeightType,

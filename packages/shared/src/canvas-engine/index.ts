@@ -101,6 +101,7 @@ export {
   type HeightPolicy,
   HEIGHT_LAYOUT_VERSION,
   HEIGHT_QUANTIZATION_STEP,
+  NODE_SHELL_INSET,
   autoHeightKey,
   contentScaleFor,
   getHeightPolicy,

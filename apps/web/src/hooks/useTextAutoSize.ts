@@ -44,7 +44,6 @@ export interface UseTextAutoSizeOpts {
   baseFontSize?: number;
   paddingX: number;
   paddingY: number;
-  borderInset?: number;
   fontOpts: FontOpts;
   /** Placeholder text used to measure minimum width when content is empty. */
   placeholder?: string;
@@ -75,7 +74,6 @@ export function useTextAutoSize({
   baseFontSize = 16,
   paddingX,
   paddingY,
-  borderInset = 0,
   fontOpts,
   placeholder = 'Type...',
   width,
@@ -114,8 +112,15 @@ export function useTextAutoSize({
     [nodeId],
   );
 
-  const insetX = paddingX + borderInset;
-  const insetY = paddingY + borderInset;
+  // The insets are the body's own padding and NOTHING else. In particular
+  // the node shell's 3px border must not be subtracted here: `TextNodeBody`
+  // absorbs that border into its own padding (`resolveTextBodyBox`), so the
+  // text always lays out at exactly `width - 2 * paddingX` whether or not an
+  // accent makes the border visible. Measuring at a narrower width than the
+  // text renders at counts a line as wrapped that the browser keeps on one
+  // line, and the node then reserves a line of height that renders empty.
+  const insetX = paddingX;
+  const insetY = paddingY;
 
   // --------------------------------------------------------------------
   // @deprecated MIGRATION_FONTSIZE_FROM_HEIGHT

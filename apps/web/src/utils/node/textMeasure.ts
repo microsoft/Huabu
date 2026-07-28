@@ -22,11 +22,8 @@ export interface FontOpts {
 const REF_SIZE = 100;
 
 /**
- * Strip `ui-*` CSS Fonts L4 generics from the family stack before
- * handing it to canvas. Some browsers silently reject them; `ctx.font`
- * then keeps its previous value (`10px sans-serif`) and every
- * `measureText` returns widths ~10× too small, breaking the word-fit
- * guard. The DOM-rendered font keeps the original stack.
+ * Strip `ui-*` CSS Fonts L4 generics from the family stack. Only used as a
+ * fallback — see {@link resolveFamilyForCanvas}.
  */
 function sanitizeFontFamilyForCanvas(family: string): string {
   return (
@@ -36,6 +33,72 @@ function sanitizeFontFamilyForCanvas(family: string): string {
       .filter((s) => !/^ui-(sans-serif|serif|monospace|rounded)$/i.test(s))
       .join(', ') || 'sans-serif'
   );
+}
+
+/** Font shorthand no engine can confuse with a real one, used as a probe. */
+const FONT_PROBE_SENTINEL = '13.7px "__sediment_font_probe__"';
+
+/** Size used for the probe — acceptance depends on the family, not the size. */
+const FONT_PROBE_SIZE = 16;
+
+let probeCtx: CanvasRenderingContext2D | null | undefined;
+
+function getProbeCtx(): CanvasRenderingContext2D | null {
+  if (probeCtx === undefined) {
+    probeCtx =
+      typeof document === 'undefined'
+        ? null
+        : document.createElement('canvas').getContext('2d');
+  }
+  return probeCtx;
+}
+
+/**
+ * Memoised per family stack.
+ *
+ * Keying on the family and not the whole shorthand matters: `fontSize`
+ * changes every frame of a resize drag, and this runs on the typing path.
+ * One probe per distinct stack keeps the map at a handful of entries and
+ * the hot path at a single map lookup.
+ */
+const resolvedFamilies = new Map<string, string>();
+
+/**
+ * Pick the family stack that measures what the DOM actually renders.
+ *
+ * The DOM keeps the authored stack, so measurement must use it too —
+ * dropping a family the browser honours (`ui-sans-serif` on Safari)
+ * measures a different typeface than the one on screen, and a width error
+ * of a fraction of a percent turns into a whole reserved line whenever a
+ * line sits near the wrap boundary.
+ *
+ * `ctx.font` is a silent setter: an unparsable value leaves the previous
+ * one in place. Writing a sentinel first turns that silence into a
+ * readable signal. Both outcomes land on the DOM's own font:
+ * - accepted → canvas resolves the same stack as CSS;
+ * - rejected → the engine cannot parse that family, so CSS skips it for
+ *   the same reason and lands on the next entry, which is exactly what
+ *   {@link sanitizeFontFamilyForCanvas} leaves behind.
+ *
+ * Without the probe, a stack containing `ui-*` would always take the
+ * second branch — correct only on engines that do not support it.
+ */
+function resolveFamilyForCanvas(family: string): string {
+  const cached = resolvedFamilies.get(family);
+  if (cached !== undefined) return cached;
+
+  const ctx = getProbeCtx();
+  let resolved = sanitizeFontFamilyForCanvas(family);
+
+  if (ctx) {
+    ctx.font = FONT_PROBE_SENTINEL;
+    const sentinel = ctx.font;
+    ctx.font = `${FONT_PROBE_SIZE}px ${family}`;
+    if (ctx.font !== sentinel) resolved = family;
+  }
+
+  resolvedFamilies.set(family, resolved);
+  return resolved;
 }
 
 /** Build the CSS font shorthand string for pretext's prepare(). */
@@ -48,7 +111,7 @@ export function buildFontStr(
   let s = '';
   if (fontStyle === 'italic') s += 'italic ';
   if (fontWeight === 'bold') s += 'bold ';
-  return `${s}${fontSize}px ${sanitizeFontFamilyForCanvas(fontFamily)}`;
+  return `${s}${fontSize}px ${resolveFamilyForCanvas(fontFamily)}`;
 }
 
 /**

@@ -23,15 +23,56 @@
 import { clsx } from 'clsx';
 import { forwardRef, type CSSProperties, type ReactNode } from 'react';
 
+import { NODE_SHELL_INSET } from '@sediment/shared/canvas-engine';
+
+/** Border (px) the node shell adds on each side. */
+const SHELL_BORDER = NODE_SHELL_INSET / 2;
+
+/**
+ * Geometry actually written to the body container.
+ *
+ * `NodeWrapper` wraps every node in a 3px border (transparent unless an
+ * accent is set) with `box-sizing: border-box`, so a child may only
+ * occupy the node box minus {@link NODE_SHELL_INSET}.
+ *
+ * Only the **width** is corrected for it, because only the width is
+ * pinned: React Flow owns `style.width`, so a body taking the node's full
+ * outer width overflows the shell and the wrapper clips the outermost
+ * pixels of its padding — which is why text used to sit glued to an
+ * accent border. Height is content-driven for these node types (the shell
+ * has no height of its own and grows to fit the body), so the body keeps
+ * its full height and vertical padding; subtracting there would only
+ * tighten the vertical rhythm of every text node for nothing.
+ *
+ * The correction keeps the *text* box identical to what `useTextAutoSize`
+ * measured — `width - 2 * paddingX` — by letting the shell border count
+ * towards the padding rather than eating into the content. Any other
+ * split would re-wrap every existing node, because the measurement that
+ * decides a node's height assumes exactly this width.
+ */
+export function resolveTextBodyBox(box: {
+  width: number;
+  height: number;
+  paddingX: number;
+  paddingY: number;
+}): { width: number; height: number; paddingX: number; paddingY: number } {
+  return {
+    width: Math.max(box.width - NODE_SHELL_INSET, 0),
+    height: box.height,
+    paddingX: Math.max(box.paddingX - SHELL_BORDER, 0),
+    paddingY: box.paddingY,
+  };
+}
+
 export interface TextNodeBodyProps {
   // -------- Sizing (from useTextNodeSurface().bodyProps) --------
-  /** Width to apply to the container div. */
+  /** Width of the node's OUTER box (shell border included). */
   effectiveWidth: number;
-  /** Height to apply to the container div. */
+  /** Height of the body box; the shell's border sits outside it. */
   effectiveHeight: number;
   /** Font size (px) for the textarea. */
   effectiveFontSize: number;
-  /** Horizontal inner padding (px). */
+  /** Horizontal inner padding (px), shell border included. */
   paddingX: number;
   /** Vertical inner padding (px). */
   paddingY: number;
@@ -130,13 +171,20 @@ export const TextNodeBody = forwardRef<HTMLTextAreaElement, TextNodeBodyProps>(
     },
     textareaRef,
   ) {
+    const box = resolveTextBodyBox({
+      width: effectiveWidth,
+      height: effectiveHeight,
+      paddingX,
+      paddingY,
+    });
+
     return (
       <div
         className={clsx('relative', containerClassName)}
         style={{
-          padding: `${paddingY}px ${paddingX}px`,
-          width: effectiveWidth,
-          height: effectiveHeight,
+          padding: `${box.paddingY}px ${box.paddingX}px`,
+          width: box.width,
+          height: box.height,
         }}
       >
         {children}
@@ -169,7 +217,7 @@ export const TextNodeBody = forwardRef<HTMLTextAreaElement, TextNodeBodyProps>(
             aria-hidden="true"
             className="pointer-events-none absolute inset-0 z-1 overflow-hidden"
             style={{
-              padding: `${paddingY}px ${paddingX}px`,
+              padding: `${box.paddingY}px ${box.paddingX}px`,
               color,
               fontFamily,
               fontWeight,
