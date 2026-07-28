@@ -44,6 +44,12 @@ Huabu uses **Agent Teams** as its managed external-agent extension mechanism.
 - **Huabu-managed Agent Team** — an Agent Team packaged for Huabu workflows,
   usually bundled under `agent-teams/`
 
+Each bundled member is dual-mode: `agentlet.yaml` keeps it independently runnable through Agent Team setup and ACP launch, while a package-root `SKILL.md` makes the same capability discoverable through standard Agent Skill installation. Both surfaces converge on the package's canonical `system_prompt.md`; the Skill contains only discovery metadata and standalone-runtime adaptation rather than a second copy of the agent procedure.
+
+Bundled scripts, prompts, examples, and supporting documents are addressed relative to the Skill directory so installation does not preserve repository or machine-specific paths. For configured standalone Skills, the user supplies an untracked package-local `.env` following `.env.example`, and the Agent loads it for tool calls according to the runtime operating system and shell. Managed Agent Team runs do not depend on that file because the daemon injects manifest Config values into the process environment.
+
+Repository validation discovers every bundled `agentlet.yaml` and requires a matching standards-compliant `SKILL.md`. It keeps folder, manifest, and Skill names aligned; checks trigger-oriented descriptions, the canonical prompt link, local reference resolution, and path portability; and rejects tracked secrets or generated workspaces.
+
 The generic `agentlet.yaml` package contract and daemon execution operations are defined in the agentlet spec. Huabu currently ships one fixed Agent Team collection with the desktop application; users do not download a collection, configure a collection root, run `agentlet agent-team setup`, or register an External Agent profile.
 
 - The Server automatically registers the bundled read-only collection after the locally supervised agentlet connects.
@@ -156,3 +162,5 @@ This is why "agent as the universal interface" is not just a nice idea for Huabu
 | [`packages/shared/src/types/api/agent-team.ts`](../../packages/shared/src/types/api/agent-team.ts)                   | Shared Zod wire contracts for Settings reads and mutations.                                                                  |
 | [`apps/web/src/components/Settings/agent-team/`](../../apps/web/src/components/Settings/agent-team/)                 | Unified Profile list and editor, bundled-member Configs, user-selected working directories, and preparation UI.              |
 | [`external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md)                                 | Generic package and daemon execution contract.                                                                               |
+| [`agent-teams/`](../../agent-teams)                                                                                  | Dual-mode bundled Agent Team packages and installable Skill adapters.                                                        |
+| [`scripts/check-agent-team-skills.mjs`](../../scripts/check-agent-team-skills.mjs)                                   | Validate bundled Skill discovery metadata, canonical references, portability, and package hygiene.                           |

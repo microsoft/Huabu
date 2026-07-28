@@ -92,6 +92,8 @@ The web keeps undo/redo managers in a registry keyed by `canvasId` while retaini
 
 The keyboard shortcut catalog may retain internal runtime bindings with `hidden: true`; `getKeyboardShortcutSections()` excludes them from the user-facing modal. Removed bindings must be deleted from the catalog rather than left as display-only entries.
 
+The Expanded Node Panel derives upstream and downstream navigation from the active Canvas edges without adding persisted navigation state: incoming-edge sources are upstream, outgoing-edge targets are downstream, and neighbors follow Canvas node order after missing endpoints, self-loops, and duplicates are removed. Bare Left/Right Arrow actions switch directly when one neighbor exists or open a deterministic chooser when several exist. Editable controls, search, menus, media controls, and embedded viewers retain arrow-key ownership. Switching reuses `openExpanded`, replaces the Canvas selection with the destination node, preserves split/replace mode, and does not pan or zoom to reveal the destination.
+
 ---
 
 ## 5. Internationalisation
@@ -188,13 +190,14 @@ The native macOS Help menu and the Windows/Linux in-app application menu reuse t
 
 ## Code entry points
 
-| File/dir                                                                                   | Responsibility                                                                                |
-| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| [`apps/web/src/App.tsx`](../../apps/web/src/App.tsx)                                       | Product router; deliberately has no handbook route.                                           |
-| [`apps/web/src/config/handbook.ts`](../../apps/web/src/config/handbook.ts)                 | Validate and open the canonical external handbook URL.                                        |
-| [`apps/web/src/hooks/useElectron.ts`](../../apps/web/src/hooks/useElectron.ts)             | Typed Electron bridge access, fixed support operations, and copied system-information format. |
-| [`apps/web/src/store/conversationOwner.ts`](../../apps/web/src/store/conversationOwner.ts) | Generic presentation-anchor/conversation-owner routing and owner-aware lifecycle writes.      |
-| [`apps/desktop/src/preload.ts`](../../apps/desktop/src/preload.ts)                         | Narrow sandbox bridge for native menu and diagnostics operations.                             |
-| [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts)                               | Electron window security, external URLs, and fixed diagnostics IPC handlers.                  |
-| [`scripts/start-web.mjs`](../../scripts/start-web.mjs)                                     | Production-style web launcher and dynamic Server port selection.                              |
-| [`scripts/dev-ports.mjs`](../../scripts/dev-ports.mjs)                                     | Shared loopback/wildcard-aware development port selection.                                    |
+| File/dir                                                                                                      | Responsibility                                                                                |
+| ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| [`apps/web/src/App.tsx`](../../apps/web/src/App.tsx)                                                          | Product router; deliberately has no handbook route.                                           |
+| [`apps/web/src/config/handbook.ts`](../../apps/web/src/config/handbook.ts)                                    | Validate and open the canonical external handbook URL.                                        |
+| [`apps/web/src/hooks/useElectron.ts`](../../apps/web/src/hooks/useElectron.ts)                                | Typed Electron bridge access, fixed support operations, and copied system-information format. |
+| [`apps/web/src/store/conversationOwner.ts`](../../apps/web/src/store/conversationOwner.ts)                    | Generic presentation-anchor/conversation-owner routing and owner-aware lifecycle writes.      |
+| [`apps/web/src/components/Panels/ExpandedNodePanel/`](../../apps/web/src/components/Panels/ExpandedNodePanel) | Expanded content rendering and edge-connected node navigation.                                |
+| [`apps/desktop/src/preload.ts`](../../apps/desktop/src/preload.ts)                                            | Narrow sandbox bridge for native menu and diagnostics operations.                             |
+| [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts)                                                  | Electron window security, external URLs, and fixed diagnostics IPC handlers.                  |
+| [`scripts/start-web.mjs`](../../scripts/start-web.mjs)                                                        | Production-style web launcher and dynamic Server port selection.                              |
+| [`scripts/dev-ports.mjs`](../../scripts/dev-ports.mjs)                                                        | Shared loopback/wildcard-aware development port selection.                                    |

@@ -4,6 +4,8 @@ This folder contains Huabu-managed Agent Teams: reusable external-agent packages
 
 Each package remains a normal Agent Team defined by the generic [`external/agentlet/spec/agent-team.md`](../external/agentlet/spec/agent-team.md) contract. Huabu adds the managed discovery, Config, Profile, setup, and runtime experience.
 
+Every bundled package is also an installable Agent Skill. The Agent Team manifest and the Skill adapter share one canonical `system_prompt.md`, so installing the package through a standard `skill-add` flow exposes the same capability without registering or launching the Agent Team.
+
 ## Quick start
 
 1. Install or run Huabu; the desktop distribution includes this collection and registers it through the locally supervised agentlet automatically.
@@ -29,11 +31,27 @@ Huabu asks Agenetes to scan the bundled collection, persists the discovered memb
 agent-teams/<team-name>/
   agentlet.yaml        # identity, harness commands, Config schema, and setup requirements
   system_prompt.md     # canonical prompt referenced by require.prompts
+  SKILL.md             # portable skill discovery and standalone-runtime adapter
   .env.example         # optional standalone-runtime example; Huabu uses managed Configs
   workspaces/          # optional CLI-generated workspaces; ignored by git
 ```
 
 The source package remains in place. Managed setup materializes only the Profile's configured `workingDirPath`.
+
+## Standalone Skill use
+
+Install an Agent Team package directory with the standard `skill-add` flow. `SKILL.md` declares when the capability should load, points to the canonical package prompt, and resolves bundled scripts and supporting files relative to its own directory.
+
+Packages that require configuration describe the expected fields in `.env.example`. For standalone Skill use, the user provides an untracked `.env` in that package directory, and the Agent loads it before tool calls using an approach appropriate for the runtime operating system and shell. The Skill never initializes `.env`. In managed Agent Team runs, the daemon injects manifest Config values into the process environment instead.
+
+Run the package validator after adding or changing a bundled member:
+
+```bash
+pnpm run test:agent-team-skills
+pnpm run check:agent-team-skills
+```
+
+The validator discovers every direct child with an `agentlet.yaml` and rejects missing Skills, malformed or drifting frontmatter, missing canonical prompts and local references, non-portable paths, and tracked `.env` or generated `workspaces/` state.
 
 ## Manifest example
 

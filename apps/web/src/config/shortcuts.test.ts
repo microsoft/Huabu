@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   APP_SHORTCUTS,
+  formatShortcutById,
   getCombo,
   getKeyboardShortcutSections,
   matches,
@@ -79,6 +80,13 @@ describe('getCombo', () => {
     // `search.moveBetweenResults` is a display-only gesture (↑ / ↓).
     expect(getCombo('search.moveBetweenResults')).toBeUndefined();
     expect(getCombo('does.not.exist')).toBeUndefined();
+  });
+});
+
+describe('formatShortcutById', () => {
+  it('uses directional glyphs for expanded-node navigation', () => {
+    expect(formatShortcutById('node.navigateUpstream')).toBe('←');
+    expect(formatShortcutById('node.navigateDownstream')).toBe('→');
   });
 });
 
