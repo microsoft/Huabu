@@ -167,17 +167,24 @@ test.describe('note auto height', () => {
     const centre = await paneCenter(page);
     await page.mouse.move(centre.x, centre.y);
     await pasteNote(page, FIXTURES['wrapping paragraph']);
-    await expect(page.locator('.react-flow__node')).toHaveCount(1);
+    await expect(
+      page.locator('[data-note-content-host] .ProseMirror'),
+    ).toHaveCount(1);
 
-    // Narrow it through the toolbar's width input, then hand the height
-    // back to the renderer — typing a width pins the height too.
-    const node = page.locator('.react-flow__node').first();
-    await node.click();
+    // A pasted node arrives selected, so its toolbar is already up — and
+    // clicking the node would be intercepted by the canvas overlay
+    // anyway. Editing only the width must leave the note auto, which is
+    // the second thing this asserts: the toolbar has to read ownership
+    // rather than infer it from the presence of a number.
     const widthInput = page.getByLabel('Width', { exact: true });
     await widthInput.fill('155');
     await widthInput.press('Enter');
-    await page.getByRole('button', { name: 'Fit height to content' }).click();
     await page.waitForTimeout(2000);
+
+    await expect(
+      page.getByRole('button', { name: 'Switch to fixed height' }),
+      'a width-only edit must not pin the height',
+    ).toBeVisible();
 
     const [overflow] = await measureOverflows(page);
     expect(

@@ -13,7 +13,7 @@
  * command would corrupt the node's style and break parent-frame fitting.
  */
 
-import { getNodeSize } from '@sediment/shared/canvas-engine';
+import { getNodeSize, resolveHeightMode } from '@sediment/shared/canvas-engine';
 
 import type { Node } from '@xyflow/react';
 
@@ -25,10 +25,10 @@ export interface GeometryEdit {
 export interface ResolvedGeometry {
   width: number;
   /**
-   * `undefined` means "no explicit height" — the command will clear any
-   * pinned height and revert the node to content-driven auto-sizing.
+   * `'auto'` hands the height back to the renderer; a number pins it.
+   * `undefined` only for a manual-height node that has no height yet.
    */
-  height: number | undefined;
+  height: number | 'auto' | undefined;
 }
 
 /**
@@ -37,10 +37,11 @@ export interface ResolvedGeometry {
  * Width: `edit.width` → `style.width` → `measured.width`. Returns `null`
  * if none of those produce a positive finite value (skip this node).
  *
- * Height: `edit.height` → `style.height`. Falling back to `style.height`
- * (rather than `measured.height`) preserves the node's pinning state —
- * an auto-height note left blank by the user stays auto, while a fixed
- * one keeps its pinned value.
+ * Height: `edit.height` → the node's current *ownership*. Reading the
+ * ownership rather than the stored number is what keeps a width-only
+ * edit from silently pinning an auto node: since auto heights became
+ * materialized, `style.height` is a number in both modes and can no
+ * longer tell them apart.
  */
 export function resolveGeometryEdit(
   node: Node,
@@ -61,10 +62,16 @@ export function resolveGeometryEdit(
     return null;
   }
 
-  const nextH = edit.height ?? styleHeight;
+  if (edit.height !== undefined) {
+    return { width: nextW, height: edit.height };
+  }
+
+  if (resolveHeightMode(node) === 'auto') {
+    return { width: nextW, height: 'auto' };
+  }
 
   return {
     width: nextW,
-    height: typeof nextH === 'number' ? nextH : undefined,
+    height: typeof styleHeight === 'number' ? styleHeight : undefined,
   };
 }

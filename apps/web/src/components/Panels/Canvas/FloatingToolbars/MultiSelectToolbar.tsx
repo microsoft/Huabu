@@ -35,7 +35,7 @@ const ACCENT_NONE = ACCENT_NONE_TOKEN;
 
 interface GeometryToolbarItem {
   nodeId: CanvasNodeId;
-  size: { width: number; height: number | undefined };
+  size: { width: number; height: number | 'auto' | undefined };
 }
 
 /**
@@ -294,8 +294,9 @@ export const MultiSelectToolbar = () => {
             // Resolve per-node via the shared helper, which:
             //  - falls back to each node's existing width when only height
             //    was edited (and skips nodes whose width can't be resolved);
-            //  - preserves each node's pinned-vs-auto height state when the
-            //    user didn't enter a height.
+            //  - reads each node's height *ownership* when the user didn't
+            //    enter a height, so a width-only edit never pins an auto
+            //    node (its `style.height` is a number in both modes).
             const items = selectedNodes
               .map((node): GeometryToolbarItem | null => {
                 const resolved = resolveGeometryEdit(node, {
