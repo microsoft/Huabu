@@ -1,11 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 
 import { HEIGHT_LAYOUT_VERSION } from '@sediment/shared/canvas-engine';
 import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
-import { collectUnmeasured } from '../warmupNodeHeights';
+import { measureNoteHeightOffscreen } from '@/components/Nodes/shared/height/measure/offscreenMeasurer';
 
-import type { Node } from '@xyflow/react';
+import { collectUnmeasured, warmupNodeHeights } from '../warmupNodeHeights';
+
+import type { Edge, Node } from '@xyflow/react';
 
 vi.mock('@/components/Nodes/shared/height/measure/offscreenMeasurer', () => ({
   measureNoteHeightOffscreen: vi.fn(),
@@ -14,6 +16,7 @@ vi.mock('@/components/Nodes/shared/height/measure/offscreenMeasurer', () => ({
 const CONTENT = '# hello';
 const KEY = `${HEIGHT_LAYOUT_VERSION}:${nodeRevisionOf({ content: CONTENT })}`;
 const ORIGIN = { x: 0, y: 0 };
+const measureNoteHeight = vi.mocked(measureNoteHeightOffscreen);
 
 function note(overrides: Partial<Node> = {}): Node {
   return {
@@ -25,6 +28,10 @@ function note(overrides: Partial<Node> = {}): Node {
     ...overrides,
   } as Node;
 }
+
+beforeEach(() => {
+  measureNoteHeight.mockReset();
+});
 
 describe('collectUnmeasured', () => {
   it('picks up a note that has never been measured', () => {
@@ -75,5 +82,61 @@ describe('collectUnmeasured', () => {
     expect(collectUnmeasured([far, near], ORIGIN).map((t) => t.nodeId)).toEqual(
       ['near', 'far'],
     );
+  });
+});
+
+describe('warmupNodeHeights', () => {
+  it('preserves graph references when every note is already measured', async () => {
+    const nodes = [
+      note({
+        data: {
+          type: 'note',
+          content: CONTENT,
+          heightMode: 'auto',
+          autoHeight: { intrinsicHeight: 260, measuredFor: KEY },
+        },
+      }),
+    ];
+    const edges: Edge[] = [];
+
+    const result = await warmupNodeHeights(nodes, {
+      canvasId: 'c1',
+      edges,
+      centre: ORIGIN,
+    });
+
+    expect(result.nodes).toBe(nodes);
+    expect(result.edges).toBe(edges);
+    expect(measureNoteHeight).not.toHaveBeenCalled();
+  });
+
+  it('refits a parent hug frame when a measured note grows', async () => {
+    measureNoteHeight.mockResolvedValue({
+      height: 260,
+      provisional: false,
+    });
+    const frame = {
+      id: 'f1',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      style: { width: 440, height: 120 },
+      data: { type: 'frame', layoutMode: 'free', sizing: 'hug' },
+    } as Node;
+    const child = note({
+      parentId: 'f1',
+      position: { x: 20, y: 20 },
+    });
+
+    const result = await warmupNodeHeights([frame, child], {
+      canvasId: 'c1',
+      edges: [],
+      centre: ORIGIN,
+    });
+
+    const warmedChild = result.nodes.find((node) => node.id === 'n1');
+    const fittedFrame = result.nodes.find((node) => node.id === 'f1');
+    expect(warmedChild?.style?.height).toBe(264);
+    expect(fittedFrame?.style?.height).toBeGreaterThan(264);
+    expect(fittedFrame?.style?.height).not.toBe(120);
   });
 });

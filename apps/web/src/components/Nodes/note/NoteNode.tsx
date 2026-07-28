@@ -106,7 +106,12 @@ export const NoteNode = memo(
     // `applyMeasuredHeights` and materialized back into `style.height` by
     // the engine. Starting at 0 is safe precisely because of that: the
     // store already holds a usable height before this component mounts.
-    const [contentHeight, setContentHeight] = useState(0);
+    const measurementKey = autoHeightKey({ data } as unknown as Node);
+    const [contentMeasurement, setContentMeasurement] = useState<{
+      height: number;
+      measuredFor: string;
+    } | null>(null);
+    const contentHeight = contentMeasurement?.height ?? 0;
     const [hostHeight, setHostHeight] = useState(0);
 
     // Defer the (expensive) Milkdown editor mount so a canvas full of
@@ -175,7 +180,14 @@ export const NoteNode = memo(
 
       const measure = () => {
         const contentH = readNoteIntrinsicHeight(host);
-        if (contentH > 0) setContentHeight(contentH);
+        if (contentH > 0) {
+          setContentMeasurement((previous) =>
+            previous?.height === contentH &&
+            previous.measuredFor === measurementKey
+              ? previous
+              : { height: contentH, measuredFor: measurementKey },
+          );
+        }
         setHostHeight(host.clientHeight);
       };
 
@@ -212,7 +224,7 @@ export const NoteNode = memo(
         mo.disconnect();
         ro.disconnect();
       };
-    }, [hydrated]);
+    }, [hydrated, measurementKey]);
 
     // Truncation is no longer conditional on fixed mode. In auto mode it
     // surfaces the window between "the content grew" and "the correction
@@ -233,14 +245,14 @@ export const NoteNode = memo(
     // height the next measurement would be compared against.
     // `setNoteHeightMode` measures offscreen instead when it needs one.
     useEffect(() => {
-      if (contentHeight <= 0) return;
+      if (!contentMeasurement) return;
       if (isFixedHeight) return;
       proposeMeasuredHeight({
         nodeId: id,
-        intrinsicHeight: contentHeight,
-        measuredFor: autoHeightKey({ data } as unknown as Node),
+        intrinsicHeight: contentMeasurement.height,
+        measuredFor: contentMeasurement.measuredFor,
       });
-    }, [contentHeight, data, id, isFixedHeight]);
+    }, [contentMeasurement, id, isFixedHeight]);
 
     // A pending proposal for an unmounting node describes a measurement
     // nobody is waiting for. Dropping it also keeps a virtualization

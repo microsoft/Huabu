@@ -24,6 +24,7 @@
 
 import { noop, type CommandDefinition } from './types.js';
 import { intrinsicToLayoutHeight } from '../height/compute.js';
+import { autoHeightKey } from '../height/freshness.js';
 import { resolveHeightMode } from '../height/policy.js';
 
 import type { CanvasCommand } from '../../index.js';
@@ -56,6 +57,10 @@ const applyMeasuredHeight: CommandDefinition<Cmd> = {
       // type that never auto-sizes, describes a state that no longer
       // exists. Dropping it is correct, not an error.
       if (resolveHeightMode(node) !== 'auto') return node;
+      // Content may change while an offscreen or queued measurement is in
+      // flight. Never stamp that old result with authority over the live
+      // node: the next measurement will carry its current key.
+      if (update.measuredFor !== autoHeightKey(node)) return node;
       if (
         !Number.isFinite(update.intrinsicHeight) ||
         update.intrinsicHeight <= 0

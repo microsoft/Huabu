@@ -1985,10 +1985,12 @@ const useCanvasStore = create<RFState>()(
         // showing a loading state; spending a bounded slice of it here
         // buys a canvas that is correct on its first frame. Whatever the
         // budget does not cover falls through to the prewarm queue.
-        const warmedNodes = await warmupNodeHeights(loadedNodes, {
+        const warmedCanvas = await warmupNodeHeights(loadedNodes, {
           canvasId: targetId,
+          edges: loadedEdges,
           centre: viewportCentreOf(loadedViewport),
         });
+        const warmedNodes = warmedCanvas.nodes;
         // An authoritative node replacement invalidates every transient that
         // points at the previous in-memory geometry. This applies both to a
         // different-canvas switch and to a same-canvas SSE gap/snapshot heal:
@@ -2008,7 +2010,7 @@ const useCanvasStore = create<RFState>()(
         // availability sync).
         get()._setStateNoAutosave({
           nodes: warmedNodes,
-          edges: loadedEdges,
+          edges: warmedCanvas.edges,
           viewport: loadedViewport,
           canvasTitle: response.title || 'Untitled',
           version: response.version,

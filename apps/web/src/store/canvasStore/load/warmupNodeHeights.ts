@@ -28,17 +28,21 @@
  */
 
 import {
+  applySharedPostEffectsFromWriteResult,
   autoHeightKey,
+  executeCanvasCommands,
   getHeightPolicy,
-  materializeAutoHeight,
   readAutoHeightHint,
   resolveHeightMode,
 } from '@sediment/shared/canvas-engine';
 
 import { measureNoteHeightOffscreen } from '@/components/Nodes/shared/height/measure/offscreenMeasurer';
 
-import type { AutoHeightHint } from '@sediment/shared';
-import type { Node } from '@xyflow/react';
+import type {
+  CanvasNodeId,
+  CanvasNodeMeasuredHeightUpdate,
+} from '@sediment/shared';
+import type { Edge, Node } from '@xyflow/react';
 
 /**
  * Wall-clock budget for the whole warmup. Sized to be unnoticeable next
@@ -49,24 +53,31 @@ const DEFAULT_BUDGET_MS = 900;
 
 export interface WarmupOptions {
   canvasId: string;
+  edges: Edge[];
   /** Canvas-space point the user will be looking at. */
   centre: { x: number; y: number };
   budgetMs?: number;
 }
 
+export interface WarmupResult {
+  nodes: Node[];
+  edges: Edge[];
+}
+
 /**
  * Measure never-measured auto notes and fold the results into the node
- * array. Returns the same reference when there was nothing to do.
+ * array through the pure canvas executor. Preserves the input node and
+ * edge array references when there was nothing to do.
  */
 export async function warmupNodeHeights(
   nodes: Node[],
   options: WarmupOptions,
-): Promise<Node[]> {
+): Promise<WarmupResult> {
   const targets = collectUnmeasured(nodes, options.centre);
-  if (targets.length === 0) return nodes;
+  if (targets.length === 0) return { nodes, edges: options.edges };
 
   const deadline = Date.now() + (options.budgetMs ?? DEFAULT_BUDGET_MS);
-  const hints = new Map<string, AutoHeightHint>();
+  const measurements: CanvasNodeMeasuredHeightUpdate[] = [];
 
   for (const target of targets) {
     if (Date.now() >= deadline) break;
@@ -76,7 +87,8 @@ export async function warmupNodeHeights(
         canvasId: options.canvasId,
       });
       if (measured.height <= 0) continue;
-      hints.set(target.nodeId, {
+      measurements.push({
+        nodeId: target.nodeId as CanvasNodeId,
         intrinsicHeight: measured.height,
         measuredFor: target.measuredFor,
         ...(measured.provisional ? { provisional: true } : {}),
@@ -87,14 +99,17 @@ export async function warmupNodeHeights(
     }
   }
 
-  if (hints.size === 0) return nodes;
+  if (measurements.length === 0) return { nodes, edges: options.edges };
 
-  return nodes.map((node) => {
-    const hint = hints.get(node.id);
-    if (!hint) return node;
-    const withHint = { ...node, data: { ...node.data, autoHeight: hint } };
-    return materializeAutoHeight(withHint);
-  });
+  const { writeResult } = executeCanvasCommands(
+    {
+      source: 'system',
+      commands: [{ type: 'APPLY_MEASURED_HEIGHT', items: measurements }],
+    },
+    { nodes, edges: options.edges, canvasId: options.canvasId },
+  );
+  const sharedOut = applySharedPostEffectsFromWriteResult(writeResult);
+  return { nodes: writeResult.nodes, edges: sharedOut.edges };
 }
 
 export interface WarmupTarget {

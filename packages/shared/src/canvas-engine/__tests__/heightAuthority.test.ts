@@ -208,6 +208,28 @@ describe('APPLY_MEASURED_HEIGHT', () => {
     expect(dataOf(writeResult.nodes, 'n1').autoHeight).toBeUndefined();
   });
 
+  it('drops a measurement when the content changed while it was in flight', () => {
+    const changedContent = '# changed while measuring';
+    const current = note('n1', {
+      style: { width: 400, height: 320 },
+      data: {
+        type: 'note',
+        content: changedContent,
+        heightMode: 'auto',
+      },
+    } as Partial<CanvasNode>);
+    const start = [current];
+
+    const { writeResult } = run(
+      [{ type: 'APPLY_MEASURED_HEIGHT', items: [measurement] }],
+      start,
+    );
+
+    expect(writeResult.nodes).toBe(start);
+    expect(styleOf(writeResult.nodes, 'n1')?.height).toBe(320);
+    expect(dataOf(writeResult.nodes, 'n1').autoHeight).toBeUndefined();
+  });
+
   it('ignores a type that never auto-sizes', () => {
     const start = [note('n1', { type: 'image', data: { type: 'image' } })];
     const { writeResult } = run(
