@@ -1,5 +1,12 @@
 import clsx from 'clsx';
-import { Bot, Columns2, TableOfContents, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Bot,
+  Columns2,
+  TableOfContents,
+  X,
+} from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -147,13 +154,28 @@ const ConnectedNodeMenu = ({
                 groupIndex > 0 && 'border-edge-default mt-1 border-t pt-1',
               )}
             >
-              <div className="text-fg-subtle flex items-center justify-between gap-4 px-3 py-1 text-[10px] font-medium uppercase">
+              <div className="text-fg-subtle flex items-center justify-between gap-4 px-3 py-1 text-xs font-medium uppercase">
                 <span>{group.label}</span>
-                {group.shortcut && (
-                  <span className="text-fg-muted text-xs font-semibold normal-case">
-                    {group.shortcut}
-                  </span>
-                )}
+                {group.shortcut &&
+                  (group.direction === 'incoming' ? (
+                    <ArrowLeft
+                      size={14}
+                      strokeWidth={2}
+                      className="text-fg-subtle shrink-0"
+                      aria-label={group.shortcut}
+                    />
+                  ) : group.direction === 'outgoing' ? (
+                    <ArrowRight
+                      size={14}
+                      strokeWidth={2}
+                      className="text-fg-subtle shrink-0"
+                      aria-label={group.shortcut}
+                    />
+                  ) : (
+                    <span className="text-fg-subtle text-xs normal-case">
+                      {group.shortcut}
+                    </span>
+                  ))}
               </div>
               {group.neighbors.map((neighbor, index) => {
                 const NodeTypeIcon = getNodeIcon(neighbor.type, neighbor.data);
