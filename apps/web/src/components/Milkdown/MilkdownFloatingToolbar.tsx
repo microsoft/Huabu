@@ -43,9 +43,12 @@ import {
 
 import { Button } from '@/components/Common/Button';
 import { cn } from '@/components/Common/cn';
+import { FLOATING_CHROME_PROPS } from '@/components/Common/floatingChrome';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Input } from '@/components/Common/Input';
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
+import { useTrackAttention } from '@/hooks/useTrackAttention';
+import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
 
 import type { MilkdownInstance, MilkdownTextRange } from './createMilkdown';
 import type {
@@ -55,6 +58,7 @@ import type {
 } from './types';
 import type { ColorPreset } from '@/components/Common/ColorPicker';
 import type { LucideIcon } from 'lucide-react';
+import type { RefObject } from 'react';
 
 type MilkdownToolbarPopover =
   | 'block-list'
@@ -179,12 +183,20 @@ function BackgroundColorTrigger({ color }: { color: string | null }) {
 
 export interface MilkdownFloatingToolbarProps {
   instance: MilkdownInstance | null;
+  /**
+   * The surface this toolbar belongs to — normally the host that wraps
+   * the editor *and* its sibling overlays, not the editor mount alone.
+   * A press or focus landing outside it (and outside floating chrome)
+   * means the user moved on, and the toolbar stands down.
+   */
+  surfaceRef: RefObject<HTMLElement | null>;
   disabled?: boolean;
   className?: string;
 }
 
 export function MilkdownFloatingToolbar({
   instance,
+  surfaceRef,
   disabled = false,
   className,
 }: MilkdownFloatingToolbarProps): JSX.Element | null {
@@ -200,6 +212,21 @@ export function MilkdownFloatingToolbar({
   );
   const [linkHref, setLinkHref] = useState('');
   const [mathValue, setMathValue] = useState('x');
+  // A ProseMirror selection survives blur, so "there is a selection" is
+  // not enough to keep the toolbar on screen: after clicking into the
+  // chat panel or an adjacent node the highlight is still there and the
+  // toolbar would keep floating over unrelated UI. Track whether this
+  // editor is still the surface being worked in and stand down when it
+  // isn't. The selection is deliberately left intact — coming back
+  // should resume where the user left off.
+  const [engaged, setEngaged] = useState(true);
+  useTrackAttention(
+    (target) => surfaceRef.current?.contains(target) ?? false,
+    setEngaged,
+  );
+  // A modal owns the whole window while it is open; a toolbar portalled
+  // to `document.body` would otherwise paint on top of its backdrop.
+  const hiddenByGlobalModal = useAnyGlobalModalOpen();
   const linkInputRef = useRef<HTMLInputElement>(null);
   const mathInputRef = useRef<HTMLInputElement>(null);
   const linkSelectionRef = useRef<MilkdownTextRange | null>(null);
@@ -207,7 +234,7 @@ export function MilkdownFloatingToolbar({
   const blockListOpen = openPopover === 'block-list';
   const linkOpen = openPopover === 'link';
   const mathOpen = openPopover === 'inline-math';
-  const toolbarOpen = selectionRect !== null;
+  const toolbarOpen = selectionRect !== null && engaged && !hiddenByGlobalModal;
   const virtualSelectionReference = useMemo(() => {
     if (!selectionRect) return null;
     return {
@@ -288,9 +315,9 @@ export function MilkdownFloatingToolbar({
   }, [instance]);
 
   useEffect(() => {
-    if (selectionRect) return;
+    if (toolbarOpen) return;
     setOpenPopover(null);
-  }, [selectionRect]);
+  }, [toolbarOpen]);
 
   useEffect(() => {
     if (!linkOpen) return;
@@ -418,6 +445,7 @@ export function MilkdownFloatingToolbar({
             <>
               <div
                 className="fixed inset-0 z-40"
+                {...FLOATING_CHROME_PROPS}
                 onClick={(event) => {
                   event.stopPropagation();
                   setOpenPopover(null);
@@ -425,6 +453,7 @@ export function MilkdownFloatingToolbar({
               />
               <div
                 ref={blockListRefs.setFloating}
+                {...FLOATING_CHROME_PROPS}
                 className="border-edge-default shadow-bottom bg-surface z-50 flex max-h-64 min-w-48 flex-col gap-1 overflow-y-auto rounded-md border p-1"
                 role="menu"
                 style={{
@@ -584,6 +613,7 @@ export function MilkdownFloatingToolbar({
             <>
               <div
                 className="fixed inset-0 z-40"
+                {...FLOATING_CHROME_PROPS}
                 onClick={(event) => {
                   event.stopPropagation();
                   setOpenPopover(null);
@@ -591,6 +621,7 @@ export function MilkdownFloatingToolbar({
               />
               <form
                 ref={linkRefs.setFloating}
+                {...FLOATING_CHROME_PROPS}
                 className="border-edge-default shadow-bottom bg-surface z-50 flex items-center gap-1 rounded-md border p-1"
                 style={{
                   ...linkStyles,
@@ -638,6 +669,7 @@ export function MilkdownFloatingToolbar({
             <>
               <div
                 className="fixed inset-0 z-40"
+                {...FLOATING_CHROME_PROPS}
                 onClick={(event) => {
                   event.stopPropagation();
                   setOpenPopover(null);
@@ -645,6 +677,7 @@ export function MilkdownFloatingToolbar({
               />
               <form
                 ref={mathRefs.setFloating}
+                {...FLOATING_CHROME_PROPS}
                 className="border-edge-default shadow-bottom bg-surface z-50 flex items-center gap-1 rounded-md border p-1"
                 style={{
                   ...mathStyles,
@@ -688,11 +721,12 @@ export function MilkdownFloatingToolbar({
     </FloatingToolbar>
   );
 
-  if (!selectionRect) return null;
+  if (!toolbarOpen) return null;
 
   return createPortal(
     <div
       ref={toolbarRefs.setFloating}
+      {...FLOATING_CHROME_PROPS}
       style={{
         ...toolbarStyles,
         zIndex: 1000,

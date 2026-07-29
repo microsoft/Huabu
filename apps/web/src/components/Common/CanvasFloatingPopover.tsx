@@ -19,6 +19,8 @@ import useCanvasStore from '@/store/canvasStore';
 import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
 import { usePreviewStore } from '@/store/previewStore';
 
+import { FLOATING_CHROME_PROPS } from './floatingChrome';
+
 /**
  * A rectangle in flow (canvas) coordinates. For point-based anchors
  * (e.g. an edge midpoint) pass `width: 0` and `height: 0`.
@@ -206,7 +208,7 @@ export function CanvasFloatingPopover({
   return createPortal(
     <div
       ref={refs.setFloating}
-      data-canvas-chrome=""
+      {...FLOATING_CHROME_PROPS}
       className={className}
       style={{
         ...floatingStyles,

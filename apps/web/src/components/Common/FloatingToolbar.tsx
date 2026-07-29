@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from './Button';
 import { cn } from './cn';
 import { ColorPicker, type ColorPreset } from './ColorPicker';
+import { FLOATING_CHROME_PROPS } from './floatingChrome';
 import {
   Select as BaseSelect,
   type SelectOption as BaseSelectOption,
@@ -340,6 +341,7 @@ function ToolbarColorPicker({
             <>
               <div
                 className="fixed inset-0 z-40"
+                {...FLOATING_CHROME_PROPS}
                 onClick={(e) => {
                   e.stopPropagation();
                   setIsOpen(false);
@@ -347,6 +349,7 @@ function ToolbarColorPicker({
               />
               <div
                 ref={refs.setFloating}
+                {...FLOATING_CHROME_PROPS}
                 className={FLOATING_TOOLBAR_POPOVER_CLASS}
                 style={{
                   ...floatingStyles,

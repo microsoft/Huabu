@@ -604,7 +604,12 @@ export const NotePreview = ({
       >
         {editMode === 'wysiwyg' ? (
           <>
-            {!readOnly ? <MilkdownFloatingToolbar instance={editor} /> : null}
+            {!readOnly ? (
+              <MilkdownFloatingToolbar
+                instance={editor}
+                surfaceRef={containerRef}
+              />
+            ) : null}
             <MilkdownEditor
               markdown={markdown}
               editable={!readOnly}

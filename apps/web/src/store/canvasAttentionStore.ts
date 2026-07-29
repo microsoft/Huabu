@@ -1,17 +1,19 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
 
+import { useTrackAttention } from '@/hooks/useTrackAttention';
+
 /**
- * Elements that count as "the canvas" when resolving attention.
+ * The element that counts as "the canvas" when resolving attention.
+ * `[data-canvas-root]` is the React Flow wrapper in `Canvas`.
  *
- * `[data-canvas-root]` is the React Flow wrapper in `Canvas`. Floating
- * chrome (node toolbar, multi-select toolbar, edge-style toolbar, the
- * connected-node picker) portals to `document.body`, so it is outside
- * that subtree and has to opt in explicitly via `[data-canvas-chrome]`
- * — without it, clicking a toolbar button would read as "the user left
- * the canvas" and the toolbar would vanish under its own pointer.
+ * Canvas floating chrome (node toolbar, multi-select toolbar, edge-style
+ * toolbar, the connected-node picker) portals to `document.body` and is
+ * therefore outside that subtree — it is covered by the neutral
+ * `FLOATING_CHROME_PROPS` marker instead, so pressing a toolbar button
+ * never reads as "the user left the canvas".
  */
-const CANVAS_SURFACE_SELECTOR = '[data-canvas-root], [data-canvas-chrome]';
+const CANVAS_SURFACE_SELECTOR = '[data-canvas-root]';
 
 interface CanvasAttentionState {
   /**
@@ -32,39 +34,28 @@ export const useCanvasAttentionStore = create<CanvasAttentionState>((set) => ({
 }));
 
 /**
- * Tracks which surface the user is working in, so canvas floating chrome
- * can step aside while they are busy in the chat panel, an expanded node,
- * or the layer panel.
+ * Publishes canvas attention into the store so canvas floating chrome
+ * can step aside while the user works in the chat panel, an expanded
+ * node, or the layer panel.
  *
- * Attention follows the last *deliberate* interaction — a pointer press or
- * a focus change — rather than the pointer position. Hover would be the
- * obvious signal and is the wrong one: merely sweeping the cursor across
- * the chat panel on the way somewhere else would blink the toolbar out and
- * back, and defending against that needs grace timers that then make the
- * toolbar feel laggy. A press/focus signal is discrete and sticky: chrome
- * disappears exactly once, when the user commits to another surface, and
- * comes back the moment they click into the canvas again.
+ * A store rather than local state because the verdict is consumed by
+ * components far from the canvas page; routing it through props would
+ * re-render the whole page on every interaction.
  *
- * Listeners are capture-phase on `document` so a handler calling
- * `stopPropagation` (common inside popovers and editors) cannot blind us.
  * Call once from the canvas page; the state is process-wide.
  */
 export function useTrackCanvasAttention(): void {
-  useEffect(() => {
-    const { setCanvasEngaged } = useCanvasAttentionStore.getState();
-    const handleInteraction = (event: Event) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
-      setCanvasEngaged(target.closest(CANVAS_SURFACE_SELECTOR) !== null);
-    };
-    document.addEventListener('pointerdown', handleInteraction, true);
-    document.addEventListener('focusin', handleInteraction, true);
-    return () => {
-      document.removeEventListener('pointerdown', handleInteraction, true);
-      document.removeEventListener('focusin', handleInteraction, true);
+  useTrackAttention(
+    (target) => target.closest(CANVAS_SURFACE_SELECTOR) !== null,
+    useCanvasAttentionStore.getState().setCanvasEngaged,
+  );
+
+  useEffect(
+    () => () => {
       // Leaving the canvas page ends the arbitration; reset so the next
       // canvas mount doesn't inherit a stale "engaged elsewhere" verdict.
-      setCanvasEngaged(true);
-    };
-  }, []);
+      useCanvasAttentionStore.getState().setCanvasEngaged(true);
+    },
+    [],
+  );
 }
