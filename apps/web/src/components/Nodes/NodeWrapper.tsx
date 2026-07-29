@@ -49,6 +49,7 @@ import useCanvasStore, {
   clearNodeDuplicateGuard,
 } from '@/store/canvasStore.ts';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore.ts';
+import { useNodeCollapseStore } from '@/store/nodeCollapseStore.ts';
 import { coerceProvenance } from '@/utils/blockProvenance';
 
 import { getAccentTokens } from './accentTokens.ts';
@@ -554,8 +555,18 @@ export const NodeWrapper = memo(
     // unselected node on a freshly loaded canvas. Selecting a node already
     // re-renders this component, so the handles still mount in the same
     // commit as the selection highlight (no perceptible delay).
+    // A node collapsed to its takeover mark has no visible card to resize,
+    // and the handles would sit on the faded footprint's corners — far from
+    // the mark, framing nothing. Zooming back in restores them.
+    const isCollapsedToMark = useNodeCollapseStore(
+      (s) => s.marks[id] !== undefined,
+    );
     const showResizer =
-      selected && resizable && !data.locked && selectedCount === 1;
+      selected &&
+      resizable &&
+      !data.locked &&
+      selectedCount === 1 &&
+      !isCollapsedToMark;
 
     // While a stroke-level (sketch) selection exists, its own toolbar (or,
     // on desktop, none) owns the surface — suppress this node's floating
@@ -572,7 +583,7 @@ export const NodeWrapper = memo(
     // gesture, so every node's toolbar stands down until the pick is
     // committed or cancelled (including the source node's own).
     const connectPortContext = useContext(PendingConnectPortContext);
-    const hasPendingConnect = connectPortContext?.pendingPort != null;
+    const hasPendingConnect = !!connectPortContext?.pendingPort;
 
     // Derive accent-tinted tokens once so border/shadow stay in sync with
     // the rest of the canvas (PreviewCard, SemanticPlaceholder, ...).

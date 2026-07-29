@@ -9,6 +9,10 @@ import {
 } from '@sediment/shared/canvas-engine';
 
 import useCanvasStore from '@/store/canvasStore';
+import {
+  collapsedMarkRect,
+  useNodeCollapseStore,
+} from '@/store/nodeCollapseStore';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 
@@ -40,6 +44,9 @@ export const SelectionOutlines = () => {
   const nodes = useCanvasStore((s) => s.nodes);
   const { zoom, x: vpX, y: vpY } = useViewport();
   const domNode = useStore((s) => s.domNode);
+  // Collapsed nodes have faded their card away, so outlining the footprint
+  // would box a stretch of empty canvas beside the mark that replaced it.
+  const marks = useNodeCollapseStore((s) => s.marks);
 
   const selectedNodes = useMemo(
     () => nodes.filter((n) => n.selected) as CanvasNode[],
@@ -54,15 +61,19 @@ export const SelectionOutlines = () => {
   const NODE_RADIUS_PX = 8;
 
   const outlines = selectedNodes.map((n) => {
+    const mark = marks[n.id];
     const abs =
       getAbsolutePosition(nodes as NestableNode[], n.id) ?? n.position;
     const { width, height } = getNodeSize(n);
-    // Fall back to xyflow's typical defaults when the node has no
-    // explicit measured size yet (e.g. a freshly added node mid-frame).
-    const w = (width || 200) * zoom;
-    const h = (height || 100) * zoom;
-    const left = abs.x * zoom + vpX;
-    const top = abs.y * zoom + vpY;
+    const rect = mark
+      ? collapsedMarkRect(mark)
+      : // Fall back to xyflow's typical defaults when the node has no
+        // explicit measured size yet (e.g. a freshly added node mid-frame).
+        { x: abs.x, y: abs.y, width: width || 200, height: height || 100 };
+    const w = rect.width * zoom;
+    const h = rect.height * zoom;
+    const left = rect.x * zoom + vpX;
+    const top = rect.y * zoom + vpY;
 
     const isSketch = n.type === 'sketch';
 
@@ -76,8 +87,13 @@ export const SelectionOutlines = () => {
           width: w,
           height: h,
           outline: `1px solid var(--color-info)`,
-          outlineOffset: 0,
-          borderRadius: NODE_RADIUS_PX * zoom,
+          outlineOffset: mark ? 2 : 0,
+          // A circle, not a rounded square. `collapsedRadius` makes this box
+          // exactly as wide as the mark's disc is across, so a circular
+          // outline hugs the mark with zero gap, while any squarer corner
+          // exposes up to 0.41r of bare canvas at each corner — which reads
+          // as a white plate behind the mark rather than a ring around it.
+          borderRadius: mark ? '50%' : NODE_RADIUS_PX * zoom,
           // Soft `info-light` glow so the node selection reads the same
           // as the selected-edge treatment (info core + info-light halo,
           // see `.react-flow__edge.selected` in index.css). A larger blur

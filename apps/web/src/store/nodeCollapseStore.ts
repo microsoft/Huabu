@@ -33,6 +33,30 @@ interface NodeCollapseState {
   setMark: (id: string, geometry: CollapsedMarkGeometry | null) => void;
 }
 
+/**
+ * Canvas-space bounding square of a collapsed mark.
+ *
+ * This is the rect interaction chrome should anchor to while a node is
+ * collapsed. The node's own footprint still exists and is still selectable,
+ * but it has faded to zero opacity — chrome drawn against it reads as a
+ * selection box, toolbar, and ports floating in empty canvas next to a small
+ * mark they appear to have nothing to do with.
+ */
+export function collapsedMarkRect(mark: CollapsedMarkGeometry): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} {
+  const size = mark.radius * 2;
+  return {
+    x: mark.cx - mark.radius,
+    y: mark.cy - mark.radius,
+    width: size,
+    height: size,
+  };
+}
+
 export const useNodeCollapseStore = create<NodeCollapseState>((set) => ({
   marks: {},
   setMark: (id, geometry) =>

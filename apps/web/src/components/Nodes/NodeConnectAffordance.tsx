@@ -27,6 +27,11 @@ import { cn } from '@/components/Common/cn.ts';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { createQuestionNodeAndCompose } from '@/components/Nodes/question/questionCompose.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
+import {
+  collapsedMarkRect,
+  useNodeCollapseStore,
+  type CollapsedMarkGeometry,
+} from '@/store/nodeCollapseStore.ts';
 
 /** Connection handle definitions – source + target on each side. */
 const HANDLE_DEFS = [
@@ -38,6 +43,14 @@ const HANDLE_DEFS = [
   { type: 'source' as const, id: 'bottom-source', position: Position.Bottom },
   { type: 'target' as const, id: 'left-target', position: Position.Left },
   { type: 'source' as const, id: 'left-source', position: Position.Left },
+] as const;
+
+/** The four sides a port is painted on, without the source/target pairing. */
+const PORT_POSITIONS = [
+  Position.Top,
+  Position.Right,
+  Position.Bottom,
+  Position.Left,
 ] as const;
 
 /** Cardinal sides a connection can leave a node from. */
@@ -375,6 +388,40 @@ function portCircleStyle(
   };
 }
 
+/** A rectangle in whatever coordinate space the caller is working in. */
+interface PortRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Centre of the port on one side of a rect — the midpoint of that edge.
+ *
+ * A collapsed mark is a circle inscribed in its bounding square, so the same
+ * edge midpoints are also the circle's four cardinal points. One formula
+ * therefore serves both the readable card and the collapsed mark.
+ */
+function portPointOnRect(
+  position: Position,
+  rect: PortRect,
+): { cx: number; cy: number } {
+  const cx =
+    position === Position.Left
+      ? rect.x
+      : position === Position.Right
+        ? rect.x + rect.width
+        : rect.x + rect.width / 2;
+  const cy =
+    position === Position.Top
+      ? rect.y
+      : position === Position.Bottom
+        ? rect.y + rect.height
+        : rect.y + rect.height / 2;
+  return { cx, cy };
+}
+
 /**
  * Screen-space repaint of the aimed-at port, drawn above the selection
  * outline.
@@ -400,6 +447,7 @@ function HotPortOverlay({
   const node = useInternalNode(nodeId);
   const domNode = useStore((s) => s.domNode);
   const transform = useStore((s) => s.transform);
+  const mark = useNodeCollapseStore((s) => s.marks[nodeId]);
 
   if (!node || !domNode) return null;
 
@@ -407,19 +455,12 @@ function HotPortOverlay({
   const { x, y } = node.internals.positionAbsolute;
   const w = node.measured.width ?? 0;
   const h = node.measured.height ?? 0;
-  // Ports sit on the node's border box, centred on the side they name.
-  const cx =
-    position === Position.Left
-      ? x
-      : position === Position.Right
-        ? x + w
-        : x + w / 2;
-  const cy =
-    position === Position.Top
-      ? y
-      : position === Position.Bottom
-        ? y + h
-        : y + h / 2;
+  // Ports sit on the node's border box, centred on the side they name —
+  // or, once the card has faded into its takeover mark, on the mark.
+  const { cx, cy } = portPointOnRect(
+    position,
+    mark ? collapsedMarkRect(mark) : { x, y, width: w, height: h },
+  );
 
   return createPortal(
     <div
@@ -441,6 +482,61 @@ function HotPortOverlay({
   );
 }
 
+/**
+ * Screen-space paint of a collapsed node's four ports.
+ *
+ * The in-flow dots live inside the node card, which fades to zero opacity
+ * once the node collapses to its takeover mark. Opacity is inherited through
+ * compositing, so a child cannot opt out of it — the dots would be positioned
+ * correctly on the mark and still be invisible, leaving only the `+` overlay
+ * to appear out of nowhere when the pointer happened to cross a port. Painting
+ * them here, in the same HUD layer `HotPortOverlay` already uses, is the same
+ * split that layer established: the in-flow port keeps hit-testing and edge
+ * geometry, this is paint only.
+ */
+function CollapsedPortDots({
+  mark,
+  hotPosition,
+  size,
+}: {
+  mark: CollapsedMarkGeometry;
+  hotPosition: Position | null;
+  size: number;
+}) {
+  const domNode = useStore((s) => s.domNode);
+  const transform = useStore((s) => s.transform);
+
+  if (!domNode) return null;
+
+  const [tx, ty, zoom] = transform;
+  const rect = collapsedMarkRect(mark);
+
+  return createPortal(
+    <>
+      {PORT_POSITIONS.map((position) => {
+        // The aimed-at port is already painted at its grown size by
+        // `HotPortOverlay`; drawing the idle dot under it would show a
+        // ring of the smaller circle poking out from behind.
+        if (position === hotPosition) return null;
+        const { cx, cy } = portPointOnRect(position, rect);
+        return (
+          <div
+            key={position}
+            aria-hidden
+            className="pointer-events-none absolute z-999 rounded-full"
+            style={{
+              ...portCircleStyle(size, 2.5),
+              left: cx * zoom + tx - size / 2,
+              top: cy * zoom + ty - size / 2,
+            }}
+          />
+        );
+      })}
+    </>,
+    domNode,
+  );
+}
+
 interface NodeConnectionHandlesProps {
   /** Id of the node these handles belong to. */
   nodeId: string;
@@ -457,6 +553,7 @@ export const NodeConnectionHandles = memo(
     const { t } = useTranslation();
     const node = useInternalNode(nodeId);
     const connectPortContext = useContext(PendingConnectPortContext);
+    const mark = useNodeCollapseStore((s) => s.marks[nodeId]);
     const baseHandleSize = isNotMouse ? 14 : 8;
     const zoom = useStore((s) => s.transform[2]);
     const inverseZoom = zoom > 0 ? 1 / zoom : 1;
@@ -497,8 +594,34 @@ export const NodeConnectionHandles = memo(
       (originSide ? SIDE_POSITION[originSide] : null) ??
       (exposed && !connecting ? hotSide : null);
 
+    // Once the card has collapsed into its takeover mark, the footprint the
+    // handles are laid out against is invisible — ports pinned to its edges
+    // would hang in empty canvas, and a connection dragged from one would
+    // start nowhere near the thing the user aimed at. Rebase them onto the
+    // mark. Handles are positioned inside the node's own box, which React
+    // Flow lays out in flow units, so the mark's canvas-space rect converts
+    // by plain translation.
+    let collapsedLocalRect: PortRect | null = null;
+    if (mark && node) {
+      const rect = collapsedMarkRect(mark);
+      const abs = node.internals.positionAbsolute;
+      collapsedLocalRect = {
+        x: rect.x - abs.x,
+        y: rect.y - abs.y,
+        width: rect.width,
+        height: rect.height,
+      };
+    }
+
     return (
       <>
+        {mark && (exposed || pinnedPosition) && (
+          <CollapsedPortDots
+            mark={mark}
+            hotPosition={hotPosition}
+            size={baseHandleSize}
+          />
+        )}
         {hotPosition && (
           <HotPortOverlay
             nodeId={nodeId}
@@ -569,6 +692,32 @@ export const NodeConnectionHandles = memo(
                       height: dotSize,
                       transform: 'translate(0, -50%)',
                     };
+          // Collapsed: same zero-thickness trick, but positioned absolutely
+          // against the mark's local rect instead of the node's own edges.
+          // `right` / `bottom` are reset because React Flow's per-side CSS
+          // sets them, and a side offset left over from the readable layout
+          // would fight the explicit `left` / `top`.
+          const alignStyle: React.CSSProperties = collapsedLocalRect
+            ? (() => {
+                const { cx, cy } = portPointOnRect(
+                  h.position,
+                  collapsedLocalRect,
+                );
+                const horizontal =
+                  h.position === Position.Top || h.position === Position.Bottom;
+                return {
+                  left: cx,
+                  top: cy,
+                  right: 'auto',
+                  bottom: 'auto',
+                  width: horizontal ? dotSize : 0,
+                  height: horizontal ? 0 : dotSize,
+                  transform: horizontal
+                    ? 'translate(-50%, 0)'
+                    : 'translate(0, -50%)',
+                };
+              })()
+            : edgeAlign;
           // Dot is centred on the (collapsed) bbox; `pointer-events:
           // auto` makes the dot the actual click target.
           //
@@ -650,7 +799,7 @@ export const NodeConnectionHandles = memo(
               id={h.id}
               position={h.position}
               style={{
-                ...edgeAlign,
+                ...alignStyle,
                 minWidth: 0,
                 minHeight: 0,
                 background: 'transparent',
