@@ -57,6 +57,40 @@ export function detectTouchCapability(): boolean {
   );
 }
 
+/**
+ * Record that a pointer of `type` is now driving the canvas.
+ *
+ * The single place that owns "a pointer was observed": it updates the live
+ * pointer mode and, for a pen, the sticky `penObserved` flag that flips `auto`
+ * routing into Pen mode. Called by the global `pointerdown` listener below and
+ * by substitute pointer sources that bypass the browser's pointer stream (the
+ * Sketch raw-touch stylus engine).
+ */
+export function observeInputPointer(type: InputMode): void {
+  if (useInputModeStore.getState().mode !== type) {
+    useInputModeStore.setState({ mode: type });
+  }
+  if (type === 'pen') useToolStore.getState().observePen();
+}
+
+/**
+ * Non-reactive twin of {@link useEffectiveInputMode}, resolved from live store
+ * state.
+ *
+ * Use it in an event handler whose own work just changed the inputs to the
+ * resolution — a value captured during the previous render would be stale. The
+ * hook remains the right choice for anything that should re-render on change.
+ */
+export function readEffectiveInputMode(): EffectiveInputMode {
+  const { inputModePreference, penObserved } = useToolStore.getState();
+  const lastPointer = useInputModeStore.getState().mode;
+  return resolveInputMode(
+    inputModePreference,
+    detectTouchCapability() || lastPointer === 'touch' || lastPointer === 'pen',
+    penObserved,
+  );
+}
+
 export function useEffectiveInputMode(): EffectiveInputMode {
   const preference = useToolStore((state) => state.inputModePreference);
   const penObserved = useToolStore((state) => state.penObserved);
@@ -86,11 +120,12 @@ export function useInputModeListener(): void {
       const next = INPUT_MODES.has(e.pointerType as InputMode)
         ? (e.pointerType as InputMode)
         : 'mouse';
-      if (useInputModeStore.getState().mode !== next) {
+      // An untrusted pen event must not flip the sticky `penObserved` flag,
+      // so it only updates the live mode.
+      if (e.isTrusted || next !== 'pen') {
+        observeInputPointer(next);
+      } else if (useInputModeStore.getState().mode !== next) {
         useInputModeStore.setState({ mode: next });
-      }
-      if (e.isTrusted && next === 'pen') {
-        useToolStore.getState().observePen();
       }
     };
     window.addEventListener('pointerdown', handler, true);
