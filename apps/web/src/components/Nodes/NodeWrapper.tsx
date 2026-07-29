@@ -9,7 +9,6 @@ import { FileWarning, FolderOpen, RefreshCw } from 'lucide-react';
 import React, {
   memo,
   useCallback,
-  useContext,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -48,15 +47,13 @@ import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore, {
   clearNodeDuplicateGuard,
 } from '@/store/canvasStore.ts';
+import { useConnectPortStore } from '@/store/connectPortStore.ts';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore.ts';
 import { useNodeCollapseStore } from '@/store/nodeCollapseStore.ts';
 import { coerceProvenance } from '@/utils/blockProvenance';
 
 import { getAccentTokens } from './accentTokens.ts';
-import {
-  NodeConnectionHandles,
-  PendingConnectPortContext,
-} from './NodeConnectAffordance.tsx';
+import { NodeConnectionHandles } from './NodeConnectAffordance.tsx';
 import { NodeTakeoverLayer } from './NodeTakeoverLayer.tsx';
 import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
 
@@ -582,8 +579,7 @@ export const NodeWrapper = memo(
     // at once puts two unrelated control clusters on screen for one
     // gesture, so every node's toolbar stands down until the pick is
     // committed or cancelled (including the source node's own).
-    const connectPortContext = useContext(PendingConnectPortContext);
-    const hasPendingConnect = !!connectPortContext?.pendingPort;
+    const hasPendingConnect = useConnectPortStore((s) => s.pending !== null);
 
     // Derive accent-tinted tokens once so border/shadow stay in sync with
     // the rest of the canvas (PreviewCard, SemanticPlaceholder, ...).

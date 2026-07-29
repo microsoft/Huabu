@@ -10,7 +10,7 @@ import {
   useStore,
 } from '@xyflow/react';
 import { Plus } from 'lucide-react';
-import { createContext, memo, useCallback, useContext, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -27,6 +27,7 @@ import { cn } from '@/components/Common/cn.ts';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { createQuestionNodeAndCompose } from '@/components/Nodes/question/questionCompose.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
+import { useConnectPortStore } from '@/store/connectPortStore.ts';
 import {
   collapsedMarkRect,
   useNodeCollapseStore,
@@ -72,25 +73,6 @@ export const SIDE_POSITION: Record<Side, Position> = {
  * it — run this through `applyEdgeStyle` to get the rendering props.
  */
 export const CONNECTED_NODE_EDGE_STYLE: EdgeStyle = { direction: 'forward' };
-
-/**
- * Port a pending "create a connected node" gesture started from, or `null`
- * when no such gesture is waiting on a node type.
- *
- * Provided by the canvas and consumed by every node's ports. Choosing a
- * type means moving the pointer off the source node, which would hide its
- * ports and make the `+` the user just pressed disappear from under them.
- * Pinning that one port keeps the pending creation anchored to something
- * visible for its whole lifetime.
- */
-export const PendingConnectPortContext = createContext<{
-  pendingPort: { nodeId: string; side: Side } | null;
-  requestConnectedNode: (
-    nodeId: string,
-    side: Side,
-    anchor: { x: number; y: number },
-  ) => void;
-} | null>(null);
 
 /** Flow-space gap between the source node and the newly-created node. */
 const NEW_NODE_GAP = 80;
@@ -205,41 +187,49 @@ export function sideFromHandleId(
  * aligned position one `NEW_NODE_GAP` away, nudged perpendicular until
  * it clears every existing node.
  */
-function computeSidePlacement(
-  nodes: NestableNode[],
-  getAbs: ReturnType<typeof createAbsolutePositionGetter>,
-  srcAbs: { x: number; y: number },
-  srcW: number,
-  srcH: number,
-  newW: number,
-  newH: number,
-  side: Side,
-): { x: number; y: number } {
+function computeSidePlacement({
+  nodes,
+  getAbs,
+  source,
+  size,
+  side,
+}: {
+  /** Every node on the canvas, used as collision obstacles. */
+  nodes: NestableNode[];
+  getAbs: ReturnType<typeof createAbsolutePositionGetter>;
+  /** Absolute rect of the node the connection leaves. */
+  source: Rect;
+  /** Size of the node about to be created. */
+  size: { w: number; h: number };
+  side: Side;
+}): { x: number; y: number } {
+  const { x: srcX, y: srcY, w: srcW, h: srcH } = source;
+  const { w: newW, h: newH } = size;
   let placementPoint: { x: number; y: number };
   switch (side) {
     case 'top':
       placementPoint = {
-        x: srcAbs.x + srcW / 2 - newW / 2,
-        y: srcAbs.y - newH - NEW_NODE_GAP,
+        x: srcX + srcW / 2 - newW / 2,
+        y: srcY - newH - NEW_NODE_GAP,
       };
       break;
     case 'bottom':
       placementPoint = {
-        x: srcAbs.x + srcW / 2 - newW / 2,
-        y: srcAbs.y + srcH + NEW_NODE_GAP,
+        x: srcX + srcW / 2 - newW / 2,
+        y: srcY + srcH + NEW_NODE_GAP,
       };
       break;
     case 'left':
       placementPoint = {
-        x: srcAbs.x - newW - NEW_NODE_GAP,
-        y: srcAbs.y + srcH / 2 - newH / 2,
+        x: srcX - newW - NEW_NODE_GAP,
+        y: srcY + srcH / 2 - newH / 2,
       };
       break;
     case 'right':
     default:
       placementPoint = {
-        x: srcAbs.x + srcW + NEW_NODE_GAP,
-        y: srcAbs.y + srcH / 2 - newH / 2,
+        x: srcX + srcW + NEW_NODE_GAP,
+        y: srcY + srcH / 2 - newH / 2,
       };
       break;
   }
@@ -321,16 +311,13 @@ export function useCreateConnectedNode() {
       const placementPoint =
         placement.kind === 'point'
           ? placement.point
-          : computeSidePlacement(
+          : computeSidePlacement({
               nodes,
               getAbs,
-              srcAbs,
-              srcW,
-              srcH,
-              newW,
-              newH,
-              placement.side,
-            );
+              source: { x: srcAbs.x, y: srcAbs.y, w: srcW, h: srcH },
+              size: { w: newW, h: newH },
+              side: placement.side,
+            });
 
       if (kind === 'question') {
         const { nodeId } = createQuestionNodeAndCompose({
@@ -552,7 +539,12 @@ export const NodeConnectionHandles = memo(
   ({ nodeId, hovered, selected, isNotMouse }: NodeConnectionHandlesProps) => {
     const { t } = useTranslation();
     const node = useInternalNode(nodeId);
-    const connectPortContext = useContext(PendingConnectPortContext);
+    // Only the pinned *side* matters here, and only when the pending
+    // gesture belongs to this node — selecting that narrowly keeps a
+    // gesture on one node from re-rendering every other node's ports.
+    const pinnedSide = useConnectPortStore((s) =>
+      s.pending?.sourceId === nodeId ? s.pending.side : null,
+    );
     const mark = useNodeCollapseStore((s) => s.marks[nodeId]);
     const baseHandleSize = isNotMouse ? 14 : 8;
     const zoom = useStore((s) => s.transform[2]);
@@ -573,9 +565,7 @@ export const NodeConnectionHandles = memo(
     const exposed = isNotMouse ? selected : hovered;
     const hotHandleSize = isNotMouse ? 22 : 20;
 
-    const pendingPort = connectPortContext?.pendingPort;
-    const pinnedPosition =
-      pendingPort?.nodeId === nodeId ? SIDE_POSITION[pendingPort.side] : null;
+    const pinnedPosition = pinnedSide ? SIDE_POSITION[pinnedSide] : null;
 
     // Pressing a port starts a connection immediately (the canvas sets
     // `connectionDragThreshold` to 0), so without this the port would
@@ -770,7 +760,6 @@ export const NodeConnectionHandles = memo(
                   !keyboardReachable ||
                   !side ||
                   !node ||
-                  !connectPortContext ||
                   (event.key !== 'Enter' && event.key !== ' ')
                 ) {
                   return;
@@ -788,7 +777,12 @@ export const NodeConnectionHandles = memo(
                       : side === 'left'
                         ? { x, y: y + height / 2 }
                         : { x: x + width, y: y + height / 2 };
-                connectPortContext.requestConnectedNode(nodeId, side, anchor);
+                useConnectPortStore.getState().setPending({
+                  sourceId: nodeId,
+                  side,
+                  anchor,
+                  kind: 'side',
+                });
               }}
             />
           );

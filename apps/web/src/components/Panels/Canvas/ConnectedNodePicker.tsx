@@ -4,7 +4,7 @@ import {
   useInternalNode,
   ViewportPortal,
 } from '@xyflow/react';
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { applyEdgeStyle } from '@sediment/shared/canvas-engine';
@@ -180,14 +180,49 @@ export function ConnectedNodePicker({
 }: ConnectedNodePickerProps) {
   const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const open = anchor !== null;
+
+  // The picker portals to the end of `document.body`, so a keyboard user
+  // who opened it from a port would otherwise have to tab through the
+  // whole canvas to reach the two choices their own keypress produced.
+  // Move focus onto the first choice and remember who had it, so
+  // dismissing hands it back to the port they started from.
+  useEffect(() => {
+    if (!open) return;
+    openerRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    rootRef.current?.querySelector('button')?.focus();
+  }, [open]);
+
+  const dismiss = useCallback(() => {
+    const opener = openerRef.current;
+    openerRef.current = null;
+    if (opener?.isConnected) opener.focus();
+    onDismiss();
+  }, [onDismiss]);
+
+  const select = useCallback(
+    (kind: ConnectedNodeKind) => {
+      // Deliberately *not* restoring focus: the node being created may
+      // open its own editor (a question node composes immediately), and
+      // handing focus back to the source port would steal it straight
+      // back out of that editor.
+      openerRef.current = null;
+      onSelect(kind);
+    },
+    [onSelect],
+  );
 
   useEffect(() => {
-    if (!anchor) return;
+    if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) onDismiss();
+      if (!rootRef.current?.contains(event.target as Node)) dismiss();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onDismiss();
+      if (event.key === 'Escape') dismiss();
     };
     document.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onKeyDown);
@@ -195,25 +230,30 @@ export function ConnectedNodePicker({
       document.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [anchor, onDismiss]);
+  }, [open, dismiss]);
 
   return (
     <>
       {anchor && tether && <PendingConnectionEdge {...tether} />}
       <CanvasFloatingPopover
         anchor={anchor ? { ...anchor, width: 0, height: 0 } : null}
-        open={anchor !== null}
+        open={open}
         offset={12}
         side="top"
         className="bg-surface shadow-bottom text-fg-muted flex items-center gap-1 rounded-lg p-1.5"
       >
-        <div ref={rootRef} className="flex items-center gap-1">
+        <div
+          ref={rootRef}
+          role="group"
+          aria-label={t('node.createConnectedNode')}
+          className="flex items-center gap-1"
+        >
           <Button
             variant="ghost"
             iconOnly
             size="sm"
             title={t('node.newNote')}
-            onClick={() => onSelect('note')}
+            onClick={() => select('note')}
           >
             <NODE_ICON.note />
           </Button>
@@ -222,7 +262,7 @@ export function ConnectedNodePicker({
             iconOnly
             size="sm"
             title={t('node.newQuestion')}
-            onClick={() => onSelect('question')}
+            onClick={() => select('question')}
           >
             <NODE_ICON.question />
           </Button>
