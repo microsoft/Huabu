@@ -1,10 +1,11 @@
 name: Nightly
 
-# Build from the default branch every night at 02:00 China Standard Time
-# (18:00 UTC), and allow an on-demand build from the Actions tab.
+# Manual-only. The daily schedule was removed to conserve GitHub Actions
+# minutes: each run builds on macOS (billed at 10x) and Windows (2x), so
+# an unattended nightly was the single largest consumer of the quota.
+# Run it from the Actions tab whenever a nightly build is actually
+# needed; the `cleanup` job below runs with it and expires old builds.
 on:
-  schedule:
-    - cron: '0 18 * * *'
   workflow_dispatch:
 
 permissions:
@@ -61,11 +62,13 @@ jobs:
               --target "$GITHUB_SHA" --notes "$(cat <<'NOTES'
           Automated nightly build.
 
-          This prerelease and its tag are automatically removed after 7 days.
+          Prereleases older than 7 days, and their tags, are removed by the
+          cleanup job of a later nightly run.
           NOTES
           )"
           fi
 
+  # Runs on every manual trigger, independently of the build jobs.
   cleanup:
     name: Remove expired nightlies
     runs-on: ubuntu-latest
