@@ -209,6 +209,11 @@ export function attachBlockDragListeners(
   // multi-block payload.
   let priorSelection: MilkdownDragRange | null = null;
 
+  // True while `view.dragging` holds a slice THIS module registered.
+  // Ownership is tracked so `dragend` tears down only our own state and
+  // leaves Crepe's / ProseMirror's drag lifecycle untouched.
+  let ownsDraggingSlice = false;
+
   const mousedownCaptureHandler = (event: Event) => {
     const target = event.target as HTMLElement | null;
     if (!target?.closest('.milkdown-block-handle')) {
@@ -229,7 +234,14 @@ export function attachBlockDragListeners(
     const instance = instanceRef.current;
     const range = instance?.getMultiBlockSelectionRange() ?? null;
     priorSelection = range;
-    if (range) event.stopPropagation();
+    if (range) {
+      // ProseMirror's native drop reads the live selection to build the
+      // moved slice. Keep it aligned with the full-block range used by our
+      // Markdown payload; otherwise a partial text selection moves only
+      // fragments even though the drag preview shows complete blocks.
+      instance?.setDragSelection(range);
+      event.stopPropagation();
+    }
   };
 
   const dragHandler = (event: DragEvent) => {
@@ -245,6 +257,10 @@ export function attachBlockDragListeners(
     const snapshot = handle
       ? (priorSelection ?? instance.getMultiBlockSelectionRange())
       : instance.getDragRangeAtDOM(image as HTMLElement);
+    // Only a handle drag over an existing multi-block selection took the
+    // `stopPropagation` branch in `mousedown`, so only that path is left
+    // without a `view.dragging` entry.
+    const isMultiBlockHandleDrag = Boolean(handle && snapshot);
     // Clear immediately so a subsequent single-block drag isn't
     // accidentally treated as multi-block.
     priorSelection = null;
@@ -255,6 +271,28 @@ export function attachBlockDragListeners(
 
     const { markdown: dragMarkdown, blockElements, range } = payload;
     const sourceContentAfterMove = instance.getDocAfterRangeRemoved(range);
+
+    // Crepe's block handle lives outside `view.dom`, so ProseMirror's own
+    // dragstart handler never sees this event — Crepe's BlockService fills
+    // `view.dragging` instead. For a multi-block selection we suppressed
+    // that mousedown, leaving `activeSelection` empty and nobody to
+    // register the slice, so a self-drop would reparse the transfer as a
+    // copy. Supply the full-block slice ourselves to restore the atomic
+    // delete-and-insert.
+    //
+    // Deliberately narrow: a single-block handle drag is already covered
+    // by Crepe, and an image drag starts INSIDE `view.dom`, where
+    // ProseMirror records a `NodeSelection`-backed `Dragging` whose
+    // `node` drives an exact `node.replace(tr)` on drop. Overwriting that
+    // with a plain slice would downgrade the move to `deleteSelection()`
+    // against an unrelated caret, duplicating the image.
+    //
+    // `move: true` only mirrors Crepe's shape; ProseMirror's drop decides
+    // move-vs-copy from the modifier key, never from this flag.
+    if (isMultiBlockHandleDrag) {
+      instance.setDraggingSlice(range);
+      ownsDraggingSlice = true;
+    }
 
     if (blockElements.length > 0 && event.dataTransfer) {
       // 'all' (vs 'copyMove') so that macOS Cmd-modified drags — which
@@ -283,9 +321,16 @@ export function attachBlockDragListeners(
   };
 
   // Defensive: clear the snapshot when the drag ends (or is cancelled),
-  // so a stale range can't poison a future drag.
+  // so a stale range can't poison a future drag. A slice we registered
+  // ourselves is torn down here too — ProseMirror's own `dragend` cleanup
+  // is bound to `view.dom`, which a handle-originated drag never reaches,
+  // so without this a stale `view.dragging` would hijack the next drop
+  // into this editor.
   const dragEndHandler = () => {
     priorSelection = null;
+    if (!ownsDraggingSlice) return;
+    ownsDraggingSlice = false;
+    instanceRef.current?.clearDraggingSlice();
   };
 
   mountRoot.addEventListener('mousedown', mousedownCaptureHandler, {

@@ -286,6 +286,10 @@ export interface MilkdownInstance {
   __selectCurrentBlockForTest?(): void;
   /** Test-only helper: select the document's text content. */
   __selectAllTextForTest?(): void;
+  /** Test-only helper: select from the first occurrence of one text to another. */
+  __selectTextBetweenForTest?(fromText: string, toText: string): void;
+  /** Test-only helper: serialize the active ProseMirror dragging slice. */
+  __getDraggingMarkdownForTest?(): string | null;
   /** Test-only helper: place the cursor after the first text occurrence. */
   __setCursorAfterTextForTest?(text: string): void;
   /** Test-only helper: node-select the list item containing the first text occurrence. */
@@ -335,6 +339,12 @@ export interface MilkdownInstance {
    * `NodeSelection` on mousedown.
    */
   getMultiBlockSelectionRange(): MilkdownDragRange | null;
+  /** Align ProseMirror's native drag selection with a resolved full-block range. */
+  setDragSelection(range: MilkdownDragRange): void;
+  /** Register the full-block slice consumed by ProseMirror's native drop handler. */
+  setDraggingSlice(range: MilkdownDragRange): void;
+  /** Clear native dragging state after a drop outside this editor or a cancelled drag. */
+  clearDraggingSlice(): void;
   /** Resolve the enclosing drag-block range for a DOM node inside the editor. */
   getDragRangeAtDOM(target: globalThis.Node): MilkdownDragRange | null;
   /**
@@ -2246,6 +2256,50 @@ export async function createMilkdown(
         );
       });
     },
+    __selectTextBetweenForTest: (fromText, toText) => {
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        let from: number | null = null;
+        let to: number | null = null;
+        view.state.doc.descendants((node, pos) => {
+          // Both endpoints are the FIRST match, and `toText` is only
+          // searched at or after `from`, so the range always runs
+          // forwards regardless of how often either string repeats.
+          if (to !== null) return false;
+          if (!node.isText) return true;
+          const value = node.text ?? '';
+          if (from === null) {
+            const index = value.indexOf(fromText);
+            if (index !== -1) from = pos + index;
+          }
+          if (from === null) return true;
+          const index = value.indexOf(toText, Math.max(0, from - pos));
+          if (index !== -1) to = pos + index + toText.length;
+          return true;
+        });
+        if (from === null || to === null || from >= to) return;
+        view.dispatch(
+          view.state.tr.setSelection(
+            TextSelection.create(view.state.doc, from, to),
+          ),
+        );
+      });
+    },
+    __getDraggingMarkdownForTest: () => {
+      let result: string | null = null;
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const dragging = view.dragging;
+        if (!dragging) return;
+        const serializer = ctx.get(serializerCtx);
+        const docNode = view.state.schema.topNodeType.create(
+          null,
+          dragging.slice.content,
+        );
+        result = serializer(docNode);
+      });
+      return result;
+    },
     __setCursorAfterTextForTest: (text) => {
       crepe.editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
@@ -2515,6 +2569,52 @@ export async function createMilkdown(
         result = { from: fromBlockStart, to: toBlockEnd };
       });
       return result;
+    },
+    setDragSelection: (range) => {
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const from = Math.max(
+          0,
+          Math.min(range.from, view.state.doc.content.size),
+        );
+        const to = Math.max(
+          from,
+          Math.min(range.to, view.state.doc.content.size),
+        );
+        // The endpoints sit BETWEEN blocks rather than inside a
+        // textblock, which ProseMirror tolerates (one `console.warn`)
+        // but never normalizes. That is deliberate: the drop handler
+        // removes the source through `tr.deleteSelection()`, so the
+        // selection has to span whole blocks or the move would leave
+        // empty shells behind.
+        view.dispatch(
+          view.state.tr.setSelection(
+            TextSelection.create(view.state.doc, from, to),
+          ),
+        );
+      });
+    },
+    setDraggingSlice: (range) => {
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const from = Math.max(
+          0,
+          Math.min(range.from, view.state.doc.content.size),
+        );
+        const to = Math.max(
+          from,
+          Math.min(range.to, view.state.doc.content.size),
+        );
+        view.dragging = {
+          slice: view.state.doc.slice(from, to),
+          move: true,
+        };
+      });
+    },
+    clearDraggingSlice: () => {
+      crepe.editor.action((ctx) => {
+        ctx.get(editorViewCtx).dragging = null;
+      });
     },
     getDragRangeAtDOM: (target) => {
       let result: MilkdownDragRange | null = null;

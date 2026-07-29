@@ -28,6 +28,36 @@ afterEach(async () => {
 });
 
 describe('Milkdown block commands', () => {
+  it('prepares a complete native move for partially selected blocks', async () => {
+    const instance = await mount(
+      'first paragraph\n\nsecond paragraph\n\nthird paragraph',
+    );
+
+    instance.__selectTextBetweenForTest?.('paragraph', 'third');
+    const originalSelection = instance.getSelectionRange();
+    const dragRange = instance.getMultiBlockSelectionRange();
+
+    expect(dragRange).not.toBeNull();
+    if (!dragRange) throw new Error('Expected a multi-block drag range');
+    expect(originalSelection).not.toEqual(dragRange);
+
+    instance.setDragSelection(dragRange);
+    instance.setDraggingSlice(dragRange);
+
+    expect(instance.getSelectionRange()).toEqual(dragRange);
+    const expectedMarkdown =
+      'first paragraph\n\nsecond paragraph\n\nthird paragraph';
+    expect(instance.getDragPayload(dragRange)?.markdown.trim()).toBe(
+      expectedMarkdown,
+    );
+    expect(instance.__getDraggingMarkdownForTest?.()?.trim()).toBe(
+      expectedMarkdown,
+    );
+
+    instance.clearDraggingSlice();
+    expect(instance.__getDraggingMarkdownForTest?.()).toBeNull();
+  });
+
   it('applies and clears a link without using prompt', async () => {
     const instance = await mount('hello');
 
