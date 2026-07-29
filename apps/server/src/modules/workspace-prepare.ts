@@ -9,11 +9,15 @@
 import { mkdirSync } from 'node:fs';
 
 import { migrateLegacyAcpSessions } from './storage/migrate-acp-sessions.js';
-import { migrateLegacyAgenetesThreads } from './storage/migrate-agenetes-threads.js';
+import {
+  migrateLegacyAgenetesThreads,
+  repairExternalAgentPreambles,
+} from './storage/migrate-agenetes-threads.js';
 import { migrateCanvasToSpace } from './storage/migrate-canvas-to-space.js';
 import { migrateLegacyChatThreads } from './storage/migrate-chat-threads.js';
 import { migrateLegacyChatTurns } from './storage/migrate-chat-turns.js';
 import { ensureWorldCanvasOnDisk } from './storage/world-canvas.js';
+import { renderExternalAgentSystemPreamble } from '../prompt/external-agent/system-preamble.js';
 
 /**
  * Prepare and migrate a resolved absolute workspace path on disk.
@@ -41,5 +45,11 @@ export function prepareWorkspaceOnDisk(workspacePath: string): void {
   // M6.9 row 1: fold the removed `acp-sessions.json` (v3) recovery records
   // into `threads.json` `ThreadRecord`s.
   migrateLegacyAcpSessions(workspacePath);
+  // Repair external Deployments persisted by pre-chat control routes without
+  // the Huabu access bootstrap. The driver will deliver it on the next turn.
+  repairExternalAgentPreambles(
+    workspacePath,
+    renderExternalAgentSystemPreamble(),
+  );
   ensureWorldCanvasOnDisk(workspacePath);
 }

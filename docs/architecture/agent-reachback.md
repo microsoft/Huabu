@@ -78,7 +78,7 @@ The internal agent owns current graph discovery and mutation. It resolves spatia
 
 ## External-agent bootstrap
 
-Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent environment. The external system prompt contains only the bootstrap instruction; the detailed procedural guide is loaded on demand from `GET /skill`.
+Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent environment. Every external-agent Deployment persists the bootstrap as its initial preamble, including Deployments first created by mode, model, or configuration control requests; startup repair backfills older undelivered records that omitted it. The detailed procedural guide is loaded on demand from `GET /skill`.
 
 The guide is direct-first: an external agent can discover, query, download, snapshot, upload, execute, and verify without invoking `POST /agent` or configuring an internal model provider. `POST /agent` remains an optional high-level interpretation path.
 
@@ -107,7 +107,9 @@ An external agent runs as an untrusted third-party CLI. It must receive its Huab
 | [`apps/server/src/modules/remote_fs/node-meta.ts`](../../apps/server/src/modules/remote_fs/node-meta.ts)                                       | Safe path projection and node metadata headers.                                                           |
 | [`apps/server/src/modules/remote_fs/skill.ts`](../../apps/server/src/modules/remote_fs/skill.ts)                                               | Resolve the bundled or canvas-specific access guide.                                                      |
 | [`apps/server/src/prompt/external-agent/access-huabu.md`](../../apps/server/src/prompt/external-agent/access-huabu.md)                         | Agent-facing RFS procedure served by `GET /skill`.                                                        |
+| [`apps/server/src/prompt/external-agent/system-preamble.ts`](../../apps/server/src/prompt/external-agent/system-preamble.ts)                   | Render the canonical external-agent bootstrap preamble.                                                   |
 | [`apps/server/src/modules/agent/acp/reachback-env.ts`](../../apps/server/src/modules/agent/acp/reachback-env.ts)                               | Inject the canvas-scoped RFS environment into external sessions.                                          |
+| [`apps/server/src/modules/storage/migrate-agenetes-threads.ts`](../../apps/server/src/modules/storage/migrate-agenetes-threads.ts)             | Repair persisted undelivered external Deployments that omitted the bootstrap preamble.                    |
 | [`external/agenetes/packages/agentlet-host/src/daemon-supervisor.ts`](../../external/agenetes/packages/agentlet-host/src/daemon-supervisor.ts) | Fork/supervise the daemon; `filterHostNamespacedEnv` strips the host namespace at the transport boundary. |
 | [`packages/shared/src/types/api/rfs.ts`](../../packages/shared/src/types/api/rfs.ts)                                                           | Shared file-plane RFS wire schemas, headers, and constants.                                               |
 | [`packages/shared/src/types/api/space-operations.ts`](../../packages/shared/src/types/api/space-operations.ts)                                 | Canonical direct-operation request, response, capability, and limit contracts.                            |

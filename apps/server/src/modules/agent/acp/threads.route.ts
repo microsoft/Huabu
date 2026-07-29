@@ -41,6 +41,7 @@ import { getProfileSchemaCache } from './profile-schema-cache.js';
 import { buildReachbackEnv } from './reachback-env.js';
 import { getExternalAgentRuntimeConfig } from './runtime-config.js';
 import { resolveBindingRecipe } from './service.js';
+import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
 import {
   agenetes,
@@ -125,6 +126,7 @@ async function resolveSetRpcEntry(
           workloadType: 'Deployment',
           namespace: existing.namespace,
           spec: {
+            initialPreamble: [renderExternalAgentSystemPreamble()],
             agentletId: existing.agentletId,
             binding: {
               alias: existing.profileId,
@@ -151,6 +153,7 @@ async function resolveSetRpcEntry(
     workloadType: 'Deployment',
     namespace: canvasAcpNamespace(ctx.canvasId ?? ''),
     spec: {
+      initialPreamble: [renderExternalAgentSystemPreamble()],
       agentletId,
       binding: { alias: ctx.profileId, profileId: ctx.profileId },
       env: buildReachbackEnv(threadId, ctx.canvasId ?? ''),
