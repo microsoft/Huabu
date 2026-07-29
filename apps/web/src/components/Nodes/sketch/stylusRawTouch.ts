@@ -5,11 +5,7 @@ import {
   observeInputPointer,
 } from '@/hooks/useInputMode';
 
-import type {
-  CSSProperties,
-  PointerEvent as ReactPointerEvent,
-  RefObject,
-} from 'react';
+import type { CSSProperties } from 'react';
 
 /**
  * Raw-touch stylus engine for the Sketch overlay.
@@ -24,10 +20,38 @@ import type {
  * reused verbatim.
  *
  * The engine is deliberately narrow: it only ever runs where a raw `Touch` can
- * be *classified* as a stylus, which is what {@link STYLUS_RAW_TOUCH_SUPPORTED}
- * gates on. Everywhere else the browser's own pointer stream is authoritative
- * and this module is inert.
+ * be *classified* as a stylus, which is what
+ * {@link isStylusRawTouchSupported} gates on. Everywhere else the browser's own
+ * pointer stream is authoritative and this module is inert.
  */
+
+/**
+ * The subset of `React.PointerEvent` the Sketch overlay's pointer handlers
+ * actually consume.
+ *
+ * Declaring it explicitly is what lets the raw-touch engine replay a stylus
+ * contact without lying about its type: a synthetic contact is a complete,
+ * unasserted `SketchPointer`, while a real `React.PointerEvent` is structurally
+ * assignable to it, so both sources flow through the same handlers. Widening a
+ * handler to read a field outside this list is a compile error rather than an
+ * iPad-only crash.
+ */
+export interface SketchPointer {
+  readonly pointerId: number;
+  readonly pointerType: string;
+  readonly clientX: number;
+  readonly clientY: number;
+  readonly pressure: number;
+  readonly button: number;
+  readonly buttons: number;
+  readonly isPrimary: boolean;
+  preventDefault(): void;
+  readonly currentTarget: {
+    setPointerCapture(pointerId: number): void;
+    releasePointerCapture(pointerId: number): void;
+    hasPointerCapture(pointerId: number): boolean;
+  };
+}
 
 /**
  * Whether this browser exposes WebKit's non-standard `Touch.touchType`, the
@@ -40,8 +64,7 @@ import type {
  * Windows touch laptops) and double-handling every contact.
  *
  * Probed on `Touch.prototype` rather than a live `Touch`, so it can be
- * evaluated once at module load with no event in hand. It is feature
- * detection, not UA sniffing.
+ * evaluated with no event in hand. It is feature detection, not UA sniffing.
  */
 function detectStylusTouchTypeSupport(): boolean {
   if (typeof window === 'undefined') return false;
@@ -53,17 +76,33 @@ function detectStylusTouchTypeSupport(): boolean {
   return proto != null && 'touchType' in proto;
 }
 
+let supportedCache: boolean | undefined;
+
 /**
  * Whether the raw-touch stylus engine is active on this device.
  *
- * Both halves are *static device capabilities*, evaluated once, never the live
- * pointer mode: the dropped Pencil contact this engine exists to recover never
- * fires a pointer event, so a signal derived from pointer events could not
- * decide whether to attach the engine — the first stroke would be lost before
- * it could turn itself on.
+ * Both halves are *static device capabilities*, never the live pointer mode:
+ * the dropped Pencil contact this engine exists to recover never fires a
+ * pointer event, so a signal derived from pointer events could not decide
+ * whether to attach the engine — the first stroke would be lost before it could
+ * turn itself on.
+ *
+ * Resolved on first call and memoised rather than at module load, so the result
+ * does not depend on import order relative to the environment it probes (which
+ * is also what makes it substitutable under test).
  */
-export const STYLUS_RAW_TOUCH_SUPPORTED =
-  detectTouchCapability() && detectStylusTouchTypeSupport();
+export function isStylusRawTouchSupported(): boolean {
+  supportedCache ??= detectTouchCapability() && detectStylusTouchTypeSupport();
+  return supportedCache;
+}
+
+/**
+ * Clear the memoised capability result so a test can re-probe a reconfigured
+ * environment. Not used by application code.
+ */
+export function resetStylusRawTouchSupportForTests(): void {
+  supportedCache = undefined;
+}
 
 /**
  * Namespace offset applied to synthetic pointer ids. A raw `Touch.identifier`
@@ -78,13 +117,15 @@ const SYNTHETIC_POINTER_ID_OFFSET = 1_000_000;
 const DEFAULT_STYLUS_PRESSURE = 0.5;
 
 /**
- * Capture-method stub used as the `currentTarget` of a synthetic pointer: a
- * touch is already implicitly captured to its target, so pointer-capture calls
- * are no-ops (and would otherwise throw on a non-pointer id).
+ * `currentTarget` of a synthetic pointer. A touch is already implicitly
+ * captured to its target, so pointer-capture calls are no-ops (and would
+ * otherwise throw on a non-pointer id).
  *
- * It doubles as an identity marker — see {@link isStylusRawTouchPointer}.
+ * It doubles as an identity marker — see {@link isStylusRawTouchPointer}. The
+ * marker is this module-private object reference rather than a flag on the
+ * event, so nothing outside can forge or accidentally reproduce it.
  */
-const POINTER_CAPTURE_STUB: unknown = {
+const POINTER_CAPTURE_STUB: SketchPointer['currentTarget'] = {
   setPointerCapture: () => {},
   releasePointerCapture: () => {},
   hasPointerCapture: () => false,
@@ -96,10 +137,14 @@ function isStylusTouch(touch: Touch): boolean {
 }
 
 /**
- * Build the minimal synthetic `React.PointerEvent` the overlay's handlers
- * actually read. Only those fields are populated; the cast is contained here.
+ * Build the synthetic pointer for a stylus contact. Every member of
+ * {@link SketchPointer} is populated, so no type assertion is involved and the
+ * overlay cannot read a field that is secretly missing.
+ *
+ * `buttons` reflects whether the stylus is still in contact: a replayed
+ * `touchend` / `touchcancel` reports 0 the same way a real `pointerup` does.
  */
-function toStylusPointerEvent(touch: Touch): ReactPointerEvent {
+function toStylusPointerEvent(touch: Touch, inContact: boolean): SketchPointer {
   const force = (touch as Touch & { force?: number }).force;
   const pressure =
     typeof force === 'number' && force > 0 ? force : DEFAULT_STYLUS_PRESSURE;
@@ -110,15 +155,18 @@ function toStylusPointerEvent(touch: Touch): ReactPointerEvent {
     clientY: touch.clientY,
     pressure,
     button: 0,
-    buttons: 1,
+    buttons: inContact ? 1 : 0,
     isPrimary: true,
+    // The underlying `touchstart` is already `preventDefault()`ed to claim the
+    // contact; the replayed pointer has no further default to suppress.
+    preventDefault: () => {},
     currentTarget: POINTER_CAPTURE_STUB,
-  } as unknown as ReactPointerEvent;
+  };
 }
 
 /** Whether this pointer event was replayed by the raw-touch engine. */
-export function isStylusRawTouchPointer(e: ReactPointerEvent): boolean {
-  return (e.currentTarget as unknown) === POINTER_CAPTURE_STUB;
+function isStylusRawTouchPointer(e: SketchPointer): boolean {
+  return e.currentTarget === POINTER_CAPTURE_STUB;
 }
 
 /**
@@ -127,97 +175,119 @@ export function isStylusRawTouchPointer(e: ReactPointerEvent): boolean {
  * only where the engine is actually attached — so Chromium stylus devices
  * (Surface, Wacom) keep using their reliable pointer stream untouched.
  */
-export function isSupersededByStylusRawTouch(e: ReactPointerEvent): boolean {
+export function isSupersededByStylusRawTouch(e: SketchPointer): boolean {
   return (
-    STYLUS_RAW_TOUCH_SUPPORTED &&
     e.pointerType === 'pen' &&
-    !isStylusRawTouchPointer(e)
+    !isStylusRawTouchPointer(e) &&
+    isStylusRawTouchSupported()
   );
 }
+
+const STYLUS_RAW_TOUCH_OVERLAY_STYLE: CSSProperties = {
+  touchAction: 'none',
+  userSelect: 'none',
+  WebkitUserSelect: 'none',
+  WebkitTouchCallout: 'none',
+};
 
 /**
  * Overlay styles that stop the browser reinterpreting a claimed stylus contact
  * as scroll / text selection / long-press callout. Applied only where the
  * engine runs, so devices on the normal pointer path keep their default
- * gesture behaviour.
+ * gesture behaviour. Returns a stable object so it can be spread during render.
  */
-export const STYLUS_RAW_TOUCH_OVERLAY_STYLE: CSSProperties | undefined =
-  STYLUS_RAW_TOUCH_SUPPORTED
-    ? {
-        touchAction: 'none',
-        userSelect: 'none',
-        WebkitUserSelect: 'none',
-        WebkitTouchCallout: 'none',
-      }
+export function getStylusRawTouchOverlayStyle(): CSSProperties | undefined {
+  return isStylusRawTouchSupported()
+    ? STYLUS_RAW_TOUCH_OVERLAY_STYLE
     : undefined;
+}
 
 export interface StylusRawTouchHandlers {
-  onDown: (e: ReactPointerEvent) => void;
-  onMove: (e: ReactPointerEvent) => void;
-  onUp: (e: ReactPointerEvent) => void;
-  onCancel: (e: ReactPointerEvent) => void;
+  onDown: (e: SketchPointer) => void;
+  onMove: (e: SketchPointer) => void;
+  onUp: (e: SketchPointer) => void;
+  onCancel: (e: SketchPointer) => void;
 }
 
 /**
- * Attach the raw-touch stylus engine to `targetRef`, replaying stylus contacts
- * into `handlers`. Inert unless {@link STYLUS_RAW_TOUCH_SUPPORTED}.
+ * Attach the raw-touch stylus engine to `el`, replaying stylus contacts into
+ * the handler set returned by `getHandlers`. Returns a teardown function.
+ * Inert unless {@link isStylusRawTouchSupported}.
  *
- * Handlers are read through a ref so the non-passive listeners stay attached
- * across renders and across a draw/erase mode switch — the caller may pass a
- * different handler set every render.
+ * React-independent so the replay protocol can be exercised with a plain
+ * element and plain touch events; {@link useStylusRawTouch} is the thin
+ * lifecycle wrapper. Handlers are pulled through `getHandlers` at dispatch time
+ * so the listeners survive a draw/erase mode switch without re-attaching.
+ */
+export function attachStylusRawTouch(
+  el: HTMLElement,
+  getHandlers: () => StylusRawTouchHandlers,
+): () => void {
+  if (!isStylusRawTouchSupported()) return () => {};
+
+  const forEachStylusTouch = (
+    e: TouchEvent,
+    inContact: boolean,
+    dispatch: (pointer: SketchPointer) => void,
+  ) => {
+    for (const touch of Array.from(e.changedTouches)) {
+      if (!isStylusTouch(touch)) continue;
+      // `preventDefault()` on the contact phases is what claims the stylus
+      // away from WebKit's gesture recogniser. It is idempotent, so calling it
+      // per matching touch is safe.
+      if (inContact) e.preventDefault();
+      dispatch(toStylusPointerEvent(touch, inContact));
+    }
+  };
+
+  const onTouchStart = (e: TouchEvent) => {
+    forEachStylusTouch(e, true, (pointer) => {
+      // The engine is the pointer source for this contact, so it also owns
+      // feeding the input-mode signal the browser would normally supply.
+      // Routing in `acceptsPointer` reads it back live.
+      observeInputPointer('pen');
+      getHandlers().onDown(pointer);
+    });
+  };
+  const onTouchMove = (e: TouchEvent) =>
+    forEachStylusTouch(e, true, (p) => getHandlers().onMove(p));
+  const onTouchEnd = (e: TouchEvent) =>
+    forEachStylusTouch(e, false, (p) => getHandlers().onUp(p));
+  const onTouchCancel = (e: TouchEvent) =>
+    forEachStylusTouch(e, false, (p) => getHandlers().onCancel(p));
+
+  // `passive: false` is required so `preventDefault()` above actually takes
+  // effect.
+  const opts = { passive: false } as const;
+  el.addEventListener('touchstart', onTouchStart, opts);
+  el.addEventListener('touchmove', onTouchMove, opts);
+  el.addEventListener('touchend', onTouchEnd, opts);
+  el.addEventListener('touchcancel', onTouchCancel, opts);
+  return () => {
+    el.removeEventListener('touchstart', onTouchStart);
+    el.removeEventListener('touchmove', onTouchMove);
+    el.removeEventListener('touchend', onTouchEnd);
+    el.removeEventListener('touchcancel', onTouchCancel);
+  };
+}
+
+/**
+ * React lifecycle wrapper around {@link attachStylusRawTouch}.
+ *
+ * Takes the element itself rather than a ref: the effect must re-run whenever
+ * the overlay mounts a different node (e.g. a draw/erase branch that stops
+ * sharing one DOM element), and a ref's `.current` cannot express that as a
+ * dependency — the listeners would silently stay on the detached node.
  */
 export function useStylusRawTouch(
-  targetRef: RefObject<HTMLElement | null>,
+  el: HTMLElement | null,
   handlers: StylusRawTouchHandlers,
 ): void {
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
 
   useEffect(() => {
-    if (!STYLUS_RAW_TOUCH_SUPPORTED) return;
-    const el = targetRef.current;
     if (!el) return;
-
-    const forEachStylusTouch = (
-      e: TouchEvent,
-      claim: boolean,
-      dispatch: (e: ReactPointerEvent) => void,
-    ) => {
-      for (const touch of Array.from(e.changedTouches)) {
-        if (!isStylusTouch(touch)) continue;
-        if (claim) e.preventDefault();
-        dispatch(toStylusPointerEvent(touch));
-      }
-    };
-
-    const onTouchStart = (e: TouchEvent) => {
-      forEachStylusTouch(e, true, (pointer) => {
-        // The engine is the pointer source for this contact, so it also owns
-        // feeding the input-mode signal the browser would normally supply.
-        // Routing in `acceptsPointer` reads it back live.
-        observeInputPointer('pen');
-        handlersRef.current.onDown(pointer);
-      });
-    };
-    const onTouchMove = (e: TouchEvent) =>
-      forEachStylusTouch(e, true, (p) => handlersRef.current.onMove(p));
-    const onTouchEnd = (e: TouchEvent) =>
-      forEachStylusTouch(e, false, (p) => handlersRef.current.onUp(p));
-    const onTouchCancel = (e: TouchEvent) =>
-      forEachStylusTouch(e, false, (p) => handlersRef.current.onCancel(p));
-
-    // `passive: false` is required: `preventDefault()` is what claims the
-    // contact away from WebKit's gesture recogniser.
-    const opts = { passive: false } as const;
-    el.addEventListener('touchstart', onTouchStart, opts);
-    el.addEventListener('touchmove', onTouchMove, opts);
-    el.addEventListener('touchend', onTouchEnd, opts);
-    el.addEventListener('touchcancel', onTouchCancel, opts);
-    return () => {
-      el.removeEventListener('touchstart', onTouchStart);
-      el.removeEventListener('touchmove', onTouchMove);
-      el.removeEventListener('touchend', onTouchEnd);
-      el.removeEventListener('touchcancel', onTouchCancel);
-    };
-  }, [targetRef]);
+    return attachStylusRawTouch(el, () => handlersRef.current);
+  }, [el]);
 }
