@@ -80,6 +80,8 @@ The four connection ports on a node are the single control for both connecting a
 
 Progressive disclosure keeps that control quiet. With a mouse, hovering a node reveals four small dots; only the dot the pointer is actually aiming at grows and shows a `+`. With pen or touch the dots are tied to selection instead, since there is no hover. The port's React Flow bounding box never grows on hover — only the painted dot does — so committed edge endpoints stay anchored to the node edge. While the picker is open the source port is pinned to that grown state through `PendingConnectPortContext`, because reaching the picker means moving the pointer off the node, which would otherwise hide every port and leave the `+` the user just pressed vanishing from under them.
 
+For keyboard input, selecting a node adds one focus stop for each of its four sides. Enter or Space on a focused port opens the same connected-node type picker with side-aligned placement; the duplicate target handle under each source handle remains outside the tab order.
+
 The aimed-at port is painted twice: once inside the viewport as the hit target, and once as a screen-space overlay portalled into the React Flow container above the selection outline. Selection outlines are themselves a HUD portalled into that container, so no z-index applied inside the viewport can win against them — a node is a stacking context nested in the renderer, making the comparison all-or-nothing — and a selected node's border would otherwise slice through the `+`. The overlay is pointer-events-transparent and owns the `+` glyph so it is never rendered twice.
 
 ## 4. Multi-touch navigation

@@ -657,6 +657,17 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const dismissConnectPicker = useCallback(() => setConnectPicker(null), []);
 
+  const requestConnectedNode = useCallback(
+    (sourceId: string, side: Side, anchor: { x: number; y: number }) => {
+      setConnectPicker({ sourceId, side, anchor, kind: 'side' });
+    },
+    [],
+  );
+  const connectPortContext = useMemo(
+    () => ({ pendingPort: pendingConnectPort, requestConnectedNode }),
+    [pendingConnectPort, requestConnectedNode],
+  );
+
   // --- Frame drag-to-create gesture (mouse / pen / touch) ---
   const exitPendingNodeType = useCallback(
     () => setPendingNodeType(null),
@@ -1381,7 +1392,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         node components as descendants, so this is how a port learns that it
         is the one a pending create-connected gesture came from.
       */}
-      <PendingConnectPortContext.Provider value={pendingConnectPort}>
+      <PendingConnectPortContext.Provider value={connectPortContext}>
         <ReactFlow
           className={isInitialViewportPending ? 'invisible' : undefined}
           defaultViewport={defaultViewport}

@@ -71,8 +71,12 @@ export const CONNECTED_NODE_EDGE_STYLE: EdgeStyle = { direction: 'forward' };
  * visible for its whole lifetime.
  */
 export const PendingConnectPortContext = createContext<{
-  nodeId: string;
-  side: Side;
+  pendingPort: { nodeId: string; side: Side } | null;
+  requestConnectedNode: (
+    nodeId: string,
+    side: Side,
+    anchor: { x: number; y: number },
+  ) => void;
 } | null>(null);
 
 /** Flow-space gap between the source node and the newly-created node. */
@@ -451,6 +455,8 @@ interface NodeConnectionHandlesProps {
 export const NodeConnectionHandles = memo(
   ({ nodeId, hovered, selected, isNotMouse }: NodeConnectionHandlesProps) => {
     const { t } = useTranslation();
+    const node = useInternalNode(nodeId);
+    const connectPortContext = useContext(PendingConnectPortContext);
     const baseHandleSize = isNotMouse ? 14 : 8;
     const zoom = useStore((s) => s.transform[2]);
     const inverseZoom = zoom > 0 ? 1 / zoom : 1;
@@ -470,7 +476,7 @@ export const NodeConnectionHandles = memo(
     const exposed = isNotMouse ? selected : hovered;
     const hotHandleSize = isNotMouse ? 22 : 20;
 
-    const pendingPort = useContext(PendingConnectPortContext);
+    const pendingPort = connectPortContext?.pendingPort;
     const pinnedPosition =
       pendingPort?.nodeId === nodeId ? SIDE_POSITION[pendingPort.side] : null;
 
@@ -501,6 +507,9 @@ export const NodeConnectionHandles = memo(
           />
         )}
         {HANDLE_DEFS.map((h) => {
+          const side = sideFromHandleId(h.id);
+          const keyboardReachable =
+            selected && h.type === 'source' && side !== null;
           // Two flavours of "handle position" are consumed by React Flow:
           //   - `getHandlePosition(..., center=false)` returns the bbox's
           //     *outer edge* on the relevant axis (e.g. `bbox.y` for
@@ -574,7 +583,7 @@ export const NodeConnectionHandles = memo(
           // A port with a picker open stays visible and pressed until the
           // gesture resolves, even after the pointer has left the node.
           const isPinned = pinnedPosition === h.position;
-          const isReachable = exposed || isPinned;
+          const isReachable = exposed || isPinned || keyboardReachable;
           const visualSize =
             (isHot ? hotHandleSize : baseHandleSize) * inverseZoom;
           const dotStyle: React.CSSProperties = {
@@ -595,11 +604,43 @@ export const NodeConnectionHandles = memo(
           // so the dot itself is just the circle and the hit target.
           const dot = (
             <span
-              aria-hidden
+              aria-hidden={!keyboardReachable}
+              aria-label={
+                keyboardReachable ? t('node.createConnectedNode') : undefined
+              }
+              role={keyboardReachable ? 'button' : undefined}
+              tabIndex={keyboardReachable ? 0 : -1}
               className="pointer-events-auto absolute rounded-full"
               style={dotStyle}
               onPointerEnter={() => setHotSide(h.position)}
               onPointerLeave={() => setHotSide(null)}
+              onFocus={() => setHotSide(h.position)}
+              onBlur={() => setHotSide(null)}
+              onKeyDown={(event) => {
+                if (
+                  !keyboardReachable ||
+                  !side ||
+                  !node ||
+                  !connectPortContext ||
+                  (event.key !== 'Enter' && event.key !== ' ')
+                ) {
+                  return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                const { x, y } = node.internals.positionAbsolute;
+                const width = node.measured.width ?? 0;
+                const height = node.measured.height ?? 0;
+                const anchor =
+                  side === 'top'
+                    ? { x: x + width / 2, y }
+                    : side === 'bottom'
+                      ? { x: x + width / 2, y: y + height }
+                      : side === 'left'
+                        ? { x, y: y + height / 2 }
+                        : { x: x + width, y: y + height / 2 };
+                connectPortContext.requestConnectedNode(nodeId, side, anchor);
+              }}
             />
           );
           return (
@@ -616,7 +657,7 @@ export const NodeConnectionHandles = memo(
                 border: 'none',
               }}
               className={cn(
-                'z-20 transition-opacity',
+                'z-20 transition-opacity focus-within:opacity-100',
                 isPinned
                   ? 'opacity-100'
                   : isNotMouse
