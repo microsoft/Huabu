@@ -51,11 +51,7 @@ import { useGesturePreviewStore } from '@/store/gesturePreviewStore.ts';
 import { coerceProvenance } from '@/utils/blockProvenance';
 
 import { getAccentTokens } from './accentTokens.ts';
-import {
-  NodeConnectionHandles,
-  NodeSideAffordance,
-  useCreateConnectedNode,
-} from './NodeConnectAffordance.tsx';
+import { NodeConnectionHandles } from './NodeConnectAffordance.tsx';
 import { NodeTakeoverLayer } from './NodeTakeoverLayer.tsx';
 import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
 
@@ -317,8 +313,6 @@ export const NodeWrapper = memo(
 
     const [hovered, setHovered] = useState(false);
     const [editing, setEditing] = useState(false);
-
-    const handleCreateConnected = useCreateConnectedNode(id);
 
     // Open the canvas's `nodes/` folder so the user can resolve a
     // duplicate-sidecar collision by hand (keep one file, delete the
@@ -808,18 +802,12 @@ export const NodeWrapper = memo(
           </div>
 
           <NodeConnectionHandles
+            nodeId={id}
             hovered={hovered}
             selected={!!selected}
             isNotMouse={isNotMouse}
           />
         </div>
-
-        <NodeSideAffordance
-          nodeId={id}
-          selected={!!selected && selectedCount === 1 && !isDragging}
-          editing={editing}
-          onCreate={handleCreateConnected}
-        />
       </>
     );
   },

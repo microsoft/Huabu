@@ -8,10 +8,9 @@ import {
   useConnection,
   useInternalNode,
   useStore,
-  useViewport,
 } from '@xyflow/react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Plus } from 'lucide-react';
+import { createContext, memo, useCallback, useContext, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -24,10 +23,9 @@ import {
   getNodeSize,
 } from '@sediment/shared/canvas-engine';
 
-import { Button } from '@/components/Common/Button.tsx';
 import { cn } from '@/components/Common/cn.ts';
+import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { createQuestionNodeAndCompose } from '@/components/Nodes/question/questionCompose.ts';
-import { NODE_ICON } from '@/config/nodeIcons.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 /** Connection handle definitions – source + target on each side. */
@@ -42,17 +40,40 @@ const HANDLE_DEFS = [
   { type: 'source' as const, id: 'left-source', position: Position.Left },
 ] as const;
 
-/** Cardinal sides used by the connected-add arrow affordances. */
+/** Cardinal sides a connection can leave a node from. */
 export type Side = 'top' | 'right' | 'bottom' | 'left';
 
-const SIDE_ARROW_ICON: Record<Side, typeof ArrowUp> = {
-  top: ArrowUp,
-  right: ArrowRight,
-  bottom: ArrowDown,
-  left: ArrowLeft,
+/** Cardinal side -> the React Flow `Position` it corresponds to. */
+export const SIDE_POSITION: Record<Side, Position> = {
+  top: Position.Top,
+  right: Position.Right,
+  bottom: Position.Bottom,
+  left: Position.Left,
 };
 
-const SIDE_ARROW_OFFSET_PX = 32;
+/**
+ * Style of the edge a port gesture creates.
+ *
+ * Named rather than inlined so the pending-edge preview can render the
+ * exact line the user is about to commit instead of an approximation of
+ * it — run this through `applyEdgeStyle` to get the rendering props.
+ */
+export const CONNECTED_NODE_EDGE_STYLE: EdgeStyle = { direction: 'forward' };
+
+/**
+ * Port a pending "create a connected node" gesture started from, or `null`
+ * when no such gesture is waiting on a node type.
+ *
+ * Provided by the canvas and consumed by every node's ports. Choosing a
+ * type means moving the pointer off the source node, which would hide its
+ * ports and make the `+` the user just pressed disappear from under them.
+ * Pinning that one port keeps the pending creation anchored to something
+ * visible for its whole lifetime.
+ */
+export const PendingConnectPortContext = createContext<{
+  nodeId: string;
+  side: Side;
+} | null>(null);
 
 /** Flow-space gap between the source node and the newly-created node. */
 const NEW_NODE_GAP = 80;
@@ -135,18 +156,137 @@ function avoidOverlap(
   return ideal;
 }
 
-export function useCreateConnectedNode(id: string) {
+/** Node types the connect affordance can spawn. */
+export type ConnectedNodeKind = 'note' | 'question';
+
+/**
+ * Where a newly created connected node should land.
+ *
+ * `'side'` auto-aligns it off one edge of the source node (what a click
+ * on a port means), `'point'` drops it exactly where the gesture ended
+ * (what dragging a port out to empty canvas means).
+ */
+export type ConnectedNodePlacement =
+  | { kind: 'side'; side: Side }
+  | { kind: 'point'; point: { x: number; y: number } };
+
+/** Parse the cardinal side out of a handle id such as `top-source`. */
+export function sideFromHandleId(
+  handleId: string | null | undefined,
+): Side | null {
+  const side = handleId?.split('-')[0];
+  return side === 'top' ||
+    side === 'right' ||
+    side === 'bottom' ||
+    side === 'left'
+    ? side
+    : null;
+}
+
+/**
+ * Auto-placement for a node attached to `side` of the source rect: the
+ * aligned position one `NEW_NODE_GAP` away, nudged perpendicular until
+ * it clears every existing node.
+ */
+function computeSidePlacement(
+  nodes: NestableNode[],
+  getAbs: ReturnType<typeof createAbsolutePositionGetter>,
+  srcAbs: { x: number; y: number },
+  srcW: number,
+  srcH: number,
+  newW: number,
+  newH: number,
+  side: Side,
+): { x: number; y: number } {
+  let placementPoint: { x: number; y: number };
+  switch (side) {
+    case 'top':
+      placementPoint = {
+        x: srcAbs.x + srcW / 2 - newW / 2,
+        y: srcAbs.y - newH - NEW_NODE_GAP,
+      };
+      break;
+    case 'bottom':
+      placementPoint = {
+        x: srcAbs.x + srcW / 2 - newW / 2,
+        y: srcAbs.y + srcH + NEW_NODE_GAP,
+      };
+      break;
+    case 'left':
+      placementPoint = {
+        x: srcAbs.x - newW - NEW_NODE_GAP,
+        y: srcAbs.y + srcH / 2 - newH / 2,
+      };
+      break;
+    case 'right':
+    default:
+      placementPoint = {
+        x: srcAbs.x + srcW + NEW_NODE_GAP,
+        y: srcAbs.y + srcH / 2 - newH / 2,
+      };
+      break;
+  }
+
+  // Collision-avoidance: keep the ideal aligned position when it is
+  // free, otherwise nudge perpendicular to the connection direction
+  // so repeated "add connected node" gestures don't stack on the same
+  // spot. Frames are ignored as obstacles (child nodes legitimately
+  // sit inside them).
+  const obstacles: Rect[] = [];
+  for (const n of nodes) {
+    if (n.type === 'frame') continue;
+    const abs = getAbs(n.id);
+    if (!abs) continue;
+    const { width, height } = getNodeSize(n);
+    const fallback = getNodeDefaultSize(n.type ?? '');
+    obstacles.push({
+      x: abs.x,
+      y: abs.y,
+      w: width > 0 ? width : fallback.width || 200,
+      h: height > 0 ? height : fallback.height || 100,
+    });
+  }
+  // Scale the avoidance budget with the source node's extent along
+  // the avoidance axis: left/right connections avoid vertically (so
+  // the source height matters), top/bottom avoid horizontally (source
+  // width). A large source needs a proportionally larger search range
+  // to clear neighbours spread across its full span.
+  const avoidAxisExtent = side === 'left' || side === 'right' ? srcH : srcW;
+  const maxAvoidDistance = NEW_NODE_MIN_AVOID_DISTANCE + avoidAxisExtent;
+  return avoidOverlap(
+    placementPoint,
+    { w: newW, h: newH },
+    side,
+    obstacles,
+    maxAvoidDistance,
+  );
+}
+
+/**
+ * Create a node of `kind` positioned by `placement` and connect it to
+ * `sourceId` with a forward edge.
+ *
+ * Both connect gestures funnel through here: clicking a port resolves to
+ * a `'side'` placement, dragging a port out to empty canvas resolves to a
+ * `'point'` placement. Geometry is the only difference — the node type
+ * always comes from the picker.
+ */
+export function useCreateConnectedNode() {
   const addNode = useCanvasStore((state) => state.addNode);
   const dispatchUiIntent = useCanvasStore((state) => state.dispatchUiIntent);
 
   return useCallback(
-    (side: Side, kind: 'note' | 'question') => {
+    (
+      sourceId: string,
+      placement: ConnectedNodePlacement,
+      kind: ConnectedNodeKind,
+    ) => {
       const state = useCanvasStore.getState();
       const nodes = state.nodes as NestableNode[];
       const byId = indexById(nodes);
-      const self = byId.get(id);
+      const self = byId.get(sourceId);
       const getAbs = createAbsolutePositionGetter(byId);
-      const srcAbs = getAbs(id);
+      const srcAbs = getAbs(sourceId);
       if (!self || !srcAbs) return;
 
       const srcW =
@@ -161,68 +301,19 @@ export function useCreateConnectedNode(id: string) {
       const newW = defaultSize.width || 200;
       const newH = defaultSize.height || 100;
 
-      let placementPoint: { x: number; y: number };
-      switch (side) {
-        case 'top':
-          placementPoint = {
-            x: srcAbs.x + srcW / 2 - newW / 2,
-            y: srcAbs.y - newH - NEW_NODE_GAP,
-          };
-          break;
-        case 'bottom':
-          placementPoint = {
-            x: srcAbs.x + srcW / 2 - newW / 2,
-            y: srcAbs.y + srcH + NEW_NODE_GAP,
-          };
-          break;
-        case 'left':
-          placementPoint = {
-            x: srcAbs.x - newW - NEW_NODE_GAP,
-            y: srcAbs.y + srcH / 2 - newH / 2,
-          };
-          break;
-        case 'right':
-        default:
-          placementPoint = {
-            x: srcAbs.x + srcW + NEW_NODE_GAP,
-            y: srcAbs.y + srcH / 2 - newH / 2,
-          };
-          break;
-      }
-
-      // Collision-avoidance: keep the ideal aligned position when it is
-      // free, otherwise nudge perpendicular to the connection direction
-      // so repeated "add connected node" gestures don't stack on the same
-      // spot. Frames are ignored as obstacles (child nodes legitimately
-      // sit inside them).
-      const obstacles: Rect[] = [];
-      for (const n of nodes) {
-        if (n.type === 'frame') continue;
-        const abs = getAbs(n.id);
-        if (!abs) continue;
-        const { width, height } = getNodeSize(n);
-        const fallback = getNodeDefaultSize(n.type ?? '');
-        obstacles.push({
-          x: abs.x,
-          y: abs.y,
-          w: width > 0 ? width : fallback.width || 200,
-          h: height > 0 ? height : fallback.height || 100,
-        });
-      }
-      // Scale the avoidance budget with the source node's extent along
-      // the avoidance axis: left/right connections avoid vertically (so
-      // the source height matters), top/bottom avoid horizontally (source
-      // width). A large source needs a proportionally larger search range
-      // to clear neighbours spread across its full span.
-      const avoidAxisExtent = side === 'left' || side === 'right' ? srcH : srcW;
-      const maxAvoidDistance = NEW_NODE_MIN_AVOID_DISTANCE + avoidAxisExtent;
-      placementPoint = avoidOverlap(
-        placementPoint,
-        { w: newW, h: newH },
-        side,
-        obstacles,
-        maxAvoidDistance,
-      );
+      const placementPoint =
+        placement.kind === 'point'
+          ? placement.point
+          : computeSidePlacement(
+              nodes,
+              getAbs,
+              srcAbs,
+              srcW,
+              srcH,
+              newW,
+              newH,
+              placement.side,
+            );
 
       if (kind === 'question') {
         const { nodeId } = createQuestionNodeAndCompose({
@@ -232,9 +323,9 @@ export function useCreateConnectedNode(id: string) {
         });
         dispatchUiIntent({
           type: 'CONNECT_EDGE',
-          source: id,
+          source: sourceId,
           target: nodeId,
-          style: { direction: 'forward' } satisfies EdgeStyle,
+          style: CONNECTED_NODE_EDGE_STYLE,
         });
         return;
       }
@@ -248,12 +339,12 @@ export function useCreateConnectedNode(id: string) {
       });
       dispatchUiIntent({
         type: 'CONNECT_EDGE',
-        source: id,
+        source: sourceId,
         target: newId,
-        style: { direction: 'forward' } satisfies EdgeStyle,
+        style: CONNECTED_NODE_EDGE_STYLE,
       });
     },
-    [id, addNode, dispatchUiIntent],
+    [addNode, dispatchUiIntent],
   );
 }
 
@@ -261,7 +352,94 @@ export function useCreateConnectedNode(id: string) {
 // NodeConnectionHandles
 // ---------------------------------------------------------------------------
 
+/**
+ * Painted circle of a port, in whatever unit the caller's coordinate
+ * space uses — flow units inside the viewport, screen px in a HUD.
+ */
+function portCircleStyle(
+  size: number,
+  borderWidth: number,
+): React.CSSProperties {
+  return {
+    width: size,
+    height: size,
+    boxSizing: 'border-box',
+    borderWidth,
+    borderStyle: 'solid',
+    borderColor: 'var(--color-info)',
+    backgroundColor: 'var(--color-info)',
+  };
+}
+
+/**
+ * Screen-space repaint of the aimed-at port, drawn above the selection
+ * outline.
+ *
+ * `SelectionOutlines` is a HUD portalled into the React Flow container at
+ * `z-998`, so nothing rendered inside the viewport can paint over it and a
+ * selected node's border would slice straight through the `+`. Raising the
+ * port's own z-index cannot help: the node is a stacking context nested
+ * inside the renderer, so it is all-or-nothing against a sibling of the
+ * renderer. The fix is the one `MultiSelectResizer` already uses — draw in
+ * the same HUD layer. The in-flow port keeps hit-testing; this is paint
+ * only, and it owns the `+` so the glyph is never rendered twice.
+ */
+function HotPortOverlay({
+  nodeId,
+  position,
+  size,
+}: {
+  nodeId: string;
+  position: Position;
+  size: number;
+}) {
+  const node = useInternalNode(nodeId);
+  const domNode = useStore((s) => s.domNode);
+  const transform = useStore((s) => s.transform);
+
+  if (!node || !domNode) return null;
+
+  const [tx, ty, zoom] = transform;
+  const { x, y } = node.internals.positionAbsolute;
+  const w = node.measured.width ?? 0;
+  const h = node.measured.height ?? 0;
+  // Ports sit on the node's border box, centred on the side they name.
+  const cx =
+    position === Position.Left
+      ? x
+      : position === Position.Right
+        ? x + w
+        : x + w / 2;
+  const cy =
+    position === Position.Top
+      ? y
+      : position === Position.Bottom
+        ? y + h
+        : y + h / 2;
+
+  return createPortal(
+    <div
+      aria-hidden
+      className="pointer-events-none absolute z-999 flex items-center justify-center rounded-full"
+      style={{
+        ...portCircleStyle(size, 2.5),
+        left: cx * zoom + tx - size / 2,
+        top: cy * zoom + ty - size / 2,
+      }}
+    >
+      <Plus
+        className="text-fg-inverse"
+        strokeWidth={3.5}
+        style={{ width: size * 0.6, height: size * 0.6 }}
+      />
+    </div>,
+    domNode,
+  );
+}
+
 interface NodeConnectionHandlesProps {
+  /** Id of the node these handles belong to. */
+  nodeId: string;
   /** Whether the parent node is currently hovered (mouse-only). */
   hovered: boolean;
   /** Whether the node is the unique selected node (touch/pen mode). */
@@ -271,7 +449,8 @@ interface NodeConnectionHandlesProps {
 }
 
 export const NodeConnectionHandles = memo(
-  ({ hovered, selected, isNotMouse }: NodeConnectionHandlesProps) => {
+  ({ nodeId, hovered, selected, isNotMouse }: NodeConnectionHandlesProps) => {
+    const { t } = useTranslation();
     const baseHandleSize = isNotMouse ? 14 : 8;
     const zoom = useStore((s) => s.transform[2]);
     const inverseZoom = zoom > 0 ? 1 / zoom : 1;
@@ -281,9 +460,46 @@ export const NodeConnectionHandles = memo(
     // from its idle hollow state to a filled + glowing state so the user
     // gets a strong "drop it here" affordance on valid endpoints.
     const connecting = useConnection((c) => c.inProgress);
+    const fromHandle = useConnection((c) => c.fromHandle);
+
+    // Ports are the single control for both "connect" and "create": drag
+    // one to link nodes, click one to spawn a connected node. Only the
+    // port the pointer is actually aiming at grows and reveals the `+`,
+    // so the idle state stays four quiet dots instead of four buttons.
+    const [hotSide, setHotSide] = useState<Position | null>(null);
+    const exposed = isNotMouse ? selected : hovered;
+    const hotHandleSize = isNotMouse ? 22 : 20;
+
+    const pendingPort = useContext(PendingConnectPortContext);
+    const pinnedPosition =
+      pendingPort?.nodeId === nodeId ? SIDE_POSITION[pendingPort.side] : null;
+
+    // Pressing a port starts a connection immediately (the canvas sets
+    // `connectionDragThreshold` to 0), so without this the port would
+    // visibly collapse the moment it is clicked. Ports on *other* nodes stay
+    // plain dots during a drag, where they mean "drop here", not "add".
+    const originSide =
+      connecting && fromHandle?.nodeId === nodeId
+        ? sideFromHandleId(fromHandle.id)
+        : null;
+
+    // At most one port of a node is ever hot, so resolve it once here
+    // rather than per handle — each side renders two stacked handles
+    // (a source and a target) that would otherwise both light up.
+    const hotPosition =
+      pinnedPosition ??
+      (originSide ? SIDE_POSITION[originSide] : null) ??
+      (exposed && !connecting ? hotSide : null);
 
     return (
       <>
+        {hotPosition && (
+          <HotPortOverlay
+            nodeId={nodeId}
+            position={hotPosition}
+            size={hotHandleSize}
+          />
+        )}
         {HANDLE_DEFS.map((h) => {
           // Two flavours of "handle position" are consumed by React Flow:
           //   - `getHandlePosition(..., center=false)` returns the bbox's
@@ -350,21 +566,42 @@ export const NodeConnectionHandles = memo(
           // Handles stay solid in every visible state so the selection
           // outline cannot visually bisect them. Connection drag adds a
           // glow to strengthen the endpoint affordance.
+          //
+          // The bbox itself never grows on hover — only the painted dot
+          // does. Growing the bbox would move `getHandlePosition`, which
+          // would drag committed edge endpoints around under the pointer.
+          const isHot = hotPosition === h.position;
+          // A port with a picker open stays visible and pressed until the
+          // gesture resolves, even after the pointer has left the node.
+          const isPinned = pinnedPosition === h.position;
+          const isReachable = exposed || isPinned;
+          const visualSize =
+            (isHot ? hotHandleSize : baseHandleSize) * inverseZoom;
           const dotStyle: React.CSSProperties = {
-            width: dotSize,
-            height: dotSize,
+            ...portCircleStyle(visualSize, dotBorderWidth),
             top: '50%',
             left: '50%',
             transform: 'translate(-50%, -50%)',
-            boxSizing: 'border-box',
-            borderWidth: dotBorderWidth,
-            borderStyle: 'solid',
-            borderColor: 'var(--color-info)',
-            backgroundColor: 'var(--color-info)',
             boxShadow: connecting
               ? '0 0 3px var(--color-info-light)'
               : undefined,
+            // React Flow paints handles with `cursor: crosshair`, which only
+            // describes half of what this control does. Clicking it creates a
+            // node, so the pointer cursor matches the `+` the user sees.
+            cursor: 'pointer',
+            transition: 'width 120ms ease, height 120ms ease',
           };
+          // `HotPortOverlay` paints the `+` on top of the selection outline,
+          // so the dot itself is just the circle and the hit target.
+          const dot = (
+            <span
+              aria-hidden
+              className="pointer-events-auto absolute rounded-full"
+              style={dotStyle}
+              onPointerEnter={() => setHotSide(h.position)}
+              onPointerLeave={() => setHotSide(null)}
+            />
+          );
           return (
             <Handle
               key={h.id}
@@ -380,20 +617,38 @@ export const NodeConnectionHandles = memo(
               }}
               className={cn(
                 'z-20 transition-opacity',
-                isNotMouse
-                  ? selected
-                    ? 'opacity-40 active:opacity-100'
-                    : 'pointer-events-none opacity-0'
-                  : hovered
-                    ? 'opacity-100'
-                    : 'pointer-events-none opacity-0',
+                isPinned
+                  ? 'opacity-100'
+                  : isNotMouse
+                    ? selected
+                      ? 'opacity-40 active:opacity-100'
+                      : 'pointer-events-none opacity-0'
+                    : hovered
+                      ? 'opacity-100'
+                      : 'pointer-events-none opacity-0',
               )}
             >
-              <span
-                aria-hidden
-                className="pointer-events-auto absolute rounded-full transition-colors"
-                style={dotStyle}
-              />
+              {/*
+                Only mount a tooltip for ports that are actually reachable.
+                A canvas holds many nodes × eight handles each, and every
+                `<Tooltip>` carries its own Floating UI instance.
+
+                The wrapper fills the (zero-thickness) handle bbox, whose
+                centre is the dot's centre, so the tooltip stays aligned
+                without knowing the dot's current size. The offset clears
+                the grown dot.
+              */}
+              {isReachable ? (
+                <Tooltip
+                  content={t('node.createConnectedNode')}
+                  wrapperClassName="absolute inset-0"
+                  offset={hotHandleSize / 2 + 8}
+                >
+                  {dot}
+                </Tooltip>
+              ) : (
+                dot
+              )}
             </Handle>
           );
         })}
@@ -402,201 +657,3 @@ export const NodeConnectionHandles = memo(
   },
 );
 NodeConnectionHandles.displayName = 'NodeConnectionHandles';
-
-interface NodeSideAffordanceProps {
-  nodeId: string;
-  selected: boolean;
-  editing: boolean;
-  onCreate: (side: Side, kind: 'note' | 'question') => void;
-}
-
-export const NodeSideAffordance = memo(
-  ({ nodeId, selected, editing, onCreate }: NodeSideAffordanceProps) => {
-    const { t } = useTranslation();
-    const domNode = useStore((state) => state.domNode);
-    const rendererEl = useMemo(
-      () => domNode?.querySelector('.react-flow__renderer') ?? null,
-      [domNode],
-    );
-    const internalNode = useInternalNode(nodeId);
-    const { zoom, x: vpX, y: vpY } = useViewport();
-
-    const [openSide, setOpenSide] = useState<Side | null>(null);
-
-    const [affordanceHovered, setAffordanceHovered] = useState(false);
-    const rootRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-      if (!openSide) return;
-      const onDown = (event: PointerEvent) => {
-        if (!rootRef.current?.contains(event.target as Node)) {
-          setOpenSide(null);
-        }
-      };
-      document.addEventListener('pointerdown', onDown);
-      return () => document.removeEventListener('pointerdown', onDown);
-    }, [openSide]);
-
-    // Close any open picker the moment the node enters edit mode so a
-    // stale popover doesn't hover over an active editor.
-    useEffect(() => {
-      if (editing) setOpenSide(null);
-    }, [editing]);
-
-    // When the node loses selection (e.g. after creating a connected
-    // child node that steals focus), clear any sticky hover state — the
-    // popover may have unmounted under a stationary pointer, in which
-    // case the browser never fires onPointerLeave on the affordance.
-    useEffect(() => {
-      if (!selected) {
-        setAffordanceHovered(false);
-        setOpenSide(null);
-      }
-    }, [selected]);
-
-    if (!rendererEl || !internalNode?.internals.positionAbsolute) return null;
-
-    const absX = internalNode.internals.positionAbsolute.x;
-    const absY = internalNode.internals.positionAbsolute.y;
-    const nodeW =
-      (internalNode.measured?.width as number | undefined) ??
-      (internalNode.style?.width as number | undefined) ??
-      0;
-    const nodeH =
-      (internalNode.measured?.height as number | undefined) ??
-      (internalNode.style?.height as number | undefined) ??
-      0;
-    const left = absX * zoom + vpX;
-    const top = absY * zoom + vpY;
-    const widthPx = nodeW * zoom;
-    const heightPx = nodeH * zoom;
-
-    const showArrows =
-      !editing && (selected || affordanceHovered || openSide !== null);
-
-    return createPortal(
-      <div
-        ref={rootRef}
-        style={{
-          position: 'absolute',
-          left,
-          top,
-          width: widthPx,
-          height: heightPx,
-          zIndex: 1000,
-          pointerEvents: 'none',
-        }}
-      >
-        {(['top', 'right', 'bottom', 'left'] as const).map((side) => {
-          const ArrowIcon = SIDE_ARROW_ICON[side];
-          const isOpen = openSide === side;
-
-          const wrapStyle: React.CSSProperties = { position: 'absolute' };
-          const popStyle: React.CSSProperties = { position: 'absolute' };
-          if (side === 'top') {
-            wrapStyle.left = '50%';
-            wrapStyle.top = -SIDE_ARROW_OFFSET_PX;
-            wrapStyle.transform = 'translate(-50%, -50%)';
-            popStyle.left = '50%';
-            popStyle.bottom = '100%';
-            popStyle.marginBottom = 8;
-            popStyle.transform = 'translateX(-50%)';
-          } else if (side === 'bottom') {
-            wrapStyle.left = '50%';
-            wrapStyle.bottom = -SIDE_ARROW_OFFSET_PX;
-            wrapStyle.transform = 'translate(-50%, 50%)';
-            popStyle.left = '50%';
-            popStyle.top = '100%';
-            popStyle.marginTop = 8;
-            popStyle.transform = 'translateX(-50%)';
-          } else if (side === 'left') {
-            wrapStyle.top = '50%';
-            wrapStyle.left = -SIDE_ARROW_OFFSET_PX;
-            wrapStyle.transform = 'translate(-50%, -50%)';
-            popStyle.top = '50%';
-            popStyle.right = '100%';
-            popStyle.marginRight = 8;
-            popStyle.transform = 'translateY(-50%)';
-          } else {
-            wrapStyle.top = '50%';
-            wrapStyle.right = -SIDE_ARROW_OFFSET_PX;
-            wrapStyle.transform = 'translate(50%, -50%)';
-            popStyle.top = '50%';
-            popStyle.left = '100%';
-            popStyle.marginLeft = 8;
-            popStyle.transform = 'translateY(-50%)';
-          }
-
-          return (
-            <div
-              key={`affordance-${side}`}
-              style={{
-                ...wrapStyle,
-                pointerEvents: showArrows ? 'auto' : 'none',
-                opacity: showArrows ? 1 : 0,
-                transition: 'opacity 150ms ease',
-              }}
-              onPointerEnter={() => setAffordanceHovered(true)}
-              onPointerLeave={() => setAffordanceHovered(false)}
-            >
-              <Button
-                variant="ghost"
-                iconOnly
-                size="md"
-                title={t('node.createConnectedNode')}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setOpenSide(isOpen ? null : side);
-                }}
-                onPointerDown={(event) => event.stopPropagation()}
-                className={cn(
-                  'hover:text-info hover:bg-info-bg text-[var(--color-info-light)] opacity-40 hover:opacity-100 [&_svg]:!h-5 [&_svg]:!w-5',
-                  isOpen && 'text-info bg-info-bg opacity-100',
-                )}
-              >
-                <ArrowIcon strokeWidth={4} />
-              </Button>
-
-              {isOpen && (
-                <div
-                  style={popStyle}
-                  className="bg-surface shadow-bottom text-fg-muted flex items-center gap-1 rounded-lg p-1.5"
-                  onPointerDown={(event) => event.stopPropagation()}
-                >
-                  <Button
-                    variant="ghost"
-                    iconOnly
-                    size="sm"
-                    title={t('node.newNote')}
-                    onClick={() => {
-                      onCreate(side, 'note');
-                      setOpenSide(null);
-                      setAffordanceHovered(false);
-                    }}
-                  >
-                    <NODE_ICON.note />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    iconOnly
-                    size="sm"
-                    title={t('node.newQuestion')}
-                    onClick={() => {
-                      onCreate(side, 'question');
-                      setOpenSide(null);
-                      setAffordanceHovered(false);
-                    }}
-                  >
-                    <NODE_ICON.question />
-                  </Button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>,
-      rendererEl,
-    );
-  },
-);
-NodeSideAffordance.displayName = 'NodeSideAffordance';

@@ -38,6 +38,14 @@ import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import { CanvasRefNode } from '@/components/Nodes/canvasRef/CanvasRefNode';
 import { FrameRefNode } from '@/components/Nodes/frameRef/FrameRefNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
+import {
+  PendingConnectPortContext,
+  sideFromHandleId,
+  useCreateConnectedNode,
+  type ConnectedNodeKind,
+  type ConnectedNodePlacement,
+  type Side,
+} from '@/components/Nodes/NodeConnectAffordance.tsx';
 import { NodeRefNode } from '@/components/Nodes/nodeRef/NodeRefNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
 import { OfficeNode } from '@/components/Nodes/office/OfficeNode';
@@ -84,6 +92,7 @@ import {
   resolveNodeDraggable,
 } from './canvasInputPolicy.ts';
 import { NodeToolbar } from './CanvasToolbar.tsx';
+import { ConnectedNodePicker } from './ConnectedNodePicker.tsx';
 import {
   EDIT_EDGE_LABEL_EVENT,
   LabelledEdge,
@@ -515,6 +524,38 @@ export const Canvas: React.FC<CanvasProps> = ({
     selectNodes(nodes.filter((n) => n.selected).map((n) => n.id));
   }, [nodes, selectNodes, tool]);
 
+  // Pending "create a connected node" gesture: geometry is already
+  // resolved, only the node type is still missing.
+  const [connectPicker, setConnectPicker] = useState<{
+    sourceId: string;
+    /** Port the gesture left the source node through. */
+    side: Side;
+    /**
+     * Flow-space point the gesture ended at: the picker is anchored here,
+     * and for a drag it is also where the new node goes.
+     */
+    anchor: { x: number; y: number };
+    /**
+     * `'point'` for a drag released on empty canvas, `'side'` for a plain
+     * port click. Everything else the pending gesture needs — placement,
+     * whether to draw a tether — follows from this plus `side`/`anchor`.
+     */
+    kind: ConnectedNodePlacement['kind'];
+  } | null>(null);
+  const createConnectedNode = useCreateConnectedNode();
+
+  // Keep the port the pending gesture came from lit while the picker is
+  // open. Reaching the picker means moving the pointer off the node, which
+  // would otherwise hide every port and leave the picker looking unrelated
+  // to the node it grew out of.
+  const pendingConnectPort = useMemo(
+    () =>
+      connectPicker
+        ? { nodeId: connectPicker.sourceId, side: connectPicker.side }
+        : null,
+    [connectPicker],
+  );
+
   // Reject self-connections (an edge whose source and target are the same
   // node). React Flow uses this both to show the in-progress connection
   // line as invalid and to suppress the `onConnect` callback, so a
@@ -524,14 +565,26 @@ export const Canvas: React.FC<CanvasProps> = ({
     [],
   );
 
-  // When a connection drag ends without landing on a handle, check if the
-  // pointer is over a node element and create the connection anyway.
-  // This makes connecting much easier on touch devices.
+  // Every connect gesture that React Flow did not resolve itself lands
+  // here, and the release point decides what it meant:
+  //
+  //   - over another node  -> connect the two nodes (React Flow only
+  //     accepts drops on a handle, so this also makes connecting far
+  //     easier on touch devices);
+  //   - over empty canvas  -> create a connected node right there;
+  //   - back on the source node -> this is what a plain *click* on a
+  //     port produces (press and release without moving), so auto-place
+  //     the new node off that port's side.
+  //
+  // The last two only pick the geometry; `ConnectedNodePicker` then asks
+  // for the node type. Folding "create" into the ports is what let the
+  // four side arrows go away.
   const onConnectEnd = useCallback(
     (
       event: MouseEvent | TouchEvent,
       connectionState: {
         fromNode?: { id: string } | null;
+        fromHandle?: { id?: string | null } | null;
         isValid: boolean | null;
       },
     ) => {
@@ -541,30 +594,68 @@ export const Canvas: React.FC<CanvasProps> = ({
       const sourceNodeId = connectionState.fromNode?.id;
       if (!sourceNodeId) return;
 
+      const releasePoint =
+        event instanceof TouchEvent
+          ? {
+              x: event.changedTouches[0].clientX,
+              y: event.changedTouches[0].clientY,
+            }
+          : { x: event.clientX, y: event.clientY };
+
       // Determine the element under the pointer
       const target =
         event instanceof TouchEvent
-          ? document.elementFromPoint(
-              event.changedTouches[0].clientX,
-              event.changedTouches[0].clientY,
-            )
+          ? document.elementFromPoint(releasePoint.x, releasePoint.y)
           : (event.target as Element);
 
-      const nodeEl = closestNodeElement(target);
-      if (!nodeEl) return;
+      const targetNodeId =
+        closestNodeElement(target)?.getAttribute('data-id') ?? null;
 
-      const targetNodeId = nodeEl.getAttribute('data-id');
-      if (!targetNodeId || targetNodeId === sourceNodeId) return;
+      if (targetNodeId && targetNodeId !== sourceNodeId) {
+        onConnect({
+          source: sourceNodeId,
+          target: targetNodeId,
+          sourceHandle: null,
+          targetHandle: null,
+        });
+        return;
+      }
 
-      onConnect({
-        source: sourceNodeId,
-        target: targetNodeId,
-        sourceHandle: null,
-        targetHandle: null,
+      const instance = rfInstanceRef.current;
+      if (!instance) return;
+      const anchor = instance.screenToFlowPosition(releasePoint);
+      const side = sideFromHandleId(connectionState.fromHandle?.id);
+      if (!side) return;
+
+      setConnectPicker({
+        sourceId: sourceNodeId,
+        side,
+        anchor,
+        kind: targetNodeId === sourceNodeId ? 'side' : 'point',
       });
     },
     [onConnect],
   );
+
+  const handleConnectedKindPick = useCallback(
+    (nodeKind: ConnectedNodeKind) => {
+      setConnectPicker((pending) => {
+        if (pending) {
+          createConnectedNode(
+            pending.sourceId,
+            pending.kind === 'side'
+              ? { kind: 'side', side: pending.side }
+              : { kind: 'point', point: pending.anchor },
+            nodeKind,
+          );
+        }
+        return null;
+      });
+    },
+    [createConnectedNode],
+  );
+
+  const dismissConnectPicker = useCallback(() => setConnectPicker(null), []);
 
   // --- Frame drag-to-create gesture (mouse / pen / touch) ---
   const exitPendingNodeType = useCallback(
@@ -1285,168 +1376,204 @@ export const Canvas: React.FC<CanvasProps> = ({
         }
       }}
     >
-      <ReactFlow
-        className={isInitialViewportPending ? 'invisible' : undefined}
-        defaultViewport={defaultViewport}
-        deleteKeyCode={null}
-        nodes={displayNodes}
-        edges={displayEdges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onConnectEnd={onConnectEnd}
-        isValidConnection={isValidConnection}
-        connectionMode={ConnectionMode.Loose}
-        onNodeDragStart={onNodeDragStart}
-        onNodeDrag={onNodeDrag}
-        onNodeDragStop={onNodeDragStop}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        onInit={(instance) => {
-          rfInstanceRef.current = instance;
-          setRfInstance(instance);
-          fitInitialViewport(instance);
-        }}
-        onMoveStart={() => {
-          // Pan and zoom both arrive here. A height correction committed
-          // mid-gesture would resize a node the user is moving past, so
-          // corrections queue up and land once the viewport settles.
-          suspendHeightCommits();
-        }}
-        onMoveEnd={(_event, viewport) => {
-          resumeHeightCommits();
-          // Mirror pan/zoom into localStorage (per canvas) so browser and
-          // desktop restarts restore the same view. Does NOT participate in
-          // the structure autosave.
-          setViewport(viewport);
-        }}
-        onPaneClick={handlePaneClick}
-        onNodeDoubleClick={(e, node) => {
-          e.stopPropagation();
-          // Expand any expandable node type on double-click.
-          if (EXPANDABLE_TYPES.has(node.type ?? '')) {
-            openExpanded(node.id);
-          }
-        }}
-        onEdgeDoubleClick={(e, edge) => {
-          // Jump straight into the label editor — saves the user the
-          // single-click-then-click-pill dance. `LabelledEdge` listens
-          // for this event by id; see `EDIT_EDGE_LABEL_EVENT`.
-          e.stopPropagation();
-          const detail: EditEdgeLabelDetail = { edgeId: edge.id };
-          window.dispatchEvent(
-            new CustomEvent<EditEdgeLabelDetail>(EDIT_EDGE_LABEL_EVENT, {
-              detail,
-            }),
-          );
-        }}
-        panOnDrag={
-          isNotMouse
-            ? false /* touch/pen → custom pointer router is the sole pan driver;
+      {/*
+        Wraps `<ReactFlow>` rather than sitting beside it: React Flow renders
+        node components as descendants, so this is how a port learns that it
+        is the one a pending create-connected gesture came from.
+      */}
+      <PendingConnectPortContext.Provider value={pendingConnectPort}>
+        <ReactFlow
+          className={isInitialViewportPending ? 'invisible' : undefined}
+          defaultViewport={defaultViewport}
+          deleteKeyCode={null}
+          nodes={displayNodes}
+          edges={displayEdges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onConnectEnd={onConnectEnd}
+          // A port is also the "create a connected node" button, so a plain
+          // click on one has to reach `onConnectEnd`. React Flow only starts
+          // (and therefore only ends) a connection once the pointer has moved
+          // past `connectionDragThreshold`, which defaults to 1px — a click
+          // that never moves would be dropped silently. Starting at 0px makes
+          // press-and-release a first-class connect gesture.
+          connectionDragThreshold={0}
+          // React Flow's own click-to-connect would fight ours: it treats the
+          // first port click as "arm a connection" and the next port click as
+          // "complete it", silently drawing an edge between two ports the user
+          // only meant to press the `+` on. Ports are our control now, so this
+          // second, invisible click protocol has to be off.
+          connectOnClick={false}
+          isValidConnection={isValidConnection}
+          connectionMode={ConnectionMode.Loose}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onInit={(instance) => {
+            rfInstanceRef.current = instance;
+            setRfInstance(instance);
+            fitInitialViewport(instance);
+          }}
+          onMoveStart={() => {
+            // Pan and zoom both arrive here. A height correction committed
+            // mid-gesture would resize a node the user is moving past, so
+            // corrections queue up and land once the viewport settles.
+            suspendHeightCommits();
+          }}
+          onMoveEnd={(_event, viewport) => {
+            resumeHeightCommits();
+            // Mirror pan/zoom into localStorage (per canvas) so browser and
+            // desktop restarts restore the same view. Does NOT participate in
+            // the structure autosave.
+            setViewport(viewport);
+          }}
+          onPaneClick={handlePaneClick}
+          onNodeDoubleClick={(e, node) => {
+            e.stopPropagation();
+            // Expand any expandable node type on double-click.
+            if (EXPANDABLE_TYPES.has(node.type ?? '')) {
+              openExpanded(node.id);
+            }
+          }}
+          onEdgeDoubleClick={(e, edge) => {
+            // Jump straight into the label editor — saves the user the
+            // single-click-then-click-pill dance. `LabelledEdge` listens
+            // for this event by id; see `EDIT_EDGE_LABEL_EVENT`.
+            e.stopPropagation();
+            const detail: EditEdgeLabelDetail = { edgeId: edge.id };
+            window.dispatchEvent(
+              new CustomEvent<EditEdgeLabelDetail>(EDIT_EDGE_LABEL_EVENT, {
+                detail,
+              }),
+            );
+          }}
+          panOnDrag={
+            isNotMouse
+              ? false /* touch/pen → custom pointer router is the sole pan driver;
                        React Flow's d3-zoom touch pan (a separate Touch Events
                        stream) would otherwise still fire under a truthy
                        `[1]` and pan the canvas mid-frame/lasso/placement */
-            : pendingNodeType
-              ? [1] /* mouse + creation tool → middle mouse button still pans */
-              : tool === 'pan'
-                ? true
-                : [
+              : pendingNodeType
+                ? [
                     1,
-                  ] /* mouse + selection tools → middle mouse button pans; drag box-selects */
-        }
-        selectionOnDrag={
-          pendingNodeType ? false : !isNotMouse && tool === 'select'
-        }
-        selectionMode={SelectionMode.Partial}
-        onSelectionStart={handleSelectionStart}
-        onSelectionEnd={handleSelectionEnd}
-        nodesDraggable={
-          !interactivityLocked && !pendingNodeType && tool !== 'lasso'
-        }
-        nodeDragThreshold={dragActivationDistance}
-        nodeClickDistance={dragActivationDistance}
-        nodesConnectable={!interactivityLocked}
-        elementsSelectable={!interactivityLocked && !pendingNodeType}
-        panOnScroll={!isNotMouse}
-        zoomOnScroll={true}
-        // Touch/pen pinch is driven by the custom pointer router (via
-        // Pointer Events). React Flow's built-in pinch uses d3-zoom on a
-        // *separate* Touch Events stream that our capture-phase pointer
-        // suppression can't stop, so leaving it on lets both fight over
-        // `setViewport` and the gesture stalls. Mirror `panOnDrag` above:
-        // hand pan AND zoom to the router whenever a finger/pen is active,
-        // keeping React Flow's pinch only for the mouse (trackpad) case.
-        zoomOnPinch={!isNotMouse}
-        minZoom={MIN_ZOOM}
-        maxZoom={MAX_ZOOM}
-        onlyRenderVisibleElements
-        // Design-tool style: selecting a node MUST NOT alter its z-order. The
-        // selection indicator (drawn by `<SelectionOutlines />` below)
-        // lives on a separate overlay layer that is always on top, so we
-        // do not need xyflow's `+1000` internal-z bump to make the ring
-        // visible. Disabling this also stops a selected covered node
-        // from popping above the node covering it, which previously felt
-        // like the click silently reordered the layers.
-        // Manual z-order: Sediment derives every node's `zIndex` from
-        // forest order (`assignNodeZIndices`) so the Layers-panel / array
-        // order is the SOLE stacking authority. `auto` would instead force
-        // framed subtrees above unframed siblings and lift framed frames by
-        // a fixed band, making a node unable to cover a frame by order.
-        zIndexMode="manual"
-        elevateNodesOnSelect={false}
-      >
-        <CanvasGestures
-          wrapperRef={wrapperRef}
-          rfInstanceRef={rfInstanceRef}
-          inputMode={inputMode}
-          interactivityLocked={interactivityLocked}
-          explicitToolActive={tool === 'lasso' || Boolean(pendingNodeType)}
-          onTouchTakeover={handleTouchTakeover}
-          onEmptyCanvasTap={() => selectNodes([])}
-          onNodeTap={(nodeId) => selectNodes([nodeId])}
-          extraRecognizers={pointerRecognizers}
-        />
-        <SelectionAutoPan
-          active={isBoxSelecting || isLassoActive}
-          wrapperRef={wrapperRef}
-          onPan={shiftLassoScreenPoints}
-        />
-        <Panel position="bottom-center" className="mb-6">
-          <NodeToolbar activeTool={tool} onToolChange={setTool} />
-        </Panel>
-        {!isBoxSelecting && <MultiSelectResizer />}
-        {!isBoxSelecting && <SelectionOutlines />}
-        {!isBoxSelecting && !hasStrokeSelection && <MultiSelectToolbar />}
-        {!isBoxSelecting && <StrokeSelectionRegion />}
-        {!isBoxSelecting && <StrokeSelectionToolbar />}
-        {!isBoxSelecting && <EdgeStyleToolbar />}
-        <IntentPopover />
-        <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
-
-        <Controls position="bottom-left" showInteractive={false}>
-          <CanvasZoomLevel />
-          <CanvasInteractivityControl
-            locked={interactivityLocked}
-            onToggle={() => setInteractivityLocked((prev) => !prev)}
+                  ] /* mouse + creation tool → middle mouse button still pans */
+                : tool === 'pan'
+                  ? true
+                  : [
+                      1,
+                    ] /* mouse + selection tools → middle mouse button pans; drag box-selects */
+          }
+          selectionOnDrag={
+            pendingNodeType ? false : !isNotMouse && tool === 'select'
+          }
+          selectionMode={SelectionMode.Partial}
+          onSelectionStart={handleSelectionStart}
+          onSelectionEnd={handleSelectionEnd}
+          nodesDraggable={
+            !interactivityLocked && !pendingNodeType && tool !== 'lasso'
+          }
+          nodeDragThreshold={dragActivationDistance}
+          nodeClickDistance={dragActivationDistance}
+          nodesConnectable={!interactivityLocked}
+          elementsSelectable={!interactivityLocked && !pendingNodeType}
+          panOnScroll={!isNotMouse}
+          zoomOnScroll={true}
+          // Touch/pen pinch is driven by the custom pointer router (via
+          // Pointer Events). React Flow's built-in pinch uses d3-zoom on a
+          // *separate* Touch Events stream that our capture-phase pointer
+          // suppression can't stop, so leaving it on lets both fight over
+          // `setViewport` and the gesture stalls. Mirror `panOnDrag` above:
+          // hand pan AND zoom to the router whenever a finger/pen is active,
+          // keeping React Flow's pinch only for the mouse (trackpad) case.
+          zoomOnPinch={!isNotMouse}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
+          onlyRenderVisibleElements
+          // Design-tool style: selecting a node MUST NOT alter its z-order. The
+          // selection indicator (drawn by `<SelectionOutlines />` below)
+          // lives on a separate overlay layer that is always on top, so we
+          // do not need xyflow's `+1000` internal-z bump to make the ring
+          // visible. Disabling this also stops a selected covered node
+          // from popping above the node covering it, which previously felt
+          // like the click silently reordered the layers.
+          // Manual z-order: Sediment derives every node's `zIndex` from
+          // forest order (`assignNodeZIndices`) so the Layers-panel / array
+          // order is the SOLE stacking authority. `auto` would instead force
+          // framed subtrees above unframed siblings and lift framed frames by
+          // a fixed band, making a node unable to cover a frame by order.
+          zIndexMode="manual"
+          elevateNodesOnSelect={false}
+        >
+          <CanvasGestures
+            wrapperRef={wrapperRef}
+            rfInstanceRef={rfInstanceRef}
+            inputMode={inputMode}
+            interactivityLocked={interactivityLocked}
+            explicitToolActive={tool === 'lasso' || Boolean(pendingNodeType)}
+            onTouchTakeover={handleTouchTakeover}
+            onEmptyCanvasTap={() => selectNodes([])}
+            onNodeTap={(nodeId) => selectNodes([nodeId])}
+            extraRecognizers={pointerRecognizers}
           />
-        </Controls>
-        {minimapEnabled && (
-          <MiniMap
-            pannable
-            zoomable
-            ariaLabel="Minimap"
-            className="border-edge-default rounded-md border shadow-sm"
+          <SelectionAutoPan
+            active={isBoxSelecting || isLassoActive}
+            wrapperRef={wrapperRef}
+            onPan={shiftLassoScreenPoints}
           />
-        )}
+          <Panel position="bottom-center" className="mb-6">
+            <NodeToolbar activeTool={tool} onToolChange={setTool} />
+          </Panel>
+          {!isBoxSelecting && <MultiSelectResizer />}
+          {!isBoxSelecting && <SelectionOutlines />}
+          {!isBoxSelecting && !hasStrokeSelection && <MultiSelectToolbar />}
+          {!isBoxSelecting && <StrokeSelectionRegion />}
+          {!isBoxSelecting && <StrokeSelectionToolbar />}
+          {!isBoxSelecting && <EdgeStyleToolbar />}
+          <ConnectedNodePicker
+            anchor={connectPicker?.anchor ?? null}
+            tether={
+              connectPicker?.kind === 'point'
+                ? {
+                    nodeId: connectPicker.sourceId,
+                    side: connectPicker.side,
+                    to: connectPicker.anchor,
+                  }
+                : null
+            }
+            onSelect={handleConnectedKindPick}
+            onDismiss={dismissConnectPicker}
+          />
+          <IntentPopover />
+          <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
 
-        {/* Sketch overlay inside ReactFlow so it shares stacking context with Panel */}
-        {pendingNodeType === 'sketch' && (
-          <SketchOverlay rfInstance={rfInstanceRef.current} />
-        )}
+          <Controls position="bottom-left" showInteractive={false}>
+            <CanvasZoomLevel />
+            <CanvasInteractivityControl
+              locked={interactivityLocked}
+              onToggle={() => setInteractivityLocked((prev) => !prev)}
+            />
+          </Controls>
+          {minimapEnabled && (
+            <MiniMap
+              pannable
+              zoomable
+              ariaLabel="Minimap"
+              className="border-edge-default rounded-md border shadow-sm"
+            />
+          )}
 
-        {/* Sketch intent processing overlay — lives in flow space so it pans/zooms with the canvas */}
-        <SketchProcessingOverlay />
-      </ReactFlow>
+          {/* Sketch overlay inside ReactFlow so it shares stacking context with Panel */}
+          {pendingNodeType === 'sketch' && (
+            <SketchOverlay rfInstance={rfInstanceRef.current} />
+          )}
+
+          {/* Sketch intent processing overlay — lives in flow space so it pans/zooms with the canvas */}
+          <SketchProcessingOverlay />
+        </ReactFlow>
+      </PendingConnectPortContext.Provider>
 
       {isInitialViewportPending && (
         <Loading
