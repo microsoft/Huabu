@@ -11,7 +11,7 @@ import {
   updateCanvasGesture,
   type CanvasPointerType,
 } from '@/handler/canvasGestureSession';
-import { useEffectiveInputMode } from '@/hooks/useInputMode';
+import { readEffectiveInputMode } from '@/hooks/useInputMode';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { useToolStore } from '@/store/toolStore';
@@ -27,7 +27,13 @@ import {
   DEFAULT_STROKE_COLOR,
   DEFAULT_STROKE_SIZE,
 } from './sketchPath';
+import {
+  getStylusRawTouchOverlayStyle,
+  isSupersededByStylusRawTouch,
+  useStylusRawTouch,
+} from './stylusRawTouch';
 
+import type { SketchPointer } from './stylusRawTouch';
 import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
 import type { ReactFlowInstance } from '@xyflow/react';
 
@@ -41,6 +47,57 @@ import type { ReactFlowInstance } from '@xyflow/react';
  */
 const PREVIEW_CLEAR_DELAY_FRAMES = 2;
 export const CANCEL_SKETCH_GESTURE_EVENT = 'sediment:cancel-sketch-gesture';
+
+/** Fewest points that can form a stroke; anything shorter is a tap. */
+const MIN_STROKE_POINTS = 3;
+
+/**
+ * Upper bound on how many trailing points {@link countLiftOffPoints} may drop.
+ * Bounded so a deliberate pressure fade-out is never mistaken for lift-off.
+ */
+const MAX_LIFT_OFF_POINTS = 6;
+
+/**
+ * A trailing decay only counts as lift-off if pressure falls to this fraction
+ * of where the decay started. Guards against reading ordinary pressure ripple
+ * as a lift-off.
+ */
+const LIFT_OFF_DECAY_RATIO = 0.7;
+
+/**
+ * Count trailing points to drop as pen lift-off noise.
+ *
+ * Lifting a pen is not instant: pressure bleeds off over ~100ms while the tip
+ * sits essentially still, so a stroke ends with a run of near-stationary
+ * samples whose pressure decays monotonically. They arrive *before*
+ * `pointerup` with the tip still nominally down, so nothing upstream rejects
+ * them. `streamline` renders behind the true tip, and that dwell is exactly
+ * what lets the smoothed path catch up — extending the stroke past where the
+ * user stopped, thinly (`thinning` scales width with pressure). The result is
+ * a fine hook on the end of every stroke.
+ *
+ * Detected by shape, not magnitude: an absolute pressure threshold can't tell
+ * a light stroke from a lift-off, but a monotonic decay run is unambiguous.
+ * Returns 0 for devices that report no pressure (many touchscreens, and the
+ * raw-touch replay path, which floors pressure at a constant).
+ */
+export function countLiftOffPoints(points: number[][]): number {
+  const limit = Math.max(
+    0,
+    Math.min(MAX_LIFT_OFF_POINTS, points.length - MIN_STROKE_POINTS),
+  );
+  let n = 0;
+  while (n < limit) {
+    const p = points[points.length - 1 - n][2] ?? 0;
+    const prev = points[points.length - 2 - n][2] ?? 0;
+    if (!(p < prev)) break;
+    n++;
+  }
+  if (n === 0) return 0;
+  const end = points[points.length - 1][2] ?? 0;
+  const start = points[points.length - 1 - n][2] ?? 0;
+  return start > 0 && end < start * LIFT_OFF_DECAY_RATIO ? n : 0;
+}
 
 /**
  * Run `cb` after `frames` animation frames have elapsed. Used to defer
@@ -126,7 +183,6 @@ export function SketchOverlay({
   const addNode = useCanvasStore((s) => s.addNode);
   const selectNodes = useCanvasStore((s) => s.selectNodes);
   const sketchDraft = useToolStore((s) => s.sketchDraft);
-  const inputMode = useEffectiveInputMode();
 
   // Drop any prior canvas selection the moment the sketch tool
   // activates so a stale selection isn't sent as context on the next
@@ -153,12 +209,25 @@ export function SketchOverlay({
   // `resolveAccent` passes legacy hex strings through unchanged.
   const resolvedColor = resolveAccent(strokeColor) ?? strokeColor;
 
-  // Two parallel arrays:
-  // - screenPtsRef: raw clientX/clientY for screenToFlowPosition (node creation)
-  // - points (state): overlay-relative coords for live SVG preview
+  // Raw clientX/clientY, fed to screenToFlowPosition on commit to build the
+  // node. Kept alongside `livePtsRef` (the same stroke in overlay-relative
+  // coords) so neither has to be re-derived per event.
   const screenPtsRef = useRef<number[][]>([]);
-  const overlayRef = useRef<HTMLDivElement>(null);
+  // The overlay node lives in state rather than a ref so the raw-touch effect
+  // can depend on it and follow a remounted element. A ref would be no more
+  // synchronous here: the ref callback and the state update land in the same
+  // commit, and pointer events only arrive after it.
+  const [overlayEl, setOverlayEl] = useState<HTMLDivElement | null>(null);
   const [points, setPoints] = useState<number[][]>([]);
+  // Live overlay-relative buffer backing `points`. Every pointermove appends
+  // here, but the buffer is published to state at most once per animation
+  // frame: republishing re-runs perfect-freehand over the *whole* stroke, and
+  // the pointer stream can outrun the display badly — the raw-touch engine
+  // replays stylus contacts straight off `touchmove` (~240 Hz on an iPad),
+  // and even a plain pen reports far above the refresh rate. Renders beyond
+  // one per frame are work no one can ever see.
+  const livePtsRef = useRef<number[][]>([]);
+  const pointsFlushRef = useRef<number | null>(null);
   // Monotonic token to invalidate pending "clear preview" callbacks when a
   // new stroke starts before the previous clear runs (see `handlePointerUp`).
   const clearTokenRef = useRef(0);
@@ -189,29 +258,67 @@ export function SketchOverlay({
     null,
   );
 
-  const acceptsPointer = useCallback(
-    (pointerType: string) => {
-      // The mouse always draws; other pointers follow the input-mode routing.
-      if (pointerType === 'mouse') return true;
-      if (inputMode === 'mouse') return false;
-      return inputMode === 'pen'
-        ? pointerType === 'pen'
-        : pointerType === 'touch';
-    },
-    [inputMode],
-  );
+  const acceptsPointer = useCallback((e: SketchPointer) => {
+    // The mouse always draws; other pointers follow the input-mode routing.
+    if (e.pointerType === 'mouse') return true;
+    // Resolved from live store state rather than a render-time value: a stylus
+    // contact replayed by the raw-touch engine has just flipped `penObserved`,
+    // and a value captured during the previous render would still read `finger`
+    // under `auto` — dropping the very first stroke.
+    const effective = readEffectiveInputMode();
+    if (effective === 'mouse') return false;
+    return effective === 'pen'
+      ? e.pointerType === 'pen'
+      : e.pointerType === 'touch';
+  }, []);
+
+  const cancelPointsFlush = useCallback(() => {
+    if (pointsFlushRef.current === null) return;
+    cancelAnimationFrame(pointsFlushRef.current);
+    pointsFlushRef.current = null;
+  }, []);
+
+  /** Queue a publish of the live buffer for the next frame (idempotent). */
+  const schedulePointsFlush = useCallback(() => {
+    if (pointsFlushRef.current !== null) return;
+    pointsFlushRef.current = requestAnimationFrame(() => {
+      pointsFlushRef.current = null;
+      // Copy: React bails out on an unchanged array identity, and the buffer
+      // keeps being appended to in place after this render.
+      setPoints(livePtsRef.current.slice());
+    });
+  }, []);
+
+  /** Publish the live buffer right away, dropping any queued frame. */
+  const flushPointsNow = useCallback(() => {
+    cancelPointsFlush();
+    setPoints(livePtsRef.current.slice());
+  }, [cancelPointsFlush]);
+
+  /**
+   * Drop the in-progress stroke and any frame queued for it.
+   *
+   * Both buffers are reassigned rather than truncated: `handlePointerUp`
+   * hands the old `screenPtsRef` array straight to `processPoints`, which
+   * must not see it emptied underneath during the deferred clear.
+   */
+  const resetStroke = useCallback(() => {
+    cancelPointsFlush();
+    livePtsRef.current = [];
+    screenPtsRef.current = [];
+    setPoints([]);
+  }, [cancelPointsFlush]);
 
   const cancelActiveGesture = useCallback(() => {
     const pointerId = activePointerIdRef.current;
     if (pointerId !== null) endCanvasGesture(pointerId);
     activePointerIdRef.current = null;
-    screenPtsRef.current = [];
     eraseHitsRef.current.clear();
     useGesturePreviewStore.getState().clearSketchErasePreview();
     clearTokenRef.current++;
-    setPoints([]);
+    resetStroke();
     setErasing(false);
-  }, []);
+  }, [resetStroke]);
 
   useEffect(() => {
     window.addEventListener(CANCEL_SKETCH_GESTURE_EVENT, cancelActiveGesture);
@@ -224,11 +331,44 @@ export function SketchOverlay({
     };
   }, [cancelActiveGesture]);
 
-  /** Convert clientX/clientY to overlay-relative coordinates */
+  // Cached overlay origin. `getBoundingClientRect()` forces a synchronous
+  // layout, and a pointermove handler is the worst possible place to ask for
+  // one: the stroke we just rendered has already invalidated layout, so every
+  // event paid for a full style + layout recalc of the document before it
+  // could even record a point. The overlay is `absolute inset-0` over the
+  // canvas, so its origin only moves when the container resizes or an
+  // ancestor scrolls — never while a stroke is in flight.
+  const overlayOriginRef = useRef<{ left: number; top: number } | null>(null);
+
+  const refreshOverlayOrigin = useCallback(() => {
+    if (!overlayEl) {
+      overlayOriginRef.current = null;
+      return;
+    }
+    const rect = overlayEl.getBoundingClientRect();
+    overlayOriginRef.current = { left: rect.left, top: rect.top };
+  }, [overlayEl]);
+
+  useEffect(() => {
+    refreshOverlayOrigin();
+    if (!overlayEl) return;
+    const observer = new ResizeObserver(refreshOverlayOrigin);
+    observer.observe(overlayEl);
+    window.addEventListener('resize', refreshOverlayOrigin);
+    // Capture phase: a scroll on any ancestor shifts the overlay too.
+    window.addEventListener('scroll', refreshOverlayOrigin, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', refreshOverlayOrigin);
+      window.removeEventListener('scroll', refreshOverlayOrigin, true);
+    };
+  }, [overlayEl, refreshOverlayOrigin]);
+
+  /** Convert clientX/clientY to overlay-relative coordinates. */
   const toLocal = useCallback((clientX: number, clientY: number) => {
-    const rect = overlayRef.current?.getBoundingClientRect();
-    if (!rect) return { lx: clientX, ly: clientY };
-    return { lx: clientX - rect.left, ly: clientY - rect.top };
+    const origin = overlayOriginRef.current;
+    if (!origin) return { lx: clientX, ly: clientY };
+    return { lx: clientX - origin.left, ly: clientY - origin.top };
   }, []);
 
   /**
@@ -248,7 +388,7 @@ export function SketchOverlay({
    * and cannot be cleanly shared without replacing React Flow's own pan.
    */
   const tryStartPan = useCallback(
-    (e: React.PointerEvent): boolean => {
+    (e: SketchPointer): boolean => {
       if (e.button !== 1 || !rfInstance) return false;
       e.preventDefault();
       try {
@@ -274,7 +414,7 @@ export function SketchOverlay({
    * short-circuit its draw/erase path).
    */
   const tryUpdatePan = useCallback(
-    (e: React.PointerEvent): boolean => {
+    (e: SketchPointer): boolean => {
       const s = panStateRef.current;
       if (!s || e.pointerId !== s.pointerId || !rfInstance) return false;
       const dx = e.clientX - s.startClientX;
@@ -296,7 +436,7 @@ export function SketchOverlay({
    * End the middle-mouse pan on pointerup / pointercancel. Returns true
    * if the event belongs to the active pan.
    */
-  const tryEndPan = useCallback((e: React.PointerEvent): boolean => {
+  const tryEndPan = useCallback((e: SketchPointer): boolean => {
     const s = panStateRef.current;
     if (!s || e.pointerId !== s.pointerId) return false;
     try {
@@ -309,7 +449,11 @@ export function SketchOverlay({
   }, []);
 
   const handlePointerDown = useCallback(
-    (e: React.PointerEvent) => {
+    (e: SketchPointer) => {
+      // Where the raw-touch engine runs it owns the stylus, so the browser's
+      // own (lossy) pen pointer stream is dropped to avoid handling a contact
+      // twice. Contacts replayed by the engine pass through.
+      if (isSupersededByStylusRawTouch(e)) return;
       // Middle mouse button → start a viewport pan instead of a stroke.
       // We have to handle this here because the overlay sits on top of
       // ReactFlow and swallows the event before its built-in panOnDrag
@@ -318,7 +462,7 @@ export function SketchOverlay({
       // Only the primary button (left mouse / pen tip / first touch) draws.
       // Other buttons (right click etc.) fall through with no action.
       if (e.button !== 0 || !e.isPrimary) return;
-      if (!acceptsPointer(e.pointerType)) return;
+      if (!acceptsPointer(e)) return;
       // Single-touch only: if another pointer is already drawing, treat
       // this as the second finger of a pinch-zoom / pan gesture. Abort the
       // in-progress stroke (release capture, drop preview) so the gesture
@@ -332,8 +476,7 @@ export function SketchOverlay({
           // Capture may already be lost; ignore.
         }
         activePointerIdRef.current = null;
-        screenPtsRef.current = [];
-        setPoints([]);
+        resetStroke();
         clearTokenRef.current++;
         return;
       }
@@ -352,31 +495,44 @@ export function SketchOverlay({
       // Invalidate any pending "clear preview" callback from the previous
       // stroke so it can't wipe the first point of the new one.
       clearTokenRef.current++;
+      // Re-measure once per gesture, so a layout shift that dodged the
+      // observers can never skew a whole stroke.
+      refreshOverlayOrigin();
       const { lx, ly } = toLocal(e.clientX, e.clientY);
       screenPtsRef.current = [[e.clientX, e.clientY, e.pressure]];
-      setPoints([[lx, ly, e.pressure]]);
+      livePtsRef.current = [[lx, ly, e.pressure]];
+      flushPointsNow();
     },
-    [acceptsPointer, toLocal, tryStartPan],
+    [
+      acceptsPointer,
+      flushPointsNow,
+      refreshOverlayOrigin,
+      resetStroke,
+      toLocal,
+      tryStartPan,
+    ],
   );
 
   const handlePointerMove = useCallback(
-    (e: React.PointerEvent) => {
+    (e: SketchPointer) => {
+      if (isSupersededByStylusRawTouch(e)) return;
       if (tryUpdatePan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
       if (e.pointerType === 'mouse' && e.buttons !== 1) return;
       updateCanvasGesture(e.pointerId, { x: e.clientX, y: e.clientY });
       const { lx, ly } = toLocal(e.clientX, e.clientY);
-      screenPtsRef.current = [
-        ...screenPtsRef.current,
-        [e.clientX, e.clientY, e.pressure],
-      ];
-      setPoints((prev) => [...prev, [lx, ly, e.pressure]]);
+      // Append in place — rebuilding both arrays per event made recording a
+      // point O(n), so a single stroke cost O(n²) just to accumulate.
+      screenPtsRef.current.push([e.clientX, e.clientY, e.pressure]);
+      livePtsRef.current.push([lx, ly, e.pressure]);
+      schedulePointsFlush();
     },
-    [toLocal, tryUpdatePan],
+    [schedulePointsFlush, toLocal, tryUpdatePan],
   );
 
   const handlePointerUp = useCallback(
-    (e: React.PointerEvent) => {
+    (e: SketchPointer) => {
+      if (isSupersededByStylusRawTouch(e)) return;
       if (tryEndPan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
       const phase = updateCanvasGesture(e.pointerId, {
@@ -386,18 +542,30 @@ export function SketchOverlay({
       activePointerIdRef.current = null;
       endCanvasGesture(e.pointerId);
       e.currentTarget.releasePointerCapture(e.pointerId);
-      const lastPoint = screenPtsRef.current.at(-1);
-      const pts =
-        lastPoint && lastPoint[0] === e.clientX && lastPoint[1] === e.clientY
-          ? screenPtsRef.current
-          : [...screenPtsRef.current, [e.clientX, e.clientY, e.pressure]];
+      // The stroke deliberately ends at the last pointermove. A pointerup
+      // carries its own coordinates, but as the tip leaves the digitizer the
+      // reported position degrades and lands several px off the real one —
+      // appending it hooked a visible tail onto the end of every stroke, and
+      // `streamline` can't smooth away a terminal outlier. Nothing is lost by
+      // dropping it: the final pointermove is already buffered, and the flush
+      // below publishes it.
+      const liftOff = countLiftOffPoints(screenPtsRef.current);
+      if (liftOff > 0) {
+        // Trim both buffers by the same count so the preview that stays
+        // painted through the handoff below matches the committed stroke.
+        screenPtsRef.current.length -= liftOff;
+        livePtsRef.current.length -= liftOff;
+      }
+      const pts = screenPtsRef.current;
 
       // A tap or natural pointer jitter remains pending and creates no stroke.
-      if (phase !== 'locked' || pts.length < 3) {
-        screenPtsRef.current = [];
-        setPoints([]);
+      if (phase !== 'locked' || pts.length < MIN_STROKE_POINTS) {
+        resetStroke();
         return;
       }
+      // Publish now rather than waiting on the queued frame: the preview has
+      // to be complete for the whole handoff window opened below.
+      flushPointsNow();
 
       const result = processPoints(
         pts,
@@ -537,11 +705,19 @@ export function SketchOverlay({
       const token = ++clearTokenRef.current;
       runAfterFrames(PREVIEW_CLEAR_DELAY_FRAMES, () => {
         if (clearTokenRef.current !== token) return;
-        screenPtsRef.current = [];
-        setPoints([]);
+        resetStroke();
       });
     },
-    [rfInstance, addNode, strokeColor, strokeSize, zoom, tryEndPan],
+    [
+      rfInstance,
+      addNode,
+      strokeColor,
+      strokeSize,
+      zoom,
+      flushPointsNow,
+      resetStroke,
+      tryEndPan,
+    ],
   );
 
   const collectEraseHits = useCallback(
@@ -607,12 +783,13 @@ export function SketchOverlay({
   }, []);
 
   const handleEraserPointerDown = useCallback(
-    (e: React.PointerEvent) => {
+    (e: SketchPointer) => {
+      if (isSupersededByStylusRawTouch(e)) return;
       // Middle mouse button → viewport pan (see handlePointerDown).
       if (tryStartPan(e)) return;
       // Only the primary button (left mouse / pen tip / first touch) erases.
       if (e.button !== 0 || !e.isPrimary) return;
-      if (!acceptsPointer(e.pointerType)) return;
+      if (!acceptsPointer(e)) return;
       // Single-touch only: a second finger lands -> abort the eraser drag
       // and let the underlying canvas handle the pinch / pan gesture.
       if (activePointerIdRef.current !== null) {
@@ -643,15 +820,23 @@ export function SketchOverlay({
       useGesturePreviewStore.getState().clearSketchErasePreview();
       e.currentTarget.setPointerCapture(e.pointerId);
       setErasing(true);
+      refreshOverlayOrigin();
       const { lx, ly } = toLocal(e.clientX, e.clientY);
       setEraserPos({ x: lx, y: ly });
       collectEraseHits(e.clientX, e.clientY);
     },
-    [acceptsPointer, collectEraseHits, toLocal, tryStartPan],
+    [
+      acceptsPointer,
+      collectEraseHits,
+      refreshOverlayOrigin,
+      toLocal,
+      tryStartPan,
+    ],
   );
 
   const handleEraserPointerMove = useCallback(
-    (e: React.PointerEvent) => {
+    (e: SketchPointer) => {
+      if (isSupersededByStylusRawTouch(e)) return;
       // Always update the visual indicator position first, regardless of
       // whether this move belongs to a middle-mouse pan. Otherwise the
       // indicator stays frozen at the pre-pan position throughout the
@@ -669,7 +854,8 @@ export function SketchOverlay({
   );
 
   const handleEraserPointerUp = useCallback(
-    (e: React.PointerEvent) => {
+    (e: SketchPointer) => {
+      if (isSupersededByStylusRawTouch(e)) return;
       if (tryEndPan(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
       const phase = updateCanvasGesture(e.pointerId, {
@@ -696,7 +882,8 @@ export function SketchOverlay({
   }, []);
 
   const handlePointerCancel = useCallback(
-    (e: React.PointerEvent) => {
+    (e: SketchPointer) => {
+      if (isSupersededByStylusRawTouch(e)) return;
       if (e.pointerId !== activePointerIdRef.current) return;
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
@@ -740,15 +927,46 @@ export function SketchOverlay({
     return `url("data:image/svg+xml;utf8,${svg}") ${center} ${center}, crosshair`;
   }, [resolvedColor, strokeSize, zoom]);
 
+  // Tessellate only when the stroke buffer is actually republished (once per
+  // frame at most). Computing this inline in the JSX re-ran perfect-freehand
+  // over the whole stroke on *every* render, including ones the stroke had no
+  // part in — eraser indicator moves, tool changes, store updates.
+  const livePath = useMemo(
+    () => (points.length > 0 ? pointsToPath(points, zoom, strokeSize) : ''),
+    [points, zoom, strokeSize],
+  );
+
+  // Raw-touch stylus engine. Where the browser's synthesized pen pointer
+  // stream is lossy (WebKit drops light / fast Apple-Pencil contacts), stylus
+  // contacts are replayed into these very handlers as synthetic pen events, so
+  // all draw / erase / commit / merge logic is reused verbatim. Inert on every
+  // other device — see `stylusRawTouch.ts` for the capability gate.
+  useStylusRawTouch(
+    overlayEl,
+    mode === 'erase'
+      ? {
+          onDown: handleEraserPointerDown,
+          onMove: handleEraserPointerMove,
+          onUp: handleEraserPointerUp,
+          onCancel: handlePointerCancel,
+        }
+      : {
+          onDown: handlePointerDown,
+          onMove: handlePointerMove,
+          onUp: handlePointerUp,
+          onCancel: handlePointerCancel,
+        },
+  );
+
   if (mode === 'erase') {
     // Eraser indicator and hit area are both defined in screen-space px
     // (`eraserScreenRadius`), so they match exactly and stay constant on
     // screen as the user pans/zooms.
     return (
       <div
-        ref={overlayRef}
+        ref={setOverlayEl}
         className="absolute inset-0 z-4"
-        style={{ cursor: 'none' }}
+        style={{ cursor: 'none', ...getStylusRawTouchOverlayStyle() }}
         onPointerDown={handleEraserPointerDown}
         onPointerMove={handleEraserPointerMove}
         onPointerUp={handleEraserPointerUp}
@@ -774,21 +992,16 @@ export function SketchOverlay({
 
   return (
     <div
-      ref={overlayRef}
+      ref={setOverlayEl}
       className="absolute inset-0 z-4"
-      style={{ cursor: dotCursor }}
+      style={{ cursor: dotCursor, ...getStylusRawTouchOverlayStyle() }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
     >
       <svg className="h-full w-full">
-        {points.length > 0 && (
-          <path
-            d={pointsToPath(points, zoom, strokeSize)}
-            fill={resolvedColor}
-          />
-        )}
+        {livePath !== '' && <path d={livePath} fill={resolvedColor} />}
       </svg>
     </div>
   );
