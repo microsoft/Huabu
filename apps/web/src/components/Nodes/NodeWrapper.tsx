@@ -9,6 +9,7 @@ import { FileWarning, FolderOpen, RefreshCw } from 'lucide-react';
 import React, {
   memo,
   useCallback,
+  useContext,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -51,7 +52,10 @@ import { useGesturePreviewStore } from '@/store/gesturePreviewStore.ts';
 import { coerceProvenance } from '@/utils/blockProvenance';
 
 import { getAccentTokens } from './accentTokens.ts';
-import { NodeConnectionHandles } from './NodeConnectAffordance.tsx';
+import {
+  NodeConnectionHandles,
+  PendingConnectPortContext,
+} from './NodeConnectAffordance.tsx';
 import { NodeTakeoverLayer } from './NodeTakeoverLayer.tsx';
 import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
 
@@ -561,6 +565,15 @@ export const NodeWrapper = memo(
       (s) => Object.keys(s.sketchStrokeSelection).length > 0,
     );
 
+    // While a create-connected gesture is pending, the picker asks "what
+    // kind of node goes on the end of this edge?" — a different question
+    // from "what does the selected node look like?". Showing both toolbars
+    // at once puts two unrelated control clusters on screen for one
+    // gesture, so every node's toolbar stands down until the pick is
+    // committed or cancelled (including the source node's own).
+    const connectPortContext = useContext(PendingConnectPortContext);
+    const hasPendingConnect = connectPortContext?.pendingPort != null;
+
     // Derive accent-tinted tokens once so border/shadow stay in sync with
     // the rest of the canvas (PreviewCard, SemanticPlaceholder, ...).
     // Stored value is a palette token (or legacy hex); resolve to CSS color.
@@ -597,7 +610,8 @@ export const NodeWrapper = memo(
         {selected &&
           selectedCount === 1 &&
           !isDragging &&
-          !hasStrokeSelection && (
+          !hasStrokeSelection &&
+          !hasPendingConnect && (
             <NodeFloatingToolbar
               id={id}
               type={type}

@@ -12,6 +12,7 @@ import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
 import { ChatPanel } from '../../components/Panels/ChatPanel';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
+import { useTrackCanvasAttention } from '../../store/canvasAttentionStore';
 import useStore, { dismissVersionConflictToast } from '../../store/canvasStore';
 import { useCanvasSyncStore } from '../../store/canvasSyncStore';
 import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
@@ -77,6 +78,12 @@ export default function CanvasPage() {
   // left layer panel (or, when focus is inside the expanded
   // preview, the in-preview find bar).
   useGlobalSearchHotkey();
+
+  // Canvas floating chrome steps aside while the user works in the chat
+  // panel, an expanded node, or the layer panel. Tracked here rather than
+  // inside `Canvas` because the surfaces being arbitrated between are
+  // siblings of the canvas, not children of it.
+  useTrackCanvasAttention();
 
   // Real-time sync: subscribe to server-pushed canvas mutations (e.g. an
   // ACP agent writing via the reachback `/execute` route) for the loaded

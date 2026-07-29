@@ -14,6 +14,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
+import { useCanvasAttentionStore } from '@/store/canvasAttentionStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
 import { usePreviewStore } from '@/store/previewStore';
@@ -108,6 +109,16 @@ export function CanvasFloatingPopover({
   // leaving two competing floating layers on screen at once.
   const hiddenByGlobalModal = useAnyGlobalModalOpen();
 
+  // Hide whenever the user has moved on to another surface — the chat
+  // panel, a split-mode expanded node, the layer panel. Selection is
+  // deliberately *not* cleared in that case (coming back should resume
+  // where they left off), but chrome that belongs to a surface nobody is
+  // working in is pure noise. Clicking anywhere on the canvas — including
+  // re-clicking the same node — restores it.
+  const hiddenByOtherSurface = useCanvasAttentionStore(
+    (s) => !s.isCanvasEngaged,
+  );
+
   // Virtual reference element: Floating UI calls `getBoundingClientRect`
   // on every position recalculation, so we always read fresh values
   // from the live React Flow container. The identity changes whenever
@@ -187,13 +198,15 @@ export function CanvasFloatingPopover({
     !open ||
     !virtualReference ||
     hiddenByExpandedPanel ||
-    hiddenByGlobalModal
+    hiddenByGlobalModal ||
+    hiddenByOtherSurface
   )
     return null;
 
   return createPortal(
     <div
       ref={refs.setFloating}
+      data-canvas-chrome=""
       className={className}
       style={{
         ...floatingStyles,
