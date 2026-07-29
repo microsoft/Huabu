@@ -38,6 +38,11 @@ import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import { CanvasRefNode } from '@/components/Nodes/canvasRef/CanvasRefNode';
 import { FrameRefNode } from '@/components/Nodes/frameRef/FrameRefNode';
 import { ImageNode } from '@/components/Nodes/image/ImageNode';
+import {
+  sideFromHandleId,
+  useCreateConnectedNode,
+  type ConnectedNodeKind,
+} from '@/components/Nodes/NodeConnectAffordance.tsx';
 import { NodeRefNode } from '@/components/Nodes/nodeRef/NodeRefNode';
 import { NoteNode } from '@/components/Nodes/note/NoteNode';
 import { OfficeNode } from '@/components/Nodes/office/OfficeNode';
@@ -84,6 +89,7 @@ import {
   resolveNodeDraggable,
 } from './canvasInputPolicy.ts';
 import { NodeToolbar } from './CanvasToolbar.tsx';
+import { ConnectedNodePicker } from './ConnectedNodePicker.tsx';
 import {
   EDIT_EDGE_LABEL_EVENT,
   LabelledEdge,
@@ -101,6 +107,7 @@ import { StructuredDropOverlay } from './StructuredDropOverlay.tsx';
 import { useInitialCanvasViewport } from './useInitialCanvasViewport.ts';
 import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
+import { useConnectPortStore } from '../../../store/connectPortStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
 import { usePreviewStore } from '../../../store/previewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
@@ -515,6 +522,19 @@ export const Canvas: React.FC<CanvasProps> = ({
     selectNodes(nodes.filter((n) => n.selected).map((n) => n.id));
   }, [nodes, selectNodes, tool]);
 
+  // Pending "create a connected node" gesture: geometry is already
+  // resolved, only the node type is still missing. Held in a store rather
+  // than local state because every node's ports read it too (see
+  // `connectPortStore`).
+  const connectPicker = useConnectPortStore((s) => s.pending);
+  const setConnectPicker = useConnectPortStore((s) => s.setPending);
+  const createConnectedNode = useCreateConnectedNode();
+
+  // A pending gesture belongs to the mounted canvas; leaving the page (or
+  // swapping canvases) must not leave a picker armed against a node that
+  // is no longer on screen.
+  useEffect(() => () => setConnectPicker(null), [setConnectPicker]);
+
   // Reject self-connections (an edge whose source and target are the same
   // node). React Flow uses this both to show the in-progress connection
   // line as invalid and to suppress the `onConnect` callback, so a
@@ -524,14 +544,26 @@ export const Canvas: React.FC<CanvasProps> = ({
     [],
   );
 
-  // When a connection drag ends without landing on a handle, check if the
-  // pointer is over a node element and create the connection anyway.
-  // This makes connecting much easier on touch devices.
+  // Every connect gesture that React Flow did not resolve itself lands
+  // here, and the release point decides what it meant:
+  //
+  //   - over another node  -> connect the two nodes (React Flow only
+  //     accepts drops on a handle, so this also makes connecting far
+  //     easier on touch devices);
+  //   - over empty canvas  -> create a connected node right there;
+  //   - back on the source node -> this is what a plain *click* on a
+  //     port produces (press and release without moving), so auto-place
+  //     the new node off that port's side.
+  //
+  // The last two only pick the geometry; `ConnectedNodePicker` then asks
+  // for the node type. Folding "create" into the ports is what let the
+  // four side arrows go away.
   const onConnectEnd = useCallback(
     (
       event: MouseEvent | TouchEvent,
       connectionState: {
         fromNode?: { id: string } | null;
+        fromHandle?: { id?: string | null } | null;
         isValid: boolean | null;
       },
     ) => {
@@ -541,29 +573,71 @@ export const Canvas: React.FC<CanvasProps> = ({
       const sourceNodeId = connectionState.fromNode?.id;
       if (!sourceNodeId) return;
 
+      const releasePoint =
+        event instanceof TouchEvent
+          ? {
+              x: event.changedTouches[0].clientX,
+              y: event.changedTouches[0].clientY,
+            }
+          : { x: event.clientX, y: event.clientY };
+
       // Determine the element under the pointer
       const target =
         event instanceof TouchEvent
-          ? document.elementFromPoint(
-              event.changedTouches[0].clientX,
-              event.changedTouches[0].clientY,
-            )
+          ? document.elementFromPoint(releasePoint.x, releasePoint.y)
           : (event.target as Element);
 
-      const nodeEl = closestNodeElement(target);
-      if (!nodeEl) return;
+      const targetNodeId =
+        closestNodeElement(target)?.getAttribute('data-id') ?? null;
 
-      const targetNodeId = nodeEl.getAttribute('data-id');
-      if (!targetNodeId || targetNodeId === sourceNodeId) return;
+      if (targetNodeId && targetNodeId !== sourceNodeId) {
+        onConnect({
+          source: sourceNodeId,
+          target: targetNodeId,
+          sourceHandle: null,
+          targetHandle: null,
+        });
+        return;
+      }
 
-      onConnect({
-        source: sourceNodeId,
-        target: targetNodeId,
-        sourceHandle: null,
-        targetHandle: null,
+      const instance = rfInstanceRef.current;
+      if (!instance) return;
+      const anchor = instance.screenToFlowPosition(releasePoint);
+      const side = sideFromHandleId(connectionState.fromHandle?.id);
+      if (!side) return;
+
+      setConnectPicker({
+        sourceId: sourceNodeId,
+        side,
+        anchor,
+        kind: targetNodeId === sourceNodeId ? 'side' : 'point',
       });
     },
-    [onConnect],
+    [onConnect, setConnectPicker],
+  );
+
+  const handleConnectedKindPick = useCallback(
+    (nodeKind: ConnectedNodeKind) => {
+      // Read-then-act rather than acting inside a `setState` updater:
+      // updaters must be pure, and React double-invokes them in
+      // StrictMode — which would create the node twice.
+      const pending = useConnectPortStore.getState().pending;
+      if (!pending) return;
+      setConnectPicker(null);
+      createConnectedNode(
+        pending.sourceId,
+        pending.kind === 'side'
+          ? { kind: 'side', side: pending.side }
+          : { kind: 'point', point: pending.anchor },
+        nodeKind,
+      );
+    },
+    [createConnectedNode, setConnectPicker],
+  );
+
+  const dismissConnectPicker = useCallback(
+    () => setConnectPicker(null),
+    [setConnectPicker],
   );
 
   // --- Frame drag-to-create gesture (mouse / pen / touch) ---
@@ -1295,6 +1369,19 @@ export const Canvas: React.FC<CanvasProps> = ({
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onConnectEnd={onConnectEnd}
+        // A port is also the "create a connected node" button, so a plain
+        // click on one has to reach `onConnectEnd`. React Flow only starts
+        // (and therefore only ends) a connection once the pointer has moved
+        // past `connectionDragThreshold`, which defaults to 1px — a click
+        // that never moves would be dropped silently. Starting at 0px makes
+        // press-and-release a first-class connect gesture.
+        connectionDragThreshold={0}
+        // React Flow's own click-to-connect would fight ours: it treats the
+        // first port click as "arm a connection" and the next port click as
+        // "complete it", silently drawing an edge between two ports the user
+        // only meant to press the `+` on. Ports are our control now, so this
+        // second, invisible click protocol has to be off.
+        connectOnClick={false}
         isValidConnection={isValidConnection}
         connectionMode={ConnectionMode.Loose}
         onNodeDragStart={onNodeDragStart}
@@ -1420,6 +1507,20 @@ export const Canvas: React.FC<CanvasProps> = ({
         {!isBoxSelecting && <StrokeSelectionRegion />}
         {!isBoxSelecting && <StrokeSelectionToolbar />}
         {!isBoxSelecting && <EdgeStyleToolbar />}
+        <ConnectedNodePicker
+          anchor={connectPicker?.anchor ?? null}
+          tether={
+            connectPicker?.kind === 'point'
+              ? {
+                  nodeId: connectPicker.sourceId,
+                  side: connectPicker.side,
+                  to: connectPicker.anchor,
+                }
+              : null
+          }
+          onSelect={handleConnectedKindPick}
+          onDismiss={dismissConnectPicker}
+        />
         <IntentPopover />
         <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
 

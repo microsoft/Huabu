@@ -3,7 +3,7 @@
 > Structure, dependency rules, and conventions for the frontend. The point of
 > this doc is the **layering rules** below — not an exhaustive file listing
 > (those rot fast; `ls` the dir for the current files).
-> Last updated: 2026-07-23
+> Last updated: 2026-07-29
 
 ---
 
@@ -73,6 +73,10 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 6. **Barrel exports** (`index.ts`) provide clean import paths in `handler/`, `utils/io/`, `utils/node/`.
 7. **Design tokens only** — never raw hex / Tailwind palette / ShadCN aliases. The token declarations in [`apps/web/src/index.css`](../../apps/web/src/index.css) are authoritative; reusable UI contracts live in [`apps/web/src/components/Common/`](../../apps/web/src/components/Common/).
 8. **Development playgrounds** belong in `pages/playground/`, use route-level lazy imports, are registered only when `import.meta.env.DEV` is true, and live outside `WorkspaceGuardLayout` so visual testing does not require an active workspace.
+
+### Toast duration contract
+
+[`Toast`](../../apps/web/src/components/Common/Toast.tsx) derives its default auto-dismiss duration from tone: `danger` toasts persist until dismissed, while `neutral`, `info`, `success`, and `warning` toasts dismiss after 3000 ms. Callers may explicitly set `duration` to override either default, including a positive duration for a transient danger message or `0` for any persistent message.
 
 ### Clipboard contract
 
@@ -224,6 +228,7 @@ The native macOS Help menu and the Windows/Linux in-app application menu reuse t
 | [`apps/web/src/config/handbook.ts`](../../apps/web/src/config/handbook.ts)                                    | Validate and open the canonical external handbook URL.                                        |
 | [`apps/web/src/hooks/useElectron.ts`](../../apps/web/src/hooks/useElectron.ts)                                | Typed Electron bridge access, fixed support operations, and copied system-information format. |
 | [`apps/web/src/store/conversationOwner.ts`](../../apps/web/src/store/conversationOwner.ts)                    | Generic presentation-anchor/conversation-owner routing and owner-aware lifecycle writes.      |
+| [`apps/web/src/components/Common/Toast.tsx`](../../apps/web/src/components/Common/Toast.tsx)                  | Global toast state, tone-specific presentation, duration defaults, and dismissal.             |
 | [`apps/web/src/components/Panels/ExpandedNodePanel/`](../../apps/web/src/components/Panels/ExpandedNodePanel) | Expanded content rendering and edge-connected node navigation.                                |
 | [`apps/desktop/src/preload.ts`](../../apps/desktop/src/preload.ts)                                            | Narrow sandbox bridge for native menu and diagnostics operations.                             |
 | [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts)                                                  | Electron window security, external URLs, and fixed diagnostics IPC handlers.                  |

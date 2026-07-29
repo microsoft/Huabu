@@ -47,15 +47,13 @@ import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore, {
   clearNodeDuplicateGuard,
 } from '@/store/canvasStore.ts';
+import { useConnectPortStore } from '@/store/connectPortStore.ts';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore.ts';
+import { useNodeCollapseStore } from '@/store/nodeCollapseStore.ts';
 import { coerceProvenance } from '@/utils/blockProvenance';
 
 import { getAccentTokens } from './accentTokens.ts';
-import {
-  NodeConnectionHandles,
-  NodeSideAffordance,
-  useCreateConnectedNode,
-} from './NodeConnectAffordance.tsx';
+import { NodeConnectionHandles } from './NodeConnectAffordance.tsx';
 import { NodeTakeoverLayer } from './NodeTakeoverLayer.tsx';
 import { SemanticPlaceholder } from './SemanticPlaceholder.tsx';
 
@@ -318,8 +316,6 @@ export const NodeWrapper = memo(
     const [hovered, setHovered] = useState(false);
     const [editing, setEditing] = useState(false);
 
-    const handleCreateConnected = useCreateConnectedNode(id);
-
     // Open the canvas's `nodes/` folder so the user can resolve a
     // duplicate-sidecar collision by hand (keep one file, delete the
     // rest). `canvasId` is read lazily from the store so the wrapper
@@ -556,8 +552,18 @@ export const NodeWrapper = memo(
     // unselected node on a freshly loaded canvas. Selecting a node already
     // re-renders this component, so the handles still mount in the same
     // commit as the selection highlight (no perceptible delay).
+    // A node collapsed to its takeover mark has no visible card to resize,
+    // and the handles would sit on the faded footprint's corners — far from
+    // the mark, framing nothing. Zooming back in restores them.
+    const isCollapsedToMark = useNodeCollapseStore(
+      (s) => s.marks[id] !== undefined,
+    );
     const showResizer =
-      selected && resizable && !data.locked && selectedCount === 1;
+      selected &&
+      resizable &&
+      !data.locked &&
+      selectedCount === 1 &&
+      !isCollapsedToMark;
 
     // While a stroke-level (sketch) selection exists, its own toolbar (or,
     // on desktop, none) owns the surface — suppress this node's floating
@@ -566,6 +572,14 @@ export const NodeWrapper = memo(
     const hasStrokeSelection = useGesturePreviewStore(
       (s) => Object.keys(s.sketchStrokeSelection).length > 0,
     );
+
+    // While a create-connected gesture is pending, the picker asks "what
+    // kind of node goes on the end of this edge?" — a different question
+    // from "what does the selected node look like?". Showing both toolbars
+    // at once puts two unrelated control clusters on screen for one
+    // gesture, so every node's toolbar stands down until the pick is
+    // committed or cancelled (including the source node's own).
+    const hasPendingConnect = useConnectPortStore((s) => s.pending !== null);
 
     // Derive accent-tinted tokens once so border/shadow stay in sync with
     // the rest of the canvas (PreviewCard, SemanticPlaceholder, ...).
@@ -603,7 +617,8 @@ export const NodeWrapper = memo(
         {selected &&
           selectedCount === 1 &&
           !isDragging &&
-          !hasStrokeSelection && (
+          !hasStrokeSelection &&
+          !hasPendingConnect && (
             <NodeFloatingToolbar
               id={id}
               type={type}
@@ -808,18 +823,12 @@ export const NodeWrapper = memo(
           </div>
 
           <NodeConnectionHandles
+            nodeId={id}
             hovered={hovered}
             selected={!!selected}
             isNotMouse={isNotMouse}
           />
         </div>
-
-        <NodeSideAffordance
-          nodeId={id}
-          selected={!!selected && selectedCount === 1 && !isDragging}
-          editing={editing}
-          onCreate={handleCreateConnected}
-        />
       </>
     );
   },

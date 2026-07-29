@@ -23,6 +23,10 @@ import { NODE_ICON } from '@/config/nodeIcons';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
+import {
+  collapsedMarkRect,
+  useNodeCollapseStore,
+} from '@/store/nodeCollapseStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 
@@ -83,6 +87,10 @@ export const NodeFloatingToolbar = memo(
   ({ id, type, data, toolbar, actions }: NodeFloatingToolbarProps) => {
     const { t } = useTranslation();
     const internalNode = useInternalNode(id);
+    // While the node is collapsed to its takeover mark the card has faded
+    // out, so the toolbar anchors to the mark instead of hovering above the
+    // top edge of an invisible rectangle.
+    const mark = useNodeCollapseStore((s) => s.marks[id]);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const convertNodeType = useCanvasStore((s) => s.convertNodeType);
     const deleteNodes = useCanvasStore((s) => s.deleteNodes);
@@ -133,6 +141,7 @@ export const NodeFloatingToolbar = memo(
     // displayed value reflects the content-driven height.
     const anchor = useMemo(() => {
       if (!internalNode) return null;
+      if (mark) return collapsedMarkRect(mark);
       const x = internalNode.internals.positionAbsolute?.x ?? 0;
       const y = internalNode.internals.positionAbsolute?.y ?? 0;
       const styleW = internalNode.style?.width as number | undefined;
@@ -140,7 +149,7 @@ export const NodeFloatingToolbar = memo(
       const width = styleW ?? internalNode.measured?.width ?? 0;
       const height = styleH ?? internalNode.measured?.height ?? 0;
       return { x, y, width, height };
-    }, [internalNode]);
+    }, [internalNode, mark]);
 
     // Current size shown in the size picker. Same source-of-truth
     // ordering as the anchor above: pinned `style` first, content-driven
