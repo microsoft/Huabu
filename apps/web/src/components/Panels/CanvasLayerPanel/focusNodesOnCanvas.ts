@@ -1,6 +1,65 @@
-import type { ReactFlowInstance } from '@xyflow/react';
+import type { ReactFlowInstance, Viewport } from '@xyflow/react';
 
-type NodeBounds = { x: number; y: number; width: number; height: number };
+type NodeBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type ViewportSize = { width: number; height: number };
+
+/** Keep the same flow-space point at the centre when the canvas is resized. */
+export const anchorViewportCentre = (
+  viewport: Viewport,
+  previousSize: ViewportSize,
+  nextSize: ViewportSize,
+): Viewport => ({
+  x: viewport.x + (nextSize.width - previousSize.width) / 2,
+  y: viewport.y + (nextSize.height - previousSize.height) / 2,
+  zoom: viewport.zoom,
+});
+
+/**
+ * Reveal flow-space bounds with the smallest screen-space pan possible.
+ * Oversized bounds are centred on the axis that cannot fit without zooming.
+ */
+export const revealBoundsInViewport = (
+  viewport: Viewport,
+  viewportSize: ViewportSize,
+  bounds: NodeBounds,
+  padding = 24,
+): Viewport => {
+  const safeWidth = Math.max(0, viewportSize.width - padding * 2);
+  const safeHeight = Math.max(0, viewportSize.height - padding * 2);
+  const left = bounds.x * viewport.zoom + viewport.x;
+  const top = bounds.y * viewport.zoom + viewport.y;
+  const right = left + bounds.width * viewport.zoom;
+  const bottom = top + bounds.height * viewport.zoom;
+  const safeRight = viewportSize.width - padding;
+  const safeBottom = viewportSize.height - padding;
+
+  let dx = 0;
+  if (right - left > safeWidth) {
+    dx = viewportSize.width / 2 - (left + right) / 2;
+  } else if (left < padding) {
+    dx = padding - left;
+  } else if (right > safeRight) {
+    dx = safeRight - right;
+  }
+
+  let dy = 0;
+  if (bottom - top > safeHeight) {
+    dy = viewportSize.height / 2 - (top + bottom) / 2;
+  } else if (top < padding) {
+    dy = padding - top;
+  } else if (bottom > safeBottom) {
+    dy = safeBottom - bottom;
+  }
+
+  if (dx === 0 && dy === 0) return viewport;
+  return { x: viewport.x + dx, y: viewport.y + dy, zoom: viewport.zoom };
+};
 
 /** Resolve bounds even when `onlyRenderVisibleElements` left nodes unmeasured. */
 export const getReliableNodeBounds = (

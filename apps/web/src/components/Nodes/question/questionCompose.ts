@@ -25,7 +25,9 @@ export function enterQuestionCompose(
   canvasId: string | null,
 ): void {
   useChatStore.getState().openQuestionCompose(view, canvasId || undefined);
-  usePanelStore.getState().requestOpenRightPanel();
+  usePanelStore
+    .getState()
+    .requestOpenRightPanel(view.presentationAnchor.nodeId);
   usePanelStore.getState().requestFocusChatInput();
 }
 

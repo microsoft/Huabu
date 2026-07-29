@@ -177,7 +177,7 @@ export const QuestionNode = memo(
             ? 'last-user'
             : 'bottom',
       );
-      requestOpenRightPanel();
+      requestOpenRightPanel(id);
       // Mark as viewed only once the run has finished.
       if (hasRun && !data.viewed) {
         patchNodeSilent(id, { viewed: true });

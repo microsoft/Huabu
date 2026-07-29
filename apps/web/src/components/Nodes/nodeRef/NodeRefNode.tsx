@@ -84,7 +84,7 @@ export const NodeRefNode = memo(
           ? 'last-user'
           : 'bottom',
       );
-      requestOpenRightPanel();
+      requestOpenRightPanel(id);
 
       if (
         (latest.source.status === 'done' || latest.source.status === 'error') &&
