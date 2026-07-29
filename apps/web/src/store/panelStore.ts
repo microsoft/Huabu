@@ -38,6 +38,9 @@ interface PanelState {
    * first-time users.
    */
   isRightCollapsed: boolean;
+  /** Node explicitly associated with the action that opened Chat. */
+  rightPanelAnchorNodeId: string | null;
+  clearRightPanelAnchor: () => void;
   setRightCollapsed: (collapsed: boolean) => void;
   toggleRightPanel: () => void;
   /**
@@ -47,7 +50,7 @@ interface PanelState {
    * can layer extra behaviour here later (focus, scroll, telemetry)
    * without touching callers.
    */
-  requestOpenRightPanel: () => void;
+  requestOpenRightPanel: (anchorNodeId?: string) => void;
 
   /**
    * Monotonic counter bumped whenever some surface wants the chat input
@@ -74,10 +77,23 @@ export const usePanelStore = create<PanelState>()(
       toggleSearchOpen: () => set((s) => ({ isSearchOpen: !s.isSearchOpen })),
 
       isRightCollapsed: true,
-      setRightCollapsed: (collapsed) => set({ isRightCollapsed: collapsed }),
+      rightPanelAnchorNodeId: null,
+      clearRightPanelAnchor: () => set({ rightPanelAnchorNodeId: null }),
+      setRightCollapsed: (collapsed) =>
+        set({
+          isRightCollapsed: collapsed,
+          rightPanelAnchorNodeId: null,
+        }),
       toggleRightPanel: () =>
-        set((s) => ({ isRightCollapsed: !s.isRightCollapsed })),
-      requestOpenRightPanel: () => set({ isRightCollapsed: false }),
+        set((s) => ({
+          isRightCollapsed: !s.isRightCollapsed,
+          rightPanelAnchorNodeId: null,
+        })),
+      requestOpenRightPanel: (anchorNodeId) =>
+        set({
+          isRightCollapsed: false,
+          rightPanelAnchorNodeId: anchorNodeId ?? null,
+        }),
 
       focusChatInputNonce: 0,
       requestFocusChatInput: () =>

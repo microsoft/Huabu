@@ -219,6 +219,7 @@ function parseStoredViewport(raw: string | null): CanvasViewport | null {
 
 function readViewportFromStorage(canvasId: string): CanvasViewport | null {
   if (!canvasId) return null;
+  flushViewportWrite();
   const key = viewportStorageKey(canvasId);
 
   try {
@@ -245,17 +246,50 @@ function viewportCentreOf(viewport: CanvasViewport | null): {
   };
 }
 
+// Layout-driven viewport corrections (panel open/close compensation) arrive
+// once per animation frame, so the write is debounced and only the settled
+// viewport reaches `localStorage`. Reads and canvas switches flush first, so
+// a pending write is never observed as stale or dropped.
+const VIEWPORT_WRITE_DEBOUNCE_MS = 200;
+
+let pendingViewportWrite: {
+  canvasId: string;
+  viewport: CanvasViewport;
+} | null = null;
+let viewportWriteTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushViewportWrite(): void {
+  if (viewportWriteTimer !== null) {
+    clearTimeout(viewportWriteTimer);
+    viewportWriteTimer = null;
+  }
+  const pending = pendingViewportWrite;
+  pendingViewportWrite = null;
+  if (!pending) return;
+  try {
+    localStorage.setItem(
+      viewportStorageKey(pending.canvasId),
+      JSON.stringify(pending.viewport),
+    );
+  } catch {
+    // Viewport persistence must never block interaction.
+  }
+}
+
 function writeViewportToStorage(
   canvasId: string,
   viewport: CanvasViewport,
 ): void {
   if (!canvasId) return;
-  const key = viewportStorageKey(canvasId);
-  try {
-    localStorage.setItem(key, JSON.stringify(viewport));
-  } catch {
-    // Viewport persistence must never block interaction.
+  if (pendingViewportWrite && pendingViewportWrite.canvasId !== canvasId) {
+    flushViewportWrite();
   }
+  pendingViewportWrite = { canvasId, viewport };
+  if (viewportWriteTimer !== null) clearTimeout(viewportWriteTimer);
+  viewportWriteTimer = setTimeout(
+    flushViewportWrite,
+    VIEWPORT_WRITE_DEBOUNCE_MS,
+  );
 }
 
 // ─── MiniMap-visibility localStorage ──────────────────────────────────────

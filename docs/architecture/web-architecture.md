@@ -194,11 +194,15 @@ selection toggles don't break xyflow's per-element `React.memo`.
 
 ## 7. Related docs
 
-Canvas pan and zoom are local UI state rather than canvas topology. [`canvasStore`](../../apps/web/src/store/canvasStore.ts) records the last viewport under a canvas-specific `localStorage` key, allowing both browser and Electron users to reopen a canvas at the previous view without creating server writes or sharing a viewport across devices.
+Canvas pan and zoom are local UI state rather than canvas topology. [`canvasStore`](../../apps/web/src/store/canvasStore.ts) records the last viewport under a canvas-specific `localStorage` key, allowing both browser and Electron users to reopen a canvas at the previous view without creating server writes or sharing a viewport across devices. The write is debounced so a per-frame animation persists once; reads and canvas switches flush any pending write first.
+
+Layout-driven Canvas resizes preserve the flow-space point at the centre of the visible Canvas and preserve zoom. Opening, closing, or resizing Layers, Chat, and split preview panels therefore expands or contracts the visible area around the current viewpoint instead of keeping one screen edge fixed. Replace previews freeze the hidden zero-width Canvas viewport, and sub-pixel corrections are dropped rather than persisted. When opening a split node or opening Chat from a canvas node, the initiating node becomes a temporary layout anchor: after centre compensation, Canvas applies only the minimum additional pan needed to place its bounds inside a 24px safe area, without zooming. That temporary Chat anchor expires on a fixed timer that outlives the panel transition, so it is discarded even when opening Chat changed no layout and cannot affect a later, unrelated resize; ordinary Chat toggles never derive an anchor from historical selection. Explicit navigation through node references, Layers, or search remains separate and may centre its requested target.
 
 - [canvas-command-architecture.md](./canvas-command-architecture.md) — the command/engine model (shared, server + web).
 - [agent-context.md](./agent-context.md) — how the web assembles agent context.
 - [api-design.md](./api-design.md) — HTTP/SSE contract rules the `api/` clients follow.
+
+Viewport resize and reveal geometry lives in [`focusNodesOnCanvas.ts`](../../apps/web/src/components/Panels/CanvasLayerPanel/focusNodesOnCanvas.ts); [`Canvas.tsx`](../../apps/web/src/components/Panels/Canvas/Canvas.tsx) applies it through a `ResizeObserver`, and [`panelStore.ts`](../../apps/web/src/store/panelStore.ts) carries the one-shot Chat node anchor.
 
 ---
 

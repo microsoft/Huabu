@@ -109,6 +109,7 @@ import { GRID_SIZE, MAX_ZOOM, MIN_ZOOM } from '../../../config/canvas.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useConnectPortStore } from '../../../store/connectPortStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
+import { usePanelStore } from '../../../store/panelStore.ts';
 import { usePreviewStore } from '../../../store/previewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
 import { useWorkspaceStore } from '../../../store/workspaceStore.ts';
@@ -133,6 +134,11 @@ import {
 import { SketchProcessingOverlay } from '../../Nodes/sketch/SketchProcessingOverlay.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
+import {
+  anchorViewportCentre,
+  getReliableNodeBounds,
+  revealBoundsInViewport,
+} from '../CanvasLayerPanel/focusNodesOnCanvas.ts';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
@@ -230,6 +236,21 @@ const EXPANDABLE_TYPES = new Set([
   'office',
   'note',
 ]);
+
+/**
+ * How long a Chat open keeps its node anchor. Long enough to outlive the
+ * 220ms panel width transition (see `index.css`), short enough that the
+ * anchor cannot survive into the user's next interaction.
+ */
+const RIGHT_PANEL_ANCHOR_TTL_MS = 400;
+
+/**
+ * Viewport corrections below this many screen pixels are dropped. Integer
+ * `clientWidth` versus fractional `contentRect`, and fractional layout
+ * widths, produce sub-pixel deltas that are invisible but still round-trip
+ * through `onMoveEnd` and dirty the persisted viewport.
+ */
+const VIEWPORT_CORRECTION_EPSILON_PX = 0.5;
 
 /**
  * `--color-info` is a design-system token that does not change at runtime,
@@ -431,6 +452,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   const { setPendingNodeType } = useToolStore.getState();
 
   const [isBoxSelecting, setIsBoxSelecting] = useState(false);
+  const rightPanelAnchorNodeId = usePanelStore(
+    (state) => state.rightPanelAnchorNodeId,
+  );
+  const clearRightPanelAnchor = usePanelStore(
+    (state) => state.clearRightPanelAnchor,
+  );
 
   // Turning the World feature on/off changes whether this Space resolves
   // its derived pin state at all, so re-run the boundary refresh.
@@ -1117,23 +1144,76 @@ export const Canvas: React.FC<CanvasProps> = ({
     [pendingNodeType, expandedNodeId, closeExpanded, placePendingNode],
   );
 
-  // When a node is expanded in split mode, pan the canvas so the node stays visible.
+  // Keep layout-driven canvas resizes spatially stable. Side panels and split
+  // previews change the wrapper size without changing React Flow's transform;
+  // compensating by half the size delta keeps the same flow point centred.
+  // An expanded split node is a stronger anchor, so reveal it with the minimum
+  // additional pan after the centre compensation. Replace mode reports a zero
+  // width and is deliberately ignored, freezing the hidden canvas viewport.
   useEffect(() => {
-    if (!expandedNodeId || expandMode !== 'split') return;
-    // Wait for the canvas container's `data-animate-width` CSS transition
-    // (220ms, see index.css) to fully settle before fitting — otherwise
-    // React Flow still has the pre-transition (larger) container size and
-    // the node ends up centered in the old viewport instead of the new one.
-    const timer = setTimeout(() => {
-      rfInstanceRef.current?.fitView({
-        nodes: [{ id: expandedNodeId }],
-        duration: 300,
-        maxZoom: rfInstanceRef.current.getZoom(),
-        padding: 0.15,
-      });
-    }, 260);
+    const wrapper = wrapperRef.current;
+    if (!wrapper || typeof ResizeObserver === 'undefined') return;
+
+    let previousSize = {
+      width: wrapper.clientWidth,
+      height: wrapper.clientHeight,
+    };
+    const observer = new ResizeObserver(([entry]) => {
+      const nextSize = {
+        width: entry.contentRect.width,
+        height: entry.contentRect.height,
+      };
+      if (nextSize.width <= 0 || nextSize.height <= 0) return;
+
+      const instance = rfInstanceRef.current;
+      if (!instance) {
+        previousSize = nextSize;
+        return;
+      }
+
+      const currentViewport = instance.getViewport();
+      let nextViewport = anchorViewportCentre(
+        currentViewport,
+        previousSize,
+        nextSize,
+      );
+      previousSize = nextSize;
+
+      const anchorNodeId =
+        expandedNodeId && expandMode === 'split'
+          ? expandedNodeId
+          : rightPanelAnchorNodeId;
+      if (anchorNodeId) {
+        const bounds = getReliableNodeBounds(instance, [anchorNodeId]);
+        if (bounds) {
+          nextViewport = revealBoundsInViewport(nextViewport, nextSize, bounds);
+        }
+      }
+
+      if (
+        Math.abs(nextViewport.x - currentViewport.x) <
+          VIEWPORT_CORRECTION_EPSILON_PX &&
+        Math.abs(nextViewport.y - currentViewport.y) <
+          VIEWPORT_CORRECTION_EPSILON_PX
+      ) {
+        return;
+      }
+      void instance.setViewport(nextViewport, { duration: 0 });
+    });
+    observer.observe(wrapper);
+    return () => observer.disconnect();
+  }, [expandedNodeId, expandMode, rightPanelAnchorNodeId]);
+
+  // The Chat anchor is one-shot and must expire on its own clock. Opening
+  // Chat from a node while the panel is already open changes no layout, so
+  // an anchor consumed only by a resize would linger and let a later,
+  // unrelated resize (Layers toggle, window resize) pan the canvas back to
+  // a node the user has long since left.
+  useEffect(() => {
+    if (!rightPanelAnchorNodeId) return;
+    const timer = setTimeout(clearRightPanelAnchor, RIGHT_PANEL_ANCHOR_TTL_MS);
     return () => clearTimeout(timer);
-  }, [expandedNodeId, expandMode]);
+  }, [rightPanelAnchorNodeId, clearRightPanelAnchor]);
 
   useEffect(() => {
     return () => {
