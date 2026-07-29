@@ -32,7 +32,6 @@
  * disguised as a successful raw-text fallback.
  */
 
-import { renderPromptFile } from '../../../prompt/index.js';
 import { renderTurn } from '../conversation/prompt/build-prompt.js';
 import {
   ACP_PROFILE,
@@ -52,11 +51,6 @@ import type { FastifyBaseLogger } from 'fastify';
  * it. Exported for tests.
  */
 export const SLASH_COMMAND_RE = /^\/[a-zA-Z][\w-]*(?:\s|$)/;
-
-/**
- * PROMPT_ROOT-relative path of the initial system preamble template.
- */
-const SYSTEM_TEMPLATE = 'external-agent/system_prompt.md';
 
 // ─── Public API ───────────────────────────────────────────────────────────
 
@@ -112,12 +106,4 @@ export async function renderExternalAgentInputs(
     return [{ type: 'text', text: parts[0].text }];
   }
   return [{ type: 'parts', parts }];
-}
-
-/**
- * Render the portable initial-preamble fragment carried by WorkloadSpec.
- * The ACP driver decides when and how to realize it.
- */
-export function renderSystemPreamble(): string {
-  return renderPromptFile(SYSTEM_TEMPLATE, {});
 }

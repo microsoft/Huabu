@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   migrateAgenetesThreadFile,
   migrateLegacyAgenetesThreads,
+  repairExternalAgentPreambles,
 } from './migrate-agenetes-threads.js';
 
 let tmp: string;
@@ -194,6 +195,38 @@ describe('migrateLegacyAgenetesThreads', () => {
         { role: 'user', content: 'Inspect the selected node.' },
       ],
       hostContext: { canvasId: 'canvas-1', legacyScope: 'operate' },
+    });
+  });
+
+  it('repairs an undelivered external Deployment missing its preamble', () => {
+    const history = join(tmp, 'Canvas', '.history');
+    mkdirSync(history, { recursive: true });
+    const scope = {
+      name: 'canvas-1',
+      storage: { root: history },
+    };
+    const store = new FileThreadStore();
+    store.upsert(scope, 'external', {
+      driverSchemaVersion: 1,
+      spec: {
+        kind: 'external',
+        workloadType: 'Deployment',
+        namespace: scope,
+        threadId: 'external',
+        spec: {
+          binding: { alias: 'Copilot', profileId: 'copilot' },
+        },
+      },
+      state: {
+        driverState: { initialPreambleDelivered: false },
+      },
+    });
+
+    expect(repairExternalAgentPreambles(tmp, 'Use Huabu RFS.')).toBe(1);
+    expect(repairExternalAgentPreambles(tmp, 'Use Huabu RFS.')).toBe(0);
+    expect(store.get(scope, 'external')).toMatchObject({
+      spec: { spec: { initialPreamble: ['Use Huabu RFS.'] } },
+      state: { driverState: { initialPreambleDelivered: false } },
     });
   });
 });

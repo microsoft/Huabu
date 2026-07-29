@@ -11,7 +11,10 @@ import { existsSync, readFileSync, readdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
 
 import { acpSpecSchema } from '@agenetes/acp-driver';
-import { THREAD_STORE_SCHEMA_VERSION } from '@agenetes/agenetes';
+import {
+  FileThreadStore,
+  THREAD_STORE_SCHEMA_VERSION,
+} from '@agenetes/agenetes';
 import { piSpecSchema } from '@agenetes/pi-driver';
 import {
   agentMetadataSchema,
@@ -364,4 +367,61 @@ export function migrateLegacyAgenetesThreads(workspace: string): number {
     migrated += migrateAgenetesThreadFile(filePath);
   }
   return migrated;
+}
+
+/**
+ * Backfill external Deployment records created by control-plane routes that
+ * persisted an empty preamble before the first chat turn.
+ */
+export function repairExternalAgentPreambles(
+  workspace: string,
+  initialPreamble: string,
+): number {
+  if (!existsSync(workspace)) return 0;
+  const store = new FileThreadStore();
+  let repaired = 0;
+  for (const entry of readdirSync(workspace, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const historyRoot = path.join(workspace, entry.name, '.history');
+    const filePath = path.join(historyRoot, 'threads.json');
+    if (!existsSync(filePath)) continue;
+    const lookupNamespace = {
+      name: entry.name,
+      storage: { root: historyRoot },
+    };
+    for (const record of store.list(lookupNamespace)) {
+      if (
+        record.spec.kind !== 'external' ||
+        record.spec.workloadType !== 'Deployment' ||
+        !record.spec.spec ||
+        typeof record.spec.spec !== 'object' ||
+        Array.isArray(record.spec.spec) ||
+        'initialPreamble' in record.spec.spec
+      ) {
+        continue;
+      }
+      const driverState = record.state.driverState;
+      if (
+        !driverState ||
+        typeof driverState !== 'object' ||
+        Array.isArray(driverState) ||
+        (driverState as { initialPreambleDelivered?: unknown })
+          .initialPreambleDelivered !== false
+      ) {
+        continue;
+      }
+      store.upsert(record.spec.namespace, record.spec.threadId, {
+        ...record,
+        spec: {
+          ...record.spec,
+          spec: {
+            ...record.spec.spec,
+            initialPreamble: [initialPreamble],
+          },
+        },
+      });
+      repaired += 1;
+    }
+  }
+  return repaired;
 }

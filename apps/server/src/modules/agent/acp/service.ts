@@ -22,13 +22,11 @@ import {
   getSupervisedAgentletId,
 } from '@agenetes/agentlet-host';
 
-import {
-  renderExternalAgentInputs,
-  renderSystemPreamble,
-} from './preprocessor.js';
+import { renderExternalAgentInputs } from './preprocessor.js';
 import { ensureProfileCacheSubscription } from './profile-cache-port.js';
 import { getProfile as getLegacyProfile } from './profile-store.js';
 import { buildReachbackEnv } from './reachback-env.js';
+import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
 import { canvasAcpNamespace } from '../../storage/paths.js';
 import {
   agenetes,
@@ -221,7 +219,7 @@ export async function* runAcpAgent(
     workloadType: 'Deployment' as const,
     namespace: canvasAcpNamespace(canvasId),
     spec: {
-      initialPreamble: [renderSystemPreamble()],
+      initialPreamble: [renderExternalAgentSystemPreamble()],
       binding,
       agentletId,
       ...(cwd !== undefined && { cwd }),
