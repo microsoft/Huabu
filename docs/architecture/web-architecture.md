@@ -95,12 +95,12 @@ Read paths must go through `readSedimentClipboardPayload` (or `readSedimentClipb
 
 Artifacts are canvas-owned, so a paste into a different Canvas than the one the payload was copied from must clone every referenced file into the destination before dispatching `PASTE_CLIPBOARD`; otherwise deleting the source Canvas would orphan the pasted node. A node references artifacts two ways, and `pasteNodes` walks both from the same shared source of truth in [`artifact-url.ts`](../../packages/shared/src/utils/artifact-url.ts):
 
-| Reference shape                 | Field list                 | Rewrite                                                    |
-| ------------------------------- | -------------------------- | ---------------------------------------------------------- |
-| Dedicated top-level field       | `ARTIFACT_DATA_FIELDS`     | field value replaced with the cloned key                   |
-| Image embedded in Markdown body | `ARTIFACT_MARKDOWN_FIELDS` | each `![…](<key>)` destination rewritten to the cloned key |
+| Reference shape                 | Field source             | Rewrite                                                    |
+| ------------------------------- | ------------------------ | ---------------------------------------------------------- |
+| Dedicated top-level field       | `ARTIFACT_DATA_FIELDS`   | field value replaced with the cloned key                   |
+| Image embedded in Markdown body | `markdownArtifactFields` | each `![…](<key>)` destination rewritten to the cloned key |
 
-The Markdown walk is what keeps images inside a `note` alive across Canvases — they live in the body string, not in `data.src`. `parseArtifactRef` decides what is cloneable: bare keys and legacy canvas-scoped URLs are, while `data:`, `blob:`, and external `http(s)` sources are left verbatim. Clones are deduplicated per `(source canvas, key)` for the whole paste, and a failed clone falls back to the original key so the node renders the server's missing-artifact placeholder instead of blocking the paste. Same-canvas pastes keep sharing the original artifact and stay on the synchronous fast path.
+The Markdown walk is what keeps images inside a `note` alive across Canvases — they live in the body string, not in `data.src`. It is scoped by node type (`markdownArtifactFields`) because `content` also exists on `text` and `question` nodes, whose bodies are plain prose that must not be rewritten. `parseArtifactRef` decides what is cloneable: bare keys and legacy canvas-scoped URLs are, while `data:`, `blob:`, and external `http(s)` sources are left verbatim. Clones are deduplicated per `(source canvas, key)` for the whole paste, and a failed clone falls back to the original key so the node renders the server's missing-artifact placeholder instead of blocking the paste. Because the clone round-trips are async, the result is dropped if the user has navigated to a different Canvas by the time they settle. Same-canvas pastes keep sharing the original artifact and stay on the synchronous fast path.
 
 ## Workspace routes and World
 

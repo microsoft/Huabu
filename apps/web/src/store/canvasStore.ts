@@ -15,9 +15,9 @@ import { create, type StateCreator } from 'zustand';
 
 import {
   ARTIFACT_DATA_FIELDS,
-  ARTIFACT_MARKDOWN_FIELDS,
   collectMarkdownArtifactRefs,
   createId,
+  markdownArtifactFields,
   parseArtifactRef,
   rewriteMarkdownArtifactRefs,
 } from '@sediment/shared';
@@ -3677,7 +3677,7 @@ const useCanvasStore = create<RFState>()(
       // otherwise deleting the source canvas would orphan the pasted
       // node. Artifacts reach a node two ways: a dedicated top-level
       // field (`ARTIFACT_DATA_FIELDS`) or an image embedded in a
-      // Markdown body (`ARTIFACT_MARKDOWN_FIELDS`, e.g. a note's
+      // Markdown body (`markdownArtifactFields`, e.g. a note's
       // `content`). Both must be walked, otherwise a note pastes with
       // its images still pointing at the source canvas.
       //
@@ -3693,7 +3693,7 @@ const useCanvasStore = create<RFState>()(
           const data = (node.data ?? {}) as Record<string, unknown>;
           if (ARTIFACT_DATA_FIELDS.some((f) => parseArtifactRef(data[f])))
             return true;
-          return ARTIFACT_MARKDOWN_FIELDS.some((field) => {
+          return markdownArtifactFields(data).some((field) => {
             const v = data[field];
             return (
               typeof v === 'string' && collectMarkdownArtifactRefs(v).length > 0
@@ -3768,7 +3768,7 @@ const useCanvasStore = create<RFState>()(
               }
             }
 
-            for (const field of ARTIFACT_MARKDOWN_FIELDS) {
+            for (const field of markdownArtifactFields(data)) {
               const markdown = data[field];
               if (typeof markdown !== 'string' || markdown.length === 0)
                 continue;
@@ -3796,6 +3796,13 @@ const useCanvasStore = create<RFState>()(
             return mutated ? { ...node, data } : node;
           }),
         );
+        // `dispatch` / `runForks` act on whatever canvas the store is
+        // showing *now*, but the work above was scoped to the canvas
+        // that was active when the paste started. Cloning takes one
+        // round-trip per embedded image, which is more than enough time
+        // for the user to switch Spaces — dropping the paste beats
+        // landing it on the wrong canvas.
+        if (get().canvasId !== dstCanvasId) return;
         dispatch(remapped);
         runForks();
       })();

@@ -47,26 +47,33 @@ export function parseArtifactUrl(
 export const ARTIFACT_DATA_FIELDS = ['src', 'coverUrl'] as const;
 
 /**
- * Node `data` field names whose value is a Markdown body that may embed
- * artifact references inline (`![alt](<artifactKey>)`), rather than
- * carrying them in a dedicated top-level field. Counterpart of
- * `ARTIFACT_DATA_FIELDS` for the paste-clone walk.
+ * Node `data` field names, keyed by node type, whose value is a Markdown
+ * body that may embed artifact references inline (`![alt](<key>)`)
+ * rather than carrying them in a dedicated top-level field. Counterpart
+ * of `ARTIFACT_DATA_FIELDS` for the paste-clone walk.
+ *
+ * Keyed by node type on purpose: `content` also exists on `text` and
+ * `question` nodes, whose bodies are plain prose rather than Markdown.
+ * Rewriting an image destination there would silently edit what the
+ * user typed. Read this through `markdownArtifactFields`.
  */
-export const ARTIFACT_MARKDOWN_FIELDS = ['content'] as const;
+const ARTIFACT_MARKDOWN_FIELDS_BY_TYPE: Readonly<
+  Record<string, readonly string[]>
+> = {
+  note: ['content'],
+};
 
 /**
- * Return true when `value` is a canvas-scoped artifact URL whose
- * canvasId is different from `currentCanvasId`. Used by paste-clone to
- * decide whether the underlying file must be copied into the
- * destination canvas before the pasted node can render.
+ * The Markdown-bearing `data` fields to walk for artifact references on
+ * a node, given its `data`. Empty for node types whose body is not
+ * Markdown — see `ARTIFACT_MARKDOWN_FIELDS_BY_TYPE`.
  */
-export function isCrossCanvasArtifactUrl(
-  value: unknown,
-  currentCanvasId: string,
-): boolean {
-  if (typeof value !== 'string') return false;
-  const parsed = parseArtifactUrl(value);
-  return parsed !== null && parsed.canvasId !== currentCanvasId;
+export function markdownArtifactFields(
+  data: Record<string, unknown>,
+): readonly string[] {
+  const type = data['type'];
+  if (typeof type !== 'string') return [];
+  return ARTIFACT_MARKDOWN_FIELDS_BY_TYPE[type] ?? [];
 }
 
 /**
@@ -126,6 +133,12 @@ export function collectMarkdownArtifactRefs(markdown: string): string[] {
  * Rewrite embedded Markdown image destinations through `resolve`, which
  * receives the raw (unwrapped) destination and returns its replacement,
  * or `null` / `undefined` to leave it as-is.
+ *
+ * Only inline image syntax is covered — reference-style images
+ * (`![alt][ref]`) and raw `<img>` HTML are left alone, since neither is
+ * produced by the editor. The replacement is written unwrapped, so a
+ * resolver must not return a destination containing whitespace or
+ * parentheses (artifact keys never do).
  */
 export function rewriteMarkdownArtifactRefs(
   markdown: string,

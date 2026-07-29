@@ -2,9 +2,26 @@ import { describe, expect, it } from 'vitest';
 
 import {
   collectMarkdownArtifactRefs,
+  markdownArtifactFields,
   parseArtifactRef,
   rewriteMarkdownArtifactRefs,
 } from '../artifact-url.js';
+
+describe('markdownArtifactFields', () => {
+  it('walks a note body', () => {
+    expect(markdownArtifactFields({ type: 'note', content: 'x' })).toEqual([
+      'content',
+    ]);
+  });
+
+  it('leaves prose-bearing node types alone', () => {
+    expect(markdownArtifactFields({ type: 'text', content: 'x' })).toEqual([]);
+    expect(markdownArtifactFields({ type: 'question', content: 'x' })).toEqual(
+      [],
+    );
+    expect(markdownArtifactFields({})).toEqual([]);
+  });
+});
 
 describe('parseArtifactRef', () => {
   it('treats a bare key as owned by the caller-supplied canvas', () => {
