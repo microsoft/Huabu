@@ -1,17 +1,24 @@
 name: CI
 
-# Enforced quality gate. Runs on every pull request and push targeting
-# `dev` or `main`. Mark the `quality` job as a required status check in
-# the branch-protection settings so it cannot be bypassed locally.
+# CircleCI (.circleci/config.yml) is now the authoritative quality gate;
+# it runs the identical lint / format / typecheck / i18n / skills checks
+# on `main`. This workflow is kept as a manually-triggerable fallback so
+# the checks can still be run on GitHub-hosted runners if CircleCI is
+# unavailable — it no longer runs automatically, because the Actions
+# minute quota is exhausted.
+#
+# To re-enable automatic runs, restore:
+#   pull_request:
+#     branches: [main]
+#   push:
+#     branches: [main]
+# and re-add `quality` as a required status check in branch protection.
 #
 # Local git hooks (.githooks/) are optional and only provide faster
-# feedback; this workflow is the authoritative gate.
+# feedback.
 
 on:
-  pull_request:
-    branches: [dev, main]
-  push:
-    branches: [dev, main]
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref to save CI minutes.
 concurrency:
