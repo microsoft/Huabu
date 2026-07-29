@@ -5,7 +5,7 @@
 > knowledge sources. Every node type runs the same pipeline; a per-type profile
 > decides which stages execute.
 
-> Last updated: 2026-07-21
+> Last updated: 2026-07-27
 
 ---
 
@@ -66,7 +66,7 @@ Each profile also declares **`bodyOwnership`** (`types.ts`): `'authored'` for us
 - Scheduling immediately marks the node ingestion state as `pending`, including the debounce wait. Preview components use that state to avoid requesting server-persisted content before preprocessing has written the node sidecar.
 - **`note` / `text` are settle-triggered, not mutation-triggered.** Their label auto-derives from the first heading/line, so firing preprocess on every typing pause churned the `.md` filename. Instead [postEffects.web.ts](../../apps/web/src/handler/canvasCommand/postEffects.web.ts) skips them on mutation, and `settleNodePreprocess` ([canvasStore.ts](../../apps/web/src/store/canvasStore.ts)) fires once at the edit-done boundary — `closeExpanded` / `openExpanded` for a `note`, `TextNode`'s blur for inline `text`. The body still saves on the fast `nodeContentQueue` cadence independently; other node types keep the per-mutation debounce.
 - `node_inserted` / `node_updated` carry a snapshot; dispatcher diffs against the profile's `watchFields` to plan the minimum stages.
-- Label policy: Enrich may propose a label, but Project includes it only when `labelSource !== 'user'`.
+- Label policy: Enrich may propose a label, but Project includes it only when the request label is not a non-empty `user`/`agent` label. Because a request can already be in flight when the user renames a node, the web client re-reads the latest node before applying the response and drops its automatic label patch when that current label is user/agent-owned; other response fields still apply.
 - Error recovery: failed extraction throws `EXTRACT_FAILED`; Persist is canvas-local (keyed by `nodeId`, written to `nodes/<nodeId>.md`) and stores a placeholder for empty / failed nodes.
 
 ---
@@ -91,5 +91,5 @@ One route: `POST /api/canvas/:id/nodes/:nodeId/preprocess` → dispatcher.
 
 ## 6. Not yet done
 
-- Per-node debounce exists (`preprocessQueue`), but no requestId-based stale-result guard for out-of-order POST responses (preprocessing is idempotent, so a race only wastes a request).
+- Per-node debounce exists (`preprocessQueue`), but there is no general requestId-based stale-result guard for out-of-order POST responses. The latest user/agent label is protected at projection time, while summaries, keywords, and other derived fields remain last-response-wins.
 - No per-canvas token budget; no batch enrichment (nodes processed one at a time).

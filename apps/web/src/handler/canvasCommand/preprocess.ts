@@ -32,6 +32,8 @@ export type PreprocessHelperDeps = {
   clearNodeIngestion: (nodeId: string) => void;
   /** Get all direct children of a frame node. */
   getChildNodes: (frameId: string) => Node[];
+  /** Get the latest node state before applying an asynchronous result. */
+  getNode: (nodeId: string) => Node | undefined;
   /** Silently patch node data without recording undo history. */
   patchNodeSilent: (nodeId: string, patch: Record<string, unknown>) => void;
 };
@@ -106,6 +108,7 @@ export async function preprocessNodeIfNeeded({
   setNodeIngestion,
   clearNodeIngestion,
   getChildNodes,
+  getNode,
   patchNodeSilent,
 }: PreprocessHelperDeps): Promise<void> {
   const nodeType = node.type ?? '';
@@ -121,12 +124,20 @@ export async function preprocessNodeIfNeeded({
       snapshot,
     });
 
-    // Apply results from the backend. The server is responsible for
-    // suppressing label suggestions that would just re-trigger its own
-    // ` (N)` dedup (see `apps/server/src/modules/preprocessing/stages/project.ts`),
-    // so the client can apply whatever it receives verbatim.
+    // Apply results from the backend. Re-check current label ownership because
+    // the user may have renamed the node while this request was in flight.
+    // Other projected fields can be applied directly.
     const patch: Record<string, unknown> = {};
-    if (response.suggestedLabel) {
+    const latestData = getNode(node.id)?.data as
+      | Record<string, unknown>
+      | undefined;
+    const latestLabel =
+      typeof latestData?.label === 'string' ? latestData.label.trim() : '';
+    const latestLabelSource = latestData?.labelSource;
+    const latestLabelIsProtected =
+      (latestLabelSource === 'user' || latestLabelSource === 'agent') &&
+      latestLabel.length > 0;
+    if (response.suggestedLabel && !latestLabelIsProtected) {
       patch.label = response.suggestedLabel;
       patch.labelSource = 'auto';
     }

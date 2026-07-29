@@ -8,11 +8,10 @@
  * `setNodeIngestion` / `clearNodeIngestion` / `patchNodeSilent` on
  * the dependencies object.
  *
- * Unlike {@link ../save/nodeContentQueue} this queue does NOT need
- * per-node inflight serialization: preprocessing is idempotent (the
- * server recomputes the same label/summary/keywords given the same
- * snapshot), so a race between two POSTs only wastes a request — it
- * cannot corrupt state.
+ * Unlike {@link ../save/nodeContentQueue} this queue does NOT serialize
+ * per-node requests. Label projection re-checks the latest node ownership
+ * before applying a response so stale auto labels cannot replace user/agent
+ * names. Other derived metadata remains last-response-wins.
  *
  * The keepalive path used at page unload bypasses
  * `preprocessNodeIfNeeded` (which mutates ingestion state that won't
@@ -116,6 +115,8 @@ export function createPreprocessQueue(opts: {
           clearNodeIngestion: state.clearNodeIngestion,
           getChildNodes: (frameId) =>
             state.nodes.filter((n) => n.parentId === frameId),
+          getNode: (id) =>
+            opts.getState().nodes.find((candidate) => candidate.id === id),
           patchNodeSilent: state.patchNodeSilent,
         });
       });
