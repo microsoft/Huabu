@@ -29,7 +29,10 @@ export interface ToastItem {
   id: string;
   message: string;
   tone?: ToastTone;
-  /** Auto-dismiss duration in ms. Set 0 to persist. Defaults to 3000. */
+  /**
+   * Auto-dismiss duration in ms. Set 0 to persist. Defaults to 0 for
+   * danger toasts and 3000 for all other tones.
+   */
   duration?: number;
   /** Optional inline action button (e.g. Reload / Undo). */
   action?: ToastAction;
@@ -148,9 +151,14 @@ const toneIcons: Record<ToastTone, IconComponent> = {
   danger: X,
 };
 
+function getToastDuration(item: ToastItem): number {
+  return item.duration ?? (item.tone === 'danger' ? 0 : 3000);
+}
+
 function ToastEntry({ item }: { item: ToastItem }) {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
+  const duration = getToastDuration(item);
 
   useEffect(() => {
     // Trigger enter animation on next frame
@@ -159,13 +167,12 @@ function ToastEntry({ item }: { item: ToastItem }) {
   }, []);
 
   useEffect(() => {
-    const ms = item.duration ?? 3000;
-    if (ms <= 0) return;
-    const timer = setTimeout(() => dismissToast(item.id), ms);
+    if (duration <= 0) return;
+    const timer = setTimeout(() => dismissToast(item.id), duration);
     return () => clearTimeout(timer);
-  }, [item.id, item.duration]);
+  }, [duration, item.id]);
 
-  const isPersistent = (item.duration ?? 3000) <= 0;
+  const isPersistent = duration <= 0;
   // Persistent toasts and action-bearing toasts must always be
   // user-dismissible — they don't fade on their own, and the user may
   // want to act on the message later (e.g. copy unsaved text before
