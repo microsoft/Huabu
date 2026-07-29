@@ -13,7 +13,14 @@ import {
 } from '@xyflow/react';
 import { create, type StateCreator } from 'zustand';
 
-import { ARTIFACT_DATA_FIELDS, createId } from '@sediment/shared';
+import {
+  ARTIFACT_DATA_FIELDS,
+  collectMarkdownArtifactRefs,
+  createId,
+  markdownArtifactFields,
+  parseArtifactRef,
+  rewriteMarkdownArtifactRefs,
+} from '@sediment/shared';
 import {
   COMMAND_META,
   applyDeltas,
@@ -3668,8 +3675,11 @@ const useCanvasStore = create<RFState>()(
       // already owned by this canvas). Cross-canvas pastes clone the
       // underlying file so the destination canvas owns its own copy —
       // otherwise deleting the source canvas would orphan the pasted
-      // node. The set of fields that may carry an artifact key is the
-      // shared `ARTIFACT_DATA_FIELDS` constant.
+      // node. Artifacts reach a node two ways: a dedicated top-level
+      // field (`ARTIFACT_DATA_FIELDS`) or an image embedded in a
+      // Markdown body (`markdownArtifactFields`, e.g. a note's
+      // `content`). Both must be walked, otherwise a note pastes with
+      // its images still pointing at the source canvas.
       //
       // We only know it's a cross-canvas paste when the clipboard
       // payload carries `srcCanvasId` AND it differs from the current
@@ -3681,9 +3691,13 @@ const useCanvasStore = create<RFState>()(
         srcCanvasId !== dstCanvasId &&
         clipboardNodes.some((node) => {
           const data = (node.data ?? {}) as Record<string, unknown>;
-          return ARTIFACT_DATA_FIELDS.some((field) => {
+          if (ARTIFACT_DATA_FIELDS.some((f) => parseArtifactRef(data[f])))
+            return true;
+          return markdownArtifactFields(data).some((field) => {
             const v = data[field];
-            return typeof v === 'string' && v.length > 0;
+            return (
+              typeof v === 'string' && collectMarkdownArtifactRefs(v).length > 0
+            );
           });
         });
 
@@ -3707,42 +3721,88 @@ const useCanvasStore = create<RFState>()(
       }
 
       void (async () => {
-        const remapped = await Promise.all(
-          clipboardNodes.map(async (node) => {
-            const data = { ...((node.data ?? {}) as Record<string, unknown>) };
-            let mutated = false;
-            for (const field of ARTIFACT_DATA_FIELDS) {
-              const value = data[field];
-              if (typeof value !== 'string' || value.length === 0) continue;
-              // Skip non-key strings (e.g. data URLs, http(s) URLs). The
-              // server-side clone only handles canvas-owned files.
-              if (value.startsWith('data:') || /^https?:/i.test(value))
-                continue;
-              if (value.includes('/')) continue;
-              try {
-                const newKey = await cloneArtifactToCanvas(
-                  srcCanvasId,
-                  value,
-                  dstCanvasId,
-                );
-                if (newKey && newKey !== value) {
-                  data[field] = newKey;
-                  mutated = true;
-                }
-              } catch (err) {
-                // Best effort — fall back to the original key. The new
-                // node will render with the missing-file placeholder
-                // (artifactMissing flag from the server) so the user can
-                // still remove it.
+        // One clone per distinct source artifact, shared across every
+        // node and every reference in this paste (the same image may be
+        // embedded several times in one note, or reused across notes).
+        const clones = new Map<string, Promise<string | null>>();
+        const cloneRef = (ref: {
+          canvasId: string | null;
+          key: string;
+        }): Promise<string | null> => {
+          const from = ref.canvasId ?? srcCanvasId;
+          if (from === dstCanvasId) return Promise.resolve(null);
+          const cacheKey = `${from}/${ref.key}`;
+          let pending = clones.get(cacheKey);
+          if (!pending) {
+            // Best effort — a failed clone falls back to the original
+            // key. The new node then renders with the missing-file
+            // placeholder (artifactMissing flag from the server) so the
+            // user can still remove it.
+            pending = cloneArtifactToCanvas(from, ref.key, dstCanvasId).catch(
+              (err) => {
                 console.warn(
                   '[paste] Failed to clone artifact for cross-canvas paste',
                   err,
                 );
+                return null;
+              },
+            );
+            clones.set(cacheKey, pending);
+          }
+          return pending;
+        };
+
+        const remapped = await Promise.all(
+          clipboardNodes.map(async (node) => {
+            const data = { ...((node.data ?? {}) as Record<string, unknown>) };
+            let mutated = false;
+
+            for (const field of ARTIFACT_DATA_FIELDS) {
+              const value = data[field];
+              const ref = parseArtifactRef(value);
+              if (!ref) continue;
+              const newKey = await cloneRef(ref);
+              if (newKey && newKey !== value) {
+                data[field] = newKey;
+                mutated = true;
               }
             }
+
+            for (const field of markdownArtifactFields(data)) {
+              const markdown = data[field];
+              if (typeof markdown !== 'string' || markdown.length === 0)
+                continue;
+              const refs = collectMarkdownArtifactRefs(markdown);
+              if (refs.length === 0) continue;
+              const rewrites = new Map<string, string>();
+              await Promise.all(
+                refs.map(async (raw) => {
+                  const ref = parseArtifactRef(raw);
+                  if (!ref) return;
+                  const newKey = await cloneRef(ref);
+                  if (newKey && newKey !== raw) rewrites.set(raw, newKey);
+                }),
+              );
+              if (rewrites.size === 0) continue;
+              const next = rewriteMarkdownArtifactRefs(markdown, (raw) =>
+                rewrites.get(raw),
+              );
+              if (next !== markdown) {
+                data[field] = next;
+                mutated = true;
+              }
+            }
+
             return mutated ? { ...node, data } : node;
           }),
         );
+        // `dispatch` / `runForks` act on whatever canvas the store is
+        // showing *now*, but the work above was scoped to the canvas
+        // that was active when the paste started. Cloning takes one
+        // round-trip per embedded image, which is more than enough time
+        // for the user to switch Spaces — dropping the paste beats
+        // landing it on the wrong canvas.
+        if (get().canvasId !== dstCanvasId) return;
         dispatch(remapped);
         runForks();
       })();

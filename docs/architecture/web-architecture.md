@@ -91,6 +91,17 @@ All representations are written through a single `ClipboardItem` by `copyCanvasC
 
 Read paths must go through `readSedimentClipboardPayload` (or `readSedimentClipboardPayloadAsync` on the Clipboard-API fallback path), which prefers `text/html` and falls back to `text/plain`. The fallback keeps clipboard contents written by older builds working. Unsupported Clipboard APIs, inaccessible sources, and image conversion failures all fall back to writing the serialized node payload to `text/plain`, which degrades external pastes to JSON but keeps Huabu-to-Huabu paste working.
 
+### Cross-canvas paste and artifact ownership
+
+Artifacts are canvas-owned, so a paste into a different Canvas than the one the payload was copied from must clone every referenced file into the destination before dispatching `PASTE_CLIPBOARD`; otherwise deleting the source Canvas would orphan the pasted node. A node references artifacts two ways, and `pasteNodes` walks both from the same shared source of truth in [`artifact-url.ts`](../../packages/shared/src/utils/artifact-url.ts):
+
+| Reference shape                 | Field source             | Rewrite                                                    |
+| ------------------------------- | ------------------------ | ---------------------------------------------------------- |
+| Dedicated top-level field       | `ARTIFACT_DATA_FIELDS`   | field value replaced with the cloned key                   |
+| Image embedded in Markdown body | `markdownArtifactFields` | each `![…](<key>)` destination rewritten to the cloned key |
+
+The Markdown walk is what keeps images inside a `note` alive across Canvases — they live in the body string, not in `data.src`. It is scoped by node type (`markdownArtifactFields`) because `content` also exists on `text` and `question` nodes, whose bodies are plain prose that must not be rewritten. `parseArtifactRef` decides what is cloneable: bare keys and legacy canvas-scoped URLs are, while `data:`, `blob:`, and external `http(s)` sources are left verbatim. Clones are deduplicated per `(source canvas, key)` for the whole paste, and a failed clone falls back to the original key so the node renders the server's missing-artifact placeholder instead of blocking the paste. Because the clone round-trips are async, the result is dropped if the user has navigated to a different Canvas by the time they settle. Same-canvas pastes keep sharing the original artifact and stay on the synchronous fast path.
+
 ## Workspace routes and World
 
 `/` is the workspace landing redirect. When the persisted World setting is enabled it redirects to the hidden World through `/canvas/:worldCanvasId`; otherwise it redirects to `/spaces`. The ordinary Space List remains a sibling page at `/spaces`, and every Canvas scope, including World, continues to use the existing `CanvasPage` and `/canvas/:canvasId` route.

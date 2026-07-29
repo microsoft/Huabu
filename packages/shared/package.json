@@ -23,6 +23,8 @@
     "format": "prettier --write .",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "dev": "tsc -w -p tsconfig.json"
   },
   "dependencies": {
