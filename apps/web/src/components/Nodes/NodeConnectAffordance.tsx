@@ -57,6 +57,19 @@ const PORT_POSITIONS = [
 /** Cardinal sides a connection can leave a node from. */
 export type Side = 'top' | 'right' | 'bottom' | 'left';
 
+/**
+ * Press area of a port (screen px), deliberately larger than the circle
+ * painted inside it: the control has to be aimed at, but drawing something
+ * this big would crowd a small node.
+ *
+ * The extra area is spent entirely *outward*, into empty canvas. The press
+ * area's inner edge is lined up with the circle's own, so widening the
+ * target costs the node body nothing — growing it inward would eat the
+ * body the user is trying to click, which is the problem it exists to
+ * avoid.
+ */
+const PORT_HIT_SIZE = { mouse: 20, touch: 28 } as const;
+
 /** Cardinal side -> the React Flow `Position` it corresponds to. */
 export const SIDE_POSITION: Record<Side, Position> = {
   top: Position.Top,
@@ -547,6 +560,11 @@ export const NodeConnectionHandles = memo(
     );
     const mark = useNodeCollapseStore((s) => s.marks[nodeId]);
     const baseHandleSize = isNotMouse ? 14 : 8;
+    const hitSize = isNotMouse ? PORT_HIT_SIZE.touch : PORT_HIT_SIZE.mouse;
+    // Distance the press area is shifted outward so its inner edge lands
+    // where the painted circle's already does. Everything the target gained
+    // over the circle therefore sits outside the node.
+    const hitOutwardShift = (hitSize - baseHandleSize) / 2;
     const zoom = useStore((s) => s.transform[2]);
     const inverseZoom = zoom > 0 ? 1 / zoom : 1;
     const dotSize = baseHandleSize * inverseZoom;
@@ -708,39 +726,83 @@ export const NodeConnectionHandles = memo(
                 };
               })()
             : edgeAlign;
-          // Dot is centred on the (collapsed) bbox; `pointer-events:
-          // auto` makes the dot the actual click target.
-          //
           // Handles stay solid in every visible state so the selection
           // outline cannot visually bisect them. Connection drag adds a
           // glow to strengthen the endpoint affordance.
           //
-          // The bbox itself never grows on hover — only the painted dot
-          // does. Growing the bbox would move `getHandlePosition`, which
-          // would drag committed edge endpoints around under the pointer.
+          // Neither the handle's bbox nor the painted circle grows on
+          // hover — the aimed-at port is drawn at its grown size by
+          // `HotPortOverlay` instead. Growing the bbox would move
+          // `getHandlePosition`, which would drag committed edge endpoints
+          // around under the pointer.
           const isHot = hotPosition === h.position;
           // A port with a picker open stays visible and pressed until the
           // gesture resolves, even after the pointer has left the node.
           const isPinned = pinnedPosition === h.position;
-          const isReachable = exposed || isPinned || keyboardReachable;
-          const visualSize =
-            (isHot ? hotHandleSize : baseHandleSize) * inverseZoom;
-          const dotStyle: React.CSSProperties = {
-            ...portCircleStyle(visualSize, dotBorderWidth),
+          // Hit-testing must follow *visibility*, not focusability. The
+          // parent `<Handle>` carries `pointer-events-none` while hidden,
+          // but CSS lets a child turn pointer events back on regardless of
+          // its ancestor, so a target that opts in unconditionally stays
+          // live on every node on the canvas even at zero opacity — and
+          // since `connectionDragThreshold` is 0, a press-and-release on one
+          // creates a node. Keyboard reachability deliberately does not open
+          // it: focus needs no pointer events, and a selected node the
+          // pointer is not on must stay a plain click target.
+          const isPinnedOrExposed = exposed || isPinned;
+          const isReachable = isPinnedOrExposed || keyboardReachable;
+          // Signed offset along the axis this side faces: negative towards
+          // the node's top/left, positive towards its bottom/right.
+          const isVerticalSide =
+            h.position === Position.Top || h.position === Position.Bottom;
+          const outwardSign =
+            h.position === Position.Top || h.position === Position.Left
+              ? -1
+              : 1;
+          const outward = hitOutwardShift * inverseZoom * outwardSign;
+          const shiftAlongAxis = (distance: number) =>
+            isVerticalSide
+              ? `translateY(${distance}px)`
+              : `translateX(${distance}px)`;
+          // Painted circle. Purely decorative — the enclosing span owns
+          // hit-testing, so this must not intercept anything itself. It is
+          // centred in that span, which has been pushed outward, so the
+          // same offset is subtracted again to put the circle back on the
+          // node's border where the edge endpoints are.
+          const circleStyle: React.CSSProperties = {
+            ...portCircleStyle(baseHandleSize * inverseZoom, dotBorderWidth),
+            position: 'absolute',
             top: '50%',
             left: '50%',
-            transform: 'translate(-50%, -50%)',
+            transform: `translate(-50%, -50%) ${shiftAlongAxis(-outward)}`,
+            pointerEvents: 'none',
             boxShadow: connecting
               ? '0 0 3px var(--color-info-light)'
               : undefined,
+          };
+          // Press area: bigger than the circle, and pushed outward so the
+          // extra room comes out of empty canvas rather than out of the
+          // node body the user is trying to click.
+          const hitStyle: React.CSSProperties = {
+            width: hitSize * inverseZoom,
+            height: hitSize * inverseZoom,
+            top: '50%',
+            left: '50%',
+            transform: `translate(-50%, -50%) ${shiftAlongAxis(outward)}`,
             // React Flow paints handles with `cursor: crosshair`, which only
             // describes half of what this control does. Clicking it creates a
             // node, so the pointer cursor matches the `+` the user sees.
             cursor: 'pointer',
-            transition: 'width 120ms ease, height 120ms ease',
           };
-          // `HotPortOverlay` paints the `+` on top of the selection outline,
-          // so the dot itself is just the circle and the hit target.
+          // The aimed-at port is painted entirely by `HotPortOverlay`, in a
+          // HUD layer above the selection outline. The in-flow circle stands
+          // down rather than being drawn underneath it: the two are placed
+          // by unrelated derivations — this one against the handle's own
+          // box (offset to cancel the wrapper's border), the overlay from
+          // `positionAbsolute` + `measured` — so any box-model discrepancy
+          // shows up as a stray ring peeking out from behind. There is also
+          // more than one in-flow circle per side, since each side stacks a
+          // source and a target handle. One painter per state, no alignment
+          // to keep.
           const dot = (
             <span
               aria-hidden={!keyboardReachable}
@@ -749,8 +811,13 @@ export const NodeConnectionHandles = memo(
               }
               role={keyboardReachable ? 'button' : undefined}
               tabIndex={keyboardReachable ? 0 : -1}
-              className="pointer-events-auto absolute rounded-full"
-              style={dotStyle}
+              className={cn(
+                'absolute',
+                isPinnedOrExposed
+                  ? 'pointer-events-auto'
+                  : 'pointer-events-none',
+              )}
+              style={hitStyle}
               onPointerEnter={() => setHotSide(h.position)}
               onPointerLeave={() => setHotSide(null)}
               onFocus={() => setHotSide(h.position)}
@@ -784,7 +851,15 @@ export const NodeConnectionHandles = memo(
                   kind: 'side',
                 });
               }}
-            />
+            >
+              {!isHot && (
+                <span
+                  aria-hidden
+                  className="rounded-full"
+                  style={circleStyle}
+                />
+              )}
+            </span>
           );
           return (
             <Handle
