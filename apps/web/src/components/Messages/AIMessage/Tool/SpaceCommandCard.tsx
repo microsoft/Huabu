@@ -68,12 +68,16 @@ export function SpaceCommandCard({ part }: ToolPart<SpaceCommandsToolPart>) {
           ? t(
               mode === 'row'
                 ? 'messages.canvasChange.rowLayout'
-                : 'messages.canvasChange.columnLayout',
+                : mode === 'grid'
+                  ? 'messages.canvasChange.gridLayout'
+                  : 'messages.canvasChange.columnLayout',
             )
           : t(
               mode === 'row'
                 ? 'messages.canvasChange.rows'
-                : 'messages.canvasChange.columns',
+                : mode === 'grid'
+                  ? 'messages.canvasChange.gridColumns'
+                  : 'messages.canvasChange.columns',
               { count: gridCount },
             );
 

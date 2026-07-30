@@ -1,6 +1,6 @@
 import { useInternalNode, useStore, useViewport } from '@xyflow/react';
 import clsx from 'clsx';
-import { Columns3, Move, Rows3, Ungroup } from 'lucide-react';
+import { Columns3, Grid2x2, Move, Rows3, Ungroup } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -53,6 +53,7 @@ const LAYOUT_MODE_OPTIONS: Array<{
   { value: 'free', label: 'Free', icon: <Move /> },
   { value: 'column', label: 'Column', icon: <Columns3 /> },
   { value: 'row', label: 'Row', icon: <Rows3 /> },
+  { value: 'grid', label: 'Grid', icon: <Grid2x2 /> },
 ];
 
 /**
@@ -93,7 +94,10 @@ export const FrameNode = memo(
 
     const layoutMode: FrameLayoutMode = data.layoutMode ?? 'free';
     const isContentMissing = data.contentMissing === true;
-    const isStructuredLayout = layoutMode === 'column' || layoutMode === 'row';
+    const isStructuredLayout = layoutMode !== 'free';
+    // `grid` counts columns just like `column` does — only `row`
+    // reinterprets the track count as rows.
+    const countsRows = layoutMode === 'row';
     const count = clampGridCount(data.gridCount);
 
     // Sizing policy lives in `data.sizing` (default `'hug'`) and is
@@ -224,7 +228,7 @@ export const FrameNode = memo(
         mode: next,
         // Seed the track count when switching into a structured mode so
         // the very first layout pass has a stable value.
-        ...((next === 'column' || next === 'row') && {
+        ...(next !== 'free' && {
           gridCount: data.gridCount ?? FRAME_GRID_DEFAULT_COUNT,
         }),
       });
@@ -240,7 +244,9 @@ export const FrameNode = memo(
                 ? t('node.frameLayoutFree')
                 : option.value === 'column'
                   ? t('node.frameLayoutColumn')
-                  : t('node.frameLayoutRow'),
+                  : option.value === 'row'
+                    ? t('node.frameLayoutRow')
+                    : t('node.frameLayoutGrid'),
           }))}
           value={layoutMode}
           onChange={setMode}
@@ -250,13 +256,11 @@ export const FrameNode = memo(
           <input
             type="number"
             inputMode="numeric"
-            aria-label={
-              layoutMode === 'column' ? t('node.columns') : t('node.rows')
-            }
+            aria-label={countsRows ? t('node.rows') : t('node.columns')}
             title={
-              layoutMode === 'column'
-                ? t('node.columnsRange', { max: maxCount })
-                : t('node.rowsRange', { max: maxCount })
+              countsRows
+                ? t('node.rowsRange', { max: maxCount })
+                : t('node.columnsRange', { max: maxCount })
             }
             min={FRAME_GRID_MIN_COUNT}
             max={maxCount}
@@ -344,9 +348,9 @@ export const FrameNode = memo(
     //    to a separate `onNodesChange` snap-mirror pass — which
     //    used to leave the preview (and the post-resize commit)
     //    one frame stale and produced visibly mis-placed children.
-    //  - `free` keeps the scaled child positions; `column` / `row`
-    //    let the grid solver re-pack the scaled children at the end
-    //    of each tick's batch, so the content-driven frame size
+    //  - `free` keeps the scaled child positions; `column` / `row` /
+    //    `grid` let the grid solver re-pack the scaled children at the
+    //    end of each tick's batch, so the content-driven frame size
     //    tracks the drag while preserving each child's size ratios.
     //  - The per-tick dispatch is rAF-coalesced (one batch per paint)
     //    so high-refresh `onResize` floods don't re-run the command
@@ -447,9 +451,9 @@ export const FrameNode = memo(
         // child proportionally (both axes) about the frame origin.
         //  - `free`:  children keep their scaled positions, so the
         //    whole cluster grows/shrinks with the box.
-        //  - `column` / `row`: the grid solver re-packs the scaled
-        //    children, so the frame snaps to the new content size
-        //    while each child's size ratio is preserved.
+        //  - `column` / `row` / `grid`: the grid solver re-packs the
+        //    scaled children, so the frame snaps to the new content
+        //    size while each child's size ratio is preserved.
         resizable
         onResizeStart={handleFrameResizeStart}
         onResize={handleFrameResize}

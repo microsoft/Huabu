@@ -41,7 +41,15 @@ export function fitFrameToChildren(
 
   const layoutMode = (frame.data as { layoutMode?: FrameLayoutMode })
     ?.layoutMode;
-  if (layoutMode === 'column' || layoutMode === 'row') return nodes;
+  // Structured frames carry their own content-driven size from the
+  // grid solver, so the generic bounding-box fit must not fight it.
+  if (
+    layoutMode === 'column' ||
+    layoutMode === 'row' ||
+    layoutMode === 'grid'
+  ) {
+    return nodes;
+  }
 
   const fit = computeContainerFit(nodes, frameId, options);
   return fit ? applyContainerFit(nodes, fit) : nodes;

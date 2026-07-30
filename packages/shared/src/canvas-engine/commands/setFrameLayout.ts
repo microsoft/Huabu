@@ -15,7 +15,8 @@ type Cmd = Extract<CanvasCommand, { type: 'SET_FRAME_LAYOUT' }>;
  * `SET_FRAME_LAYOUT` — change a frame's `layoutMode` and (optionally)
  * `gridCount`. The executor's end-of-batch structured-relayout pass
  * picks up the affected frame and:
- *  - reflows children into tracks when switching to `column` / `row`;
+ *  - reflows children into tracks when switching to `column` / `row` /
+ *    `grid`;
  *  - resizes the frame to fit its content;
  *  - cascades the size change to ancestor frames.
  *
@@ -49,7 +50,8 @@ const setFrameLayout: CommandDefinition<Cmd> = {
     //  - `free` mode doesn't use gridCount, but we preserve any
     //    previously stored value so flipping back into a grid mode
     //    remembers the user's last choice.
-    const isGridMode = cmd.mode === 'column' || cmd.mode === 'row';
+    const isGridMode =
+      cmd.mode === 'column' || cmd.mode === 'row' || cmd.mode === 'grid';
     const nextGridCount =
       typeof cmd.gridCount === 'number'
         ? clampGridCount(cmd.gridCount)

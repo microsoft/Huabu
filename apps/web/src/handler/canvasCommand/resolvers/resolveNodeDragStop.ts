@@ -1,8 +1,4 @@
-import {
-  FRAME_GRID_MAX_COUNT,
-  FRAME_GRID_MIN_COUNT,
-  type FrameLayoutMode,
-} from '@sediment/shared';
+import { FRAME_GRID_MAX_COUNT, FRAME_GRID_MIN_COUNT } from '@sediment/shared';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
@@ -14,6 +10,7 @@ import {
   pickColumnDropTarget,
   pickRowDropTarget,
   readFrameGridConfig,
+  type FrameGridAxis,
   type NestableNode,
   type StructuredDropTarget,
 } from '@sediment/shared/canvas-engine';
@@ -334,7 +331,7 @@ export default function resolveNodeDragStop(
 interface GridDropPlan {
   nodeId: CanvasNodeId;
   frameId: string;
-  axis: 'column' | 'row';
+  axis: FrameGridAxis;
   count: number; // pre-drop count
   target: StructuredDropTarget;
 }
@@ -357,6 +354,9 @@ interface GridDropCommands {
  *
  *  - Column masonry → the column under the cursor (mouse X).
  *  - Row masonry    → the row under the cursor (mouse Y).
+ *  - Row-aligned grid → same as column masonry: `grid` counts columns
+ *    and stores the column in `frameSlot`, so it reuses the column
+ *    picker verbatim.
  *
  * Either kind of target may be returned: drop into an existing track,
  * or insert a brand-new track at the cursor's gap position (used to
@@ -391,9 +391,9 @@ function collectGridDropPlans(
       : { x: post.position.x, y: post.position.y };
 
     const target =
-      cfg.axis === 'column'
-        ? pickColumnDropTarget(preDragNodes, frame.id, framePoint, cfg.count)
-        : pickRowDropTarget(preDragNodes, frame.id, framePoint, cfg.count);
+      cfg.axis === 'row'
+        ? pickRowDropTarget(preDragNodes, frame.id, framePoint, cfg.count)
+        : pickColumnDropTarget(preDragNodes, frame.id, framePoint, cfg.count);
 
     plans.push({
       nodeId: id as CanvasNodeId,
@@ -526,7 +526,7 @@ function buildGridDropCommands(
         out.commands.push({
           type: 'SET_FRAME_LAYOUT',
           frameId: frameId as CanvasNodeId,
-          mode: axis as FrameLayoutMode,
+          mode: axis,
           gridCount: nextCount,
         });
         out.frameDataPatches.push({

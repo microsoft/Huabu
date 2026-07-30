@@ -408,6 +408,7 @@
     "frameLayoutFree": "Free",
     "frameLayoutColumn": "Column",
     "frameLayoutRow": "Row",
+    "frameLayoutGrid": "Grid",
     "columns": "Columns",
     "rows": "Rows",
     "columnsRange": "Columns (1–{{max}})",
@@ -732,10 +733,13 @@
       "freeLayout": "free",
       "columnLayout": "column layout",
       "rowLayout": "row layout",
+      "gridLayout": "grid layout",
       "columns_one": "{{count}} column",
       "columns_other": "{{count}} columns",
       "rows_one": "{{count}} row",
-      "rows_other": "{{count}} rows"
+      "rows_other": "{{count}} rows",
+      "gridColumns_one": "grid, {{count}} column",
+      "gridColumns_other": "grid, {{count}} columns"
     },
     "commandOperationAligned": "Aligned nodes: {{count}} ({{detail}})",
     "commandOperationDistributed": "Distributed nodes: {{count}}",

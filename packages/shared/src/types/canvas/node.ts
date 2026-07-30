@@ -441,8 +441,17 @@ export interface AudioNodeData extends BaseNodeData {
  *              are at least as many children as columns.
  * - `row`    — N rows × ∞ columns. Mirror of `column` on the other axis
  *              (children top-aligned within their row).
+ * - `grid`   — N columns like `column`, but rows are aligned too: all
+ *              children sharing a row band get one shared Y origin and
+ *              the band's height is the tallest member. Row membership
+ *              is **derived** from the children's current vertical
+ *              overlap (nothing extra is persisted), so a column may
+ *              legitimately have no member in a given band — that cell
+ *              is simply left blank instead of being back-filled. This
+ *              is what makes side-by-side correspondence survive a
+ *              missing counterpart.
  */
-export const FRAME_LAYOUT_MODES = ['free', 'column', 'row'] as const;
+export const FRAME_LAYOUT_MODES = ['free', 'column', 'row', 'grid'] as const;
 export type FrameLayoutMode = (typeof FRAME_LAYOUT_MODES)[number];
 
 /**
@@ -476,9 +485,10 @@ export interface FrameNodeData extends BaseNodeData {
   layoutMode?: FrameLayoutMode;
   /**
    * Number of tracks for the active grid mode — interpreted as columns
-   * when `layoutMode === 'column'`, as rows when `layoutMode === 'row'`,
-   * ignored otherwise. Clamped to [`FRAME_GRID_MIN_COUNT`,
-   * `FRAME_GRID_MAX_COUNT`]; defaults to `FRAME_GRID_DEFAULT_COUNT`.
+   * when `layoutMode === 'column'` or `'grid'`, as rows when
+   * `layoutMode === 'row'`, ignored otherwise. Clamped to
+   * [`FRAME_GRID_MIN_COUNT`, `FRAME_GRID_MAX_COUNT`]; defaults to
+   * `FRAME_GRID_DEFAULT_COUNT`.
    */
   gridCount?: number;
   /**

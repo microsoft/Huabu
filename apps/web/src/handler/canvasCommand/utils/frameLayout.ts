@@ -12,6 +12,7 @@
 
 import {
   applyColumnLayout,
+  applyGridLayout,
   applyRowLayout,
   readFrameGridConfig,
 } from '@sediment/shared/canvas-engine';
@@ -157,7 +158,9 @@ export function buildStructuredFrameRelayoutCommands(
     const result =
       cfg.axis === 'column'
         ? applyColumnLayout(workingNodes, id, cfg.count)
-        : applyRowLayout(workingNodes, id, cfg.count);
+        : cfg.axis === 'row'
+          ? applyRowLayout(workingNodes, id, cfg.count)
+          : applyGridLayout(workingNodes, id, cfg.count);
     if (!result) continue;
 
     // Child positions (only when they actually move).

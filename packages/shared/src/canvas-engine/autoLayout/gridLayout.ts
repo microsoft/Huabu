@@ -1,8 +1,9 @@
 /**
- * @file Frame `column` / `row` masonry layouts.
+ * @file Frame `column` / `row` masonry layouts and the `grid`
+ * row-aligned layout.
  *
- * Two deterministic pack algorithms that share one shape with the axis
- * swapped:
+ * Three deterministic pack algorithms. The first two share one shape
+ * with the axis swapped:
  *
  *   • `column` — N **columns**, each child stacks top-to-bottom inside
  *                its column, left-aligned. Drop column = column under
@@ -10,12 +11,17 @@
  *   • `row`    — N **rows**, mirror of column on the other axis
  *                (children stack left-to-right, top-aligned).
  *
- * Both modes enforce a "no empty track" invariant: as long as the
- * child count ≥ N, every track has at least one item. If a track
+ * Both masonry modes enforce a "no empty track" invariant: as long as
+ * the child count ≥ N, every track has at least one item. If a track
  * would be left empty (because a stored `frameSlot` accidentally
  * collapsed all children into a subset of tracks), one neighbour is
  * pulled in. The new slot assignment is written back to
  * `data.frameSlot` so subsequent passes stay stable.
+ *
+ *   • `grid`   — N **columns** (same `frameSlot` model as `column`),
+ *                but the Y axis is aligned too: children are grouped
+ *                into **row bands** and every member of a band shares
+ *                one Y origin. See {@link applyGridLayout}.
  */
 import {
   FRAME_GRID_DEFAULT_COUNT,
@@ -136,20 +142,30 @@ export function clampGridCount(raw: number | undefined): number {
 }
 
 /**
+ * The structured layout modes, i.e. every `FrameLayoutMode` except
+ * `free`. `column` and `grid` both count **columns** and both store
+ * the column index in each child's `data.frameSlot`; `row` counts
+ * rows. The drag-time pickers therefore treat `grid` exactly like
+ * `column` — only the solver differs.
+ */
+export type FrameGridAxis = 'column' | 'row' | 'grid';
+
+/**
  * Read the layout config persisted on a frame. Returns `null` for
  * non-frame nodes or frames in `free` mode (caller no-ops).
  */
 export function readFrameGridConfig(
   node: Node | undefined,
-): { axis: 'column' | 'row'; count: number } | null {
+): { axis: FrameGridAxis; count: number } | null {
   if (!node || node.type !== 'frame') return null;
   const data = node.data as
     | { layoutMode?: FrameLayoutMode; gridCount?: number }
     | undefined;
-  if (data?.layoutMode !== 'column' && data?.layoutMode !== 'row') return null;
+  const mode = data?.layoutMode;
+  if (mode !== 'column' && mode !== 'row' && mode !== 'grid') return null;
   return {
-    axis: data.layoutMode,
-    count: clampGridCount(data.gridCount),
+    axis: mode,
+    count: clampGridCount(data?.gridCount),
   };
 }
 
@@ -539,6 +555,164 @@ export function applyRowLayout(
   };
 }
 
+// ── Row-aligned grid ──────────────────────────────────────────────────
+
+/**
+ * Group children into **row bands**: maximal sets that (a) overlap
+ * vertically and (b) occupy distinct columns.
+ *
+ * Children are swept in ascending `position.y`. A child joins the open
+ * band when its box still overlaps the band's running bottom edge AND
+ * its column is not already taken; otherwise it opens a new band. The
+ * distinct-column rule is what stops a tall child from swallowing the
+ * frame: a band can never hold more than one item per column, so its
+ * size is bounded by the track count.
+ *
+ * **Idempotency.** After {@link applyGridLayout} runs, every member of
+ * a band sits at exactly that band's origin and the next band starts
+ * one `interGapY` below the band's bottom. Re-running the sweep on
+ * that output reproduces the same bands, so the layout is a fixed
+ * point — no tolerance constant is involved and repeated passes (or a
+ * resize gesture's per-tick re-solve) never reshuffle rows.
+ *
+ * The `top === bandTop` escape hatch covers zero-height children,
+ * whose box cannot "overlap" anything: same-origin siblings still band
+ * together instead of each opening a band of their own.
+ */
+function groupIntoRowBands(
+  children: ChildSlot[],
+  columnOf: (child: ChildSlot) => number,
+): ChildSlot[][] {
+  const ordered = [...children].sort((a, b) => {
+    const dy = a.node.position.y - b.node.position.y;
+    if (dy !== 0) return dy;
+    // Deterministic tie-break so equal-Y children band in a stable
+    // order regardless of the caller's array order.
+    return a.node.position.x - b.node.position.x;
+  });
+
+  const bands: ChildSlot[][] = [];
+  let bandTop = 0;
+  let bandBottom = 0;
+  let bandColumns = new Set<number>();
+
+  for (const child of ordered) {
+    const column = columnOf(child);
+    const top = child.node.position.y;
+    const overlapsBand =
+      bands.length > 0 && (top === bandTop || top < bandBottom);
+
+    if (overlapsBand && !bandColumns.has(column)) {
+      bands[bands.length - 1].push(child);
+      bandBottom = Math.max(bandBottom, top + child.height);
+      bandColumns.add(column);
+      continue;
+    }
+
+    bands.push([child]);
+    bandTop = top;
+    bandBottom = top + child.height;
+    bandColumns = new Set<number>([column]);
+  }
+
+  return bands;
+}
+
+/**
+ * N-column layout with **aligned rows**.
+ *
+ * Columns behave exactly like {@link applyColumnLayout} — same
+ * `frameSlot` assignment, same content-driven column widths, same
+ * per-axis padding / gap derivation — so the drag-time column pickers
+ * and the resize gesture are reused verbatim. The difference is the Y
+ * axis: instead of each column stacking independently from the top,
+ * children are grouped into row bands ({@link groupIntoRowBands}) and
+ * every member of a band is placed at that band's shared origin, with
+ * the band's height set by its tallest member.
+ *
+ * The point of the mode is **correspondence across columns**: items
+ * meant to line up are placed side by side, and a column with no
+ * member in a band simply leaves that cell blank rather than pulling
+ * its next item up. Row membership is derived from where the user
+ * dropped things, so nothing beyond the existing `frameSlot` is
+ * persisted and switching back to `free` leaves no residue.
+ *
+ * Frame sizing stays content-driven and per-axis self-consistent:
+ * scaling every child width by `sx` scales the column widths, the
+ * width median, `padX` and `interGapX` alike (and likewise `sy` on the
+ * height side), so a single-edge resize tracks the pointer exactly.
+ */
+export function applyGridLayout(
+  nodes: Node[],
+  frameId: string,
+  count: number,
+  emptyTrackPolicy: 'fill' | 'compact' = 'compact',
+): FrameGridLayoutResult | null {
+  const frame = nodes.find((n) => n.id === frameId);
+  if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
+
+  const children = collectChildren(nodes, frameId);
+  if (children.length === 0) return null;
+
+  const cols = clampGridCount(count);
+  const { assignment, count: effectiveCols } = assignTrackSlots(
+    children,
+    cols,
+    (c) => c.node.position.y,
+    emptyTrackPolicy,
+  );
+  const columnOf = (child: ChildSlot) => assignment.get(child.node.id) ?? 0;
+
+  // Column widths span the whole frame (max over every band) — that is
+  // what makes the vertical edges read as columns.
+  const colWidth = new Array<number>(effectiveCols).fill(0);
+  for (const child of children) {
+    const c = columnOf(child);
+    if (child.width > colWidth[c]) colWidth[c] = child.width;
+  }
+
+  // Per-axis padding + gap — identical derivation to the masonry
+  // solvers so all three modes size their frame the same way.
+  const widthMedian = median(children.map((c) => c.width));
+  const heightMedian = median(children.map((c) => c.height));
+  const padX = paddingFromExtent(widthMedian);
+  const padY = paddingFromExtent(heightMedian);
+  const interGapX = gapFromExtent(widthMedian);
+  const interGapY = gapFromExtent(heightMedian);
+
+  const colOriginX = new Array<number>(effectiveCols).fill(padX);
+  for (let c = 1; c < effectiveCols; c += 1) {
+    colOriginX[c] =
+      colOriginX[c - 1] +
+      (colWidth[c - 1] > 0 ? colWidth[c - 1] + interGapX : 0);
+  }
+
+  const bands = groupIntoRowBands(children, columnOf);
+
+  const positions = new Map<string, XYPosition>();
+  let y = padY;
+  for (const band of bands) {
+    const bandHeight = Math.max(0, ...band.map((c) => c.height));
+    for (const item of band) {
+      positions.set(item.node.id, { x: colOriginX[columnOf(item)], y });
+    }
+    y += bandHeight + interGapY;
+  }
+  // `y` overshot by one trailing inter-band gap.
+  const contentBottom = bands.length > 0 ? y - interGapY : padY;
+
+  const lastCol = effectiveCols - 1;
+  const contentRight =
+    effectiveCols > 0 ? colOriginX[lastCol] + colWidth[lastCol] : padX;
+
+  return {
+    childPositions: positions,
+    slotAssignments: assignment,
+    frameSize: { width: contentRight + padX, height: contentBottom + padY },
+    effectiveCount: effectiveCols,
+  };
+}
+
 // ── Drag-time slot pickers ────────────────────────────────────────────
 
 /**
@@ -849,6 +1023,10 @@ export interface StructuredDropZone {
  * rank the `into-existing` insertion caret against the dragged node's
  * top edge — exactly how the solver re-sorts the track on release.
  *
+ * `grid` is treated as `column` throughout: it counts columns and
+ * stores the column in `frameSlot` just like column masonry, so the
+ * drop decision and its geometry are identical.
+ *
  * Returns `null` when the frame is missing. All coordinates are
  * frame-local; the caller offsets by the frame's absolute position.
  */
@@ -856,19 +1034,18 @@ export function describeStructuredDropZone(
   nodes: Node[],
   frameId: string,
   framePoint: { x: number; y: number },
-  axis: 'column' | 'row',
+  axis: FrameGridAxis,
   count: number,
   dragged?: DraggedNodeRect,
 ): StructuredDropZone | null {
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame) return null;
 
-  const target =
-    axis === 'column'
-      ? pickColumnDropTarget(nodes, frameId, framePoint, count)
-      : pickRowDropTarget(nodes, frameId, framePoint, count);
+  const isCol = axis !== 'row';
+  const target = isCol
+    ? pickColumnDropTarget(nodes, frameId, framePoint, count)
+    : pickRowDropTarget(nodes, frameId, framePoint, count);
 
-  const isCol = axis === 'column';
   // Axis projections: "main" = the count axis (where tracks sit),
   // "cross" = the stack axis (where items pile up inside a track).
   const mainSize = (c: ChildSlot) => (isCol ? c.width : c.height);
@@ -1041,7 +1218,7 @@ export function describeStructuredDropZone(
 // ── Executor integration: apply layout to nodes in-place ──────────────
 
 /**
- * Apply structured (`column` / `row`) layout to every frame in
+ * Apply structured (`column` / `row` / `grid`) layout to every frame in
  * `frameIds` that opted into it via `data.layoutMode`. Free-mode frames
  * are skipped (caller's `fitFrames` handles them).
  *
@@ -1093,7 +1270,9 @@ export function applyStructuredFrameRelayout(
     const result =
       cfg.axis === 'column'
         ? applyColumnLayout(working, frameId, cfg.count, policy)
-        : applyRowLayout(working, frameId, cfg.count, policy);
+        : cfg.axis === 'row'
+          ? applyRowLayout(working, frameId, cfg.count, policy)
+          : applyGridLayout(working, frameId, cfg.count, policy);
     if (!result) continue;
 
     handled.add(frameId);

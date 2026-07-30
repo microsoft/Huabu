@@ -408,6 +408,7 @@
     "frameLayoutFree": "自由",
     "frameLayoutColumn": "列",
     "frameLayoutRow": "行",
+    "frameLayoutGrid": "网格",
     "columns": "列数",
     "rows": "行数",
     "columnsRange": "列数（1–{{max}}）",
@@ -732,10 +733,13 @@
       "freeLayout": "自由",
       "columnLayout": "列式",
       "rowLayout": "行式",
+      "gridLayout": "网格",
       "columns_one": "{{count}} 列",
       "columns_other": "{{count}} 列",
       "rows_one": "{{count}} 行",
-      "rows_other": "{{count}} 行"
+      "rows_other": "{{count}} 行",
+      "gridColumns_one": "网格 {{count}} 列",
+      "gridColumns_other": "网格 {{count}} 列"
     },
     "commandOperationAligned": "已对齐节点：{{count}} 个（{{detail}}）",
     "commandOperationDistributed": "已均匀分布节点：{{count}} 个",
