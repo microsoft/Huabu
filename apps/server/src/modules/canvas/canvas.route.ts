@@ -30,7 +30,6 @@ import {
 import { CanvasNotFoundError, applyDeltasOnServer } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
-import { runWithExternalNoteWatcherSuspended } from './external-watcher.js';
 import {
   assertWorldPortalTopologyAllowed,
   WorldPortalMutationError,
@@ -61,6 +60,7 @@ import {
   type UpdateNodeOutcome,
 } from '../storage/index.js';
 import { canvasRoot, nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
+import { withSpaceDirHandlesReleased } from '../storage/space-dir-handles.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
@@ -573,10 +573,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         .code(403)
         .send({ message: 'World canvas cannot be deleted' });
     }
-    // Suspend the external-note watcher across the directory delete: on
-    // Windows a live `fs.watch` handle inside the canvas subtree makes
-    // `rmSync` fail with EPERM (same root cause as the rename path).
-    const deleted = await runWithExternalNoteWatcherSuspended(() =>
+    // Release any handle held inside this Space's directory across the
+    // delete: on Windows a live `fs.watch` handle makes `rmSync` fail with
+    // EPERM (same root cause as the rename path). A no-op unless the Space
+    // currently has an open external-note stream.
+    const deleted = await withSpaceDirHandlesReleased(canvasId, () =>
       deleteCanvas(canvasId),
     );
 
@@ -1159,10 +1160,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const previousTitle = existing?.title ?? null;
     const nextTitle = title ?? previousTitle;
     if (typeof title === 'string' && title !== previousTitle) {
-      // Suspend the external-note watcher across the directory rename: on
-      // Windows a live `fs.watch` handle inside the canvas subtree makes
-      // `renameSync` fail with EPERM (see `runWithExternalNoteWatcherSuspended`).
-      const renameResult = await runWithExternalNoteWatcherSuspended(() =>
+      // Release any handle held inside this Space's directory across the
+      // rename: on Windows a live `fs.watch` handle makes `renameSync` fail
+      // with EPERM (see `withSpaceDirHandlesReleased`).
+      const renameResult = await withSpaceDirHandlesReleased(canvasId, () =>
         store.renameSelf(title),
       );
       if (!renameResult.ok && renameResult.reason === 'conflict') {

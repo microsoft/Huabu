@@ -53,9 +53,9 @@ void start();
 // foreground group. Without an explicit handler Node takes the default
 // action and terminates immediately — which SKIPS Fastify's `onClose`
 // hooks. Those hooks are the ONLY thing that reaps the forked agentlet
-// daemon (see daemon-supervisor.ts → `close()`) and closes the external
-// -note chokidar watcher (see app.ts `onClose`), so a hard exit here
-// orphans the daemon and leaves the watch handle wedged after the app
+// daemon (see daemon-supervisor.ts → `close()`) and releases the active
+// external-note watch handles (see app.ts `onClose`), so a hard exit here
+// orphans the daemon and leaves those handles wedged after the app
 // is gone.
 //
 // On Windows there is no real POSIX signal delivery: Electron's

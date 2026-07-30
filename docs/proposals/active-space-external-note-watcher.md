@@ -3,6 +3,8 @@
 Status: Accepted — implemented on PR [#392](https://github.com/hai-team/Sediment/pull/392); set to `Shipped` when that PR merges.
 Last updated: 2026-07-30
 
+> **Superseded in part.** A follow-up on the same PR removed the depth-zero Workspace watcher entirely and moved the suspension bracket out of this module, so sections [9](#9-workspace-lifecycle) and [10](#10-server-owned-rename-and-delete) no longer describe shipped code. The `canvasId -> directory` index is now invalidated lazily by its read paths, and `space-dir-handles.ts` owns a neutral, `canvasId`-scoped `withSpaceDirHandlesReleased` primitive that active sessions register with. [canvas-storage.md](../architecture/canvas-storage.md) is authoritative.
+
 > **Scope.** This proposal refines the external-note watcher introduced by PR #392 so Workspace-level observation owns only Space lifecycle while `nodes/` observation exists only for Spaces with active external-note SSE subscribers. It preserves #392's depth-zero Workspace watcher, lazy discovery, bounded asynchronous reads, and cloud-drive startup improvements. It does not attempt to repair Google Drive, OneDrive, or macOS File Provider synchronization state.
 
 ## 1. Problem
@@ -238,9 +240,10 @@ When shipped, set this proposal to `Status: Shipped`, record the merge PR or com
 
 ## 17. Code entry points
 
-| File                                                                                      | Responsibility                                                                                                                |
-| ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| [external-watcher.ts](../../apps/server/src/modules/canvas/external-watcher.ts)           | Workspace lifecycle watcher, active Space session ownership, lazy discovery, native event handling, suspension, and shutdown. |
-| [external.route.ts](../../apps/server/src/modules/canvas/external.route.ts)               | External-note SSE session acquisition, snapshot delivery, event forwarding, and release on disconnect.                        |
-| [external-watcher.test.ts](../../apps/server/src/modules/canvas/external-watcher.test.ts) | Startup, subscription, race, lifecycle, degradation, and resource-release coverage.                                           |
-| [canvas-storage.md](../architecture/canvas-storage.md)                                    | Authoritative shipped storage and watcher contract after implementation.                                                      |
+| File                                                                                      | Responsibility                                                                                         |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| [external-watcher.ts](../../apps/server/src/modules/canvas/external-watcher.ts)           | Active Space session ownership, lazy discovery, native event handling, and workspace-switch teardown.  |
+| [space-dir-handles.ts](../../apps/server/src/modules/storage/space-dir-handles.ts)        | Neutral `canvasId`-scoped handle release/re-acquire bracket for server-owned Space rename and delete.  |
+| [external.route.ts](../../apps/server/src/modules/canvas/external.route.ts)               | External-note SSE session acquisition, snapshot delivery, event forwarding, and release on disconnect. |
+| [external-watcher.test.ts](../../apps/server/src/modules/canvas/external-watcher.test.ts) | Subscription, race, lifecycle, degradation, and resource-release coverage.                             |
+| [canvas-storage.md](../architecture/canvas-storage.md)                                    | Authoritative shipped storage and watcher contract after implementation.                               |

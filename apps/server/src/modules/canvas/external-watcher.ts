@@ -1,35 +1,33 @@
 /**
  * @file External-note observation.
  *
- * Two ownership tiers, per `docs/architecture/canvas-storage.md`:
+ * Exists for exactly one product feature: surfacing user-authored `.md` files
+ * dropped into `<Space>/nodes/` from outside the app so the layer panel can
+ * offer them for import.
  *
- * - One depth-zero Chokidar watcher observes **Space lifecycle only** —
- *   top-level directory add/remove/rename. It never enumerates `nodes/`.
- * - One native `fs.watch` handle per **active Space session** observes
- *   `<Space>/nodes/`. A session exists only while at least one external-note
- *   SSE subscriber is attached, so watcher count scales with open streams
- *   rather than with total Space count. Inactive Spaces hold no watcher and
- *   no in-memory state; their eventual state is rebuilt by the first lazy
- *   scan when they are next opened.
+ * One native `fs.watch` handle per **active Space session** observes
+ * `<Space>/nodes/`. A session exists only while at least one external-note SSE
+ * subscriber is attached, so watcher count equals the number of open streams.
+ * Inactive Spaces hold no watcher and no in-memory state; their eventual state
+ * is rebuilt by the first lazy scan when they are next opened. There is no
+ * workspace-level watcher: `canvas-dirs.ts` invalidates its directory index
+ * lazily on the read paths that need it.
+ *
+ * Because a live handle blocks `renameSync` / `rmSync` on Windows, each
+ * session registers itself with `space-dir-handles.ts` so a server-owned
+ * rename or delete of that Space can release and re-acquire it.
  */
 
 import { watch as watchFs, type FSWatcher as NativeFSWatcher } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
-import chokidar, { type FSWatcher } from 'chokidar';
-
 import { getLogger } from '../../utils/logger.js';
-import {
-  listAllCanvasDirEntries,
-  refreshCanvasDirIndex,
-} from '../storage/canvas-dirs.js';
+import { listAllCanvasDirEntries } from '../storage/canvas-dirs.js';
 import { parseFrontmatter } from '../storage/frontmatter.js';
 import { getCanvasStore } from '../storage/index.js';
-import {
-  SPACE_JSON_FILENAME,
-  WORLD_CANVAS_DIR_NAME,
-} from '../storage/paths.js';
+import { SPACE_JSON_FILENAME } from '../storage/paths.js';
+import { registerSpaceDirHandleOwner } from '../storage/space-dir-handles.js';
 import { getWorkspacePath, isWorkspaceConfigured } from '../workspace.js';
 
 import type { CanvasFile } from '../storage/index.js';
@@ -72,11 +70,12 @@ interface ActiveSpaceWatch {
   scanFailed: boolean;
   /** Bumped on close and on workspace reset to reject stale async work. */
   sessionGeneration: number;
+  /** Deregisters the session from `space-dir-handles.ts`. */
+  unregisterHandleOwner: () => void;
   closed: boolean;
 }
 
 const sessions = new Map<string, ActiveSpaceWatch>();
-let watcher: FSWatcher | null = null;
 let workspaceGeneration = 0;
 let nextSessionGeneration = 1;
 
@@ -271,6 +270,7 @@ function disarmSessionWatcher(session: ActiveSpaceWatch): void {
 function destroySession(session: ActiveSpaceWatch): void {
   if (session.closed) return;
   session.closed = true;
+  session.unregisterHandleOwner();
   disarmSessionWatcher(session);
   session.listeners.clear();
   session.pendingItems.clear();
@@ -282,114 +282,34 @@ function destroySession(session: ActiveSpaceWatch): void {
 }
 
 /**
- * Re-point active sessions after the top-level directory index changed. A
- * renamed Space re-arms its watcher at the new path; a deleted Space drops its
- * live state and tells subscribers it is now empty. Inactive Spaces are
- * deliberately untouched — they own no watcher to fix up.
+ * Re-point a session at its Space directory, which a server-owned mutation
+ * may have renamed or deleted. A survivor re-arms its watcher at the new path;
+ * a deleted Space drops its live state and tells subscribers it is now empty.
+ * Idempotent, so it doubles as the handle-owner `reacquire` hook.
  */
-function resyncActiveSessions(): void {
-  for (const session of [...sessions.values()]) {
-    const nodesPath = nodesPathFor(session.canvasId);
-    if (!nodesPath) {
-      disarmSessionWatcher(session);
-      session.nodesPath = '';
-      session.pendingItems.clear();
-      session.initialScan = null;
-      emit(session, { type: 'snapshot', data: { items: [] } });
-      continue;
-    }
-    if (nodesPath === session.nodesPath && session.watcher) continue;
+function resyncSession(session: ActiveSpaceWatch): void {
+  if (session.closed) return;
+  const nodesPath = nodesPathFor(session.canvasId);
+  if (!nodesPath) {
     disarmSessionWatcher(session);
-    session.nodesPath = nodesPath;
-    armSessionWatcher(session);
+    session.nodesPath = '';
+    session.pendingItems.clear();
+    session.initialScan = null;
+    emit(session, { type: 'snapshot', data: { items: [] } });
+    return;
   }
-}
-
-async function closeWatcherHandles(): Promise<void> {
-  const activeWatcher = watcher;
-  watcher = null;
-  for (const session of sessions.values()) disarmSessionWatcher(session);
-  if (activeWatcher) await activeWatcher.close().catch(() => undefined);
-}
-
-/**
- * Arm the depth-zero workspace watcher plus the native watcher of every
- * currently active Space session. Discovery state is left untouched so the
- * caller decides whether a fresh scan should clear it or preserve it across
- * self-write suspension.
- */
-function armWatcher(): void {
-  if (!isWorkspaceConfigured()) return;
-  const ws = getWorkspacePath();
-  let initialScanComplete = false;
-  const invalidateForTopLevelDirectory = (candidate: string): void => {
-    if (!initialScanComplete) return;
-    const relative = path.relative(path.resolve(ws), path.resolve(candidate));
-    if (
-      !relative ||
-      relative === '..' ||
-      relative.startsWith(`..${path.sep}`) ||
-      path.isAbsolute(relative) ||
-      relative.includes(path.sep)
-    ) {
-      return;
-    }
-    refreshCanvasDirIndex();
-    resyncActiveSessions();
-  };
-  for (const session of sessions.values()) armSessionWatcher(session);
-  watcher = chokidar.watch(ws, {
-    ignoreInitial: true,
-    depth: 0,
-    ignored: (candidate: string) => {
-      const basename = path.basename(candidate);
-      if (!basename.startsWith('.')) return false;
-      return (
-        path.resolve(candidate) !==
-        path.join(path.resolve(ws), WORLD_CANVAS_DIR_NAME)
-      );
-    },
-  });
-  watcher
-    .on('addDir', invalidateForTopLevelDirectory)
-    .on('unlinkDir', invalidateForTopLevelDirectory)
-    .on('ready', () => {
-      initialScanComplete = true;
-    })
-    // Swallow watcher errors. When a canvas directory is deleted while
-    // chokidar is mid-scan (common on virtual/network filesystems such as
-    // Google Drive), readdirp can emit a transient EINVAL/ENOENT `lstat`
-    // error. Without this handler the FSWatcher re-emits it as an unhandled
-    // 'error' event, which crashes the whole server process. Log and ignore.
-    .on('error', (err: unknown) => {
-      getLogger('external-note-watcher').warn(
-        { err },
-        'external note watcher error (ignored)',
-      );
-    });
-}
-
-// Serialize watcher lifecycle transitions (reset / shutdown). `commitWorkspacePath`
-// fires `void resetExternalNoteWatcher()` without awaiting, so two rapid workspace
-// activations could otherwise run their close→arm cycles concurrently: the second
-// `armWatcher()` overwrites the module-level `watcher` reference before the first
-// cycle closes its handle, leaking a live FSWatcher that can never be closed.
-// Chaining every transition through one promise guarantees strict ordering.
-let lifecycleChain: Promise<void> = Promise.resolve();
-
-function enqueueLifecycle(task: () => Promise<void>): Promise<void> {
-  // Run `task` after the previous transition settles, regardless of whether it
-  // resolved or rejected, so one failed close can never wedge the chain.
-  const run = lifecycleChain.then(task, task);
-  lifecycleChain = run.catch(() => undefined);
-  return run;
+  if (nodesPath === session.nodesPath && session.watcher) return;
+  disarmSessionWatcher(session);
+  session.nodesPath = nodesPath;
+  armSessionWatcher(session);
 }
 
 /**
  * Tear every active session down and tell its subscribers the Space is now
  * empty. Called on workspace switch and shutdown: the previous workspace's
  * canvasIds are meaningless afterwards, and the client reconnects its stream
- * when it navigates into the new workspace.
+ * when it navigates into the new workspace. Bumping the workspace generation
+ * rejects any scan or event still in flight from the previous workspace.
  */
 function destroyAllSessions(): void {
   for (const session of [...sessions.values()]) {
@@ -400,94 +320,21 @@ function destroyAllSessions(): void {
 }
 
 /**
- * Stop the current watcher (if any), drop every active session, and re-arm
- * the workspace watcher against the currently active workspace. Safe to call
- * multiple times and from concurrent callers — transitions are serialized so
- * the module-level `watcher` reference is never overwritten before its handle
- * is closed. Bumping the workspace generation rejects any scan or event still
- * in flight from the previous workspace.
- */
-export async function resetExternalNoteWatcher(): Promise<void> {
-  return enqueueLifecycle(async () => {
-    workspaceGeneration += 1;
-    await closeWatcherHandles();
-    destroyAllSessions();
-    armWatcher();
-  });
-}
-
-/**
- * Close the current watcher (if any) and drop every session *without*
- * re-arming. Call this from the server's shutdown path so live `fs.watch`
- * handles are released cleanly instead of being force-killed — on
- * virtual/network filesystems (Google Drive) a force-terminated process can
- * leave in-flight watch requests wedged. Serialized against
- * `resetExternalNoteWatcher` through the shared lifecycle chain.
- */
-export async function closeExternalNoteWatcher(): Promise<void> {
-  return enqueueLifecycle(async () => {
-    workspaceGeneration += 1;
-    await closeWatcherHandles();
-    destroyAllSessions();
-  });
-}
-
-// ── Self-write suspension ────────────────────────────────────────────────
-//
-// On Windows a live `fs.watch` handle anywhere inside a canvas subtree
-// (the canvas dir itself OR its `nodes/` child) makes `renameSync` /
-// `rmSync` of that directory fail with EPERM — the handle is persistent,
-// so retries never win and `unwatch(subpath)` does not release it. The
-// only fix is to fully `close()` the workspace watcher and every active
-// session watcher for the duration of a server-owned directory
-// rename/delete, then re-arm them.
-//
-// The server is the sole legitimate writer of these directories, so
-// suspending our own observer around our own write is safe. A depth
-// counter lets concurrent/nested suspensions (e.g. a rename racing a
-// delete) share one close/re-arm cycle instead of thrashing.
-let suspendDepth = 0;
-let armAfterResume = false;
-
-/**
- * Run `fn` with the external-note watcher suspended, then re-arm it.
+ * Drop every active external-note session and release its handles.
  *
- * Use this to bracket any server-initiated rename or delete of a canvas
- * directory so a live watch handle cannot block the filesystem operation on
- * Windows. Re-arming preserves each active session's discovery state:
- * external notes are keyed by `canvasId` + `relativePath`
- * (`nodes/<file>.md`), neither of which a directory rename changes, and
- * `recordItem` is idempotent — so the client's external-note list does not
- * flicker. A session whose Space was deleted inside the bracket is resynced
- * to an empty state instead.
+ * Called on workspace switch (the previous workspace's canvasIds are
+ * meaningless afterwards, and the client reconnects its stream when it
+ * navigates into the new workspace) and on server shutdown, so live
+ * `fs.watch` handles are released cleanly instead of being force-killed —
+ * on virtual/network filesystems (Google Drive) a force-terminated process
+ * can leave in-flight watch requests wedged.
  *
- * A no-op passthrough when nothing is currently armed (e.g. no workspace
- * configured, or a test harness), so it never spins up a watcher that was
- * intentionally absent.
+ * Synchronous and idempotent: there is no workspace-level watcher to close,
+ * so no lifecycle serialization is required.
  */
-export async function runWithExternalNoteWatcherSuspended<T>(
-  fn: () => T | Promise<T>,
-): Promise<T> {
-  if (suspendDepth === 0) {
-    // Only re-arm on exit if something was actually running on entry.
-    armAfterResume = watcher !== null || sessions.size > 0;
-    await closeWatcherHandles();
-  }
-  suspendDepth++;
-  try {
-    return await fn();
-  } finally {
-    suspendDepth--;
-    if (suspendDepth === 0 && armAfterResume) {
-      armAfterResume = false;
-      // While suspended we observed no events, so a Space renamed or deleted
-      // inside the bracket must be reconciled explicitly: `resyncActiveSessions`
-      // re-points survivors at their new directory and empties the rest.
-      refreshCanvasDirIndex();
-      resyncActiveSessions();
-      armWatcher();
-    }
-  }
+export function resetExternalNoteSessions(): void {
+  workspaceGeneration += 1;
+  destroyAllSessions();
 }
 
 // ── Lazy initial discovery ───────────────────────────────────────────────
@@ -582,7 +429,7 @@ export async function openExternalNoteSession(
 ): Promise<ExternalNoteSession> {
   let session = sessions.get(canvasId);
   if (!session) {
-    session = {
+    const created: ActiveSpaceWatch = {
       canvasId,
       nodesPath: nodesPathFor(canvasId) ?? '',
       watcher: null,
@@ -594,10 +441,18 @@ export async function openExternalNoteSession(
       initialScan: null,
       scanFailed: false,
       sessionGeneration: nextSessionGeneration++,
+      unregisterHandleOwner: () => undefined,
       closed: false,
     };
-    sessions.set(canvasId, session);
-    armSessionWatcher(session);
+    session = created;
+    sessions.set(canvasId, created);
+    // Declare the handle so a server-owned rename/delete of this Space can
+    // release it; `resyncSession` re-resolves the directory on re-acquire.
+    created.unregisterHandleOwner = registerSpaceDirHandleOwner(canvasId, {
+      release: () => disarmSessionWatcher(created),
+      reacquire: () => resyncSession(created),
+    });
+    armSessionWatcher(created);
   }
 
   const active = session;

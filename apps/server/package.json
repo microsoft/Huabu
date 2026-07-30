@@ -40,7 +40,6 @@
     "@resvg/resvg-wasm": "^2.6.2",
     "@sediment/shared": "workspace:*",
     "archiver": "^7.0.1",
-    "chokidar": "^5.0.0",
     "dotenv": "^17.2.3",
     "fastify": "^5.2.0",
     "image-size": "^2.0.2",

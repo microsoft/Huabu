@@ -1,15 +1,12 @@
 /**
- * @file Tests for the external-note watcher's two ownership tiers: the
- * depth-zero workspace chokidar watcher that observes Space lifecycle only,
- * and the per-active-Space native `nodes/` watcher owned by an external-note
- * SSE session. Also covers `runWithExternalNoteWatcherSuspended` — the
- * depth-counted bracket that fully closes every live handle for the duration
- * of a server-owned canvas rename/delete (so a live `fs.watch` handle cannot
- * block `renameSync` / `rmSync` with EPERM on Windows) and then re-arms it.
+ * @file Tests for external-note discovery: the per-active-Space native
+ * `nodes/` watcher owned by an external-note SSE session, its lazy scan, and
+ * its registration with the Space-directory handle registry (so a
+ * server-owned rename/delete can release the handle that would otherwise
+ * fail `renameSync` / `rmSync` with EPERM on Windows).
  *
- * chokidar, `node:fs`, and the workspace resolver are mocked so the module can
- * be exercised without a real filesystem: `chokidar.watch` returns a fake
- * `FSWatcher` and the workspace is toggled on/off per test.
+ * `node:fs`, `node:fs/promises`, and the workspace resolver are mocked so the
+ * module can be exercised without a real filesystem.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,12 +33,6 @@ vi.mock('node:fs', () => ({
   watch: nativeWatchMock,
 }));
 
-const watchMock = vi.hoisted(() => vi.fn());
-
-vi.mock('chokidar', () => ({
-  default: { watch: watchMock },
-}));
-
 vi.mock('../workspace.js', () => ({
   isWorkspaceConfigured: () => state.configured,
   getWorkspacePath: () => '/ws',
@@ -51,15 +42,11 @@ vi.mock('../../utils/logger.js', () => ({
   getLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }),
 }));
 
-// Spy on the canvas-dir index so the delete-cleanup prune step on re-arm is
-// observable (it refreshes the index and enumerates live canvas ids).
 const canvasDirs = vi.hoisted(() => ({
-  refresh: vi.fn(),
   list: vi.fn<() => Array<{ id: string; filename: string }>>(() => []),
 }));
 
 vi.mock('../storage/canvas-dirs.js', () => ({
-  refreshCanvasDirIndex: canvasDirs.refresh,
   listAllCanvasDirEntries: () => canvasDirs.list(),
 }));
 
@@ -71,30 +58,12 @@ vi.mock('../storage/index.js', () => ({
   getCanvasStore: () => canvasStore,
 }));
 
-/** Build a fresh fake FSWatcher whose `.on(...)` chain is a no-op. */
-function makeFakeWatcher() {
-  const w = {
-    on: vi.fn(() => w),
-    close: vi.fn(async () => undefined),
-  };
-  return w;
-}
-
 function makeFakeNativeWatcher() {
   const nativeWatcher = {
     on: vi.fn(() => nativeWatcher),
     close: vi.fn(),
   };
   return nativeWatcher;
-}
-
-function emitWatcherEvent(event: string, ...args: unknown[]): unknown {
-  const calls = current.on.mock.calls as unknown as Array<
-    [string, (...callbackArgs: unknown[]) => unknown]
-  >;
-  const callback = calls.find(([registered]) => registered === event)?.[1];
-  if (!callback) throw new Error(`No watcher handler registered for ${event}`);
-  return callback(...args);
 }
 
 function emitNativeWatcherEvent(filename: string): void {
@@ -107,9 +76,9 @@ function emitNativeWatcherEvent(filename: string): void {
 
 import {
   openExternalNoteSession,
-  resetExternalNoteWatcher,
-  runWithExternalNoteWatcherSuspended,
+  resetExternalNoteSessions,
 } from './external-watcher.js';
+import { withSpaceDirHandlesReleased } from '../storage/space-dir-handles.js';
 
 import type { ExternalNoteEvent } from '@sediment/shared';
 
@@ -120,16 +89,9 @@ function markdownReads(): string[] {
     .filter((filePath) => filePath.endsWith('.md'));
 }
 
-let current: ReturnType<typeof makeFakeWatcher>;
 let currentNative: ReturnType<typeof makeFakeNativeWatcher>;
 
 beforeEach(() => {
-  watchMock.mockReset();
-  current = makeFakeWatcher();
-  watchMock.mockImplementation(() => {
-    current = makeFakeWatcher();
-    return current;
-  });
   nativeWatchMock.mockReset();
   currentNative = makeFakeNativeWatcher();
   nativeWatchMock.mockImplementation(() => {
@@ -150,90 +112,23 @@ beforeEach(() => {
   state.configured = true;
 });
 
-afterEach(async () => {
-  // Tear the module-level watcher down so state does not leak between tests.
+afterEach(() => {
+  // Drop module-level sessions so state does not leak between tests.
   state.configured = false;
-  await resetExternalNoteWatcher();
-});
-
-describe('workspace lifecycle watcher', () => {
-  it('arms only a depth-zero Chokidar watcher at startup', async () => {
-    canvasDirs.list.mockReturnValue([
-      { id: 'canvas-a', filename: 'canvas-a' },
-      { id: 'canvas-b', filename: 'canvas-b' },
-    ]);
-    await resetExternalNoteWatcher();
-
-    expect(watchMock).toHaveBeenCalledWith(
-      '/ws',
-      expect.objectContaining({ ignoreInitial: true, depth: 0 }),
-    );
-    // Inactive Spaces own no watcher and are never enumerated at startup.
-    expect(nativeWatchMock).not.toHaveBeenCalled();
-    expect(fileIO.readdir).not.toHaveBeenCalled();
-    expect(markdownReads()).toHaveLength(0);
-  });
-
-  it('invalidates only for top-level directory changes after initial scan', async () => {
-    await resetExternalNoteWatcher();
-    canvasDirs.refresh.mockClear();
-
-    emitWatcherEvent('addDir', '/ws/canvas-a');
-    expect(canvasDirs.refresh).not.toHaveBeenCalled();
-
-    emitWatcherEvent('ready');
-    emitWatcherEvent('addDir', '/ws/canvas-a');
-    emitWatcherEvent('addDir', '/ws/canvas-a/nodes');
-    emitWatcherEvent('unlinkDir', '/ws/canvas-b');
-
-    expect(canvasDirs.refresh).toHaveBeenCalledTimes(2);
-  });
-
-  it('re-arms an active Space watcher at its new directory after a rename', async () => {
-    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'old-name' }]);
-    await resetExternalNoteWatcher();
-    const session = await openExternalNoteSession('canvas-a', vi.fn());
-    const beforeRename = currentNative;
-    nativeWatchMock.mockClear();
-
-    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'new-name' }]);
-    emitWatcherEvent('ready');
-    emitWatcherEvent('addDir', '/ws/new-name');
-
-    expect(beforeRename.close).toHaveBeenCalledTimes(1);
-    expect(nativeWatchMock).toHaveBeenCalledTimes(1);
-    expect(nativeWatchMock.mock.calls[0]?.[0]).toMatch(/new-name[\\/]nodes$/);
-    session.close();
-  });
-
-  it('empties an active session whose Space was deleted', async () => {
-    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
-    await resetExternalNoteWatcher();
-    const events: ExternalNoteEvent[] = [];
-    const session = await openExternalNoteSession('canvas-a', (event) =>
-      events.push(event),
-    );
-    const watcherBefore = currentNative;
-    nativeWatchMock.mockClear();
-
-    canvasDirs.list.mockReturnValue([]);
-    emitWatcherEvent('ready');
-    emitWatcherEvent('unlinkDir', '/ws/canvas-a');
-
-    expect(watcherBefore.close).toHaveBeenCalledTimes(1);
-    expect(nativeWatchMock).not.toHaveBeenCalled();
-    expect(events.at(-1)).toEqual({ type: 'snapshot', data: { items: [] } });
-    session.close();
-  });
+  resetExternalNoteSessions();
 });
 
 describe('openExternalNoteSession', () => {
-  it('watches only the Space that has a subscriber', async () => {
+  it('registers no watcher until a Space is subscribed', async () => {
     canvasDirs.list.mockReturnValue([
       { id: 'canvas-a', filename: 'canvas-a' },
       { id: 'canvas-b', filename: 'canvas-b' },
     ]);
-    await resetExternalNoteWatcher();
+
+    // Nothing observes the workspace on its own — inactive Spaces are never
+    // enumerated and hold no handle.
+    expect(nativeWatchMock).not.toHaveBeenCalled();
+    expect(fileIO.readdir).not.toHaveBeenCalled();
 
     const session = await openExternalNoteSession('canvas-a', vi.fn());
 
@@ -254,7 +149,6 @@ describe('openExternalNoteSession', () => {
       order.push('readdir');
       return [];
     });
-    await resetExternalNoteWatcher();
 
     const session = await openExternalNoteSession('canvas-a', vi.fn());
 
@@ -267,7 +161,6 @@ describe('openExternalNoteSession', () => {
     fileIO.readdir.mockResolvedValue([
       { name: 'first.md', isFile: () => true },
     ]);
-    await resetExternalNoteWatcher();
 
     const [first, second] = await Promise.all([
       openExternalNoteSession('canvas-a', vi.fn()),
@@ -305,7 +198,6 @@ describe('openExternalNoteSession', () => {
         releaseReads.push(() => resolve('---\nid: external-note\n---\n'));
       });
     });
-    await resetExternalNoteWatcher();
 
     const opening = openExternalNoteSession('canvas-a', vi.fn());
 
@@ -327,7 +219,6 @@ describe('openExternalNoteSession', () => {
       { name: 'first.md', isFile: () => true },
       { name: 'second.md', isFile: () => true },
     ]);
-    await resetExternalNoteWatcher();
 
     const first = await openExternalNoteSession('canvas-a', vi.fn());
     const second = await openExternalNoteSession('canvas-a', vi.fn());
@@ -349,7 +240,6 @@ describe('openExternalNoteSession', () => {
   it('retries a failed initial scan on a later subscription', async () => {
     canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
     fileIO.readdir.mockRejectedValueOnce(new Error('EBUSY'));
-    await resetExternalNoteWatcher();
 
     const failed = await openExternalNoteSession('canvas-a', vi.fn());
     expect(failed.snapshot).toEqual([]);
@@ -371,7 +261,6 @@ describe('openExternalNoteSession', () => {
     fileIO.readdir.mockResolvedValue([
       { name: 'first.md', isFile: () => true },
     ]);
-    await resetExternalNoteWatcher();
 
     const listener = vi.fn();
     const holder = await openExternalNoteSession('canvas-a', vi.fn());
@@ -389,14 +278,12 @@ describe('openExternalNoteSession', () => {
 });
 
 describe('native note events', () => {
-  it('emits one added event per file and never invalidates the dir index', async () => {
+  it('emits one added event per file regardless of duplicate raw events', async () => {
     canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
-    await resetExternalNoteWatcher();
     const events: ExternalNoteEvent[] = [];
     const session = await openExternalNoteSession('canvas-a', (event) =>
       events.push(event),
     );
-    canvasDirs.refresh.mockClear();
 
     emitNativeWatcherEvent('later.md');
     emitNativeWatcherEvent('later.md');
@@ -415,14 +302,12 @@ describe('native note events', () => {
       expect(canvasStore.read.mock.calls.length).toBeGreaterThan(1);
     });
     expect(events).toHaveLength(1);
-    expect(canvasDirs.refresh).not.toHaveBeenCalled();
 
     session.close();
   });
 
   it('stops delivering events after the final subscriber closes', async () => {
     canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
-    await resetExternalNoteWatcher();
     const listener = vi.fn();
     const session = await openExternalNoteSession('canvas-a', listener);
 
@@ -436,115 +321,109 @@ describe('native note events', () => {
   });
 });
 
-describe('runWithExternalNoteWatcherSuspended', () => {
-  it('is a no-op passthrough when no watcher is running', async () => {
-    // No workspace configured → `resetExternalNoteWatcher` arms nothing.
-    state.configured = false;
-    await resetExternalNoteWatcher();
-    watchMock.mockClear();
-
-    const fn = vi.fn(async () => 'result');
-    const out = await runWithExternalNoteWatcherSuspended(fn);
-
-    expect(out).toBe('result');
-    expect(fn).toHaveBeenCalledTimes(1);
-    // Must NOT spin up a watcher that was intentionally absent.
-    expect(watchMock).not.toHaveBeenCalled();
-  });
-
-  it('closes the active watcher for the duration of fn and re-arms after', async () => {
-    await resetExternalNoteWatcher(); // arms watcher #1
-    const first = current;
-    expect(watchMock).toHaveBeenCalledTimes(1);
-
-    let closedDuringFn = false;
-    const out = await runWithExternalNoteWatcherSuspended(async () => {
-      closedDuringFn = first.close.mock.calls.length > 0;
-      return 42;
-    });
-
-    expect(out).toBe(42);
-    expect(closedDuringFn).toBe(true);
-    expect(first.close).toHaveBeenCalledTimes(1);
-    // Re-armed: a second watcher was built after fn resolved.
-    expect(watchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('re-arms the watcher even when fn throws', async () => {
-    await resetExternalNoteWatcher(); // arms watcher #1
-    const first = current;
-
-    await expect(
-      runWithExternalNoteWatcherSuspended(async () => {
-        throw new Error('rename failed');
-      }),
-    ).rejects.toThrow('rename failed');
-
-    expect(first.close).toHaveBeenCalledTimes(1);
-    expect(watchMock).toHaveBeenCalledTimes(2); // re-armed despite the throw
-  });
-
-  it('shares a single close/re-arm cycle across nested suspensions', async () => {
-    await resetExternalNoteWatcher(); // arms watcher #1
-    const first = current;
-    watchMock.mockClear();
-
-    await runWithExternalNoteWatcherSuspended(async () => {
-      await runWithExternalNoteWatcherSuspended(async () => {
-        // Inner suspension: watcher already closed by the outer bracket,
-        // so it must NOT close/re-arm again.
-        expect(first.close).toHaveBeenCalledTimes(1);
-        expect(watchMock).not.toHaveBeenCalled();
-      });
-      // Still inside the outer bracket: no re-arm yet.
-      expect(watchMock).not.toHaveBeenCalled();
-    });
-
-    // Outer bracket exited → exactly one close and one re-arm for the pair.
-    expect(first.close).toHaveBeenCalledTimes(1);
-    expect(watchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('re-arms only the watchers of Spaces that still have subscribers', async () => {
-    // Guards the active-session boundary: suspension must release every live
-    // handle (so Windows can rename/delete the directory) and then re-arm
-    // exactly the active Spaces — never the inactive ones.
+describe('Space-directory handle release', () => {
+  it('does not touch handles for a Space with no subscriber', async () => {
     canvasDirs.list.mockReturnValue([
       { id: 'canvas-a', filename: 'canvas-a' },
       { id: 'canvas-b', filename: 'canvas-b' },
     ]);
-    await resetExternalNoteWatcher();
     const session = await openExternalNoteSession('canvas-a', vi.fn());
-    const before = currentNative;
+    const untouched = currentNative;
     nativeWatchMock.mockClear();
-    canvasDirs.refresh.mockClear();
 
-    await runWithExternalNoteWatcherSuspended(async () => {
-      expect(before.close).toHaveBeenCalledTimes(1);
-      expect(nativeWatchMock).not.toHaveBeenCalled();
-    });
+    // Deleting an unopened Space is the common case and must be a plain
+    // passthrough — no handle churn anywhere.
+    const out = await withSpaceDirHandlesReleased('canvas-b', async () => 'ok');
 
-    expect(canvasDirs.refresh).toHaveBeenCalledTimes(1);
-    expect(nativeWatchMock).toHaveBeenCalledTimes(1);
-    expect(nativeWatchMock.mock.calls[0]?.[0]).toMatch(/canvas-a[\\/]nodes$/);
+    expect(out).toBe('ok');
+    expect(untouched.close).not.toHaveBeenCalled();
+    expect(nativeWatchMock).not.toHaveBeenCalled();
     session.close();
   });
 
-  it('empties an active session whose Space was deleted while suspended', async () => {
+  it('releases and re-acquires the watcher of the mutated Space', async () => {
+    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'old-name' }]);
+    const session = await openExternalNoteSession('canvas-a', vi.fn());
+    const before = currentNative;
+    nativeWatchMock.mockClear();
+
+    await withSpaceDirHandlesReleased('canvas-a', async () => {
+      expect(before.close).toHaveBeenCalledTimes(1);
+      expect(nativeWatchMock).not.toHaveBeenCalled();
+      // The mutation renames the directory; re-acquire must re-resolve it.
+      canvasDirs.list.mockReturnValue([
+        { id: 'canvas-a', filename: 'new-name' },
+      ]);
+    });
+
+    expect(nativeWatchMock).toHaveBeenCalledTimes(1);
+    expect(nativeWatchMock.mock.calls[0]?.[0]).toMatch(/new-name[\\/]nodes$/);
+    session.close();
+  });
+
+  it('re-acquires even when the mutation throws', async () => {
     canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
-    await resetExternalNoteWatcher();
+    const session = await openExternalNoteSession('canvas-a', vi.fn());
+    const before = currentNative;
+    nativeWatchMock.mockClear();
+
+    await expect(
+      withSpaceDirHandlesReleased('canvas-a', async () => {
+        throw new Error('rename failed');
+      }),
+    ).rejects.toThrow('rename failed');
+
+    expect(before.close).toHaveBeenCalledTimes(1);
+    expect(nativeWatchMock).toHaveBeenCalledTimes(1);
+    session.close();
+  });
+
+  it('shares one release/re-acquire cycle across nested mutations', async () => {
+    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
+    const session = await openExternalNoteSession('canvas-a', vi.fn());
+    const before = currentNative;
+    nativeWatchMock.mockClear();
+
+    await withSpaceDirHandlesReleased('canvas-a', async () => {
+      await withSpaceDirHandlesReleased('canvas-a', async () => {
+        expect(before.close).toHaveBeenCalledTimes(1);
+        expect(nativeWatchMock).not.toHaveBeenCalled();
+      });
+      // Still inside the outer bracket: no re-acquire yet.
+      expect(nativeWatchMock).not.toHaveBeenCalled();
+    });
+
+    expect(before.close).toHaveBeenCalledTimes(1);
+    expect(nativeWatchMock).toHaveBeenCalledTimes(1);
+    session.close();
+  });
+
+  it('empties an active session whose Space was deleted by the mutation', async () => {
+    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
     const events: ExternalNoteEvent[] = [];
     const session = await openExternalNoteSession('canvas-a', (event) =>
       events.push(event),
     );
     nativeWatchMock.mockClear();
 
-    await runWithExternalNoteWatcherSuspended(async () => {
+    await withSpaceDirHandlesReleased('canvas-a', async () => {
       canvasDirs.list.mockReturnValue([]);
     });
 
     expect(nativeWatchMock).not.toHaveBeenCalled();
     expect(events.at(-1)).toEqual({ type: 'snapshot', data: { items: [] } });
     session.close();
+  });
+
+  it('stops tracking a Space once its last subscriber closed', async () => {
+    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
+    const session = await openExternalNoteSession('canvas-a', vi.fn());
+    session.close();
+    nativeWatchMock.mockClear();
+
+    await withSpaceDirHandlesReleased('canvas-a', async () => undefined);
+
+    // Deregistered on close → nothing to release, nothing to re-acquire.
+    expect(nativeWatchMock).not.toHaveBeenCalled();
   });
 });
