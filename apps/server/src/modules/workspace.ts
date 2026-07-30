@@ -35,7 +35,7 @@
 
 import path from 'node:path';
 
-import { resetExternalNoteWatcher } from './canvas/external-watcher.js';
+import { resetExternalNoteSessions } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
 import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import { invalidateUserSkill } from '../prompt/index.js';
@@ -161,7 +161,7 @@ export function commitWorkspacePath(resolvedPath: string): void {
   // — here `invalidateUserSkill` is only ever called from within
   // function bodies, after both modules have finished evaluating.
   invalidateUserSkill();
-  void resetExternalNoteWatcher();
+  resetExternalNoteSessions();
 }
 
 // ──────────────────────────────────────────────────────────────────────

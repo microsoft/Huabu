@@ -40,7 +40,7 @@ import {
 } from './modules/agent-team/bundled-agent-teams.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
-import { closeExternalNoteWatcher } from './modules/canvas/external-watcher.js';
+import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
 import integrationsRoutes from './modules/integrations/integrations.route.js';
@@ -322,13 +322,13 @@ if (bundledAgentTeamsPath) {
 } else {
   app.log.warn('[agent-team] bundled collection not found');
 }
-// Release the external-note chokidar watcher on shutdown. Its live
-// `fs.watch` handle is otherwise only closed on a workspace switch, so a
-// force-terminated process leaves it open — and on virtual/network
+// Release every active external-note session on shutdown. Their `fs.watch`
+// handles are otherwise only closed on a workspace switch, so a
+// force-terminated process leaves them open — and on virtual/network
 // filesystems (Google Drive) an abandoned watch request can stay wedged
-// after the process is gone. Closing it here lets `app.close()` (driven
-// by the SIGTERM/SIGINT handlers in server.ts) tear it down gracefully.
-app.addHook('onClose', async () => closeExternalNoteWatcher());
+// after the process is gone. Closing them here lets `app.close()` (driven
+// by the SIGTERM/SIGINT handlers in server.ts) tear them down gracefully.
+app.addHook('onClose', async () => resetExternalNoteSessions());
 // Capture the bound TCP port for L1-owned reachback (RFS): the
 // canvas-scoped `HUABU_RFS_URL` base is built from this. RFS is
 // canvas-coupled and therefore a pure L1 concern, so the port lives in

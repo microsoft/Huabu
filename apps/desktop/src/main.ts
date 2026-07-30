@@ -1305,8 +1305,8 @@ app.on('window-all-closed', () => {
 // Gracefully shut down the server before the process exits. We
 // preventDefault and drive the quit ourselves so we can:
 //   1. ask the server to shut down cooperatively so it runs Fastify's
-//      `onClose` hooks (reap the agentlet daemon, close the external-note
-//      chokidar watch handle, flush logs). On Windows `serverProcess.kill()`
+//      `onClose` hooks (reap the agentlet daemon, release the active
+//      external-note watch handles, flush logs). On Windows `serverProcess.kill()`
 //      is a hard `TerminateProcess` that bypasses the server's signal
 //      handlers, so a `system:shutdown` message over the utility parent
 //      port is the ONLY way those hooks run before exit — otherwise the
@@ -1343,8 +1343,8 @@ app.on('before-quit', (event) => {
   // Windows `proc.kill()` is a hard `TerminateProcess`; on POSIX it is a
   // SIGTERM, which the server handles as *another* graceful shutdown, so
   // the only truly forceful stop there is the `app.exit(0)` cap below.
-  // 2.5s (under the 3s app.exit cap) gives `app.close()` — which closes
-  // the chokidar watch handle this fix protects — headroom to finish
+  // 2.5s (under the 3s app.exit cap) gives `app.close()` — which releases
+  // the watch handles this fix protects — headroom to finish
   // before Windows force-terminates it mid-cleanup.
   const hardKill = setTimeout(() => {
     if (!exited) {
