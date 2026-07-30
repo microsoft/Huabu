@@ -122,7 +122,9 @@ export function Modal({
       className="bg-bg-default/80 animate-in fade-in fixed inset-0 flex items-center justify-center backdrop-blur-sm duration-200"
       style={{ zIndex, top: titleBarInset || undefined }}
     >
+      {/* Decorative backdrop; Escape is the keyboard equivalent. */}
       <div
+        role="presentation"
         className="absolute inset-0"
         onClick={closeOnBackdropClick ? onClose : undefined}
       />
