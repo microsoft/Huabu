@@ -874,8 +874,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                   'hover:text-fg-default focus-visible:outline-info cursor-text focus-visible:outline-1',
               )}
               title={canRenameQuestion ? t('node.rename') : panelTitle}
-              role={canRenameQuestion ? 'button' : undefined}
-              tabIndex={canRenameQuestion ? 0 : undefined}
+              {...(canRenameQuestion
+                ? { role: 'button' as const, tabIndex: 0 }
+                : {})}
               onClick={() => {
                 if (canRenameQuestion) setIsEditingQuestionTitle(true);
               }}

@@ -610,8 +610,9 @@ export const ExpandedNodePanel = ({
                   canEditTitle && 'hover:text-fg-default cursor-text',
                 )}
                 title={canEditTitle ? t('node.rename') : undefined}
-                role={canEditTitle ? 'button' : undefined}
-                tabIndex={canEditTitle ? 0 : undefined}
+                {...(canEditTitle
+                  ? { role: 'button' as const, tabIndex: 0 }
+                  : {})}
                 onClick={() => {
                   if (canEditTitle) setIsEditingTitle(true);
                 }}

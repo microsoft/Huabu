@@ -719,6 +719,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             placeholder={`https://example.com/image.png\nhttps://example.com/doc.pdf\nhttps://google.com`}
             value={linkText}
             onChange={(e) => setLinkText(e.target.value)}
+            // Modal opens solely to collect this input.
+            // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
             onKeyDown={(e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {

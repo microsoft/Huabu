@@ -369,7 +369,10 @@ export const AudioNode = memo(
             src={resolveArtifactUrl(data.src, canvasId)}
             preload="metadata"
             className="hidden"
-          />
+          >
+            {/* User-recorded audio has no caption source. */}
+            <track kind="captions" />
+          </audio>
         </>
       );
     } else if (recState === 'recording') {

@@ -15,7 +15,10 @@ export const VideoPreview = ({ data }: PreviewComponentProps) => {
             src={resolveArtifactUrl(src, canvasId)}
             controls
             className="nodrag h-full w-full object-contain"
-          />
+          >
+            {/* User-supplied video has no caption source. */}
+            <track kind="captions" />
+          </video>
         ) : (
           <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
             No Video Source

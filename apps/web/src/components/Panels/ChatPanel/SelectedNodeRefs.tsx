@@ -91,6 +91,9 @@ export const SourceCount = () => {
   return (
     <Tooltip content={tooltipContent}>
       <span
+        // Focusable, non-interactive tooltip target (Tooltip wires
+        // aria-describedby) — the W3C tooltip pattern.
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
         aria-label={accessibleLabel}
         className="text-fg-muted inline-flex cursor-default items-center gap-1 text-sm leading-tight focus:outline-none"

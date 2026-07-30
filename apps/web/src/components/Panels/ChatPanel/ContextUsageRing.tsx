@@ -193,6 +193,9 @@ export const ContextUsageRing = ({
   return (
     <Tooltip content={tooltipContent}>
       <span
+        // Focusable, non-interactive tooltip target (Tooltip wires
+        // aria-describedby) — the W3C tooltip pattern.
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
         aria-label={t('chat.contextUsageAria', {
           used: formatTokens(usedTokens),

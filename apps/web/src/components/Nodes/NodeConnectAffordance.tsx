@@ -805,12 +805,13 @@ export const NodeConnectionHandles = memo(
           // to keep.
           const dot = (
             <span
-              aria-hidden={!keyboardReachable}
-              aria-label={
-                keyboardReachable ? t('node.createConnectedNode') : undefined
-              }
-              role={keyboardReachable ? 'button' : undefined}
-              tabIndex={keyboardReachable ? 0 : -1}
+              {...(keyboardReachable
+                ? {
+                    role: 'button' as const,
+                    tabIndex: 0,
+                    'aria-label': t('node.createConnectedNode'),
+                  }
+                : { 'aria-hidden': true, tabIndex: -1 })}
               className={cn(
                 'absolute',
                 isPinnedOrExposed

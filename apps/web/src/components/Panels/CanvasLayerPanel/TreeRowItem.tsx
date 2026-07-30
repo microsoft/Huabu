@@ -305,6 +305,8 @@ export const TreeRowItem = React.memo(
           {isEditing ? (
             <input
               ref={inputRef}
+              // Rename is entered deliberately; focus must follow.
+              // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}

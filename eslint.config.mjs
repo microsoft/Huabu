@@ -255,18 +255,18 @@ export default typescriptEslint.config(
       // The `recommended` preset is enabled at its default `error`
       // severity so newly written UI cannot regress accessibility.
       ...jsxA11yPlugin.flatConfigs.recommended.rules,
-      // Temporary downgrades: these rules already have pre-existing
-      // violations in the current codebase (49 at the time of enabling).
-      // They stay as warnings so `pnpm lint` keeps passing while the
-      // backlog is worked down; promote each one back to `error` once
-      // its remaining occurrences are fixed.
+      // Temporary downgrades: these rules still have pre-existing
+      // violations. They stay as warnings so `pnpm lint` keeps passing
+      // while the backlog is worked down; promote each one back to
+      // `error` once its remaining occurrences are fixed.
       'jsx-a11y/click-events-have-key-events': 'warn',
       'jsx-a11y/no-static-element-interactions': 'warn',
       'jsx-a11y/no-noninteractive-element-interactions': 'warn',
-      'jsx-a11y/no-noninteractive-tabindex': 'warn',
       'jsx-a11y/interactive-supports-focus': 'warn',
-      'jsx-a11y/media-has-caption': 'warn',
-      'jsx-a11y/no-autofocus': 'warn',
+      // Only flag `autoFocus` on real DOM elements — the prop's meaning on
+      // our own components (Button, TextInput, DropdownMenuItem) is theirs
+      // to define.
+      'jsx-a11y/no-autofocus': ['error', { ignoreNonDOM: true }],
       'react/react-in-jsx-scope': 'off',
       'react/jsx-uses-react': 'off',
       'react-hooks/rules-of-hooks': 'error',
