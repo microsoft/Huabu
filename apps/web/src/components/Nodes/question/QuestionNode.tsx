@@ -24,6 +24,7 @@ import {
 import { getQuestionDisplayText } from '@/utils/node/questionDisplayText';
 import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentation.ts';
 
+import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { enterQuestionCompose } from './questionCompose.ts';
 import { QuestionTakeoverMark } from './QuestionTakeoverMark.tsx';
@@ -86,6 +87,7 @@ export const QuestionNode = memo(
 
     const status = getQuestionNodeStatus(data);
     const viewed = data.viewed ?? false;
+    const isContentMissing = data.contentMissing === true;
 
     // Count of this thread's agent changes that were SKIPPED because the
     // user was mid-editing the target node. Drives
@@ -300,62 +302,74 @@ export const QuestionNode = memo(
         data={data}
         type={'question'}
         selected={selected}
-        actions={questionToolbar}
+        actions={isContentMissing ? undefined : questionToolbar}
         keepAspectRatio={false}
         allowOverflow
         fillColor={STICKY_BG}
         className="question-sticky rounded-lg transition-all duration-200"
-        onDoubleClick={isForkPending ? undefined : handleActivate}
-        takeover={{
-          onActivate: isForkPending ? undefined : handleActivate,
-          renderMark: (s) => (
-            <QuestionTakeoverMark
-              state={s}
-              status={badgeStatus ?? 'idle'}
-              agent={agentPresentation}
-              unread={isDoneUnviewed || isErrorUnviewed}
-              conflictCount={status === 'done' ? conflictCount : 0}
-              interactive={canOpenInChat}
-              onOpen={canOpenInChat ? openInChat : undefined}
-              accessibleLabel={
-                canOpenInChat
-                  ? `${agentPresentation.alias} · ${t('node.openConversation')}`
-                  : undefined
+        onDoubleClick={
+          isContentMissing || isForkPending ? undefined : handleActivate
+        }
+        takeover={
+          isContentMissing
+            ? undefined
+            : {
+                onActivate: isForkPending ? undefined : handleActivate,
+                renderMark: (s) => (
+                  <QuestionTakeoverMark
+                    state={s}
+                    status={badgeStatus ?? 'idle'}
+                    agent={agentPresentation}
+                    unread={isDoneUnviewed || isErrorUnviewed}
+                    conflictCount={status === 'done' ? conflictCount : 0}
+                    interactive={canOpenInChat}
+                    onOpen={canOpenInChat ? openInChat : undefined}
+                    accessibleLabel={
+                      canOpenInChat
+                        ? `${agentPresentation.alias} · ${t('node.openConversation')}`
+                        : undefined
+                    }
+                    conflictTooltip={
+                      conflictCount > 0
+                        ? t('node.agentChangesSkipped', {
+                            count: conflictCount,
+                          })
+                        : undefined
+                    }
+                    tooltip={
+                      needsApproval
+                        ? t('messages.permissionRequested')
+                        : status === 'error' && data.errorMessage
+                          ? data.errorMessage
+                          : canOpenInChat
+                            ? status === 'running'
+                              ? t('node.watchLiveConversation')
+                              : t('node.openConversation')
+                            : undefined
+                    }
+                  />
+                ),
               }
-              conflictTooltip={
-                conflictCount > 0
-                  ? t('node.agentChangesSkipped', { count: conflictCount })
-                  : undefined
-              }
-              tooltip={
-                needsApproval
-                  ? t('messages.permissionRequested')
-                  : status === 'error' && data.errorMessage
-                    ? data.errorMessage
-                    : canOpenInChat
-                      ? status === 'running'
-                        ? t('node.watchLiveConversation')
-                        : t('node.openConversation')
-                      : undefined
-              }
-            />
-          ),
-        }}
+        }
         {...surface.nodeWrapperProps}
       >
-        <TextNodeBody
-          ref={textareaRef}
-          {...surface.bodyProps}
-          draft={surface.draft}
-          onChange={() => {}}
-          onBlur={() => {}}
-          isEditing={false}
-          onRequestEdit={handleActivate}
-          placeholder={QUESTION_NODE_PLACEHOLDER}
-          fontFamily={QUESTION_FONT_FAMILY}
-          color="var(--question-fg)"
-          textareaClassName="placeholder:text-fg-default/40"
-        />
+        {isContentMissing ? (
+          <MissingFileBanner nodeId={id} />
+        ) : (
+          <TextNodeBody
+            ref={textareaRef}
+            {...surface.bodyProps}
+            draft={surface.draft}
+            onChange={() => {}}
+            onBlur={() => {}}
+            isEditing={false}
+            onRequestEdit={handleActivate}
+            placeholder={QUESTION_NODE_PLACEHOLDER}
+            fontFamily={QUESTION_FONT_FAMILY}
+            color="var(--question-fg)"
+            textareaClassName="placeholder:text-fg-default/40"
+          />
+        )}
       </NodeWrapper>
     );
   },

@@ -361,3 +361,95 @@ describe('PUT /nodes/:nodeId/content — tombstone drops late writes after delet
     }
   });
 });
+
+describe('missing-sidecar barrier', () => {
+  function seedNodeWithoutSidecar(
+    canvasId: string,
+    nodeId: string,
+    nodeType: string,
+  ): void {
+    getCanvasStore(canvasId).write({
+      canvasId,
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          { id: nodeId, type: nodeType, position: { x: 0, y: 0 }, data: {} },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  }
+
+  it('hydrates a PDF without its sidecar as contentMissing', async () => {
+    const app = await buildApp();
+    try {
+      seedNodeWithoutSidecar('pdf-missing', 'pdf1', 'pdf');
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/canvas/pdf-missing',
+      });
+
+      expect(response.statusCode).toBe(200);
+      const payload = response.json<{
+        state: { nodes: Array<{ data?: { contentMissing?: boolean } }> };
+      }>();
+      expect(payload.state.nodes[0]?.data?.contentMissing).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it.each(['frame', 'sketch'])(
+    'hydrates a %s without its sidecar as contentMissing',
+    async (nodeType) => {
+      const app = await buildApp();
+      try {
+        const canvasId = `${nodeType}-missing`;
+        const nodeId = `${nodeType}1`;
+        seedNodeWithoutSidecar(canvasId, nodeId, nodeType);
+
+        const response = await app.inject({
+          method: 'GET',
+          url: `/canvas/${canvasId}`,
+        });
+
+        expect(response.statusCode).toBe(200);
+        const payload = response.json<{
+          state: { nodes: Array<{ data?: { contentMissing?: boolean } }> };
+        }>();
+        expect(payload.state.nodes[0]?.data?.contentMissing).toBe(true);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it('does not recreate the missing sidecar through preprocessing', async () => {
+    const app = await buildApp();
+    try {
+      seedNodeWithoutSidecar('pdf-preprocess', 'pdf1', 'pdf');
+      const store = getCanvasStore('pdf-preprocess');
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/canvas/pdf-preprocess/nodes/pdf1/preprocess',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          nodeType: 'pdf',
+          trigger: 'node_updated',
+          snapshot: {},
+        }),
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json<{ success: boolean }>().success).toBe(false);
+      expect(store.readNode('pdf1')).toBeNull();
+    } finally {
+      await app.close();
+    }
+  });
+});

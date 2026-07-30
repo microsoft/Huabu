@@ -128,6 +128,35 @@ describe('persist — authored-body CAS guard', () => {
     expect(result.contentChanged).toBe(true);
     expect(bodyOf('c2', 'n1')).toBe('first body');
   });
+
+  it('does not recreate a missing sidecar when preprocessing requires one', async () => {
+    getCanvasStore('c3').write({
+      canvasId: 'c3',
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          { id: 'pdf1', type: 'pdf', position: { x: 0, y: 0 }, data: {} },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    const store = getCanvasStore('c3');
+
+    const result = await persist(
+      normalized('pdf1', ''),
+      'pdf',
+      'derived',
+      store,
+      undefined,
+      true,
+    );
+
+    expect(result.contentChanged).toBe(false);
+    expect(store.readNode('pdf1')).toBeNull();
+  });
 });
 
 describe('persist — concurrency with a content PUT (authored body not clobbered)', () => {

@@ -14,6 +14,7 @@ import { clampGridCount } from '@sediment/shared/canvas-engine';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { Input } from '@/components/Common/Input.tsx';
+import { MissingFileBanner } from '@/components/Nodes/MissingFileBanner.tsx';
 import { NodeWrapper } from '@/components/Nodes/NodeWrapper.tsx';
 import useCanvasStore from '@/store/canvasStore.ts';
 
@@ -91,6 +92,7 @@ export const FrameNode = memo(
     );
 
     const layoutMode: FrameLayoutMode = data.layoutMode ?? 'free';
+    const isContentMissing = data.contentMissing === true;
     const isStructuredLayout = layoutMode === 'column' || layoutMode === 'row';
     const count = clampGridCount(data.gridCount);
 
@@ -433,8 +435,8 @@ export const FrameNode = memo(
         data={data}
         type={'frame'}
         selected={selected && !isEditingLabel}
-        actions={FrameActions}
-        overlayContent={labelOverlay}
+        actions={isContentMissing ? undefined : FrameActions}
+        overlayContent={isContentMissing ? undefined : labelOverlay}
         overlayOffsetY={-24}
         overlayVisible={labelSemanticallyVisible}
         overlayInteractionPriority={isEditingLabel ? 3 : selected ? 2 : 0}
@@ -454,7 +456,11 @@ export const FrameNode = memo(
         onResizeEnd={handleFrameResizeEnd}
         allowOverflow
       >
-        <div className="h-full w-full" />
+        {isContentMissing ? (
+          <MissingFileBanner nodeId={id} />
+        ) : (
+          <div className="h-full w-full" />
+        )}
       </NodeWrapper>
     );
   },

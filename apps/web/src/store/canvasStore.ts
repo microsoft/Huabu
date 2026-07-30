@@ -74,6 +74,7 @@ import { measureMissingAutoHeights } from './canvasStore/height/measureMissingAu
 import { createIntentActionWindow } from './canvasStore/intentActionWindow';
 import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
+import { shouldBackfillNodeLabel } from './canvasStore/load/shouldBackfillNodeLabel';
 import { warmupNodeHeights } from './canvasStore/load/warmupNodeHeights';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
 import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
@@ -2100,9 +2101,7 @@ const useCanvasStore = create<RFState>()(
         // dispatcher decides per node profile whether there's any
         // actual work to do, so we don't filter by type here.
         for (const node of warmedNodes) {
-          const data = node.data as Record<string, unknown> | undefined;
-          const label = typeof data?.label === 'string' ? data.label : '';
-          if (label.trim().length > 0) continue;
+          if (!shouldBackfillNodeLabel(node)) continue;
           preprocessQueue.schedule(node);
         }
       } catch (error) {

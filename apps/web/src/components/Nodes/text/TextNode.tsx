@@ -18,7 +18,7 @@ import {
 import { getAccentTokens } from '../accentTokens';
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
-import { TextNodeBody } from '../shared/TextNodeBody';
+import { resolveTextBodyBox, TextNodeBody } from '../shared/TextNodeBody';
 
 import type { CanvasTextNodeData, NodeStyle } from '../types';
 import type { NodeFontFamily } from '@sediment/shared';
@@ -47,6 +47,7 @@ export const TextNode = memo(
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     const content = data.content ?? '';
+    const isContentMissing = data.contentMissing === true;
 
     // ------------------------------------------------------------------
     // Style derivation
@@ -94,6 +95,12 @@ export const TextNode = memo(
       fontOpts,
       placeholder: TEXT_NODE_PLACEHOLDER,
     });
+    const missingBodyBox = resolveTextBodyBox({
+      width: surface.bodyProps.effectiveWidth,
+      height: surface.bodyProps.effectiveHeight,
+      paddingX: surface.bodyProps.paddingX,
+      paddingY: surface.bodyProps.paddingY,
+    });
 
     // ------------------------------------------------------------------
     // Editing handlers
@@ -112,9 +119,9 @@ export const TextNode = memo(
     // consume the one-shot request.
     useEffect(() => {
       if (!inlineEditRequested) return;
-      setIsEditing(true);
+      if (!isContentMissing) setIsEditing(true);
       consumeInlineEditRequest(id);
-    }, [consumeInlineEditRequest, id, inlineEditRequested]);
+    }, [consumeInlineEditRequest, id, inlineEditRequested, isContentMissing]);
 
     const toggleDecoration = (value: string) => {
       let current = textDecoration.split(' ').filter(Boolean);
@@ -210,43 +217,40 @@ export const TextNode = memo(
         data={data}
         type={'text'}
         selected={selected}
-        toolbar={TextToolbar}
+        toolbar={isContentMissing ? undefined : TextToolbar}
         keepAspectRatio={false}
         className="transition-all duration-200"
         {...surface.nodeWrapperProps}
       >
-        <TextNodeBody
-          ref={textareaRef}
-          {...surface.bodyProps}
-          draft={surface.draft}
-          onChange={surface.setDraft}
-          onBlur={handleBlur}
-          isEditing={isEditing}
-          onRequestEdit={handleDoubleClick}
-          placeholder={TEXT_NODE_PLACEHOLDER}
-          fontFamily={fontFamily}
-          fontWeight={isBold ? 'bold' : 'normal'}
-          fontStyle={isItalic ? 'italic' : 'normal'}
-          textDecoration={textDecoration}
-          color={textColor}
-          textareaClassName="placeholder:text-fg-subtle/30"
-          containerClassName="overflow-hidden"
-        >
-          {/*
-            Server flagged the per-node markdown file as missing on disk.
-            Surface a small inline banner while the editor is empty so the
-            user can recreate the file by typing or remove the node.
-          */}
-          {data.contentMissing && !surface.draft.trim() && (
-            <div className="absolute top-1 right-1 left-1 z-10">
-              <MissingFileBanner
-                nodeId={id}
-                title={t('node.textFileMissingRecreate')}
-                variant="inline"
-              />
-            </div>
-          )}
-        </TextNodeBody>
+        {isContentMissing ? (
+          <div
+            className="flex items-center overflow-hidden"
+            style={{
+              width: missingBodyBox.width,
+              height: missingBodyBox.height,
+            }}
+          >
+            <MissingFileBanner nodeId={id} />
+          </div>
+        ) : (
+          <TextNodeBody
+            ref={textareaRef}
+            {...surface.bodyProps}
+            draft={surface.draft}
+            onChange={surface.setDraft}
+            onBlur={handleBlur}
+            isEditing={isEditing}
+            onRequestEdit={handleDoubleClick}
+            placeholder={TEXT_NODE_PLACEHOLDER}
+            fontFamily={fontFamily}
+            fontWeight={isBold ? 'bold' : 'normal'}
+            fontStyle={isItalic ? 'italic' : 'normal'}
+            textDecoration={textDecoration}
+            color={textColor}
+            textareaClassName="placeholder:text-fg-subtle/30"
+            containerClassName="overflow-hidden"
+          />
+        )}
       </NodeWrapper>
     );
   },

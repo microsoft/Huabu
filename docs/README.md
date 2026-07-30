@@ -74,6 +74,7 @@ docs/
 
 | Doc                                                                                                | Status         | Summary                                                                    |
 | -------------------------------------------------------------------------------------------------- | -------------- | -------------------------------------------------------------------------- |
+| [active-space-external-note-watcher.md](./proposals/active-space-external-note-watcher.md)         | Proposed       | Scope external-note watchers to Spaces with active SSE subscribers.        |
 | [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md)                   | In-Progress    | Read/write revision freshness across agent and web paths.                  |
 | [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                 | Proposed       | Canvas checkpoint and restoration design.                                  |
 | [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                           | In-Progress    | Roadmap from multi-agent sync to multi-user co-editing.                    |

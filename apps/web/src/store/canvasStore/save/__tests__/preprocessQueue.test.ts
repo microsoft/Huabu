@@ -133,4 +133,56 @@ describe('preprocessQueue', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(preprocessNodeIfNeeded).toHaveBeenCalledOnce();
   });
+
+  it('does not schedule preprocessing for a missing sidecar', async () => {
+    const node: Node = {
+      id: 'note-missing',
+      type: 'note',
+      position: { x: 0, y: 0 },
+      data: { contentMissing: true },
+    };
+    const setNodeIngestion = vi.fn();
+    const queue = createPreprocessQueue({
+      delayMs: 1_000,
+      getState: () => ({
+        canvasId: 'canvas-1',
+        nodes: [node],
+        setNodeIngestion,
+        clearNodeIngestion: vi.fn(),
+        patchNodeSilent: vi.fn(),
+      }),
+    });
+
+    queue.schedule(node);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(setNodeIngestion).not.toHaveBeenCalled();
+    expect(preprocessNodeIfNeeded).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending preprocess when the sidecar becomes missing', async () => {
+    const node: Node = {
+      id: 'note-removed-during-debounce',
+      type: 'note',
+      position: { x: 0, y: 0 },
+      data: {},
+    };
+    let nodes: Node[] = [node];
+    const queue = createPreprocessQueue({
+      delayMs: 1_000,
+      getState: () => ({
+        canvasId: 'canvas-1',
+        nodes,
+        setNodeIngestion: vi.fn(),
+        clearNodeIngestion: vi.fn(),
+        patchNodeSilent: vi.fn(),
+      }),
+    });
+
+    queue.schedule(node);
+    nodes = [{ ...node, data: { contentMissing: true } }];
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(preprocessNodeIfNeeded).not.toHaveBeenCalled();
+  });
 });

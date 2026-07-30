@@ -28,6 +28,7 @@ export async function persist(
   bodyOwnership: BodyOwnership | undefined,
   store: CanvasStore,
   src?: string,
+  requireExisting = false,
 ): Promise<PersistResult> {
   if (!contentKind) {
     return { skipped: true };
@@ -50,6 +51,12 @@ export async function persist(
     apply: (existing) => {
       existingSrc =
         typeof existing?.src === 'string' ? existing.src : undefined;
+
+      if (requireExisting && !existing) {
+        log.warn({ nodeId }, 'persist skipped: node sidecar is missing');
+        branch = 'skip';
+        return null;
+      }
 
       // Authored-body ownership guard (data-loss prevention). For authored
       // bodies (note/text) the content PUT is the sole body writer and owns
