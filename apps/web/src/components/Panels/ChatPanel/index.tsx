@@ -211,7 +211,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   );
   const addNode = useCanvasStore((state) => state.addNode);
   const llmConfig = useLLMStore((state) => state.config);
-  const llmModels = useLLMStore((state) => state.models);
   const llmLoading = useLLMStore((state) => state.loading);
   const llmInit = useLLMStore((state) => state.init);
 
@@ -567,13 +566,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     }
   }, [llmConfig, llmLoading, llmInit]);
 
-  const activeModelName = useMemo(() => {
-    const activeModelId = llmConfig?.model?.trim();
-    if (!activeModelId) return '';
-    const matchedModel = llmModels.find((m) => m.id === activeModelId);
-    return matchedModel?.name?.trim() || activeModelId;
-  }, [llmConfig?.model, llmModels]);
-
   const panelTitle = useMemo(() => {
     if (viewingSketchCluster) return t('chat.sketchRecognition');
     if (viewingQuestionThread) {
@@ -591,11 +583,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     if (agentBinding.kind === 'external') {
       return t('chat.chatWith', { name: agentBinding.alias });
     }
-    return activeModelName
-      ? t('chat.chatWith', { name: activeModelName })
-      : t('chat.title');
+    return t('chat.title');
   }, [
-    activeModelName,
     agentBinding,
     t,
     viewingQuestionThread,
