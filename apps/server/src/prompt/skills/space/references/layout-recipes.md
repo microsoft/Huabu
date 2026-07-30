@@ -34,9 +34,9 @@ Place the centre at `(cx, cy)`; place N children on a ring of radius `r`. For ev
 - **Position the frame first**, then position children. Child `position` is **frame-relative** (parent-local): a child at `(0, 0)` sits at the frame's top-left. So the coordinates in the patterns above are the child's offsets **inside** the frame, starting from `(0, 0)` + your padding.
 - Give the frame a clear `data.label` so the group is identifiable when zoomed out.
 
-### Structured frame layout (`column` / `row`)
+### Structured frame layout (`column` / `row` / `grid`)
 
-A frame can opt into a deterministic masonry layout that re-flows its children automatically whenever they change (added, removed, resized). Use `SET_FRAME_LAYOUT` to switch a frame between `free` (default), `column`, or `row`, optionally with `gridCount` (number of tracks, 1–12, default 1):
+A frame can opt into a deterministic layout that re-flows its children automatically whenever they change (added, removed, resized). Use `SET_FRAME_LAYOUT` to switch a frame between `free` (default), `column`, `row`, or `grid`, optionally with `gridCount` (number of tracks, 1–12, default 1):
 
 ```
 SET_FRAME_LAYOUT { frameId: "<frame-id>", mode: "column", gridCount: 3 }
@@ -44,11 +44,42 @@ SET_FRAME_LAYOUT { frameId: "<frame-id>", mode: "column", gridCount: 3 }
 
 - `column` — N columns, children stack top-to-bottom inside each column, left-aligned. Column width adapts to the widest child.
 - `row` — mirror on the other axis: N rows, children stack left-to-right inside each row, top-aligned. Row height adapts to the tallest child.
+- `grid` — N columns like `column`, but rows are aligned too: children that overlap vertically share one row origin, and the row's height is its tallest member.
 - The engine assigns each child to a track automatically (least-full track wins) and writes the slot back to `data.frameSlot`. To pin a child to a specific track, pass `MERGE_NODE_DATA` with `patch: { frameSlot: <0..N-1> }` after the layout switch. To control vertical (column mode) or horizontal (row mode) order within a track, set initial child positions; the engine sorts by that axis.
 - Structured frames default to `sizing: "hug"`: the engine re-sizes the frame after every child change, so do not pass an explicit frame size in this mode. Use `sizing: "manual"` to preserve a pinned frame size while children still reflow; children that do not fit may overflow along the main axis.
 - Switch back to free positioning with `SET_FRAME_LAYOUT { frameId, mode: "free" }`.
 
-Use structured frames for: stacked column lists, kanban-style boards, row tracks where each lane represents a theme, deterministic comparison tables.
+Use `column` / `row` for: stacked column lists, kanban-style boards, row tracks where each lane represents a theme.
+
+#### Choosing `grid` over `column`
+
+`column` is masonry — each column packs independently, so a column holding fewer items pulls its next item up. That breaks any layout where a node in column A is supposed to line up with a specific node in column B. `grid` fixes exactly that case: a column with no item in a given row leaves the cell blank instead of back-filling it.
+
+Reach for `grid` whenever the columns are **parallel series** rather than independent stacks — question notes beside their answers, papers beside a per-paper summary, an original beside its translation — especially when some items have no counterpart.
+
+Row membership is derived from vertical overlap, so you control the pairing through the children's initial `position.y`: give the two members of a pair the same (or overlapping) Y before switching modes, and leave a gap where a counterpart is missing.
+
+```
+# 1. Place each pair at a shared Y; row 2 has no right-hand counterpart.
+SET_NODE_GEOMETRY [
+  { nodeId: "<q1>", position: { x: 0,   y: 0   } },
+  { nodeId: "<a1>", position: { x: 400, y: 0   } },
+  { nodeId: "<q2>", position: { x: 0,   y: 200 } },
+  { nodeId: "<q3>", position: { x: 0,   y: 400 } },
+  { nodeId: "<a3>", position: { x: 400, y: 400 } }
+]
+# 2. Pin the columns, then switch the frame into grid mode.
+MERGE_NODE_DATA [
+  { nodeId: "<q1>", patch: { frameSlot: 0 } },
+  { nodeId: "<q2>", patch: { frameSlot: 0 } },
+  { nodeId: "<q3>", patch: { frameSlot: 0 } },
+  { nodeId: "<a1>", patch: { frameSlot: 1 } },
+  { nodeId: "<a3>", patch: { frameSlot: 1 } }
+]
+SET_FRAME_LAYOUT { frameId: "<frame-id>", mode: "grid", gridCount: 2 }
+```
+
+Adding a missing counterpart later is a two-command follow-up: create the node inside the frame at the partner's current Y, then `MERGE_NODE_DATA` its `frameSlot`. The solver re-derives the bands and the new node lands in the blank cell.
 
 ## Connecting layers
 

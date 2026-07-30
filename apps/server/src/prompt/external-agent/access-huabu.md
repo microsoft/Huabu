@@ -163,7 +163,7 @@ Before placing or resizing relative to existing content, query the relevant node
 
 Never pin top-level height for `text` or `question`; change rendered text scale with `data.style.fontSize`. Notes normally auto-size by content but may use an explicit fixed height. For free-form root or frame layouts, a useful starting heuristic is about 50px between nodes and 40px frame padding, adjusted to the actual queried sizes.
 
-Frames default to `free` layout, where child positions remain explicit and parent-local. `column` and `row` are structured layouts configured through `SET_FRAME_LAYOUT`; `gridCount` selects 1–12 tracks and defaults to 1. Structured frames choose final child slots, so child `position` is only an ordering hint. Their default `hug` sizing fits the frame to its content; `manual` preserves a pinned frame size while children still reflow and may overflow. Fetch the `SET_FRAME_LAYOUT` capability before using sizing or track options.
+Frames default to `free` layout, where child positions remain explicit and parent-local. `column`, `row`, and `grid` are structured layouts configured through `SET_FRAME_LAYOUT`; `gridCount` selects 1–12 tracks (columns for `column` and `grid`, rows for `row`) and defaults to 1. `column` and `row` are masonry: each track stacks independently, so a track holding fewer items pulls its next item up. `grid` additionally aligns rows — children that overlap vertically share one row origin and a column with no item in a row leaves that cell blank, which is what keeps items in different columns side by side when one column has no counterpart. Structured frames choose final child slots, so child `position` is only an ordering hint. Their default `hug` sizing fits the frame to its content; `manual` preserves a pinned frame size while children still reflow and may overflow. Fetch the `SET_FRAME_LAYOUT` capability before using sizing or track options.
 
 ## 7. Execute Space commands
 
@@ -187,7 +187,7 @@ The accepted command set is:
 | `SET_EDGE_STYLE`       | Patch edge direction, line shape, dash style, stroke, width, or label.                  |
 | `ALIGN_NODES`          | Align existing nodes along one axis.                                                    |
 | `DISTRIBUTE_NODES`     | Evenly space three or more existing nodes.                                              |
-| `SET_FRAME_LAYOUT`     | Configure a frame's free, column, or row layout.                                        |
+| `SET_FRAME_LAYOUT`     | Configure a frame's free, column, row, or grid layout.                                  |
 | `SET_PORTAL_NODE_PINS` | Pin or unpin source nodes in the workspace World Canvas.                                |
 
 This table is only a navigation summary. For the complete contract of one command—including required fields, parameter types, enums, limits, semantic constraints, result description, and a valid example—fetch its capability:

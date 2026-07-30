@@ -350,7 +350,7 @@ export const setFrameLayoutCommandSchema = z
     mode: z
       .enum(FRAME_LAYOUT_MODES)
       .describe(
-        '`free` preserves child positions; `column` and `row` enable structured layout.',
+        '`free` preserves child positions. `column` / `row` pack children into N independent masonry tracks: each track stacks on its own, so a track holding fewer items pulls its next item up. `grid` counts columns like `column` but also aligns rows — children that overlap vertically share one row origin, and a column with no item in a given row leaves that cell blank. Choose `grid` when items in different columns must stay side by side even where one column has no counterpart.',
       ),
     gridCount: z
       .number()
@@ -358,7 +358,9 @@ export const setFrameLayoutCommandSchema = z
       .min(FRAME_GRID_MIN_COUNT)
       .max(FRAME_GRID_MAX_COUNT)
       .optional()
-      .describe('Track count for column or row layout. Ignored for free.'),
+      .describe(
+        'Track count: columns for `column` and `grid`, rows for `row`. Ignored for `free`.',
+      ),
     sizing: z
       .enum(FRAME_SIZING_MODES)
       .optional()
