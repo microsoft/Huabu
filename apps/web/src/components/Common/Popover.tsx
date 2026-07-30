@@ -16,6 +16,7 @@ import {
 import { createPortal } from 'react-dom';
 
 import { cn } from './cn';
+import { FLOATING_CHROME_PROPS } from './floatingChrome';
 
 type FloatingPosition = { x: number; y: number };
 
@@ -299,6 +300,7 @@ export const Popover: FC<PopoverProps> = ({
           setContentElement(node);
           assignRef(contentRef, node);
         }}
+        {...FLOATING_CHROME_PROPS}
         className={cn(
           'border-edge-default bg-surface fixed rounded-md border shadow-lg',
           className,
