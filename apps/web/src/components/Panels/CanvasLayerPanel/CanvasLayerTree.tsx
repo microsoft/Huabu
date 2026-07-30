@@ -119,7 +119,7 @@ const SortableRow = React.memo(
     onToggleCollapse,
     onToggleLock,
   }: SortableRowProps) => {
-    const { attributes, listeners, setNodeRef, isDragging } = useSortable({
+    const { listeners, setNodeRef, isDragging } = useSortable({
       id: item.id,
     });
 
@@ -157,7 +157,6 @@ const SortableRow = React.memo(
         // DnD plumbing - disabled if dragging is disabled
         forwardedRef={setNodeRef}
         style={style}
-        dndAttributes={isDraggingDisabled ? undefined : attributes}
         dndListeners={isDraggingDisabled ? undefined : listeners}
       />
     );

@@ -8,13 +8,11 @@
 :root {
   /* Text hierarchy */
   --fg-default: #191919;
-  --fg-muted: #6b6b6b;
-  --fg-subtle: #ababab;
+  --fg-muted: #515151;
+  --fg-subtle: #767676;
   --fg-inverse: #ffffff;
 
   /* Backgrounds */
-  /* --bg-default: #fcfbf7; */
-  /* --bg-surface: #ffffff; */
   --bg-default: #f5f5f5;
   --bg-surface: #ffffff;
 
