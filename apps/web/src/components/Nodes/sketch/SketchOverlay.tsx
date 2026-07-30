@@ -32,6 +32,7 @@ import {
   isSupersededByStylusRawTouch,
   useStylusRawTouch,
 } from './stylusRawTouch';
+import { shouldCommitSketchStroke } from './sketchStrokeCommit';
 
 import type { SketchPointer } from './stylusRawTouch';
 import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
@@ -47,57 +48,6 @@ import type { ReactFlowInstance } from '@xyflow/react';
  */
 const PREVIEW_CLEAR_DELAY_FRAMES = 2;
 export const CANCEL_SKETCH_GESTURE_EVENT = 'sediment:cancel-sketch-gesture';
-
-/** Fewest points that can form a stroke; anything shorter is a tap. */
-const MIN_STROKE_POINTS = 3;
-
-/**
- * Upper bound on how many trailing points {@link countLiftOffPoints} may drop.
- * Bounded so a deliberate pressure fade-out is never mistaken for lift-off.
- */
-const MAX_LIFT_OFF_POINTS = 6;
-
-/**
- * A trailing decay only counts as lift-off if pressure falls to this fraction
- * of where the decay started. Guards against reading ordinary pressure ripple
- * as a lift-off.
- */
-const LIFT_OFF_DECAY_RATIO = 0.7;
-
-/**
- * Count trailing points to drop as pen lift-off noise.
- *
- * Lifting a pen is not instant: pressure bleeds off over ~100ms while the tip
- * sits essentially still, so a stroke ends with a run of near-stationary
- * samples whose pressure decays monotonically. They arrive *before*
- * `pointerup` with the tip still nominally down, so nothing upstream rejects
- * them. `streamline` renders behind the true tip, and that dwell is exactly
- * what lets the smoothed path catch up — extending the stroke past where the
- * user stopped, thinly (`thinning` scales width with pressure). The result is
- * a fine hook on the end of every stroke.
- *
- * Detected by shape, not magnitude: an absolute pressure threshold can't tell
- * a light stroke from a lift-off, but a monotonic decay run is unambiguous.
- * Returns 0 for devices that report no pressure (many touchscreens, and the
- * raw-touch replay path, which floors pressure at a constant).
- */
-export function countLiftOffPoints(points: number[][]): number {
-  const limit = Math.max(
-    0,
-    Math.min(MAX_LIFT_OFF_POINTS, points.length - MIN_STROKE_POINTS),
-  );
-  let n = 0;
-  while (n < limit) {
-    const p = points[points.length - 1 - n][2] ?? 0;
-    const prev = points[points.length - 2 - n][2] ?? 0;
-    if (!(p < prev)) break;
-    n++;
-  }
-  if (n === 0) return 0;
-  const end = points[points.length - 1][2] ?? 0;
-  const start = points[points.length - 1 - n][2] ?? 0;
-  return start > 0 && end < start * LIFT_OFF_DECAY_RATIO ? n : 0;
-}
 
 /**
  * Run `cb` after `frames` animation frames have elapsed. Used to defer
@@ -549,17 +499,12 @@ export function SketchOverlay({
       // `streamline` can't smooth away a terminal outlier. Nothing is lost by
       // dropping it: the final pointermove is already buffered, and the flush
       // below publishes it.
-      const liftOff = countLiftOffPoints(screenPtsRef.current);
-      if (liftOff > 0) {
-        // Trim both buffers by the same count so the preview that stays
-        // painted through the handoff below matches the committed stroke.
-        screenPtsRef.current.length -= liftOff;
-        livePtsRef.current.length -= liftOff;
-      }
       const pts = screenPtsRef.current;
 
-      // A tap or natural pointer jitter remains pending and creates no stroke.
-      if (phase !== 'locked' || pts.length < MIN_STROKE_POINTS) {
+      // Sketch is an explicit ink tool, so a normal release commits even when
+      // the gesture stayed below the drag threshold. This preserves dots and
+      // short marks while pending gestures remain cancellable by pinch takeover.
+      if (!shouldCommitSketchStroke(phase, pts.length)) {
         resetStroke();
         return;
       }
