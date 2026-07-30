@@ -40,6 +40,7 @@ import type { Duplex } from 'node:stream';
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
 const DEFAULT_CONTROL_REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_SPAWN_REQUEST_TIMEOUT_MS = 240_000;
 const DEFAULT_OUTBOUND_BUFFER_LIMIT = 100;
 const DEFAULT_INBOUND_PRE_ATTACH_BUFFER_LIMIT = 1_000;
 
@@ -76,6 +77,7 @@ export class AgentletGateway {
   private readonly agentTeamMachineHandlers = new Set<() => void>();
   private readonly handshakeTimeout: number;
   private readonly controlRequestTimeout: number;
+  private readonly spawnRequestTimeout: number;
   private readonly outboundBufferLimit: number;
   private readonly inboundPreAttachBufferLimit: number;
   private readonly logger: AgentletGatewayLogger;
@@ -88,6 +90,8 @@ export class AgentletGateway {
       options.handshakeTimeout ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
     this.controlRequestTimeout =
       options.controlRequestTimeout ?? DEFAULT_CONTROL_REQUEST_TIMEOUT_MS;
+    this.spawnRequestTimeout =
+      options.spawnRequestTimeout ?? DEFAULT_SPAWN_REQUEST_TIMEOUT_MS;
     this.outboundBufferLimit =
       options.outboundBufferLimit ?? DEFAULT_OUTBOUND_BUFFER_LIMIT;
     this.inboundPreAttachBufferLimit =
@@ -182,7 +186,12 @@ export class AgentletGateway {
     agentletId: string,
     params: SpawnParams,
   ): Promise<SpawnResult> {
-    return this.sendControlRequest(agentletId, ServerMethods.SPAWN, params);
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.SPAWN,
+      params,
+      this.spawnRequestTimeout,
+    );
   }
 
   stopOnAgentlet(agentletId: string, params: StopParams): Promise<StopResult> {
@@ -556,6 +565,7 @@ export class AgentletGateway {
     agentletId: string,
     method: string,
     params: unknown,
+    timeoutMs = this.controlRequestTimeout,
   ): Promise<T> {
     const connection = this.requireConnectedAgentlet(agentletId);
     const id = ++this.requestId;
@@ -565,7 +575,7 @@ export class AgentletGateway {
       const timer = setTimeout(() => {
         this.pendingRequests.delete(key);
         reject(new Error(`Agentlet request timed out: ${method}`));
-      }, this.controlRequestTimeout);
+      }, timeoutMs);
       this.pendingRequests.set(key, {
         resolve: (value) => resolve(value as T),
         reject,

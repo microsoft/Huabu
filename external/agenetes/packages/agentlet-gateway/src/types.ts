@@ -27,6 +27,7 @@ export interface AgentletGatewayOptions {
   onDisconnection?(connection: AgentletConnection, reason: string): void;
   handshakeTimeout?: number;
   controlRequestTimeout?: number;
+  spawnRequestTimeout?: number;
   outboundBufferLimit?: number;
   inboundPreAttachBufferLimit?: number;
   logger?: AgentletGatewayLogger;

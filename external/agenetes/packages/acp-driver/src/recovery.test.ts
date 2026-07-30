@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AcpServiceError } from './errors.js';
 import { AcpAgentHandle, lowerAcpInputs } from './handle.js';
 import { emptyAcpOverlay } from './overlay.js';
+import { acpSessionRegistry } from './session-registry.js';
 
 import type { AcpCreateSpec, AcpDurableState } from './handle.js';
 import type { AcpSessionEntry } from './session-registry.js';
@@ -23,6 +24,7 @@ const spec: AcpCreateSpec = {
   threadId: 'thread_1',
   namespace: { name: 'canvas_1' },
   spec: {
+    agentletId: 'machine-a',
     binding: { alias: 'copilot', profileId: 'profile_1' },
     recipe: {
       alias: 'copilot',
@@ -89,6 +91,7 @@ const submission = {
 describe('ACP durable history recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    acpSessionRegistry.remove('machine-a', spec.threadId);
   });
 
   describe('ACP canonical input lowering', () => {
@@ -156,6 +159,7 @@ describe('ACP durable history recovery', () => {
         driverState: { initialPreambleDelivered: false },
         metadata: { currentModeId: 'ask' },
       },
+      repairFromClosedEntry: false,
     });
     expect(
       sessionMocks.ensureAcpSession.mock.calls[1]?.[0]?.priorState?.driverState,
@@ -173,6 +177,47 @@ describe('ACP durable history recovery', () => {
       }),
       { type: 'text', text: 'current request' },
     ]);
+  });
+
+  it('keeps native recovery and history fallback in one Handle singleflight', async () => {
+    let authorizeFallback: (() => void) | undefined;
+    const authorizeHistoryLoad = vi.fn(
+      () =>
+        new Promise<{ allowed: true; estimatedSize: number }>((resolve) => {
+          authorizeFallback = () =>
+            resolve({ allowed: true, estimatedSize: 100 });
+        }),
+    );
+    const { entry } = sessionEntry();
+    sessionMocks.ensureAcpSession
+      .mockRejectedValueOnce(
+        new AcpServiceError(
+          'session_resume_unavailable',
+          'native session is gone',
+        ),
+      )
+      .mockResolvedValueOnce(entry);
+    const handle = new AcpAgentHandle(
+      spec,
+      durableContext(authorizeHistoryLoad),
+    );
+
+    const first = handle
+      .run(submission, { overlay: emptyAcpOverlay(), logger })
+      .next();
+    await vi.waitFor(() => {
+      expect(authorizeHistoryLoad).toHaveBeenCalledOnce();
+    });
+    const second = handle
+      .run(submission, { overlay: emptyAcpOverlay(), logger })
+      .next();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sessionMocks.ensureAcpSession).toHaveBeenCalledOnce();
+    authorizeFallback?.();
+    await Promise.all([first, second]);
+    expect(sessionMocks.ensureAcpSession).toHaveBeenCalledTimes(2);
+    expect(authorizeHistoryLoad).toHaveBeenCalledOnce();
   });
 
   it('keeps unrelated spawn failures hard', async () => {
@@ -195,6 +240,34 @@ describe('ACP durable history recovery', () => {
     ).rejects.toMatchObject({ code: 'spawn_failed' });
     expect(sessionMocks.ensureAcpSession).toHaveBeenCalledTimes(1);
     expect(authorizeHistoryLoad).not.toHaveBeenCalled();
+  });
+
+  it('rejects control operations while the underlying session is suspended', async () => {
+    const setSessionMode = vi.fn();
+    acpSessionRegistry.set('machine-a', spec.threadId, {
+      ...sessionEntry().entry,
+      agentletId: 'machine-a',
+      threadId: spec.threadId,
+      client: {
+        isClosed: true,
+        shutdown: vi.fn(),
+        setSessionMode,
+      },
+    } as unknown as AcpSessionEntry);
+    const handle = new AcpAgentHandle(spec, {
+      recovery: {
+        authorizeHistoryLoad: vi.fn(),
+      },
+    });
+
+    await expect(
+      handle.control({ type: 'set_mode', data: { modeId: 'plan' } }),
+    ).resolves.toEqual({
+      ok: false,
+      error: `ACP session is suspended for thread ${spec.threadId}; send a message to reconnect`,
+      code: 'session_suspended',
+    });
+    expect(setSessionMode).not.toHaveBeenCalled();
   });
 
   it('does not dispatch a prompt when aborted during session bootstrap', async () => {

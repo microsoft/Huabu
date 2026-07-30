@@ -287,6 +287,7 @@ export class AcpAgentHandle<
    */
   readonly capabilities: AgentCapabilities = ACP_CAPABILITIES;
   private turnsToLoad?: readonly AgentTurn[];
+  private ensureSessionPromise?: Promise<AcpSessionEntry>;
 
   /**
    * @param spec       The baked create-time WorkloadSpec projection.
@@ -317,6 +318,19 @@ export class AcpAgentHandle<
   }
 
   private async ensureSession(
+    logger: AcpSessionLogger,
+  ): Promise<AcpSessionEntry> {
+    if (this.ensureSessionPromise) return this.ensureSessionPromise;
+    const promise = this.ensureSessionInner(logger).finally(() => {
+      if (this.ensureSessionPromise === promise) {
+        this.ensureSessionPromise = undefined;
+      }
+    });
+    this.ensureSessionPromise = promise;
+    return promise;
+  }
+
+  private async ensureSessionInner(
     logger: AcpSessionLogger,
   ): Promise<AcpSessionEntry> {
     const recoveryInput = this.createContext.recoveryInput;
@@ -350,13 +364,14 @@ export class AcpAgentHandle<
             metadata: sourceState.metadata,
           }
         : undefined;
-      return this.openSession(fallbackState, logger);
+      return this.openSession(fallbackState, logger, false);
     }
   }
 
   private async openSession(
     priorState: AgentStateSnapshot<AcpDurableState> | undefined,
     logger: AcpSessionLogger,
+    repairFromClosedEntry = true,
   ): Promise<AcpSessionEntry> {
     const { recipe, env } = await resolveAcpRuntimeLaunch(
       this.spec.spec,
@@ -371,6 +386,7 @@ export class AcpAgentHandle<
       ...(recipe !== undefined && { recipe }),
       ...(env !== undefined && { env }),
       ...(priorState !== undefined && { priorState }),
+      repairFromClosedEntry,
       idleTimeoutSecs: this.runtimePolicy.getIdleTimeoutSecs(),
       logger,
     });
@@ -651,11 +667,13 @@ export class AcpAgentHandle<
     // session to act on is a precondition failure — we do NOT lazily spawn
     // one just to, e.g., set a mode (§3.6.2 / M2.6).
     const entry = acpSessionRegistry.get(this.agentletId, this.spec.threadId);
-    if (!entry) {
+    if (!entry || entry.client.isClosed) {
       return {
         ok: false,
-        error: `no active ACP session for thread ${this.spec.threadId}`,
-        code: 'not_found',
+        error: entry
+          ? `ACP session is suspended for thread ${this.spec.threadId}; send a message to reconnect`
+          : `no active ACP session for thread ${this.spec.threadId}`,
+        code: entry ? 'session_suspended' : 'not_found',
       };
     }
     const { client, sessionId } = entry;
