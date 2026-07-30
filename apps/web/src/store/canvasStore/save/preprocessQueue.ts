@@ -31,6 +31,10 @@ import { createPerKeyDebouncer } from './perKeyDebouncer';
 import type { CanvasNodeType } from '@sediment/shared';
 import type { Node } from '@xyflow/react';
 
+function hasMissingContent(node: Node): boolean {
+  return node.data?.contentMissing === true;
+}
+
 /**
  * Slice fields the queue reads at fire time. Kept structural (not
  * `RFState`) so this module is free of store-type coupling and
@@ -96,6 +100,7 @@ export function createPreprocessQueue(opts: {
       // against typos without dragging a runtime list into the
       // web bundle.
       if (node.type === ('sketch' satisfies CanvasNodeType)) return;
+      if (hasMissingContent(node)) return;
       const scheduledState = opts.getState();
       if (!scheduledState.canvasId) return;
       const nodeId = node.id;
@@ -108,6 +113,7 @@ export function createPreprocessQueue(opts: {
         if (!state.canvasId) return;
         // Re-fetch the latest node so we send the most up-to-date content.
         const latestNode = state.nodes.find((n) => n.id === nodeId) ?? node;
+        if (hasMissingContent(latestNode)) return;
         void preprocessNodeIfNeeded({
           canvasId: state.canvasId,
           node: latestNode,
@@ -136,7 +142,7 @@ export function createPreprocessQueue(opts: {
 
       for (const nodeId of pendingIds) {
         const node = nodes.find((n) => n.id === nodeId);
-        if (!node) continue;
+        if (!node || hasMissingContent(node)) continue;
         const snapshot = buildPreprocessSnapshot(node, (frameId) =>
           nodes.filter((n) => n.parentId === frameId),
         );

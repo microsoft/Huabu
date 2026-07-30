@@ -268,9 +268,9 @@ export const NoteNode = memo(
       contentHeight,
     );
 
-    // Markdown file missing on disk + no in-memory fallback → replace
-    // the editor with a full-card placeholder.
-    const isContentMissing = data.contentMissing && !markdown.trim();
+    // A missing sidecar is a write barrier even if stale content remains in
+    // memory, so never expose editing or drop targets while it is absent.
+    const isContentMissing = data.contentMissing === true;
 
     // When the user picks an accent the wrapper paints both the border
     // and the accent-tinted fill. Drop the inner paper surfaces in that
@@ -424,11 +424,7 @@ export const NoteNode = memo(
         }
       >
         {isContentMissing ? (
-          <MissingFileBanner
-            nodeId={id}
-            title={t('node.noteFileMissing')}
-            description={t('node.noteFileMissingDescription')}
-          />
+          <MissingFileBanner nodeId={id} />
         ) : (
           <>
             <div

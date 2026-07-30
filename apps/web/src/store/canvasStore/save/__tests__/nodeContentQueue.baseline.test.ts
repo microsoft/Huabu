@@ -12,7 +12,11 @@ import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
-import { CanvasConflictError, putNodeContent } from '@/api/canvas';
+import {
+  CanvasConflictError,
+  getNodeContent,
+  putNodeContent,
+} from '@/api/canvas';
 import { toast } from '@/components/Common/Toast';
 
 import { createNodeContentQueue } from '../nodeContentQueue';
@@ -22,7 +26,7 @@ import type { Node } from '@xyflow/react';
 
 vi.mock('@/api/canvas', async (importActual) => {
   const actual = await importActual<typeof CanvasApi>();
-  return { ...actual, putNodeContent: vi.fn() };
+  return { ...actual, getNodeContent: vi.fn(), putNodeContent: vi.fn() };
 });
 
 vi.mock('@/components/Common/Toast', () => ({
@@ -30,6 +34,7 @@ vi.mock('@/components/Common/Toast', () => ({
 }));
 
 const putMock = putNodeContent as unknown as Mock;
+const getMock = getNodeContent as unknown as Mock;
 const toastMock = toast as unknown as Mock;
 
 function noteNode(content: string, label = 'Note'): Node {
@@ -57,6 +62,7 @@ function makeQueue(node: Node) {
 
 beforeEach(() => {
   putMock.mockReset();
+  getMock.mockReset();
   toastMock.mockReset();
 });
 
@@ -91,6 +97,16 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(putMock.mock.calls[0][2].expectRev).toBe(nodeRevisionOf({}));
   });
 
+  it('does not recreate a missing markdown sidecar', async () => {
+    const node = noteNode('');
+    node.data = { ...node.data, contentMissing: true };
+    const { queue } = makeQueue(node);
+
+    await queue.flushNow('c1', 'n1');
+
+    expect(putMock).not.toHaveBeenCalled();
+  });
+
   it('on NODE_CONTENT_CONFLICT: no throw, keeps text, freezes, toasts once', async () => {
     const node = noteNode('v1');
     const { queue, state } = makeQueue(node);
@@ -117,6 +133,43 @@ describe('nodeContentQueue baseline lifecycle', () => {
     await queue.flushNow('c1', 'n1');
     expect(putMock).toHaveBeenCalledTimes(1);
     expect(toastMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('adopts contentMissing when Load latest finds a deleted sidecar', async () => {
+    const node = noteNode('mine');
+    const { queue, state } = makeQueue(node);
+    queue.seedBaselines([node]);
+    putMock.mockRejectedValueOnce(
+      new CanvasConflictError({
+        code: 'NODE_CONTENT_CONFLICT',
+        message: 'changed elsewhere',
+        nodeId: 'n1',
+        currentRev: 'OTHER',
+      }),
+    );
+    getMock.mockResolvedValueOnce({
+      nodeId: 'n1',
+      type: 'note',
+      label: null,
+      content: '',
+      rev: nodeRevisionOf({}),
+      contentMissing: true,
+    });
+
+    await queue.flushNow('c1', 'n1');
+    const toastOpts = toastMock.mock.calls[0][1] as {
+      action: { onClick: () => void };
+    };
+    toastOpts.action.onClick();
+    await vi.waitFor(() => {
+      expect(state._setStateNoAutosave).toHaveBeenCalledWith({
+        nodes: [
+          expect.objectContaining({
+            data: expect.objectContaining({ contentMissing: true }),
+          }),
+        ],
+      });
+    });
   });
 
   it('"Keep mine" re-baselines to the disk rev and force-writes over it', async () => {

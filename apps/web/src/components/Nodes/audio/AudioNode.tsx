@@ -6,7 +6,7 @@ import { resolveArtifactUrl, uploadAudio } from '@/api/artifact';
 import { cn } from '@/components/Common/cn';
 import useCanvasStore from '@/store/canvasStore.ts';
 
-import { MissingFileBanner } from '../MissingFileBanner';
+import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasAudioNodeData } from '../types';
@@ -312,19 +312,12 @@ export const AudioNode = memo(
 
     const stopRf = (e: React.SyntheticEvent) => e.stopPropagation();
     const hasAudio = typeof data?.src === 'string' && data.src.length > 0;
+    const missingFileKind = getMissingFileKind(data);
     const progressRatio =
       durationSec > 0 ? Math.min(1, currentSec / durationSec) : 0;
 
     let body: React.ReactNode;
-    if (data?.artifactMissing) {
-      body = (
-        <MissingFileBanner
-          nodeId={id}
-          title={t('node.audioFileMissing')}
-          description={t('node.artifactMissingDescription')}
-        />
-      );
-    } else if (recState === 'uploading') {
+    if (recState === 'uploading') {
       body = (
         <span className="text-fg-muted w-full text-center text-xs">
           {t('node.saving')}
@@ -461,24 +454,28 @@ export const AudioNode = memo(
         type={'audio'}
         selected={selected}
         minHeight={56}
-        className="bg-surface"
+        className={missingFileKind ? undefined : 'bg-surface'}
       >
-        <div
-          role="presentation"
-          className="flex h-full w-full items-center gap-2.5 px-3"
-          onPointerDown={stopRf}
-          onMouseDown={stopRf}
-        >
-          {body}
-          {recState === 'error' && errMsg && (
-            <span
-              className="text-danger ml-1 truncate text-[10px]"
-              title={errMsg}
-            >
-              {errMsg}
-            </span>
-          )}
-        </div>
+        {missingFileKind ? (
+          <MissingFileBanner nodeId={id} />
+        ) : (
+          <div
+            role="presentation"
+            className="flex h-full w-full items-center gap-2.5 px-3"
+            onPointerDown={stopRf}
+            onMouseDown={stopRf}
+          >
+            {body}
+            {recState === 'error' && errMsg && (
+              <span
+                className="text-danger ml-1 truncate text-[10px]"
+                title={errMsg}
+              >
+                {errMsg}
+              </span>
+            )}
+          </div>
+        )}
       </NodeWrapper>
     );
   },

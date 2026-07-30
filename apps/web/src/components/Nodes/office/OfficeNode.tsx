@@ -12,7 +12,7 @@ import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
 
 import { getAccentTokens } from '../accentTokens';
-import { MissingFileBanner } from '../MissingFileBanner';
+import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasOfficeNodeData } from '../types';
@@ -79,6 +79,7 @@ export const OfficeNode = memo(
     const canvasId = useCanvasStore((s) => s.canvasId);
 
     const src = typeof data.src === 'string' ? data.src : '';
+    const missingFileKind = getMissingFileKind(data);
     const summary =
       typeof (data as { summary?: unknown }).summary === 'string'
         ? ((data as { summary?: string }).summary as string)
@@ -139,88 +140,91 @@ export const OfficeNode = memo(
         data={data}
         type={'office'}
         selected={selected}
-        actions={OfficeActions}
+        actions={missingFileKind ? undefined : OfficeActions}
         resizable
         keepAspectRatio={false}
-        className={clsx('bg-surface transition-all duration-300 ease-in-out')}
+        className={clsx(
+          !missingFileKind && 'bg-surface',
+          'transition-all duration-300 ease-in-out',
+        )}
       >
-        <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
-          <div
-            style={{
-              transform: `scale(${scale})`,
-              transformOrigin: 'top left',
-              width: `${100 / scale}%`,
-              height: `${100 / scale}%`,
-            }}
-          >
-            {data.artifactMissing ? (
-              <MissingFileBanner
-                nodeId={id}
-                title={t('node.officeFileMissing', { label: meta.label })}
-                description={t('node.artifactMissingDescription')}
-              />
-            ) : src ? (
-              <div className="bg-surface relative flex h-full w-full flex-col overflow-hidden">
-                {/* Cover area: large centered format icon over an
+        {missingFileKind ? (
+          <MissingFileBanner nodeId={id} />
+        ) : (
+          <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
+            <div
+              style={{
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left',
+                width: `${100 / scale}%`,
+                height: `${100 / scale}%`,
+              }}
+            >
+              {src ? (
+                <div className="bg-surface relative flex h-full w-full flex-col overflow-hidden">
+                  {/* Cover area: large centered format icon over an
                     accent-tinted background. Acts as the visual
                     counterpart to PreviewCard's image slot for nodes
                     that don't have a render-time thumbnail. */}
-                <div
-                  className="flex min-h-0 flex-1 items-center justify-center"
-                  style={{ background: coverBg }}
-                >
                   <div
-                    className="flex flex-col items-center gap-2"
-                    style={{ color: iconColor }}
+                    className="flex min-h-0 flex-1 items-center justify-center"
+                    style={{ background: coverBg }}
                   >
-                    <FormatIcon
-                      size={72}
-                      strokeWidth={1.4}
-                      aria-hidden="true"
-                    />
-                    <span className="text-fg-muted text-xs font-medium tracking-wide uppercase">
-                      {meta.label}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Info footer mirrors PreviewCard's layout. */}
-                <div
-                  className="flex flex-col px-4 pt-2 pb-2"
-                  style={{
-                    borderTop: `2px solid ${borderColor}`,
-                    background: accentTokens?.softBg ?? 'transparent',
-                  }}
-                >
-                  <div className="min-w-0 shrink-0">
                     <div
-                      className="float-left mr-2 flex translate-y-1.75 items-center"
+                      className="flex flex-col items-center gap-2"
                       style={{ color: iconColor }}
                     >
-                      <FormatIcon size={16} />
+                      <FormatIcon
+                        size={72}
+                        strokeWidth={1.4}
+                        aria-hidden="true"
+                      />
+                      <span className="text-fg-muted text-xs font-medium tracking-wide uppercase">
+                        {meta.label}
+                      </span>
                     </div>
-                    <span
-                      className="min-w-0 text-lg font-medium wrap-break-word"
-                      style={{ color: iconColor }}
-                    >
-                      {(data.label as string) ||
-                        t('node.untitledTypedDocument', { label: meta.label })}
-                    </span>
                   </div>
-                  {summary ? (
-                    <p className="text-fg-muted mt-1 line-clamp-5 text-base leading-relaxed">
-                      {summary}
-                    </p>
-                  ) : null}
+
+                  {/* Info footer mirrors PreviewCard's layout. */}
+                  <div
+                    className="flex flex-col px-4 pt-2 pb-2"
+                    style={{
+                      borderTop: `2px solid ${borderColor}`,
+                      background: accentTokens?.softBg ?? 'transparent',
+                    }}
+                  >
+                    <div className="min-w-0 shrink-0">
+                      <div
+                        className="float-left mr-2 flex translate-y-1.75 items-center"
+                        style={{ color: iconColor }}
+                      >
+                        <FormatIcon size={16} />
+                      </div>
+                      <span
+                        className="min-w-0 text-lg font-medium wrap-break-word"
+                        style={{ color: iconColor }}
+                      >
+                        {(data.label as string) ||
+                          t('node.untitledTypedDocument', {
+                            label: meta.label,
+                          })}
+                      </span>
+                    </div>
+                    {summary ? (
+                      <p className="text-fg-muted mt-1 line-clamp-5 text-base leading-relaxed">
+                        {summary}
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-                {t('node.noOfficeSource')}
-              </div>
-            )}
+              ) : (
+                <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
+                  {t('node.noOfficeSource')}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </NodeWrapper>
     );
   },

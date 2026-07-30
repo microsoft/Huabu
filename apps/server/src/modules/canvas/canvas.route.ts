@@ -287,13 +287,6 @@ function stripNodesForCanvas(nodes: NodeLike[]): NodeLike[] {
 }
 
 /**
- * Node types whose primary content lives in `nodes/<safe(label)>.md`.
- * For these, a missing markdown file means the node body is empty and we
- * surface a `contentMissing` flag so the client can prompt the user.
- */
-const CONTENT_BACKED_NODE_TYPES = new Set(['note', 'text']);
-
-/**
  * Node types that reference an artifact file via `data.src`. When the
  * referenced file is gone from disk we surface an `artifactMissing` flag
  * so the client can show a placeholder + Remove button.
@@ -386,7 +379,7 @@ function hydrateOneNode(
   }
 
   if (!nodeContent) {
-    if (CONTENT_BACKED_NODE_TYPES.has(nodeType)) {
+    if (MD_BACKED_NODE_TYPES.has(nodeType)) {
       data['contentMissing'] = true;
     }
     // Without a sidecar we can't recover `src`, so the
@@ -994,6 +987,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const { nodeType, trigger, snapshot, previousSnapshot, options } =
       parsed.data;
     const dispatcher = getPreprocessDispatcher();
+    const store = getCanvasStore(canvasId);
+
+    if (MD_BACKED_NODE_TYPES.has(nodeType) && !store.readNode(nodeId)) {
+      return reply.send({
+        nodeId,
+        success: false,
+        error: 'Node sidecar is missing',
+      });
+    }
 
     try {
       const ppRequest: PreprocessNodeRequest = {

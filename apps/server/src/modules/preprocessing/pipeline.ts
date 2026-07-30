@@ -310,6 +310,7 @@ export async function runPipeline(
             bodyOwnership,
             deps.store,
             src,
+            true,
           );
           ctx.persisted.placeholder = true;
           diagnostics.push({
@@ -325,6 +326,7 @@ export async function runPipeline(
             bodyOwnership,
             deps.store,
             src,
+            true,
           );
         }
         usedCapabilities.push('persist_source');

@@ -231,10 +231,10 @@ export interface BaseNodeData {
   style?: NodeStyle;
   /**
    * Server-set hint: the per-node markdown file backing this node was not
-   * found on disk during the last GET. Frontend renders a "file missing"
-   * banner so the user can recreate it (by typing) or remove the node.
-   * Cleared automatically on the next GET once the file is present again.
-   * Only meaningful for node types that persist content (note / text).
+   * found on disk during the last GET. Frontend renders the shared
+   * non-editable missing-file state and refuses automatic writes that could
+   * silently recreate it. Cleared on the next GET once the file is present.
+   * Meaningful for every node type backed by a markdown sidecar.
    */
   contentMissing?: boolean;
   /**

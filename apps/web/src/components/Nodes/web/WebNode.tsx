@@ -13,6 +13,7 @@ import useCanvasStore from '../../../store/canvasStore.ts';
 import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
 import { Loading } from '../../Common/Loading';
 import { getAccentTokens } from '../accentTokens.ts';
+import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper.tsx';
 import { useDeferredHydration } from '../shared/nodeHydrationScheduler.ts';
 
@@ -59,6 +60,7 @@ export const WebNode = memo(
     const webHydrated = useDeferredHydration(isMinimalLOD);
 
     const src = typeof data?.src === 'string' ? data.src : '';
+    const missingFileKind = getMissingFileKind(data);
     const isRemoteUrl = REMOTE_URL_RE.test(src);
 
     // URL surfaced as the "open externally" link in the floating toolbar.
@@ -211,26 +213,29 @@ export const WebNode = memo(
         data={data}
         type={'web'}
         selected={selected}
-        actions={WebActions}
+        actions={missingFileKind ? undefined : WebActions}
         resizable
         keepAspectRatio={false}
       >
-        <div className="bg-surface relative flex h-full w-full flex-col overflow-hidden rounded-lg">
-          <div
-            style={{
-              transform: `scale(${scale})`,
-              transformOrigin: 'top left',
-              width: `${100 / scale}%`,
-              height: `${100 / scale}%`,
-            }}
-          >
-            {!src ? (
-              <div className="text-fg-subtle flex h-full w-full items-center justify-center text-base">
-                {t('node.invalidUrl')}
-              </div>
-            ) : (
-              <div className="flex h-full w-full flex-col">
-                {/* ── Thumbnail area ──────────────────────────────────
+        {missingFileKind ? (
+          <MissingFileBanner nodeId={id} />
+        ) : (
+          <div className="bg-surface relative flex h-full w-full flex-col overflow-hidden rounded-lg">
+            <div
+              style={{
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left',
+                width: `${100 / scale}%`,
+                height: `${100 / scale}%`,
+              }}
+            >
+              {!src ? (
+                <div className="text-fg-subtle flex h-full w-full items-center justify-center text-base">
+                  {t('node.invalidUrl')}
+                </div>
+              ) : (
+                <div className="flex h-full w-full flex-col">
+                  {/* ── Thumbnail area ──────────────────────────────────
                     Static preview only — no live iframe (the embedded
                     page's scripts were a large per-node perf cost and are
                     reserved for the expanded Preview panel now). Layer
@@ -239,120 +244,121 @@ export const WebNode = memo(
                       2. Favicon "logo card", or a "No preview" hint when
                          even the favicon is missing.
                       3. og:image cover (when present and not failed). */}
-                <div
-                  className="relative min-h-0 flex-1 overflow-hidden"
-                  style={thumbBgStyle}
-                >
-                  {/* Layer 1: favicon fallback, or a "No preview" hint.
+                  <div
+                    className="relative min-h-0 flex-1 overflow-hidden"
+                    style={thumbBgStyle}
+                  >
+                    {/* Layer 1: favicon fallback, or a "No preview" hint.
                       Always rendered so a missing / broken og:image
                       (Layer 2) reveals a sensible visual underneath
                       instead of a gray box. */}
-                  <div
-                    className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6"
-                    style={accentFg}
-                  >
-                    {showThumbFavicon ? (
-                      <>
-                        <img
-                          src={favicon}
-                          alt=""
-                          className="h-16 w-16 rounded-md object-contain"
-                          decoding="async"
-                          onError={() => setThumbFaviconFailed(true)}
-                        />
-                        {siteName ? (
-                          <span className="text-fg-muted max-w-full truncate text-sm">
-                            {siteName}
+                    <div
+                      className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6"
+                      style={accentFg}
+                    >
+                      {showThumbFavicon ? (
+                        <>
+                          <img
+                            src={favicon}
+                            alt=""
+                            className="h-16 w-16 rounded-md object-contain"
+                            decoding="async"
+                            onError={() => setThumbFaviconFailed(true)}
+                          />
+                          {siteName ? (
+                            <span className="text-fg-muted max-w-full truncate text-sm">
+                              {siteName}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <NodeTypeIcon
+                            size={40}
+                            strokeWidth={1.25}
+                            className="text-fg-subtle"
+                          />
+                          <span className="text-fg-subtle text-sm">
+                            {siteName || t('node.noPreview')}
                           </span>
-                        ) : null}
-                      </>
-                    ) : (
-                      <>
-                        <NodeTypeIcon
-                          size={40}
-                          strokeWidth={1.25}
-                          className="text-fg-subtle"
-                        />
-                        <span className="text-fg-subtle text-sm">
-                          {siteName || t('node.noPreview')}
-                        </span>
-                      </>
-                    )}
-                  </div>
+                        </>
+                      )}
+                    </div>
 
-                  {/* Layer 2: og:image cover. Sits above the favicon
+                    {/* Layer 2: og:image cover. Sits above the favicon
                       fallback and hides it when the image loads. On
                       error we flip state so the fallback re-appears
                       (preventing the broken-image flash). */}
-                  {showCoverImage ? (
-                    <img
-                      src={fallbackImage}
-                      alt={title}
-                      className="absolute inset-0 block h-full w-full object-cover"
-                      decoding="async"
-                      draggable={false}
-                      onError={() => setCoverImageFailed(true)}
-                    />
-                  ) : null}
+                    {showCoverImage ? (
+                      <img
+                        src={fallbackImage}
+                        alt={title}
+                        className="absolute inset-0 block h-full w-full object-cover"
+                        decoding="async"
+                        draggable={false}
+                        onError={() => setCoverImageFailed(true)}
+                      />
+                    ) : null}
 
-                  {previewLoading && !preview ? (
-                    <Loading layout="overlay" variant="skeleton" />
-                  ) : null}
-                </div>
+                    {previewLoading && !preview ? (
+                      <Loading layout="overlay" variant="skeleton" />
+                    ) : null}
+                  </div>
 
-                {/* ── Footer: icon + title + AI summary ───────────────
+                  {/* ── Footer: icon + title + AI summary ───────────────
                     Fixed-content height so it never grows; the thumbnail
                     above absorbs any extra space when the user resizes. */}
-                <div
-                  className="flex shrink-0 flex-col gap-1 px-4 pt-2 pb-3"
-                  style={footerStyle}
-                >
-                  <div className="flex items-start gap-2" style={accentFg}>
-                    <span className="mt-1 flex shrink-0 items-center">
-                      {favicon && !footerFaviconFailed ? (
-                        <img
-                          src={favicon}
-                          alt=""
-                          className="h-4 w-4 rounded-sm"
-                          decoding="async"
-                          onError={() => setFooterFaviconFailed(true)}
-                        />
-                      ) : (
-                        <NodeTypeIcon size={16} />
-                      )}
-                    </span>
-                    <span className="min-w-0 text-base font-medium wrap-break-word">
-                      {title}
-                    </span>
+                  <div
+                    className="flex shrink-0 flex-col gap-1 px-4 pt-2 pb-3"
+                    style={footerStyle}
+                  >
+                    <div className="flex items-start gap-2" style={accentFg}>
+                      <span className="mt-1 flex shrink-0 items-center">
+                        {favicon && !footerFaviconFailed ? (
+                          <img
+                            src={favicon}
+                            alt=""
+                            className="h-4 w-4 rounded-sm"
+                            decoding="async"
+                            onError={() => setFooterFaviconFailed(true)}
+                          />
+                        ) : (
+                          <NodeTypeIcon size={16} />
+                        )}
+                      </span>
+                      <span className="min-w-0 text-base font-medium wrap-break-word">
+                        {title}
+                      </span>
+                    </div>
+                    {previewError && ingestion?.status !== 'pending' ? (
+                      <p className="text-fg-subtle text-sm"></p>
+                    ) : summary ? (
+                      <p className="text-fg-muted line-clamp-3 text-sm leading-relaxed">
+                        {summary}
+                      </p>
+                    ) : null}
                   </div>
-                  {previewError && ingestion?.status !== 'pending' ? (
-                    <p className="text-fg-subtle text-sm"></p>
-                  ) : summary ? (
-                    <p className="text-fg-muted line-clamp-3 text-sm leading-relaxed">
-                      {summary}
-                    </p>
-                  ) : null}
                 </div>
-              </div>
-            )}
-          </div>
-
-          {/* Loading overlay while preprocessing is in-flight. */}
-          {ingestion?.status === 'pending' && !preview ? (
-            <Loading
-              layout="overlay"
-              variant="skeleton"
-              message={t('node.processing')}
-            />
-          ) : null}
-
-          {/* Subtle "no preview" hint when extraction failed but the node still mounts. */}
-          {previewError && !preview && ingestion?.status !== 'pending' ? (
-            <div className="text-fg-subtle pointer-events-none absolute right-2 bottom-2 z-10 flex items-center gap-1 text-xs">
-              <ImageOff size={12} />
+              )}
             </div>
-          ) : null}
-        </div>
+
+            {/* Loading overlay while preprocessing is in-flight. */}
+            {ingestion?.status === 'pending' && !preview ? (
+              <Loading
+                layout="overlay"
+                variant="skeleton"
+                message={t('node.processing')}
+              />
+            ) : null}
+
+            {/* Subtle "no preview" hint when extraction failed but the node still mounts. */}
+            {previewError && !preview && ingestion?.status !== 'pending' ? (
+              <div className="text-fg-subtle pointer-events-none absolute right-2 bottom-2 z-10 flex items-center gap-1 text-xs">
+                <ImageOff size={12} />
+              </div>
+            ) : null}
+          </div>
+        )}
       </NodeWrapper>
     );
   },

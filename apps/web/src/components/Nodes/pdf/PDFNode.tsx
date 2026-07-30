@@ -8,7 +8,7 @@ import { useNodeLOD } from '@/hooks/useNodeLOD';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
 
-import { MissingFileBanner } from '../MissingFileBanner';
+import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import { PreviewCard } from '../PreviewCard';
 import { useDeferredHydration } from '../shared/nodeHydrationScheduler';
@@ -47,6 +47,7 @@ export const PDFNode = memo(
       typeof (data as { summary?: unknown }).summary === 'string'
         ? ((data as { summary?: string }).summary as string)
         : '';
+    const missingFileKind = getMissingFileKind(data);
 
     // Auto-generated thumbnail from the first PDF page (when no manual cover).
     const [thumbnail, setThumbnail] = useState<string | null>(null);
@@ -137,66 +138,64 @@ export const PDFNode = memo(
         data={data}
         type={'pdf'}
         selected={selected}
-        actions={PDFActions}
+        actions={missingFileKind ? undefined : PDFActions}
         resizable
         keepAspectRatio={false}
-        className="bg-surface"
+        className={missingFileKind ? undefined : 'bg-surface'}
       >
-        <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
-          {/* Render the first page off-screen to capture a thumbnail when no
-              manual cover exists. Gated behind the per-frame hydration
-              scheduler *and* React.lazy so:
-                - many un-covered PDFs stream their pdf.js builds one per
-                  frame instead of fighting for the main thread, and
-                - canvases whose PDFs all have cached covers never download
-                  the `react-pdf` chunk at all. */}
-          {needsThumbnailCapture && thumbnailHydrated && (
-            <Suspense fallback={null}>
-              <FirstPageThumbnail
-                src={src}
-                canvasId={canvasId}
-                onCapture={handleThumbnailCapture}
-              />
-            </Suspense>
-          )}
-
-          <div
-            style={{
-              transform: `scale(${scale})`,
-              transformOrigin: 'top left',
-              width: `${100 / scale}%`,
-              height: `${100 / scale}%`,
-            }}
-          >
-            {data.artifactMissing ? (
-              <MissingFileBanner
-                nodeId={id}
-                title={t('node.pdfFileMissing')}
-                description={t('node.artifactMissingDescription')}
-              />
-            ) : src ? (
-              <PreviewCard
-                image={coverImage}
-                imageAlt={data.label || t('node.pdfCover')}
-                nodeType="pdf"
-                title={data.label || t('node.untitledPdf')}
-                loading={!coverImage}
-                imagePosition="top"
-                accentColor={data.style?.accent}
-              >
-                {summary ? (
-                  <p className="text-fg-muted line-clamp-5 text-base leading-relaxed">
-                    {summary}
-                  </p>
-                ) : null}
-              </PreviewCard>
-            ) : (
-              <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-                {t('node.noPdfSource')}
-              </div>
+        {missingFileKind ? (
+          <MissingFileBanner nodeId={id} />
+        ) : (
+          <div className="relative flex h-full w-full flex-col overflow-hidden rounded-lg">
+            {/* Render the first page off-screen to capture a thumbnail when no
+                manual cover exists. Gated behind the per-frame hydration
+                scheduler *and* React.lazy so:
+                  - many un-covered PDFs stream their pdf.js builds one per
+                    frame instead of fighting for the main thread, and
+                  - canvases whose PDFs all have cached covers never download
+                    the `react-pdf` chunk at all. */}
+            {needsThumbnailCapture && thumbnailHydrated && (
+              <Suspense fallback={null}>
+                <FirstPageThumbnail
+                  src={src}
+                  canvasId={canvasId}
+                  onCapture={handleThumbnailCapture}
+                />
+              </Suspense>
             )}
+
+            <div
+              style={{
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left',
+                width: `${100 / scale}%`,
+                height: `${100 / scale}%`,
+              }}
+            >
+              {src ? (
+                <PreviewCard
+                  image={coverImage}
+                  imageAlt={data.label || t('node.pdfCover')}
+                  nodeType="pdf"
+                  title={data.label || t('node.untitledPdf')}
+                  loading={!coverImage}
+                  imagePosition="top"
+                  accentColor={data.style?.accent}
+                >
+                  {summary ? (
+                    <p className="text-fg-muted line-clamp-5 text-base leading-relaxed">
+                      {summary}
+                    </p>
+                  ) : null}
+                </PreviewCard>
+              ) : (
+                <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
+                  {t('node.noPdfSource')}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </NodeWrapper>
     );
   },

@@ -189,8 +189,7 @@ export interface PutNodeContentResponse {
  * Response for `GET /api/canvas/:canvasId/nodes/:nodeId/content`.
  *
  * When `contentMissing` is true the markdown sidecar has not been written
- * yet (or was deleted out-of-band); `content` is empty and `label` is
- * `null` in that case.
+ * yet (or was deleted out-of-band); sidecar-derived fields are unavailable.
  */
 export interface GetNodeContentResponse {
   nodeId: string;

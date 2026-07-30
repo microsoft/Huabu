@@ -276,6 +276,7 @@ export function createNodeContentQueue(opts: {
     if (frozen.has(nodeId)) return null;
 
     const data = (node.data ?? {}) as Record<string, unknown>;
+    if (data['contentMissing'] === true) return null;
     const body: PutNodeContentRequest = { nodeType };
 
     if (TEXT_BEARING_NODE_TYPES.has(nodeType)) {
@@ -521,6 +522,8 @@ export function createNodeContentQueue(opts: {
               src: res.src,
               summary: res.summary,
               keywords: res.keywords,
+              contentMissing: res.contentMissing ?? false,
+              artifactMissing: res.artifactMissing ?? false,
               contentDuplicate: res.contentDuplicate ?? false,
               duplicateFiles: res.duplicateFiles ?? [],
             },

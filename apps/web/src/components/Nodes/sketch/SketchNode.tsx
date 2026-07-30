@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { resolveAccent } from '@sediment/shared';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { MissingFileBanner } from '@/components/Nodes/MissingFileBanner';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { useIntentStore } from '@/store/intentStore';
@@ -59,6 +60,7 @@ export const SketchNode = memo(
     const h = height ?? data.initialSize?.height ?? 1;
     const scaleX = w / (data.initialSize?.width || 1);
     const scaleY = h / (data.initialSize?.height || 1);
+    const isContentMissing = data.contentMissing === true;
 
     const requestSketchRecognition = useIntentStore(
       (s) => s.requestSketchRecognition,
@@ -153,18 +155,21 @@ export const SketchNode = memo(
         type="sketch"
         selected={selected}
         resizable={true}
-        toolbar={sketchToolbar}
-        actions={sketchActions}
+        toolbar={isContentMissing ? undefined : sketchToolbar}
+        actions={isContentMissing ? undefined : sketchActions}
         allowOverflow
       >
-        <svg
-          width={w}
-          height={h}
-          viewBox={`0 0 ${w} ${h}`}
-          className="h-full w-full"
-          overflow="visible"
-        >
-          {/*
+        {isContentMissing ? (
+          <MissingFileBanner nodeId={id} />
+        ) : (
+          <svg
+            width={w}
+            height={h}
+            viewBox={`0 0 ${w} ${h}`}
+            className="h-full w-full"
+            overflow="visible"
+          >
+            {/*
             Hit-testing: the wrapper `.react-flow__node-sketch` is set to
             `pointer-events: none` in `index.css` so blank areas of the
             stroke's bounding box drill through to nodes beneath. Each
@@ -172,29 +177,33 @@ export const SketchNode = memo(
             which only registers hits on actual rendered fill \u2014 i.e. the
             painted stroke shape itself. No Tailwind override needed.
           */}
-          {strokes.map((s) => {
-            const isSelected = selectedStrokeIdSet.has(s.id);
-            const isHighlighted = !isSelected && highlightStrokeIdSet.has(s.id);
-            return (
-              <g
-                key={s.id}
-                visibility={erasedStrokeIdSet.has(s.id) ? 'hidden' : undefined}
-                transform={
-                  movePreview && isSelected && !isCarried
-                    ? `translate(${movePreview.dx} ${movePreview.dy})`
-                    : undefined
-                }
-                style={
-                  isSelected || isHighlighted
-                    ? { filter: 'drop-shadow(0 0 3px var(--color-info))' }
-                    : undefined
-                }
-              >
-                <StrokePath stroke={s} scaleX={scaleX} scaleY={scaleY} />
-              </g>
-            );
-          })}
-        </svg>
+            {strokes.map((s) => {
+              const isSelected = selectedStrokeIdSet.has(s.id);
+              const isHighlighted =
+                !isSelected && highlightStrokeIdSet.has(s.id);
+              return (
+                <g
+                  key={s.id}
+                  visibility={
+                    erasedStrokeIdSet.has(s.id) ? 'hidden' : undefined
+                  }
+                  transform={
+                    movePreview && isSelected && !isCarried
+                      ? `translate(${movePreview.dx} ${movePreview.dy})`
+                      : undefined
+                  }
+                  style={
+                    isSelected || isHighlighted
+                      ? { filter: 'drop-shadow(0 0 3px var(--color-info))' }
+                      : undefined
+                  }
+                >
+                  <StrokePath stroke={s} scaleX={scaleX} scaleY={scaleY} />
+                </g>
+              );
+            })}
+          </svg>
+        )}
       </NodeWrapper>
     );
   },
