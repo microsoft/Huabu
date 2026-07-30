@@ -10,9 +10,7 @@ import {
 } from '@sediment/shared';
 
 import {
-  ensureExternalNotesScanned,
-  snapshotExternalNotes,
-  subscribeExternalNotes,
+  openExternalNoteSession,
   takeExternalNote,
 } from './external-watcher.js';
 import { parseFrontmatter } from '../storage/frontmatter.js';
@@ -25,7 +23,9 @@ function writeSSE(raw: NodeJS.WritableStream, event: ExternalNoteEvent): void {
 }
 
 const externalRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
-  // SSE stream of external note events for a single canvas.
+  // SSE stream of external note events for a single canvas. The stream is the
+  // sole consumer of live external-note events, so it also owns the Space's
+  // native `nodes/` watcher for as long as it stays connected.
   fastify.get<{ Params: { canvasId: string } }>(
     '/:canvasId/external/stream',
     async (request, reply) => {
@@ -40,23 +40,33 @@ const externalRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       reply.raw.flushHeaders?.();
       reply.raw.write(': ok\n\n');
 
-      await ensureExternalNotesScanned(canvasId);
-      writeSSE(reply.raw, {
-        type: 'snapshot',
-        data: { items: snapshotExternalNotes(canvasId) },
-      });
-
-      const unsubscribe = subscribeExternalNotes(canvasId, (event) => {
-        writeSSE(reply.raw, event);
-      });
-
+      // Track disconnects that happen while the initial scan is still running
+      // so the session is released and nothing is written to a dead response.
+      let closed = false;
+      let release: (() => void) | null = null;
       request.raw.on('close', () => {
-        unsubscribe();
+        closed = true;
+        release?.();
         try {
           reply.raw.end();
         } catch {
           /* already closed */
         }
+      });
+
+      const session = await openExternalNoteSession(canvasId, (event) => {
+        if (closed) return;
+        writeSSE(reply.raw, event);
+      });
+      if (closed) {
+        session.close();
+        return;
+      }
+      release = session.close;
+
+      writeSSE(reply.raw, {
+        type: 'snapshot',
+        data: { items: session.snapshot },
       });
     },
   );

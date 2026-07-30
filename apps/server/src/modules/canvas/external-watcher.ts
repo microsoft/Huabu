@@ -1,3 +1,18 @@
+/**
+ * @file External-note observation.
+ *
+ * Two ownership tiers, per `docs/architecture/canvas-storage.md`:
+ *
+ * - One depth-zero Chokidar watcher observes **Space lifecycle only** —
+ *   top-level directory add/remove/rename. It never enumerates `nodes/`.
+ * - One native `fs.watch` handle per **active Space session** observes
+ *   `<Space>/nodes/`. A session exists only while at least one external-note
+ *   SSE subscriber is attached, so watcher count scales with open streams
+ *   rather than with total Space count. Inactive Spaces hold no watcher and
+ *   no in-memory state; their eventual state is rebuilt by the first lazy
+ *   scan when they are next opened.
+ */
+
 import { watch as watchFs, type FSWatcher as NativeFSWatcher } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -22,31 +37,72 @@ import type { ExternalNoteEvent, ExternalNoteItem } from '@sediment/shared';
 
 type Listener = (event: ExternalNoteEvent) => void;
 
+/** Upper bound on concurrent markdown reads inside one lazy Space scan. */
 const INITIAL_SCAN_CONCURRENCY = 8;
+/** Debounce applied to raw native events before `stat` + `readFile`. */
+const NODE_EVENT_SETTLE_MS = 170;
 
-const pendingByCanvas = new Map<string, Map<string, ExternalNoteItem>>();
-const listenersByCanvas = new Map<string, Set<Listener>>();
-const initialScansByCanvas = new Map<string, Promise<void>>();
+export interface ExternalNoteSession {
+  /** Merged initial state at acquisition time, newest first. */
+  snapshot: ExternalNoteItem[];
+  /**
+   * Idempotent. The final release closes the Space's native watcher,
+   * clears its pending timers, and drops its discovery state.
+   */
+  close(): void;
+}
+
+interface ActiveSpaceWatch {
+  canvasId: string;
+  nodesPath: string;
+  watcher: NativeFSWatcher | null;
+  listeners: Set<Listener>;
+  /** Subscribers that acquired the session, including ones still scanning. */
+  holders: number;
+  pendingItems: Map<string, ExternalNoteItem>;
+  pendingEvents: Map<string, NodeJS.Timeout>;
+  /**
+   * Paths a native event already resolved while the initial scan is in
+   * flight. Non-null only during that window; scan results for these paths
+   * are discarded so a live event always wins over an older observation.
+   */
+  scanOverrides: Set<string> | null;
+  initialScan: Promise<void> | null;
+  /** Set when a scan could not enumerate, so a later subscription retries. */
+  scanFailed: boolean;
+  /** Bumped on close and on workspace reset to reject stale async work. */
+  sessionGeneration: number;
+  closed: boolean;
+}
+
+const sessions = new Map<string, ActiveSpaceWatch>();
 let watcher: FSWatcher | null = null;
-let nodeWatchers: NativeFSWatcher[] = [];
-const pendingNodeEvents = new Map<string, NodeJS.Timeout>();
+let workspaceGeneration = 0;
+let nextSessionGeneration = 1;
 
-function resolvePath(
-  absPath: string,
-): { canvasId: string; relativePath: string } | null {
+/**
+ * Stamp identifying the workspace and session a piece of async work started
+ * under. A slow cloud-drive read may resolve long after a workspace switch or
+ * after the Space was closed and reopened; comparing stamps stops it from
+ * repopulating unrelated state.
+ */
+function stampOf(session: ActiveSpaceWatch): string {
+  return `${workspaceGeneration}:${session.sessionGeneration}`;
+}
+
+function isSessionCurrent(session: ActiveSpaceWatch, stamp?: string): boolean {
+  if (session.closed) return false;
+  if (sessions.get(session.canvasId) !== session) return false;
+  return stamp === undefined || stamp === stampOf(session);
+}
+
+function nodesPathFor(canvasId: string): string | null {
   if (!isWorkspaceConfigured()) return null;
-  const ws = getWorkspacePath();
-  const prefix = ws.endsWith(path.sep) ? ws : ws + path.sep;
-  if (!absPath.startsWith(prefix)) return null;
-  const parts = absPath.slice(prefix.length).split(path.sep);
-  if (parts.length !== 3 || parts[1] !== 'nodes') return null;
-  if (!parts[2].endsWith('.md')) return null;
-  for (const entry of listAllCanvasDirEntries()) {
-    if (entry.filename === parts[0]) {
-      return { canvasId: entry.id, relativePath: `nodes/${parts[2]}` };
-    }
-  }
-  return null;
+  const entry = listAllCanvasDirEntries().find(
+    (candidate) => candidate.id === canvasId,
+  );
+  if (!entry) return null;
+  return path.join(getWorkspacePath(), entry.filename, 'nodes');
 }
 
 function noteIdsFromCanvas(canvas: CanvasFile | null): Set<string> {
@@ -63,11 +119,12 @@ function canvasNoteIds(canvasId: string): Set<string> {
   return noteIdsFromCanvas(getCanvasStore(canvasId).read());
 }
 
-async function readInitialCanvasNoteIds(absPath: string): Promise<Set<string>> {
+async function readInitialCanvasNoteIds(
+  nodesPath: string,
+): Promise<Set<string>> {
   try {
-    const canvasRoot = path.dirname(path.dirname(absPath));
     const raw = await readFile(
-      path.join(canvasRoot, SPACE_JSON_FILENAME),
+      path.join(path.dirname(nodesPath), SPACE_JSON_FILENAME),
       'utf8',
     );
     return noteIdsFromCanvas(JSON.parse(raw) as CanvasFile);
@@ -76,23 +133,10 @@ async function readInitialCanvasNoteIds(absPath: string): Promise<Set<string>> {
   }
 }
 
-function cachedInitialCanvasNoteIds(
-  canvasId: string,
-  absPath: string,
-  cache: Map<string, Promise<Set<string>>>,
-): Promise<Set<string>> {
-  const cached = cache.get(canvasId);
-  if (cached) return cached;
-  const pending = readInitialCanvasNoteIds(absPath);
-  cache.set(canvasId, pending);
-  return pending;
-}
-
 async function buildItem(
   absPath: string,
-  canvasId: string,
   relativePath: string,
-  initialNoteIdsByCanvas?: Map<string, Promise<Set<string>>>,
+  knownNoteIds: () => Promise<Set<string>>,
 ): Promise<ExternalNoteItem | null> {
   try {
     const [raw, st] = await Promise.all([
@@ -102,16 +146,7 @@ async function buildItem(
     const { meta } = parseFrontmatter(raw);
     const rawId = meta['id'];
     const noteId = typeof rawId === 'string' && rawId ? rawId : undefined;
-    if (noteId) {
-      const known = initialNoteIdsByCanvas
-        ? await cachedInitialCanvasNoteIds(
-            canvasId,
-            absPath,
-            initialNoteIdsByCanvas,
-          )
-        : canvasNoteIds(canvasId);
-      if (known.has(noteId)) return null;
-    }
+    if (noteId && (await knownNoteIds()).has(noteId)) return null;
     return {
       relativePath,
       fileName: path.basename(absPath),
@@ -123,10 +158,8 @@ async function buildItem(
   }
 }
 
-function emit(canvasId: string, event: ExternalNoteEvent): void {
-  const set = listenersByCanvas.get(canvasId);
-  if (!set) return;
-  for (const fn of set) {
+function emit(session: ActiveSpaceWatch, event: ExternalNoteEvent): void {
+  for (const fn of [...session.listeners]) {
     try {
       fn(event);
     } catch {
@@ -135,105 +168,155 @@ function emit(canvasId: string, event: ExternalNoteEvent): void {
   }
 }
 
-async function addResolvedItem(
-  absPath: string,
-  canvasId: string,
-  relativePath: string,
-  initialNoteIdsByCanvas?: Map<string, Promise<Set<string>>>,
-): Promise<void> {
-  const item = await buildItem(
-    absPath,
-    canvasId,
-    relativePath,
-    initialNoteIdsByCanvas,
-  );
-  if (!item) return;
-  let map = pendingByCanvas.get(canvasId);
-  if (!map) {
-    map = new Map();
-    pendingByCanvas.set(canvasId, map);
-  }
-  if (map.has(relativePath)) return;
-  map.set(relativePath, item);
-  emit(canvasId, { type: 'added', data: item });
+/** Idempotent by `relativePath`: a repeat observation replaces, never dupes. */
+function recordItem(session: ActiveSpaceWatch, item: ExternalNoteItem): void {
+  const existed = session.pendingItems.has(item.relativePath);
+  session.pendingItems.set(item.relativePath, item);
+  if (!existed) emit(session, { type: 'added', data: item });
 }
 
-function handleUnlink(absPath: string): void {
-  const resolved = resolvePath(absPath);
-  if (!resolved) return;
-  const { canvasId, relativePath } = resolved;
-  const map = pendingByCanvas.get(canvasId);
-  if (!map?.delete(relativePath)) return;
-  emit(canvasId, { type: 'removed', data: { relativePath } });
+function forgetItem(session: ActiveSpaceWatch, relativePath: string): void {
+  if (!session.pendingItems.delete(relativePath)) return;
+  emit(session, { type: 'removed', data: { relativePath } });
 }
 
-function closeNodeWatchers(): void {
-  for (const timer of pendingNodeEvents.values()) clearTimeout(timer);
-  pendingNodeEvents.clear();
-  for (const nodeWatcher of nodeWatchers) nodeWatcher.close();
-  nodeWatchers = [];
-}
-
-function armNodeWatchers(): void {
-  closeNodeWatchers();
-  const ws = getWorkspacePath();
-  for (const entry of listAllCanvasDirEntries()) {
-    const nodesPath = path.join(ws, entry.filename, 'nodes');
-    try {
-      const nodeWatcher = watchFs(
-        nodesPath,
-        { persistent: true, encoding: 'utf8' },
-        (_eventType, filename) => {
-          if (!filename) return;
-          const basename = path.basename(filename);
-          if (basename !== filename || !basename.endsWith('.md')) return;
-          const absPath = path.join(nodesPath, basename);
-          const relativePath = `nodes/${basename}`;
-          const pending = pendingNodeEvents.get(absPath);
-          if (pending) clearTimeout(pending);
-          pendingNodeEvents.set(
-            absPath,
-            setTimeout(() => {
-              pendingNodeEvents.delete(absPath);
-              void stat(absPath)
-                .then((fileStat) => {
-                  if (fileStat.isFile()) {
-                    return addResolvedItem(absPath, entry.id, relativePath);
-                  }
-                })
-                .catch(() => handleUnlink(absPath));
-            }, 170),
-          );
-        },
-      );
-      nodeWatcher.on('error', (err: unknown) => {
-        getLogger('external-note-watcher').warn(
-          { err, nodesPath },
-          'external note directory watcher error (ignored)',
-        );
-      });
-      nodeWatchers.push(nodeWatcher);
-    } catch (err) {
-      getLogger('external-note-watcher').warn(
-        { err, nodesPath },
-        'external note directory watcher could not start (ignored)',
-      );
+function snapshotOf(session: ActiveSpaceWatch): ExternalNoteItem[] {
+  const known = canvasNoteIds(session.canvasId);
+  const out: ExternalNoteItem[] = [];
+  for (const [rel, item] of session.pendingItems) {
+    if (item.noteId && known.has(item.noteId)) {
+      session.pendingItems.delete(rel);
+      continue;
     }
+    out.push(item);
+  }
+  return out.sort((a, b) => b.mtime - a.mtime);
+}
+
+// ── Native `nodes/` watching (active Spaces only) ────────────────────────
+
+function scheduleNodeEvent(session: ActiveSpaceWatch, basename: string): void {
+  const relativePath = `nodes/${basename}`;
+  const absPath = path.join(session.nodesPath, basename);
+  const existing = session.pendingEvents.get(relativePath);
+  if (existing) clearTimeout(existing);
+  session.pendingEvents.set(
+    relativePath,
+    setTimeout(() => {
+      session.pendingEvents.delete(relativePath);
+      const stamp = stampOf(session);
+      if (!isSessionCurrent(session, stamp)) return;
+      // Claim authority over this path for the remainder of any in-flight
+      // initial scan so a late scan read cannot resurrect or stale-overwrite.
+      session.scanOverrides?.add(relativePath);
+      void stat(absPath)
+        .then(async (fileStat) => {
+          if (!fileStat.isFile()) return;
+          const item = await buildItem(absPath, relativePath, () =>
+            Promise.resolve(canvasNoteIds(session.canvasId)),
+          );
+          if (!item || !isSessionCurrent(session, stamp)) return;
+          recordItem(session, item);
+        })
+        .catch(() => {
+          if (isSessionCurrent(session, stamp)) {
+            forgetItem(session, relativePath);
+          }
+        });
+    }, NODE_EVENT_SETTLE_MS),
+  );
+}
+
+/**
+ * Register the Space's native watcher. Failure is non-fatal: the caller still
+ * gets a lazy snapshot, it simply will not receive live updates until the next
+ * first subscription retries registration.
+ */
+function armSessionWatcher(session: ActiveSpaceWatch): void {
+  if (session.watcher || !session.nodesPath) return;
+  const { nodesPath } = session;
+  try {
+    const nativeWatcher = watchFs(
+      nodesPath,
+      { persistent: true, encoding: 'utf8' },
+      (_eventType, filename) => {
+        if (!filename) return;
+        const basename = path.basename(filename);
+        if (basename !== filename || !basename.endsWith('.md')) return;
+        scheduleNodeEvent(session, basename);
+      },
+    );
+    nativeWatcher.on('error', (err: unknown) => {
+      getLogger('external-note-watcher').warn(
+        { err, canvasId: session.canvasId, nodesPath },
+        'external note directory watcher error (ignored)',
+      );
+    });
+    session.watcher = nativeWatcher;
+  } catch (err) {
+    getLogger('external-note-watcher').warn(
+      { err, canvasId: session.canvasId, nodesPath },
+      'external note directory watcher could not start (ignored)',
+    );
+  }
+}
+
+function disarmSessionWatcher(session: ActiveSpaceWatch): void {
+  for (const timer of session.pendingEvents.values()) clearTimeout(timer);
+  session.pendingEvents.clear();
+  session.watcher?.close();
+  session.watcher = null;
+}
+
+function destroySession(session: ActiveSpaceWatch): void {
+  if (session.closed) return;
+  session.closed = true;
+  disarmSessionWatcher(session);
+  session.listeners.clear();
+  session.pendingItems.clear();
+  session.scanOverrides = null;
+  session.initialScan = null;
+  if (sessions.get(session.canvasId) === session) {
+    sessions.delete(session.canvasId);
+  }
+}
+
+/**
+ * Re-point active sessions after the top-level directory index changed. A
+ * renamed Space re-arms its watcher at the new path; a deleted Space drops its
+ * live state and tells subscribers it is now empty. Inactive Spaces are
+ * deliberately untouched — they own no watcher to fix up.
+ */
+function resyncActiveSessions(): void {
+  for (const session of [...sessions.values()]) {
+    const nodesPath = nodesPathFor(session.canvasId);
+    if (!nodesPath) {
+      disarmSessionWatcher(session);
+      session.nodesPath = '';
+      session.pendingItems.clear();
+      session.initialScan = null;
+      emit(session, { type: 'snapshot', data: { items: [] } });
+      continue;
+    }
+    if (nodesPath === session.nodesPath && session.watcher) continue;
+    disarmSessionWatcher(session);
+    session.nodesPath = nodesPath;
+    armSessionWatcher(session);
   }
 }
 
 async function closeWatcherHandles(): Promise<void> {
   const activeWatcher = watcher;
   watcher = null;
-  closeNodeWatchers();
+  for (const session of sessions.values()) disarmSessionWatcher(session);
   if (activeWatcher) await activeWatcher.close().catch(() => undefined);
 }
 
 /**
- * Watch top-level Space lifecycle changes with Chokidar and note-directory
- * changes with native `fs.watch`, which registers without crawling existing
- * files. Pending state is left untouched so the caller decides whether a
- * fresh scan should clear it or preserve it across self-write suspension.
+ * Arm the depth-zero workspace watcher plus the native watcher of every
+ * currently active Space session. Discovery state is left untouched so the
+ * caller decides whether a fresh scan should clear it or preserve it across
+ * self-write suspension.
  */
 function armWatcher(): void {
   if (!isWorkspaceConfigured()) return;
@@ -252,9 +335,9 @@ function armWatcher(): void {
       return;
     }
     refreshCanvasDirIndex();
-    armNodeWatchers();
+    resyncActiveSessions();
   };
-  armNodeWatchers();
+  for (const session of sessions.values()) armSessionWatcher(session);
   watcher = chokidar.watch(ws, {
     ignoreInitial: true,
     depth: 0,
@@ -303,34 +386,49 @@ function enqueueLifecycle(task: () => Promise<void>): Promise<void> {
 }
 
 /**
- * Stop the current watcher (if any), drop pending state, and re-arm it
- * against the currently active workspace. Safe to call multiple times and
- * from concurrent callers — transitions are serialized so the module-level
- * `watcher` reference is never overwritten before its handle is closed.
- * Listeners are preserved so reconnected clients keep their streams.
+ * Tear every active session down and tell its subscribers the Space is now
+ * empty. Called on workspace switch and shutdown: the previous workspace's
+ * canvasIds are meaningless afterwards, and the client reconnects its stream
+ * when it navigates into the new workspace.
+ */
+function destroyAllSessions(): void {
+  for (const session of [...sessions.values()]) {
+    emit(session, { type: 'snapshot', data: { items: [] } });
+    destroySession(session);
+  }
+  sessions.clear();
+}
+
+/**
+ * Stop the current watcher (if any), drop every active session, and re-arm
+ * the workspace watcher against the currently active workspace. Safe to call
+ * multiple times and from concurrent callers — transitions are serialized so
+ * the module-level `watcher` reference is never overwritten before its handle
+ * is closed. Bumping the workspace generation rejects any scan or event still
+ * in flight from the previous workspace.
  */
 export async function resetExternalNoteWatcher(): Promise<void> {
   return enqueueLifecycle(async () => {
+    workspaceGeneration += 1;
     await closeWatcherHandles();
-    pendingByCanvas.clear();
-    initialScansByCanvas.clear();
+    destroyAllSessions();
     armWatcher();
   });
 }
 
 /**
- * Close the current watcher (if any) and drop pending state *without*
- * re-arming. Call this from the server's shutdown path so the live
- * `fs.watch` handle is released cleanly instead of being force-killed —
- * on virtual/network filesystems (Google Drive) a force-terminated
- * process can leave in-flight watch requests wedged. Serialized against
+ * Close the current watcher (if any) and drop every session *without*
+ * re-arming. Call this from the server's shutdown path so live `fs.watch`
+ * handles are released cleanly instead of being force-killed — on
+ * virtual/network filesystems (Google Drive) a force-terminated process can
+ * leave in-flight watch requests wedged. Serialized against
  * `resetExternalNoteWatcher` through the shared lifecycle chain.
  */
 export async function closeExternalNoteWatcher(): Promise<void> {
   return enqueueLifecycle(async () => {
+    workspaceGeneration += 1;
     await closeWatcherHandles();
-    pendingByCanvas.clear();
-    initialScansByCanvas.clear();
+    destroyAllSessions();
   });
 }
 
@@ -340,8 +438,9 @@ export async function closeExternalNoteWatcher(): Promise<void> {
 // (the canvas dir itself OR its `nodes/` child) makes `renameSync` /
 // `rmSync` of that directory fail with EPERM — the handle is persistent,
 // so retries never win and `unwatch(subpath)` does not release it. The
-// only fix is to fully `close()` the single workspace watcher for the
-// duration of a server-owned directory rename/delete, then re-arm it.
+// only fix is to fully `close()` the workspace watcher and every active
+// session watcher for the duration of a server-owned directory
+// rename/delete, then re-arm them.
 //
 // The server is the sole legitimate writer of these directories, so
 // suspending our own observer around our own write is safe. A depth
@@ -354,23 +453,24 @@ let armAfterResume = false;
  * Run `fn` with the external-note watcher suspended, then re-arm it.
  *
  * Use this to bracket any server-initiated rename or delete of a canvas
- * directory so the live watch handle cannot block the filesystem
- * operation on Windows. Re-arming preserves `pendingByCanvas`: external
- * notes are keyed by `canvasId` + `relativePath` (`nodes/<file>.md`),
- * neither of which a directory rename changes, and the `handleAdd`
- * dedupe guard suppresses duplicate `added` emits during the re-scan —
- * so the client's external-note list does not flicker.
+ * directory so a live watch handle cannot block the filesystem operation on
+ * Windows. Re-arming preserves each active session's discovery state:
+ * external notes are keyed by `canvasId` + `relativePath`
+ * (`nodes/<file>.md`), neither of which a directory rename changes, and
+ * `recordItem` is idempotent — so the client's external-note list does not
+ * flicker. A session whose Space was deleted inside the bracket is resynced
+ * to an empty state instead.
  *
- * A no-op passthrough when the watcher is not currently running (e.g.
- * no workspace configured, or a test harness), so it never spins up a
- * watcher that was intentionally absent.
+ * A no-op passthrough when nothing is currently armed (e.g. no workspace
+ * configured, or a test harness), so it never spins up a watcher that was
+ * intentionally absent.
  */
 export async function runWithExternalNoteWatcherSuspended<T>(
   fn: () => T | Promise<T>,
 ): Promise<T> {
   if (suspendDepth === 0) {
-    // Only re-arm on exit if a watcher was actually running on entry.
-    armAfterResume = watcher !== null || nodeWatchers.length > 0;
+    // Only re-arm on exit if something was actually running on entry.
+    armAfterResume = watcher !== null || sessions.size > 0;
     await closeWatcherHandles();
   }
   suspendDepth++;
@@ -380,106 +480,144 @@ export async function runWithExternalNoteWatcherSuspended<T>(
     suspendDepth--;
     if (suspendDepth === 0 && armAfterResume) {
       armAfterResume = false;
-      // Prune pending entries for canvases that no longer exist. While the
-      // watcher was suspended we observed no `unlink` events, so a canvas
-      // deleted during the bracket (its whole subtree `rmSync`'d) would
-      // otherwise leave its `pendingByCanvas` map permanently stale — a
-      // small leak, and `snapshotExternalNotes` never revisits a deleted
-      // canvasId to clear it lazily. Keyed by `canvasId`, so a rename
-      // (which changes only the directory name, not the id) is unaffected.
+      // While suspended we observed no events, so a Space renamed or deleted
+      // inside the bracket must be reconciled explicitly: `resyncActiveSessions`
+      // re-points survivors at their new directory and empties the rest.
       refreshCanvasDirIndex();
-      const liveCanvasIds = new Set(
-        listAllCanvasDirEntries().map((entry) => entry.id),
-      );
-      for (const id of pendingByCanvas.keys()) {
-        if (!liveCanvasIds.has(id)) pendingByCanvas.delete(id);
-      }
+      resyncActiveSessions();
       armWatcher();
     }
   }
 }
 
-export function snapshotExternalNotes(canvasId: string): ExternalNoteItem[] {
-  const map = pendingByCanvas.get(canvasId);
-  if (!map) return [];
-  const known = canvasNoteIds(canvasId);
-  const out: ExternalNoteItem[] = [];
-  for (const [rel, item] of map) {
-    if (item.noteId && known.has(item.noteId)) {
-      map.delete(rel);
-      continue;
-    }
-    out.push(item);
-  }
-  return out.sort((a, b) => b.mtime - a.mtime);
-}
+// ── Lazy initial discovery ───────────────────────────────────────────────
 
-async function scanExternalNotes(canvasId: string): Promise<void> {
-  if (!isWorkspaceConfigured()) return;
-  const entry = listAllCanvasDirEntries().find(
-    (candidate) => candidate.id === canvasId,
-  );
-  if (!entry) return;
-  const nodesPath = path.join(getWorkspacePath(), entry.filename, 'nodes');
-  let notePaths: string[];
+/**
+ * Enumerate `<Space>/nodes/*.md` and merge the results into session state.
+ * The native watcher is already armed by the caller, so an event observed
+ * mid-scan is authoritative and wins over anything this scan reads.
+ */
+async function runInitialScan(session: ActiveSpaceWatch): Promise<void> {
+  const stamp = stampOf(session);
+  const overrides = new Set<string>();
+  session.scanOverrides = overrides;
   try {
-    const entries = await readdir(nodesPath, { withFileTypes: true });
-    notePaths = entries
-      .filter(
-        (candidate) => candidate.isFile() && candidate.name.endsWith('.md'),
-      )
-      .map((candidate) => path.join(nodesPath, candidate.name));
-  } catch {
-    return;
-  }
-
-  const initialNoteIdsByCanvas = new Map<string, Promise<Set<string>>>();
-  let nextIndex = 0;
-  const worker = async (): Promise<void> => {
-    while (nextIndex < notePaths.length) {
-      const notePath = notePaths[nextIndex++];
-      if (notePath) {
-        await addResolvedItem(
-          notePath,
-          canvasId,
-          `nodes/${path.basename(notePath)}`,
-          initialNoteIdsByCanvas,
-        );
-      }
+    let noteNames: string[];
+    try {
+      const entries = await readdir(session.nodesPath, { withFileTypes: true });
+      noteNames = entries
+        .filter(
+          (candidate) => candidate.isFile() && candidate.name.endsWith('.md'),
+        )
+        .map((candidate) => candidate.name);
+    } catch {
+      // Do not cache a failed enumeration; a later subscription may retry.
+      session.scanFailed = true;
+      return;
     }
-  };
-  await Promise.all(
-    Array.from(
-      { length: Math.min(INITIAL_SCAN_CONCURRENCY, notePaths.length) },
-      () => worker(),
-    ),
-  );
+    if (!isSessionCurrent(session, stamp)) return;
+
+    let topology: Promise<Set<string>> | null = null;
+    const knownNoteIds = (): Promise<Set<string>> =>
+      (topology ??= readInitialCanvasNoteIds(session.nodesPath));
+
+    let nextIndex = 0;
+    const worker = async (): Promise<void> => {
+      while (nextIndex < noteNames.length) {
+        const name = noteNames[nextIndex++];
+        if (!name) continue;
+        const relativePath = `nodes/${name}`;
+        const item = await buildItem(
+          path.join(session.nodesPath, name),
+          relativePath,
+          knownNoteIds,
+        );
+        if (!isSessionCurrent(session, stamp)) return;
+        if (!item || overrides.has(relativePath)) continue;
+        recordItem(session, item);
+      }
+    };
+    await Promise.all(
+      Array.from(
+        { length: Math.min(INITIAL_SCAN_CONCURRENCY, noteNames.length) },
+        () => worker(),
+      ),
+    );
+  } finally {
+    if (session.scanOverrides === overrides) session.scanOverrides = null;
+  }
 }
 
-export function ensureExternalNotesScanned(canvasId: string): Promise<void> {
-  const existing = initialScansByCanvas.get(canvasId);
-  if (existing) return existing;
-  const pending = scanExternalNotes(canvasId);
-  initialScansByCanvas.set(canvasId, pending);
-  return pending;
+async function ensureInitialScan(session: ActiveSpaceWatch): Promise<void> {
+  let scan = session.initialScan;
+  if (!scan) {
+    session.scanFailed = false;
+    scan = runInitialScan(session);
+    session.initialScan = scan;
+  }
+  await scan;
+  if (session.scanFailed && session.initialScan === scan) {
+    session.initialScan = null;
+  }
 }
 
-export function subscribeExternalNotes(
+// ── Session acquisition ──────────────────────────────────────────────────
+
+/**
+ * Acquire a Space-scoped external-note session.
+ *
+ * The first subscriber arms the native watcher *before* enumeration begins,
+ * which closes the ordinary scan-then-watch gap, then returns one merged
+ * snapshot. Additional subscribers share that watcher and that scan.
+ * `listener` starts receiving events only once its snapshot has been
+ * produced, so it never sees an `added` event for an item the snapshot
+ * already carries.
+ *
+ * Callers must invoke `close()` on every exit path, including a disconnect
+ * that happens while the initial scan is still running.
+ */
+export async function openExternalNoteSession(
   canvasId: string,
   listener: Listener,
-): () => void {
-  let set = listenersByCanvas.get(canvasId);
-  if (!set) {
-    set = new Set();
-    listenersByCanvas.set(canvasId, set);
+): Promise<ExternalNoteSession> {
+  let session = sessions.get(canvasId);
+  if (!session) {
+    session = {
+      canvasId,
+      nodesPath: nodesPathFor(canvasId) ?? '',
+      watcher: null,
+      listeners: new Set(),
+      holders: 0,
+      pendingItems: new Map(),
+      pendingEvents: new Map(),
+      scanOverrides: null,
+      initialScan: null,
+      scanFailed: false,
+      sessionGeneration: nextSessionGeneration++,
+      closed: false,
+    };
+    sessions.set(canvasId, session);
+    armSessionWatcher(session);
   }
-  set.add(listener);
-  return () => {
-    const s = listenersByCanvas.get(canvasId);
-    if (!s) return;
-    s.delete(listener);
-    if (s.size === 0) listenersByCanvas.delete(canvasId);
+
+  const active = session;
+  active.holders += 1;
+  let released = false;
+  const close = (): void => {
+    if (released) return;
+    released = true;
+    active.listeners.delete(listener);
+    active.holders -= 1;
+    if (active.holders <= 0) destroySession(active);
   };
+
+  if (active.nodesPath) await ensureInitialScan(active);
+
+  // Registering the listener and reading the snapshot must stay in one
+  // synchronous block so no event can slip between them.
+  if (released || !isSessionCurrent(active)) return { snapshot: [], close };
+  active.listeners.add(listener);
+  return { snapshot: snapshotOf(active), close };
 }
 
 /** Remove and return a pending item — used by the import endpoint. */
@@ -487,8 +625,9 @@ export function takeExternalNote(
   canvasId: string,
   relativePath: string,
 ): ExternalNoteItem | null {
-  const map = pendingByCanvas.get(canvasId);
-  const item = map?.get(relativePath) ?? null;
-  if (item) map?.delete(relativePath);
+  const session = sessions.get(canvasId);
+  if (!session) return null;
+  const item = session.pendingItems.get(relativePath) ?? null;
+  if (item) session.pendingItems.delete(relativePath);
   return item;
 }
