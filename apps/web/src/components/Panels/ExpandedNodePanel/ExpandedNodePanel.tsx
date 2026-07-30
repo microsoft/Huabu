@@ -145,7 +145,12 @@ const ConnectedNodeMenu = ({
         </Button>
       }
     >
-      <div role="menu" aria-label={menuLabel} onKeyDown={handleMenuKeyDown}>
+      <div
+        role="menu"
+        tabIndex={-1}
+        aria-label={menuLabel}
+        onKeyDown={handleMenuKeyDown}
+      >
         {groups.map((group, groupIndex) => {
           return (
             <div

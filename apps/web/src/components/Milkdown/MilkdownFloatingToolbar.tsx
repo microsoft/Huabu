@@ -456,6 +456,7 @@ export function MilkdownFloatingToolbar({
                 {...FLOATING_CHROME_PROPS}
                 className="border-edge-default shadow-bottom bg-surface z-50 flex max-h-64 min-w-48 flex-col gap-1 overflow-y-auto rounded-md border p-1"
                 role="menu"
+                tabIndex={-1}
                 style={{
                   ...blockListStyles,
                   visibility: blockListPositioned ? 'visible' : 'hidden',
@@ -619,6 +620,8 @@ export function MilkdownFloatingToolbar({
                   setOpenPopover(null);
                 }}
               />
+              {/* Handlers below only isolate the popover from the editor. */}
+              {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
               <form
                 ref={linkRefs.setFloating}
                 {...FLOATING_CHROME_PROPS}
@@ -675,6 +678,8 @@ export function MilkdownFloatingToolbar({
                   setOpenPopover(null);
                 }}
               />
+              {/* Handlers below only isolate the popover from the editor. */}
+              {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
               <form
                 ref={mathRefs.setFloating}
                 {...FLOATING_CHROME_PROPS}

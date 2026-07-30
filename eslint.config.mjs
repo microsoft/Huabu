@@ -12,6 +12,18 @@ import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// jsx-a11y's default handler list includes `onError` / `onLoad`, which are
+// resource lifecycle events (image fallbacks, iframe spinners) rather than
+// interactions, so they must not make an element "interactive".
+const A11Y_INTERACTION_HANDLERS = [
+  'onClick',
+  'onMouseDown',
+  'onMouseUp',
+  'onKeyPress',
+  'onKeyDown',
+  'onKeyUp',
+];
+
 export default typescriptEslint.config(
   {
     ignores: [
@@ -260,9 +272,14 @@ export default typescriptEslint.config(
       // while the backlog is worked down; promote each one back to
       // `error` once its remaining occurrences are fixed.
       'jsx-a11y/click-events-have-key-events': 'warn',
-      'jsx-a11y/no-static-element-interactions': 'warn',
-      'jsx-a11y/no-noninteractive-element-interactions': 'warn',
-      'jsx-a11y/interactive-supports-focus': 'warn',
+      'jsx-a11y/no-static-element-interactions': [
+        'warn',
+        { handlers: A11Y_INTERACTION_HANDLERS },
+      ],
+      'jsx-a11y/no-noninteractive-element-interactions': [
+        'error',
+        { handlers: A11Y_INTERACTION_HANDLERS },
+      ],
       // Only flag `autoFocus` on real DOM elements — the prop's meaning on
       // our own components (Button, TextInput, DropdownMenuItem) is theirs
       // to define.
