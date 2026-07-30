@@ -47,6 +47,7 @@ import { FLOATING_CHROME_PROPS } from '@/components/Common/floatingChrome';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Input } from '@/components/Common/Input';
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
+import { useCloseOnEscape } from '@/hooks/useCloseOnEscape';
 import { useTrackAttention } from '@/hooks/useTrackAttention';
 import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
 
@@ -234,6 +235,7 @@ export function MilkdownFloatingToolbar({
   const blockListOpen = openPopover === 'block-list';
   const linkOpen = openPopover === 'link';
   const mathOpen = openPopover === 'inline-math';
+  useCloseOnEscape(openPopover !== null, () => setOpenPopover(null));
   const toolbarOpen = selectionRect !== null && engaged && !hiddenByGlobalModal;
   const virtualSelectionReference = useMemo(() => {
     if (!selectionRect) return null;
@@ -444,6 +446,7 @@ export function MilkdownFloatingToolbar({
         ? createPortal(
             <>
               <div
+                role="presentation"
                 className="fixed inset-0 z-40"
                 {...FLOATING_CHROME_PROPS}
                 onClick={(event) => {
@@ -451,11 +454,14 @@ export function MilkdownFloatingToolbar({
                   setOpenPopover(null);
                 }}
               />
+              {/* Handlers below only isolate the popover from the editor. */}
+              {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events */}
               <div
                 ref={blockListRefs.setFloating}
                 {...FLOATING_CHROME_PROPS}
                 className="border-edge-default shadow-bottom bg-surface z-50 flex max-h-64 min-w-48 flex-col gap-1 overflow-y-auto rounded-md border p-1"
                 role="menu"
+                tabIndex={-1}
                 style={{
                   ...blockListStyles,
                   visibility: blockListPositioned ? 'visible' : 'hidden',
@@ -612,6 +618,7 @@ export function MilkdownFloatingToolbar({
         ? createPortal(
             <>
               <div
+                role="presentation"
                 className="fixed inset-0 z-40"
                 {...FLOATING_CHROME_PROPS}
                 onClick={(event) => {
@@ -619,6 +626,8 @@ export function MilkdownFloatingToolbar({
                   setOpenPopover(null);
                 }}
               />
+              {/* Handlers below only isolate the popover from the editor. */}
+              {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events */}
               <form
                 ref={linkRefs.setFloating}
                 {...FLOATING_CHROME_PROPS}
@@ -668,6 +677,7 @@ export function MilkdownFloatingToolbar({
         ? createPortal(
             <>
               <div
+                role="presentation"
                 className="fixed inset-0 z-40"
                 {...FLOATING_CHROME_PROPS}
                 onClick={(event) => {
@@ -675,6 +685,8 @@ export function MilkdownFloatingToolbar({
                   setOpenPopover(null);
                 }}
               />
+              {/* Handlers below only isolate the popover from the editor. */}
+              {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events */}
               <form
                 ref={mathRefs.setFloating}
                 {...FLOATING_CHROME_PROPS}

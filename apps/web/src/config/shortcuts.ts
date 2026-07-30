@@ -148,6 +148,12 @@ export const SHORTCUTS: ShortcutDef[] = [
     descriptionKey: 'shortcuts.items.deleteSelected',
     section: SECTION.editing,
   },
+  {
+    id: 'edit.edgeLabel',
+    combo: { key: 'Enter' },
+    descriptionKey: 'shortcuts.items.editEdgeLabel',
+    section: SECTION.editing,
+  },
 
   // Layout
   {

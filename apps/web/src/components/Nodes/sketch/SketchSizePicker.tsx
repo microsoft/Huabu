@@ -102,6 +102,7 @@ export function SketchSizePicker({
               />
               <div
                 ref={refs.setFloating}
+                role="presentation"
                 className={`${FLOATING_TOOLBAR_POPOVER_CLASS} flex items-center`}
                 style={{
                   ...floatingStyles,

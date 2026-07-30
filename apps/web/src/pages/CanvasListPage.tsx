@@ -258,7 +258,7 @@ export default function CanvasListPage() {
               <h2 className="text-fg-default text-2xl font-bold">
                 {t('canvasList.title')}
               </h2>
-              <p className="text-fg-subtle mt-1 text-sm">
+              <p className="text-fg-muted mt-1 text-sm">
                 {t('canvasList.subtitle')}
               </p>
             </div>

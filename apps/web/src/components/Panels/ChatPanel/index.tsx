@@ -63,6 +63,7 @@ import type {
   IntentCandidate,
   IntentEpisode,
 } from '@sediment/shared';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 interface ChatPanelProps {
   isCollapsed?: boolean;
@@ -874,18 +875,19 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                   'hover:text-fg-default focus-visible:outline-info cursor-text focus-visible:outline-1',
               )}
               title={canRenameQuestion ? t('node.rename') : panelTitle}
-              role={canRenameQuestion ? 'button' : undefined}
-              tabIndex={canRenameQuestion ? 0 : undefined}
-              onClick={() => {
-                if (canRenameQuestion) setIsEditingQuestionTitle(true);
-              }}
-              onKeyDown={(event) => {
-                if (!canRenameQuestion) return;
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  setIsEditingQuestionTitle(true);
-                }
-              }}
+              {...(canRenameQuestion
+                ? {
+                    role: 'button' as const,
+                    tabIndex: 0,
+                    onClick: () => setIsEditingQuestionTitle(true),
+                    onKeyDown: (event: ReactKeyboardEvent) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setIsEditingQuestionTitle(true);
+                      }
+                    },
+                  }
+                : {})}
             >
               {panelTitle}
             </span>

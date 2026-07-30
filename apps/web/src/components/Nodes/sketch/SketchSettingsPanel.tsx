@@ -65,6 +65,7 @@ export function SketchSettingsPanel({
 
   return (
     <div
+      role="presentation"
       className={cn(
         FLOATING_TOOLBAR_CLASS,
         'absolute bottom-full left-1/2 mb-3 -translate-x-1/2',

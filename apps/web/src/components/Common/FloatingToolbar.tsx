@@ -21,6 +21,8 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
+import { useCloseOnEscape } from '@/hooks/useCloseOnEscape';
+
 import { Button } from './Button';
 import { cn } from './cn';
 import { ColorPicker, type ColorPreset } from './ColorPicker';
@@ -74,6 +76,7 @@ interface RootProps {
 function Root({ children, className, onMouseDown }: RootProps) {
   return (
     <div
+      role="presentation"
       className={cn(FLOATING_TOOLBAR_CLASS, className)}
       onMouseDown={onMouseDown}
     >
@@ -286,6 +289,8 @@ function ToolbarColorPicker({
     whileElementsMounted: autoUpdate,
   });
 
+  useCloseOnEscape(isOpen, () => setIsOpen(false));
+
   // Resolve the token to a CSS color for the trigger swatch.
   // Legacy hex / CSS keyword passes through unchanged.
   const triggerColor =
@@ -340,6 +345,7 @@ function ToolbarColorPicker({
         ? createPortal(
             <>
               <div
+                role="presentation"
                 className="fixed inset-0 z-40"
                 {...FLOATING_CHROME_PROPS}
                 onClick={(e) => {
@@ -349,6 +355,7 @@ function ToolbarColorPicker({
               />
               <div
                 ref={refs.setFloating}
+                role="presentation"
                 {...FLOATING_CHROME_PROPS}
                 className={FLOATING_TOOLBAR_POPOVER_CLASS}
                 style={{
@@ -800,17 +807,7 @@ function ToolbarAlignPicker({
 
   // Close on Escape — the popover sits over the canvas, so Escape
   // should dismiss the picker without deselecting nodes.
-  useEffect(() => {
-    if (!isOpen) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [isOpen]);
+  useCloseOnEscape(isOpen, () => setIsOpen(false));
 
   const pick = (direction: ToolbarAlignDirection) => {
     onAlign(direction);
@@ -880,6 +877,7 @@ function ToolbarAlignPicker({
       {isOpen && (
         <>
           <div
+            role="presentation"
             className="fixed inset-0 z-40"
             onClick={(e) => {
               e.stopPropagation();
@@ -887,6 +885,7 @@ function ToolbarAlignPicker({
             }}
           />
           <div
+            role="presentation"
             className="border-edge-default shadow-bottom animate-in fade-in zoom-in bg-surface absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 rounded-lg border p-1.5 duration-200"
             onClick={(e) => e.stopPropagation()}
           >

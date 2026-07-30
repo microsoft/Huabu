@@ -145,7 +145,12 @@ const ConnectedNodeMenu = ({
         </Button>
       }
     >
-      <div role="menu" aria-label={menuLabel} onKeyDown={handleMenuKeyDown}>
+      <div
+        role="menu"
+        tabIndex={-1}
+        aria-label={menuLabel}
+        onKeyDown={handleMenuKeyDown}
+      >
         {groups.map((group, groupIndex) => {
           return (
             <div
@@ -610,18 +615,19 @@ export const ExpandedNodePanel = ({
                   canEditTitle && 'hover:text-fg-default cursor-text',
                 )}
                 title={canEditTitle ? t('node.rename') : undefined}
-                role={canEditTitle ? 'button' : undefined}
-                tabIndex={canEditTitle ? 0 : undefined}
-                onClick={() => {
-                  if (canEditTitle) setIsEditingTitle(true);
-                }}
-                onKeyDown={(e) => {
-                  if (!canEditTitle) return;
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setIsEditingTitle(true);
-                  }
-                }}
+                {...(canEditTitle
+                  ? {
+                      role: 'button' as const,
+                      tabIndex: 0,
+                      onClick: () => setIsEditingTitle(true),
+                      onKeyDown: (e: ReactKeyboardEvent) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setIsEditingTitle(true);
+                        }
+                      },
+                    }
+                  : {})}
               >
                 {liveLabel || t('node.untitled')}
               </span>

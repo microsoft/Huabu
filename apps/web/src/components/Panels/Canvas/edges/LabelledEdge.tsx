@@ -485,6 +485,7 @@ function EdgeLabelEditor({
     <div
       // `nodrag nopan` keeps clicks on the pill from being interpreted
       // as canvas drag / pan gestures.
+      role="presentation"
       className="nodrag nopan absolute"
       style={{
         transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
@@ -521,8 +522,15 @@ function EdgeLabelEditor({
        * and editing states share the exact same DOM box (no sibling
        * overlay to drift).
        */}
+      {/* contentEditable already carries implicit textbox semantics,
+          which the linter does not recognise. */}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
       <div
         ref={ref}
+        // Only a textbox while editing. Edge labels stay out of the DOM tab
+        // order (it would flood the canvas); selecting the edge and pressing
+        // Enter is the keyboard route in — see `useCanvasShortcuts`.
+        {...(editing ? { role: 'textbox' as const, tabIndex: 0 } : {})}
         contentEditable={editing}
         suppressContentEditableWarning
         aria-label={t('node.edgeLabel')}

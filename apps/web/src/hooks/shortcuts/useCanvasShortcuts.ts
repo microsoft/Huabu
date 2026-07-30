@@ -6,6 +6,8 @@ import {
   type MutableRefObject,
 } from 'react';
 
+import { EDIT_EDGE_LABEL_EVENT } from '@/components/Panels/Canvas/edges/LabelledEdge';
+
 import { isEditableTarget } from './isEditableTarget';
 import {
   uploadFileToNodeInput,
@@ -24,6 +26,7 @@ import {
 } from '../../utils/io/clipboard';
 import { looksLikeUrl } from '../../utils/io/media';
 
+import type { EditEdgeLabelDetail } from '@/components/Panels/Canvas/edges/LabelledEdge';
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { Edge, Node, ReactFlowInstance } from '@xyflow/react';
 
@@ -251,6 +254,26 @@ export function useCanvasShortcuts(
         if (selectedEdgeIds.length > 0) {
           disconnectEdges(selectedEdgeIds);
         }
+        return;
+      }
+
+      // Enter — edit the selected edge's label. Canvas elements stay out of
+      // the DOM tab order, so selection acts as the keyboard's focus and
+      // Enter is the way to descend into it (same pattern as tldraw/FigJam).
+      // Requires exactly one edge and no nodes selected, so the target is
+      // unambiguous.
+      if (key === 'Enter' && !mod && !e.altKey && !e.shiftKey && !editable) {
+        const { nodes: cur, edges: curEdges } = useCanvasStore.getState();
+        if (cur.some((n) => n.selected)) return;
+        const selectedEdges = curEdges.filter((edge) => edge.selected);
+        if (selectedEdges.length !== 1) return;
+        e.preventDefault();
+        const detail: EditEdgeLabelDetail = { edgeId: selectedEdges[0].id };
+        window.dispatchEvent(
+          new CustomEvent<EditEdgeLabelDetail>(EDIT_EDGE_LABEL_EVENT, {
+            detail,
+          }),
+        );
         return;
       }
 

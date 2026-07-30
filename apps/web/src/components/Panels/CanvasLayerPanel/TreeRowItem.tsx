@@ -5,10 +5,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Button } from '../../Common/Button';
 
-import type {
-  DraggableAttributes,
-  DraggableSyntheticListeners,
-} from '@dnd-kit/core';
+import type { DraggableSyntheticListeners } from '@dnd-kit/core';
 import type { ReactNode } from 'react';
 
 export interface TreeRowItemProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -91,7 +88,6 @@ export interface TreeRowItemProps extends React.HTMLAttributes<HTMLDivElement> {
 
   // DnD refs and props
   forwardedRef?: React.Ref<HTMLDivElement>;
-  dndAttributes?: DraggableAttributes;
   dndListeners?: DraggableSyntheticListeners;
 }
 
@@ -118,7 +114,6 @@ export const TreeRowItem = React.memo(
     dropIntentDepth,
     isIntoFrameHighlight = false,
     forwardedRef,
-    dndAttributes,
     dndListeners,
     style,
     className,
@@ -204,10 +199,10 @@ export const TreeRowItem = React.memo(
     };
 
     return (
+      // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
       <div
         ref={forwardedRef}
         style={mergedStyle}
-        {...dndAttributes}
         {...(!isEditing ? dndListeners : {})}
         onClick={onClick}
         onDoubleClick={handleDoubleClick}
@@ -305,6 +300,8 @@ export const TreeRowItem = React.memo(
           {isEditing ? (
             <input
               ref={inputRef}
+              // Rename is entered deliberately; focus must follow.
+              // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
               value={editValue}
               onChange={(e) => setEditValue(e.target.value)}

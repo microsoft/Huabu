@@ -804,13 +804,17 @@ export const NodeConnectionHandles = memo(
           // source and a target handle. One painter per state, no alignment
           // to keep.
           const dot = (
+            // Role, tabIndex and label are applied together below; the
+            // linter cannot see them through the spread.
+            // eslint-disable-next-line jsx-a11y/no-static-element-interactions
             <span
-              aria-hidden={!keyboardReachable}
-              aria-label={
-                keyboardReachable ? t('node.createConnectedNode') : undefined
-              }
-              role={keyboardReachable ? 'button' : undefined}
-              tabIndex={keyboardReachable ? 0 : -1}
+              {...(keyboardReachable
+                ? {
+                    role: 'button' as const,
+                    tabIndex: 0,
+                    'aria-label': t('node.createConnectedNode'),
+                  }
+                : { 'aria-hidden': true, tabIndex: -1 })}
               className={cn(
                 'absolute',
                 isPinnedOrExposed

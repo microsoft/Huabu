@@ -5,6 +5,8 @@ For what the product is and how to run it, see the [root README](../README.md).
 For agent and contributor rules, see
 [`.github/copilot-instructions.md`](../.github/copilot-instructions.md).
 
+The desktop security-review attachment is [desktop-threat-model-attachment.md](./desktop-threat-model-attachment.md).
+
 For **diagnosing slow or misbehaving agents** (built-in Huabu agents or external
 ACP agents), see [agent-diagnosis-guide.md](./agent-diagnosis-guide.md).
 
