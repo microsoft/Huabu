@@ -616,18 +616,18 @@ export const ExpandedNodePanel = ({
                 )}
                 title={canEditTitle ? t('node.rename') : undefined}
                 {...(canEditTitle
-                  ? { role: 'button' as const, tabIndex: 0 }
+                  ? {
+                      role: 'button' as const,
+                      tabIndex: 0,
+                      onClick: () => setIsEditingTitle(true),
+                      onKeyDown: (e: ReactKeyboardEvent) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setIsEditingTitle(true);
+                        }
+                      },
+                    }
                   : {})}
-                onClick={() => {
-                  if (canEditTitle) setIsEditingTitle(true);
-                }}
-                onKeyDown={(e) => {
-                  if (!canEditTitle) return;
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setIsEditingTitle(true);
-                  }
-                }}
               >
                 {liveLabel || t('node.untitled')}
               </span>

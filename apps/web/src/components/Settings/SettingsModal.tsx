@@ -148,6 +148,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           than a flat dark wash, so it harmonises with the bright title
           bar left uncovered above and the white dialog panel. */}
       <div
+        role="presentation"
         className="animate-in fade-in bg-bg-default/80 absolute inset-0 backdrop-blur-sm duration-200"
         onClick={onClose}
       />

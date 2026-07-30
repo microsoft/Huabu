@@ -52,6 +52,9 @@ function formatSeconds(sec: number): string {
 
 const BAR_COUNT = 22;
 
+/** Keyboard arrow-key seek step for the scrubber. */
+const SEEK_STEP_SEC = 5;
+
 // Deterministic pseudo-waveform: stable across renders for a given seed
 // so the bars don't flicker on re-mount. Half-sine envelope tapers the
 // edges so it reads as a natural recording, not random noise.
@@ -213,6 +216,19 @@ export const AudioNode = memo(
       [durationSec],
     );
 
+    const seekBy = useCallback(
+      (deltaSec: number) => {
+        const a = audioRef.current;
+        if (!a || !isFinite(durationSec) || durationSec <= 0) return;
+        a.currentTime = Math.min(
+          durationSec,
+          Math.max(0, a.currentTime + deltaSec),
+        );
+        setCurrentSec(a.currentTime);
+      },
+      [durationSec],
+    );
+
     // Attach listeners via a callback ref so they bind the moment the
     // <audio> element enters the DOM. A `useEffect([data?.src])` would
     // miss this because zustand's `updateNodeData` re-renders BEFORE
@@ -344,7 +360,13 @@ export const AudioNode = memo(
             aria-valuemin={0}
             aria-valuemax={durationSec || 0}
             aria-valuenow={currentSec}
-            tabIndex={-1}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+              e.preventDefault();
+              e.stopPropagation();
+              seekBy(e.key === 'ArrowLeft' ? -SEEK_STEP_SEC : SEEK_STEP_SEC);
+            }}
           >
             {waveform.map((h, i) => {
               const played = i / BAR_COUNT <= progressRatio;
@@ -442,6 +464,7 @@ export const AudioNode = memo(
         className="bg-surface"
       >
         <div
+          role="presentation"
           className="flex h-full w-full items-center gap-2.5 px-3"
           onPointerDown={stopRf}
           onMouseDown={stopRf}

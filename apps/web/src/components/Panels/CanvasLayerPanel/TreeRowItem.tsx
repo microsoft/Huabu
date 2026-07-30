@@ -204,6 +204,10 @@ export const TreeRowItem = React.memo(
     };
 
     return (
+      // `dndAttributes` supplies role="button" + tabIndex and
+      // `dndListeners` the keyboard activators, neither of which the
+      // linter can see through the spreads.
+      // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events
       <div
         ref={forwardedRef}
         style={mergedStyle}

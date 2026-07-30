@@ -592,6 +592,7 @@
     "attachmentFallbackFileLower": "file",
     "attachedImageAlt": "Attached image",
     "removeAttachment": "Remove attachment",
+    "lockSelectionAttachment": "Keep this selection as an attachment",
     "attachmentSource": "Source:",
     "attachmentContent": "Content:",
     "stopGenerating": "Stop generating",

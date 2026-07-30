@@ -428,15 +428,25 @@ export const ChatInput = ({
                     );
                   }
 
+                  const lockSelectionAttachment = () => {
+                    // Lock the selection: promote to a regular pending attachment
+                    const locked = { ...att };
+                    useChatStore.getState().setSelectionAttachment(null);
+                    addPendingAttachment(locked);
+                  };
+
                   const tile = (
                     <div
                       key="selection-att"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={t('chat.lockSelectionAttachment')}
                       className="group border-edge-default relative flex cursor-pointer items-center justify-center rounded-md border border-dashed"
-                      onClick={() => {
-                        // Lock the selection: promote to a regular pending attachment
-                        const locked = { ...att };
-                        useChatStore.getState().setSelectionAttachment(null);
-                        addPendingAttachment(locked);
+                      onClick={lockSelectionAttachment}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter' && e.key !== ' ') return;
+                        e.preventDefault();
+                        lockSelectionAttachment();
                       }}
                     >
                       <div className="bg-surface flex h-12 w-12 items-center justify-center rounded-md px-1">
