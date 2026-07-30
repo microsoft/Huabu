@@ -251,6 +251,22 @@ export default typescriptEslint.config(
       },
     },
     rules: {
+      // Accessibility linting for JSX (eslint-plugin-jsx-a11y).
+      // The `recommended` preset is enabled at its default `error`
+      // severity so newly written UI cannot regress accessibility.
+      ...jsxA11yPlugin.flatConfigs.recommended.rules,
+      // Temporary downgrades: these rules already have pre-existing
+      // violations in the current codebase (49 at the time of enabling).
+      // They stay as warnings so `pnpm lint` keeps passing while the
+      // backlog is worked down; promote each one back to `error` once
+      // its remaining occurrences are fixed.
+      'jsx-a11y/click-events-have-key-events': 'warn',
+      'jsx-a11y/no-static-element-interactions': 'warn',
+      'jsx-a11y/no-noninteractive-element-interactions': 'warn',
+      'jsx-a11y/no-noninteractive-tabindex': 'warn',
+      'jsx-a11y/interactive-supports-focus': 'warn',
+      'jsx-a11y/media-has-caption': 'warn',
+      'jsx-a11y/no-autofocus': 'warn',
       'react/react-in-jsx-scope': 'off',
       'react/jsx-uses-react': 'off',
       'react-hooks/rules-of-hooks': 'error',
