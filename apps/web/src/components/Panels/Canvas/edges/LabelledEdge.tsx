@@ -527,9 +527,9 @@ function EdgeLabelEditor({
       {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
       <div
         ref={ref}
-        // Only a textbox while editing. Known gap: entering edit still
-        // requires a pointer, since making every edge label tabbable
-        // would flood the canvas tab order.
+        // Only a textbox while editing. Edge labels stay out of the DOM tab
+        // order (it would flood the canvas); selecting the edge and pressing
+        // Enter is the keyboard route in — see `useCanvasShortcuts`.
         {...(editing ? { role: 'textbox' as const, tabIndex: 0 } : {})}
         contentEditable={editing}
         suppressContentEditableWarning
