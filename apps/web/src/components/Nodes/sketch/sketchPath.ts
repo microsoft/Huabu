@@ -4,12 +4,13 @@ import { ACCENT_PALETTE, type ColorPickerOption } from '@sediment/shared';
 
 export const SKETCH_OPTIONS = {
   size: 4,
-  thinning: 0.5,
+  thinning: 0.4,
   smoothing: 0.5,
-  streamline: 0.5,
+  streamline: 0.35,
+  simulatePressure: false,
   easing: (t: number) => t,
-  start: { taper: 1, easing: (t: number) => t, cap: true },
-  end: { taper: 1, easing: (t: number) => t, cap: true },
+  start: { taper: 0, easing: (t: number) => t, cap: true },
+  end: { taper: 0, easing: (t: number) => t, cap: true },
 };
 
 /**
