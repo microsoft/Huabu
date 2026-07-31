@@ -197,9 +197,55 @@ function clampInt(raw: number, lo: number, hi: number): number {
   return raw;
 }
 
+/** The axis a persisted cell index addresses. */
+export type FrameAxis = 'column' | 'row';
+
+type FrameCellData = {
+  frameColumn?: number;
+  frameRow?: number;
+  /** @deprecated Pre-split single track index. */
+  frameSlot?: number;
+};
+
+function finiteIndex(raw: unknown): number | undefined {
+  return typeof raw === 'number' && Number.isFinite(raw)
+    ? Math.round(raw)
+    : undefined;
+}
+
+/**
+ * Read a child's index on the frame's **count axis** — the axis whose
+ * track total `gridCount` sets: columns for `column` / `grid`, rows for
+ * `row`.
+ *
+ * This is the one reader that honours the legacy `data.frameSlot`,
+ * because that field only ever meant "which track on the count axis".
+ * Falling back here is also what makes a `column` → `grid` switch carry
+ * the column over untranslated. Nothing writes `frameSlot` any more, so
+ * the fallback expires on its own as Frames relayout.
+ */
+export function readFrameTrack(
+  node: { data?: unknown },
+  axis: FrameAxis,
+): number | undefined {
+  const data = node.data as FrameCellData | undefined;
+  const own = axis === 'column' ? data?.frameColumn : data?.frameRow;
+  return finiteIndex(own) ?? finiteIndex(data?.frameSlot);
+}
+
+/**
+ * Read a Grid child's row. Deliberately has **no** legacy fallback:
+ * `grid` postdates `frameSlot`, so a `frameSlot` seen here always came
+ * from a `column` / `row` frame and means a track on the other axis.
+ * Reusing it as the row would deal every child onto the diagonal.
+ */
+export function readFrameGridRow(node: { data?: unknown }): number | undefined {
+  return finiteIndex((node.data as FrameCellData | undefined)?.frameRow);
+}
+
 /**
  * Assign each child to a track index (0..count-1):
- *   1. Honour the stored `frameSlot` when present.
+ *   1. Honour the stored count-axis index when present.
  *   2. Unassigned children go into the track with the fewest items
  *      (ties → first such track).
  *   3. Resolve empty tracks per `emptyTrackPolicy`:
@@ -223,6 +269,7 @@ function assignTrackSlots(
   count: number,
   sortKey: (c: ChildSlot) => number,
   emptyTrackPolicy: 'fill' | 'compact',
+  trackAxis: FrameAxis,
 ): { assignment: Map<string, number>; count: number } {
   const ordered = [...children].sort((a, b) => sortKey(a) - sortKey(b));
   const buckets: string[][] = Array.from({ length: count }, () => []);
@@ -231,10 +278,9 @@ function assignTrackSlots(
   // Pass 1 — honour stored slots.
   const unassigned: ChildSlot[] = [];
   for (const child of ordered) {
-    const raw = (child.node.data as { frameSlot?: number } | undefined)
-      ?.frameSlot;
-    if (typeof raw === 'number' && Number.isFinite(raw)) {
-      const slot = clampInt(Math.round(raw), 0, count - 1);
+    const raw = readFrameTrack(child.node, trackAxis);
+    if (raw !== undefined) {
+      const slot = clampInt(raw, 0, count - 1);
       buckets[slot].push(child.node.id);
       assignment.set(child.node.id, slot);
     } else {
@@ -522,6 +568,7 @@ export function applyColumnLayout(
     cols,
     (c) => c.node.position.y,
     emptyTrackPolicy,
+    'column',
   );
 
   // Bucket by column, sort each column by current Y.
@@ -641,6 +688,7 @@ export function applyRowLayout(
     rows,
     (c) => c.node.position.x,
     emptyTrackPolicy,
+    'row',
   );
 
   const rowItems: ChildSlot[][] = Array.from(
@@ -724,21 +772,17 @@ function assignGridRows(
   children: ChildSlot[],
   columnOf: (child: ChildSlot) => number,
 ): { bands: ChildSlot[][]; assignment: Map<string, number> } {
-  const ordered = [...children].sort((a, b) => {
-    const aRaw = (a.node.data as { frameRow?: number } | undefined)?.frameRow;
-    const bRaw = (b.node.data as { frameRow?: number } | undefined)?.frameRow;
-    const aRow = Number.isFinite(aRaw) ? Math.max(0, Math.round(aRaw!)) : 0;
-    const bRow = Number.isFinite(bRaw) ? Math.max(0, Math.round(bRaw!)) : 0;
-    return aRow - bRow || a.node.id.localeCompare(b.node.id);
-  });
+  const rowOf = (child: ChildSlot) =>
+    Math.max(0, readFrameGridRow(child.node) ?? 0);
+  const ordered = [...children].sort(
+    (a, b) => rowOf(a) - rowOf(b) || a.node.id.localeCompare(b.node.id),
+  );
 
   const assignment = new Map<string, number>();
   const occupied = new Set<string>();
   for (const child of ordered) {
     const column = columnOf(child);
-    const raw = (child.node.data as { frameRow?: number } | undefined)
-      ?.frameRow;
-    let row = Number.isFinite(raw) ? Math.max(0, Math.round(raw!)) : 0;
+    let row = rowOf(child);
     while (occupied.has(`${row}:${column}`)) row += 1;
     occupied.add(`${row}:${column}`);
     assignment.set(child.node.id, row);
@@ -796,6 +840,7 @@ export function applyGridLayout(
     cols,
     (c) => c.node.position.y,
     emptyTrackPolicy,
+    'column',
   );
   const columnOf = (child: ChildSlot) => assignment.get(child.node.id) ?? 0;
 
@@ -997,12 +1042,7 @@ export function pickColumnDropTarget(
   const allChildren = collectChildren(nodes, frameId);
   const colItems: ChildSlot[][] = Array.from({ length: count }, () => []);
   for (const child of allChildren) {
-    const raw = (child.node.data as { frameSlot?: number } | undefined)
-      ?.frameSlot;
-    const c =
-      typeof raw === 'number' && Number.isFinite(raw)
-        ? clampInt(Math.round(raw), 0, count - 1)
-        : 0;
+    const c = clampInt(readFrameTrack(child.node, 'column') ?? 0, 0, count - 1);
     colItems[c].push(child);
   }
 
@@ -1099,12 +1139,7 @@ export function pickRowDropTarget(
   const allChildren = collectChildren(nodes, frameId);
   const rowItems: ChildSlot[][] = Array.from({ length: count }, () => []);
   for (const child of allChildren) {
-    const raw = (child.node.data as { frameSlot?: number } | undefined)
-      ?.frameSlot;
-    const r =
-      typeof raw === 'number' && Number.isFinite(raw)
-        ? clampInt(Math.round(raw), 0, count - 1)
-        : 0;
+    const r = clampInt(readFrameTrack(child.node, 'row') ?? 0, 0, count - 1);
     rowItems[r].push(child);
   }
 
@@ -1367,29 +1402,16 @@ function describeGridDropZone(
   const source = nodes.find(
     (node) => node.id === dragged.id && node.parentId === frameId,
   );
-  const sourceData = source?.data as
-    | { frameSlot?: number; frameRow?: number }
-    | undefined;
-  const sourceRow = Number.isFinite(sourceData?.frameRow)
-    ? Math.max(0, Math.round(sourceData!.frameRow!))
-    : 0;
-  const sourceSlot = Number.isFinite(sourceData?.frameSlot)
-    ? clampInt(Math.round(sourceData!.frameSlot!), 0, count - 1)
-    : 0;
+  const columnOf = (node: Node) =>
+    clampInt(readFrameTrack(node, 'column') ?? 0, 0, count - 1);
+  const rowOf = (node: Node) => Math.max(0, readFrameGridRow(node) ?? 0);
+  const sourceRow = source ? rowOf(source) : 0;
+  const sourceSlot = source ? columnOf(source) : 0;
   const occupant = opensTrack
     ? undefined
     : nodes.find((node) => {
         if (node.id === dragged.id || node.parentId !== frameId) return false;
-        const data = node.data as
-          | { frameSlot?: number; frameRow?: number }
-          | undefined;
-        const slot = Number.isFinite(data?.frameSlot)
-          ? clampInt(Math.round(data!.frameSlot!), 0, count - 1)
-          : 0;
-        const row = Number.isFinite(data?.frameRow)
-          ? Math.max(0, Math.round(data!.frameRow!))
-          : 0;
-        return slot === targetSlot && row === targetRow;
+        return columnOf(node) === targetSlot && rowOf(node) === targetRow;
       });
   const insertsRow = !source && !!occupant;
   let foundDragged = false;
@@ -1407,25 +1429,16 @@ function describeGridDropZone(
         ...node,
         parentId: frameId,
         position: { x: dragged.x, y: dragged.y },
-        data: { ...node.data, frameSlot: targetSlot, frameRow: targetRow },
+        data: { ...node.data, frameColumn: targetSlot, frameRow: targetRow },
         style: { ...node.style, width: dragged.width, height: dragged.height },
         measured: { width: dragged.width, height: dragged.height },
       };
     }
     if (node.parentId !== frameId) return node;
 
-    const data = node.data as
-      | { frameSlot?: number; frameRow?: number }
-      | undefined;
-    const raw = data?.frameSlot;
-    const slot =
-      typeof raw === 'number' && Number.isFinite(raw)
-        ? clampInt(Math.round(raw), 0, count - 1)
-        : 0;
+    const slot = columnOf(node);
     const shiftedSlot = opensTrack && slot >= targetSlot ? slot + 1 : slot;
-    const row = Number.isFinite(data?.frameRow)
-      ? Math.max(0, Math.round(data!.frameRow!))
-      : 0;
+    const row = rowOf(node);
     const nextRow =
       source && node.id === occupant?.id
         ? sourceRow
@@ -1438,7 +1451,7 @@ function describeGridDropZone(
       ? node
       : {
           ...node,
-          data: { ...node.data, frameSlot: nextSlot, frameRow: nextRow },
+          data: { ...node.data, frameColumn: nextSlot, frameRow: nextRow },
         };
   });
 
@@ -1448,7 +1461,7 @@ function describeGridDropZone(
       type: 'text',
       parentId: frameId,
       position: { x: dragged.x, y: dragged.y },
-      data: { frameSlot: targetSlot, frameRow: targetRow },
+      data: { frameColumn: targetSlot, frameRow: targetRow },
       style: { width: dragged.width, height: dragged.height },
       measured: { width: dragged.width, height: dragged.height },
     } as Node);
@@ -1536,6 +1549,11 @@ export function describeStructuredDropZone(
     );
   }
 
+  // Masonry modes own exactly one axis, and it is the one the mode is
+  // named after, so the cell field follows directly from `axis`.
+  const trackAxis: FrameAxis = isCol ? 'column' : 'row';
+  const trackField = isCol ? 'frameColumn' : 'frameRow';
+
   let foundDragged = false;
   const effectiveCount =
     target.kind === 'insert-new' && count < FRAME_GRID_MAX_COUNT
@@ -1558,7 +1576,7 @@ export function describeStructuredDropZone(
         ...node,
         parentId: frameId,
         position: { x: dragged.x, y: dragged.y },
-        data: { ...node.data, frameSlot: targetSlot },
+        data: { ...node.data, [trackField]: targetSlot },
         style: { ...node.style, width: dragged.width, height: dragged.height },
         measured: { width: dragged.width, height: dragged.height },
       };
@@ -1566,14 +1584,10 @@ export function describeStructuredDropZone(
     if (target.kind !== 'insert-new' || node.parentId !== frameId) {
       return node;
     }
-    const raw = (node.data as { frameSlot?: number } | undefined)?.frameSlot;
-    const slot =
-      typeof raw === 'number' && Number.isFinite(raw)
-        ? clampInt(Math.round(raw), 0, count - 1)
-        : 0;
+    const slot = clampInt(readFrameTrack(node, trackAxis) ?? 0, 0, count - 1);
     return slot < targetSlot
       ? node
-      : { ...node, data: { ...node.data, frameSlot: slot + 1 } };
+      : { ...node, data: { ...node.data, [trackField]: slot + 1 } };
   });
   if (!foundDragged) {
     simulated.push({
@@ -1581,7 +1595,7 @@ export function describeStructuredDropZone(
       type: 'text',
       parentId: frameId,
       position: { x: dragged.x, y: dragged.y },
-      data: { frameSlot: targetSlot },
+      data: { [trackField]: targetSlot },
       style: { width: dragged.width, height: dragged.height },
       measured: { width: dragged.width, height: dragged.height },
     } as Node);
@@ -1739,33 +1753,41 @@ export function applyStructuredFrameRelayout(
           },
         };
       }
-      // Direct children — position + slot only (sizes are content-driven
+      // Direct children — position + cell only (sizes are content-driven
       // and owned by each child; the solver never overrides them).
       if (n.parentId !== frameId) return n;
+      const trackAxis: FrameAxis = cfg.axis === 'row' ? 'row' : 'column';
+      const trackField = cfg.axis === 'row' ? 'frameRow' : 'frameColumn';
       const nextPos = result.childPositions.get(n.id);
       const nextSlot = result.slotAssignments.get(n.id);
       const nextRow = result.rowAssignments?.get(n.id);
       const dataRec = (n.data ?? {}) as Record<string, unknown>;
-      const priorSlot = (dataRec as { frameSlot?: number }).frameSlot;
-      const priorRow = (dataRec as { frameRow?: number }).frameRow;
+      const priorSlot = readFrameTrack(n, trackAxis);
+      const priorRow = readFrameGridRow(n);
+      // The pre-split `frameSlot` is read-only: seeing one means this
+      // child predates the axis split, so the relayout takes the chance
+      // to rewrite it as the axis-named field. Tracked separately from
+      // `slotChanged` because the value itself is usually unchanged —
+      // it is the *field* that moves.
+      const shedsLegacy = 'frameSlot' in dataRec;
       const posChanged =
         !!nextPos && (n.position.x !== nextPos.x || n.position.y !== nextPos.y);
       const slotChanged =
         typeof nextSlot === 'number' && priorSlot !== nextSlot;
       const rowChanged = typeof nextRow === 'number' && priorRow !== nextRow;
-      if (!posChanged && !slotChanged && !rowChanged) return n;
+      if (!posChanged && !slotChanged && !rowChanged && !shedsLegacy) return n;
+      const dataChanged = slotChanged || rowChanged || shedsLegacy;
+      let nextData: Record<string, unknown> | undefined;
+      if (dataChanged) {
+        nextData = { ...dataRec };
+        delete nextData.frameSlot;
+        if (typeof nextSlot === 'number') nextData[trackField] = nextSlot;
+        if (typeof nextRow === 'number') nextData.frameRow = nextRow;
+      }
       return {
         ...n,
         ...(posChanged && nextPos ? { position: nextPos } : {}),
-        ...(slotChanged || rowChanged
-          ? {
-              data: {
-                ...dataRec,
-                ...(slotChanged ? { frameSlot: nextSlot } : {}),
-                ...(rowChanged ? { frameRow: nextRow } : {}),
-              },
-            }
-          : {}),
+        ...(nextData ? { data: nextData } : {}),
       };
     });
   }

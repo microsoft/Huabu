@@ -261,21 +261,38 @@ export interface BaseNodeData {
    */
   duplicateFiles?: string[];
   /**
-   * Track index inside the parent frame when that frame is in a grid
-   * layout mode. Means the **column index** when the parent is in
-   * `column` or `grid` mode, the **row index** when the parent is in
-   * `row` mode, and is ignored for `free` mode and root-level nodes.
+   * Column index inside a parent Frame laid out in `column` or `grid`
+   * mode. Ignored by `free` and `row` layouts and by root-level nodes.
    *
-   * Persisted so a child stays in its user-chosen lane across re-runs
+   * Persisted so a child stays in its user-chosen column across re-runs
    * of the layout pass (especially the "no empty track" rebalance).
+   *
+   * Each structured mode addresses the axes it actually has, and every
+   * field is named after its axis: `column` uses this, `row` uses
+   * {@link frameRow}, and `grid` — being two-dimensional — uses both as
+   * a persistent cell. Switching `column` → `grid` therefore carries the
+   * column over untranslated.
    */
-  frameSlot?: number;
+  frameColumn?: number;
   /**
-   * Row index inside a parent Frame using `grid` layout. Together with
-   * {@link frameSlot}, this identifies the child's persistent cell.
-   * Ignored by `free`, `column`, and `row` layouts.
+   * Row index inside a parent Frame laid out in `row` or `grid` mode.
+   * Ignored by `free` and `column` layouts and by root-level nodes. See
+   * {@link frameColumn} for how the two combine.
    */
   frameRow?: number;
+  /**
+   * Legacy single track index, written by builds before the axes were
+   * split into {@link frameColumn} / {@link frameRow}. It meant the
+   * column index under `column` / `grid` and the row index under `row`,
+   * which is exactly the mode-dependent reading the split removed.
+   *
+   * Read-only compatibility: each solver falls back to it on its own
+   * axis and writes only the new field, so a Frame sheds this on its
+   * first relayout. Delete once no unopened pre-split canvases remain.
+   *
+   * @deprecated Use {@link frameColumn} / {@link frameRow}.
+   */
+  frameSlot?: number;
   /**
    * Who owns this node's height.
    *
@@ -522,8 +539,9 @@ export interface NodeRefNodeData extends BaseNodeData {
   artifactMissing?: never;
   contentDuplicate?: never;
   duplicateFiles?: never;
-  frameSlot?: never;
+  frameColumn?: never;
   frameRow?: never;
+  frameSlot?: never;
   target: {
     canvasId: string;
     nodeId: string;
@@ -540,8 +558,9 @@ export interface FrameRefNodeData extends BaseNodeData {
   artifactMissing?: never;
   contentDuplicate?: never;
   duplicateFiles?: never;
-  frameSlot?: never;
+  frameColumn?: never;
   frameRow?: never;
+  frameSlot?: never;
   target: {
     canvasId: string;
     nodeId: string;

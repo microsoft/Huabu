@@ -23,14 +23,26 @@ function frame(layoutMode: 'column' | 'row' | 'grid' = 'column'): Node {
   } as Node;
 }
 
-function child(id: string, slot: number, row = 0): Node {
+/**
+ * A framed child pinned to an explicit cell. Each mode addresses only
+ * the axes it has, so the caller names them rather than passing a
+ * mode-dependent "slot".
+ */
+function child(
+  id: string,
+  cell: { column?: number; row?: number },
+  at = { x: (cell.column ?? 0) * 120, y: (cell.row ?? 0) * 100 },
+): Node {
   return {
     id,
     type: 'text',
     parentId: 'frame',
-    position: { x: slot * 120, y: 0 },
+    position: at,
     measured: { width: 100, height: 60 },
-    data: { frameSlot: slot, frameRow: row },
+    data: {
+      ...(cell.column === undefined ? {} : { frameColumn: cell.column }),
+      ...(cell.row === undefined ? {} : { frameRow: cell.row }),
+    },
   } as Node;
 }
 
@@ -44,7 +56,12 @@ describe('structured edge gutters', () => {
     } as Edge;
 
     const result = applyColumnLayout(
-      [frame(), child('a', 0), child('b', 1), child('c', 2)],
+      [
+        frame(),
+        child('a', { column: 0 }),
+        child('b', { column: 1 }),
+        child('c', { column: 2 }),
+      ],
       'frame',
       3,
       'fill',
@@ -76,7 +93,12 @@ describe('structured edge gutters', () => {
       data: { edgeStyle: { label: 'blocks' } },
     } as Edge;
     const result = applyRowLayout(
-      [frame('row'), child('a', 0), child('b', 1), child('c', 2)],
+      [
+        frame('row'),
+        child('a', { row: 0 }),
+        child('b', { row: 1 }),
+        child('c', { row: 2 }),
+      ],
       'frame',
       3,
       'fill',
@@ -92,10 +114,10 @@ describe('structured edge gutters', () => {
   it('plans both column and row-band gutters in grid mode', () => {
     const nodes = [
       frame('grid'),
-      child('a', 0),
-      child('b', 1),
-      { ...child('c', 0, 1), position: { x: 0, y: 100 } },
-      { ...child('d', 1, 1), position: { x: 120, y: 100 } },
+      child('a', { column: 0, row: 0 }),
+      child('b', { column: 1, row: 0 }),
+      child('c', { column: 0, row: 1 }),
+      child('d', { column: 1, row: 1 }),
     ];
     const edges = [
       { id: 'horizontal', source: 'a', target: 'b' } as Edge,
@@ -110,8 +132,8 @@ describe('structured edge gutters', () => {
   it('assigns a diagonal Grid edge label to the X gutter only', () => {
     const nodes = [
       frame('grid'),
-      child('a', 0, 0),
-      { ...child('b', 1, 1), position: { x: 120, y: 100 } },
+      child('a', { column: 0, row: 0 }),
+      child('b', { column: 1, row: 1 }),
     ];
     const edge = {
       id: 'diagonal',
@@ -138,7 +160,7 @@ describe('structured edge gutters', () => {
       data: { edgeStyle: { label: 'a much longer relationship label' } },
     } as Edge;
     const result = applyColumnLayout(
-      [frame(), child('a', 0), child('b', 1)],
+      [frame(), child('a', { column: 0 }), child('b', { column: 1 })],
       'frame',
       2,
       'fill',
@@ -150,7 +172,11 @@ describe('structured edge gutters', () => {
   });
 
   it('relayouts and reroutes immediately when an internal edge label changes', () => {
-    const nodes = [frame(), child('a', 0), child('b', 1)];
+    const nodes = [
+      frame(),
+      child('a', { column: 0 }),
+      child('b', { column: 1 }),
+    ];
     const edge = { id: 'edge-ab', source: 'a', target: 'b' } as Edge;
     const before = applyColumnLayout(nodes, 'frame', 2, 'fill', {
       edges: [edge],
@@ -178,7 +204,11 @@ describe('structured edge gutters', () => {
   });
 
   it('preserves edge-aware X gutters when Grid drag geometry resizes the frame', () => {
-    const nodes = [frame('grid'), child('a', 0), child('b', 1)];
+    const nodes = [
+      frame('grid'),
+      child('a', { column: 0 }),
+      child('b', { column: 1 }),
+    ];
     const edge = {
       id: 'edge-ab',
       source: 'a',

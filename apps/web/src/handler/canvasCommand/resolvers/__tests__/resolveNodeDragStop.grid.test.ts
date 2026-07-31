@@ -23,7 +23,7 @@ function makeFrame(): Node {
 
 function makeChild(
   id: string,
-  frameSlot: number,
+  frameColumn: number,
   frameRow: number,
   parentId: string | undefined = 'frame',
 ): Node {
@@ -32,7 +32,7 @@ function makeChild(
     type: 'text',
     parentId,
     position: { x: 0, y: 0 },
-    data: { frameSlot, frameRow },
+    data: { frameColumn, frameRow },
     style: CHILD_SIZE,
     measured: CHILD_SIZE,
   } as Node;
@@ -191,9 +191,12 @@ describe('resolveNodeDragStop Grid cells', () => {
     );
     const patches = mergedPatches(resolution.commands);
 
-    expect(patches.get('dragged')).toMatchObject({ frameSlot: 1, frameRow: 1 });
+    expect(patches.get('dragged')).toMatchObject({
+      frameColumn: 1,
+      frameRow: 1,
+    });
     expect(patches.get('occupant')).toMatchObject({
-      frameSlot: 0,
+      frameColumn: 0,
       frameRow: 0,
     });
   });
@@ -229,7 +232,10 @@ describe('resolveNodeDragStop Grid cells', () => {
     );
     const patches = mergedPatches(resolution.commands);
 
-    expect(patches.get('dragged')).toMatchObject({ frameSlot: 1, frameRow: 0 });
+    expect(patches.get('dragged')).toMatchObject({
+      frameColumn: 1,
+      frameRow: 0,
+    });
     expect(patches.get('occupant')).toMatchObject({ frameRow: 1 });
     expect(patches.get('next-row')).toMatchObject({ frameRow: 2 });
   });

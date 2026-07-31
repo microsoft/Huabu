@@ -21,7 +21,7 @@ function makeFrame(layoutMode: 'column' | 'row' | 'grid'): Node {
 
 function makeChild(
   id: string,
-  frameSlot: number,
+  frameColumn: number,
   position: { x: number; y: number },
   frameRow = 0,
 ): Node {
@@ -30,7 +30,28 @@ function makeChild(
     type: 'text',
     parentId: 'frame',
     position,
-    data: { frameSlot, frameRow },
+    data: { frameColumn, frameRow },
+    style: { width: 80, height: 40 },
+    measured: { width: 80, height: 40 },
+  } as Node;
+}
+
+/**
+ * A `row` frame's track IS its row, so its children carry only
+ * `frameRow` — writing a column would address an axis the mode has not
+ * got.
+ */
+function makeRowChild(
+  id: string,
+  frameRow: number,
+  position: { x: number; y: number },
+): Node {
+  return {
+    id,
+    type: 'text',
+    parentId: 'frame',
+    position,
+    data: { frameRow },
     style: { width: 80, height: 40 },
     measured: { width: 80, height: 40 },
   } as Node;
@@ -96,7 +117,7 @@ describe('describeStructuredDropZone context', () => {
         ? {
             ...node,
             position: { x: movedDragged.x, y: movedDragged.y },
-            data: { ...node.data, frameSlot: 1 },
+            data: { ...node.data, frameColumn: 1 },
           }
         : node,
     );
@@ -119,9 +140,9 @@ describe('describeStructuredDropZone context', () => {
   it('uses the same track contract with swapped geometry for rows', () => {
     const nodes = [
       makeFrame('row'),
-      makeChild('dragged', 0, { x: 16, y: 16 }),
-      makeChild('row-peer', 0, { x: 112, y: 16 }),
-      makeChild('other-row', 1, { x: 16, y: 72 }),
+      makeRowChild('dragged', 0, { x: 16, y: 16 }),
+      makeRowChild('row-peer', 0, { x: 112, y: 16 }),
+      makeRowChild('other-row', 1, { x: 16, y: 72 }),
     ];
 
     const zone = describeStructuredDropZone(
@@ -168,7 +189,7 @@ describe('describeStructuredDropZone context', () => {
         ? {
             ...node,
             position: { x: movedDragged.x, y: movedDragged.y },
-            data: { ...node.data, frameSlot: 1, frameRow: 1 },
+            data: { ...node.data, frameColumn: 1, frameRow: 1 },
           }
         : node,
     );
@@ -212,7 +233,7 @@ describe('describeStructuredDropZone context', () => {
         ? {
             ...node,
             position: { x: movedDragged.x, y: movedDragged.y },
-            data: { ...node.data, frameSlot: 1, frameRow: 1 },
+            data: { ...node.data, frameColumn: 1, frameRow: 1 },
           }
         : node,
     );
@@ -243,9 +264,9 @@ describe('describeStructuredDropZone context', () => {
   it('reports masonry tracks on the count axis only', () => {
     const nodes = [
       makeFrame('row'),
-      makeChild('dragged', 0, { x: 16, y: 16 }),
-      makeChild('row-peer', 0, { x: 112, y: 16 }),
-      makeChild('other-row', 1, { x: 16, y: 72 }),
+      makeRowChild('dragged', 0, { x: 16, y: 16 }),
+      makeRowChild('row-peer', 0, { x: 112, y: 16 }),
+      makeRowChild('other-row', 1, { x: 16, y: 72 }),
     ];
 
     const zone = describeStructuredDropZone(
@@ -285,7 +306,7 @@ describe('describeStructuredDropZone context', () => {
         ? {
             ...node,
             position: { x: movedDragged.x, y: movedDragged.y },
-            data: { ...node.data, frameSlot: 1, frameRow: 0 },
+            data: { ...node.data, frameColumn: 1, frameRow: 0 },
           }
         : node,
     );
@@ -342,7 +363,7 @@ describe('describeStructuredDropZone reflow', () => {
         ? {
             ...node,
             position: { x: movedDragged.x, y: movedDragged.y },
-            data: { ...node.data, frameSlot: 1, frameRow: 1 },
+            data: { ...node.data, frameColumn: 1, frameRow: 1 },
           }
         : node,
     );

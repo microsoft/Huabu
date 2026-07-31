@@ -350,7 +350,7 @@ export const setFrameLayoutCommandSchema = z
     mode: z
       .enum(FRAME_LAYOUT_MODES)
       .describe(
-        '`free` preserves child positions. `column` / `row` pack children into N independent masonry tracks: each track stacks on its own, so a track holding fewer items pulls its next item up. `grid` counts columns like `column` but also aligns rows — children that overlap vertically share one row origin, and a column with no item in a given row leaves that cell blank. Choose `grid` when items in different columns must stay side by side even where one column has no counterpart.',
+        '`free` preserves child positions. `column` / `row` pack children into N independent masonry tracks: each track stacks on its own, so a track holding fewer items pulls its next item up. `grid` counts columns like `column` but also aligns rows, so a column with no child in a given row leaves that cell blank. Choose `grid` when items in different columns must stay side by side even where one column has no counterpart.',
       ),
     gridCount: z
       .number()
@@ -360,6 +360,20 @@ export const setFrameLayoutCommandSchema = z
       .optional()
       .describe(
         'Track count: columns for `column` and `grid`, rows for `row`. Ignored for `free`.',
+      ),
+    cells: z
+      .array(
+        z
+          .object({
+            nodeId: z.string().min(1),
+            column: z.number().int().min(0).optional(),
+            row: z.number().int().min(0).optional(),
+          })
+          .strict(),
+      )
+      .optional()
+      .describe(
+        'Where each direct child sits. A structured frame computes every child position from its cell, so `position` cannot express this — pass `cells` whenever placement matters. `column` addresses columns, `row` addresses rows, `grid` addresses both; an index for an axis the mode lacks is ignored. Children you omit keep their current cell, or are auto-assigned if they have none. Skipping a row number in one column is how you leave that cell blank in `grid`.',
       ),
     sizing: z
       .enum(FRAME_SIZING_MODES)

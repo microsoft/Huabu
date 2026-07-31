@@ -15,6 +15,8 @@ import {
   applyGridLayout,
   applyRowLayout,
   readFrameGridConfig,
+  readFrameGridRow,
+  readFrameTrack,
 } from '@sediment/shared/canvas-engine';
 
 import type {
@@ -24,6 +26,7 @@ import type {
   CanvasNodeGeometryUpdate,
   FrameLayoutMode,
 } from '@sediment/shared';
+import type { FrameAxis } from '@sediment/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
 /**
@@ -35,16 +38,21 @@ import type { Node } from '@xyflow/react';
  * values from `ui.nodes` and miss newly-arrived children or assign
  * them to the wrong track.
  */
+/** The cell fields a structured relayout may write on a child. */
+export type FrameCellPatch = { frameColumn?: number; frameRow?: number };
+
 export interface PendingFrameMutations {
   /**
    * Direct child → new parent. Pass `null` to detach. Mirrors the
    * `SET_NODE_PARENT` command emitted by callers.
    */
   parentChanges?: ReadonlyMap<string, string | null>;
-  /** Direct child → new `frameSlot`. Mirrors a `MERGE_NODE_DATA` patch. */
-  slotPatches?: ReadonlyArray<{ nodeId: string; slot: number }>;
-  /** Grid child → new `frameRow`. Mirrors a `MERGE_NODE_DATA` patch. */
-  rowPatches?: ReadonlyArray<{ nodeId: string; row: number }>;
+  /**
+   * Direct child → new cell. Deliberately shaped as the exact patch the
+   * caller hands to `MERGE_NODE_DATA`, so the mirror used for the
+   * layout pass and the command that actually commits cannot drift.
+   */
+  cellPatches?: ReadonlyArray<{ nodeId: string; patch: FrameCellPatch }>;
   /**
    * Frame → layout-mode + gridCount patch. Mirrors the
    * `MERGE_NODE_DATA` emitted by `SET_FRAME_LAYOUT_MODE`.
@@ -59,8 +67,8 @@ export interface PendingFrameMutations {
  * Apply a set of pending mutations to a node array and return a fresh
  * copy. Pure / non-mutating: the input is left untouched.
  *
- * Only mutates the fields the caller explicitly named (parentId,
- * frameSlot, layoutMode/gridCount). Everything else is preserved by
+ * Only mutates the fields the caller explicitly named (parentId, the
+ * cell fields, layoutMode/gridCount). Everything else is preserved by
  * reference — this is intentionally lighter than `executor.execute`
  * because we only need enough fidelity for the grid layout pass.
  */
@@ -68,23 +76,18 @@ function applyPendingMutations(
   nodes: Node[],
   pending: PendingFrameMutations,
 ): Node[] {
-  const { parentChanges, slotPatches, rowPatches, frameDataPatches } = pending;
+  const { parentChanges, cellPatches, frameDataPatches } = pending;
   if (
     (!parentChanges || parentChanges.size === 0) &&
-    (!slotPatches || slotPatches.length === 0) &&
-    (!rowPatches || rowPatches.length === 0) &&
+    (!cellPatches || cellPatches.length === 0) &&
     (!frameDataPatches || frameDataPatches.length === 0)
   ) {
     return nodes;
   }
 
-  const slotById = new Map<string, number>();
-  if (slotPatches) {
-    for (const p of slotPatches) slotById.set(p.nodeId, p.slot);
-  }
-  const rowById = new Map<string, number>();
-  if (rowPatches) {
-    for (const p of rowPatches) rowById.set(p.nodeId, p.row);
+  const cellById = new Map<string, FrameCellPatch>();
+  if (cellPatches) {
+    for (const p of cellPatches) cellById.set(p.nodeId, p.patch);
   }
   const frameDataById = new Map<string, Record<string, unknown>>();
   if (frameDataPatches) {
@@ -100,16 +103,11 @@ function applyPendingMutations(
         ...(nextParent ? { parentId: nextParent } : { parentId: undefined }),
       };
     }
-    if (slotById.has(n.id)) {
+    const cellPatch = cellById.get(n.id);
+    if (cellPatch) {
       next = {
         ...next,
-        data: { ...(next.data ?? {}), frameSlot: slotById.get(n.id) },
-      };
-    }
-    if (rowById.has(n.id)) {
-      next = {
-        ...next,
-        data: { ...(next.data ?? {}), frameRow: rowById.get(n.id) },
+        data: { ...(next.data ?? {}), ...cellPatch },
       };
     }
     const framePatch = frameDataById.get(n.id);
@@ -202,25 +200,24 @@ export function buildStructuredFrameRelayoutCommands(
       });
     }
 
-    // Slot writes — only when the value differs from what's stored on
-    // the working copy (which already reflects `pending.slotPatches`).
+    // Cell writes — only when the value differs from what's stored on
+    // the working copy (which already reflects `pending.cellPatches`).
+    const trackField = cfg.axis === 'row' ? 'frameRow' : 'frameColumn';
+    const trackAxis: FrameAxis = cfg.axis === 'row' ? 'row' : 'column';
     for (const [nodeId, slot] of result.slotAssignments) {
       const node = workingNodes.find((n) => n.id === nodeId);
       if (!node) continue;
-      const prior = (node.data as { frameSlot?: number } | undefined)
-        ?.frameSlot;
-      if (typeof prior === 'number' && prior === slot) continue;
+      if (readFrameTrack(node, trackAxis) === slot) continue;
       dataPatches.push({
         nodeId: nodeId as CanvasNodeId,
-        patch: { frameSlot: slot },
+        patch: { [trackField]: slot },
       });
     }
 
     for (const [nodeId, row] of result.rowAssignments ?? []) {
       const node = workingNodes.find((n) => n.id === nodeId);
       if (!node) continue;
-      const prior = (node.data as { frameRow?: number } | undefined)?.frameRow;
-      if (typeof prior === 'number' && prior === row) continue;
+      if (readFrameGridRow(node) === row) continue;
       dataPatches.push({
         nodeId: nodeId as CanvasNodeId,
         patch: { frameRow: row },

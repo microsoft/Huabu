@@ -287,6 +287,23 @@ export type CanvasCommand =
       mode: FrameLayoutMode;
       gridCount?: number;
       sizing?: FrameSizing;
+      /**
+       * Optional cell assignments applied to direct children in the same
+       * command. Structured frames derive every child position from its
+       * cell, so a caller that cares where things land has to say so —
+       * and saying it here rather than in a preceding `MERGE_NODE_DATA`
+       * removes an ordering trap: the layout pass that runs at the end
+       * of this batch already sees the assignments.
+       *
+       * `column` addresses columns, `row` addresses rows, and `grid`
+       * addresses both; an index for an axis the mode does not have is
+       * ignored.
+       */
+      cells?: Array<{
+        nodeId: CanvasNodeId;
+        column?: number;
+        row?: number;
+      }>;
     }
   | {
       /**

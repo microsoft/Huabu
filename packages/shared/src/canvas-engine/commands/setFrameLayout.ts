@@ -74,8 +74,16 @@ const setFrameLayout: CommandDefinition<Cmd> = {
         : undefined;
     const nextSizing: FrameSizing | undefined = explicitSizing ?? prior.sizing;
 
-    // No-op short-circuit when nothing changed.
+    const cellById = cmd.cells?.length
+      ? new Map(cmd.cells.map((cell) => [cell.nodeId as string, cell]))
+      : undefined;
+
+    // No-op short-circuit when nothing changed. Cell assignments always
+    // count as a change: they are an explicit instruction, and letting
+    // them ride on the layout fields being different would silently drop
+    // them whenever a caller re-pins cells without touching the mode.
     if (
+      !cellById &&
       prior.layoutMode === cmd.mode &&
       prior.gridCount === nextGridCount &&
       prior.sizing === nextSizing
@@ -84,7 +92,23 @@ const setFrameLayout: CommandDefinition<Cmd> = {
     }
 
     const nextNodes = state.nodes.map((n) => {
-      if (n.id !== cmd.frameId) return n;
+      if (n.id !== cmd.frameId) {
+        const cell = cellById?.get(n.id);
+        // Only direct children of this frame can hold one of its cells.
+        if (!cell || n.parentId !== cmd.frameId) return n;
+        const dataRec = (n.data ?? {}) as Record<string, unknown>;
+        const nextData: Record<string, unknown> = { ...dataRec };
+        // The legacy single index would out-rank nothing here, but it
+        // would linger and contradict the cell the caller just set.
+        delete nextData.frameSlot;
+        if (typeof cell.column === 'number') {
+          nextData.frameColumn = Math.max(0, Math.round(cell.column));
+        }
+        if (typeof cell.row === 'number') {
+          nextData.frameRow = Math.max(0, Math.round(cell.row));
+        }
+        return { ...n, data: nextData };
+      }
       const dataRec = (n.data ?? {}) as Record<string, unknown>;
       const nextData: Record<string, unknown> = {
         ...dataRec,
@@ -112,7 +136,9 @@ const setFrameLayout: CommandDefinition<Cmd> = {
       applied: true,
       nodes: nextNodes,
       edges: state.edges,
-      mutatedNodes: nextNodes.filter((n) => n.id === cmd.frameId),
+      mutatedNodes: nextNodes.filter(
+        (n) => n.id === cmd.frameId || cellById?.has(n.id),
+      ),
       affectedFrameIds: [cmd.frameId as string],
     };
   },

@@ -11,6 +11,9 @@ import {
   pickGridRowTarget,
   pickRowDropTarget,
   readFrameGridConfig,
+  readFrameGridRow,
+  readFrameTrack,
+  type FrameAxis,
   type FrameGridAxis,
   type NestableNode,
   type StructuredDropTarget,
@@ -24,6 +27,7 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
+import type { FrameCellPatch } from '../utils/frameLayout';
 import type {
   CanvasCommand,
   CanvasNodeId,
@@ -233,8 +237,7 @@ export default function resolveNodeDragStop(
     commands.push(...dropOutcome.commands);
     commands.push(
       ...buildStructuredFrameRelayoutCommands(affectedFrameIds, result, {
-        slotPatches: dropOutcome.slotPatches,
-        rowPatches: dropOutcome.rowPatches,
+        cellPatches: dropOutcome.cellPatches,
         frameDataPatches: dropOutcome.frameDataPatches,
       }),
     );
@@ -276,8 +279,7 @@ export default function resolveNodeDragStop(
   commands.push(...dropOutcome.commands);
   commands.push(
     ...buildStructuredFrameRelayoutCommands(affectedFrameIds, result, {
-      slotPatches: dropOutcome.slotPatches,
-      rowPatches: dropOutcome.rowPatches,
+      cellPatches: dropOutcome.cellPatches,
       frameDataPatches: dropOutcome.frameDataPatches,
     }),
   );
@@ -349,8 +351,7 @@ interface GridDropPlan {
  */
 interface GridDropCommands {
   commands: CanvasCommand[];
-  slotPatches: Array<{ nodeId: CanvasNodeId; slot: number }>;
-  rowPatches: Array<{ nodeId: CanvasNodeId; row: number }>;
+  cellPatches: Array<{ nodeId: CanvasNodeId; patch: FrameCellPatch }>;
   frameDataPatches: Array<{ nodeId: string; patch: Record<string, unknown> }>;
 }
 
@@ -436,7 +437,7 @@ function collectGridDropPlans(
  *     A plain move that doesn't empty its source track keeps the
  *     current count and only re-slots the dragged node(s).
  *
- * `slotPatches` / `frameDataPatches` mirror the emitted commands so the
+ * `cellPatches` / `frameDataPatches` mirror the emitted commands so the
  * caller can feed them into {@link buildStructuredFrameRelayoutCommands}
  * as `pending` input.
  */
@@ -447,16 +448,14 @@ function buildGridDropCommands(
   if (plans.length === 0) {
     return {
       commands: [],
-      slotPatches: [],
-      rowPatches: [],
+      cellPatches: [],
       frameDataPatches: [],
     };
   }
 
   const out: GridDropCommands = {
     commands: [],
-    slotPatches: [],
-    rowPatches: [],
+    cellPatches: [],
     frameDataPatches: [],
   };
 
@@ -470,28 +469,23 @@ function buildGridDropCommands(
 
   for (const [frameId, framePlans] of byFrame) {
     const { axis, count } = framePlans[0];
+    // The count axis is the one the mode is named after; `grid` counts
+    // columns and addresses rows separately.
+    const trackAxis: FrameAxis = axis === 'row' ? 'row' : 'column';
+    const trackField = axis === 'row' ? 'frameRow' : 'frameColumn';
 
-    // Stored slot for every existing child of this frame (clamped).
+    // Stored cell for every existing child of this frame (clamped).
     const origSlot = new Map<string, number>();
     const origRow = new Map<string, number>();
     const childIds: string[] = [];
     for (const node of preDragNodes) {
       if (node.parentId !== frameId) continue;
-      const raw = (node.data as { frameSlot?: number } | undefined)?.frameSlot;
-      const s =
-        typeof raw === 'number' && Number.isFinite(raw)
-          ? clampSlot(Math.round(raw), count)
-          : 0;
-      origSlot.set(node.id, s);
+      origSlot.set(
+        node.id,
+        clampSlot(readFrameTrack(node, trackAxis) ?? 0, count),
+      );
       if (axis === 'grid') {
-        const rawRow = (node.data as { frameRow?: number } | undefined)
-          ?.frameRow;
-        origRow.set(
-          node.id,
-          typeof rawRow === 'number' && Number.isFinite(rawRow)
-            ? Math.max(0, Math.round(rawRow))
-            : 0,
-        );
+        origRow.set(node.id, Math.max(0, readFrameGridRow(node) ?? 0));
       }
       childIds.push(node.id);
     }
@@ -620,19 +614,12 @@ function buildGridDropCommands(
         const rowChanged =
           typeof finalRow === 'number' && origRow.get(id) !== finalRow;
         if (!slotChanged && !rowChanged) continue;
-        mergePatches.push({
-          nodeId: id as CanvasNodeId,
-          patch: {
-            ...(slotChanged ? { frameSlot: finalSlot } : {}),
-            ...(rowChanged ? { frameRow: finalRow } : {}),
-          },
-        });
-        if (slotChanged) {
-          out.slotPatches.push({ nodeId: id as CanvasNodeId, slot: finalSlot });
-        }
-        if (rowChanged) {
-          out.rowPatches.push({ nodeId: id as CanvasNodeId, row: finalRow });
-        }
+        const patch: FrameCellPatch = {
+          ...(slotChanged ? { [trackField]: finalSlot } : {}),
+          ...(rowChanged ? { frameRow: finalRow } : {}),
+        };
+        mergePatches.push({ nodeId: id as CanvasNodeId, patch });
+        out.cellPatches.push({ nodeId: id as CanvasNodeId, patch });
       }
       if (mergePatches.length > 0) {
         out.commands.push({ type: 'MERGE_NODE_DATA', patches: mergePatches });
@@ -652,19 +639,12 @@ function buildGridDropCommands(
       const slotChanged = origSlot.get(id) !== slot;
       const rowChanged = typeof row === 'number' && origRow.get(id) !== row;
       if (!slotChanged && !rowChanged) continue;
-      mergePatches.push({
-        nodeId: id as CanvasNodeId,
-        patch: {
-          ...(slotChanged ? { frameSlot: slot } : {}),
-          ...(rowChanged ? { frameRow: row } : {}),
-        },
-      });
-      if (slotChanged) {
-        out.slotPatches.push({ nodeId: id as CanvasNodeId, slot });
-      }
-      if (rowChanged) {
-        out.rowPatches.push({ nodeId: id as CanvasNodeId, row });
-      }
+      const patch: FrameCellPatch = {
+        ...(slotChanged ? { [trackField]: slot } : {}),
+        ...(rowChanged ? { frameRow: row } : {}),
+      };
+      mergePatches.push({ nodeId: id as CanvasNodeId, patch });
+      out.cellPatches.push({ nodeId: id as CanvasNodeId, patch });
     }
     if (mergePatches.length === 0) continue;
     out.commands.push({

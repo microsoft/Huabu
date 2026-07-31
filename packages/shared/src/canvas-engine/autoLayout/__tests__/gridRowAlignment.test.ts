@@ -2,9 +2,9 @@
  * @file Tests for `applyGridLayout` — the `grid` layout mode.
  *
  * `grid` reuses the `column` mode's track model (N columns, column
- * index stored in `data.frameSlot`) but aligns the Y axis as well:
- * children that overlap vertically are grouped into a **row band** and
- * share one Y origin.
+ * index stored in `data.frameColumn`) but aligns the Y axis as well:
+ * children that share a `data.frameRow` are grouped into a **row band**
+ * and share one Y origin.
  *
  * The contract these tests pin down:
  *   • Members of a band line up exactly (that is the whole point).
@@ -41,7 +41,7 @@ function makeChild(
   id: string,
   position: { x: number; y: number },
   size: { width: number; height: number },
-  frameSlot: number,
+  frameColumn: number,
   frameRow: number,
 ): Node {
   return {
@@ -51,7 +51,7 @@ function makeChild(
     position,
     style: { width: size.width, height: size.height },
     measured: { width: size.width, height: size.height },
-    data: { frameSlot, frameRow },
+    data: { frameColumn, frameRow },
   } as Node;
 }
 
