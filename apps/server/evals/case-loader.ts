@@ -66,12 +66,36 @@ const noErrorAssertion = z.object({
   kind: z.literal('no_error'),
 });
 
+const commandEmittedAssertion = z.object({
+  kind: z.literal('command_emitted'),
+  /**
+   * Canvas command type that must appear in some `space_commands` call.
+   * `tool_called` can only see the tool name, which for `space_commands`
+   * says nothing about what the agent actually asked for — the whole
+   * decision lives in the arguments.
+   */
+  type: z.string().min(1),
+  /**
+   * Optional literal field predicates on the matched command, e.g.
+   * `{ mode: grid }`. All listed fields must match.
+   */
+  where: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
+  /**
+   * Optional dotted paths that must be present and non-empty on the
+   * matched command, e.g. `cells`. Distinguishes "chose the right
+   * command" from "chose it and supplied the payload that makes it do
+   * anything".
+   */
+  hasNonEmpty: z.array(z.string().min(1)).optional(),
+});
+
 export const assertionSchema = z.discriminatedUnion('kind', [
   toolCalledAssertion,
   toolSucceededAssertion,
   responseContainsAssertion,
   maxTurnsAssertion,
   noErrorAssertion,
+  commandEmittedAssertion,
 ]);
 
 export type Assertion = z.infer<typeof assertionSchema>;

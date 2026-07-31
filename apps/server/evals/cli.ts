@@ -35,6 +35,7 @@ import { fileURLToPath } from 'node:url';
 
 import { renderDiff } from './differ.js';
 import { runAll, type RunReport } from './runner.js';
+import { initializeSecretStore } from '../src/security/secret-store.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CASES_DIR = path.join(HERE, 'cases');
@@ -137,6 +138,12 @@ async function runCommand(filter: string[] | undefined): Promise<{
   outputDir: string;
   report: RunReport;
 }> {
+  // The server boots this during startup; the eval CLI is a second entry
+  // point into the same code, so without it every case dies at the first
+  // credential read with "Secret store has not been initialized" —
+  // before any model call, which reads as a case failure rather than a
+  // setup failure.
+  await initializeSecretStore();
   const outputDir = path.join(RUNS_DIR, timestampId());
   const report = await runAll({
     casesDir: CASES_DIR,

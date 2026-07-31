@@ -113,6 +113,55 @@ function evaluateOne(trace: Trace, a: Assertion): AssertionResult {
       if (trace.error === null) return { id, pass: true };
       return { id, pass: false, detail: trace.error };
     }
+
+    case 'command_emitted': {
+      const where = a.where ?? {};
+      const id = `command_emitted:${a.type}${
+        Object.keys(where).length > 0
+          ? `(${Object.entries(where)
+              .map(([k, v]) => `${k}=${String(v)}`)
+              .join(',')})`
+          : ''
+      }${a.hasNonEmpty?.length ? `[${a.hasNonEmpty.join(',')}]` : ''}`;
+
+      const emitted = trace.toolCalls
+        .filter((c) => c.name === 'space_commands')
+        .flatMap((c) => {
+          const commands = c.args['commands'];
+          return Array.isArray(commands)
+            ? (commands as Array<Record<string, unknown>>)
+            : [];
+        });
+
+      const matched = emitted.filter((cmd) => {
+        if (cmd['type'] !== a.type) return false;
+        for (const [key, value] of Object.entries(where)) {
+          if (cmd[key] !== value) return false;
+        }
+        for (const field of a.hasNonEmpty ?? []) {
+          const v = cmd[field];
+          if (v === null || v === undefined) return false;
+          if (Array.isArray(v) && v.length === 0) return false;
+        }
+        return true;
+      });
+
+      if (matched.length > 0) return { id, pass: true };
+      return {
+        id,
+        pass: false,
+        detail:
+          `no matching ${a.type}. Emitted commands: ${
+            emitted.map((c) => String(c['type'])).join(', ') || '(none)'
+          }. ` +
+          `Candidates of this type: ${
+            emitted
+              .filter((c) => c['type'] === a.type)
+              .map((c) => JSON.stringify(c).slice(0, 240))
+              .join(' | ') || '(none)'
+          }`,
+      };
+    }
   }
 }
 
