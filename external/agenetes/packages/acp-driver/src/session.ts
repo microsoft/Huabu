@@ -264,6 +264,8 @@ function snapshotEntryMeta(entry: AcpSessionEntry): AgentMetadata {
     availableModels: entry.availableModels,
     currentModelId: entry.currentModelId,
     configOptions: entry.configOptions,
+    selections: entry.selections,
+    selectionsUpdatedAt: entry.selectionsUpdatedAt,
     sessionInfo: entry.sessionInfo,
     usage: entry.usage,
     metaUpdatedAt: entry.metaUpdatedAt,
@@ -296,6 +298,38 @@ export function snapshotEntryState(
 }
 
 /**
+ * Config-option ids that also have a dedicated legacy ACP field
+ * (`session/setSessionMode` / `session/setSessionModel`). Agents that
+ * publish a `category: 'mode' | 'model'` config option address the same
+ * knob through both channels, so we key both onto one selection id.
+ */
+export const MODE_SELECTION_ID = 'mode';
+export const MODEL_SELECTION_ID = 'model';
+
+/**
+ * Record an explicit user selection for this thread and up-report it.
+ *
+ * The only writer of {@link AcpSessionEntry.selections}. Agent pushes
+ * deliberately never reach it: for agents whose config options are
+ * process-global (Copilot CLI), a broadcast would otherwise replace the
+ * user's per-thread choice with "whatever was picked last, anywhere".
+ */
+export function recordSessionSelection(
+  entry: AcpSessionEntry,
+  optionId: string,
+  value: string | boolean,
+): void {
+  entry.selections[optionId] = value;
+  entry.selectionsUpdatedAt = Date.now();
+  if (typeof value === 'string') {
+    if (optionId === MODE_SELECTION_ID) entry.currentModeId = value;
+    else if (optionId === MODEL_SELECTION_ID) entry.currentModelId = value;
+  }
+  entry.metaUpdatedAt = entry.selectionsUpdatedAt;
+  reportEntryState(entry);
+}
+
+/**
  * Hydrate a fresh registry entry from a down-fed {@link AgentMetadata}
  * snapshot (I9.7). Used by the "already loaded" recovery path where neither
  * `session/new` nor `session/load` provides a meta seed and the agent
@@ -322,6 +356,10 @@ function hydrateEntryFromPersistedMeta(
     entry.currentModelId = meta.currentModelId;
   }
   if (meta.configOptions) entry.configOptions = meta.configOptions;
+  if (meta.selections) entry.selections = { ...meta.selections };
+  if (typeof meta.selectionsUpdatedAt === 'number') {
+    entry.selectionsUpdatedAt = meta.selectionsUpdatedAt;
+  }
   if (meta.sessionInfo !== undefined) entry.sessionInfo = meta.sessionInfo;
   if (meta.usage !== undefined) entry.usage = meta.usage;
   if (typeof meta.metaUpdatedAt === 'number') {
@@ -623,6 +661,8 @@ async function ensureAcpSessionInner(
     availableModels: [],
     currentModelId: null,
     configOptions: [],
+    selections: {},
+    selectionsUpdatedAt: 0,
     sessionInfo: null,
     usage: null,
     metaUpdatedAt: 0,

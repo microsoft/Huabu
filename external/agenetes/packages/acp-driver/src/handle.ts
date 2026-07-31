@@ -45,7 +45,10 @@ import { AcpServiceError } from './errors.js';
 import { applyToolExt } from './overlay.js';
 import { acpSessionRegistry } from './session-registry.js';
 import {
+  MODEL_SELECTION_ID,
+  MODE_SELECTION_ID,
   ensureAcpSession,
+  recordSessionSelection,
   registerAcpStateListener,
   reportEntryState,
 } from './session.js';
@@ -693,9 +696,11 @@ export class AcpAgentHandle<
           return { ok: true };
         case 'set_mode':
           await client.setSessionMode(sessionId, msg.data.modeId);
+          recordSessionSelection(entry, MODE_SELECTION_ID, msg.data.modeId);
           return { ok: true };
         case 'set_model':
           await client.setSessionModel(sessionId, msg.data.modelId);
+          recordSessionSelection(entry, MODEL_SELECTION_ID, msg.data.modelId);
           return { ok: true };
         case 'set_config_option':
           await client.setSessionConfigOption(
@@ -703,6 +708,7 @@ export class AcpAgentHandle<
             msg.data.optionId,
             msg.data.value,
           );
+          recordSessionSelection(entry, msg.data.optionId, msg.data.value);
           return { ok: true };
         case 'answer_permission': {
           const matched = client.resolvePermission(

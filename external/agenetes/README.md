@@ -490,6 +490,8 @@ Beyond the imperative runtime surface (I9.3) and the query surface (I9.4), the i
 
 There is exactly **one source of the durable snapshot** — the handle's fold — so in-turn meta never double-folds into the record: on an in-turn meta event the handle both _yields the raw frame to the run stream_ (the UI's live animation) and _pushes the folded snapshot up-report_ (persistence). The record and any cache read **solely** from `notifications()`, never from the run stream. The surface is a **Deployment** affordance (a long-lived session has out-of-turn state); a **Job** has no out-of-turn life, so its stream is empty.
 
+`AgentMetadata` separates two kinds of control-plane state that agents routinely conflate. The **agent-reported** surface (`currentModeId` / `currentModelId` / `configOptions[].currentValue`) is whatever the agent last announced. **`selections`** is the map of explicit user choices for _that thread_, keyed by config-option id. Only a `ControlMsg` set-RPC writes `selections`; an agent push never does. The distinction is load-bearing because several agents implement config options as process-global user settings and broadcast one value to every live session — the agent-reported value then answers "what was picked last, anywhere", so a resumed thread must be repainted (and reconciled back onto the agent) from `selections` instead.
+
 在命令式的运行期表面（I9.3）与查询表面（I9.4）之外，实例还暴露一个**通知表面**——`notifications(threadId): AsyncIterable<AgentMetadata>`——推送 agent 可观察的控制平面状态随其变化的流。它是那些已经搭乘 run 的 `AgentStreamEvent` 流（I8）的 turn 内 `*_update` 帧的**turn 外**同伴：同一套可选/用量表面，无论是否有活跃 run 都能送达。该数据流恰好一个原语 + 一个派生读侧：
 
 - **Up-report（原语，handle → instance）.** handle 把原生 state 折叠为 **`AgentStateSnapshot { driverState, metadata? }`**，每次变化都推送*当前完整 snapshot*——**全量 snapshot、绝非 per-field delta**。driver 拥有 `driverState` 的 schema 与语义；ACP 的 state 包含 `sessionId?` 与 `initialPreambleDelivered`。`defineDriver(...)` boundary 在 Agenetes 持久化前验证每次 emitted state。handle 是**唯一折叠点**，经内部 emitter 推送，因此 instance 在 create 时为每个 handle 注册一个 listener，而不是启动 polling loop。
@@ -497,6 +499,8 @@ There is exactly **one source of the durable snapshot** — the handle's fold �
 - **读侧（instance → host application）.** `notifications(threadId)` 是实例 per-thread 流的一个 `AsyncIterable` 视图，携带 driver-agnostic 的 `metadata`；host application 只消费自己需要的部分（例如 SSE 桥重绘模式/模型/命令选择器），而不透明的 `sessionId` 根本不被 host application 读取。这条通道**取代 M3 的 `profileCachePort` stopgap**——host application 的 profile-schema-cache 变成一个普通订阅者，而非被 driver 注入的 sink。
 
 持久快照**只有一个来源**——handle 的折叠——因此 turn 内 meta 绝不会二次折进记录：收到 turn 内 meta 事件时，handle 既*把原始帧 yield 到 run 流*（UI 的实时动画）、又*把折叠后的快照 up-report*（持久化）。记录与任何缓存**只**从 `notifications()` 读，绝不从 run 流读。该表面是 **Deployment** 的能力（长命 session 才有 turn 外状态）；**Job** 没有 turn 外生命，其流为空。
+
+`AgentMetadata` 区分了两类常被 agent 混为一谈的控制平面状态。**agent 上报面**（`currentModeId` / `currentModelId` / `configOptions[].currentValue`）是 agent 最后一次宣告的值；**`selections`** 则是*该 thread* 上用户显式做出的选择，按 config-option id 索引。只有 `ControlMsg` set-RPC 会写 `selections`，agent 推送永远不会。这一区分是承重的：若干 agent 把 config option 实现为进程级全局用户设置并向所有活跃 session 广播同一个值，此时 agent 上报值回答的是"最后一次在任何地方选了什么"，因此 resume 的 thread 必须改用 `selections` 重绘（并把它回放给 agent）。
 
 **I9.8 A two-tier conversation log; the host application reads it, Agenetes alone writes it / 两级会话日志；host application 只读，唯 Agenetes 写.**
 
