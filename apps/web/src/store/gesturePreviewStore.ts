@@ -4,7 +4,6 @@ import type { Guide } from '@/handler/snap/types';
 import type {
   FrameFitResult,
   StructuredDropContext,
-  StructuredDropContextRect,
 } from '@sediment/shared/canvas-engine';
 
 /**
@@ -112,10 +111,10 @@ type GesturePreviewData = {
 
   /**
    * Live drop indicator for a node hovering over a structured
-   * (column / row / grid) frame. Includes the precise picker decision,
-   * the active track and its reference nodes, plus Grid's shared row
-   * band and aligned peers. Written by `canvasStore.onNodeDrag`; cleared
-   * on drag end. Free-mode frames never set it.
+   * (column / row / grid) frame: the footprint the dragged node will
+   * occupy, plus the frame's track structure and which track the drop
+   * lands in. Written by `canvasStore.onNodeDrag`; cleared on drag end.
+   * Free-mode frames never set it.
    */
   structuredDropPreview: StructuredDropPreview | null;
 };
@@ -189,16 +188,10 @@ type GesturePreviewState = GesturePreviewData & {
 export type StructuredDropPreview = {
   frameId: string;
   kind: 'into-existing' | 'insert-new';
-  indicator: 'caret' | 'footprint';
   x: number;
   y: number;
   width: number;
   height: number;
-  swap?: {
-    occupantId: string;
-    from: StructuredDropContextRect;
-    to: StructuredDropContextRect;
-  };
   context: StructuredDropContext;
 };
 

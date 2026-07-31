@@ -2840,31 +2840,14 @@ const useCanvasStore = create<RFState>()(
             useGesturePreviewStore.getState().setStructuredDropPreview({
               frameId: targetFrameId,
               kind: zone.kind,
-              indicator: zone.indicator,
               x: frameAbs.x + zone.x,
               y: frameAbs.y + zone.y,
               width: zone.width,
               height: zone.height,
-              ...(zone.swap
-                ? {
-                    swap: {
-                      ...zone.swap,
-                      from: toAbsoluteRect(zone.swap.from),
-                      to: toAbsoluteRect(zone.swap.to),
-                    },
-                  }
-                : {}),
               context: {
                 ...zone.context,
-                trackRect: zone.context.trackRect
-                  ? toAbsoluteRect(zone.context.trackRect)
-                  : null,
-                trackPeerRects: zone.context.trackPeerRects.map(toAbsoluteRect),
-                alignmentRect: zone.context.alignmentRect
-                  ? toAbsoluteRect(zone.context.alignmentRect)
-                  : null,
-                alignmentPeerRects:
-                  zone.context.alignmentPeerRects.map(toAbsoluteRect),
+                tracks: zone.context.tracks.map(toAbsoluteRect),
+                rows: zone.context.rows.map(toAbsoluteRect),
               },
             });
             if (getFrameSizing(targetFrame) === 'hug') {

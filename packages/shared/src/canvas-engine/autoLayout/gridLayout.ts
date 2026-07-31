@@ -340,7 +340,18 @@ export interface FrameGridLayoutResult {
   slotAssignments: Map<string, number>;
   /** Grid-only row assignments persisted as `data.frameRow`. */
   rowAssignments?: Map<string, number>;
-  /** Grid-only stable row geometry, including currently empty rows. */
+  /**
+   * Frame-local column geometry (`column` and `grid` modes), in slot
+   * order. Exposed so a drag preview can draw the frame's actual track
+   * structure rather than leaving the user to infer it from wherever
+   * the reflowed peers happen to land.
+   */
+  columnTracks?: Array<{ left: number; width: number }>;
+  /**
+   * Frame-local row geometry, in row order. `grid` reports its stable
+   * persistent rows (including currently empty ones); `row` reports its
+   * masonry tracks. Absent for `column`, which has no row structure.
+   */
   rowTracks?: Array<{ top: number; height: number }>;
   frameSize: { width: number; height: number };
   gutters: StructuredGutterPlan[];
@@ -591,6 +602,10 @@ export function applyColumnLayout(
   return {
     childPositions: positions,
     slotAssignments: assignment,
+    columnTracks: colOriginX.map((left, c) => ({
+      left,
+      width: colWidth[c],
+    })),
     frameSize: { width, height },
     gutters,
     effectiveCount: effectiveCols,
@@ -695,6 +710,7 @@ export function applyRowLayout(
   return {
     childPositions: positions,
     slotAssignments: assignment,
+    rowTracks: rowOriginY.map((top, r) => ({ top, height: rowHeight[r] })),
     frameSize: { width, height },
     gutters,
     effectiveCount: effectiveRows,
@@ -869,6 +885,10 @@ export function applyGridLayout(
     childPositions: positions,
     slotAssignments: assignment,
     rowAssignments,
+    columnTracks: colOriginX.map((left, c) => ({
+      left,
+      width: colWidth[c],
+    })),
     rowTracks,
     frameSize: { width: contentRight + padX, height: contentBottom + padY },
     gutters: [...xGutters, ...yGutters],
@@ -1164,21 +1184,9 @@ export function pickRowDropTarget(
 
 // ── Drag-time drop-zone geometry (live preview) ───────────────────────
 
-/** Fallback ghost size (flow units) when the dragged node's size is
- *  unknown (programmatic emits) and the frame has no existing tracks /
- *  items to borrow a median size from. */
-const GHOST_TRACK_FALLBACK = 160;
-
-/** Cross thickness (flow units) of the `into-existing` insertion
- *  caret's hit band. The visible caret — a full-width line with end
- *  brackets and a centre plus — is drawn at a fixed pixel size by the
- *  overlay; this constant only positions the band on the insertion gap
- *  so a tall / wide dragged node can never occlude its neighbours. */
-const INSERT_CARET_THICKNESS = 2;
-
-/** Frame-local rect + size of the dragged node, used to size the
- *  `insert-new` ghost block and to rank the `into-existing` insertion
- *  caret. All coordinates are frame-local (top-left). */
+/** Frame-local rect + size of the dragged node. Its size is the drop
+ *  footprint the preview draws; its position seeds the simulated layout
+ *  the solver then re-packs. All coordinates are frame-local (top-left). */
 export interface DraggedNodeRect {
   id: string;
   x: number;
@@ -1191,20 +1199,16 @@ export interface DraggedNodeRect {
  * Frame-local rect describing where a live drag would land inside a
  * structured frame, so the UI can render a drop indicator.
  *
- *  - `into-existing` — `rect` is a full-track-width **insertion caret**
- *    (a thin band the overlay decorates with end brackets + a centre
- *    plus) placed at the exact stack gap the node would slot into. A
- *    caret (rather than a node-sized footprint) is used so a tall /
- *    wide dragged node can't occlude the neighbours it lands between.
- *  - `insert-new`    — `rect` is a **ghost block** (the dragged node's
- *    width × height) at the gap where a new track would open.
+ * `x` / `y` are the **solver's** projected position for the dragged
+ * node under the simulated drop, and `width` / `height` are the dragged
+ * node's own — so the rect is literally the footprint the node will
+ * occupy on release, in every layout mode. `kind` only distinguishes
+ * whether that footprint sits in an existing track or opens a new one,
+ * which the overlay renders differently because a brand-new track
+ * displaces no peers and so is invisible in the reflow.
  */
 export interface StructuredDropZone {
   kind: 'into-existing' | 'insert-new';
-  indicator: 'caret' | 'footprint';
-  slot: number;
-  /** Grid-only persistent row targeted by this drop. */
-  row?: number;
   x: number;
   y: number;
   width: number;
@@ -1217,12 +1221,6 @@ export interface StructuredDropZone {
    * onto the real nodes so peers slide aside under the cursor.
    */
   reflow: StructuredReflowEntry[];
-  /** Grid-only preview of an occupied target cell being swapped out. */
-  swap?: {
-    occupantId: string;
-    from: StructuredDropContextRect;
-    to: StructuredDropContextRect;
-  };
   context: StructuredDropContext;
 }
 
@@ -1261,22 +1259,64 @@ export interface StructuredDropContextRect {
   height: number;
 }
 
-export interface StructuredDropPeerRect extends StructuredDropContextRect {
-  id: string;
-}
-
 /**
- * Layout context rendered around the precise drop indicator. Every
- * structured mode exposes its active track and the peers that establish
- * that track's shared edge. Grid additionally exposes the row and
- * peers that will share its Y origin with the dragged node.
+ * Layout context rendered around the precise drop indicator: the
+ * frame's track structure under the simulated drop, and which track the
+ * drop lands in.
  */
 export interface StructuredDropContext {
   axis: FrameGridAxis;
-  trackRect: StructuredDropContextRect | null;
-  trackPeerRects: StructuredDropPeerRect[];
-  alignmentRect: StructuredDropContextRect | null;
-  alignmentPeerRects: StructuredDropPeerRect[];
+  /**
+   * Every track of the frame under the **simulated** (post-drop)
+   * layout, in slot order: columns for `column` / `grid`, rows for
+   * `row`. Reflowing peers alone leaves the frame's track structure
+   * implicit — a column with one short child and a column with none
+   * look alike — so the overlay draws these bands to make "how many
+   * tracks are there, and which one am I over" readable mid-drag.
+   */
+  tracks: StructuredDropContextRect[];
+  /** Index into {@link tracks} the drop lands in; `-1` when unresolved. */
+  activeTrack: number;
+  /**
+   * Grid-only row bands under the simulated layout, in row order.
+   * Empty rows are included: they are real, addressable cells in
+   * `grid`, so hiding them would misreport the row count.
+   */
+  rows: StructuredDropContextRect[];
+  /** Index into {@link rows} the drop lands in; `-1` when unresolved. */
+  activeRow: number;
+}
+
+/**
+ * Project a solved layout's track geometry into frame-local bands for
+ * the drop overlay. Bands span the solved frame size on the off-axis so
+ * a column reads as a full-height stripe (and a row as a full-width
+ * one) regardless of how tall its current members happen to be.
+ *
+ * Indices are preserved verbatim (no empty-track filtering) so they stay
+ * aligned with `slotAssignments` / `rowAssignments`.
+ */
+function describeTrackBands(
+  layout: FrameGridLayoutResult | null | undefined,
+  axis: FrameGridAxis,
+): { tracks: StructuredDropContextRect[]; rows: StructuredDropContextRect[] } {
+  if (!layout) return { tracks: [], rows: [] };
+  const { width, height } = layout.frameSize;
+  const rowBands = (layout.rowTracks ?? []).map((track) => ({
+    x: 0,
+    y: track.top,
+    width,
+    height: track.height,
+  }));
+  if (axis === 'row') return { tracks: rowBands, rows: [] };
+
+  const columnBands = (layout.columnTracks ?? []).map((track) => ({
+    x: track.left,
+    y: 0,
+    width: track.width,
+    height,
+  }));
+  return { tracks: columnBands, rows: axis === 'grid' ? rowBands : [] };
 }
 
 /** Pick a persistent Grid row from a frame-local Y coordinate. */
@@ -1310,7 +1350,6 @@ export function pickGridRowTarget(
 
 function describeGridDropZone(
   nodes: Node[],
-  frame: Node,
   frameId: string,
   count: number,
   target: StructuredDropTarget,
@@ -1423,106 +1462,22 @@ function describeGridDropZone(
   );
   const position = layout?.childPositions.get(dragged.id);
   if (!layout || !position) return null;
-  const currentLayout = solveStructuredFrameLayout(
-    nodes,
-    frameId,
-    'compact',
-    options,
-  );
-  const occupantSize = occupant ? getNodeSize(occupant) : null;
-  const occupantDestination = occupant
-    ? layout.childPositions.get(occupant.id)
-    : undefined;
-  const swap =
-    source && occupant && occupantSize && occupantDestination
-      ? {
-          occupantId: occupant.id,
-          from: {
-            x: occupant.position.x,
-            y: occupant.position.y,
-            width: occupantSize.width,
-            height: occupantSize.height,
-          },
-          to: {
-            x: occupantDestination.x,
-            y: occupantDestination.y,
-            width: occupantSize.width,
-            height: occupantSize.height,
-          },
-        }
-      : undefined;
-
-  const peerRects: StructuredDropPeerRect[] = [];
-  for (const child of collectChildren(nodes, frameId)) {
-    if (child.node.id === dragged.id) continue;
-    const childPosition = currentLayout?.childPositions.get(child.node.id);
-    if (!childPosition) continue;
-    peerRects.push({
-      id: child.node.id,
-      x: childPosition.x,
-      y: childPosition.y,
-      width: child.width,
-      height: child.height,
-    });
-  }
-
-  const trackPeerRects = peerRects.filter(
-    (peer) => currentLayout?.slotAssignments.get(peer.id) === targetSlot,
-  );
-  const alignmentPeerRects = peerRects.filter(
-    (peer) => currentLayout?.rowAssignments?.get(peer.id) === targetRow,
-  );
-  const frameSize = getNodeSize(frame);
-  const currentColumnPositions = collectChildren(nodes, frameId)
-    .filter(
-      (child) =>
-        currentLayout?.slotAssignments.get(child.node.id) === targetSlot,
-    )
-    .map((child) => currentLayout?.childPositions.get(child.node.id))
-    .filter((value): value is XYPosition => value !== undefined);
-  const currentRowTrack = currentLayout?.rowTracks?.[targetRow];
+  const bands = describeTrackBands(layout, 'grid');
 
   return {
     kind: opensTrack ? 'insert-new' : 'into-existing',
-    indicator: 'footprint',
-    slot: targetSlot,
-    row: targetRow,
     x: position.x,
     y: position.y,
     width: dragged.width,
     height: dragged.height,
     frameSize: layout.frameSize,
     reflow: collectReflowPositions(nodes, frameId, dragged.id, layout),
-    ...(swap ? { swap } : {}),
     context: {
       axis: 'grid',
-      trackRect:
-        currentColumnPositions.length > 0
-          ? {
-              x: Math.min(...currentColumnPositions.map((item) => item.x)),
-              y: 0,
-              width: Math.max(
-                ...collectChildren(nodes, frameId)
-                  .filter(
-                    (child) =>
-                      currentLayout?.slotAssignments.get(child.node.id) ===
-                      targetSlot,
-                  )
-                  .map((child) => child.width),
-              ),
-              height: frameSize.height,
-            }
-          : null,
-      trackPeerRects,
-      alignmentRect: currentRowTrack
-        ? {
-            x: 0,
-            y: currentRowTrack.top,
-            width: frameSize.width,
-            height: currentRowTrack.height,
-          }
-        : null,
-      alignmentPeerRects,
+      tracks: bands.tracks,
+      activeTrack: layout.slotAssignments.get(dragged.id) ?? targetSlot,
+      rows: bands.rows,
+      activeRow: layout.rowAssignments?.get(dragged.id) ?? targetRow,
     },
   };
 }
@@ -1535,17 +1490,22 @@ function describeGridDropZone(
  * never disagree with the committed drop. This helper only adds the
  * matching geometry.
  *
- * `dragged` (frame-local rect of the node under the cursor) lets the
- * preview size the `insert-new` ghost block to the actual node and
- * rank the `into-existing` insertion caret against the dragged node's
- * top edge — exactly how the solver re-sorts the track on release.
+ * Every mode reports the **same** rect: the position the simulated
+ * solver assigns the dragged node, at the dragged node's own size. The
+ * masonry modes used to substitute a hand-computed insertion caret,
+ * which meant re-deriving the solver's intra-track spacing beside the
+ * solver — two implementations of one layout, free to drift, and a
+ * weaker answer than the footprint the grid mode was already able to
+ * show. Simulating once and reading the position back removes both
+ * problems.
  *
- * `grid` uses the same column picker for its persisted `frameSlot`, then
- * simulates {@link applyGridLayout} to resolve the second dimension. Its
- * indicator is therefore the final cell footprint, not a masonry caret.
+ * `dragged` is the frame-local rect of the node under the cursor.
+ * Without it there is no footprint to project and no drop to preview,
+ * so the helper reports `null` rather than inventing a placeholder.
  *
- * Returns `null` when the frame is missing. All coordinates are
- * frame-local; the caller offsets by the frame's absolute position.
+ * Returns `null` when the frame is missing or the simulated layout does
+ * not place the dragged node. All coordinates are frame-local; the
+ * caller offsets by the frame's absolute position.
  */
 export function describeStructuredDropZone(
   nodes: Node[],
@@ -1557,26 +1517,16 @@ export function describeStructuredDropZone(
   options: StructuredLayoutOptions = {},
 ): StructuredDropZone | null {
   const frame = nodes.find((n) => n.id === frameId);
-  if (!frame) return null;
+  if (!frame || !dragged) return null;
 
   const isCol = axis !== 'row';
   const target = isCol
     ? pickColumnDropTarget(nodes, frameId, framePoint, count)
     : pickRowDropTarget(nodes, frameId, framePoint, count);
 
-  // Axis projections: "main" = the count axis (where tracks sit),
-  // "cross" = the stack axis (where items pile up inside a track).
-  const mainSize = (c: ChildSlot) => (isCol ? c.width : c.height);
-  const crossSize = (c: ChildSlot) => (isCol ? c.height : c.width);
-  const crossTop = (c: ChildSlot) =>
-    isCol ? c.node.position.y : c.node.position.x;
-
-  const allChildren = collectChildren(nodes, frameId);
-
-  if (axis === 'grid' && dragged) {
+  if (axis === 'grid') {
     return describeGridDropZone(
       nodes,
-      frame,
       frameId,
       count,
       target,
@@ -1585,190 +1535,6 @@ export function describeStructuredDropZone(
       options,
     );
   }
-
-  // Bucket children by stored slot (mirrors the pickers / solvers).
-  const items: ChildSlot[][] = Array.from({ length: count }, () => []);
-  for (const child of allChildren) {
-    const raw = (child.node.data as { frameSlot?: number } | undefined)
-      ?.frameSlot;
-    const s =
-      typeof raw === 'number' && Number.isFinite(raw)
-        ? clampInt(Math.round(raw), 0, count - 1)
-        : 0;
-    items[s].push(child);
-  }
-
-  // Track extent along the count axis (column width / row height).
-  const extent = items.map((list) =>
-    list.length === 0 ? 0 : Math.max(...list.map(mainSize)),
-  );
-  // Per-axis spacing — mirror of the column / row solvers. Each axis
-  // derives its padding + gap from the SAME-AXIS median of child
-  // extents so the drop-zone math stays self-consistent under per-axis
-  // resize. `main` = the count axis (between tracks); `cross` = the
-  // stack axis (within a track). For column: main=X, cross=Y; for row
-  // they swap.
-  const widthMedian = median(allChildren.map((c) => c.width));
-  const heightMedian = median(allChildren.map((c) => c.height));
-  const mainMedian = isCol ? widthMedian : heightMedian;
-  const crossMedian = isCol ? heightMedian : widthMedian;
-  const interGap = gapFromExtent(mainMedian);
-  const mainPad = paddingFromExtent(mainMedian);
-  const crossPad = paddingFromExtent(crossMedian);
-
-  // Cumulative start / end of each track; empty tracks collapse.
-  const start = new Array<number>(count).fill(mainPad);
-  const end = new Array<number>(count).fill(mainPad);
-  let cursor = mainPad;
-  for (let s = 0; s < count; s += 1) {
-    start[s] = cursor;
-    end[s] = cursor + extent[s];
-    if (extent[s] > 0) cursor += extent[s] + interGap;
-  }
-  const contentEnd = cursor > mainPad ? cursor - interGap : mainPad;
-
-  // Indicators start one frame-padding in from the cross edge (where the
-  // first item of a track sits). The `insert-new` ghost is sized to the
-  // dragged node on both axes, so no frame-spanning band is needed.
-  const crossStart = crossPad;
-
-  let mainStart: number;
-  let mainLen: number;
-  let crossPos: number;
-  let crossLen: number;
-
-  if (target.kind === 'into-existing') {
-    // Insertion CARET spanning the full target-track width, placed at
-    // the exact gap the dragged node would slot into. The solver
-    // re-sorts the track by the node's cross-top, so rank the gap
-    // against the sibling tops. The band is kept thin (the overlay
-    // draws the visible line + end brackets + centre plus at a fixed
-    // pixel size) so a tall / wide dragged node can't occlude the
-    // neighbours it lands between.
-    mainStart = start[target.slot];
-    // Span the *current* track extent (column width / row height) so the
-    // caret matches the row / column it slots into, rather than the
-    // dragged node's size. Fall back to the dragged size / a default only
-    // when the track has no measurable extent (no laid-out items yet).
-    mainLen =
-      extent[target.slot] > 0
-        ? extent[target.slot]
-        : Math.max(
-            dragged ? (isCol ? dragged.width : dragged.height) : 0,
-            GHOST_TRACK_FALLBACK,
-          );
-
-    const siblings = items[target.slot]
-      .filter((c) => !dragged || c.node.id !== dragged.id)
-      .sort((a, b) => crossTop(a) - crossTop(b));
-    // Mirror the solver's intra-track spacing exactly: it derives the
-    // intra gap from the cross-axis median (heights for column, widths
-    // for row), matching `applyColumnLayout`'s `intraGapY` /
-    // `applyRowLayout`'s `intraGapX`.
-    const intra = gapFromExtent(crossMedian);
-    const ref = dragged
-      ? isCol
-        ? dragged.y
-        : dragged.x
-      : isCol
-        ? framePoint.y
-        : framePoint.x;
-
-    let idx = 0;
-    while (idx < siblings.length && crossTop(siblings[idx]) < ref) idx += 1;
-
-    let gapCenter: number;
-    if (siblings.length === 0) {
-      gapCenter = crossStart;
-    } else if (idx === 0) {
-      gapCenter = Math.max(crossStart, crossTop(siblings[0]) - intra / 2);
-    } else if (idx >= siblings.length) {
-      const last = siblings[siblings.length - 1];
-      gapCenter = crossTop(last) + crossSize(last) + intra / 2;
-    } else {
-      const prev = siblings[idx - 1];
-      const next = siblings[idx];
-      gapCenter = (crossTop(prev) + crossSize(prev) + crossTop(next)) / 2;
-    }
-
-    crossPos = gapCenter - INSERT_CARET_THICKNESS / 2;
-    crossLen = INSERT_CARET_THICKNESS;
-  } else {
-    // Ghost block sized to the dragged node on BOTH axes (main = width,
-    // cross = height for a column frame; swapped for a row), centred on
-    // the gap where the new track opens. A node-sized block can never
-    // overflow the frame the way a frame-spanning band could.
-    const ghostMain = dragged
-      ? isCol
-        ? dragged.width
-        : dragged.height
-      : median(extent.filter((e) => e > 0)) || GHOST_TRACK_FALLBACK;
-    const ghostCross = dragged
-      ? isCol
-        ? dragged.height
-        : dragged.width
-      : GHOST_TRACK_FALLBACK;
-    // Gap separating the new track's ghost from the adjacent content,
-    // symmetric for prepend (before slot 0) and append (after the last).
-    const newTrackGap = Math.min(mainPad * 0.5, interGap || MIN_GAP);
-    let center: number;
-    if (target.slot <= 0) {
-      // Prepend: sit the ghost just LEFT of (above, for rows) the first
-      // track — in the new space it would occupy — instead of starting at
-      // `pad`, which overlaps the existing first column. Mirrors the
-      // append branch below.
-      center = mainPad - newTrackGap - ghostMain / 2;
-    } else if (target.slot >= count) {
-      center = contentEnd + newTrackGap + ghostMain / 2;
-    } else center = (end[target.slot - 1] + start[target.slot]) / 2;
-    mainStart = center - ghostMain / 2;
-    mainLen = ghostMain;
-    crossPos = crossStart;
-    crossLen = ghostCross;
-  }
-
-  const dropRect: StructuredDropContextRect = isCol
-    ? {
-        x: mainStart,
-        y: crossPos,
-        width: mainLen,
-        height: crossLen,
-      }
-    : {
-        x: crossPos,
-        y: mainStart,
-        width: crossLen,
-        height: mainLen,
-      };
-
-  const frameSize = getNodeSize(frame);
-  const targetItems = items[target.slot] ?? [];
-  const toPeerRect = (child: ChildSlot): StructuredDropPeerRect => ({
-    id: child.node.id,
-    x: child.node.position.x,
-    y: child.node.position.y,
-    width: child.width,
-    height: child.height,
-  });
-  const trackPeerRects = targetItems
-    .filter((child) => child.node.id !== dragged?.id)
-    .map(toPeerRect);
-  const trackRect =
-    target.kind === 'insert-new'
-      ? dropRect
-      : isCol
-        ? {
-            x: start[target.slot],
-            y: 0,
-            width: Math.max(extent[target.slot], dragged?.width ?? 0),
-            height: frameSize.height,
-          }
-        : {
-            x: 0,
-            y: start[target.slot],
-            width: frameSize.width,
-            height: Math.max(extent[target.slot], dragged?.height ?? 0),
-          };
 
   let foundDragged = false;
   const effectiveCount =
@@ -1786,7 +1552,7 @@ export function describeStructuredDropZone(
         data: { ...node.data, gridCount: effectiveCount },
       };
     }
-    if (dragged && node.id === dragged.id) {
+    if (node.id === dragged.id) {
       foundDragged = true;
       return {
         ...node,
@@ -1797,11 +1563,7 @@ export function describeStructuredDropZone(
         measured: { width: dragged.width, height: dragged.height },
       };
     }
-    if (
-      target.kind !== 'insert-new' ||
-      node.parentId !== frameId ||
-      node.id === dragged?.id
-    ) {
+    if (target.kind !== 'insert-new' || node.parentId !== frameId) {
       return node;
     }
     const raw = (node.data as { frameSlot?: number } | undefined)?.frameSlot;
@@ -1813,7 +1575,7 @@ export function describeStructuredDropZone(
       ? node
       : { ...node, data: { ...node.data, frameSlot: slot + 1 } };
   });
-  if (dragged && !foundDragged) {
+  if (!foundDragged) {
     simulated.push({
       id: dragged.id,
       type: 'text',
@@ -1830,25 +1592,26 @@ export function describeStructuredDropZone(
     'compact',
     options,
   );
+  const position = simulatedLayout?.childPositions.get(dragged.id);
+  if (!simulatedLayout || !position) return null;
+
+  const bands = describeTrackBands(simulatedLayout, axis);
 
   return {
     kind: target.kind,
-    indicator: target.kind === 'into-existing' ? 'caret' : 'footprint',
-    slot: target.slot,
-    ...dropRect,
-    frameSize: simulatedLayout?.frameSize ?? frameSize,
-    reflow: collectReflowPositions(
-      nodes,
-      frameId,
-      dragged?.id,
-      simulatedLayout,
-    ),
+    x: position.x,
+    y: position.y,
+    width: dragged.width,
+    height: dragged.height,
+    frameSize: simulatedLayout.frameSize,
+    reflow: collectReflowPositions(nodes, frameId, dragged.id, simulatedLayout),
     context: {
       axis,
-      trackRect,
-      trackPeerRects,
-      alignmentRect: null,
-      alignmentPeerRects: [],
+      tracks: bands.tracks,
+      activeTrack:
+        simulatedLayout.slotAssignments.get(dragged.id) ?? targetSlot,
+      rows: bands.rows,
+      activeRow: -1,
     },
   };
 }
