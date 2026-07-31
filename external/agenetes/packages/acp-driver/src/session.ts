@@ -330,6 +330,119 @@ export function recordSessionSelection(
 }
 
 /**
+ * Restore this thread's remembered selections onto a fresh entry.
+ *
+ * Deliberately unconditional, unlike {@link hydrateEntryFromPersistedMeta}:
+ * that one is gated on `metaUpdatedAt === 0` so a live agent push wins over
+ * a stale snapshot, but the gate closes the moment the agent's bootstrap
+ * `config_option_update` drains — which it always does, synchronously, when
+ * the session listener is installed. Selections are user intent that no
+ * agent push can supersede, so they must survive that race.
+ *
+ * Only `selections` itself is touched: `currentModeId` / `currentModelId`
+ * keep carrying the agent's own view so {@link reconcileSessionSelections}
+ * can still tell whether the agent already agrees.
+ */
+function hydrateSelectionsFromPersistedMeta(
+  entry: AcpSessionEntry,
+  meta: AgentMetadata | undefined,
+): void {
+  if (!meta?.selections) return;
+  entry.selections = { ...meta.selections };
+  entry.selectionsUpdatedAt = meta.selectionsUpdatedAt ?? 0;
+}
+
+/** @internal Exported for tests. */
+export { hydrateSelectionsFromPersistedMeta };
+
+/** The value the agent currently reports for one selectable knob. */
+function agentReportedValue(
+  entry: AcpSessionEntry,
+  optionId: string,
+): string | boolean | undefined {
+  const option = entry.configOptions.find(
+    (o) => String((o as { id?: unknown }).id ?? '') === optionId,
+  );
+  if (option) {
+    return (option as { currentValue?: string | boolean }).currentValue;
+  }
+  if (optionId === MODE_SELECTION_ID) return entry.currentModeId ?? undefined;
+  if (optionId === MODEL_SELECTION_ID) return entry.currentModelId ?? undefined;
+  return undefined;
+}
+
+/** Route one selection to the channel the agent actually publishes it on. */
+function applySelectionToAgent(
+  entry: AcpSessionEntry,
+  optionId: string,
+  value: string | boolean,
+): Promise<unknown> {
+  const publishedAsConfigOption = entry.configOptions.some(
+    (o) => String((o as { id?: unknown }).id ?? '') === optionId,
+  );
+  if (!publishedAsConfigOption && typeof value === 'string') {
+    if (optionId === MODE_SELECTION_ID) {
+      return entry.client.setSessionMode(entry.sessionId, value);
+    }
+    if (optionId === MODEL_SELECTION_ID) {
+      return entry.client.setSessionModel(entry.sessionId, value);
+    }
+  }
+  return entry.client.setSessionConfigOption(entry.sessionId, optionId, value);
+}
+
+/**
+ * Replay this thread's selections onto a freshly opened session.
+ *
+ * Resume restores the user's intent locally, but the agent knows nothing
+ * about it — for agents with process-global config options it starts the
+ * session on whatever was picked last in some other thread. Without this
+ * the persisted `allow_all` is remembered yet never honoured, and the
+ * first prompt runs under the wrong model.
+ *
+ * Fire-and-forget: a knob the agent rejects (a retired model id, a
+ * capability it dropped) must not block the first prompt, so it is
+ * removed from the map and the thread falls back to the agent's own value
+ * rather than retrying on every open.
+ */
+async function reconcileSessionSelections(
+  entry: AcpSessionEntry,
+  logger: AcpSessionLogger,
+): Promise<void> {
+  let dropped = false;
+  let applied = 0;
+  for (const [optionId, value] of Object.entries(entry.selections)) {
+    if (agentReportedValue(entry, optionId) === value) continue;
+    try {
+      await applySelectionToAgent(entry, optionId, value);
+      applied += 1;
+    } catch (err) {
+      delete entry.selections[optionId];
+      dropped = true;
+      logger.warn(
+        {
+          sessionId: entry.sessionId,
+          optionId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        '[acp] dropped a selection the agent rejected',
+      );
+    }
+  }
+  if (applied === 0 && !dropped) return;
+  if (dropped) entry.selectionsUpdatedAt = Date.now();
+  entry.metaUpdatedAt = Date.now();
+  reportEntryState(entry);
+  logger.info(
+    { sessionId: entry.sessionId, applied, dropped },
+    '[acp] replayed per-thread selections onto the resumed session',
+  );
+}
+
+/** @internal Exported for tests. */
+export { reconcileSessionSelections };
+
+/**
  * Hydrate a fresh registry entry from a down-fed {@link AgentMetadata}
  * snapshot (I9.7). Used by the "already loaded" recovery path where neither
  * `session/new` nor `session/load` provides a meta seed and the agent
@@ -356,10 +469,6 @@ function hydrateEntryFromPersistedMeta(
     entry.currentModelId = meta.currentModelId;
   }
   if (meta.configOptions) entry.configOptions = meta.configOptions;
-  if (meta.selections) entry.selections = { ...meta.selections };
-  if (typeof meta.selectionsUpdatedAt === 'number') {
-    entry.selectionsUpdatedAt = meta.selectionsUpdatedAt;
-  }
   if (meta.sessionInfo !== undefined) entry.sessionInfo = meta.sessionInfo;
   if (meta.usage !== undefined) entry.usage = meta.usage;
   if (typeof meta.metaUpdatedAt === 'number') {
@@ -689,6 +798,11 @@ async function ensureAcpSessionInner(
     logger,
   );
 
+  // Unconditional, and before the listener: the agent's bootstrap push
+  // would otherwise close the `metaUpdatedAt === 0` gate below and strand
+  // the user's remembered choices.
+  hydrateSelectionsFromPersistedMeta(created, priorState?.metadata);
+
   // Installing the listener synchronously drains Gateway pre-attach messages
   // that AcpAgentClient retained as orphan updates during construction.
   client.registerSessionListener(sessionId, (update) => {
@@ -736,6 +850,11 @@ async function ensureAcpSessionInner(
   }
 
   acpSessionRegistry.set(agentletId, threadId, created);
+
+  // Push the restored intent back onto the agent. Not awaited: the knobs
+  // are independent of the first prompt, and a slow agent must not delay
+  // session open. Errors are handled per-selection inside.
+  void reconcileSessionSelections(created, logger);
 
   // The durable record is refreshed via the up-report channel (I9.7): the
   // owning handle installs `reportState` on this entry the moment it
