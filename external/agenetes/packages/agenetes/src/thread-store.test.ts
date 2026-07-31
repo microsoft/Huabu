@@ -109,7 +109,42 @@ describe('FileThreadStore agenetes-v2 durable backing', () => {
           'utf8',
         ),
       ),
-    ).toMatchObject({ schemaVersion: THREAD_STORE_SCHEMA_VERSION });
+    ).toMatchObject({
+      schemaVersion: THREAD_STORE_SCHEMA_VERSION,
+      records: {
+        t1: { spec: { namespace: { name: 'canvas-1' } } },
+      },
+    });
+  });
+
+  it('rebinds a persisted machine-specific storage root to the current namespace', () => {
+    const namespace = ns('canvas-1');
+    const staleRoot = '/Users/christy/Library/CloudStorage/Huabu/.history';
+    writeStore(namespace, {
+      schemaVersion: THREAD_STORE_SCHEMA_VERSION,
+      records: {
+        t1: {
+          ...record('t1'),
+          spec: {
+            ...spec('t1'),
+            namespace: {
+              name: 'canvas-1',
+              storage: { root: staleRoot },
+            },
+          },
+        },
+      },
+    });
+
+    const store = new FileThreadStore();
+    const reread = store.get(namespace, 't1');
+    expect(reread?.spec.namespace).toEqual(namespace);
+
+    store.upsert(namespace, 't1', reread!);
+    const persisted = JSON.parse(
+      readFileSync(path.join(namespace.storage!.root, 'threads.json'), 'utf8'),
+    ) as { records: { t1: ThreadRecord } };
+    expect(persisted.records.t1.spec.namespace).toEqual({ name: 'canvas-1' });
   });
 
   it('upsert replaces the whole record; delete removes it', () => {
