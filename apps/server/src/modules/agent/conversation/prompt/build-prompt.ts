@@ -34,7 +34,7 @@ import type { ChatEnvelope } from '../envelope.js';
 import type { ContentPart, UserContent } from './attachments.js';
 import type { RenderProfile } from './profile.js';
 import type { AgentInput, AgentInputPart, AgentTurn } from '@agenetes/protocol';
-import type { Message } from '@earendil-works/pi-ai';
+import type { AssistantMessage, Message, Usage } from '@earendil-works/pi-ai';
 
 /** A pi-ai conversation message (the built-in agent's context unit). */
 type PiMessage = Message;
@@ -45,6 +45,40 @@ const INTERRUPTED_NOTICE =
   '[SYSTEM Interrupted] The user interrupted the previous operation. ' +
   'Do NOT continue or retry the interrupted task. ' +
   'Wait for the next user message and treat it as a new request.';
+
+function emptyReplayUsage(): Usage {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+}
+
+function replayUsage(value: unknown): Usage | null {
+  if (!value || typeof value !== 'object') return null;
+  const usage = value as Partial<Usage>;
+  const cost = usage.cost as Partial<Usage['cost']> | undefined;
+  const values = [
+    usage.input,
+    usage.output,
+    usage.cacheRead,
+    usage.cacheWrite,
+    usage.totalTokens,
+    cost?.input,
+    cost?.output,
+    cost?.cacheRead,
+    cost?.cacheWrite,
+    cost?.total,
+  ];
+  return values.every(
+    (entry) => typeof entry === 'number' && Number.isFinite(entry),
+  )
+    ? (value as Usage)
+    : null;
+}
 
 /**
  * Render a {@link ChatEnvelope} into a flat `ContentPart[]` (text +
@@ -281,6 +315,7 @@ export async function rebuildTurnMessages(
  */
 function foldedTranscriptToPiMessages(turn: AgentTurn): PiMessage[] {
   const out: PiMessage[] = [];
+  const assistantMessages: AssistantMessage[] = [];
   let content: Array<Record<string, unknown>> = [];
   let toolResults: PiMessage[] = [];
   let sawToolCall = false;
@@ -288,12 +323,15 @@ function foldedTranscriptToPiMessages(turn: AgentTurn): PiMessage[] {
 
   const flushRound = (): void => {
     if (content.length > 0) {
-      out.push({
+      const assistant = {
         role: 'assistant',
         content,
+        usage: emptyReplayUsage(),
         stopReason: sawToolCall ? 'toolUse' : 'stop',
         timestamp: Date.now(),
-      } as unknown as PiMessage);
+      } as unknown as AssistantMessage;
+      assistantMessages.push(assistant);
+      out.push(assistant);
     }
     out.push(...toolResults);
     content = [];
@@ -356,6 +394,10 @@ function foldedTranscriptToPiMessages(turn: AgentTurn): PiMessage[] {
   }
 
   flushRound();
+
+  const persistedUsage = replayUsage(turn.meta?.usage);
+  const finalAssistant = assistantMessages[assistantMessages.length - 1];
+  if (persistedUsage && finalAssistant) finalAssistant.usage = persistedUsage;
 
   if (turn.meta?.stopReason === 'aborted') {
     out.push({

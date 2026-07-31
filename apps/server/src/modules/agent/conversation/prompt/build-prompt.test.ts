@@ -30,7 +30,8 @@ import type {
   AgentTurn,
   FoldedMessage,
 } from '@agenetes/protocol';
-import type { Message } from '@earendil-works/pi-ai';
+import type { Api, Context, Message, Model } from '@earendil-works/pi-ai';
+import { clampMaxTokensToContext } from '@earendil-works/pi-ai/api/simple-options';
 import type { ChatAttachment } from '@sediment/shared';
 
 /** Build an {@link AgentTurn} from an envelope + folded transcript. */
@@ -371,6 +372,21 @@ describe('rebuildContextMessages', () => {
 
     const result = out.find((m) => m.role === 'toolResult');
     expect((result as unknown as { isError: boolean }).isError).toBe(true);
+  });
+
+  it('produces assistant messages that token estimation can inspect', async () => {
+    const out = await rebuildContextMessages(
+      [
+        makeTurn(makeEnvelope({ text: 'hello' }), [
+          { type: 'text', data: { content: 'hi' } },
+        ]),
+      ],
+      NO_CANVAS,
+    );
+
+    const model = { contextWindow: 128_000 } as Model<Api>;
+    const context = { messages: out } as Context;
+    expect(() => clampMaxTokensToContext(model, context, 4_096)).not.toThrow();
   });
 
   it('skips empty turns but still appends their transcript', async () => {
