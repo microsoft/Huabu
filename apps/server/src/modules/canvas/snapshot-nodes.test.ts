@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  bundledResvgWasmPath,
   clusterToSvg,
   filterSketchStrokes,
   type ContextImage,
@@ -15,6 +16,17 @@ const TINY_PNG = Buffer.from(
     '0000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082',
   'hex',
 );
+
+describe('bundledResvgWasmPath', () => {
+  it('converts a Windows file URL without duplicating the drive prefix', () => {
+    expect(
+      bundledResvgWasmPath(
+        'file:///C:/Program%20Files/Huabu/resources/server/server.js',
+        'win32',
+      ),
+    ).toBe('C:\\Program Files\\Huabu\\resources\\server\\resvg-bg.wasm');
+  });
+});
 
 function makeImageNode(opts: {
   id: string;

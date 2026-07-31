@@ -50,6 +50,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
 import { getStroke } from 'perfect-freehand';
@@ -211,6 +212,19 @@ function nodeBoxSize(n: CanvasNode): { width: number; height: number } {
 // snapshot calls (e.g. agent snapshotting 3 sketches in parallel) all
 // await the same init.
 let wasmInitPromise: Promise<void> | null = null;
+
+export function bundledResvgWasmPath(
+  moduleUrl: string | URL,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const windows = platform === 'win32';
+  const pathImpl = windows ? path.win32 : path.posix;
+  return pathImpl.join(
+    pathImpl.dirname(fileURLToPath(moduleUrl, { windows })),
+    'resvg-bg.wasm',
+  );
+}
+
 async function ensureResvgReady(): Promise<void> {
   if (wasmInitPromise) return wasmInitPromise;
   wasmInitPromise = (async () => {
@@ -224,10 +238,7 @@ async function ensureResvgReady(): Promise<void> {
       wasmBytes = await readFile(wasmPath);
     } catch {
       // Bundle path
-      const wasmPath = path.join(
-        path.dirname(decodeURIComponent(new URL(import.meta.url).pathname)),
-        'resvg-bg.wasm',
-      );
+      const wasmPath = bundledResvgWasmPath(import.meta.url);
       wasmBytes = await readFile(wasmPath);
     }
     await initWasm(wasmBytes);

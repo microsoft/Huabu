@@ -57,7 +57,7 @@ extraResources:
   - from: ../server/dist-bundle/workspace-prepare.worker.js
     to: server/workspace-prepare.worker.js
   # @resvg/resvg-wasm — loaded on demand by the `rasterize_node` agent
-  # tool via `path.join(__dirname, 'resvg-bg.wasm')` (bundle layout
+  # tool from the bundled server module's file URL (bundle layout
   # fallback). Missing this file is non-fatal at boot but the tool
   # throws "no such file" on first sketch rasterization.
   - from: ../server/dist-bundle/resvg-bg.wasm

@@ -88,7 +88,7 @@ export default defineConfig([
       console.log(`[tsup] copied bundled Agent Teams -> ${agentTeamsDst}`);
       // @resvg/resvg-wasm — copied next to server.js so the
       // snapshot_nodes tool's bundle-layout fallback finds it via
-      // `path.join(__dirname, 'resvg-bg.wasm')`.
+      // bundled server module's file URL.
       const resvgWasmDst = path.resolve('dist-bundle/resvg-bg.wasm');
       cpSync(resvgWasmSrc, resvgWasmDst);
       console.log(`[tsup] copied resvg-bg.wasm -> ${resvgWasmDst}`);
