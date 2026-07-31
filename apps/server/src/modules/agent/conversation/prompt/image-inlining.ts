@@ -13,6 +13,7 @@
  * attachment renderer only cares whether it got bytes back.
  */
 
+import { isVisionImageMime } from '../../../../utils/mime.js';
 import { resolveArtifactImageUrl } from '../../../artifact/utils.js';
 import { getCanvasStore } from '../../../storage/index.js';
 
@@ -46,9 +47,10 @@ function base64DecodedByteLength(b64: string): number {
  *
  * - `inline`: we have base64 bytes the LLM can see.
  * - `skipped`: we resolved the URL but the image was too large to
- *   inline (`reason: 'too_large'`) or the source wasn't an image
- *   (`reason: 'not_image'` / `'fetch_failed'`). The caller should
- *   surface a textual placeholder instead of dropping the part
+ *   inline (`reason: 'too_large'`), the source wasn't an image
+ *   (`reason: 'not_image'` / `'fetch_failed'`), or its media type is one
+ *   no vision provider accepts (`reason: 'unsupported_type'`). The caller
+ *   should surface a textual placeholder instead of dropping the part
  *   silently — the agent then knows to ask for a downsampled
  *   version or to inspect the node directly.
  */
@@ -56,8 +58,9 @@ export type ResolvedImage =
   | { kind: 'inline'; data: string; mimeType: string }
   | {
       kind: 'skipped';
-      reason: 'too_large' | 'not_image' | 'fetch_failed';
+      reason: 'too_large' | 'not_image' | 'fetch_failed' | 'unsupported_type';
       sizeBytes?: number;
+      mimeType?: string;
     };
 
 function parseDataUrl(url: string): { mimeType: string; data: string } | null {
@@ -94,12 +97,26 @@ export async function resolveImageUrl(
     if (!parsed) {
       return { kind: 'skipped', reason: 'not_image' };
     }
+    // Media type first: an unusable type stays unusable at any size, and
+    // the caller's recovery advice differs between the two outcomes.
+    if (!isVisionImageMime(parsed.mimeType)) {
+      return {
+        kind: 'skipped',
+        reason: 'unsupported_type',
+        mimeType: parsed.mimeType,
+      };
+    }
     // Apply the same byte cap we enforce on external fetches — a
     // multi-MB canvas artifact would otherwise sail through and tip
     // the request over the upstream LLM's body limit.
     const sizeBytes = base64DecodedByteLength(parsed.data);
     if (sizeBytes > MAX_INLINE_IMAGE_BYTES) {
-      return { kind: 'skipped', reason: 'too_large', sizeBytes };
+      return {
+        kind: 'skipped',
+        reason: 'too_large',
+        sizeBytes,
+        mimeType: parsed.mimeType,
+      };
     }
     return { kind: 'inline', data: parsed.data, mimeType: parsed.mimeType };
   }
@@ -114,6 +131,13 @@ export async function resolveImageUrl(
       const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.startsWith('image/')) {
         return { kind: 'skipped', reason: 'not_image' };
+      }
+      if (!isVisionImageMime(contentType)) {
+        return {
+          kind: 'skipped',
+          reason: 'unsupported_type',
+          mimeType: contentType.split(';')[0],
+        };
       }
 
       // Cap the inlined payload so a hostile / accidentally-huge URL
@@ -131,6 +155,7 @@ export async function resolveImageUrl(
           kind: 'skipped',
           reason: 'too_large',
           sizeBytes: declaredSize,
+          mimeType: contentType.split(';')[0],
         };
       }
 
@@ -144,6 +169,7 @@ export async function resolveImageUrl(
             kind: 'skipped',
             reason: 'too_large',
             sizeBytes: buffer.byteLength,
+            mimeType: contentType.split(';')[0],
           };
         }
         return {
@@ -164,7 +190,12 @@ export async function resolveImageUrl(
         if (total > MAX_INLINE_IMAGE_BYTES) {
           // Release the stream so the underlying connection can close.
           await reader.cancel().catch(() => {});
-          return { kind: 'skipped', reason: 'too_large', sizeBytes: total };
+          return {
+            kind: 'skipped',
+            reason: 'too_large',
+            sizeBytes: total,
+            mimeType: contentType.split(';')[0],
+          };
         }
         chunks.push(value);
       }

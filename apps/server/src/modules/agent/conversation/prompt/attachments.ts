@@ -33,6 +33,7 @@ import path from 'node:path';
 
 import { resolveImageUrl, MAX_INLINE_IMAGE_BYTES } from './image-inlining.js';
 import { escapeXmlAttr, escapeXmlText } from './node-element.js';
+import { isRasterizableImageMime } from '../../../../utils/mime.js';
 import { ARTIFACT_URL_REGEX } from '../../../artifact/utils.js';
 import { getCanvasStore } from '../../../storage/index.js';
 
@@ -110,13 +111,27 @@ export async function buildAttachmentParts(
             // Don't silently drop a too-large image — tell the agent
             // exactly why and how to recover. The placeholder carries the
             // origin node ids (in the `origin` attribute) so the model
-            // can call `snapshot_nodes` for a downscaled PNG.
+            // can call `snapshot_nodes` for a downscaled PNG — but only
+            // when resvg can actually decode the source bytes.
             const mb = resolved.sizeBytes
               ? (resolved.sizeBytes / (1024 * 1024)).toFixed(1)
               : '?';
+            const recovery =
+              originIds.length > 0 && isRasterizableImageMime(resolved.mimeType)
+                ? 'Call `snapshot_nodes` on the origin node id to get a downscaled PNG, or `read`'
+                : 'Ask the user for a smaller copy, or `read`';
             parts.push({
               type: 'text',
-              text: `<attachment type="image" name="${escapeXmlAttr(label)}"${originAttr}>\nomitted from vision (~${mb} MB exceeds the ${(MAX_INLINE_IMAGE_BYTES / (1024 * 1024)).toFixed(0)} MB inline cap). Call \`snapshot_nodes\` on the origin node id to get a downscaled PNG, or \`read\` the node's sidecar for its description.\n</attachment>`,
+              text: `<attachment type="image" name="${escapeXmlAttr(label)}"${originAttr}>\nomitted from vision (~${mb} MB exceeds the ${(MAX_INLINE_IMAGE_BYTES / (1024 * 1024)).toFixed(0)} MB inline cap). ${recovery} the node's sidecar for its description.\n</attachment>`,
+            });
+          } else if (resolved.reason === 'unsupported_type') {
+            // Sending these bytes would make the provider reject the whole
+            // request. `snapshot_nodes` cannot rescue them either — resvg
+            // decodes a strict subset of what models accept — so say plainly
+            // that the pixels are unavailable instead of inventing a fix.
+            parts.push({
+              type: 'text',
+              text: `<attachment type="image" name="${escapeXmlAttr(label)}"${originAttr}>\nomitted from vision (${escapeXmlText(resolved.mimeType ?? 'unknown media type')} is not accepted by vision models, and cannot be converted server-side). You cannot see this image. \`read\` the node's sidecar for any description or label, and otherwise tell the user the image must be re-saved as PNG or JPEG to be visible.\n</attachment>`,
             });
           }
         }

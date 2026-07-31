@@ -64,6 +64,7 @@ import {
 } from '@sediment/shared';
 import { getSketchRenderedSize } from '@sediment/shared/canvas-engine';
 
+import { RASTERIZABLE_IMAGE_EXT_MIME } from '../../utils/mime.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type {
@@ -382,16 +383,10 @@ function clusterFingerprint(
 // Used by `maybeResizeImageArtifact` to wrap raw image bytes inside an
 // SVG `<image>` element for resvg-driven downscaling, and by
 // `loadContextImage` to pick a base64 MIME for the backdrop embed.
-// resvg supports PNG / JPEG / GIF via `<image href="data:..." />`.
 // Anything outside this map (webp / svg / avif) is left at its original
 // size and is skipped for backdrop compositing — the sketch still
 // renders, just without that backdrop.
-const IMAGE_EXT_MIME: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-};
+const IMAGE_EXT_MIME = RASTERIZABLE_IMAGE_EXT_MIME;
 
 /**
  * Read a non-empty string value from a node's markdown sidecar

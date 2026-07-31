@@ -16,6 +16,7 @@ import {
   IMAGE_LABEL_PROMPT,
   buildFrameLabelPrompt,
 } from '../../prompt/resolve-label.js';
+import { isVisionImageMime } from '../../utils/mime.js';
 import { llmComplete } from '../agent/llm.js';
 import { resolveArtifactImageUrl } from '../artifact/utils.js';
 
@@ -73,6 +74,7 @@ export class ProviderManager {
       if (!match) return undefined;
 
       const [, mimeType, base64Data] = match;
+      if (!isVisionImageMime(mimeType)) return undefined;
       const piContext: Context = {
         systemPrompt: '',
         messages: [

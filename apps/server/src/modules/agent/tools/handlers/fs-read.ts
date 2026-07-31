@@ -35,7 +35,7 @@ import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
 import { normalizeRel, safeResolve } from './fs-sandbox.js';
 import { readSkillFile, resolveSkillPath } from '../../../../prompt/index.js';
-import { IMAGE_MIME_MAP } from '../../../../utils/mime.js';
+import { IMAGE_MIME_MAP, isVisionImageMime } from '../../../../utils/mime.js';
 import { parseFrontmatter } from '../../../storage/frontmatter.js';
 import { getCanvasStore } from '../../../storage/index.js';
 import { readCanvasMemory, readWorkspaceMemory } from '../../memory/index.js';
@@ -220,10 +220,15 @@ export async function handleRead(
   }
 
   // Raster image artifacts are returned inline as vision content so
-  // vision-capable models can actually see them. SVG is excluded — it
-  // is XML text and the regular text path serves the model better.
+  // vision-capable models can actually see them. Types no vision model
+  // accepts (SVG, BMP, AVIF) fall through: SVG is XML text that the
+  // regular text path serves better, and the rest are refused as binary
+  // rather than triggering a provider-side rejection of the whole request.
   const ext = path.extname(abs).toLowerCase();
-  const imageMime = ext === '.svg' ? undefined : IMAGE_MIME_MAP[ext];
+  const candidateMime = IMAGE_MIME_MAP[ext];
+  const imageMime = isVisionImageMime(candidateMime)
+    ? candidateMime
+    : undefined;
   if (imageMime) {
     return {
       content: [

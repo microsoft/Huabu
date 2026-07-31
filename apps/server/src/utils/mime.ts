@@ -17,7 +17,61 @@ export const IMAGE_MIME_MAP: Record<string, string> = {
   '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
   '.bmp': 'image/bmp',
+  '.avif': 'image/avif',
 };
+
+// ---------------------------------------------------------------------------
+// Vision (LLM) support
+// ---------------------------------------------------------------------------
+
+/**
+ * Image MIME types every vision-capable provider we target accepts.
+ *
+ * Anything outside this set (`image/svg+xml`, `image/bmp`, `image/avif`, …)
+ * must never reach a model: the provider rejects the whole request with
+ * `image media type not supported`, losing the user's entire turn rather
+ * than just the one unusable image.
+ */
+export const VISION_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+]);
+
+/** Whether image bytes of this MIME type can be sent as vision content. */
+export function isVisionImageMime(mime: string | null | undefined): boolean {
+  if (!mime) return false;
+  return VISION_IMAGE_MIME_TYPES.has(mime.split(';')[0].trim().toLowerCase());
+}
+
+// ---------------------------------------------------------------------------
+// resvg rasterization support
+// ---------------------------------------------------------------------------
+
+/**
+ * Image extensions resvg can decode from an `<image href="data:...">` embed,
+ * i.e. the source types `snapshot_nodes` can re-render or downscale.
+ *
+ * A strict subset of {@link VISION_IMAGE_MIME_TYPES}: anything a model
+ * refuses is also something snapshotting cannot rescue, so `snapshot_nodes`
+ * must never be offered as a recovery path for those.
+ */
+export const RASTERIZABLE_IMAGE_EXT_MIME: Readonly<Record<string, string>> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+};
+
+/** Whether `snapshot_nodes` can rasterize source bytes of this MIME type. */
+export function isRasterizableImageMime(
+  mime: string | null | undefined,
+): boolean {
+  if (!mime) return false;
+  const normalized = mime.split(';')[0].trim().toLowerCase();
+  return Object.values(RASTERIZABLE_IMAGE_EXT_MIME).includes(normalized);
+}
 
 // ---------------------------------------------------------------------------
 // Extension → MIME (all media – images + documents + video)
