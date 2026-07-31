@@ -14,6 +14,7 @@ import { getAgentTeamRegistry } from '@agenetes/agentlet-host';
 import { piDriverFactory, type PiTurnCtx } from '@agenetes/pi-driver';
 
 import { type AgentHandle } from './handle.js';
+import { HISTORY_REPLAY_BUDGET } from './history-replay.js';
 import { huabuPiDriverPorts } from './pi-driver.js';
 import { getExternalAgentRuntimeConfig } from '../acp/runtime-config.js';
 
@@ -61,6 +62,14 @@ export const agenetes: Agenetes = mountAgenetes({
   threadStore: new FileThreadStore(),
   eventLogStore: new FileEventLogStore(),
   turnStore: new FileTurnStore(),
+  // Last-resort guard only: the built-in driver already fits its replay to
+  // HISTORY_REPLAY_BUDGET, so this bounds the ACP text projection, which has
+  // no host materializer of its own.
+  autoRecoverPolicy: {
+    enabled: true,
+    safeHistoryLoadLimit: HISTORY_REPLAY_BUDGET,
+    onThresholdExceeded: 'deny',
+  },
 });
 
 export { ACP_CAPABILITIES };

@@ -232,22 +232,37 @@ export async function rebuildContextMessages(
 ): Promise<PiMessage[]> {
   const out: PiMessage[] = [];
   for (const turn of turns) {
-    const envelope = chatEnvelopeFromSubmission(turn.request);
-    if (envelope) {
-      // History turns render WITHOUT their neighbourhood: it was a
-      // point-in-time snapshot only relevant while that turn was live.
-      // Re-emitting a stale copy per historical turn would bloat the
-      // context and, because it is baked into a committed message, would
-      // never be reusable by the provider's prefix cache. The live turn
-      // re-injects a fresh neighbourhood as the prompt tail instead.
-      const { messages } = await renderEnvelopeMessages(envelope, {
-        ...opts,
-        includeNeighbourhood: false,
-      });
-      out.push(...messages);
-    }
-    out.push(...foldedTranscriptToPiMessages(turn));
+    out.push(...(await rebuildTurnMessages(turn, opts)));
   }
+  return out;
+}
+
+/**
+ * Rebuild one turn's slice of the pi-ai message array. Split out from
+ * {@link rebuildContextMessages} so a caller that has to fit history into a
+ * budget can keep or drop whole turns — a partial turn would leave a
+ * `toolCall` without its `toolResult`, which the provider rejects.
+ */
+export async function rebuildTurnMessages(
+  turn: AgentTurn,
+  opts: { canvasId: string | null },
+): Promise<PiMessage[]> {
+  const out: PiMessage[] = [];
+  const envelope = chatEnvelopeFromSubmission(turn.request);
+  if (envelope) {
+    // History turns render WITHOUT their neighbourhood: it was a
+    // point-in-time snapshot only relevant while that turn was live.
+    // Re-emitting a stale copy per historical turn would bloat the
+    // context and, because it is baked into a committed message, would
+    // never be reusable by the provider's prefix cache. The live turn
+    // re-injects a fresh neighbourhood as the prompt tail instead.
+    const { messages } = await renderEnvelopeMessages(envelope, {
+      ...opts,
+      includeNeighbourhood: false,
+    });
+    out.push(...messages);
+  }
+  out.push(...foldedTranscriptToPiMessages(turn));
   return out;
 }
 
