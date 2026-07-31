@@ -546,10 +546,23 @@ interface NodeConnectionHandlesProps {
   selected: boolean;
   /** True for touch / pen input; otherwise we treat as mouse. */
   isNotMouse: boolean;
+  /**
+   * Whether the node is currently being dragged. A move gesture keeps the
+   * pointer inside the node (and the node selected), so hover/selection
+   * alone would leave the ports lit for the whole drag — floating over the
+   * drop placeholder and inviting a connection the gesture cannot start.
+   */
+  dragging: boolean;
 }
 
 export const NodeConnectionHandles = memo(
-  ({ nodeId, hovered, selected, isNotMouse }: NodeConnectionHandlesProps) => {
+  ({
+    nodeId,
+    hovered,
+    selected,
+    isNotMouse,
+    dragging,
+  }: NodeConnectionHandlesProps) => {
     const { t } = useTranslation();
     const node = useInternalNode(nodeId);
     // Only the pinned *side* matters here, and only when the pending
@@ -580,7 +593,7 @@ export const NodeConnectionHandles = memo(
     // port the pointer is actually aiming at grows and reveals the `+`,
     // so the idle state stays four quiet dots instead of four buttons.
     const [hotSide, setHotSide] = useState<Position | null>(null);
-    const exposed = isNotMouse ? selected : hovered;
+    const exposed = !dragging && (isNotMouse ? selected : hovered);
     const hotHandleSize = isNotMouse ? 22 : 20;
 
     const pinnedPosition = pinnedSide ? SIDE_POSITION[pinnedSide] : null;
@@ -882,13 +895,11 @@ export const NodeConnectionHandles = memo(
                 'z-20 transition-opacity focus-within:opacity-100',
                 isPinned
                   ? 'opacity-100'
-                  : isNotMouse
-                    ? selected
+                  : !exposed
+                    ? 'pointer-events-none opacity-0'
+                    : isNotMouse
                       ? 'opacity-40 active:opacity-100'
-                      : 'pointer-events-none opacity-0'
-                    : hovered
-                      ? 'opacity-100'
-                      : 'pointer-events-none opacity-0',
+                      : 'opacity-100',
               )}
             >
               {/*
