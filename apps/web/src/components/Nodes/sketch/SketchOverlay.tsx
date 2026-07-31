@@ -27,12 +27,12 @@ import {
   DEFAULT_STROKE_COLOR,
   DEFAULT_STROKE_SIZE,
 } from './sketchPath';
+import { shouldCommitSketchStroke } from './sketchStrokeCommit';
 import {
   getStylusRawTouchOverlayStyle,
   isSupersededByStylusRawTouch,
   useStylusRawTouch,
 } from './stylusRawTouch';
-import { shouldCommitSketchStroke } from './sketchStrokeCommit';
 
 import type { SketchPointer } from './stylusRawTouch';
 import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
