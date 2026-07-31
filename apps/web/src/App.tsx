@@ -195,7 +195,7 @@ function WorkspaceGuardLayout() {
   const isReady = useWorkspaceStore((s) => s.isReady);
 
   if (initialising) return <WorkspaceLoadingScreen />;
-  if (!isReady) return <WorkspaceSetupPage />;
+  if (!isReady) return <Navigate to="/setup" replace />;
   return <Outlet />;
 }
 

@@ -13,6 +13,7 @@
  *     envelope for records written before `rendered` existed.
  */
 
+import { clampMaxTokensToContext } from '@earendil-works/pi-ai/api/simple-options';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -31,7 +32,6 @@ import type {
   FoldedMessage,
 } from '@agenetes/protocol';
 import type { Api, Context, Message, Model } from '@earendil-works/pi-ai';
-import { clampMaxTokensToContext } from '@earendil-works/pi-ai/api/simple-options';
 import type { ChatAttachment } from '@sediment/shared';
 
 /** Build an {@link AgentTurn} from an envelope + folded transcript. */

@@ -50,6 +50,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
 import { getStroke } from 'perfect-freehand';
@@ -63,6 +64,7 @@ import {
 } from '@sediment/shared';
 import { getSketchRenderedSize } from '@sediment/shared/canvas-engine';
 
+import { RASTERIZABLE_IMAGE_EXT_MIME } from '../../utils/mime.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type {
@@ -211,6 +213,19 @@ function nodeBoxSize(n: CanvasNode): { width: number; height: number } {
 // snapshot calls (e.g. agent snapshotting 3 sketches in parallel) all
 // await the same init.
 let wasmInitPromise: Promise<void> | null = null;
+
+export function bundledResvgWasmPath(
+  moduleUrl: string | URL,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const windows = platform === 'win32';
+  const pathImpl = windows ? path.win32 : path.posix;
+  return pathImpl.join(
+    pathImpl.dirname(fileURLToPath(moduleUrl, { windows })),
+    'resvg-bg.wasm',
+  );
+}
+
 async function ensureResvgReady(): Promise<void> {
   if (wasmInitPromise) return wasmInitPromise;
   wasmInitPromise = (async () => {
@@ -224,10 +239,7 @@ async function ensureResvgReady(): Promise<void> {
       wasmBytes = await readFile(wasmPath);
     } catch {
       // Bundle path
-      const wasmPath = path.join(
-        path.dirname(decodeURIComponent(new URL(import.meta.url).pathname)),
-        'resvg-bg.wasm',
-      );
+      const wasmPath = bundledResvgWasmPath(import.meta.url);
       wasmBytes = await readFile(wasmPath);
     }
     await initWasm(wasmBytes);
@@ -371,16 +383,10 @@ function clusterFingerprint(
 // Used by `maybeResizeImageArtifact` to wrap raw image bytes inside an
 // SVG `<image>` element for resvg-driven downscaling, and by
 // `loadContextImage` to pick a base64 MIME for the backdrop embed.
-// resvg supports PNG / JPEG / GIF via `<image href="data:..." />`.
 // Anything outside this map (webp / svg / avif) is left at its original
 // size and is skipped for backdrop compositing — the sketch still
 // renders, just without that backdrop.
-const IMAGE_EXT_MIME: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-};
+const IMAGE_EXT_MIME = RASTERIZABLE_IMAGE_EXT_MIME;
 
 /**
  * Read a non-empty string value from a node's markdown sidecar

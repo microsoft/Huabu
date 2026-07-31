@@ -60,7 +60,10 @@ export async function resolveArtifactImageUrl(
   try {
     const buffer = await readFile(filePath);
     const ext = path.extname(filePath).toLowerCase();
-    const mime = IMAGE_MIME_MAP[ext] ?? 'image/png';
+    // Never guess `image/png` for an unknown extension: callers forward this
+    // MIME to the LLM, which sniffs the real bytes and rejects the whole
+    // request when the declared type doesn't match.
+    const mime = IMAGE_MIME_MAP[ext] ?? 'application/octet-stream';
     return `data:${mime};base64,${buffer.toString('base64')}`;
   } catch (err) {
     log.warn({ err, filePath }, 'Failed to read artifact');
