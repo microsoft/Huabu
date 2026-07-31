@@ -229,4 +229,46 @@ describe('migrateLegacyAgenetesThreads', () => {
       state: { driverState: { initialPreambleDelivered: false } },
     });
   });
+
+  it('rebinds a shared external thread instead of writing to its previous host path', () => {
+    const history = join(tmp, 'Canvas', '.history');
+    const staleHistory = join(tmp, 'previous-host', 'Canvas', '.history');
+    mkdirSync(history, { recursive: true });
+    const filePath = join(history, 'threads.json');
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        schemaVersion: 'agenetes-v2',
+        records: {
+          external: {
+            driverSchemaVersion: 1,
+            spec: {
+              kind: 'external',
+              workloadType: 'Deployment',
+              namespace: {
+                name: 'canvas-1',
+                storage: { root: staleHistory },
+              },
+              threadId: 'external',
+              spec: {
+                binding: { alias: 'Copilot', profileId: 'copilot' },
+              },
+            },
+            state: {
+              driverState: { initialPreambleDelivered: false },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(repairExternalAgentPreambles(tmp, 'Use Huabu RFS.')).toBe(1);
+    expect(existsSync(staleHistory)).toBe(false);
+    const persisted = JSON.parse(readFileSync(filePath, 'utf-8')) as {
+      records: { external: { spec: { namespace: unknown } } };
+    };
+    expect(persisted.records.external.spec.namespace).toEqual({
+      name: 'canvas-1',
+    });
+  });
 });
