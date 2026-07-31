@@ -73,6 +73,7 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 6. **Barrel exports** (`index.ts`) provide clean import paths in `handler/`, `utils/io/`, `utils/node/`.
 7. **Design tokens only** — never raw hex / Tailwind palette / ShadCN aliases. The token declarations in [`apps/web/src/index.css`](../../apps/web/src/index.css) are authoritative; reusable UI contracts live in [`apps/web/src/components/Common/`](../../apps/web/src/components/Common/).
 8. **Development playgrounds** belong in `pages/playground/`, use route-level lazy imports, are registered only when `import.meta.env.DEV` is true, and live outside `WorkspaceGuardLayout` so visual testing does not require an active workspace.
+9. **Keep the first-screen graph small** — everything statically reachable from `main.tsx` is evaluated before React's first paint, and on the desktop that is the dominant cold-start cost. The canvas route is lazy, the editor toolchain is reached only through dynamic imports, and shared vendor libraries have explicit `manualChunks` homes. See [desktop-startup.md § 3](./desktop-startup.md#3-the-first-screen-bundle-boundary) before adding a static import to anything the app shell reaches.
 
 ### Toast duration contract
 

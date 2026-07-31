@@ -158,6 +158,14 @@ export default defineConfig(({ mode }) => {
           // by library gives long-lived, independently-cached vendor chunks
           // and lets the browser download them in parallel.
           manualChunks(id) {
+            // Vite's dynamic-import preload helper is a virtual module, so it
+            // falls outside the `node_modules` guard below. Left unassigned,
+            // Rollup parks it in whichever chunk imports it first — in
+            // practice `vendor-editor`, and that single edge was enough to
+            // make the 2.3 MB editor bundle a static dependency of the entry.
+            // `vendor-react` is loaded by the app entry regardless, so it is
+            // the cheapest place to put it.
+            if (id.includes('vite/preload-helper')) return 'vendor-react';
             if (!id.includes('node_modules')) return undefined;
             // React runtime + router: changes rarely, shared by everything.
             if (
@@ -166,6 +174,30 @@ export default defineConfig(({ mode }) => {
               )
             ) {
               return 'vendor-react';
+            }
+            // Markdown parsing/serialisation (unified / remark / micromark /
+            // mdast / hast and their leaf helpers).
+            //
+            // This and `vendor-ui` below exist to keep small *shared*
+            // libraries out of `vendor-editor`. A module with no explicit
+            // home lands in a chunk its importers have in common, which for
+            // anything the editor also uses means `vendor-editor` — and that
+            // made the 2.4 MB editor bundle a static dependency of the entry
+            // for the sake of `clsx` and a markdown parser.
+            if (
+              /node_modules\/(unified|remark[^/]*|micromark[^/]*|mdast[^/]*|unist[^/]*|vfile[^/]*|hast[^/]*|character-entities[^/]*|decode-named-character-reference|stringify-entities|property-information|space-separated-tokens|comma-separated-tokens|html-void-elements|web-namespaces|markdown-table|longest-streak|zwitch|ccount|devlop|trim-lines)\//.test(
+                id,
+              )
+            ) {
+              return 'vendor-markdown';
+            }
+            // Positioning + class-name helpers, used by the app shell and by
+            // the editor's own popovers alike.
+            if (
+              id.includes('@floating-ui') ||
+              /node_modules\/(clsx|tailwind-merge)\//.test(id)
+            ) {
+              return 'vendor-ui';
             }
             // Editor stack: Milkdown/ProseMirror and CodeMirror/Lezer are
             // interdependent (Milkdown's code-block plugin embeds CodeMirror),

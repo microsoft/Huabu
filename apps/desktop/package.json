@@ -6,7 +6,7 @@
   "author": "Huabu Team",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/build-splash.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run src",
     "icons:build": "node scripts/build-icons.mjs",
@@ -24,6 +24,7 @@
     "@types/node": "^22.15.0",
     "electron": "43.1.1",
     "electron-builder": "^26.0.0",
+    "lottie-web": "^5.13.0",
     "png2icons": "^2.0.1",
     "sharp": "^0.34.5",
     "typescript": "^6.0.3",

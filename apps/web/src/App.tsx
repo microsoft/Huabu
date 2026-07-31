@@ -1,5 +1,13 @@
 import { FloatingDelayGroup } from '@floating-ui/react';
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  lazy,
+  Suspense,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   createBrowserRouter,
@@ -17,11 +25,19 @@ import { WindowChrome } from './components/Shell/WindowChrome';
 import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
 import { useInputModeListener } from './hooks/useInputMode';
 import CanvasListPage from './pages/CanvasListPage';
-import CanvasPage from './pages/CanvasPage/CanvasPage.tsx';
 import { WorkspaceLoadingScreen } from './pages/WorkspaceLoadingScreen';
 import WorkspaceSetupPage from './pages/WorkspaceSetupPage';
 import { drainPendingSaves } from './store/canvasStore.ts';
 import { useWorkspaceStore } from './store/workspaceStore';
+
+/**
+ * Loaded on demand so the editor, PDF and KaTeX vendor chunks — roughly 3 MB
+ * of JavaScript that only the canvas needs — stay out of the entry graph.
+ * Everything Vite reaches statically from `main.tsx` ends up as a
+ * `modulepreload` in `index.html` and must be parsed before the first React
+ * paint, which is the single largest contributor to desktop cold-start time.
+ */
+const CanvasPage = lazy(() => import('./pages/CanvasPage/CanvasPage.tsx'));
 
 const playgroundRoutes = import.meta.env.DEV
   ? [
@@ -238,7 +254,20 @@ export default function App() {
               children: [
                 { path: '/', element: <WorkspaceLanding /> },
                 { path: '/spaces', element: <CanvasListPage /> },
-                { path: '/canvas/:canvasId', element: <CanvasPage /> },
+                {
+                  path: '/canvas/:canvasId',
+                  element: (
+                    // `React.lazy` rather than the router's own `lazy` option:
+                    // a route element that is always defined keeps the router
+                    // synchronous, so the title bar and the rest of
+                    // `RootLayout` stay mounted while the chunk arrives
+                    // instead of the whole tree waiting on route
+                    // initialisation.
+                    <Suspense fallback={<WorkspaceLoadingScreen />}>
+                      <CanvasPage />
+                    </Suspense>
+                  ),
+                },
                 { path: '*', element: <Navigate to="/" replace /> },
               ],
             },

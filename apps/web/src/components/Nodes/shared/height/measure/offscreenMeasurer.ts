@@ -28,7 +28,6 @@
 import { getHeightRefWidth } from '@sediment/shared/canvas-engine';
 
 import { resolveArtifactUrl } from '@/api/artifact';
-import { createMilkdown } from '@/components/Milkdown/createMilkdown';
 import {
   NOTE_CONTENT_HOST_CLASS,
   readNoteIntrinsicHeight,
@@ -112,6 +111,15 @@ async function buildHost(): Promise<Host> {
   container.appendChild(content);
   document.body.appendChild(container);
 
+  // Imported here rather than at module scope: `canvasStore` reaches this
+  // file, and the app shell reaches `canvasStore`, so a static edge would
+  // pull the whole editor toolchain (Milkdown + ProseMirror + CodeMirror +
+  // KaTeX, ~2.7 MB) into the entry chunk and in front of the first paint.
+  // `buildHost` is already async and only runs once a measurement is
+  // actually requested, which is inside a canvas — where the editor chunk
+  // is loaded anyway.
+  const { createMilkdown } =
+    await import('@/components/Milkdown/createMilkdown');
   const instance = await createMilkdown({
     root: content,
     initialMarkdown: '',
