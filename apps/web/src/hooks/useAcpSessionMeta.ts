@@ -115,6 +115,7 @@ const EMPTY_META: AcpSessionMetaSnapshot = {
   availableModels: [],
   currentModelId: null,
   configOptions: [],
+  selections: {},
   sessionInfo: null,
   usage: null,
   updatedAt: 0,

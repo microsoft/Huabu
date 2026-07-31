@@ -81,6 +81,7 @@ const meta: AcpSessionMetaSnapshot = {
       options: modeOptions,
     },
   ],
+  selections: {},
   sessionInfo: null,
   usage: null,
   updatedAt: 0,

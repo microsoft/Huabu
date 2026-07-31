@@ -416,6 +416,16 @@ export interface AcpSessionMetaSnapshot {
   currentModelId: string | null;
   /** Free-form config knobs (most recent snapshot, replace-semantics). */
   configOptions: AcpSessionConfigOption[];
+  /**
+   * Explicit user selections for this thread, keyed by config-option id
+   * (`mode` / `model` / agent-defined ids such as `allow_all`).
+   *
+   * Takes precedence over `currentModeId` / `currentModelId` /
+   * `configOptions[].currentValue` when rendering: those carry the
+   * AGENT's view, which for agents with process-global settings is the
+   * value last picked in any session rather than in this one.
+   */
+  selections: Record<string, string | boolean>;
   /** Human-readable title + activity timestamp pushed by the agent. */
   sessionInfo: { title: string | null; updatedAt: string | null } | null;
   /** Token / cost budget snapshot. */
@@ -564,6 +574,7 @@ export const acpSessionMetaSnapshotSchema = z.object({
   configOptions: z.array(
     ZAcpSessionConfigOption as unknown as z.ZodType<AcpSessionConfigOption>,
   ),
+  selections: z.record(z.string(), z.union([z.string(), z.boolean()])),
   sessionInfo: z
     .object({
       title: z.string().nullable(),
