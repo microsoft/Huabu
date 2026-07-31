@@ -32,7 +32,7 @@ import { getCanvasStore } from '../../../storage/index.js';
 export const MAX_INLINE_IMAGE_BYTES = 4 * 1024 * 1024;
 
 /** Decoded byte size of a base64 string (no allocation). */
-export function base64DecodedByteLength(b64: string): number {
+function base64DecodedByteLength(b64: string): number {
   const len = b64.length;
   if (len === 0) return 0;
   let padding = 0;

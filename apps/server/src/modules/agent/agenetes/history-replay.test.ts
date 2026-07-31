@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  HISTORY_REPLAY_BUDGET,
+  estimateReplayUnits,
+  HISTORY_LOAD_SANITY_LIMIT,
   materializeHuabuHistory,
 } from './history-replay.js';
-import { MAX_INLINE_IMAGE_BYTES } from '../conversation/prompt/image-inlining.js';
 
 import type { AgentTurn } from '@agenetes/protocol';
 import type { Message } from '@earendil-works/pi-ai';
@@ -60,11 +60,9 @@ function replayGroups(groups: Message[][]): void {
 }
 
 describe('materializeHuabuHistory', () => {
-  it('re-inlines recent images and degrades older ones to a placeholder', async () => {
-    // The byte budget fits two full-size images; the newest one claims its
-    // share first, so the older one no longer fits.
-    const older = base64Body(MAX_INLINE_IMAGE_BYTES * 1.5, 'A');
-    const newer = base64Body(MAX_INLINE_IMAGE_BYTES * 1.5, 'B');
+  it('replays every turn in order, images included', async () => {
+    const older = base64Body(6 * 1024 * 1024, 'A');
+    const newer = base64Body(6 * 1024 * 1024, 'B');
     replayGroups([[imageMessage(older)], [imageMessage(newer)]]);
 
     const { messages } = await materializeHuabuHistory(
@@ -72,34 +70,20 @@ describe('materializeHuabuHistory', () => {
       { canvasId: 'c1' },
     );
 
-    const parts = contentParts(messages);
-    const images = parts.filter((part) => part.type === 'image');
-    expect(images).toHaveLength(1);
-    expect(images[0]?.data).toBe(newer);
-    expect(
-      parts.some((part) => part.text?.includes('Earlier image omitted')),
-    ).toBe(true);
-  });
-
-  it('prices an image as a flat cost, not as the length of its base64 body', async () => {
-    replayGroups([[imageMessage(base64Body(MAX_INLINE_IMAGE_BYTES, 'A'))]]);
-
-    const { estimatedSize } = await materializeHuabuHistory(
-      { mode: 'recover', turns: [durableTurn('a')] },
-      { canvasId: 'c1' },
+    const images = contentParts(messages).filter(
+      (part) => part.type === 'image',
     );
-
-    expect(estimatedSize).toBeLessThan(HISTORY_REPLAY_BUDGET);
+    expect(images.map((part) => part.data)).toEqual([older, newer]);
   });
 
-  it('drops whole oldest turns over budget and tells the model', async () => {
+  it('keeps a long history whole rather than trimming it', async () => {
     replayGroups([
       [textMessage(`first ${'x'.repeat(150_000)}`)],
       [textMessage(`second ${'y'.repeat(150_000)}`)],
       [textMessage(`third ${'z'.repeat(150_000)}`)],
     ]);
 
-    const { messages, estimatedSize } = await materializeHuabuHistory(
+    const { messages } = await materializeHuabuHistory(
       {
         mode: 'recover',
         turns: [durableTurn('a'), durableTurn('b'), durableTurn('c')],
@@ -107,20 +91,16 @@ describe('materializeHuabuHistory', () => {
       { canvasId: null },
     );
 
-    expect(messages).toHaveLength(2);
-    expect(messages[0]?.content).toContain('2 oldest turn(s)');
-    expect(messages[1]?.content).toContain('third');
-    expect(estimatedSize).toBeLessThan(HISTORY_REPLAY_BUDGET);
+    expect(messages).toHaveLength(3);
+    expect(messages[0]?.content).toContain('first');
+    expect(messages[2]?.content).toContain('third');
   });
 
-  it('keeps the newest turn even when it alone exceeds the budget', async () => {
-    replayGroups([[textMessage('q'.repeat(600_000))]]);
+  it('prices an image as a flat cost, not as the length of its base64 body', () => {
+    // Image bytes alone must never trip the sanity limit, or a thread with
+    // a few attachments would be denied recovery outright.
+    const huge = imageMessage(base64Body(6 * 1024 * 1024, 'A'));
 
-    const { messages } = await materializeHuabuHistory(
-      { mode: 'recover', turns: [durableTurn('a')] },
-      { canvasId: null },
-    );
-
-    expect(messages).toHaveLength(1);
+    expect(estimateReplayUnits([huge])).toBeLessThan(HISTORY_LOAD_SANITY_LIMIT);
   });
 });

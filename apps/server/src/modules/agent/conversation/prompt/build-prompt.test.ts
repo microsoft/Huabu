@@ -8,8 +8,9 @@
  *     (`<invoked_skills>` → `<selected_nodes>` → `<canvas_neighbourhood>`);
  *   - the user's own words always come LAST, wrapped in `<user_request>`;
  *   - the plain-text fast path skips the XML scaffolding entirely;
- *   - `rebuildContextMessages` re-derives the user message from the
- *     stored envelope WITHOUT duplicating it against the transcript.
+ *   - `rebuildContextMessages` replays the canonical `rendered` inputs a
+ *     turn was submitted with, and only re-derives from the stored
+ *     envelope for records written before `rendered` existed.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -24,7 +25,11 @@ import { buildAgentNodePreview } from '../../node-ref.js';
 import type { NodeNeighbourhoodContext } from '../../../canvas/node-neighbourhood.js';
 import type { AgentNodeRef } from '../../node-ref.js';
 import type { ChatEnvelope, ResolvedSkill } from '../envelope.js';
-import type { AgentTurn, FoldedMessage } from '@agenetes/protocol';
+import type {
+  AgentInputPart,
+  AgentTurn,
+  FoldedMessage,
+} from '@agenetes/protocol';
 import type { Message } from '@earendil-works/pi-ai';
 import type { ChatAttachment } from '@sediment/shared';
 
@@ -254,7 +259,7 @@ describe('rebuildContextMessages', () => {
     expect(out[1].role).toBe('assistant');
   });
 
-  it('omits the neighbourhood from rebuilt history (it only rides the live turn)', async () => {
+  it('omits the neighbourhood when replaying a record written before `rendered`', async () => {
     const neighbourhood: NodeNeighbourhoodContext = {
       layers: [
         {
@@ -285,8 +290,9 @@ describe('rebuildContextMessages', () => {
       '<canvas_neighbourhood>',
     );
 
-    // …but once the same turn is replayed as history, it is stripped so
-    // the message prefix stays byte-stable / cache-friendly.
+    // …but a legacy turn with no `rendered` has to be re-rendered against
+    // today's canvas, so its point-in-time neighbourhood is dropped rather
+    // than silently replaced with a newer one.
     const out = await rebuildContextMessages(
       [makeTurn(envelope, [])],
       NO_CANVAS,
@@ -294,6 +300,77 @@ describe('rebuildContextMessages', () => {
     expect(textOf(out[0].content)).not.toContain('<canvas_neighbourhood>');
     // The user's own words survive the rebuild.
     expect(textOf(out[0].content)).toContain('summarize');
+  });
+
+  it('replays the canonical rendered inputs verbatim, images included', async () => {
+    const parts: AgentInputPart[] = [
+      {
+        type: 'text',
+        text: '<canvas_neighbourhood>\nstale\n</canvas_neighbourhood>',
+      },
+      { type: 'image', data: 'AAAA', mimeType: 'image/png' },
+      { type: 'text', text: '<user_request>\nlook\n</user_request>' },
+    ];
+    const turn: AgentTurn = {
+      request: createChatSubmission(makeEnvelope({ text: 'look' }), [
+        { type: 'parts', parts },
+      ]),
+      transcript: [],
+    };
+
+    const out = await rebuildContextMessages([turn], NO_CANVAS);
+
+    // Byte-identical to what the model saw: the image stays a native image
+    // part, and nothing is re-rendered against the current canvas.
+    expect(out).toHaveLength(1);
+    expect(out[0].content).toEqual(parts);
+  });
+
+  it('replays a multi-round turn as assistant → toolResult → assistant', async () => {
+    const out = await rebuildContextMessages(
+      [
+        makeTurn(makeEnvelope({ text: 'go' }), [
+          {
+            type: 'tool_call',
+            data: { toolCallId: 't1', title: 'read', rawOutput: 'contents' },
+          },
+          { type: 'text', data: { content: 'here is the answer' } },
+        ]),
+      ],
+      NO_CANVAS,
+    );
+
+    expect(out.map((m) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'toolResult',
+      'assistant',
+    ]);
+    // The final prose must not be folded back into the round that called
+    // the tool, or the model reads the answer as preceding its own result.
+    expect(textOf(out[3].content)).toContain('here is the answer');
+  });
+
+  it('replays a failed tool call as an error result', async () => {
+    const out = await rebuildContextMessages(
+      [
+        makeTurn(makeEnvelope({ text: 'go' }), [
+          {
+            type: 'tool_call',
+            data: {
+              toolCallId: 't1',
+              title: 'write',
+              status: 'failed',
+              rawOutput: 'permission denied',
+            },
+          },
+        ]),
+      ],
+      NO_CANVAS,
+    );
+
+    const result = out.find((m) => m.role === 'toolResult');
+    expect((result as unknown as { isError: boolean }).isError).toBe(true);
   });
 
   it('skips empty turns but still appends their transcript', async () => {
