@@ -203,3 +203,99 @@ describe('describeStructuredDropZone context', () => {
     });
   });
 });
+
+describe('describeStructuredDropZone reflow', () => {
+  it('projects the simulated grid layout onto the existing children', () => {
+    const nodes = [
+      makeFrame('grid'),
+      makeChild('dragged', 0, { x: 16, y: 16 }),
+      makeChild('same-row', 0, { x: 16, y: 72 }, 1),
+      makeChild('next-row', 1, { x: 112, y: 128 }, 2),
+    ];
+    const movedDragged = { ...dragged, x: 112, y: 72 };
+
+    const zone = describeStructuredDropZone(
+      nodes,
+      'frame',
+      { x: 152, y: 80 },
+      'grid',
+      2,
+      movedDragged,
+    );
+
+    const simulated = nodes.map((node) =>
+      node.id === 'dragged'
+        ? {
+            ...node,
+            position: { x: movedDragged.x, y: movedDragged.y },
+            data: { ...node.data, frameSlot: 1, frameRow: 1 },
+          }
+        : node,
+    );
+    const solved = applyGridLayout(simulated, 'frame', 2);
+
+    expect(zone?.reflow.map((entry) => entry.id).sort()).toEqual([
+      'next-row',
+      'same-row',
+    ]);
+    for (const entry of zone?.reflow ?? []) {
+      expect({ x: entry.x, y: entry.y }).toEqual(
+        solved?.childPositions.get(entry.id),
+      );
+    }
+  });
+
+  it('projects the simulated column layout and never includes the dragged node', () => {
+    const nodes = [
+      makeFrame('column'),
+      makeChild('dragged', 1, { x: 112, y: 16 }),
+      makeChild('column-peer', 0, { x: 16, y: 16 }),
+      makeChild('column-tail', 0, { x: 16, y: 72 }),
+    ];
+
+    const zone = describeStructuredDropZone(
+      nodes,
+      'frame',
+      { x: 32, y: 30 },
+      'column',
+      2,
+      { ...dragged, x: 16, y: 16 },
+    );
+
+    expect(zone?.reflow.map((entry) => entry.id)).not.toContain('dragged');
+    expect(zone?.reflow.map((entry) => entry.id).sort()).toEqual([
+      'column-peer',
+      'column-tail',
+    ]);
+    // Dropping ahead of the two peers pushes them down the column.
+    const tail = zone?.reflow.find((entry) => entry.id === 'column-tail');
+    expect(tail?.y).toBeGreaterThan(72);
+  });
+
+  it('omits children of other frames', () => {
+    const nodes = [
+      makeFrame('column'),
+      makeChild('dragged', 0, { x: 16, y: 16 }),
+      makeChild('peer', 0, { x: 16, y: 72 }),
+      {
+        id: 'outsider',
+        type: 'text',
+        position: { x: 400, y: 400 },
+        data: {},
+        style: { width: 80, height: 40 },
+        measured: { width: 80, height: 40 },
+      } as Node,
+    ];
+
+    const zone = describeStructuredDropZone(
+      nodes,
+      'frame',
+      { x: 32, y: 30 },
+      'column',
+      2,
+      dragged,
+    );
+
+    expect(zone?.reflow.map((entry) => entry.id)).toEqual(['peer']);
+  });
+});

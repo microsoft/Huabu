@@ -33,6 +33,7 @@ import {
 } from '@sediment/shared/canvas-engine';
 
 import { resolveArtifactUrl } from '@/api/artifact';
+import { cn } from '@/components/Common/cn';
 import { Loading } from '@/components/Common/Loading';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import { CanvasRefNode } from '@/components/Nodes/canvasRef/CanvasRefNode';
@@ -421,6 +422,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
   const frameFitPreviews = useGesturePreviewStore(
     (state) => state.frameFitPreviews,
+  );
+  // Enables the peer slide-aside transition while a node hovers a
+  // structured frame. Toggles once per hover (not per drag tick), and the
+  // CSS rule excludes `.dragging` so the dragged node stays on the cursor.
+  const isStructuredReflowing = useGesturePreviewStore(
+    (state) => state.structuredDropPreview !== null,
   );
 
   // ── Non-reactive action handles ──────────────────────────────
@@ -1440,7 +1447,10 @@ export const Canvas: React.FC<CanvasProps> = ({
       }}
     >
       <ReactFlow
-        className={isInitialViewportPending ? 'invisible' : undefined}
+        className={cn(
+          isInitialViewportPending && 'invisible',
+          isStructuredReflowing && 'structured-reflow',
+        )}
         defaultViewport={defaultViewport}
         deleteKeyCode={null}
         nodes={displayNodes}

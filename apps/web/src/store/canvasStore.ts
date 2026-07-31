@@ -86,6 +86,7 @@ import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDe
 import { createStructureScheduler } from './canvasStore/save/structureScheduler';
 import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
+import { createStructuredReflowController } from './canvasStore/slices/structuredReflow';
 import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
@@ -133,6 +134,7 @@ import type {
   WireSelectionNode,
   ResolvedWorldReference,
 } from '@sediment/shared';
+import type { StructuredReflowEntry } from '@sediment/shared/canvas-engine';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
@@ -1221,6 +1223,13 @@ let _dragPreviewRafId: number | null = null;
 // parent change is involved — so a plain free-node move produces no
 // command and would otherwise never schedule the autosave PUT.
 let _dragStartPositions: Map<string, { x: number; y: number }> | null = null;
+
+// ── Live structured-frame reflow preview ──────────────────────────────
+// While a node hovers a `column` / `row` / `grid` frame, the solver's
+// projected child positions are written onto the REAL peers so they
+// slide aside under the cursor. The reversal bookkeeping (and the two
+// invariants that keep it safe) live in the controller module.
+const structuredReflow = createStructuredReflowController();
 
 // Resize-preview state (per-paint rAF coalescing + free-frame child
 // baseline snapshot) lives in `./canvasStore/slices/resizePreview.ts`.
@@ -2485,7 +2494,30 @@ const useCanvasStore = create<RFState>()(
         // Re-read store inside the rAF callback so we always use the
         // latest node positions (ReactFlow may have applied intermediate
         // updates between the event and the rAF tick).
-        const { nodes, edges } = get();
+        const { nodes: storeNodes, edges } = get();
+
+        // Every predicate / picker / solver below runs against the
+        // pre-drag geometry, with the live reflow preview undone. See
+        // `createStructuredReflowController` for why this matters.
+        const nodes = structuredReflow.strip(storeNodes);
+
+        // Commit the reflow preview for this tick (or undo it when the
+        // node no longer hovers a structured frame). Called exactly once
+        // per tick, at every exit point below. Dragged nodes are filtered
+        // out: React Flow owns their position until release, so writing a
+        // solved position for them would fight the cursor.
+        const draggedIds = new Set(draggedNodes.map((d) => d.id));
+        const commitReflow = (
+          reflow: readonly StructuredReflowEntry[] | null,
+        ) => {
+          const next = reflow
+            ? structuredReflow.apply(
+                storeNodes,
+                reflow.filter((entry) => !draggedIds.has(entry.id)),
+              )
+            : structuredReflow.clear(storeNodes);
+          if (next) get()._setStateNoAutosave({ nodes: next });
+        };
 
         // Space-held drag opts out of *parent membership changes* only.
         // The current parent's frame still refits around the child's
@@ -2855,13 +2887,16 @@ const useCanvasStore = create<RFState>()(
             }
             // Solver owns the slot here → suppress free-alignment guides.
             setSnapStructuredSuppressed(true);
+            commitReflow(zone.reflow);
           } else {
             useGesturePreviewStore.getState().clearStructuredDropPreview();
             setSnapStructuredSuppressed(false);
+            commitReflow(null);
           }
         } else {
           useGesturePreviewStore.getState().clearStructuredDropPreview();
           setSnapStructuredSuppressed(false);
+          commitReflow(null);
         }
       });
     },
@@ -2875,6 +2910,15 @@ const useCanvasStore = create<RFState>()(
       }
       useGesturePreviewStore.getState().clearFrameFitPreview();
       useGesturePreviewStore.getState().clearStructuredDropPreview();
+
+      // Undo the live reflow BEFORE the drop is resolved: the resolver's
+      // pickers must classify the release against pre-drag geometry —
+      // exactly what the preview was computed from. Restoring here (rather
+      // than after the commit) also avoids a visible flash, because the
+      // restore and the authoritative `SET_NODE_GEOMETRY` land in the same
+      // tick, so React never paints the intermediate state.
+      const restoredNodes = structuredReflow.clear(get().nodes);
+      if (restoredNodes) get()._setStateNoAutosave({ nodes: restoredNodes });
 
       // Read the Space-bypass snapshot taken by `endSnapSession`.
       // The snap session is normally torn down by `onNodesChange`
@@ -2983,6 +3027,9 @@ const useCanvasStore = create<RFState>()(
       preview.clearFrameFitPreview();
       preview.clearStructuredDropPreview();
 
+      const withoutReflow = structuredReflow.clear(get().nodes);
+      if (withoutReflow) get()._setStateNoAutosave({ nodes: withoutReflow });
+
       const startPositions = _dragStartPositions;
       _dragStartPositions = null;
       if (startPositions) {
@@ -3024,6 +3071,8 @@ const useCanvasStore = create<RFState>()(
       resizePreviewController.cancelPendingRaf();
       useGesturePreviewStore.getState().clearFrameFitPreview();
       useGesturePreviewStore.getState().clearStructuredDropPreview();
+      const restored = structuredReflow.clear(get().nodes);
+      if (restored) get()._setStateNoAutosave({ nodes: restored });
       _dragStartPositions = null;
       endSnapSession();
     },

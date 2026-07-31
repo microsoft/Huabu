@@ -91,6 +91,7 @@ export {
   type StructuredDropContext,
   type StructuredDropContextRect,
   type StructuredDropPeerRect,
+  type StructuredReflowEntry,
   type DraggedNodeRect,
 } from './autoLayout/gridLayout.js';
 

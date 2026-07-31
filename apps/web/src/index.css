@@ -516,6 +516,22 @@ body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
     height 0.2s ease-out;
 }
 
+/* Live structured-frame reflow: while a node hovers a `column` / `row` /
+   `grid` frame, `canvasStore.onNodeDrag` writes the solver's projected
+   positions onto the real peers so they slide aside instead of the drop
+   being described by a stack of translucent overlay rects. The class is
+   toggled on the ReactFlow root by `Canvas.tsx` for the duration of the
+   hover; `:not(.dragging)` keeps the dragged node glued to the cursor. */
+.react-flow.structured-reflow .react-flow__node:not(.dragging) {
+  transition: transform 0.14s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-flow.structured-reflow .react-flow__node:not(.dragging) {
+    transition: none;
+  }
+}
+
 /* Sketch nodes: hit-test only the painted stroke pixels so clicks in the
    blank area of the bounding box "drill through" to nodes underneath
    (matching professional vector editors for overlapping freehand strokes).

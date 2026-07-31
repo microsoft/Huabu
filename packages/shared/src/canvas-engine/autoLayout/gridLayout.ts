@@ -1211,6 +1211,12 @@ export interface StructuredDropZone {
   height: number;
   /** Final content-driven Frame size from the simulated structured solver. */
   frameSize: { width: number; height: number };
+  /**
+   * Where the frame's existing children land in the simulated layout.
+   * Drives the live reflow preview: the caller writes these positions
+   * onto the real nodes so peers slide aside under the cursor.
+   */
+  reflow: StructuredReflowEntry[];
   /** Grid-only preview of an occupied target cell being swapped out. */
   swap?: {
     occupantId: string;
@@ -1218,6 +1224,34 @@ export interface StructuredDropZone {
     to: StructuredDropContextRect;
   };
   context: StructuredDropContext;
+}
+
+/** Frame-local destination of one existing child under the simulated drop. */
+export interface StructuredReflowEntry {
+  id: string;
+  x: number;
+  y: number;
+}
+
+/**
+ * Project a simulated layout onto the frame's *existing* children,
+ * skipping the dragged node (React Flow owns its position mid-drag).
+ */
+function collectReflowPositions(
+  nodes: Node[],
+  frameId: string,
+  draggedId: string | undefined,
+  layout: FrameGridLayoutResult | null | undefined,
+): StructuredReflowEntry[] {
+  if (!layout) return [];
+  const out: StructuredReflowEntry[] = [];
+  for (const node of nodes) {
+    if (node.parentId !== frameId || node.id === draggedId) continue;
+    const next = layout.childPositions.get(node.id);
+    if (!next) continue;
+    out.push({ id: node.id, x: next.x, y: next.y });
+  }
+  return out;
 }
 
 export interface StructuredDropContextRect {
@@ -1458,6 +1492,7 @@ function describeGridDropZone(
     width: dragged.width,
     height: dragged.height,
     frameSize: layout.frameSize,
+    reflow: collectReflowPositions(nodes, frameId, dragged.id, layout),
     ...(swap ? { swap } : {}),
     context: {
       axis: 'grid',
@@ -1802,6 +1837,12 @@ export function describeStructuredDropZone(
     slot: target.slot,
     ...dropRect,
     frameSize: simulatedLayout?.frameSize ?? frameSize,
+    reflow: collectReflowPositions(
+      nodes,
+      frameId,
+      dragged?.id,
+      simulatedLayout,
+    ),
     context: {
       axis,
       trackRect,
