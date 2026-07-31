@@ -1,0 +1,167 @@
+import { describe, expect, it } from 'vitest';
+
+import { applyGridLayout, describeStructuredDropZone } from '../gridLayout.js';
+
+import type { Node } from '@xyflow/react';
+
+function makeFrame(layoutMode: 'column' | 'row' | 'grid'): Node {
+  return {
+    id: 'frame',
+    type: 'frame',
+    position: { x: 0, y: 0 },
+    data: { layoutMode, gridCount: 2 },
+    style: { width: 240, height: 160 },
+    measured: { width: 240, height: 160 },
+  } as Node;
+}
+
+function makeChild(
+  id: string,
+  frameSlot: number,
+  position: { x: number; y: number },
+): Node {
+  return {
+    id,
+    type: 'text',
+    parentId: 'frame',
+    position,
+    data: { frameSlot },
+    style: { width: 80, height: 40 },
+    measured: { width: 80, height: 40 },
+  } as Node;
+}
+
+const dragged = {
+  id: 'dragged',
+  x: 16,
+  y: 16,
+  width: 80,
+  height: 40,
+};
+
+describe('describeStructuredDropZone context', () => {
+  it('describes the target column and its alignment peers', () => {
+    const nodes = [
+      makeFrame('column'),
+      makeChild('dragged', 0, { x: 16, y: 16 }),
+      makeChild('column-peer', 0, { x: 16, y: 72 }),
+      makeChild('other-column', 1, { x: 112, y: 16 }),
+    ];
+
+    const zone = describeStructuredDropZone(
+      nodes,
+      'frame',
+      { x: 32, y: 30 },
+      'column',
+      2,
+      dragged,
+    );
+
+    expect(zone?.context.axis).toBe('column');
+    expect(zone?.context.trackRect.height).toBe(160);
+    expect(zone?.context.trackPeerRects.map((peer) => peer.id)).toEqual([
+      'column-peer',
+    ]);
+    expect(zone?.context.alignmentRect).toBeNull();
+  });
+
+  it('uses the same track contract with swapped geometry for rows', () => {
+    const nodes = [
+      makeFrame('row'),
+      makeChild('dragged', 0, { x: 16, y: 16 }),
+      makeChild('row-peer', 0, { x: 112, y: 16 }),
+      makeChild('other-row', 1, { x: 16, y: 72 }),
+    ];
+
+    const zone = describeStructuredDropZone(
+      nodes,
+      'frame',
+      { x: 30, y: 32 },
+      'row',
+      2,
+      dragged,
+    );
+
+    expect(zone?.context.axis).toBe('row');
+    expect(zone?.context.trackRect.width).toBe(240);
+    expect(zone?.context.trackPeerRects.map((peer) => peer.id)).toEqual([
+      'row-peer',
+    ]);
+    expect(zone?.context.alignmentRect).toBeNull();
+  });
+
+  it('uses the solver result as the two-dimensional grid footprint', () => {
+    const nodes = [
+      makeFrame('grid'),
+      makeChild('dragged', 0, { x: 16, y: 16 }),
+      makeChild('same-row', 0, { x: 16, y: 16 }),
+      makeChild('target-column-next-row', 1, { x: 112, y: 72 }),
+    ];
+    const movedDragged = { ...dragged, x: 112 };
+
+    const zone = describeStructuredDropZone(
+      nodes,
+      'frame',
+      { x: 152, y: 24 },
+      'grid',
+      2,
+      movedDragged,
+    );
+    const simulated = nodes.map((node) =>
+      node.id === 'dragged'
+        ? {
+            ...node,
+            position: { x: movedDragged.x, y: movedDragged.y },
+            data: { ...node.data, frameSlot: 1 },
+          }
+        : node,
+    );
+    const solved = applyGridLayout(simulated, 'frame', 2);
+    const finalPosition = solved?.childPositions.get('dragged');
+
+    expect(zone?.indicator).toBe('footprint');
+    expect(finalPosition).toBeDefined();
+    expect(zone).toMatchObject({
+      x: finalPosition?.x,
+      y: finalPosition?.y,
+      width: movedDragged.width,
+      height: movedDragged.height,
+    });
+    expect(zone?.context.axis).toBe('grid');
+    expect(zone?.context.trackRect.height).toBe(160);
+    expect(zone?.context.alignmentRect).toMatchObject({
+      x: 0,
+      y: finalPosition?.y,
+      width: 240,
+      height: 40,
+    });
+    expect(zone?.context.alignmentPeerRects.map((peer) => peer.id)).toEqual([
+      'same-row',
+    ]);
+  });
+
+  it('previews the compacted position when moving empties a column', () => {
+    const nodes = [
+      makeFrame('grid'),
+      makeChild('dragged', 0, { x: 16, y: 16 }),
+      makeChild('target-column-peer', 1, { x: 112, y: 72 }),
+    ];
+    const movedDragged = { ...dragged, x: 112 };
+
+    const zone = describeStructuredDropZone(
+      nodes,
+      'frame',
+      { x: 152, y: 24 },
+      'grid',
+      2,
+      movedDragged,
+    );
+
+    expect(zone?.indicator).toBe('footprint');
+    expect(zone?.context.trackPeerRects.map((peer) => peer.id)).toEqual([
+      'target-column-peer',
+    ]);
+    expect(zone?.x).toBe(zone?.context.trackPeerRects[0].x);
+    expect(zone?.x).not.toBe(movedDragged.x);
+  });
+});

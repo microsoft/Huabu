@@ -1,7 +1,10 @@
 import { create } from 'zustand';
 
 import type { Guide } from '@/handler/snap/types';
-import type { FrameFitResult } from '@sediment/shared/canvas-engine';
+import type {
+  FrameFitResult,
+  StructuredDropContext,
+} from '@sediment/shared/canvas-engine';
 
 /**
  * Visual role of a frame-fit preview, used by the overlay layer to
@@ -108,12 +111,10 @@ type GesturePreviewData = {
 
   /**
    * Live drop indicator for a node hovering over a structured
-   * (column / row) frame. Absolute flow-space rect plus the picker's
-   * decision (`into-existing` highlights the target track,
-   * `insert-new` draws a thin bar at the gap where a new track opens).
-   * Written by `canvasStore.onNodeDrag`; cleared on drag end. `null`
-   * when the cursor isn't over a structured frame (free-mode frames
-   * never set it).
+   * (column / row / grid) frame. Includes the precise picker decision,
+   * the active track and its reference nodes, plus Grid's shared row
+   * band and aligned peers. Written by `canvasStore.onNodeDrag`; cleared
+   * on drag end. Free-mode frames never set it.
    */
   structuredDropPreview: StructuredDropPreview | null;
 };
@@ -187,10 +188,12 @@ type GesturePreviewState = GesturePreviewData & {
 export type StructuredDropPreview = {
   frameId: string;
   kind: 'into-existing' | 'insert-new';
+  indicator: 'caret' | 'footprint';
   x: number;
   y: number;
   width: number;
   height: number;
+  context: StructuredDropContext;
 };
 
 /**

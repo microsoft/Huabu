@@ -260,7 +260,7 @@ let _kind: GestureKind = 'drag';
 /**
  * When `true`, the drag path in `applySnap` skips both the snap delta
  * and the alignment guides. Set per drag tick by the canvas store when
- * the dragged node currently hovers a structured (column / row) frame:
+ * the dragged node currently hovers a structured (column / row / grid) frame:
  * there the drop position is decided by the layout solver, not free
  * placement, so smart-alignment guides would point at positions the
  * node will never actually land on. The structured drop ghost takes
@@ -519,7 +519,7 @@ export function isSnapSessionActive(): boolean {
 /**
  * Toggle structured-frame snap suppression for the active drag. Called
  * every drag tick by the canvas store: `true` while the dragged node
- * hovers a column / row frame (solver decides the slot, so alignment
+ * hovers a column / row / grid frame (solver decides the slot, so alignment
  * guides are misleading), `false` otherwise. No-op outside a drag
  * session; always reset by `endSnapSession`.
  */

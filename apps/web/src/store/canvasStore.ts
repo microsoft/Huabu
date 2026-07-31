@@ -2759,13 +2759,31 @@ const useCanvasStore = create<RFState>()(
             : null;
 
           if (zone && frameAbs) {
+            const toAbsoluteRect = <T extends { x: number; y: number }>(
+              rect: T,
+            ): T => ({
+              ...rect,
+              x: frameAbs.x + rect.x,
+              y: frameAbs.y + rect.y,
+            });
             useGesturePreviewStore.getState().setStructuredDropPreview({
               frameId: targetFrameId,
               kind: zone.kind,
+              indicator: zone.indicator,
               x: frameAbs.x + zone.x,
               y: frameAbs.y + zone.y,
               width: zone.width,
               height: zone.height,
+              context: {
+                ...zone.context,
+                trackRect: toAbsoluteRect(zone.context.trackRect),
+                trackPeerRects: zone.context.trackPeerRects.map(toAbsoluteRect),
+                alignmentRect: zone.context.alignmentRect
+                  ? toAbsoluteRect(zone.context.alignmentRect)
+                  : null,
+                alignmentPeerRects:
+                  zone.context.alignmentPeerRects.map(toAbsoluteRect),
+              },
             });
             // Solver owns the slot here → suppress free-alignment guides.
             setSnapStructuredSuppressed(true);

@@ -1003,11 +1003,146 @@ export interface DraggedNodeRect {
  */
 export interface StructuredDropZone {
   kind: 'into-existing' | 'insert-new';
+  indicator: 'caret' | 'footprint';
   slot: number;
   x: number;
   y: number;
   width: number;
   height: number;
+  context: StructuredDropContext;
+}
+
+export interface StructuredDropContextRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface StructuredDropPeerRect extends StructuredDropContextRect {
+  id: string;
+}
+
+/**
+ * Layout context rendered around the precise drop indicator. Every
+ * structured mode exposes its active track and the peers that establish
+ * that track's shared edge. Grid additionally exposes the row band and
+ * peers that will share its Y origin with the dragged node.
+ */
+export interface StructuredDropContext {
+  axis: FrameGridAxis;
+  trackRect: StructuredDropContextRect;
+  trackPeerRects: StructuredDropPeerRect[];
+  alignmentRect: StructuredDropContextRect | null;
+  alignmentPeerRects: StructuredDropPeerRect[];
+}
+
+function describeGridDropZone(
+  nodes: Node[],
+  frame: Node,
+  frameId: string,
+  count: number,
+  target: StructuredDropTarget,
+  dragged: DraggedNodeRect,
+): StructuredDropZone | null {
+  const opensTrack =
+    target.kind === 'insert-new' && count < FRAME_GRID_MAX_COUNT;
+  const targetSlot = opensTrack
+    ? target.slot
+    : Math.min(target.slot, count - 1);
+  const effectiveCount = opensTrack ? count + 1 : count;
+  let foundDragged = false;
+
+  const simulated = nodes.map((node) => {
+    if (node.id === dragged.id) {
+      foundDragged = true;
+      return {
+        ...node,
+        parentId: frameId,
+        position: { x: dragged.x, y: dragged.y },
+        data: { ...node.data, frameSlot: targetSlot },
+        style: { ...node.style, width: dragged.width, height: dragged.height },
+        measured: { width: dragged.width, height: dragged.height },
+      };
+    }
+    if (!opensTrack || node.parentId !== frameId) return node;
+
+    const raw = (node.data as { frameSlot?: number } | undefined)?.frameSlot;
+    const slot =
+      typeof raw === 'number' && Number.isFinite(raw)
+        ? clampInt(Math.round(raw), 0, count - 1)
+        : 0;
+    return slot < targetSlot
+      ? node
+      : { ...node, data: { ...node.data, frameSlot: slot + 1 } };
+  });
+
+  if (!foundDragged) {
+    simulated.push({
+      id: dragged.id,
+      type: 'text',
+      parentId: frameId,
+      position: { x: dragged.x, y: dragged.y },
+      data: { frameSlot: targetSlot },
+      style: { width: dragged.width, height: dragged.height },
+      measured: { width: dragged.width, height: dragged.height },
+    } as Node);
+  }
+
+  const layout = applyGridLayout(simulated, frameId, effectiveCount, 'compact');
+  const position = layout?.childPositions.get(dragged.id);
+  if (!layout || !position) return null;
+
+  const peerRects: StructuredDropPeerRect[] = [];
+  for (const child of collectChildren(simulated, frameId)) {
+    if (child.node.id === dragged.id) continue;
+    const childPosition = layout.childPositions.get(child.node.id);
+    if (!childPosition) continue;
+    peerRects.push({
+      id: child.node.id,
+      x: childPosition.x,
+      y: childPosition.y,
+      width: child.width,
+      height: child.height,
+    });
+  }
+
+  const trackPeerRects = peerRects.filter((peer) => peer.x === position.x);
+  const alignmentPeerRects = peerRects.filter((peer) => peer.y === position.y);
+  const frameSize = getNodeSize(frame);
+
+  return {
+    kind: opensTrack ? 'insert-new' : 'into-existing',
+    indicator: 'footprint',
+    slot: targetSlot,
+    x: position.x,
+    y: position.y,
+    width: dragged.width,
+    height: dragged.height,
+    context: {
+      axis: 'grid',
+      trackRect: {
+        x: position.x,
+        y: 0,
+        width: Math.max(
+          dragged.width,
+          ...trackPeerRects.map((peer) => peer.width),
+        ),
+        height: frameSize.height,
+      },
+      trackPeerRects,
+      alignmentRect: {
+        x: 0,
+        y: position.y,
+        width: frameSize.width,
+        height: Math.max(
+          dragged.height,
+          ...alignmentPeerRects.map((peer) => peer.height),
+        ),
+      },
+      alignmentPeerRects,
+    },
+  };
 }
 
 /**
@@ -1023,9 +1158,9 @@ export interface StructuredDropZone {
  * rank the `into-existing` insertion caret against the dragged node's
  * top edge — exactly how the solver re-sorts the track on release.
  *
- * `grid` is treated as `column` throughout: it counts columns and
- * stores the column in `frameSlot` just like column masonry, so the
- * drop decision and its geometry are identical.
+ * `grid` uses the same column picker for its persisted `frameSlot`, then
+ * simulates {@link applyGridLayout} to resolve the second dimension. Its
+ * indicator is therefore the final cell footprint, not a masonry caret.
  *
  * Returns `null` when the frame is missing. All coordinates are
  * frame-local; the caller offsets by the frame's absolute position.
@@ -1054,6 +1189,10 @@ export function describeStructuredDropZone(
     isCol ? c.node.position.y : c.node.position.x;
 
   const allChildren = collectChildren(nodes, frameId);
+
+  if (axis === 'grid' && dragged) {
+    return describeGridDropZone(nodes, frame, frameId, count, target, dragged);
+  }
 
   // Bucket children by stored slot (mirrors the pickers / solvers).
   const items: ChildSlot[][] = Array.from({ length: count }, () => []);
@@ -1196,23 +1335,114 @@ export function describeStructuredDropZone(
     crossLen = ghostCross;
   }
 
-  return isCol
+  const dropRect: StructuredDropContextRect = isCol
     ? {
-        kind: target.kind,
-        slot: target.slot,
         x: mainStart,
         y: crossPos,
         width: mainLen,
         height: crossLen,
       }
     : {
-        kind: target.kind,
-        slot: target.slot,
         x: crossPos,
         y: mainStart,
         width: crossLen,
         height: mainLen,
       };
+
+  const frameSize = getNodeSize(frame);
+  const targetItems = items[target.slot] ?? [];
+  const toPeerRect = (child: ChildSlot): StructuredDropPeerRect => ({
+    id: child.node.id,
+    x: child.node.position.x,
+    y: child.node.position.y,
+    width: child.width,
+    height: child.height,
+  });
+  const trackPeerRects = targetItems
+    .filter((child) => child.node.id !== dragged?.id)
+    .map(toPeerRect);
+  const trackRect =
+    target.kind === 'insert-new'
+      ? dropRect
+      : isCol
+        ? {
+            x: start[target.slot],
+            y: 0,
+            width: Math.max(extent[target.slot], dragged?.width ?? 0),
+            height: frameSize.height,
+          }
+        : {
+            x: 0,
+            y: start[target.slot],
+            width: frameSize.width,
+            height: Math.max(extent[target.slot], dragged?.height ?? 0),
+          };
+
+  let alignmentRect: StructuredDropContextRect | null = null;
+  let alignmentPeerRects: StructuredDropPeerRect[] = [];
+  if (axis === 'grid' && dragged) {
+    let draggedChild = allChildren.find(
+      (child) => child.node.id === dragged.id,
+    );
+    if (!draggedChild) {
+      draggedChild = {
+        node: {
+          id: dragged.id,
+          type: 'text',
+          parentId: frameId,
+          position: { x: dragged.x, y: dragged.y },
+          data: { frameSlot: target.slot },
+        } as Node,
+        width: dragged.width,
+        height: dragged.height,
+      };
+    }
+
+    const rowCandidates = allChildren.includes(draggedChild)
+      ? allChildren
+      : [...allChildren, draggedChild];
+    const columnOf = (child: ChildSlot) => {
+      if (child.node.id === dragged.id) return target.slot;
+      const raw = (child.node.data as { frameSlot?: number } | undefined)
+        ?.frameSlot;
+      return typeof raw === 'number' && Number.isFinite(raw)
+        ? clampInt(Math.round(raw), 0, count - 1)
+        : 0;
+    };
+    const targetBand = groupIntoRowBands(rowCandidates, columnOf).find((band) =>
+      band.some((child) => child.node.id === dragged.id),
+    );
+
+    if (targetBand) {
+      const rowTop = Math.min(
+        ...targetBand.map((child) => child.node.position.y),
+      );
+      const rowHeight = Math.max(0, ...targetBand.map((child) => child.height));
+      alignmentRect = {
+        x: 0,
+        y: rowTop,
+        width: frameSize.width,
+        height: rowHeight,
+      };
+      alignmentPeerRects = targetBand
+        .filter((child) => child.node.id !== dragged.id)
+        .map(toPeerRect);
+    }
+  }
+
+  return {
+    kind: target.kind,
+    indicator: target.kind === 'into-existing' ? 'caret' : 'footprint',
+    slot: target.slot,
+    ...dropRect,
+    context: {
+      axis,
+      trackRect,
+      trackPeerRects,
+      alignmentRect,
+      alignmentPeerRects,
+    },
+  };
 }
 
 // ── Executor integration: apply layout to nodes in-place ──────────────

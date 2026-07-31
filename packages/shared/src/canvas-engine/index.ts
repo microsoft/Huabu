@@ -83,6 +83,9 @@ export {
   type FrameGridLayoutResult,
   type StructuredDropTarget,
   type StructuredDropZone,
+  type StructuredDropContext,
+  type StructuredDropContextRect,
+  type StructuredDropPeerRect,
   type DraggedNodeRect,
 } from './autoLayout/gridLayout.js';
 
