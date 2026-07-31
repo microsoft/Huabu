@@ -126,22 +126,17 @@ export type AcpSessionMetaEvent = AcpSessionMetaStreamEvent;
 
 /**
  * Patch shape accepted by {@link UseAcpSessionMetaResult.applyOptimistic}.
- * Every field is optional; only the provided fields are mutated.
  *
- * - `currentModeId`: replaces the active mode id (mirrors the
- *   `session_mode_update` SSE event but lets callers also pass
- *   `null` for revert).
- * - `currentModelId`: replaces the active model id. There is no SSE
- *   event for this, so optimistic updates are the only way to get the
- *   selector to reflect a model switch before the agent re-pushes the
- *   full `configOptions` snapshot.
- * - `configOption`: replaces a single option's `currentValue` (matched
- *   by `id`). No-op when no option with that id exists in the cache.
+ * `selection` records this thread's explicit choice for one knob, keyed the
+ * same way the server keys `AcpSessionMetaSnapshot.selections` (a
+ * config-option id, or the reserved `'mode'` / `'model'`). It is the field
+ * the selector UI actually reads, so writing it is what makes a pill update
+ * before the set-RPC round-trip resolves. Pass `value: null` to drop the
+ * selection again, which is how a failed RPC reverts: the pill falls back to
+ * whatever the agent reports rather than to a second guess of its own.
  */
 export interface AcpSessionMetaOptimisticPatch {
-  currentModeId?: string | null;
-  currentModelId?: string | null;
-  configOption?: { id: string; value: string | boolean };
+  selection?: { id: string; value: string | boolean | null };
 }
 
 export interface UseAcpSessionMetaResult {
@@ -397,50 +392,22 @@ export function useAcpSessionMeta({
 
   const applyOptimistic = useCallback(
     (patch: AcpSessionMetaOptimisticPatch) => {
+      const selection = patch.selection;
+      if (!selection) return;
       setMeta((prev) => {
-        let changed = false;
-        let next: AcpSessionMetaSnapshot = prev;
-
-        if (
-          'currentModeId' in patch &&
-          patch.currentModeId !== prev.currentModeId
-        ) {
-          next = { ...next, currentModeId: patch.currentModeId ?? null };
-          changed = true;
+        const prior = prev.selections[selection.id];
+        if (selection.value === null) {
+          if (!(selection.id in prev.selections)) return prev;
+          const selections = { ...prev.selections };
+          delete selections[selection.id];
+          return { ...prev, selections, updatedAt: Date.now() };
         }
-
-        if (
-          'currentModelId' in patch &&
-          patch.currentModelId !== prev.currentModelId
-        ) {
-          next = { ...next, currentModelId: patch.currentModelId ?? null };
-          changed = true;
-        }
-
-        if (patch.configOption) {
-          const { id, value } = patch.configOption;
-          const idx = prev.configOptions.findIndex(
-            (o) => String((o as { id?: unknown }).id ?? '') === id,
-          );
-          if (idx !== -1) {
-            const target = prev.configOptions[idx] as {
-              currentValue?: unknown;
-            };
-            if (target.currentValue !== value) {
-              const updated = {
-                ...prev.configOptions[idx],
-                currentValue: value,
-              };
-              const list = prev.configOptions.slice();
-              list[idx] = updated as (typeof list)[number];
-              next = { ...next, configOptions: list };
-              changed = true;
-            }
-          }
-        }
-
-        if (!changed) return prev;
-        return { ...next, updatedAt: Date.now() };
+        if (prior === selection.value) return prev;
+        return {
+          ...prev,
+          selections: { ...prev.selections, [selection.id]: selection.value },
+          updatedAt: Date.now(),
+        };
       });
     },
     [],

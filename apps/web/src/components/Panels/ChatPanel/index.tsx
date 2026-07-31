@@ -4,7 +4,11 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
-import { getQuestionNodeStatus } from '@sediment/shared';
+import {
+  getQuestionNodeStatus,
+  MODE_SELECTION_ID,
+  MODEL_SELECTION_ID,
+} from '@sediment/shared';
 
 import {
   setAcpSessionConfigOption,
@@ -352,7 +356,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     loading: acpSessionMetaLoading,
     error: acpSessionMetaError,
     errorCode: acpSessionMetaErrorCode,
-    applyEvent: applyAcpSessionMetaEvent,
     applyOptimistic: applyAcpSessionMetaOptimistic,
   } = useAcpSessionMeta({
     threadId,
@@ -438,19 +441,28 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     [agentBinding, ownerCanvasId],
   );
 
+  // Set-RPC handlers.
+  //
+  // Each one records the choice in the snapshot's `selections` map before
+  // the round-trip so the pill updates immediately, and drops it again on
+  // failure so the pill falls back to whatever the agent reports. That map
+  // is also what the server persists as this thread's intent, so the
+  // optimistic write mirrors the durable one instead of inventing a
+  // second, UI-only notion of "current".
   const handleAcpSelectMode = useCallback(
     async (modeId: string) => {
       if (!threadId) return;
-      const previousModeId = acpSessionMetaRef.current.currentModeId;
-      if (previousModeId === modeId) return;
-      applyAcpSessionMetaEvent({
-        type: 'session_mode_update',
-        data: { currentModeId: modeId },
+      const previous =
+        acpSessionMetaRef.current.selections[MODE_SELECTION_ID] ?? null;
+      applyAcpSessionMetaOptimistic({
+        selection: { id: MODE_SELECTION_ID, value: modeId },
       });
       try {
         await setAcpSessionMode(threadId, { modeId, ...acpSetRpcSpawnCtx });
       } catch (err) {
-        applyAcpSessionMetaOptimistic({ currentModeId: previousModeId });
+        applyAcpSessionMetaOptimistic({
+          selection: { id: MODE_SELECTION_ID, value: previous },
+        });
         toast(
           err instanceof Error
             ? t('chat.failedSwitchModeWithMessage', { message: err.message })
@@ -459,25 +471,23 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         );
       }
     },
-    [
-      threadId,
-      applyAcpSessionMetaEvent,
-      applyAcpSessionMetaOptimistic,
-      acpSetRpcSpawnCtx,
-      t,
-    ],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, t],
   );
 
   const handleAcpSelectModel = useCallback(
     async (modelId: string) => {
       if (!threadId) return;
-      const previousModelId = acpSessionMetaRef.current.currentModelId;
-      if (previousModelId === modelId) return;
-      applyAcpSessionMetaOptimistic({ currentModelId: modelId });
+      const previous =
+        acpSessionMetaRef.current.selections[MODEL_SELECTION_ID] ?? null;
+      applyAcpSessionMetaOptimistic({
+        selection: { id: MODEL_SELECTION_ID, value: modelId },
+      });
       try {
         await setAcpSessionModel(threadId, { modelId, ...acpSetRpcSpawnCtx });
       } catch (err) {
-        applyAcpSessionMetaOptimistic({ currentModelId: previousModelId });
+        applyAcpSessionMetaOptimistic({
+          selection: { id: MODEL_SELECTION_ID, value: previous },
+        });
         toast(
           err instanceof Error
             ? t('chat.failedSwitchModelWithMessage', { message: err.message })
@@ -492,18 +502,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const handleAcpSelectConfigOption = useCallback(
     async (optionId: string, value: string | boolean) => {
       if (!threadId) return;
-      const priorOption = acpSessionMetaRef.current.configOptions.find(
-        (o) => String((o as { id?: unknown }).id ?? '') === optionId,
-      );
-      const previousValue = (
-        priorOption as { currentValue?: unknown } | undefined
-      )?.currentValue;
-      const previousValueTyped =
-        typeof previousValue === 'string' || typeof previousValue === 'boolean'
-          ? previousValue
-          : undefined;
-      if (previousValueTyped === value) return;
-      applyAcpSessionMetaOptimistic({ configOption: { id: optionId, value } });
+      const previous = acpSessionMetaRef.current.selections[optionId] ?? null;
+      applyAcpSessionMetaOptimistic({
+        selection: { id: optionId, value },
+      });
       try {
         await setAcpSessionConfigOption(threadId, {
           configOptionId: optionId,
@@ -511,11 +513,9 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           ...acpSetRpcSpawnCtx,
         });
       } catch (err) {
-        if (previousValueTyped !== undefined) {
-          applyAcpSessionMetaOptimistic({
-            configOption: { id: optionId, value: previousValueTyped },
-          });
-        }
+        applyAcpSessionMetaOptimistic({
+          selection: { id: optionId, value: previous },
+        });
         toast(
           err instanceof Error
             ? t('chat.failedUpdateOptionWithMessage', { message: err.message })
