@@ -1,0 +1,60 @@
+id: operate-grid-pairs
+description: >-
+  Operate agent tidies five scattered notes into a question / answer
+  correspondence, where one question has no answer. This is the exact
+  shape `grid` exists for: `column` masonry would pull A3 up beside Q2
+  because the right-hand column packs independently, silently pairing an
+  answer with the wrong question. Passing the case therefore checks two
+  things the schema alone cannot — that the agent reaches for `grid` over
+  `column`, and that it addresses cells through `SET_FRAME_LAYOUT.cells`
+  rather than assuming `position` decides rows.
+mode: operate
+fixture: operate-grid-pairs
+canvasId: default-canvas
+seeds: 1
+maxIterations: 10
+
+# Deliberately phrased as an intent ("line them up"), not as an
+# instruction naming grid or cells. If the agent only picks the right
+# mode when told to, the prompt guidance has not landed.
+prompt: |
+  This Space has three question notes and two answer notes, scattered
+  about. Tidy them into a frame with questions on the left and answers on
+  the right, so each answer sits level with the question it belongs to.
+  Q2 has no answer yet — leave that slot empty rather than sliding the
+  next answer up into it.
+
+assertions:
+  # (a) It must ground itself in what the notes actually are before it can
+  #     pair them; labels alone are suggestive but the bodies confirm.
+  - kind: tool_called
+    name: get_space_outline
+
+  # (b) The run must end in a real mutation.
+  - kind: tool_called
+    name: space_commands
+  - kind: tool_succeeded
+    name: space_commands
+
+  # (c) The decision this case exists for. `column` would also "work" and
+  #     look plausible in a screenshot, which is exactly why the tool name
+  #     alone proves nothing — the choice lives in the arguments. `cells`
+  #     must be non-empty too: `grid` without it leaves every child on row
+  #     0 and then bumps by node id, so the pairing would be accidental.
+  - kind: command_emitted
+    type: SET_FRAME_LAYOUT
+    where:
+      mode: grid
+    hasNonEmpty:
+      - cells
+
+  # (d) Turn budget. Framing + laying out five known nodes is a couple of
+  #     batches; anything much larger means it is groping.
+  - kind: max_turns
+    max: 8
+
+  - kind: no_error
+# The one thing still left to the trace is whether the answer column
+# actually *skips* row 1 rather than filling it — asserting an absence
+# needs a predicate language this catalogue does not have, and getting it
+# wrong would be worse than reading `runs/<id>/*.trace.json` by hand.
