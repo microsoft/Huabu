@@ -167,7 +167,7 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
           affectedFrameIds.add(updated.parentId);
         }
       }
-      // Structured (`column` / `row`) frames that were themselves
+      // Structured (`column` / `row` / `grid`) frames that were themselves
       // resized must be passed through the end-of-batch grid solver
       // so it re-flows children against the new (manually-pinned)
       // container size. Free-mode frames are deliberately excluded —
@@ -178,7 +178,9 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
         ?.layoutMode;
       if (
         updated.type === 'frame' &&
-        (layoutMode === 'column' || layoutMode === 'row')
+        (layoutMode === 'column' ||
+          layoutMode === 'row' ||
+          layoutMode === 'grid')
       ) {
         affectedFrameIds.add(updated.id);
       }

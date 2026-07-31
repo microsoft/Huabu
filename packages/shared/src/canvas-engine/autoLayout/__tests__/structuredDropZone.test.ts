@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyGridLayout, describeStructuredDropZone } from '../gridLayout.js';
+import {
+  applyGridLayout,
+  describeStructuredDropZone,
+  solveStructuredFrameLayout,
+} from '../gridLayout.js';
 
 import type { Node } from '@xyflow/react';
 
@@ -19,13 +23,14 @@ function makeChild(
   id: string,
   frameSlot: number,
   position: { x: number; y: number },
+  frameRow = 0,
 ): Node {
   return {
     id,
     type: 'text',
     parentId: 'frame',
     position,
-    data: { frameSlot },
+    data: { frameSlot, frameRow },
     style: { width: 80, height: 40 },
     measured: { width: 80, height: 40 },
   } as Node;
@@ -58,11 +63,14 @@ describe('describeStructuredDropZone context', () => {
     );
 
     expect(zone?.context.axis).toBe('column');
-    expect(zone?.context.trackRect.height).toBe(160);
+    expect(zone?.context.trackRect?.height).toBe(160);
     expect(zone?.context.trackPeerRects.map((peer) => peer.id)).toEqual([
       'column-peer',
     ]);
     expect(zone?.context.alignmentRect).toBeNull();
+    expect(zone?.frameSize).toEqual(
+      solveStructuredFrameLayout(nodes, 'frame')?.frameSize,
+    );
   });
 
   it('uses the same track contract with swapped geometry for rows', () => {
@@ -83,26 +91,29 @@ describe('describeStructuredDropZone context', () => {
     );
 
     expect(zone?.context.axis).toBe('row');
-    expect(zone?.context.trackRect.width).toBe(240);
+    expect(zone?.context.trackRect?.width).toBe(240);
     expect(zone?.context.trackPeerRects.map((peer) => peer.id)).toEqual([
       'row-peer',
     ]);
     expect(zone?.context.alignmentRect).toBeNull();
+    expect(zone?.frameSize).toEqual(
+      solveStructuredFrameLayout(nodes, 'frame')?.frameSize,
+    );
   });
 
   it('uses the solver result as the two-dimensional grid footprint', () => {
     const nodes = [
       makeFrame('grid'),
       makeChild('dragged', 0, { x: 16, y: 16 }),
-      makeChild('same-row', 0, { x: 16, y: 16 }),
-      makeChild('target-column-next-row', 1, { x: 112, y: 72 }),
+      makeChild('same-row', 0, { x: 16, y: 72 }, 1),
+      makeChild('target-column-next-row', 1, { x: 112, y: 128 }, 2),
     ];
-    const movedDragged = { ...dragged, x: 112 };
+    const movedDragged = { ...dragged, x: 112, y: 72 };
 
     const zone = describeStructuredDropZone(
       nodes,
       'frame',
-      { x: 152, y: 24 },
+      { x: 152, y: 80 },
       'grid',
       2,
       movedDragged,
@@ -112,7 +123,7 @@ describe('describeStructuredDropZone context', () => {
         ? {
             ...node,
             position: { x: movedDragged.x, y: movedDragged.y },
-            data: { ...node.data, frameSlot: 1 },
+            data: { ...node.data, frameSlot: 1, frameRow: 1 },
           }
         : node,
     );
@@ -126,9 +137,10 @@ describe('describeStructuredDropZone context', () => {
       y: finalPosition?.y,
       width: movedDragged.width,
       height: movedDragged.height,
+      frameSize: solved?.frameSize,
     });
     expect(zone?.context.axis).toBe('grid');
-    expect(zone?.context.trackRect.height).toBe(160);
+    expect(zone?.context.trackRect?.height).toBe(160);
     expect(zone?.context.alignmentRect).toMatchObject({
       x: 0,
       y: finalPosition?.y,
@@ -144,7 +156,7 @@ describe('describeStructuredDropZone context', () => {
     const nodes = [
       makeFrame('grid'),
       makeChild('dragged', 0, { x: 16, y: 16 }),
-      makeChild('target-column-peer', 1, { x: 112, y: 72 }),
+      makeChild('target-column-peer', 1, { x: 112, y: 72 }, 1),
     ];
     const movedDragged = { ...dragged, x: 112 };
 
@@ -156,12 +168,38 @@ describe('describeStructuredDropZone context', () => {
       2,
       movedDragged,
     );
+    const current = applyGridLayout(nodes, 'frame', 2);
+    const currentTargetPosition =
+      current?.childPositions.get('target-column-peer');
 
     expect(zone?.indicator).toBe('footprint');
+    expect(zone?.context.trackRect?.x).toBe(currentTargetPosition?.x);
     expect(zone?.context.trackPeerRects.map((peer) => peer.id)).toEqual([
       'target-column-peer',
     ]);
-    expect(zone?.x).toBe(zone?.context.trackPeerRects[0].x);
-    expect(zone?.x).not.toBe(movedDragged.x);
+    expect(zone?.context.alignmentPeerRects).toEqual([]);
+    expect(zone?.x).not.toBe(zone?.context.trackRect?.x);
+  });
+
+  it('describes the occupied node moving into the source cell on swap', () => {
+    const nodes = [
+      makeFrame('grid'),
+      makeChild('dragged', 0, { x: 16, y: 16 }, 0),
+      makeChild('occupant', 1, { x: 112, y: 72 }, 1),
+    ];
+    const zone = describeStructuredDropZone(
+      nodes,
+      'frame',
+      { x: 152, y: 80 },
+      'grid',
+      2,
+      { ...dragged, x: 112, y: 72 },
+    );
+
+    expect(zone?.swap).toMatchObject({
+      occupantId: 'occupant',
+      from: { x: 112, y: 72, width: 80, height: 40 },
+      to: { x: 16, y: 16, width: 80, height: 40 },
+    });
   });
 });

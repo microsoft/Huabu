@@ -8,6 +8,7 @@ import {
   moveNodeIntoFrame,
   moveNodeOutOfFrame,
   pickColumnDropTarget,
+  pickGridRowTarget,
   pickRowDropTarget,
   readFrameGridConfig,
   type FrameGridAxis,
@@ -204,6 +205,7 @@ export default function resolveNodeDragStop(
     intent.draggedNodeIds,
     result,
     ui.nodes,
+    ui.edges,
     intent.pointerFlowPosition,
   );
   const dropOutcome = buildGridDropCommands(dropPlans, ui.nodes);
@@ -232,6 +234,7 @@ export default function resolveNodeDragStop(
     commands.push(
       ...buildStructuredFrameRelayoutCommands(affectedFrameIds, result, {
         slotPatches: dropOutcome.slotPatches,
+        rowPatches: dropOutcome.rowPatches,
         frameDataPatches: dropOutcome.frameDataPatches,
       }),
     );
@@ -274,6 +277,7 @@ export default function resolveNodeDragStop(
   commands.push(
     ...buildStructuredFrameRelayoutCommands(affectedFrameIds, result, {
       slotPatches: dropOutcome.slotPatches,
+      rowPatches: dropOutcome.rowPatches,
       frameDataPatches: dropOutcome.frameDataPatches,
     }),
   );
@@ -334,6 +338,7 @@ interface GridDropPlan {
   axis: FrameGridAxis;
   count: number; // pre-drop count
   target: StructuredDropTarget;
+  row?: number;
 }
 
 /**
@@ -345,6 +350,7 @@ interface GridDropPlan {
 interface GridDropCommands {
   commands: CanvasCommand[];
   slotPatches: Array<{ nodeId: CanvasNodeId; slot: number }>;
+  rowPatches: Array<{ nodeId: CanvasNodeId; row: number }>;
   frameDataPatches: Array<{ nodeId: string; patch: Record<string, unknown> }>;
 }
 
@@ -354,9 +360,8 @@ interface GridDropCommands {
  *
  *  - Column masonry → the column under the cursor (mouse X).
  *  - Row masonry    → the row under the cursor (mouse Y).
- *  - Row-aligned grid → same as column masonry: `grid` counts columns
- *    and stores the column in `frameSlot`, so it reuses the column
- *    picker verbatim.
+ *  - Grid → column under the cursor plus the persistent row under the
+ *    cursor. Column uses `frameSlot`; row uses `frameRow`.
  *
  * Either kind of target may be returned: drop into an existing track,
  * or insert a brand-new track at the cursor's gap position (used to
@@ -371,6 +376,7 @@ function collectGridDropPlans(
   draggedIds: string[],
   postDragNodes: NestableNode[],
   preDragNodes: Node[],
+  edges: UiResolverState['edges'],
   pointerFlowPosition?: { x: number; y: number },
 ): GridDropPlan[] {
   const plans: GridDropPlan[] = [];
@@ -401,6 +407,11 @@ function collectGridDropPlans(
       axis: cfg.axis,
       count: cfg.count,
       target,
+      ...(cfg.axis === 'grid'
+        ? {
+            row: pickGridRowTarget(preDragNodes, frame.id, framePoint.y, edges),
+          }
+        : {}),
     });
   }
   return plans;
@@ -434,12 +445,18 @@ function buildGridDropCommands(
   preDragNodes: Node[],
 ): GridDropCommands {
   if (plans.length === 0) {
-    return { commands: [], slotPatches: [], frameDataPatches: [] };
+    return {
+      commands: [],
+      slotPatches: [],
+      rowPatches: [],
+      frameDataPatches: [],
+    };
   }
 
   const out: GridDropCommands = {
     commands: [],
     slotPatches: [],
+    rowPatches: [],
     frameDataPatches: [],
   };
 
@@ -456,6 +473,7 @@ function buildGridDropCommands(
 
     // Stored slot for every existing child of this frame (clamped).
     const origSlot = new Map<string, number>();
+    const origRow = new Map<string, number>();
     const childIds: string[] = [];
     for (const node of preDragNodes) {
       if (node.parentId !== frameId) continue;
@@ -465,11 +483,22 @@ function buildGridDropCommands(
           ? clampSlot(Math.round(raw), count)
           : 0;
       origSlot.set(node.id, s);
+      if (axis === 'grid') {
+        const rawRow = (node.data as { frameRow?: number } | undefined)
+          ?.frameRow;
+        origRow.set(
+          node.id,
+          typeof rawRow === 'number' && Number.isFinite(rawRow)
+            ? Math.max(0, Math.round(rawRow))
+            : 0,
+        );
+      }
       childIds.push(node.id);
     }
 
     // Working assignment = stored slots; dragged nodes overwritten below.
     const slotOf = new Map<string, number>(origSlot);
+    const rowOf = new Map<string, number>(origRow);
     // Include any dragged node that just entered this frame from outside.
     for (const plan of framePlans) {
       if (!slotOf.has(plan.nodeId)) childIds.push(plan.nodeId);
@@ -501,6 +530,51 @@ function buildGridDropCommands(
             ? plan.target.slot
             : Math.min(plan.target.slot, count - 1);
         slotOf.set(plan.nodeId, slot);
+      }
+    }
+
+    if (axis === 'grid') {
+      for (const plan of framePlans) {
+        const targetRow = plan.row ?? 0;
+        const targetSlot = slotOf.get(plan.nodeId) ?? 0;
+        const occupantId = childIds.find(
+          (id) =>
+            id !== plan.nodeId &&
+            slotOf.get(id) === targetSlot &&
+            rowOf.get(id) === targetRow,
+        );
+        const sourceRow = origRow.get(plan.nodeId);
+        const sourceSlot = origSlot.get(plan.nodeId);
+
+        if (sourceRow !== undefined && sourceSlot !== undefined) {
+          if (occupantId) {
+            slotOf.set(occupantId, sourceSlot);
+            rowOf.set(occupantId, sourceRow);
+          }
+          rowOf.set(plan.nodeId, targetRow);
+          continue;
+        }
+
+        if (occupantId) {
+          for (const id of childIds) {
+            const row = rowOf.get(id);
+            if (row !== undefined && row >= targetRow) rowOf.set(id, row + 1);
+          }
+        }
+        rowOf.set(plan.nodeId, targetRow);
+      }
+
+      const occupiedRows = new Set(rowOf.values());
+      const rowEmptied = [...new Set(origRow.values())].some(
+        (row) => !occupiedRows.has(row),
+      );
+      if (rowEmptied) {
+        const orderedRows = [...occupiedRows].sort((a, b) => a - b);
+        const rowRemap = new Map<number, number>();
+        orderedRows.forEach((row, index) => rowRemap.set(row, index));
+        for (const [id, row] of rowOf) {
+          rowOf.set(id, rowRemap.get(row) ?? 0);
+        }
       }
     }
 
@@ -541,12 +615,24 @@ function buildGridDropCommands(
       }> = [];
       for (const id of childIds) {
         const finalSlot = remap.get(slotOf.get(id) ?? 0) ?? 0;
-        if (origSlot.get(id) === finalSlot) continue;
+        const finalRow = rowOf.get(id);
+        const slotChanged = origSlot.get(id) !== finalSlot;
+        const rowChanged =
+          typeof finalRow === 'number' && origRow.get(id) !== finalRow;
+        if (!slotChanged && !rowChanged) continue;
         mergePatches.push({
           nodeId: id as CanvasNodeId,
-          patch: { frameSlot: finalSlot },
+          patch: {
+            ...(slotChanged ? { frameSlot: finalSlot } : {}),
+            ...(rowChanged ? { frameRow: finalRow } : {}),
+          },
         });
-        out.slotPatches.push({ nodeId: id as CanvasNodeId, slot: finalSlot });
+        if (slotChanged) {
+          out.slotPatches.push({ nodeId: id as CanvasNodeId, slot: finalSlot });
+        }
+        if (rowChanged) {
+          out.rowPatches.push({ nodeId: id as CanvasNodeId, row: finalRow });
+        }
       }
       if (mergePatches.length > 0) {
         out.commands.push({ type: 'MERGE_NODE_DATA', patches: mergePatches });
@@ -556,21 +642,35 @@ function buildGridDropCommands(
 
     // ── Plain move that doesn't empty its source track: only the
     //    dragged nodes change slot; the grid keeps its current count.
-    const slotPatches: Array<{ nodeId: CanvasNodeId; slot: number }> = [];
-    for (const plan of framePlans) {
-      const slot = slotOf.get(plan.nodeId) ?? 0;
-      if (origSlot.get(plan.nodeId) === slot) continue;
-      slotPatches.push({ nodeId: plan.nodeId as CanvasNodeId, slot });
+    const mergePatches: Array<{
+      nodeId: CanvasNodeId;
+      patch: Record<string, unknown>;
+    }> = [];
+    for (const id of childIds) {
+      const slot = slotOf.get(id) ?? 0;
+      const row = rowOf.get(id);
+      const slotChanged = origSlot.get(id) !== slot;
+      const rowChanged = typeof row === 'number' && origRow.get(id) !== row;
+      if (!slotChanged && !rowChanged) continue;
+      mergePatches.push({
+        nodeId: id as CanvasNodeId,
+        patch: {
+          ...(slotChanged ? { frameSlot: slot } : {}),
+          ...(rowChanged ? { frameRow: row } : {}),
+        },
+      });
+      if (slotChanged) {
+        out.slotPatches.push({ nodeId: id as CanvasNodeId, slot });
+      }
+      if (rowChanged) {
+        out.rowPatches.push({ nodeId: id as CanvasNodeId, row });
+      }
     }
-    if (slotPatches.length === 0) continue;
+    if (mergePatches.length === 0) continue;
     out.commands.push({
       type: 'MERGE_NODE_DATA',
-      patches: slotPatches.map((p) => ({
-        nodeId: p.nodeId,
-        patch: { frameSlot: p.slot },
-      })),
+      patches: mergePatches,
     });
-    out.slotPatches.push(...slotPatches);
   }
 
   return out;

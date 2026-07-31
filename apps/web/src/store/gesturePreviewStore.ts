@@ -4,6 +4,7 @@ import type { Guide } from '@/handler/snap/types';
 import type {
   FrameFitResult,
   StructuredDropContext,
+  StructuredDropContextRect,
 } from '@sediment/shared/canvas-engine';
 
 /**
@@ -193,6 +194,11 @@ export type StructuredDropPreview = {
   y: number;
   width: number;
   height: number;
+  swap?: {
+    occupantId: string;
+    from: StructuredDropContextRect;
+    to: StructuredDropContextRect;
+  };
   context: StructuredDropContext;
 };
 

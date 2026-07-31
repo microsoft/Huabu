@@ -18,10 +18,9 @@
  * pulled in. The new slot assignment is written back to
  * `data.frameSlot` so subsequent passes stay stable.
  *
- *   • `grid`   — N **columns** (same `frameSlot` model as `column`),
- *                but the Y axis is aligned too: children are grouped
- *                into **row bands** and every member of a band shares
- *                one Y origin. See {@link applyGridLayout}.
+ *   • `grid`   — N **columns** with persistent `(frameSlot, frameRow)`
+ *                cells. Every member of a row shares one Y origin. See
+ *                {@link applyGridLayout}.
  */
 import { EDGE_LABEL_MAX_INVERSE_SCALE } from '../../types/canvas/edge.js';
 import {
@@ -339,6 +338,10 @@ function compactEmptyTracks(
 export interface FrameGridLayoutResult {
   childPositions: Map<string, XYPosition>;
   slotAssignments: Map<string, number>;
+  /** Grid-only row assignments persisted as `data.frameRow`. */
+  rowAssignments?: Map<string, number>;
+  /** Grid-only stable row geometry, including currently empty rows. */
+  rowTracks?: Array<{ top: number; height: number }>;
   frameSize: { width: number; height: number };
   gutters: StructuredGutterPlan[];
   /**
@@ -700,65 +703,39 @@ export function applyRowLayout(
 
 // ── Row-aligned grid ──────────────────────────────────────────────────
 
-/**
- * Group children into **row bands**: maximal sets that (a) overlap
- * vertically and (b) occupy distinct columns.
- *
- * Children are swept in ascending `position.y`. A child joins the open
- * band when its box still overlaps the band's running bottom edge AND
- * its column is not already taken; otherwise it opens a new band. The
- * distinct-column rule is what stops a tall child from swallowing the
- * frame: a band can never hold more than one item per column, so its
- * size is bounded by the track count.
- *
- * **Idempotency.** After {@link applyGridLayout} runs, every member of
- * a band sits at exactly that band's origin and the next band starts
- * one `interGapY` below the band's bottom. Re-running the sweep on
- * that output reproduces the same bands, so the layout is a fixed
- * point — no tolerance constant is involved and repeated passes (or a
- * resize gesture's per-tick re-solve) never reshuffle rows.
- *
- * The `top === bandTop` escape hatch covers zero-height children,
- * whose box cannot "overlap" anything: same-origin siblings still band
- * together instead of each opening a band of their own.
- */
-function groupIntoRowBands(
+/** Resolve persistent Grid rows while enforcing one child per cell. */
+function assignGridRows(
   children: ChildSlot[],
   columnOf: (child: ChildSlot) => number,
-): ChildSlot[][] {
+): { bands: ChildSlot[][]; assignment: Map<string, number> } {
   const ordered = [...children].sort((a, b) => {
-    const dy = a.node.position.y - b.node.position.y;
-    if (dy !== 0) return dy;
-    // Deterministic tie-break so equal-Y children band in a stable
-    // order regardless of the caller's array order.
-    return a.node.position.x - b.node.position.x;
+    const aRaw = (a.node.data as { frameRow?: number } | undefined)?.frameRow;
+    const bRaw = (b.node.data as { frameRow?: number } | undefined)?.frameRow;
+    const aRow = Number.isFinite(aRaw) ? Math.max(0, Math.round(aRaw!)) : 0;
+    const bRow = Number.isFinite(bRaw) ? Math.max(0, Math.round(bRaw!)) : 0;
+    return aRow - bRow || a.node.id.localeCompare(b.node.id);
   });
 
-  const bands: ChildSlot[][] = [];
-  let bandTop = 0;
-  let bandBottom = 0;
-  let bandColumns = new Set<number>();
-
+  const assignment = new Map<string, number>();
+  const occupied = new Set<string>();
   for (const child of ordered) {
     const column = columnOf(child);
-    const top = child.node.position.y;
-    const overlapsBand =
-      bands.length > 0 && (top === bandTop || top < bandBottom);
-
-    if (overlapsBand && !bandColumns.has(column)) {
-      bands[bands.length - 1].push(child);
-      bandBottom = Math.max(bandBottom, top + child.height);
-      bandColumns.add(column);
-      continue;
-    }
-
-    bands.push([child]);
-    bandTop = top;
-    bandBottom = top + child.height;
-    bandColumns = new Set<number>([column]);
+    const raw = (child.node.data as { frameRow?: number } | undefined)
+      ?.frameRow;
+    let row = Number.isFinite(raw) ? Math.max(0, Math.round(raw!)) : 0;
+    while (occupied.has(`${row}:${column}`)) row += 1;
+    occupied.add(`${row}:${column}`);
+    assignment.set(child.node.id, row);
   }
 
-  return bands;
+  const rowCount = Math.max(0, ...assignment.values()) + 1;
+  const bands: ChildSlot[][] = Array.from({ length: rowCount }, () => []);
+  for (const child of children) {
+    const row = assignment.get(child.node.id) ?? 0;
+    bands[row].push(child);
+  }
+
+  return { bands, assignment };
 }
 
 /**
@@ -769,16 +746,15 @@ function groupIntoRowBands(
  * per-axis padding / gap derivation — so the drag-time column pickers
  * and the resize gesture are reused verbatim. The difference is the Y
  * axis: instead of each column stacking independently from the top,
- * children are grouped into row bands ({@link groupIntoRowBands}) and
- * every member of a band is placed at that band's shared origin, with
- * the band's height set by its tallest member.
+ * children are grouped by persistent `data.frameRow` and
+ * every member of a row is placed at that row's shared origin, with
+ * the row's height set by its tallest member.
  *
  * The point of the mode is **correspondence across columns**: items
  * meant to line up are placed side by side, and a column with no
- * member in a band simply leaves that cell blank rather than pulling
- * its next item up. Row membership is derived from where the user
- * dropped things, so nothing beyond the existing `frameSlot` is
- * persisted and switching back to `free` leaves no residue.
+ * member in a row simply leaves that cell blank rather than pulling
+ * its next item up. Row membership is persistent and independent of
+ * rendered geometry.
  *
  * Frame sizing stays content-driven and per-axis self-consistent:
  * scaling every child width by `sx` scales the column widths, the
@@ -841,34 +817,49 @@ export function applyGridLayout(
         : 0);
   }
 
-  const bands = groupIntoRowBands(children, columnOf);
+  const { bands, assignment: rowAssignments } = assignGridRows(
+    children,
+    columnOf,
+  );
   const bandByNodeId = new Map<string, number>();
   for (let bandIndex = 0; bandIndex < bands.length; bandIndex += 1) {
     for (const child of bands[bandIndex]) {
       bandByNodeId.set(child.node.id, bandIndex);
     }
   }
+  const yEdges = options.edges?.filter((edge) => {
+    const sourceColumn = assignment.get(edge.source);
+    const targetColumn = assignment.get(edge.target);
+    return sourceColumn !== undefined && sourceColumn === targetColumn;
+  });
   const yGutters = planAxisGutters(
     'y',
     bands.length,
     interGapY,
     bandByNodeId,
-    options.edges,
+    yEdges,
     options.frozenGutters?.y,
   );
 
   const positions = new Map<string, XYPosition>();
+  const rowTracks: Array<{ top: number; height: number }> = [];
   let y = padY;
   for (let bandIndex = 0; bandIndex < bands.length; bandIndex += 1) {
     const band = bands[bandIndex];
-    const bandHeight = Math.max(0, ...band.map((c) => c.height));
+    const bandHeight =
+      band.length > 0
+        ? Math.max(...band.map((child) => child.height))
+        : heightMedian;
+    rowTracks.push({ top: y, height: bandHeight });
     for (const item of band) {
       positions.set(item.node.id, { x: colOriginX[columnOf(item)], y });
     }
     y += bandHeight + (yGutters[bandIndex]?.finalSize ?? interGapY);
   }
   // `y` overshot by one trailing inter-band gap.
-  const contentBottom = bands.length > 0 ? y - interGapY : padY;
+  const trailingGap =
+    bands.length > 0 ? (yGutters[bands.length - 1]?.finalSize ?? interGapY) : 0;
+  const contentBottom = bands.length > 0 ? y - trailingGap : padY;
 
   const lastCol = effectiveCols - 1;
   const contentRight =
@@ -877,10 +868,35 @@ export function applyGridLayout(
   return {
     childPositions: positions,
     slotAssignments: assignment,
+    rowAssignments,
+    rowTracks,
     frameSize: { width: contentRight + padX, height: contentBottom + padY },
     gutters: [...xGutters, ...yGutters],
     effectiveCount: effectiveCols,
   };
+}
+
+/** Resolve one structured Frame through its configured canonical solver. */
+export function solveStructuredFrameLayout(
+  nodes: Node[],
+  frameId: string,
+  emptyTrackPolicy: 'fill' | 'compact' = 'compact',
+  options: StructuredLayoutOptions = {},
+): FrameGridLayoutResult | null {
+  const frame = nodes.find((node) => node.id === frameId);
+  const config = readFrameGridConfig(frame);
+  if (!config) return null;
+  return config.axis === 'column'
+    ? applyColumnLayout(nodes, frameId, config.count, emptyTrackPolicy, options)
+    : config.axis === 'row'
+      ? applyRowLayout(nodes, frameId, config.count, emptyTrackPolicy, options)
+      : applyGridLayout(
+          nodes,
+          frameId,
+          config.count,
+          emptyTrackPolicy,
+          options,
+        );
 }
 
 /** Compute the current edge-aware gutter plan without mutating canvas data. */
@@ -889,16 +905,9 @@ export function getStructuredFrameGutterPlan(
   edges: readonly Edge[],
   frameId: string,
 ): StructuredGutterPlan[] {
-  const frame = nodes.find((node) => node.id === frameId);
-  const config = readFrameGridConfig(frame);
-  if (!config) return [];
-  const options: StructuredLayoutOptions = { edges };
-  const result =
-    config.axis === 'column'
-      ? applyColumnLayout(nodes, frameId, config.count, 'compact', options)
-      : config.axis === 'row'
-        ? applyRowLayout(nodes, frameId, config.count, 'compact', options)
-        : applyGridLayout(nodes, frameId, config.count, 'compact', options);
+  const result = solveStructuredFrameLayout(nodes, frameId, 'compact', {
+    edges,
+  });
   return result?.gutters ?? [];
 }
 
@@ -1194,10 +1203,20 @@ export interface StructuredDropZone {
   kind: 'into-existing' | 'insert-new';
   indicator: 'caret' | 'footprint';
   slot: number;
+  /** Grid-only persistent row targeted by this drop. */
+  row?: number;
   x: number;
   y: number;
   width: number;
   height: number;
+  /** Final content-driven Frame size from the simulated structured solver. */
+  frameSize: { width: number; height: number };
+  /** Grid-only preview of an occupied target cell being swapped out. */
+  swap?: {
+    occupantId: string;
+    from: StructuredDropContextRect;
+    to: StructuredDropContextRect;
+  };
   context: StructuredDropContext;
 }
 
@@ -1215,15 +1234,44 @@ export interface StructuredDropPeerRect extends StructuredDropContextRect {
 /**
  * Layout context rendered around the precise drop indicator. Every
  * structured mode exposes its active track and the peers that establish
- * that track's shared edge. Grid additionally exposes the row band and
+ * that track's shared edge. Grid additionally exposes the row and
  * peers that will share its Y origin with the dragged node.
  */
 export interface StructuredDropContext {
   axis: FrameGridAxis;
-  trackRect: StructuredDropContextRect;
+  trackRect: StructuredDropContextRect | null;
   trackPeerRects: StructuredDropPeerRect[];
   alignmentRect: StructuredDropContextRect | null;
   alignmentPeerRects: StructuredDropPeerRect[];
+}
+
+/** Pick a persistent Grid row from a frame-local Y coordinate. */
+export function pickGridRowTarget(
+  nodes: Node[],
+  frameId: string,
+  y: number,
+  edges: readonly Edge[] = [],
+): number {
+  const frame = nodes.find((node) => node.id === frameId);
+  const config = readFrameGridConfig(frame);
+  if (!config || config.axis !== 'grid') return 0;
+  const layout = applyGridLayout(nodes, frameId, config.count, 'compact', {
+    edges,
+  });
+  if (!layout?.rowAssignments) return 0;
+
+  const ordered = (layout.rowTracks ?? []).map(
+    (track, row) =>
+      [row, { top: track.top, bottom: track.top + track.height }] as const,
+  );
+  if (ordered.length === 0) return 0;
+  for (let index = 0; index < ordered.length; index += 1) {
+    const [row, bounds] = ordered[index];
+    if (y <= bounds.bottom) return row;
+    const next = ordered[index + 1];
+    if (next && y < (bounds.bottom + next[1].top) / 2) return row;
+  }
+  return ordered[ordered.length - 1][0] + 1;
 }
 
 function describeGridDropZone(
@@ -1232,7 +1280,9 @@ function describeGridDropZone(
   frameId: string,
   count: number,
   target: StructuredDropTarget,
+  pointerY: number,
   dragged: DraggedNodeRect,
+  options: StructuredLayoutOptions,
 ): StructuredDropZone | null {
   const opensTrack =
     target.kind === 'insert-new' && count < FRAME_GRID_MAX_COUNT;
@@ -1240,30 +1290,83 @@ function describeGridDropZone(
     ? target.slot
     : Math.min(target.slot, count - 1);
   const effectiveCount = opensTrack ? count + 1 : count;
+  const targetRow = pickGridRowTarget(nodes, frameId, pointerY, options.edges);
+  const source = nodes.find(
+    (node) => node.id === dragged.id && node.parentId === frameId,
+  );
+  const sourceData = source?.data as
+    | { frameSlot?: number; frameRow?: number }
+    | undefined;
+  const sourceRow = Number.isFinite(sourceData?.frameRow)
+    ? Math.max(0, Math.round(sourceData!.frameRow!))
+    : 0;
+  const sourceSlot = Number.isFinite(sourceData?.frameSlot)
+    ? clampInt(Math.round(sourceData!.frameSlot!), 0, count - 1)
+    : 0;
+  const occupant = opensTrack
+    ? undefined
+    : nodes.find((node) => {
+        if (node.id === dragged.id || node.parentId !== frameId) return false;
+        const data = node.data as
+          | { frameSlot?: number; frameRow?: number }
+          | undefined;
+        const slot = Number.isFinite(data?.frameSlot)
+          ? clampInt(Math.round(data!.frameSlot!), 0, count - 1)
+          : 0;
+        const row = Number.isFinite(data?.frameRow)
+          ? Math.max(0, Math.round(data!.frameRow!))
+          : 0;
+        return slot === targetSlot && row === targetRow;
+      });
+  const insertsRow = !source && !!occupant;
   let foundDragged = false;
 
   const simulated = nodes.map((node) => {
+    if (node.id === frameId && effectiveCount !== count) {
+      return {
+        ...node,
+        data: { ...node.data, gridCount: effectiveCount },
+      };
+    }
     if (node.id === dragged.id) {
       foundDragged = true;
       return {
         ...node,
         parentId: frameId,
         position: { x: dragged.x, y: dragged.y },
-        data: { ...node.data, frameSlot: targetSlot },
+        data: { ...node.data, frameSlot: targetSlot, frameRow: targetRow },
         style: { ...node.style, width: dragged.width, height: dragged.height },
         measured: { width: dragged.width, height: dragged.height },
       };
     }
-    if (!opensTrack || node.parentId !== frameId) return node;
+    if (node.parentId !== frameId) return node;
 
-    const raw = (node.data as { frameSlot?: number } | undefined)?.frameSlot;
+    const data = node.data as
+      | { frameSlot?: number; frameRow?: number }
+      | undefined;
+    const raw = data?.frameSlot;
     const slot =
       typeof raw === 'number' && Number.isFinite(raw)
         ? clampInt(Math.round(raw), 0, count - 1)
         : 0;
-    return slot < targetSlot
+    const shiftedSlot = opensTrack && slot >= targetSlot ? slot + 1 : slot;
+    const row = Number.isFinite(data?.frameRow)
+      ? Math.max(0, Math.round(data!.frameRow!))
+      : 0;
+    const nextRow =
+      source && node.id === occupant?.id
+        ? sourceRow
+        : insertsRow && row >= targetRow
+          ? row + 1
+          : row;
+    const nextSlot =
+      source && node.id === occupant?.id ? sourceSlot : shiftedSlot;
+    return nextSlot === slot && nextRow === row
       ? node
-      : { ...node, data: { ...node.data, frameSlot: slot + 1 } };
+      : {
+          ...node,
+          data: { ...node.data, frameSlot: nextSlot, frameRow: nextRow },
+        };
   });
 
   if (!foundDragged) {
@@ -1272,20 +1375,53 @@ function describeGridDropZone(
       type: 'text',
       parentId: frameId,
       position: { x: dragged.x, y: dragged.y },
-      data: { frameSlot: targetSlot },
+      data: { frameSlot: targetSlot, frameRow: targetRow },
       style: { width: dragged.width, height: dragged.height },
       measured: { width: dragged.width, height: dragged.height },
     } as Node);
   }
 
-  const layout = applyGridLayout(simulated, frameId, effectiveCount, 'compact');
+  const layout = solveStructuredFrameLayout(
+    simulated,
+    frameId,
+    'compact',
+    options,
+  );
   const position = layout?.childPositions.get(dragged.id);
   if (!layout || !position) return null;
+  const currentLayout = solveStructuredFrameLayout(
+    nodes,
+    frameId,
+    'compact',
+    options,
+  );
+  const occupantSize = occupant ? getNodeSize(occupant) : null;
+  const occupantDestination = occupant
+    ? layout.childPositions.get(occupant.id)
+    : undefined;
+  const swap =
+    source && occupant && occupantSize && occupantDestination
+      ? {
+          occupantId: occupant.id,
+          from: {
+            x: occupant.position.x,
+            y: occupant.position.y,
+            width: occupantSize.width,
+            height: occupantSize.height,
+          },
+          to: {
+            x: occupantDestination.x,
+            y: occupantDestination.y,
+            width: occupantSize.width,
+            height: occupantSize.height,
+          },
+        }
+      : undefined;
 
   const peerRects: StructuredDropPeerRect[] = [];
-  for (const child of collectChildren(simulated, frameId)) {
+  for (const child of collectChildren(nodes, frameId)) {
     if (child.node.id === dragged.id) continue;
-    const childPosition = layout.childPositions.get(child.node.id);
+    const childPosition = currentLayout?.childPositions.get(child.node.id);
     if (!childPosition) continue;
     peerRects.push({
       id: child.node.id,
@@ -1296,39 +1432,61 @@ function describeGridDropZone(
     });
   }
 
-  const trackPeerRects = peerRects.filter((peer) => peer.x === position.x);
-  const alignmentPeerRects = peerRects.filter((peer) => peer.y === position.y);
+  const trackPeerRects = peerRects.filter(
+    (peer) => currentLayout?.slotAssignments.get(peer.id) === targetSlot,
+  );
+  const alignmentPeerRects = peerRects.filter(
+    (peer) => currentLayout?.rowAssignments?.get(peer.id) === targetRow,
+  );
   const frameSize = getNodeSize(frame);
+  const currentColumnPositions = collectChildren(nodes, frameId)
+    .filter(
+      (child) =>
+        currentLayout?.slotAssignments.get(child.node.id) === targetSlot,
+    )
+    .map((child) => currentLayout?.childPositions.get(child.node.id))
+    .filter((value): value is XYPosition => value !== undefined);
+  const currentRowTrack = currentLayout?.rowTracks?.[targetRow];
 
   return {
     kind: opensTrack ? 'insert-new' : 'into-existing',
     indicator: 'footprint',
     slot: targetSlot,
+    row: targetRow,
     x: position.x,
     y: position.y,
     width: dragged.width,
     height: dragged.height,
+    frameSize: layout.frameSize,
+    ...(swap ? { swap } : {}),
     context: {
       axis: 'grid',
-      trackRect: {
-        x: position.x,
-        y: 0,
-        width: Math.max(
-          dragged.width,
-          ...trackPeerRects.map((peer) => peer.width),
-        ),
-        height: frameSize.height,
-      },
+      trackRect:
+        currentColumnPositions.length > 0
+          ? {
+              x: Math.min(...currentColumnPositions.map((item) => item.x)),
+              y: 0,
+              width: Math.max(
+                ...collectChildren(nodes, frameId)
+                  .filter(
+                    (child) =>
+                      currentLayout?.slotAssignments.get(child.node.id) ===
+                      targetSlot,
+                  )
+                  .map((child) => child.width),
+              ),
+              height: frameSize.height,
+            }
+          : null,
       trackPeerRects,
-      alignmentRect: {
-        x: 0,
-        y: position.y,
-        width: frameSize.width,
-        height: Math.max(
-          dragged.height,
-          ...alignmentPeerRects.map((peer) => peer.height),
-        ),
-      },
+      alignmentRect: currentRowTrack
+        ? {
+            x: 0,
+            y: currentRowTrack.top,
+            width: frameSize.width,
+            height: currentRowTrack.height,
+          }
+        : null,
       alignmentPeerRects,
     },
   };
@@ -1361,6 +1519,7 @@ export function describeStructuredDropZone(
   axis: FrameGridAxis,
   count: number,
   dragged?: DraggedNodeRect,
+  options: StructuredLayoutOptions = {},
 ): StructuredDropZone | null {
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame) return null;
@@ -1380,7 +1539,16 @@ export function describeStructuredDropZone(
   const allChildren = collectChildren(nodes, frameId);
 
   if (axis === 'grid' && dragged) {
-    return describeGridDropZone(nodes, frame, frameId, count, target, dragged);
+    return describeGridDropZone(
+      nodes,
+      frame,
+      frameId,
+      count,
+      target,
+      framePoint.y,
+      dragged,
+      options,
+    );
   }
 
   // Bucket children by stored slot (mirrors the pickers / solvers).
@@ -1567,69 +1735,79 @@ export function describeStructuredDropZone(
             height: Math.max(extent[target.slot], dragged?.height ?? 0),
           };
 
-  let alignmentRect: StructuredDropContextRect | null = null;
-  let alignmentPeerRects: StructuredDropPeerRect[] = [];
-  if (axis === 'grid' && dragged) {
-    let draggedChild = allChildren.find(
-      (child) => child.node.id === dragged.id,
-    );
-    if (!draggedChild) {
-      draggedChild = {
-        node: {
-          id: dragged.id,
-          type: 'text',
-          parentId: frameId,
-          position: { x: dragged.x, y: dragged.y },
-          data: { frameSlot: target.slot },
-        } as Node,
-        width: dragged.width,
-        height: dragged.height,
+  let foundDragged = false;
+  const effectiveCount =
+    target.kind === 'insert-new' && count < FRAME_GRID_MAX_COUNT
+      ? count + 1
+      : count;
+  const targetSlot =
+    target.kind === 'insert-new'
+      ? target.slot
+      : Math.min(target.slot, count - 1);
+  const simulated = nodes.map((node) => {
+    if (node.id === frameId && effectiveCount !== count) {
+      return {
+        ...node,
+        data: { ...node.data, gridCount: effectiveCount },
       };
     }
-
-    const rowCandidates = allChildren.includes(draggedChild)
-      ? allChildren
-      : [...allChildren, draggedChild];
-    const columnOf = (child: ChildSlot) => {
-      if (child.node.id === dragged.id) return target.slot;
-      const raw = (child.node.data as { frameSlot?: number } | undefined)
-        ?.frameSlot;
-      return typeof raw === 'number' && Number.isFinite(raw)
+    if (dragged && node.id === dragged.id) {
+      foundDragged = true;
+      return {
+        ...node,
+        parentId: frameId,
+        position: { x: dragged.x, y: dragged.y },
+        data: { ...node.data, frameSlot: targetSlot },
+        style: { ...node.style, width: dragged.width, height: dragged.height },
+        measured: { width: dragged.width, height: dragged.height },
+      };
+    }
+    if (
+      target.kind !== 'insert-new' ||
+      node.parentId !== frameId ||
+      node.id === dragged?.id
+    ) {
+      return node;
+    }
+    const raw = (node.data as { frameSlot?: number } | undefined)?.frameSlot;
+    const slot =
+      typeof raw === 'number' && Number.isFinite(raw)
         ? clampInt(Math.round(raw), 0, count - 1)
         : 0;
-    };
-    const targetBand = groupIntoRowBands(rowCandidates, columnOf).find((band) =>
-      band.some((child) => child.node.id === dragged.id),
-    );
-
-    if (targetBand) {
-      const rowTop = Math.min(
-        ...targetBand.map((child) => child.node.position.y),
-      );
-      const rowHeight = Math.max(0, ...targetBand.map((child) => child.height));
-      alignmentRect = {
-        x: 0,
-        y: rowTop,
-        width: frameSize.width,
-        height: rowHeight,
-      };
-      alignmentPeerRects = targetBand
-        .filter((child) => child.node.id !== dragged.id)
-        .map(toPeerRect);
-    }
+    return slot < targetSlot
+      ? node
+      : { ...node, data: { ...node.data, frameSlot: slot + 1 } };
+  });
+  if (dragged && !foundDragged) {
+    simulated.push({
+      id: dragged.id,
+      type: 'text',
+      parentId: frameId,
+      position: { x: dragged.x, y: dragged.y },
+      data: { frameSlot: targetSlot },
+      style: { width: dragged.width, height: dragged.height },
+      measured: { width: dragged.width, height: dragged.height },
+    } as Node);
   }
+  const simulatedLayout = solveStructuredFrameLayout(
+    simulated,
+    frameId,
+    'compact',
+    options,
+  );
 
   return {
     kind: target.kind,
     indicator: target.kind === 'into-existing' ? 'caret' : 'footprint',
     slot: target.slot,
     ...dropRect,
+    frameSize: simulatedLayout?.frameSize ?? frameSize,
     context: {
       axis,
       trackRect,
       trackPeerRects,
-      alignmentRect,
-      alignmentPeerRects,
+      alignmentRect: null,
+      alignmentPeerRects: [],
     },
   };
 }
@@ -1649,6 +1827,7 @@ export function describeStructuredDropZone(
  * Mutations applied per handled frame:
  * - Children's `position` — `result.childPositions`
  * - Children's `data.frameSlot` — `result.slotAssignments`
+ * - Grid children's `data.frameRow` — `result.rowAssignments`
  * - Frame's `data.gridCount` — `result.effectiveCount` (so a track the
  *   layout dropped is reflected in the stored count and the UI stepper)
  * - Frame's `style.width` / `style.height` / `measured` — `result.frameSize`,
@@ -1694,12 +1873,12 @@ export function applyStructuredFrameRelayout(
       edges: options.edges,
       frozenGutters: options.frozenGuttersByFrame?.get(frameId),
     };
-    const result =
-      cfg.axis === 'column'
-        ? applyColumnLayout(working, frameId, cfg.count, policy, layoutOptions)
-        : cfg.axis === 'row'
-          ? applyRowLayout(working, frameId, cfg.count, policy, layoutOptions)
-          : applyGridLayout(working, frameId, cfg.count, policy, layoutOptions);
+    const result = solveStructuredFrameLayout(
+      working,
+      frameId,
+      policy,
+      layoutOptions,
+    );
     if (!result) continue;
 
     handled.add(frameId);
@@ -1761,17 +1940,28 @@ export function applyStructuredFrameRelayout(
       if (n.parentId !== frameId) return n;
       const nextPos = result.childPositions.get(n.id);
       const nextSlot = result.slotAssignments.get(n.id);
+      const nextRow = result.rowAssignments?.get(n.id);
       const dataRec = (n.data ?? {}) as Record<string, unknown>;
       const priorSlot = (dataRec as { frameSlot?: number }).frameSlot;
+      const priorRow = (dataRec as { frameRow?: number }).frameRow;
       const posChanged =
         !!nextPos && (n.position.x !== nextPos.x || n.position.y !== nextPos.y);
       const slotChanged =
         typeof nextSlot === 'number' && priorSlot !== nextSlot;
-      if (!posChanged && !slotChanged) return n;
+      const rowChanged = typeof nextRow === 'number' && priorRow !== nextRow;
+      if (!posChanged && !slotChanged && !rowChanged) return n;
       return {
         ...n,
         ...(posChanged && nextPos ? { position: nextPos } : {}),
-        ...(slotChanged ? { data: { ...dataRec, frameSlot: nextSlot } } : {}),
+        ...(slotChanged || rowChanged
+          ? {
+              data: {
+                ...dataRec,
+                ...(slotChanged ? { frameSlot: nextSlot } : {}),
+                ...(rowChanged ? { frameRow: nextRow } : {}),
+              },
+            }
+          : {}),
       };
     });
   }

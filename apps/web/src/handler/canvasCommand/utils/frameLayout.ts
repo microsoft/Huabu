@@ -43,6 +43,8 @@ export interface PendingFrameMutations {
   parentChanges?: ReadonlyMap<string, string | null>;
   /** Direct child → new `frameSlot`. Mirrors a `MERGE_NODE_DATA` patch. */
   slotPatches?: ReadonlyArray<{ nodeId: string; slot: number }>;
+  /** Grid child → new `frameRow`. Mirrors a `MERGE_NODE_DATA` patch. */
+  rowPatches?: ReadonlyArray<{ nodeId: string; row: number }>;
   /**
    * Frame → layout-mode + gridCount patch. Mirrors the
    * `MERGE_NODE_DATA` emitted by `SET_FRAME_LAYOUT_MODE`.
@@ -66,10 +68,11 @@ function applyPendingMutations(
   nodes: Node[],
   pending: PendingFrameMutations,
 ): Node[] {
-  const { parentChanges, slotPatches, frameDataPatches } = pending;
+  const { parentChanges, slotPatches, rowPatches, frameDataPatches } = pending;
   if (
     (!parentChanges || parentChanges.size === 0) &&
     (!slotPatches || slotPatches.length === 0) &&
+    (!rowPatches || rowPatches.length === 0) &&
     (!frameDataPatches || frameDataPatches.length === 0)
   ) {
     return nodes;
@@ -78,6 +81,10 @@ function applyPendingMutations(
   const slotById = new Map<string, number>();
   if (slotPatches) {
     for (const p of slotPatches) slotById.set(p.nodeId, p.slot);
+  }
+  const rowById = new Map<string, number>();
+  if (rowPatches) {
+    for (const p of rowPatches) rowById.set(p.nodeId, p.row);
   }
   const frameDataById = new Map<string, Record<string, unknown>>();
   if (frameDataPatches) {
@@ -97,6 +104,12 @@ function applyPendingMutations(
       next = {
         ...next,
         data: { ...(next.data ?? {}), frameSlot: slotById.get(n.id) },
+      };
+    }
+    if (rowById.has(n.id)) {
+      next = {
+        ...next,
+        data: { ...(next.data ?? {}), frameRow: rowById.get(n.id) },
       };
     }
     const framePatch = frameDataById.get(n.id);
@@ -200,6 +213,17 @@ export function buildStructuredFrameRelayoutCommands(
       dataPatches.push({
         nodeId: nodeId as CanvasNodeId,
         patch: { frameSlot: slot },
+      });
+    }
+
+    for (const [nodeId, row] of result.rowAssignments ?? []) {
+      const node = workingNodes.find((n) => n.id === nodeId);
+      if (!node) continue;
+      const prior = (node.data as { frameRow?: number } | undefined)?.frameRow;
+      if (typeof prior === 'number' && prior === row) continue;
+      dataPatches.push({
+        nodeId: nodeId as CanvasNodeId,
+        patch: { frameRow: row },
       });
     }
 

@@ -28,6 +28,8 @@ type ScreenRect = {
  *  - `insert-new`    → a translucent dashed ghost block (the dragged
  *    node's width × height) with a centred add icon, marking where a
  *    new column / row opens.
+ *  - occupied Grid cell → the current occupant gets a warning outline,
+ *    and an occupant-sized dashed ghost marks its destination cell.
  *
  * Free-mode frames never populate the preview, so nothing renders.
  */
@@ -59,9 +61,17 @@ export const StructuredDropOverlay: React.FC<{
 
     return {
       drop: project(preview),
-      track: project(preview.context.trackRect),
+      track: preview.context.trackRect
+        ? project(preview.context.trackRect)
+        : null,
       alignment: preview.context.alignmentRect
         ? project(preview.context.alignmentRect)
+        : null,
+      swap: preview.swap
+        ? {
+            from: project(preview.swap.from),
+            to: project(preview.swap.to),
+          }
         : null,
     };
   }, [preview, rfInstance, wrapperRef]);
@@ -96,10 +106,12 @@ export const StructuredDropOverlay: React.FC<{
 
   return (
     <>
-      <div
-        className="bg-info/6 pointer-events-none absolute z-40 transition-all duration-100"
-        style={screen.track}
-      />
+      {screen.track && (
+        <div
+          className="bg-info/6 pointer-events-none absolute z-40 transition-all duration-100"
+          style={screen.track}
+        />
+      )}
       {screen.alignment && (
         <div
           className="bg-info/8 pointer-events-none absolute z-40 transition-all duration-100"
@@ -107,6 +119,18 @@ export const StructuredDropOverlay: React.FC<{
         />
       )}
       {dropIndicator}
+      {screen.swap && (
+        <>
+          <div
+            className="bg-warning/10 border-warning pointer-events-none absolute z-40 rounded border-2 transition-all duration-100"
+            style={screen.swap.from}
+          />
+          <div
+            className="bg-warning/8 border-warning/80 pointer-events-none absolute z-40 rounded border-2 border-dashed transition-all duration-100"
+            style={screen.swap.to}
+          />
+        </>
+      )}
     </>
   );
 });

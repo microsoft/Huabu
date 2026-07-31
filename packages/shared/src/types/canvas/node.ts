@@ -263,13 +263,19 @@ export interface BaseNodeData {
   /**
    * Track index inside the parent frame when that frame is in a grid
    * layout mode. Means the **column index** when the parent is in
-   * `column` mode, the **row index** when the parent is in `row`
-   * mode, and is ignored for `free` mode and root-level nodes.
+   * `column` or `grid` mode, the **row index** when the parent is in
+   * `row` mode, and is ignored for `free` mode and root-level nodes.
    *
    * Persisted so a child stays in its user-chosen lane across re-runs
    * of the layout pass (especially the "no empty track" rebalance).
    */
   frameSlot?: number;
+  /**
+   * Row index inside a parent Frame using `grid` layout. Together with
+   * {@link frameSlot}, this identifies the child's persistent cell.
+   * Ignored by `free`, `column`, and `row` layouts.
+   */
+  frameRow?: number;
   /**
    * Who owns this node's height.
    *
@@ -517,6 +523,7 @@ export interface NodeRefNodeData extends BaseNodeData {
   contentDuplicate?: never;
   duplicateFiles?: never;
   frameSlot?: never;
+  frameRow?: never;
   target: {
     canvasId: string;
     nodeId: string;
@@ -534,6 +541,7 @@ export interface FrameRefNodeData extends BaseNodeData {
   contentDuplicate?: never;
   duplicateFiles?: never;
   frameSlot?: never;
+  frameRow?: never;
   target: {
     canvasId: string;
     nodeId: string;

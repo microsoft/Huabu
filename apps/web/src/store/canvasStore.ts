@@ -33,6 +33,7 @@ import {
   wouldUnframe,
   wouldAutoFrame,
   readFrameGridConfig,
+  solveStructuredFrameLayout,
   describeStructuredDropZone,
   getNodeSize,
   normalizeTreeOrder,
@@ -2484,7 +2485,7 @@ const useCanvasStore = create<RFState>()(
         // Re-read store inside the rAF callback so we always use the
         // latest node positions (ReactFlow may have applied intermediate
         // updates between the event and the rAF tick).
-        const { nodes } = get();
+        const { nodes, edges } = get();
 
         // Space-held drag opts out of *parent membership changes* only.
         // The current parent's frame still refits around the child's
@@ -2650,6 +2651,29 @@ const useCanvasStore = create<RFState>()(
           if (getFrameSizing(frameNode) !== 'hug') continue;
           const leaving = leavingByFrame.get(frameId);
           const entering = enteringByFrame.get(frameId);
+          const structuredConfig = readFrameGridConfig(frameNode);
+          if (structuredConfig) {
+            const previewNodes = leaving?.size
+              ? liveNodes.filter((node) => !leaving.has(node.id))
+              : liveNodes;
+            const layout = solveStructuredFrameLayout(
+              previewNodes,
+              frameId,
+              'compact',
+              { edges },
+            );
+            const frameAbs = getFrameAbsolutePosition(liveNodes, frameId);
+            if (layout && frameAbs) {
+              previews.push({
+                frameId,
+                position: frameAbs,
+                width: layout.frameSize.width,
+                height: layout.frameSize.height,
+                role: leaving && !entering ? 'source' : 'target',
+              });
+            }
+            continue;
+          }
           const fit = computeFrameFit(liveNodes, frameId, {
             excludeNodeIds: leaving,
             includeAbsoluteRects: entering,
@@ -2769,6 +2793,7 @@ const useCanvasStore = create<RFState>()(
                 gridCfg.axis,
                 gridCfg.count,
                 draggedRect,
+                { edges },
               )
             : null;
 
@@ -2788,9 +2813,20 @@ const useCanvasStore = create<RFState>()(
               y: frameAbs.y + zone.y,
               width: zone.width,
               height: zone.height,
+              ...(zone.swap
+                ? {
+                    swap: {
+                      ...zone.swap,
+                      from: toAbsoluteRect(zone.swap.from),
+                      to: toAbsoluteRect(zone.swap.to),
+                    },
+                  }
+                : {}),
               context: {
                 ...zone.context,
-                trackRect: toAbsoluteRect(zone.context.trackRect),
+                trackRect: zone.context.trackRect
+                  ? toAbsoluteRect(zone.context.trackRect)
+                  : null,
                 trackPeerRects: zone.context.trackPeerRects.map(toAbsoluteRect),
                 alignmentRect: zone.context.alignmentRect
                   ? toAbsoluteRect(zone.context.alignmentRect)
@@ -2799,6 +2835,24 @@ const useCanvasStore = create<RFState>()(
                   zone.context.alignmentPeerRects.map(toAbsoluteRect),
               },
             });
+            if (getFrameSizing(targetFrame) === 'hug') {
+              const structuredFramePreview: FrameFitPreview = {
+                frameId: targetFrameId,
+                position: frameAbs,
+                width: zone.frameSize.width,
+                height: zone.frameSize.height,
+                role: 'target',
+              };
+              const targetPreviewIndex = previews.findIndex(
+                (preview) => preview.frameId === targetFrameId,
+              );
+              if (targetPreviewIndex >= 0) {
+                previews[targetPreviewIndex] = structuredFramePreview;
+              } else {
+                previews.push(structuredFramePreview);
+              }
+              useGesturePreviewStore.getState().setFrameFitPreviews(previews);
+            }
             // Solver owns the slot here → suppress free-alignment guides.
             setSnapStructuredSuppressed(true);
           } else {

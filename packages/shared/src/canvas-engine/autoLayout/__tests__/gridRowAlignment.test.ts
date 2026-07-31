@@ -18,9 +18,13 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { applyColumnLayout, applyGridLayout } from '../gridLayout.js';
+import {
+  applyColumnLayout,
+  applyGridLayout,
+  pickGridRowTarget,
+} from '../gridLayout.js';
 
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 
 function makeFrame(gridCount: number): Node {
   return {
@@ -38,6 +42,7 @@ function makeChild(
   position: { x: number; y: number },
   size: { width: number; height: number },
   frameSlot: number,
+  frameRow: number,
 ): Node {
   return {
     id,
@@ -46,7 +51,7 @@ function makeChild(
     position,
     style: { width: size.width, height: size.height },
     measured: { width: size.width, height: size.height },
-    data: { frameSlot },
+    data: { frameSlot, frameRow },
   } as Node;
 }
 
@@ -60,11 +65,11 @@ const SIZE = { width: 100, height: 50 };
 function makePairedNodes(): Node[] {
   return [
     makeFrame(2),
-    makeChild('left-1', { x: 0, y: 0 }, SIZE, 0),
-    makeChild('right-1', { x: 400, y: 0 }, SIZE, 1),
-    makeChild('left-2', { x: 0, y: 200 }, SIZE, 0),
-    makeChild('left-3', { x: 0, y: 400 }, SIZE, 0),
-    makeChild('right-3', { x: 400, y: 400 }, { width: 100, height: 80 }, 1),
+    makeChild('left-1', { x: 0, y: 0 }, SIZE, 0, 0),
+    makeChild('right-1', { x: 400, y: 0 }, SIZE, 1, 0),
+    makeChild('left-2', { x: 0, y: 200 }, SIZE, 0, 1),
+    makeChild('left-3', { x: 0, y: 400 }, SIZE, 0, 2),
+    makeChild('right-3', { x: 400, y: 400 }, { width: 100, height: 80 }, 1, 2),
   ];
 }
 
@@ -152,13 +157,14 @@ describe('applyGridLayout', () => {
     expect(frameSize.height).toBeGreaterThanOrEqual(lastBandTop + 80);
   });
 
-  it('is a fixed point — re-running reproduces the same bands', () => {
+  it('keeps rows stable when rendered Y positions change', () => {
     const nodes = makePairedNodes();
     const first = positionsOf(nodes);
 
     const relaid = nodes.map((n) => {
-      const next = first.childPositions.get(n.id);
-      return next ? { ...n, position: next } : n;
+      if (n.id === 'right-3')
+        return { ...n, position: { ...n.position, y: 0 } };
+      return n;
     });
     const second = positionsOf(relaid);
 
@@ -171,8 +177,8 @@ describe('applyGridLayout', () => {
   it('bands zero-height children that share an origin', () => {
     const nodes = [
       makeFrame(2),
-      makeChild('a', { x: 0, y: 0 }, { width: 100, height: 0 }, 0),
-      makeChild('b', { x: 400, y: 0 }, { width: 100, height: 0 }, 1),
+      makeChild('a', { x: 0, y: 0 }, { width: 100, height: 0 }, 0, 0),
+      makeChild('b', { x: 400, y: 0 }, { width: 100, height: 0 }, 1, 0),
     ];
     const { childPositions } = positionsOf(nodes);
 
@@ -185,14 +191,67 @@ describe('applyGridLayout', () => {
     // of each other.
     const nodes = [
       makeFrame(2),
-      makeChild('left-a', { x: 0, y: 0 }, SIZE, 0),
-      makeChild('left-b', { x: 0, y: 0 }, SIZE, 0),
-      makeChild('right-a', { x: 400, y: 0 }, SIZE, 1),
+      makeChild('left-a', { x: 0, y: 0 }, SIZE, 0, 0),
+      makeChild('left-b', { x: 0, y: 0 }, SIZE, 0, 0),
+      makeChild('right-a', { x: 400, y: 0 }, SIZE, 1, 0),
     ];
-    const { childPositions } = positionsOf(nodes);
+    const { childPositions, rowAssignments } = positionsOf(nodes);
 
     expect(at(childPositions, 'left-a').y).not.toBe(
       at(childPositions, 'left-b').y,
     );
+    expect(rowAssignments?.get('left-a')).not.toBe(
+      rowAssignments?.get('left-b'),
+    );
+  });
+
+  it('does not let the dragged node position move row hit areas', () => {
+    const nodes = makePairedNodes();
+    const layout = positionsOf(nodes);
+    const secondRowY = at(layout.childPositions, 'left-2').y + SIZE.height / 2;
+
+    expect(pickGridRowTarget(nodes, 'f', secondRowY)).toBe(1);
+
+    const liveDragNodes = nodes.map((node) =>
+      node.id === 'left-1'
+        ? { ...node, position: { ...node.position, y: 10_000 } }
+        : node,
+    );
+    expect(pickGridRowTarget(liveDragNodes, 'f', secondRowY)).toBe(1);
+  });
+
+  it('uses edge-aware gutter geometry for row hit areas', () => {
+    const nodes = makePairedNodes();
+    const edges: Edge[] = [
+      {
+        id: 'edge-labelled',
+        source: 'left-1',
+        target: 'left-2',
+        data: { label: 'A wide label between persistent rows' },
+      },
+    ];
+    const layout = applyGridLayout(nodes, 'f', 2, 'compact', { edges });
+    if (!layout) throw new Error('applyGridLayout returned null');
+    const secondRowY = at(layout.childPositions, 'left-2').y + SIZE.height / 2;
+
+    expect(pickGridRowTarget(nodes, 'f', secondRowY, edges)).toBe(1);
+  });
+
+  it('preserves empty row indices instead of compacting later rows', () => {
+    const nodes = [
+      makeFrame(2),
+      makeChild('first', { x: 0, y: 0 }, SIZE, 0, 0),
+      makeChild('third', { x: 0, y: 0 }, SIZE, 0, 2),
+    ];
+    const result = positionsOf(nodes);
+
+    expect(result.rowAssignments).toEqual(
+      new Map([
+        ['first', 0],
+        ['third', 2],
+      ]),
+    );
+    expect(result.rowTracks).toHaveLength(3);
+    expect(result.rowTracks?.[1].height).toBe(SIZE.height);
   });
 });

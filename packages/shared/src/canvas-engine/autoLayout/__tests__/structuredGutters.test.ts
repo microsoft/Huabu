@@ -8,7 +8,10 @@ import {
   applyRowLayout,
 } from '../gridLayout.js';
 
-import type { CanvasCommand } from '../../../types/canvas/command.js';
+import type {
+  CanvasCommand,
+  CanvasNodeId,
+} from '../../../types/canvas/command.js';
 import type { Edge, Node } from '@xyflow/react';
 
 function frame(layoutMode: 'column' | 'row' | 'grid' = 'column'): Node {
@@ -20,14 +23,14 @@ function frame(layoutMode: 'column' | 'row' | 'grid' = 'column'): Node {
   } as Node;
 }
 
-function child(id: string, slot: number): Node {
+function child(id: string, slot: number, row = 0): Node {
   return {
     id,
     type: 'text',
     parentId: 'frame',
     position: { x: slot * 120, y: 0 },
     measured: { width: 100, height: 60 },
-    data: { frameSlot: slot },
+    data: { frameSlot: slot, frameRow: row },
   } as Node;
 }
 
@@ -91,8 +94,8 @@ describe('structured edge gutters', () => {
       frame('grid'),
       child('a', 0),
       child('b', 1),
-      { ...child('c', 0), position: { x: 0, y: 100 } },
-      { ...child('d', 1), position: { x: 120, y: 100 } },
+      { ...child('c', 0, 1), position: { x: 0, y: 100 } },
+      { ...child('d', 1, 1), position: { x: 120, y: 100 } },
     ];
     const edges = [
       { id: 'horizontal', source: 'a', target: 'b' } as Edge,
@@ -102,6 +105,29 @@ describe('structured edge gutters', () => {
 
     expect(result?.gutters.some((gutter) => gutter.axis === 'x')).toBe(true);
     expect(result?.gutters.some((gutter) => gutter.axis === 'y')).toBe(true);
+  });
+
+  it('assigns a diagonal Grid edge label to the X gutter only', () => {
+    const nodes = [
+      frame('grid'),
+      child('a', 0, 0),
+      { ...child('b', 1, 1), position: { x: 120, y: 100 } },
+    ];
+    const edge = {
+      id: 'diagonal',
+      source: 'a',
+      target: 'b',
+      data: { edgeStyle: { label: 'diagonal relationship' } },
+    } as Edge;
+    const result = applyGridLayout(nodes, 'frame', 2, 'compact', {
+      edges: [edge],
+    });
+    const xGutter = result?.gutters.find((gutter) => gutter.axis === 'x');
+    const yGutter = result?.gutters.find((gutter) => gutter.axis === 'y');
+
+    expect(xGutter?.finalSize).toBeGreaterThan(xGutter?.baseSize ?? Infinity);
+    expect(yGutter?.finalSize).toBe(yGutter?.baseSize);
+    expect(yGutter?.lanes).toEqual([]);
   });
 
   it('uses frozen gutter sizes instead of recomputing label demand', () => {
@@ -149,5 +175,40 @@ describe('structured edge gutters', () => {
       before?.childPositions.get('b')?.x ?? Number.POSITIVE_INFINITY,
     );
     expect(writeResult.requiresEdgeReroute).toBe(true);
+  });
+
+  it('preserves edge-aware X gutters when Grid drag geometry resizes the frame', () => {
+    const nodes = [frame('grid'), child('a', 0), child('b', 1)];
+    const edge = {
+      id: 'edge-ab',
+      source: 'a',
+      target: 'b',
+      data: { edgeStyle: { label: 'a wide relationship label' } },
+    } as Edge;
+    const expected = applyGridLayout(nodes, 'frame', 3, 'compact', {
+      edges: [edge],
+    });
+    const command = {
+      type: 'SET_NODE_GEOMETRY',
+      items: [
+        {
+          nodeId: 'frame' as CanvasNodeId,
+          size: { width: 300, height: 180 },
+        },
+        {
+          nodeId: 'b' as CanvasNodeId,
+          position: { x: 120, y: 0 },
+        },
+      ],
+    } as CanvasCommand;
+
+    const { writeResult } = executeCanvasCommands(
+      { commands: [command] },
+      { nodes, edges: [edge], canvasId: 'canvas' },
+    );
+    const moved = writeResult.nodes.find((node) => node.id === 'b');
+
+    expect(moved?.position.x).toBe(expected?.childPositions.get('b')?.x);
+    expect(moved?.position.x).toBeGreaterThan(120);
   });
 });
