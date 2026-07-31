@@ -47,7 +47,8 @@ export function createAgentRecoveryContext(
 
   return {
     async authorizeHistoryLoad(input) {
-      const estimatedSize = estimateHistoryLoadSize(input.turns);
+      const estimatedSize =
+        input.estimatedSize ?? estimateHistoryLoadSize(input.turns);
       const denied = (
         code:
           | 'auto_recover_disabled'

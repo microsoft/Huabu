@@ -26,6 +26,14 @@ export interface AgentForkInput {
 export interface HistoryLoadAuthorizationInput {
   readonly mode: 'recover' | 'fork';
   readonly turns: readonly ObservedAgentTurn[];
+  /**
+   * Size of the payload the driver will actually replay, in the same unit as
+   * the policy limit. A driver that lowers turns into a different replay form
+   * (native messages, projected text) must report it here; otherwise Agenetes
+   * falls back to estimating the durable turns, which only matches drivers
+   * that replay them verbatim.
+   */
+  readonly estimatedSize?: number;
 }
 
 /** Structured result of the instance-level history-load policy. */

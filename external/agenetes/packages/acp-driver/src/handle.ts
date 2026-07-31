@@ -36,7 +36,10 @@
 
 import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
 import { resolveAgentInputs } from '@agenetes/protocol';
-import { HistoryLoadDeniedError } from '@agenetes/runtime';
+import {
+  HistoryLoadDeniedError,
+  projectTextHistoryTurn,
+} from '@agenetes/runtime';
 
 import { AcpServiceError } from './errors.js';
 import { applyToolExt } from './overlay.js';
@@ -309,12 +312,18 @@ export class AcpAgentHandle<
     mode: 'recover' | 'fork',
     turns: readonly AgentTurn[],
   ): Promise<void> {
+    // ACP replays history as one prepended text block, so the payload to
+    // authorize is the text-projected turn set, not the durable one.
+    const historyTurns = turns.map(projectTextHistoryTurn);
     const authorization =
-      await this.createContext.recovery.authorizeHistoryLoad({ mode, turns });
+      await this.createContext.recovery.authorizeHistoryLoad({
+        mode,
+        turns: historyTurns,
+      });
     if (!authorization.allowed) {
       throw new HistoryLoadDeniedError(authorization);
     }
-    this.turnsToLoad = turns;
+    this.turnsToLoad = historyTurns;
   }
 
   private async ensureSession(

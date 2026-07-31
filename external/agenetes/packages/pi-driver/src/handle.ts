@@ -191,8 +191,21 @@ function serializeDurableTurn(turn: AgentTurn): string {
   });
 }
 
+function textSeedMessages(turns: readonly AgentTurn[]): Message[] {
+  return [
+    {
+      role: 'user',
+      content: `${HISTORY_MESSAGE_PREAMBLE}\n${turns
+        .map(serializeDurableTurn)
+        .join('\n')}`,
+      timestamp: Date.now(),
+    },
+  ];
+}
+
 export async function resolvePiInitialMessages(
   spec: PiWorkloadSpec,
+  ports: PiDriverPorts,
   context: AgentCreateContext<PiDurableState>,
 ): Promise<Message[]> {
   const durableInput = context.recoveryInput ?? context.forkInput;
@@ -200,23 +213,30 @@ export async function resolvePiInitialMessages(
     return [...(spec.spec.initialMessages ?? [])];
   }
 
+  const mode = context.forkInput ? 'fork' : 'recover';
+  const turns = durableInput.turns;
+  // Lower before authorizing: the budget must price the payload that is
+  // actually replayed, not the durable record it was derived from.
+  const replay = await ports.materializeHistory?.(
+    { mode, turns },
+    {
+      workloadType: spec.workloadType,
+      namespace: spec.namespace,
+      threadId: spec.threadId,
+      hostContext: spec.spec.hostContext,
+    },
+  );
+
   const authorization = await context.recovery.authorizeHistoryLoad({
-    mode: context.forkInput ? 'fork' : 'recover',
-    turns: durableInput.turns,
+    mode,
+    turns,
+    ...(replay && { estimatedSize: replay.estimatedSize }),
   });
   if (!authorization.allowed) {
     throw new HistoryLoadDeniedError(authorization);
   }
 
-  return [
-    {
-      role: 'user',
-      content: `${HISTORY_MESSAGE_PREAMBLE}\n${durableInput.turns
-        .map(serializeDurableTurn)
-        .join('\n')}`,
-      timestamp: Date.now(),
-    },
-  ];
+  return replay ? [...replay.messages] : textSeedMessages(turns);
 }
 
 /**
@@ -268,6 +288,7 @@ export class PiAgentHandle<
       const tools = await this.ports.resolveTools(recipe.tools ?? [], tCtx);
       const initialMessages = await resolvePiInitialMessages(
         spec,
+        this.ports,
         this.createContext,
       );
 

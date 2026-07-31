@@ -14,6 +14,7 @@ import { getAgentTeamRegistry } from '@agenetes/agentlet-host';
 import { piDriverFactory, type PiTurnCtx } from '@agenetes/pi-driver';
 
 import { type AgentHandle } from './handle.js';
+import { HISTORY_LOAD_SANITY_LIMIT } from './history-replay.js';
 import { huabuPiDriverPorts } from './pi-driver.js';
 import { getExternalAgentRuntimeConfig } from '../acp/runtime-config.js';
 
@@ -61,6 +62,14 @@ export const agenetes: Agenetes = mountAgenetes({
   threadStore: new FileThreadStore(),
   eventLogStore: new FileEventLogStore(),
   turnStore: new FileTurnStore(),
+  // Corruption guard, not a context budget: replay restores whatever the
+  // live handle would still be holding, and trimming that is the
+  // conversation's problem, not recovery's.
+  autoRecoverPolicy: {
+    enabled: true,
+    safeHistoryLoadLimit: HISTORY_LOAD_SANITY_LIMIT,
+    onThresholdExceeded: 'deny',
+  },
 });
 
 export { ACP_CAPABILITIES };

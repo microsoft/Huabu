@@ -12,6 +12,7 @@
 
 import { MODEL_ROLES } from '@sediment/shared';
 
+import { materializeHuabuHistory } from './history-replay.js';
 import {
   ensureApiKeyForRole,
   resolveModelByIdAsync,
@@ -131,6 +132,12 @@ export const huabuPiDriverPorts = {
         readSet: getSessionReadSet(ctx.threadId),
       },
     );
+  },
+  async materializeHistory(input, ctx) {
+    const host = getHuabuHostContext(ctx);
+    return materializeHuabuHistory(input, {
+      canvasId: host.canvasId ?? null,
+    });
   },
 } satisfies PiDriverPorts;
 

@@ -34,7 +34,7 @@ import type { ChatEnvelope } from '../envelope.js';
 import type { ContentPart, UserContent } from './attachments.js';
 import type { RenderProfile } from './profile.js';
 import type { AgentInput, AgentInputPart, AgentTurn } from '@agenetes/protocol';
-import type { Message } from '@earendil-works/pi-ai';
+import type { AssistantMessage, Message, Usage } from '@earendil-works/pi-ai';
 
 /** A pi-ai conversation message (the built-in agent's context unit). */
 type PiMessage = Message;
@@ -45,6 +45,40 @@ const INTERRUPTED_NOTICE =
   '[SYSTEM Interrupted] The user interrupted the previous operation. ' +
   'Do NOT continue or retry the interrupted task. ' +
   'Wait for the next user message and treat it as a new request.';
+
+function emptyReplayUsage(): Usage {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+}
+
+function replayUsage(value: unknown): Usage | null {
+  if (!value || typeof value !== 'object') return null;
+  const usage = value as Partial<Usage>;
+  const cost = usage.cost as Partial<Usage['cost']> | undefined;
+  const values = [
+    usage.input,
+    usage.output,
+    usage.cacheRead,
+    usage.cacheWrite,
+    usage.totalTokens,
+    cost?.input,
+    cost?.output,
+    cost?.cacheRead,
+    cost?.cacheWrite,
+    cost?.total,
+  ];
+  return values.every(
+    (entry) => typeof entry === 'number' && Number.isFinite(entry),
+  )
+    ? (value as Usage)
+    : null;
+}
 
 /**
  * Render a {@link ChatEnvelope} into a flat `ContentPart[]` (text +
@@ -70,13 +104,12 @@ export async function renderTurn(
     profile,
   );
   // The neighbourhood is a volatile "current canvas state" block, so it
-  // rides ONLY the live turn (the tail of the assembled prompt) and is
-  // omitted from rebuilt history. Keeping committed turns free of it
-  // leaves the message prefix byte-stable and append-only, which is what
-  // the provider's prompt/KV cache needs to keep hitting; a fresh copy
-  // is re-injected on the current turn instead of N stale snapshots
-  // piling up. `rebuildContextMessages` passes `false`; the live
-  // built-in / ACP turn keeps the default `true`.
+  // rides ONLY the live turn (the tail of the assembled prompt). It is
+  // also omitted when a legacy turn has to be re-rendered as history:
+  // that path resolves today's canvas, so keeping the section would put
+  // a different snapshot in the same committed turn on every rebuild and
+  // break the prefix the provider's prompt/KV cache depends on. Turns
+  // replayed from their stored `rendered` inputs never reach here.
   const neighbourhoodSection = includeNeighbourhood
     ? renderNeighbourhoodSection(env.focus.anchor, profile)
     : undefined;
@@ -232,47 +265,89 @@ export async function rebuildContextMessages(
 ): Promise<PiMessage[]> {
   const out: PiMessage[] = [];
   for (const turn of turns) {
+    out.push(...(await rebuildTurnMessages(turn, opts)));
+  }
+  return out;
+}
+
+/**
+ * Rebuild one turn's slice of the pi-ai message array.
+ *
+ * Replay uses what the turn actually sent: `rendered` is the canonical
+ * input array persisted with the submission, so images come back as native
+ * image parts and the text is byte-identical to what the model saw. Turns
+ * written before `rendered` existed are re-rendered from their envelope
+ * instead — that path resolves today's canvas, so it drops the
+ * neighbourhood, whose point-in-time snapshot would otherwise differ on
+ * every rebuild and break the provider's prefix cache.
+ */
+export async function rebuildTurnMessages(
+  turn: AgentTurn,
+  opts: { canvasId: string | null },
+): Promise<PiMessage[]> {
+  const out: PiMessage[] = [];
+  const rendered = turn.request?.rendered;
+  if (rendered && rendered.length > 0) {
+    out.push(...agentInputsToPiMessages(rendered));
+  } else {
     const envelope = chatEnvelopeFromSubmission(turn.request);
     if (envelope) {
-      // History turns render WITHOUT their neighbourhood: it was a
-      // point-in-time snapshot only relevant while that turn was live.
-      // Re-emitting a stale copy per historical turn would bloat the
-      // context and, because it is baked into a committed message, would
-      // never be reusable by the provider's prefix cache. The live turn
-      // re-injects a fresh neighbourhood as the prompt tail instead.
       const { messages } = await renderEnvelopeMessages(envelope, {
         ...opts,
         includeNeighbourhood: false,
       });
       out.push(...messages);
     }
-    out.push(...foldedTranscriptToPiMessages(turn));
   }
+  out.push(...foldedTranscriptToPiMessages(turn));
   return out;
 }
 
 /**
  * Project a turn's folded Tier-2 transcript back into pi-ai messages for
- * LLM context replay. Text/thinking/tool_call fragments collapse into a
- * single assistant message; each resolved tool call emits a paired
- * tool-result message. Orphaned tool calls (no output captured) are
- * dropped so the reconstructed context never carries a dangling
- * `toolCall` the provider would reject. An aborted turn appends a system
- * interruption notice; a folded error appends a system error notice.
+ * LLM context replay. Each round of the turn becomes one assistant
+ * message followed by its tool results, so a multi-round turn replays as
+ * `assistant → toolResult → assistant` rather than collapsing every round
+ * into one block. Orphaned tool calls (no output captured) are dropped so
+ * the reconstructed context never carries a dangling `toolCall` the
+ * provider would reject. An aborted turn appends a system interruption
+ * notice; a folded error appends a system error notice.
  */
 function foldedTranscriptToPiMessages(turn: AgentTurn): PiMessage[] {
   const out: PiMessage[] = [];
-  const content: Array<Record<string, unknown>> = [];
-  const toolResults: PiMessage[] = [];
+  const assistantMessages: AssistantMessage[] = [];
+  let content: Array<Record<string, unknown>> = [];
+  let toolResults: PiMessage[] = [];
   let sawToolCall = false;
   let errorDetail: string | null = null;
 
+  const flushRound = (): void => {
+    if (content.length > 0) {
+      const assistant = {
+        role: 'assistant',
+        content,
+        usage: emptyReplayUsage(),
+        stopReason: sawToolCall ? 'toolUse' : 'stop',
+        timestamp: Date.now(),
+      } as unknown as AssistantMessage;
+      assistantMessages.push(assistant);
+      out.push(assistant);
+    }
+    out.push(...toolResults);
+    content = [];
+    toolResults = [];
+    sawToolCall = false;
+  };
+
   for (const msg of turn.transcript) {
     if (msg.type === 'text') {
+      // Assistant prose after a resolved tool call is the next round.
+      if (sawToolCall) flushRound();
       if (msg.data.content.length > 0) {
         content.push({ type: 'text', text: msg.data.content });
       }
     } else if (msg.type === 'thinking') {
+      if (sawToolCall) flushRound();
       if (msg.data.content.length > 0) {
         content.push({ type: 'thinking', thinking: msg.data.content });
       }
@@ -281,6 +356,7 @@ function foldedTranscriptToPiMessages(turn: AgentTurn): PiMessage[] {
         toolCallId: string;
         title?: string;
         internalToolName?: string;
+        status?: string;
         rawInput?: unknown;
         rawOutput?: unknown;
       };
@@ -308,7 +384,7 @@ function foldedTranscriptToPiMessages(turn: AgentTurn): PiMessage[] {
         toolCallId: data.toolCallId,
         toolName: name,
         content: [{ type: 'text', text: resultText }],
-        isError: false,
+        isError: data.status === 'failed',
         timestamp: Date.now(),
       } as unknown as PiMessage);
     } else if (msg.type === 'error') {
@@ -317,15 +393,11 @@ function foldedTranscriptToPiMessages(turn: AgentTurn): PiMessage[] {
     // `plan` fragments are UI-only and never part of the LLM context.
   }
 
-  if (content.length > 0) {
-    out.push({
-      role: 'assistant',
-      content,
-      stopReason: sawToolCall ? 'toolUse' : 'stop',
-      timestamp: Date.now(),
-    } as unknown as PiMessage);
-  }
-  out.push(...toolResults);
+  flushRound();
+
+  const persistedUsage = replayUsage(turn.meta?.usage);
+  const finalAssistant = assistantMessages[assistantMessages.length - 1];
+  if (persistedUsage && finalAssistant) finalAssistant.usage = persistedUsage;
 
   if (turn.meta?.stopReason === 'aborted') {
     out.push({
