@@ -10,7 +10,7 @@
  * - External links open in a new tab with `rel="noopener"`.
  */
 
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink } from 'react-router';
 
 import { cn } from './cn';
 

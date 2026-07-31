@@ -10,7 +10,7 @@
 
 import { ArrowUpRight } from 'lucide-react';
 import { useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 import { withBasePath } from '../basePath';
 import { cn } from './cn';

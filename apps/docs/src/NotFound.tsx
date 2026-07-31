@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 export function NotFound() {
   return (
