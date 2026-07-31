@@ -264,4 +264,20 @@ describe('rerouteAllEdges', () => {
     expect(out[0].sourceHandle).toBe('right-source');
     expect(out[0].targetHandle).toBe('left-target');
   });
+
+  it('keeps internal frame edges facing inward despite sibling obstacles', () => {
+    const frame = makeNode('frame', 0, 0, 500, 300, { type: 'frame' });
+    const nodes = [
+      frame,
+      makeNode('s', 20, 80, 100, 100, { parentId: 'frame' }),
+      makeNode('t', 320, 80, 100, 100, { parentId: 'frame' }),
+      makeNode('blocker', 140, 80, 160, 100, { parentId: 'frame' }),
+    ];
+    const out = rerouteAllEdges(nodes, [makeEdge('s', 't')]);
+
+    expect(out[0]).toMatchObject({
+      sourceHandle: 'right-source',
+      targetHandle: 'left-target',
+    });
+  });
 });

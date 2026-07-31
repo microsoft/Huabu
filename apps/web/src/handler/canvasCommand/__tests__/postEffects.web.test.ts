@@ -43,6 +43,7 @@ function run(
     effects: effectsWith(mutatedNodes, contentEditedNodeIds),
     canvasId: 'c1',
     getNodes: () => [],
+    getEdges: () => [],
     setNodes: () => undefined,
     triggerPreprocessing,
     forgetNodeContent: () => undefined,

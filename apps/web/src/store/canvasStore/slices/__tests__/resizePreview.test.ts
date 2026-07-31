@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { getStructuredFrameGutterPlan } from '@sediment/shared/canvas-engine';
+
 import { getNodeFontFit, refitFont } from '@/utils/node/fontFit';
 import {
   TEXT_NODE_PADDING_X,
@@ -13,7 +15,7 @@ import {
 } from '../resizePreview';
 
 import type { CanvasUiIntent } from '@/handler/canvasCommand/uiIntent';
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 
 /**
  * Minimal in-memory store double for the resize-preview controller.
@@ -23,8 +25,12 @@ import type { Node } from '@xyflow/react';
  * a snapshot taken earlier keeps referencing the pre-edit node objects —
  * exactly the property the undo path relies on.
  */
-function createStoreDouble(initialNodes: Node[]) {
+function createStoreDouble(initialNodes: Node[], edges: Edge[] = []) {
   let nodes: Node[] = initialNodes;
+  let lastResizeIntent: Extract<
+    CanvasUiIntent,
+    { type: 'RESIZE_NODE' }
+  > | null = null;
 
   const patchNodeSilent = (nodeId: string, patch: Record<string, unknown>) => {
     nodes = nodes.map((n) =>
@@ -37,6 +43,7 @@ function createStoreDouble(initialNodes: Node[]) {
   // the controller's `getNodeSize` reads to stay consistent across ticks.
   const dispatchUiIntent = (intent: CanvasUiIntent) => {
     if (intent.type !== 'RESIZE_NODE') return;
+    lastResizeIntent = intent;
     nodes = nodes.map((n) => {
       const item = intent.items.find((i) => i.nodeId === n.id);
       if (!item) return n;
@@ -55,6 +62,7 @@ function createStoreDouble(initialNodes: Node[]) {
 
   const getState = (): ResizePreviewSliceState => ({
     nodes,
+    edges,
     dispatchUiIntent,
     patchNodeSilent,
   });
@@ -62,11 +70,55 @@ function createStoreDouble(initialNodes: Node[]) {
   return {
     getState,
     getNodes: () => nodes,
+    getLastResizeIntent: () => lastResizeIntent,
     setNodes: (next: Node[]) => {
       nodes = next;
     },
   };
 }
+
+describe('resize-preview controller — structured gutter freeze', () => {
+  it('scales the captured gutter plan without recomputing it per tick', () => {
+    const structuredFrame = {
+      ...frameNode(),
+      data: { layoutMode: 'column', gridCount: 2 },
+    } as Node;
+    const left = textNode('left', 16, 'left', {
+      position: { x: 20, y: 20 },
+      measured: { width: 60, height: 40 },
+      data: { frameSlot: 0 },
+    });
+    const right = textNode('right', 16, 'right', {
+      position: { x: 100, y: 20 },
+      measured: { width: 60, height: 40 },
+      data: { frameSlot: 1 },
+    });
+    const edge = {
+      id: 'edge',
+      source: 'left',
+      target: 'right',
+      data: { edgeStyle: { label: 'depends on' } },
+    } as Edge;
+    const nodes = [structuredFrame, left, right];
+    const initialGutter = getStructuredFrameGutterPlan(
+      nodes,
+      [edge],
+      'frame',
+    )[0].finalSize;
+    const store = createStoreDouble(nodes, [edge]);
+    const controller = createResizePreviewController({
+      getState: store.getState,
+    });
+
+    controller.captureFrameResizeSnapshot('frame');
+    controller.applyFrameResizeScale(392, 196, 0, 0);
+    controller.flushFrameResizeScale();
+
+    const frozen = store.getLastResizeIntent()?.frozenStructuredGutters;
+    expect(frozen?.get('frame')?.x?.[0]).toBe(initialGutter * 2);
+    controller.clearFrameResizeSnapshot();
+  });
+});
 
 /** Locate a node by id, failing the test loudly if it is missing. */
 function findNode(nodes: readonly Node[], id: string): Node {

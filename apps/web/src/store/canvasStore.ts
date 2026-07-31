@@ -38,6 +38,7 @@ import {
   normalizeTreeOrder,
   type AlignDirection,
   type Delta,
+  type ExecutorOptions,
   type NestableNode,
 } from '@sediment/shared/canvas-engine';
 
@@ -866,6 +867,7 @@ type RFState = {
   executeCommands: (
     commands: CanvasCommand[],
     source?: CanvasExecutionSource,
+    options?: Pick<ExecutorOptions, 'frozenStructuredGutters'>,
   ) => void;
   /**
    * @internal Apply a server-authored delta batch (M2 headless executor).
@@ -1096,6 +1098,7 @@ const resizePreviewController = createResizePreviewController({
     const state = useCanvasStore.getState();
     return {
       nodes: state.nodes,
+      edges: state.edges,
       dispatchUiIntent: state.dispatchUiIntent,
       patchNodeSilent: state.patchNodeSilent,
     };
@@ -1497,7 +1500,7 @@ const useCanvasStore = create<RFState>()(
     // --- Internal: not exposed in the public CanvasStore interface ---
 
     /** Execute a batch of shared CanvasCommands. Source defaults to 'ui'. */
-    executeCommands: (commands, source) => {
+    executeCommands: (commands, source, options) => {
       const resolvedSource = source ?? 'ui';
       const execution: CanvasExecution = {
         source: resolvedSource,
@@ -1511,6 +1514,7 @@ const useCanvasStore = create<RFState>()(
 
       const { writeResult, commandResults, pendingEffects } =
         executeCanvasCommands(execution, state, {
+          ...options,
           // Agent batches must always refit parent frames because the
           // LLM cannot accurately predict rendered dimensions.
           forceFitFrames: resolvedSource === 'agent',
@@ -1567,6 +1571,7 @@ const useCanvasStore = create<RFState>()(
         effects: pendingEffects,
         canvasId: state.canvasId,
         getNodes: () => get().nodes,
+        getEdges: () => get().edges,
         setNodes: (nodes) => set({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
         forgetNodeContent: nodeContentQueue.forgetNode,
@@ -1719,6 +1724,7 @@ const useCanvasStore = create<RFState>()(
         },
         canvasId,
         getNodes: () => get().nodes,
+        getEdges: () => get().edges,
         setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
         forgetNodeContent: nodeContentQueue.forgetNode,
@@ -1758,7 +1764,15 @@ const useCanvasStore = create<RFState>()(
         editNodeId !== undefined &&
         uiState.nodes.some(({ id }) => id === editNodeId);
       if (execution.commands.length > 0) {
-        get().executeCommands(execution.commands);
+        get().executeCommands(
+          execution.commands,
+          undefined,
+          intent.type === 'RESIZE_NODE' && intent.preview
+            ? {
+                frozenStructuredGutters: intent.frozenStructuredGutters,
+              }
+            : undefined,
+        );
       }
       if (editNodeId !== undefined && !editTargetAlreadyExists) {
         const node = get().nodes.find(({ id }) => id === editNodeId);
@@ -3079,7 +3093,8 @@ const useCanvasStore = create<RFState>()(
           // re-measurement.
           const mode = (parent.data as { layoutMode?: string } | undefined)
             ?.layoutMode;
-          const isStructured = mode === 'column' || mode === 'row';
+          const isStructured =
+            mode === 'column' || mode === 'row' || mode === 'grid';
           if (!isStructured && getFrameSizing(parent) !== 'hug') continue;
           // Skip when measured matches the explicitly-pinned size —
           // the RO is just confirming the size we already committed
@@ -3105,6 +3120,7 @@ const useCanvasStore = create<RFState>()(
           scheduleDeferredFrameRelayout(
             framesToRelayout,
             () => get().nodes,
+            () => get().edges,
             (nodes) => set({ nodes }),
           );
         }

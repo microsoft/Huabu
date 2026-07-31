@@ -23,6 +23,7 @@
  *                into **row bands** and every member of a band shares
  *                one Y origin. See {@link applyGridLayout}.
  */
+import { EDGE_LABEL_MAX_INVERSE_SCALE } from '../../types/canvas/edge.js';
 import {
   FRAME_GRID_DEFAULT_COUNT,
   FRAME_GRID_MAX_COUNT,
@@ -33,7 +34,7 @@ import { paddingFromExtent } from '../utils/constants.js';
 import { getNodeSize } from '../utils/nodeSizes.js';
 
 import type { FrameLayoutMode } from '../../types/canvas/node.js';
-import type { Node, XYPosition } from '@xyflow/react';
+import type { Edge, Node, XYPosition } from '@xyflow/react';
 
 // ── Spacing constants ─────────────────────────────────────────────────
 
@@ -339,6 +340,7 @@ export interface FrameGridLayoutResult {
   childPositions: Map<string, XYPosition>;
   slotAssignments: Map<string, number>;
   frameSize: { width: number; height: number };
+  gutters: StructuredGutterPlan[];
   /**
    * The track count the layout actually resolved to. Equals the
    * requested `count` under the `'fill'` policy; may be smaller under
@@ -346,6 +348,123 @@ export interface FrameGridLayoutResult {
    * the frame's `gridCount`.
    */
   effectiveCount: number;
+}
+
+export interface StructuredGutterLane {
+  edgeId: string;
+  lane: number;
+  labelExtent: number;
+}
+
+export interface StructuredGutterPlan {
+  axis: 'x' | 'y';
+  index: number;
+  baseSize: number;
+  requiredSize: number;
+  finalSize: number;
+  lanes: StructuredGutterLane[];
+}
+
+export interface StructuredLayoutOptions {
+  edges?: readonly Edge[];
+  frozenGutters?: {
+    x?: readonly number[];
+    y?: readonly number[];
+  };
+}
+
+export type StructuredGutterSizes = NonNullable<
+  StructuredLayoutOptions['frozenGutters']
+>;
+
+const EDGE_GUTTER_CLEARANCE = 16;
+const EDGE_LABEL_GUTTER_CLEARANCE = 32;
+const EDGE_LABEL_WRAP_CAP = 120;
+const EDGE_LABEL_CHAR_WIDTH = 6;
+const EDGE_LABEL_HORIZONTAL_INSET = 14;
+const EDGE_LABEL_LINE_HEIGHT = 14;
+const EDGE_LABEL_VERTICAL_INSET = 6;
+
+function estimateEdgeLabelExtent(label: string, axis: 'x' | 'y'): number {
+  const explicitLines = label.split('\n');
+  const contentCap = EDGE_LABEL_WRAP_CAP - EDGE_LABEL_HORIZONTAL_INSET;
+  const maxCharsPerLine = Math.max(
+    1,
+    Math.floor(contentCap / EDGE_LABEL_CHAR_WIDTH),
+  );
+  const visualLineCount = explicitLines.reduce(
+    (sum, line) => sum + Math.max(1, Math.ceil(line.length / maxCharsPerLine)),
+    0,
+  );
+  if (axis === 'y') {
+    return (
+      Math.min(3, visualLineCount) * EDGE_LABEL_LINE_HEIGHT +
+      EDGE_LABEL_VERTICAL_INSET
+    );
+  }
+  const longestLine = Math.max(0, ...explicitLines.map((line) => line.length));
+  return Math.min(
+    EDGE_LABEL_WRAP_CAP,
+    longestLine * EDGE_LABEL_CHAR_WIDTH + EDGE_LABEL_HORIZONTAL_INSET,
+  );
+}
+
+function planAxisGutters(
+  axis: 'x' | 'y',
+  count: number,
+  baseSize: number,
+  slotByNodeId: ReadonlyMap<string, number>,
+  edges: readonly Edge[] | undefined,
+  frozenSizes: readonly number[] | undefined,
+): StructuredGutterPlan[] {
+  const plans = Array.from({ length: Math.max(0, count - 1) }, (_, index) => ({
+    axis,
+    index,
+    baseSize,
+    requiredSize: baseSize,
+    finalSize: Math.max(baseSize, frozenSizes?.[index] ?? baseSize),
+    lanes: [] as StructuredGutterLane[],
+  }));
+  if (!edges) return plans;
+
+  for (const edge of edges) {
+    const sourceSlot = slotByNodeId.get(edge.source);
+    const targetSlot = slotByNodeId.get(edge.target);
+    if (
+      sourceSlot === undefined ||
+      targetSlot === undefined ||
+      sourceSlot === targetSlot
+    ) {
+      continue;
+    }
+    const label = (
+      edge.data as { edgeStyle?: { label?: string } } | undefined
+    )?.edgeStyle?.label?.trim();
+    const labelExtent = label ? estimateEdgeLabelExtent(label, axis) : 0;
+    const requiredSize = Math.max(
+      24,
+      labelExtent > 0
+        ? (labelExtent + EDGE_LABEL_GUTTER_CLEARANCE) *
+            EDGE_LABEL_MAX_INVERSE_SCALE
+        : EDGE_GUTTER_CLEARANCE,
+    );
+    const first = Math.min(sourceSlot, targetSlot);
+    const last = Math.max(sourceSlot, targetSlot);
+    for (let index = first; index < last; index += 1) {
+      const plan = plans[index];
+      if (!plan) continue;
+      plan.lanes.push({
+        edgeId: edge.id,
+        lane: plan.lanes.length,
+        labelExtent,
+      });
+      plan.requiredSize = Math.max(plan.requiredSize, requiredSize);
+      if (frozenSizes?.[index] === undefined) {
+        plan.finalSize = Math.max(plan.baseSize, plan.requiredSize);
+      }
+    }
+  }
+  return plans;
 }
 
 // ── Column masonry ────────────────────────────────────────────────────
@@ -375,6 +494,7 @@ export function applyColumnLayout(
   frameId: string,
   count: number,
   emptyTrackPolicy: 'fill' | 'compact' = 'compact',
+  options: StructuredLayoutOptions = {},
 ): FrameGridLayoutResult | null {
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
@@ -428,13 +548,23 @@ export function applyColumnLayout(
   const padY = paddingFromExtent(heightMedian);
   const interGapX = gapFromExtent(widthMedian);
   const intraGapY = gapFromExtent(heightMedian);
+  const gutters = planAxisGutters(
+    'x',
+    effectiveCols,
+    interGapX,
+    assignment,
+    options.edges,
+    options.frozenGutters?.x,
+  );
 
   // Cumulative left edge of each column.
   const colOriginX = new Array<number>(effectiveCols).fill(padX);
   for (let c = 1; c < effectiveCols; c += 1) {
     colOriginX[c] =
       colOriginX[c - 1] +
-      (colWidth[c - 1] > 0 ? colWidth[c - 1] + interGapX : 0);
+      (colWidth[c - 1] > 0
+        ? colWidth[c - 1] + (gutters[c - 1]?.finalSize ?? interGapX)
+        : 0);
   }
 
   const positions = new Map<string, XYPosition>();
@@ -459,6 +589,7 @@ export function applyColumnLayout(
     childPositions: positions,
     slotAssignments: assignment,
     frameSize: { width, height },
+    gutters,
     effectiveCount: effectiveCols,
   };
 }
@@ -478,6 +609,7 @@ export function applyRowLayout(
   frameId: string,
   count: number,
   emptyTrackPolicy: 'fill' | 'compact' = 'compact',
+  options: StructuredLayoutOptions = {},
 ): FrameGridLayoutResult | null {
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
@@ -521,12 +653,22 @@ export function applyRowLayout(
   const padY = paddingFromExtent(heightMedian);
   const interGapY = gapFromExtent(heightMedian);
   const intraGapX = gapFromExtent(widthMedian);
+  const gutters = planAxisGutters(
+    'y',
+    effectiveRows,
+    interGapY,
+    assignment,
+    options.edges,
+    options.frozenGutters?.y,
+  );
 
   const rowOriginY = new Array<number>(effectiveRows).fill(padY);
   for (let r = 1; r < effectiveRows; r += 1) {
     rowOriginY[r] =
       rowOriginY[r - 1] +
-      (rowHeight[r - 1] > 0 ? rowHeight[r - 1] + interGapY : 0);
+      (rowHeight[r - 1] > 0
+        ? rowHeight[r - 1] + (gutters[r - 1]?.finalSize ?? interGapY)
+        : 0);
   }
 
   const positions = new Map<string, XYPosition>();
@@ -551,6 +693,7 @@ export function applyRowLayout(
     childPositions: positions,
     slotAssignments: assignment,
     frameSize: { width, height },
+    gutters,
     effectiveCount: effectiveRows,
   };
 }
@@ -647,6 +790,7 @@ export function applyGridLayout(
   frameId: string,
   count: number,
   emptyTrackPolicy: 'fill' | 'compact' = 'compact',
+  options: StructuredLayoutOptions = {},
 ): FrameGridLayoutResult | null {
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
@@ -679,24 +823,49 @@ export function applyGridLayout(
   const padY = paddingFromExtent(heightMedian);
   const interGapX = gapFromExtent(widthMedian);
   const interGapY = gapFromExtent(heightMedian);
+  const xGutters = planAxisGutters(
+    'x',
+    effectiveCols,
+    interGapX,
+    assignment,
+    options.edges,
+    options.frozenGutters?.x,
+  );
 
   const colOriginX = new Array<number>(effectiveCols).fill(padX);
   for (let c = 1; c < effectiveCols; c += 1) {
     colOriginX[c] =
       colOriginX[c - 1] +
-      (colWidth[c - 1] > 0 ? colWidth[c - 1] + interGapX : 0);
+      (colWidth[c - 1] > 0
+        ? colWidth[c - 1] + (xGutters[c - 1]?.finalSize ?? interGapX)
+        : 0);
   }
 
   const bands = groupIntoRowBands(children, columnOf);
+  const bandByNodeId = new Map<string, number>();
+  for (let bandIndex = 0; bandIndex < bands.length; bandIndex += 1) {
+    for (const child of bands[bandIndex]) {
+      bandByNodeId.set(child.node.id, bandIndex);
+    }
+  }
+  const yGutters = planAxisGutters(
+    'y',
+    bands.length,
+    interGapY,
+    bandByNodeId,
+    options.edges,
+    options.frozenGutters?.y,
+  );
 
   const positions = new Map<string, XYPosition>();
   let y = padY;
-  for (const band of bands) {
+  for (let bandIndex = 0; bandIndex < bands.length; bandIndex += 1) {
+    const band = bands[bandIndex];
     const bandHeight = Math.max(0, ...band.map((c) => c.height));
     for (const item of band) {
       positions.set(item.node.id, { x: colOriginX[columnOf(item)], y });
     }
-    y += bandHeight + interGapY;
+    y += bandHeight + (yGutters[bandIndex]?.finalSize ?? interGapY);
   }
   // `y` overshot by one trailing inter-band gap.
   const contentBottom = bands.length > 0 ? y - interGapY : padY;
@@ -709,8 +878,28 @@ export function applyGridLayout(
     childPositions: positions,
     slotAssignments: assignment,
     frameSize: { width: contentRight + padX, height: contentBottom + padY },
+    gutters: [...xGutters, ...yGutters],
     effectiveCount: effectiveCols,
   };
+}
+
+/** Compute the current edge-aware gutter plan without mutating canvas data. */
+export function getStructuredFrameGutterPlan(
+  nodes: Node[],
+  edges: readonly Edge[],
+  frameId: string,
+): StructuredGutterPlan[] {
+  const frame = nodes.find((node) => node.id === frameId);
+  const config = readFrameGridConfig(frame);
+  if (!config) return [];
+  const options: StructuredLayoutOptions = { edges };
+  const result =
+    config.axis === 'column'
+      ? applyColumnLayout(nodes, frameId, config.count, 'compact', options)
+      : config.axis === 'row'
+        ? applyRowLayout(nodes, frameId, config.count, 'compact', options)
+        : applyGridLayout(nodes, frameId, config.count, 'compact', options);
+  return result?.gutters ?? [];
 }
 
 // ── Drag-time slot pickers ────────────────────────────────────────────
@@ -1480,6 +1669,10 @@ export function applyStructuredFrameRelayout(
   nodes: Node[],
   frameIds: Iterable<string>,
   fillFrameIds?: Iterable<string>,
+  options: {
+    edges?: readonly Edge[];
+    frozenGuttersByFrame?: ReadonlyMap<string, StructuredGutterSizes>;
+  } = {},
 ): { nodes: Node[]; handledFrameIds: Set<string> } {
   const handled = new Set<string>();
   const seen = new Set<string>();
@@ -1497,12 +1690,16 @@ export function applyStructuredFrameRelayout(
     if (!cfg) continue;
 
     const policy = fillSet?.has(frameId) ? 'fill' : 'compact';
+    const layoutOptions: StructuredLayoutOptions = {
+      edges: options.edges,
+      frozenGutters: options.frozenGuttersByFrame?.get(frameId),
+    };
     const result =
       cfg.axis === 'column'
-        ? applyColumnLayout(working, frameId, cfg.count, policy)
+        ? applyColumnLayout(working, frameId, cfg.count, policy, layoutOptions)
         : cfg.axis === 'row'
-          ? applyRowLayout(working, frameId, cfg.count, policy)
-          : applyGridLayout(working, frameId, cfg.count, policy);
+          ? applyRowLayout(working, frameId, cfg.count, policy, layoutOptions)
+          : applyGridLayout(working, frameId, cfg.count, policy, layoutOptions);
     if (!result) continue;
 
     handled.add(frameId);

@@ -42,6 +42,7 @@ import type {
   RecentAction,
   EdgeStyle,
 } from '@sediment/shared';
+import type { StructuredGutterSizes } from '@sediment/shared/canvas-engine';
 import type { Edge, Node } from '@xyflow/react';
 
 // ---------------------------------------------------------------------------
@@ -214,6 +215,8 @@ export type CanvasUiIntent =
        * exactly one event.
        */
       preview?: boolean;
+      /** Resize-start gutter plan; consumed only by transient previews. */
+      frozenStructuredGutters?: ReadonlyMap<string, StructuredGutterSizes>;
     }
   | {
       type: 'REORDER_NODE';

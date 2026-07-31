@@ -27,7 +27,7 @@ type Cmd = Extract<CanvasCommand, { type: 'SET_FRAME_LAYOUT' }>;
 const setFrameLayout: CommandDefinition<Cmd> = {
   meta: {
     snapshot: 'yes',
-    requiresEdgeReroute: false,
+    requiresEdgeReroute: true,
   },
 
   handler(cmd, state) {

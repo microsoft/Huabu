@@ -30,6 +30,25 @@ export interface ObstacleRect {
   h: number;
 }
 
+/** Frames whose direct children are joined by one of the given edges. */
+export function getInternalEdgeFrameIds(
+  nodes: readonly Node[],
+  edges: readonly Edge[],
+): string[] {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const frameIds = new Set<string>();
+  for (const edge of edges) {
+    const sourceParentId = nodeById.get(edge.source)?.parentId;
+    if (!sourceParentId) continue;
+    const targetParentId = nodeById.get(edge.target)?.parentId;
+    if (sourceParentId !== targetParentId) continue;
+    if (nodeById.get(sourceParentId)?.type === 'frame') {
+      frameIds.add(sourceParentId);
+    }
+  }
+  return [...frameIds];
+}
+
 /** Cardinal routing direction (source → target). */
 type RouteDir = 'right' | 'left' | 'down' | 'up';
 
@@ -40,6 +59,23 @@ const DIR_HANDLES: Record<RouteDir, HandlePair> = {
   down: { sourceHandle: 'bottom-source', targetHandle: 'top-target' },
   up: { sourceHandle: 'top-source', targetHandle: 'bottom-target' },
 };
+
+function getInternalFrameHandles(source: Node, target: Node): HandlePair {
+  const sourceSize = getLayoutNodeSize(source);
+  const targetSize = getLayoutNodeSize(target);
+  const dx =
+    target.position.x +
+    targetSize.w / 2 -
+    (source.position.x + sourceSize.w / 2);
+  const dy =
+    target.position.y +
+    targetSize.h / 2 -
+    (source.position.y + sourceSize.h / 2);
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? DIR_HANDLES.right : DIR_HANDLES.left;
+  }
+  return dy >= 0 ? DIR_HANDLES.down : DIR_HANDLES.up;
+}
 
 /**
  * L-shaped candidates: source exits one side, target enters from a
@@ -596,7 +632,14 @@ export function rerouteAllEdges<
         ? target
         : { ...target, position: targetAbs };
 
-    const handles = getSmartHandles(srcNode, tgtNode, obstacles);
+    const sharedFrameId =
+      source.parentId && source.parentId === target.parentId
+        ? source.parentId
+        : null;
+    const handles =
+      sharedFrameId && nodeMap.get(sharedFrameId)?.type === 'frame'
+        ? getInternalFrameHandles(srcNode, tgtNode)
+        : getSmartHandles(srcNode, tgtNode, obstacles);
     if (
       edge.sourceHandle === handles.sourceHandle &&
       edge.targetHandle === handles.targetHandle

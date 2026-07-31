@@ -48,7 +48,9 @@ import {
   getAbsolutePosition as getFrameAbsolutePosition,
   getFrameSizing,
   getNodeSize,
+  getStructuredFrameGutterPlan,
   type NestableNode,
+  type StructuredGutterSizes,
 } from '@sediment/shared/canvas-engine';
 
 import {
@@ -62,7 +64,7 @@ import { useGesturePreviewStore } from '../../gesturePreviewStore';
 
 import type { CanvasUiIntent } from '@/handler/canvasCommand/uiIntent';
 import type { FrameSizing, NodeStyle } from '@sediment/shared';
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 
 /**
  * Item shape accepted by `previewResizeGeometry` — mirrors the
@@ -89,6 +91,7 @@ export type ResizeGeometryItem = {
  */
 export type ResizePreviewSliceState = {
   nodes: readonly Node[];
+  edges: readonly Edge[];
   dispatchUiIntent: (intent: CanvasUiIntent) => void;
   /**
    * Silent (no-undo) node-data patch. Used to scale text-bearing
@@ -176,8 +179,23 @@ type FrameResizeSnapshot = {
    * compensate their local positions for the frame's origin shift).
    */
   sizing: FrameSizing;
+  gutters?: StructuredGutterSizes;
   children: FrameResizeChildSnapshot[];
 };
+
+function collectGutterSizes(
+  plans: ReturnType<typeof getStructuredFrameGutterPlan>,
+): StructuredGutterSizes | undefined {
+  if (plans.length === 0) return undefined;
+  const sizes: StructuredGutterSizes = {};
+  for (const plan of plans) {
+    const current = sizes[plan.axis];
+    const values = current ? [...current] : [];
+    values[plan.index] = plan.finalSize;
+    sizes[plan.axis] = values;
+  }
+  return sizes;
+}
 
 /**
  * Build a {@link ResizePreviewController}.
@@ -248,7 +266,10 @@ export function createResizePreviewController(opts: {
   // call it directly without relying on `this`-binding (the store
   // surfaces these methods as plain property values, which would
   // strip `this` at call time).
-  const previewResizeGeometry = (items: ResizeGeometryItem[]) => {
+  const previewResizeGeometry = (
+    items: ResizeGeometryItem[],
+    frozenStructuredGutters?: ReadonlyMap<string, StructuredGutterSizes>,
+  ) => {
     // Dispatch the live preview through the normal command pipeline
     // so the structured-frame solver (column/row) and any other
     // post-effects re-run on every tick. Re-arming the gesture
@@ -265,9 +286,12 @@ export function createResizePreviewController(opts: {
     // would each persist an event (≈ one per paint), so a single drag
     // emitted many RESIZE events. The authoritative single event is
     // recorded by the end-of-gesture `setNodeGeometry` commit.
-    opts
-      .getState()
-      .dispatchUiIntent({ type: 'RESIZE_NODE', items, preview: true });
+    opts.getState().dispatchUiIntent({
+      type: 'RESIZE_NODE',
+      items,
+      preview: true,
+      frozenStructuredGutters,
+    });
     canvasHistoryManager.markGestureSnapshot();
   };
 
@@ -319,7 +343,10 @@ export function createResizePreviewController(opts: {
           },
         });
       }
-      previewResizeGeometry(items);
+      previewResizeGeometry(
+        items,
+        snap.gutters ? new Map([[snap.frameId, snap.gutters]]) : undefined,
+      );
       return;
     }
     // ---- Hug branch: per-axis scaling ------------------------------
@@ -363,7 +390,16 @@ export function createResizePreviewController(opts: {
     // snapshot flag stays re-armed. For structured (column/row)
     // frames the grid solver re-packs the scaled children at the
     // end of the batch; for free frames the scaled positions stick.
-    previewResizeGeometry(items);
+    const scaledGutters = snap.gutters
+      ? {
+          x: snap.gutters.x?.map((size) => size * sx),
+          y: snap.gutters.y?.map((size) => size * sy),
+        }
+      : undefined;
+    previewResizeGeometry(
+      items,
+      scaledGutters ? new Map([[snap.frameId, scaledGutters]]) : undefined,
+    );
 
     // Re-derive text-bearing children's locked fontSize for their NEW
     // box using the same content-aware pretext fit the node uses for its
@@ -462,7 +498,7 @@ export function createResizePreviewController(opts: {
     },
 
     captureFrameResizeSnapshot(frameId) {
-      const { nodes } = opts.getState();
+      const { nodes, edges } = opts.getState();
       const frame = nodes.find((n) => n.id === frameId);
       if (!frame || frame.type !== 'frame') {
         freeSnapshot = null;
@@ -474,6 +510,13 @@ export function createResizePreviewController(opts: {
         return;
       }
       const sizing = getFrameSizing(frame);
+      const gutters = collectGutterSizes(
+        getStructuredFrameGutterPlan(
+          nodes as NestableNode[],
+          edges as Edge[],
+          frameId,
+        ),
+      );
       // Children are always snapshotted — `manual` frames need them
       // too so `flushScale` can compensate child local positions for
       // the frame's origin shift (TL/TR/BL/T/L handles all move the
@@ -502,6 +545,7 @@ export function createResizePreviewController(opts: {
         frameWidth: frameSize.width,
         frameHeight: frameSize.height,
         sizing,
+        gutters,
         children,
       };
     },
