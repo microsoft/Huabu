@@ -211,6 +211,12 @@ export interface EnsureAcpSessionOptions {
    * thread (no durable record yet).
    */
   priorState?: AgentStateSnapshot<AcpDurableState>;
+  /**
+   * Whether a matching closed live entry may override `priorState` during
+   * Handle self-repair. Disabled only for the history fallback after native
+   * resume/load has already returned `session_resume_unavailable`.
+   */
+  repairFromClosedEntry?: boolean;
   logger: AcpSessionLogger;
 }
 
@@ -407,7 +413,7 @@ function seedEntryFromNewSessionResult(
  * `runAcpAgent`):
  *  - Binding switched to a different profile → drop and rebuild.
  *  - Canvas changed → drop (sandbox scope mismatch).
- *  - Stored client was shut down → drop and reopen.
+ *  - Stored client was shut down → repair from its latest recoverable state.
  *
  * Throws synchronously when the agentlet bridge is not mounted or the
  * daemon refuses to spawn the agent — same surface as the inline path
@@ -446,13 +452,6 @@ async function ensureAcpSessionInner(
   const { agentletId, threadId, binding, logger } = opts;
   const namespace = opts.namespace;
   const scopeName = namespace.name;
-  // Down-feed (I9.7): the durable snapshot the instance read off the
-  // ThreadStore and threaded down on create. Its `sessionId` drives resume
-  // (`session/load`) and its `metadata` seeds the entry — no on-disk
-  // `readAcpSessionRecord` read anymore.
-  const priorState = opts.priorState;
-  const priorSessionId = priorState?.driverState.sessionId;
-
   // Recipe resolution (recipe-first-via-L1, I9.6 / R1): use the L1-baked
   // recipe that rode the create-time spec verbatim. L1 owns keeping a
   // returning thread's recipe stable; the driver no longer reads a
@@ -480,6 +479,57 @@ async function ensureAcpSessionInner(
     );
   }
 
+  const registeredEntry = acpSessionRegistry.get(agentletId, threadId);
+  const entryMatchesRequest =
+    registeredEntry?.namespace.name === scopeName &&
+    registeredEntry.profileId === binding.profileId;
+  if (
+    registeredEntry &&
+    entryMatchesRequest &&
+    !registeredEntry.client.isClosed
+  ) {
+    logger.debug(
+      { threadId, sessionId: registeredEntry.sessionId },
+      '[acp] reusing existing session for thread',
+    );
+    return registeredEntry;
+  }
+
+  let priorState = opts.priorState;
+  if (
+    registeredEntry &&
+    entryMatchesRequest &&
+    registeredEntry.client.isClosed &&
+    opts.repairFromClosedEntry !== false
+  ) {
+    priorState = snapshotEntryState(registeredEntry);
+    logger.info(
+      {
+        threadId,
+        sessionId: priorState.driverState.sessionId,
+        persistedToDisk: registeredEntry.persistedToDisk,
+      },
+      '[acp] stored session client was closed \u2014 repairing from live entry state',
+    );
+  } else if (registeredEntry && !entryMatchesRequest) {
+    logger.info(
+      {
+        threadId,
+        oldScopeName: registeredEntry.namespace.name,
+        newScopeName: scopeName,
+        oldProfileId: registeredEntry.profileId,
+        newProfileId: binding.profileId,
+      },
+      '[acp] stored session does not match requested scope/profile \u2014 replacing',
+    );
+  } else if (registeredEntry?.client.isClosed) {
+    logger.info(
+      { threadId },
+      '[acp] bypassing closed session state after native recovery failed',
+    );
+  }
+  const priorSessionId = priorState?.driverState.sessionId;
+
   // Resolve the thread to a live agentlet agent. Each thread owns its
   // own CLI process — the orchestrator either returns the cached spawn
   // or asks the daemon to start a new one keyed on `threadId`.
@@ -506,39 +556,6 @@ async function ensureAcpSessionInner(
       'connect_timeout',
       `External agent '${recipe.alias}' is not connected`,
     );
-  }
-
-  let entry = acpSessionRegistry.get(agentletId, threadId);
-  if (entry && entry.namespace.name !== scopeName) {
-    logger.info(
-      {
-        threadId,
-        oldScopeName: entry.namespace.name,
-        newScopeName: scopeName,
-      },
-      '[acp] thread scope changed \u2014 discarding stale session (sandbox scope mismatch)',
-    );
-    // The durable record is namespace-partitioned in the ThreadStore, so a
-    // scope switch already writes under the new namespace and the old
-    // record simply lingers unread — the instance (sole store writer) owns
-    // any cleanup, not the driver. We only drop the live in-memory entry.
-    acpSessionRegistry.remove(agentletId, threadId);
-    entry = undefined;
-  }
-  if (entry && entry.client.isClosed) {
-    logger.info(
-      { threadId },
-      '[acp] stored session client was closed \u2014 reopening',
-    );
-    acpSessionRegistry.remove(agentletId, threadId);
-    entry = undefined;
-  }
-  if (entry) {
-    logger.debug(
-      { threadId, sessionId: entry.sessionId },
-      '[acp] reusing existing session for thread',
-    );
-    return entry;
   }
 
   // ── New session: skip re-initialization ──────────────────────────

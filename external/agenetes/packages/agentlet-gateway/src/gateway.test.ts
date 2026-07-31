@@ -293,6 +293,44 @@ describe('AgentletGateway', () => {
     ).not.toThrow();
   });
 
+  it('allows spawn bootstrap to outlive the ordinary control timeout', async () => {
+    const { gateway, url } = await startHarness({
+      controlRequestTimeout: 20,
+      spawnRequestTimeout: 200,
+    });
+    const agentlet = await connect(url, {
+      role: 'agentlet',
+      queryId: 'machine-a',
+      token: 'token-a',
+      hello: agentletHello('machine-a'),
+    });
+    agentlet.socket.on('message', (data) => {
+      const message = JSON.parse(data.toString()) as JsonRpcMessage;
+      if (
+        'method' in message &&
+        message.method === ServerMethods.SPAWN &&
+        'id' in message
+      ) {
+        setTimeout(() => {
+          agentlet.socket.send(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: message.id,
+              result: { sessionId: 'slow-bootstrap', pid: 456 },
+            }),
+          );
+        }, 50);
+      }
+    });
+
+    await expect(
+      gateway.spawnOnAgentlet('machine-a', {
+        appId: 'thread-a',
+        sessionSpec: { command: 'mock-agent' },
+      }),
+    ).resolves.toEqual({ sessionId: 'slow-bootstrap', pid: 456 });
+  });
+
   it('keys equal native session IDs independently per daemon', async () => {
     const { gateway, url } = await startHarness();
 

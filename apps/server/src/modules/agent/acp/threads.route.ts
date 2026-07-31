@@ -69,6 +69,14 @@ interface ThreadParams {
   threadId: string;
 }
 
+function controlFailureStatus(code?: string): 409 | 502 {
+  return code === 'session_suspended' ? 409 : 502;
+}
+
+function controlFailureCode(operation: string, code?: string): string {
+  return code === 'session_suspended' ? code : `acp_${operation}_failed`;
+}
+
 function resolveThreadAgentletId(threadId: string, canvasId?: string): string {
   if (canvasId) {
     const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
@@ -554,9 +562,10 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         { threadId, modeId: parsed.data.modeId, err: ack.error },
         '[acp/threads] setSessionMode failed',
       );
-      return reply
-        .status(502)
-        .send({ message: ack.error, code: 'acp_set_mode_failed' });
+      return reply.status(controlFailureStatus(ack.code)).send({
+        message: ack.error,
+        code: controlFailureCode('set_mode', ack.code),
+      });
     }
     // Optimistic local update so the next GET returns the new id even
     // before the agent's confirmation notification lands.
@@ -603,9 +612,10 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         { threadId, modelId: parsed.data.modelId, err: ack.error },
         '[acp/threads] setSessionModel failed',
       );
-      return reply
-        .status(502)
-        .send({ message: ack.error, code: 'acp_set_model_failed' });
+      return reply.status(controlFailureStatus(ack.code)).send({
+        message: ack.error,
+        code: controlFailureCode('set_model', ack.code),
+      });
     }
     entry.currentModelId = parsed.data.modelId;
     entry.metaUpdatedAt = Date.now();
@@ -661,9 +671,10 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         },
         '[acp/threads] setSessionConfigOption failed',
       );
-      return reply
-        .status(502)
-        .send({ message: ack.error, code: 'acp_set_config_option_failed' });
+      return reply.status(controlFailureStatus(ack.code)).send({
+        message: ack.error,
+        code: controlFailureCode('set_config_option', ack.code),
+      });
     }
     entry.metaUpdatedAt = Date.now();
     return {
