@@ -22,5 +22,6 @@ export type {
   ThreadIdentity,
 } from './realization.js';
 export { HistoryLoadDeniedError } from './realization.js';
+export { projectTextHistoryTurn } from './history.js';
 export { AgenetesError } from './errors.js';
 export type { AgenetesErrorCode } from './errors.js';

@@ -7,7 +7,7 @@ import { acpSessionRegistry } from './session-registry.js';
 
 import type { AcpCreateSpec, AcpDurableState } from './handle.js';
 import type { AcpSessionEntry } from './session-registry.js';
-import type { SessionId } from '@agenetes/protocol';
+import type { AgentTurn, SessionId } from '@agenetes/protocol';
 import type { AgentCreateContext } from '@agenetes/runtime';
 
 const sessionMocks = vi.hoisted(() => ({
@@ -49,6 +49,7 @@ const logger = {
 
 function durableContext(
   authorizeHistoryLoad: AgentCreateContext<AcpDurableState>['recovery']['authorizeHistoryLoad'],
+  turns: readonly AgentTurn[] = [foldedTurn],
 ): AgentCreateContext<AcpDurableState> {
   return {
     recoveryInput: {
@@ -59,7 +60,7 @@ function durableContext(
         },
         metadata: { currentModeId: 'ask' },
       },
-      turns: [foldedTurn],
+      turns,
     },
     recovery: { authorizeHistoryLoad },
   };
@@ -166,7 +167,15 @@ describe('ACP durable history recovery', () => {
     ).not.toHaveProperty('sessionId');
     expect(authorizeHistoryLoad).toHaveBeenCalledWith({
       mode: 'recover',
-      turns: [foldedTurn],
+      turns: [
+        {
+          ...foldedTurn,
+          request: {
+            ...foldedTurn.request,
+            rendered: [{ type: 'text', text: 'earlier question' }],
+          },
+        },
+      ],
     });
     expect(prompt.mock.calls[0]?.[1]).toEqual([
       expect.objectContaining({
@@ -177,6 +186,63 @@ describe('ACP durable history recovery', () => {
       }),
       { type: 'text', text: 'current request' },
     ]);
+  });
+
+  it('omits historical image bodies from the text replay', async () => {
+    const imageData = 'aGVsbG8='.repeat(2_000);
+    const imageTurn: AgentTurn = {
+      ...foldedTurn,
+      request: {
+        type: 'user_text',
+        content: 'earlier question',
+        rendered: [
+          {
+            type: 'parts',
+            parts: [
+              { type: 'text', text: 'inspect this image' },
+              { type: 'image', data: imageData, mimeType: 'image/png' },
+            ],
+          },
+        ],
+      },
+    };
+    const authorizeHistoryLoad = vi.fn(async () => ({
+      allowed: true as const,
+      estimatedSize: 100,
+    }));
+    const { entry, prompt } = sessionEntry();
+    sessionMocks.ensureAcpSession
+      .mockRejectedValueOnce(
+        new AcpServiceError(
+          'session_resume_unavailable',
+          'native session is gone',
+        ),
+      )
+      .mockResolvedValueOnce(entry);
+
+    const handle = new AcpAgentHandle(
+      spec,
+      durableContext(authorizeHistoryLoad, [imageTurn]),
+    );
+    for await (const _event of handle.run(submission, {
+      overlay: emptyAcpOverlay(),
+      logger,
+    })) {
+      // Drain the turn.
+    }
+
+    const authorized = JSON.stringify(
+      authorizeHistoryLoad.mock.calls[0]?.[0]?.turns,
+    );
+    expect(authorized).not.toContain(imageData);
+    expect(authorized).toContain('image omitted from text-only history replay');
+
+    const historyBlock = prompt.mock.calls[0]?.[1]?.[0] as { text: string };
+    expect(historyBlock.text).not.toContain(imageData);
+    expect(historyBlock.text).toContain('inspect this image');
+    expect(historyBlock.text).toContain(
+      'image omitted from text-only history replay',
+    );
   });
 
   it('keeps native recovery and history fallback in one Handle singleflight', async () => {

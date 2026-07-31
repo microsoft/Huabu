@@ -7,7 +7,7 @@ import {
   resolvePiSystemPrompt,
 } from './handle.js';
 
-import type { PiDurableState, PiWorkloadSpec } from './types.js';
+import type { PiDriverPorts, PiDurableState, PiWorkloadSpec } from './types.js';
 import type { AgentTurn } from '@agenetes/protocol';
 import type { HistoryLoadDeniedError } from '@agenetes/runtime';
 import type { AgentCreateContext, MountedAgentDriver } from '@agenetes/runtime';
@@ -26,6 +26,12 @@ const spec: PiWorkloadSpec = {
 const foldedTurn: AgentTurn = {
   request: { type: 'user_text', content: 'hello' },
   transcript: [{ type: 'text', data: { content: 'world' } }],
+};
+
+const basePorts: PiDriverPorts = {
+  resolveModel: vi.fn(),
+  getApiKey: vi.fn(),
+  resolveTools: vi.fn(),
 };
 
 function context(
@@ -82,7 +88,7 @@ describe('pi durable history seed', () => {
   it('keeps configured initial messages for a fresh create', async () => {
     const authorizeHistoryLoad = vi.fn();
     await expect(
-      resolvePiInitialMessages(spec, {
+      resolvePiInitialMessages(spec, basePorts, {
         recovery: { authorizeHistoryLoad },
       }),
     ).resolves.toEqual(spec.spec.initialMessages);
@@ -96,6 +102,7 @@ describe('pi durable history seed', () => {
     }));
     const messages = await resolvePiInitialMessages(
       spec,
+      basePorts,
       context(authorizeHistoryLoad),
     );
 
@@ -109,6 +116,49 @@ describe('pi durable history seed', () => {
       '"rendered":[{"type":"text","text":"hello"}]',
     );
     expect(messages[0]?.content).not.toContain('legacy seed');
+  });
+
+  it('replays the host-materialized payload and authorizes its reported size', async () => {
+    const authorizeHistoryLoad = vi.fn(async () => ({
+      allowed: true as const,
+      estimatedSize: 7,
+    }));
+    const materialized = [
+      {
+        role: 'user' as const,
+        content: [
+          { type: 'text' as const, text: 'hello' },
+          {
+            type: 'image' as const,
+            data: 'aGVsbG8=',
+            mimeType: 'image/png',
+          },
+        ],
+        timestamp: 1,
+      },
+      { role: 'assistant' as const, content: 'world', timestamp: 2 },
+    ];
+    const materializeHistory = vi.fn(async () => ({
+      messages: materialized,
+      estimatedSize: 7,
+    }));
+
+    const messages = await resolvePiInitialMessages(
+      spec,
+      { ...basePorts, materializeHistory },
+      context(authorizeHistoryLoad),
+    );
+
+    expect(materializeHistory).toHaveBeenCalledWith(
+      { mode: 'recover', turns: [foldedTurn] },
+      expect.objectContaining({ threadId: 'thread_1' }),
+    );
+    expect(authorizeHistoryLoad).toHaveBeenCalledWith({
+      mode: 'recover',
+      turns: [foldedTurn],
+      estimatedSize: 7,
+    });
+    expect(messages).toEqual(materialized);
   });
 
   describe('pi canonical input lowering', () => {
@@ -164,6 +214,7 @@ describe('pi durable history seed', () => {
     }));
     await resolvePiInitialMessages(
       spec,
+      basePorts,
       context(authorizeHistoryLoad, 'source_thread'),
     );
     expect(authorizeHistoryLoad).toHaveBeenCalledWith({
@@ -180,7 +231,7 @@ describe('pi durable history seed', () => {
       safeLimit: 10_000,
     }));
     await expect(
-      resolvePiInitialMessages(spec, context(authorizeHistoryLoad)),
+      resolvePiInitialMessages(spec, basePorts, context(authorizeHistoryLoad)),
     ).rejects.toMatchObject<HistoryLoadDeniedError>({
       name: 'HistoryLoadDeniedError',
       code: 'safe_limit_exceeded',

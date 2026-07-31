@@ -239,6 +239,11 @@ The default policy is `{ enabled: true, safeHistoryLoadLimit: 10_000, onThreshol
 
 默认 policy 是 `{ enabled: true, safeHistoryLoadLimit: 10_000, onThresholdExceeded: 'deny' }`。显式 fork 不受 `policy.enabled` 禁用，因为 fork 本身已经是 host 的显式操作；但它仍受同一 size limit 与 confirm-or-deny behavior 约束。
 
+**I2.6.2 The authorized size is the payload the driver will actually replay / 被授权的 size 是 driver 真正回放的 payload.**
+Durable turns are a record, not a replay format. A driver lowers them into its own channel first, then authorizes the result: `authorizeHistoryLoad({ ..., estimatedSize })` overrides the built-in estimate, which is only correct for drivers that replay the durable turns verbatim. Two consequences follow. A driver that can only replay text (ACP prepends one text block) must project image parts to a placeholder via `projectTextHistoryTurn` from `@agenetes/runtime` — a base64 body carries no meaning once flattened into text, and pricing it would charge the budget for bytes the model never benefits from. A driver whose backend accepts structured messages should expose a host seam instead (`PiDriverPorts.materializeHistory`), so the host can re-render turns natively — keeping role attribution, tool-call pairing, and real image parts — and fit them to its own budget before reporting the size.
+
+Durable turns 是记录，不是回放格式。Driver 先把它们下放（lower）到自己的通道，再对结果授权：`authorizeHistoryLoad({ ..., estimatedSize })` 会覆盖内建估算——内建估算只对逐字回放 durable turns 的 driver 成立。由此有两点结论。只能回放文本的 driver（ACP 以一个前置 text block 回放）必须用 `@agenetes/runtime` 的 `projectTextHistoryTurn` 把 image part 投影为占位文本——base64 一旦被压平成文本就不再有语义，为它计费等于让 budget 承担模型完全用不上的字节。后端接受结构化 message 的 driver 则应暴露 host seam（`PiDriverPorts.materializeHistory`），由 host 原生重渲染 turns——保留 role 归属、tool-call 配对与真正的 image part——并在报告 size 前先按自身 budget 裁剪。
+
 ### I3. Workload lifecycle types: Job vs Deployment / 工作负载生命周期类型：Job vs Deployment
 
 Callers do not choose a reconcile strategy (declarative vs imperative — that is an internal detail); they choose a **workload lifecycle type** (`workloadType`), which differs only in **completion semantics**:

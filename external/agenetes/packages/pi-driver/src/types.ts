@@ -1,7 +1,7 @@
 import { agentSpecSchema } from '@agenetes/protocol';
 import { z } from 'zod';
 
-import type { Namespace, WorkloadType } from '@agenetes/protocol';
+import type { AgentTurn, Namespace, WorkloadType } from '@agenetes/protocol';
 import type { TypedWorkloadSpec } from '@agenetes/runtime';
 import type {
   AgentTool,
@@ -140,6 +140,23 @@ export type PiToolContext = PiModelContext;
 
 export type PiRunResult = Message[];
 
+/** The durable history a handle is about to replay into a fresh agent. */
+export interface PiHistoryInput {
+  readonly mode: 'recover' | 'fork';
+  readonly turns: readonly AgentTurn[];
+}
+
+/** A host-lowered replay payload plus the size it should be authorized at. */
+export interface PiHistoryReplay {
+  readonly messages: readonly Message[];
+  /**
+   * Size of `messages` in the unit the instance's `safeHistoryLoadLimit`
+   * uses. Only the host knows how its payload prices out (inline images cost
+   * far less than their base64 length suggests), so it reports the number.
+   */
+  readonly estimatedSize: number;
+}
+
 export interface PiDriverPorts {
   resolveModel(ref: PiModelRef, ctx: PiModelContext): Promise<Model<Api>>;
   getApiKey(
@@ -150,6 +167,16 @@ export interface PiDriverPorts {
     refs: readonly PiToolRef[],
     ctx: PiToolContext,
   ): Promise<AgentTool[]>;
+  /**
+   * Lower durable turns into the native messages to seed a recovered or
+   * forked agent with. Omit it to fall back to the driver's built-in text
+   * seed, which flattens every turn into one JSON Lines user message and so
+   * cannot carry image parts or per-role attribution.
+   */
+  materializeHistory?(
+    input: PiHistoryInput,
+    ctx: PiModelContext,
+  ): Promise<PiHistoryReplay>;
 }
 
 export interface PiDriverFactoryConfig {

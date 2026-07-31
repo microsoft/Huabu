@@ -13,6 +13,8 @@ export type {
   PiDriverFactoryConfig,
   PiDriverPorts,
   PiDurableState,
+  PiHistoryInput,
+  PiHistoryReplay,
   PiModelContext,
   PiModelRef,
   PiRunResult,
