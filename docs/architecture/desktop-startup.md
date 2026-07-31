@@ -19,6 +19,8 @@ app.whenReady()
                                            ← WorkspaceLoadingScreen covers this
 ```
 
+When no remembered workspace can be activated, the workspace guard redirects to the stable `/setup` route instead of rendering the setup page inside the guard. This keeps the route that owns the post-activation navigation mounted while `selectWorkspace()` publishes `isReady`; after activation it navigates through `/` to `/spaces` (or World when enabled).
+
 Two independent costs dominate a cold start:
 
 1. **Entry-graph evaluation.** One long synchronous task in the renderer. Its cost is the size of the first-screen JavaScript graph, and it is paid in full on the first launch after an install or an update, when Chromium's per-origin code cache is empty. (It is also paid on _every_ launch when the shell cannot get its preferred port, because the origin — and therefore the cache — changes with the port.)
