@@ -48,11 +48,12 @@ function child(
 
 describe('structured edge gutters', () => {
   it('expands only the crossed column gutter for an edge label', () => {
+    const LABEL = 'depends on';
     const edge = {
       id: 'edge-ab',
       source: 'a',
       target: 'b',
-      data: { edgeStyle: { label: 'depends on' } },
+      data: { edgeStyle: { label: LABEL } },
     } as Edge;
 
     const result = applyColumnLayout(
@@ -70,11 +71,17 @@ describe('structured edge gutters', () => {
 
     expect(result).not.toBeNull();
     expect(result?.gutters).toHaveLength(2);
+    // Only the gutter the edge crosses is widened, and it is widened to
+    // the label's bounded extent plus clearance at the renderer's
+    // maximum inverse scale.
     const labelledGutter = result?.gutters[0];
+    // Char width 6 + horizontal inset 14, then clearance 32 at the
+    // renderer's maximum inverse scale.
+    const labelExtent = LABEL.length * 6 + 14;
     expect(labelledGutter?.requiredSize).toBe(
-      ((labelledGutter?.lanes[0].labelExtent ?? 0) + 32) *
-        EDGE_LABEL_MAX_INVERSE_SCALE,
+      (labelExtent + 32) * EDGE_LABEL_MAX_INVERSE_SCALE,
     );
+    expect(labelledGutter?.finalSize).toBe(labelledGutter?.requiredSize);
     expect(result?.gutters[1].finalSize).toBe(result?.gutters[1].baseSize);
     expect(result?.slotAssignments).toEqual(
       new Map([
@@ -106,9 +113,10 @@ describe('structured edge gutters', () => {
     );
 
     expect(result?.gutters.map((gutter) => gutter.axis)).toEqual(['y', 'y']);
-    expect(result?.gutters.every((gutter) => gutter.lanes.length === 1)).toBe(
-      true,
-    );
+    // The edge spans both row boundaries, so both are widened.
+    expect(
+      result?.gutters.every((gutter) => gutter.requiredSize > gutter.baseSize),
+    ).toBe(true);
   });
 
   it('plans both column and row-band gutters in grid mode', () => {
@@ -149,7 +157,7 @@ describe('structured edge gutters', () => {
 
     expect(xGutter?.finalSize).toBeGreaterThan(xGutter?.baseSize ?? Infinity);
     expect(yGutter?.finalSize).toBe(yGutter?.baseSize);
-    expect(yGutter?.lanes).toEqual([]);
+    expect(yGutter?.requiredSize).toBe(yGutter?.baseSize);
   });
 
   it('uses frozen gutter sizes instead of recomputing label demand', () => {

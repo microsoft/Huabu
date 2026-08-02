@@ -77,7 +77,6 @@ export {
   applyStructuredFrameRelayout,
   getStructuredFrameGutterPlan,
   clampGridCount,
-  gridRowCeiling,
   readFrameGridConfig,
   resolveFrameTrackCount,
   pickColumnDropTarget,

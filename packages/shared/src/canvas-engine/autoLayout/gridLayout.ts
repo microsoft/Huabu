@@ -190,9 +190,10 @@ export function readFrameGridRowCount(
 /**
  * The structured layout modes, i.e. every `FrameLayoutMode` except
  * `free`. `column` and `grid` both count **columns** and both store
- * the column index in each child's `data.frameSlot`; `row` counts
- * rows. The drag-time pickers therefore treat `grid` exactly like
- * `column` — only the solver differs.
+ * the column index in each child's `data.frameColumn`; `row` counts
+ * rows and stores them in `data.frameRow`. The drag-time pickers
+ * therefore treat `grid` exactly like `column` — only the solver
+ * differs.
  */
 export type FrameGridAxis = 'column' | 'row' | 'grid';
 
@@ -582,19 +583,21 @@ export interface FrameGridLayoutResult {
   effectiveCount: number;
 }
 
-export interface StructuredGutterLane {
-  edgeId: string;
-  lane: number;
-  labelExtent: number;
-}
-
+/**
+ * One inter-track gutter's resolved size.
+ *
+ * `baseSize` is the content-derived gap, `requiredSize` the widest
+ * demand any crossing edge placed on it, and `finalSize` what the
+ * layout actually used — the three differ only when an edge label
+ * needs more room than the gap provides, or when a resize gesture
+ * froze the gutter.
+ */
 export interface StructuredGutterPlan {
   axis: 'x' | 'y';
   index: number;
   baseSize: number;
   requiredSize: number;
   finalSize: number;
-  lanes: StructuredGutterLane[];
 }
 
 export interface StructuredLayoutOptions {
@@ -634,7 +637,13 @@ function estimateEdgeLabelExtent(label: string, axis: 'x' | 'y'): number {
       EDGE_LABEL_VERTICAL_INSET
     );
   }
-  const longestLine = Math.max(0, ...explicitLines.map((line) => line.length));
+  // Reduce rather than `Math.max(...lines)`: edge labels carry no
+  // length limit, and spreading a few hundred thousand elements into a
+  // call overflows the stack.
+  const longestLine = explicitLines.reduce(
+    (longest, line) => Math.max(longest, line.length),
+    0,
+  );
   return Math.min(
     EDGE_LABEL_WRAP_CAP,
     longestLine * EDGE_LABEL_CHAR_WIDTH + EDGE_LABEL_HORIZONTAL_INSET,
@@ -655,7 +664,6 @@ function planAxisGutters(
     baseSize,
     requiredSize: baseSize,
     finalSize: Math.max(baseSize, frozenSizes?.[index] ?? baseSize),
-    lanes: [] as StructuredGutterLane[],
   }));
   if (!edges) return plans;
 
@@ -685,11 +693,6 @@ function planAxisGutters(
     for (let index = first; index < last; index += 1) {
       const plan = plans[index];
       if (!plan) continue;
-      plan.lanes.push({
-        edgeId: edge.id,
-        lane: plan.lanes.length,
-        labelExtent,
-      });
       plan.requiredSize = Math.max(plan.requiredSize, requiredSize);
       if (frozenSizes?.[index] === undefined) {
         plan.finalSize = Math.max(plan.baseSize, plan.requiredSize);
@@ -1274,11 +1277,11 @@ export function getStructuredFrameGutterPlan(
  * track.
  *
  *  - `into-existing` — drop into an existing track at `slot` (range
- *    `[0, count - 1]`). Only the dragged child's `frameSlot` changes;
+ *    `[0, count - 1]`). Only the dragged child's cell changes;
  *    siblings stay put.
  *  - `insert-new`    — create a brand-new track at `slot` (range
  *    `[0, count]`; `count` means append at the end). Every existing
- *    child with `frameSlot >= slot` must be shifted by +1 by the
+ *    child at or past `slot` must be shifted by +1 by the
  *    caller, the dragged child takes `slot`, and the frame's
  *    `gridCount` becomes `count + 1`.
  *
@@ -1942,7 +1945,7 @@ export function describeStructuredDropZone(
  * - Frame's `style.width` / `style.height` / `measured` — `result.frameSize`,
  *   **only when** `getFrameSizing(frame) === 'hug'`. Manual-sized
  *   structured frames keep their user-pinned size; children still get
- *   re-packed by the solver (positions / `frameSlot`) but may overflow
+ *   re-packed by the solver (positions / cells) but may overflow
  *   the frame box on the main axis (start-aligned, allowed to spill).
  *
  * `fillFrameIds` selects the empty-track policy per frame: those in the
@@ -1997,7 +2000,7 @@ export function applyStructuredFrameRelayout(
     //                `style` + `measured` so the frame wraps its
     //                children (and ancestor fits cascade correctly).
     //   • `manual` — keep the user-pinned frame size untouched; only
-    //                children positions / `frameSlot` and the frame's
+    //                children positions / cells and the frame's
     //                `gridCount` are written. Children may overflow on
     //                the main axis when the user pins a frame smaller
     //                than its packed content; that's the documented
