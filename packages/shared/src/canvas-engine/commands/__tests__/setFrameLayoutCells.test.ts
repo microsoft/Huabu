@@ -140,4 +140,32 @@ describe('SET_FRAME_LAYOUT cells', () => {
 
     expect(dataOf(result.nodes, 'outsider').frameColumn).toBeUndefined();
   });
+
+  it('leaves a child alone when its cell does not actually change', () => {
+    // `cells` and a mode change both address every child, but a node
+    // reported as mutated is re-persisted and re-broadcast whether or
+    // not it moved, so the ones that stay put keep their identity.
+    const nodes = scene([
+      { frameColumn: 0, frameRow: 0 },
+      { frameColumn: 1, frameRow: 0 },
+    ]);
+    nodes[0].data = { layoutMode: 'grid', gridCount: 2 };
+
+    const result = run(
+      {
+        type: 'SET_FRAME_LAYOUT',
+        frameId: 'frame' as Cmd['frameId'],
+        mode: 'grid',
+        gridCount: 2,
+        cells: [
+          { nodeId: 'c0' as Cmd['frameId'], column: 0, row: 0 },
+          { nodeId: 'c1' as Cmd['frameId'], column: 1, row: 1 },
+        ],
+      },
+      nodes,
+    );
+
+    expect(result.nodes[1]).toBe(nodes[1]);
+    expect(result.mutatedNodes?.map((n) => n.id)).toEqual(['frame', 'c1']);
+  });
 });

@@ -1005,12 +1005,6 @@ function assignGridRows(
   // guards untrusted row indices and would otherwise shrink a floor the
   // user explicitly asked for (a one-child frame has a ceiling of 2, so
   // "12 rows" would silently become 3).
-  // `minRows` only ever adds bands: the content decides how many rows
-  // are *needed*, and a floor below that cannot be honoured. It is
-  // capped by FRAME_GRID_MAX_COUNT rather than by `ceiling`, which
-  // guards untrusted row indices and would otherwise shrink a floor the
-  // user explicitly asked for (a one-child frame has a ceiling of 2, so
-  // "12 rows" would silently become 3).
   const bandCount = Math.max(
     maxRow + 1,
     clampInt(minRows, 0, FRAME_GRID_MAX_COUNT),

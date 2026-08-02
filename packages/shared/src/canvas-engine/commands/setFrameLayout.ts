@@ -155,6 +155,18 @@ const setFrameLayout: CommandDefinition<Cmd> = {
         if (typeof cell?.row === 'number') {
           nextData.frameRow = Math.max(0, Math.round(cell.row));
         }
+        // A child whose cell the command did not actually change keeps
+        // its identity. Both a mode change and a `cells` payload address
+        // every child of the frame, but most of them usually land where
+        // they already were — and a node that appears in `mutatedNodes`
+        // is re-persisted and re-broadcast whether or not it moved.
+        if (
+          nextData.frameColumn === dataRec.frameColumn &&
+          nextData.frameRow === dataRec.frameRow &&
+          !('frameSlot' in dataRec)
+        ) {
+          return n;
+        }
         touchedChildIds.add(n.id);
         return { ...n, data: nextData };
       }
