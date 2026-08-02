@@ -31,7 +31,17 @@ export interface ObstacleRect {
   h: number;
 }
 
-/** Frames whose direct children are joined by one of the given edges. */
+/**
+ * **Structured** Frames whose direct children are joined by one of the
+ * given edges.
+ *
+ * Reported by the edge commands so the executor can recompute gutters —
+ * the lanes a structured Frame reserves for the edges running between
+ * its children — in the same batch. `free` Frames are excluded because
+ * they have no gutters to recompute: naming one here would only put it
+ * through the end-of-batch fit pass, turning an edge restyle into a
+ * frame resize that saves, broadcasts, and lands in the same undo step.
+ */
 export function getInternalEdgeFrameIds(
   nodes: readonly Node[],
   edges: readonly Edge[],
@@ -41,9 +51,10 @@ export function getInternalEdgeFrameIds(
   for (const edge of edges) {
     const sourceParentId = nodeById.get(edge.source)?.parentId;
     if (!sourceParentId) continue;
+    if (frameIds.has(sourceParentId)) continue;
     const targetParentId = nodeById.get(edge.target)?.parentId;
     if (sourceParentId !== targetParentId) continue;
-    if (nodeById.get(sourceParentId)?.type === 'frame') {
+    if (readFrameGridConfig(nodeById.get(sourceParentId))) {
       frameIds.add(sourceParentId);
     }
   }

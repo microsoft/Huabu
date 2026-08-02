@@ -211,6 +211,35 @@ describe('structured edge gutters', () => {
     expect(writeResult.requiresEdgeReroute).toBe(true);
   });
 
+  it('leaves a free frame alone when an internal edge changes', () => {
+    // A `free` frame has no gutters to recompute, so reporting it as
+    // affected would only put it through the end-of-batch fit pass —
+    // turning an edge restyle into a frame resize that saves, broadcasts
+    // and shares the restyle's undo step.
+    const nodes = [
+      { ...frame(), data: { layoutMode: 'free', sizing: 'hug' } } as Node,
+      child('a', {}, { x: 40, y: 40 }),
+      child('b', {}, { x: 400, y: 300 }),
+    ];
+    const edge = { id: 'edge-ab', source: 'a', target: 'b' } as Edge;
+
+    const { writeResult } = executeCanvasCommands(
+      {
+        commands: [
+          {
+            type: 'SET_EDGE_STYLE',
+            edges: [{ edge: 'edge-ab', style: { label: 'relates to' } }],
+          } as CanvasCommand,
+        ],
+      },
+      { nodes, edges: [edge], canvasId: 'canvas' },
+    );
+
+    expect(writeResult.nodes.find((node) => node.id === 'frame')).toEqual(
+      nodes[0],
+    );
+  });
+
   it('preserves edge-aware X gutters when Grid drag geometry resizes the frame', () => {
     const nodes = [
       frame('grid'),
