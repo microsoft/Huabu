@@ -472,6 +472,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   const clearRightPanelAnchor = usePanelStore(
     (state) => state.clearRightPanelAnchor,
   );
+  const layoutAnchorNodeId =
+    expandedNodeId && expandMode === 'split'
+      ? expandedNodeId
+      : rightPanelAnchorNodeId;
+  const layoutAnchorNodeIdRef = useRef(layoutAnchorNodeId);
+  layoutAnchorNodeIdRef.current = layoutAnchorNodeId;
 
   // Turning the World feature on/off changes whether this Space resolves
   // its derived pin state at all, so re-run the boundary refresh.
@@ -1210,10 +1216,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       );
       previousSize = nextSize;
 
-      const anchorNodeId =
-        expandedNodeId && expandMode === 'split'
-          ? expandedNodeId
-          : rightPanelAnchorNodeId;
+      const anchorNodeId = layoutAnchorNodeIdRef.current;
       if (anchorNodeId) {
         const bounds = getReliableNodeBounds(instance, [anchorNodeId]);
         if (bounds) {
@@ -1233,7 +1236,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     });
     observer.observe(wrapper);
     return () => observer.disconnect();
-  }, [expandedNodeId, expandMode, rightPanelAnchorNodeId]);
+  }, []);
 
   // The Chat anchor is one-shot and must expire on its own clock. Opening
   // Chat from a node while the panel is already open changes no layout, so

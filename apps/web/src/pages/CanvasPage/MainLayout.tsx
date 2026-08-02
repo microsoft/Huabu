@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { usePanelStore } from '@/store/panelStore';
 
@@ -51,6 +51,46 @@ export const MainLayout = ({
   // Suspends width transition while the user drags a resize handle so the
   // panel tracks the cursor 1:1 instead of animating each pointer-move.
   const [isResizing, setIsResizing] = useState(false);
+  const [isRightPanelVisible, setIsRightPanelVisible] =
+    useState(!isRightCollapsed);
+  const [isRightPanelMoving, setIsRightPanelMoving] = useState(false);
+  const committedRightCollapsedRef = useRef(isRightCollapsed);
+  const rightPanelMotionFallbackRef = useRef<number | null>(null);
+
+  const finishRightPanelMotion = () => {
+    if (rightPanelMotionFallbackRef.current !== null) {
+      window.clearTimeout(rightPanelMotionFallbackRef.current);
+      rightPanelMotionFallbackRef.current = null;
+    }
+    setIsRightPanelMoving(false);
+  };
+
+  // Commit the final flex layout immediately, then animate only compositor
+  // transforms. The zero-width closing slot right-aligns its absolute child,
+  // so the panel stays in its old visual position while it slides offscreen.
+  useLayoutEffect(() => {
+    if (committedRightCollapsedRef.current === isRightCollapsed) return;
+    committedRightCollapsedRef.current = isRightCollapsed;
+    setIsRightPanelMoving(true);
+
+    const frame = requestAnimationFrame(() => {
+      setIsRightPanelVisible(!isRightCollapsed);
+      // `transitionend` is authoritative. This only covers reduced motion,
+      // interrupted transitions, and environments that omit the event.
+      rightPanelMotionFallbackRef.current = window.setTimeout(
+        finishRightPanelMotion,
+        300,
+      );
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+      if (rightPanelMotionFallbackRef.current !== null) {
+        window.clearTimeout(rightPanelMotionFallbackRef.current);
+        rightPanelMotionFallbackRef.current = null;
+      }
+    };
+  }, [isRightCollapsed]);
 
   const effectiveLeftWidthPx = isLeftCollapsed
     ? COLLAPSED_LEFT_WIDTH_PX
@@ -228,7 +268,15 @@ export const MainLayout = ({
           when the left panel is collapsed. The chat collapse state is
           forwarded to children so they can render their own top-right
           floating controls (chat toggle + settings). */}
-      <div className="relative min-w-0 flex-1">
+      <div
+        className="relative min-w-0 flex-1"
+        data-right-panel-motion={
+          isRightPanelMoving ||
+          committedRightCollapsedRef.current !== isRightCollapsed
+            ? 'true'
+            : undefined
+        }
+      >
         {React.isValidElement(children)
           ? React.cloneElement(children as React.ReactElement<any>, {
               isChatCollapsed: isRightCollapsed,
@@ -256,26 +304,41 @@ export const MainLayout = ({
         <div className={resizeHandleInnerClassName} />
       </div>
 
-      {/* Right Panel — spans full height. When collapsed the column shrinks
-          to 0 and `overflow-hidden` clips it; the panel is always rendered
-          in its expanded form so the SidebarPanel's own collapsed strip
-          never flashes during the width animation (mirrors the left
-          column's behavior). The chat-toggle button lives as a floating
-          overlay in the center area when collapsed. */}
+      {/* Right Panel — the outer slot jumps to its final width so Canvas only
+          resizes once. The fixed-width inner panel and React Flow viewport
+          then animate their compositor transforms to the same final layout.
+          While closing, the zero-width slot right-aligns the absolute inner
+          panel so it can slide offscreen instead of disappearing immediately. */}
       <div
-        className="shrink-0 overflow-hidden"
-        data-animate-width
+        className="relative shrink-0"
+        data-right-panel-slot
+        data-collapsed={isRightCollapsed ? 'true' : undefined}
         data-resizing={isResizing ? 'true' : undefined}
         style={{
           width: `${effectiveRightWidthPx}px`,
         }}
       >
-        {React.isValidElement(rightPanel)
-          ? React.cloneElement(rightPanel as React.ReactElement<any>, {
-              isCollapsed: false,
-              onToggle: toggleRightPanel,
-            })
-          : rightPanel}
+        <div
+          className="absolute top-0 h-full"
+          data-right-panel-content
+          data-visible={isRightPanelVisible ? 'true' : undefined}
+          style={{ width: `${rightWidthPx}px` }}
+          onTransitionEnd={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              event.propertyName === 'transform'
+            ) {
+              finishRightPanelMotion();
+            }
+          }}
+        >
+          {React.isValidElement(rightPanel)
+            ? React.cloneElement(rightPanel as React.ReactElement<any>, {
+                isCollapsed: false,
+                onToggle: toggleRightPanel,
+              })
+            : rightPanel}
+        </div>
       </div>
     </div>
   );
