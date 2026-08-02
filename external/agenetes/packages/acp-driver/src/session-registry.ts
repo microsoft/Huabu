@@ -189,6 +189,13 @@ export interface AcpSessionEntry {
   /** Epoch ms the selection map was last written by a set-RPC. */
   selectionsUpdatedAt: number;
   /**
+   * The in-flight replay of {@link AcpSessionEntry.selections} onto the
+   * agent, or `null` once nothing is pending. Anything that must not
+   * overtake it — a turn's `session/prompt`, a user's set-RPC — waits on it
+   * through `awaitSelectionReplay`.
+   */
+  selectionsReplay: Promise<void> | null;
+  /**
    * Last `session_info_update` payload — title + activity stamp.
    * `null` until the agent pushes one.
    */

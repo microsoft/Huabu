@@ -2,6 +2,7 @@ import { RequestError } from '@agentclientprotocol/sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  awaitSelectionReplay,
   hydrateSelectionsFromPersistedMeta,
   reconcileSessionSelections,
 } from './session.js';
@@ -38,6 +39,7 @@ function entry(overrides: Partial<AcpSessionEntry> = {}): AcpSessionEntry {
     configOptions: [],
     selections: {},
     selectionsUpdatedAt: 0,
+    selectionsReplay: null,
     metaUpdatedAt: 0,
     ...overrides,
   } as unknown as AcpSessionEntry;
@@ -252,5 +254,66 @@ describe('selection replay', () => {
     const c = e.client as unknown as ReturnType<typeof client>;
     expect(c.setSessionConfigOption).not.toHaveBeenCalled();
     expect(e.metaUpdatedAt).toBe(0);
+  });
+});
+
+describe('selection replay ordering', () => {
+  it('does not wait when no replay is pending', async () => {
+    await expect(
+      awaitSelectionReplay(entry({ selectionsReplay: null })),
+    ).resolves.toBeUndefined();
+  });
+
+  it('holds the caller until the replay lands', async () => {
+    // The guarantee the first turn of a resumed thread depends on: the
+    // prompt must not overtake the knobs it should run under.
+    let landed!: () => void;
+    const e = entry({
+      selectionsReplay: new Promise<void>((resolve) => {
+        landed = resolve;
+      }),
+    });
+
+    let proceeded = false;
+    const waiting = awaitSelectionReplay(e).then(() => {
+      proceeded = true;
+    });
+    await Promise.resolve();
+    expect(proceeded).toBe(false);
+
+    landed();
+    await waiting;
+    expect(proceeded).toBe(true);
+  });
+
+  it('gives up after the bound so an unresponsive agent cannot hang the turn', async () => {
+    vi.useFakeTimers();
+    try {
+      const e = entry({ selectionsReplay: new Promise<void>(() => {}) });
+
+      const waiting = awaitSelectionReplay(e);
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      await expect(waiting).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits out the bound at most once per session', async () => {
+    vi.useFakeTimers();
+    try {
+      const e = entry({ selectionsReplay: new Promise<void>(() => {}) });
+      const first = awaitSelectionReplay(e);
+      await vi.advanceTimersByTimeAsync(3_000);
+      await first;
+
+      // Would hang here \u2014 nothing advances the clock again \u2014 if a second
+      // caller re-armed the bound instead of proceeding straight through.
+      await awaitSelectionReplay(e);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -14,6 +14,10 @@ const sessionMocks = vi.hoisted(() => ({
   ensureAcpSession: vi.fn(),
   registerAcpStateListener: vi.fn(() => () => {}),
   reportEntryState: vi.fn(),
+  awaitSelectionReplay: vi.fn(async () => {}),
+  recordSessionSelection: vi.fn(),
+  MODE_SELECTION_ID: 'mode',
+  MODEL_SELECTION_ID: 'model',
 }));
 
 vi.mock('./session.js', () => sessionMocks);

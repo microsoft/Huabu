@@ -502,6 +502,48 @@ async function reconcileSessionSelections(
 export { reconcileSessionSelections };
 
 /**
+ * How long a caller will wait for the selection replay before giving up on
+ * it. The replay is one round-trip per remembered knob, so this only bites
+ * when the agent is unresponsive — and then proceeding on stale settings
+ * beats hanging the turn on an agent that may never answer.
+ */
+const SELECTION_REPLAY_WAIT_MS = 3_000;
+
+/**
+ * Let the session's selection replay finish before acting on the agent.
+ *
+ * Session open is lazy, so the replay is kicked off by the very turn that
+ * needs it and races the `session/prompt` that follows. The first knob is
+ * written to the wire before open returns, but the loop is sequential, so
+ * every later knob would otherwise land after the prompt — the first turn
+ * of a resumed thread runs on the wrong model, or without the auto-approve
+ * the user set. A user set-RPC has the mirrored problem: the replay's
+ * remembered value could overwrite the choice the user just made.
+ *
+ * Waiting is bounded, and waited out at most once per session: if the
+ * replay is slow enough to hit the bound, charging every later caller for
+ * it again would turn one delayed turn into a permanently sluggish thread.
+ */
+export async function awaitSelectionReplay(
+  entry: AcpSessionEntry,
+): Promise<void> {
+  const pending = entry.selectionsReplay;
+  if (!pending) return;
+  entry.selectionsReplay = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      pending,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, SELECTION_REPLAY_WAIT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * Hydrate a fresh registry entry from a down-fed {@link AgentMetadata}
  * snapshot (I9.7). Used by the "already loaded" recovery path where neither
  * `session/new` nor `session/load` provides a meta seed and the agent
@@ -831,6 +873,7 @@ async function ensureAcpSessionInner(
     configOptions: [],
     selections: {},
     selectionsUpdatedAt: 0,
+    selectionsReplay: null,
     sessionInfo: null,
     usage: null,
     metaUpdatedAt: 0,
@@ -917,10 +960,23 @@ async function ensureAcpSessionInner(
 
   acpSessionRegistry.set(agentletId, threadId, created);
 
-  // Push the restored intent back onto the agent. Not awaited: the knobs
-  // are independent of the first prompt, and a slow agent must not delay
-  // session open. Errors are handled per-selection inside.
-  void reconcileSessionSelections(created, logger, { agentViewIsLive });
+  // Push the restored intent back onto the agent. Not awaited here: a slow
+  // agent must not delay session open itself. The handle waits on this
+  // before the turn's prompt and before any user set-RPC, so nothing
+  // overtakes it. Errors are handled per-selection inside; the catch only
+  // guards against an unexpected throw so awaiting is always safe.
+  created.selectionsReplay = reconcileSessionSelections(created, logger, {
+    agentViewIsLive,
+  }).catch((err: unknown) => {
+    logger.warn(
+      {
+        threadId,
+        sessionId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      '[acp] selection replay aborted',
+    );
+  });
 
   // The durable record is refreshed via the up-report channel (I9.7): the
   // owning handle installs `reportState` on this entry the moment it
