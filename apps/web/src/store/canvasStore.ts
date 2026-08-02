@@ -31,6 +31,7 @@ import {
   getAbsolutePosition as getFrameAbsolutePosition,
   getFrameSizing,
   wouldUnframe,
+  wouldStickToStructuredFrame,
   wouldAutoFrame,
   readFrameGridConfig,
   resolveFrameTrackCount,
@@ -2573,8 +2574,19 @@ const useCanvasStore = create<RFState>()(
             const dragSize = liveNode
               ? getNodeSize(liveNode)
               : { width: 0, height: 0 };
+            // A structured parent claims a much larger capture zone, and
+            // it has to be honoured HERE: this tick's answer is cached
+            // and replayed verbatim at drop time, so deciding "unframe"
+            // while the overlay says "insert a new track" is exactly how
+            // a node ends up outside the frame it was shown entering.
+            const stickToStructured = wouldStickToStructuredFrame(
+              liveNodes,
+              dn.id,
+              pointerFlow,
+            );
             if (
               !bypassReparent &&
+              !stickToStructured &&
               wouldUnframe(liveNodes, dn.id, {
                 epsilon: 0,
                 margin: 10,
@@ -2685,27 +2697,16 @@ const useCanvasStore = create<RFState>()(
         let targetFrameId = enteringFrameId ?? primary?.parentId;
         // Sticky case (node already lives in a frame): only keep showing the
         // structured indicator while the cursor is still inside that frame's
-        // capture zone — the frame rect expanded by the dragged node's size.
-        // This mirrors NODE_DRAG_STOP, which keeps a node in its structured
-        // frame iff the release pointer is in the same zone — so the preview
-        // and the committed drop never disagree (no "shows insert, lands
-        // outside") while the outer prepend / append bands stay reachable.
-        if (!enteringFrameId && targetFrameId && pointerFlow) {
-          const fAbs = getFrameAbsolutePosition(liveNodes, targetFrameId);
-          const fNode = liveNodes.find((n) => n.id === targetFrameId);
-          const fSize = fNode ? getNodeSize(fNode) : null;
-          const dragNode = liveNodes.find((n) => n.id === draggedNode.id);
-          const dragSize = dragNode
-            ? getNodeSize(dragNode)
-            : { width: 0, height: 0 };
-          const inside =
-            fAbs &&
-            fSize &&
-            pointerFlow.x >= fAbs.x - dragSize.width &&
-            pointerFlow.x <= fAbs.x + fSize.width + dragSize.width &&
-            pointerFlow.y >= fAbs.y - dragSize.height &&
-            pointerFlow.y <= fAbs.y + fSize.height + dragSize.height;
-          if (!inside) targetFrameId = undefined;
+        // capture zone. Same predicate as the unframe decision above and as
+        // NODE_DRAG_STOP, so the preview and the committed drop cannot
+        // disagree (no "shows insert, lands outside") while the outer
+        // prepend / append bands stay reachable.
+        if (
+          !enteringFrameId &&
+          targetFrameId &&
+          !wouldStickToStructuredFrame(liveNodes, draggedNode.id, pointerFlow)
+        ) {
+          targetFrameId = undefined;
         }
         const targetFrame = targetFrameId
           ? liveNodes.find((n) => n.id === targetFrameId)

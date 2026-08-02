@@ -26,7 +26,12 @@ export type {
   AutoUnframeByNonOverlapOptions,
 } from './geometry.js';
 
-export { findFrameAtPoint, wouldAutoFrame, wouldUnframe } from './detection.js';
+export {
+  findFrameAtPoint,
+  wouldAutoFrame,
+  wouldUnframe,
+  wouldStickToStructuredFrame,
+} from './detection.js';
 
 export type {
   FrameNodesInRectOptions,

@@ -14,6 +14,7 @@ import {
   readFrameGridRow,
   readFrameTrack,
   resolveFrameTrackCount,
+  wouldStickToStructuredFrame,
   type FrameAxis,
   type FrameGridAxis,
   type NestableNode,
@@ -114,18 +115,12 @@ export default function resolveNodeDragStop(
     // contradicting the live "insert column / row" preview. The node-size
     // margin makes the edge bands reachable while a clearly-away drag
     // (beyond one node-size) still unframes.
-    const preParent = preParentIds.get(id);
     const dragSize = nodeRectSize(nodes, id);
-    const stickToStructured =
-      !!preParent &&
-      !!intent.pointerFlowPosition &&
-      pointerInsideStructuredFrame(
-        nodes,
-        preParent,
-        intent.pointerFlowPosition,
-        dragSize.width,
-        dragSize.height,
-      );
+    const stickToStructured = wouldStickToStructuredFrame(
+      nodes as NestableNode[],
+      id,
+      intent.pointerFlowPosition,
+    );
     if (!stickToStructured) {
       // Free-mode frames use a pointer-capture halo so a child node
       // stays parented while the user repositions it inside the frame —
@@ -598,28 +593,6 @@ function absoluteY(nodes: Node[], nodeId: string): number {
   return sum;
 }
 
-/** Absolute rect of a frame, or `null` when its size is unknown. */
-function frameAbsRect(
-  nodes: Node[],
-  frameId: string,
-): { x: number; y: number; width: number; height: number } | null {
-  const frame = nodes.find((n) => n.id === frameId);
-  if (!frame) return null;
-  const width =
-    (frame.style as { width?: number } | undefined)?.width ??
-    (frame.measured as { width?: number } | undefined)?.width;
-  const height =
-    (frame.style as { height?: number } | undefined)?.height ??
-    (frame.measured as { height?: number } | undefined)?.height;
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
-  return {
-    x: absoluteX(nodes, frameId),
-    y: absoluteY(nodes, frameId),
-    width: width as number,
-    height: height as number,
-  };
-}
-
 /** Width / height of a node from its measured size, then style, else 0. */
 function nodeRectSize(
   nodes: Node[],
@@ -635,32 +608,4 @@ function nodeRectSize(
     (node?.style as { height?: number } | undefined)?.height ??
     0;
   return { width, height };
-}
-
-/**
- * True when `frameId` is a structured (column / row) frame and `pointer`
- * (flow space) lies within its absolute bounds expanded by `marginX` /
- * `marginY` on each side. The margin (the dragged node's size) makes the
- * outer prepend / append padding reachable when the node's body — and
- * thus the cursor — is dragged slightly past the frame edge, so the
- * drag-stop resolver keeps the node parented instead of unframing on
- * insufficient body-overlap.
- */
-function pointerInsideStructuredFrame(
-  nodes: Node[],
-  frameId: string,
-  pointer: { x: number; y: number },
-  marginX = 0,
-  marginY = 0,
-): boolean {
-  const frame = nodes.find((n) => n.id === frameId);
-  if (!frame || !readFrameGridConfig(frame)) return false;
-  const rect = frameAbsRect(nodes, frameId);
-  if (!rect) return false;
-  return (
-    pointer.x >= rect.x - marginX &&
-    pointer.x <= rect.x + rect.width + marginX &&
-    pointer.y >= rect.y - marginY &&
-    pointer.y <= rect.y + rect.height + marginY
-  );
 }

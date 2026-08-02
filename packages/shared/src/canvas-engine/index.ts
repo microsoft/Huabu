@@ -184,6 +184,7 @@ export {
   unframe,
   autoUnframeNodeByNonOverlap,
   wouldUnframe,
+  wouldStickToStructuredFrame,
   wouldAutoFrame,
   autoFrameNodeByOverlap,
   frameNodes,
