@@ -433,6 +433,19 @@ function isSelectionUnusable(err: unknown): boolean {
  * the persisted `allow_all` is remembered yet never honoured, and the
  * first prompt runs under the wrong model.
  *
+ * `agentViewIsLive` says whether the entry's agent-reported fields
+ * (`currentModeId` / `currentModelId` / `configOptions[].currentValue`)
+ * were established by this session's own traffic. They are NOT a reliable
+ * mirror of the agent whenever they came off disk instead:
+ * `recordSessionSelection` copies a mode/model pick onto `current*`, and
+ * the agent echoes a config-option pick back as `currentValue`, so the
+ * persisted snapshot contains the USER's last choice wearing the agent's
+ * clothes. Diffing against that concludes "the agent already agrees" about
+ * a fresh agent still sitting on its defaults, and skips the one push that
+ * mattered. So the shortcut is only taken when the view is live; otherwise
+ * every remembered knob is pushed, which is idempotent and off the
+ * critical path.
+ *
  * Fire-and-forget: a knob the agent cannot accept must not block the first
  * prompt. A value the agent *rejects* (see {@link isSelectionUnusable}) is
  * forgotten so a retired model id cannot wedge the thread on every open;
@@ -443,12 +456,15 @@ function isSelectionUnusable(err: unknown): boolean {
 async function reconcileSessionSelections(
   entry: AcpSessionEntry,
   logger: AcpSessionLogger,
+  { agentViewIsLive }: { agentViewIsLive: boolean },
 ): Promise<void> {
   let dropped = false;
   let applied = 0;
   let retained = 0;
   for (const [optionId, value] of Object.entries(entry.selections)) {
-    if (agentReportedValue(entry, optionId) === value) continue;
+    if (agentViewIsLive && agentReportedValue(entry, optionId) === value) {
+      continue;
+    }
     try {
       await applySelectionToAgent(entry, optionId, value);
       applied += 1;
@@ -856,8 +872,15 @@ async function ensureAcpSessionInner(
   // server lifetime), use it as a fallback seed — it may carry
   // modes/models/configOptions that the agent doesn't re-push after
   // bootstrap.
+  //
+  // Doing so also means the entry's agent-reported fields are now a disk
+  // copy of the user's own last choice rather than anything this agent
+  // said, which `reconcileSessionSelections` must not mistake for
+  // agreement — hence the flag.
+  let agentViewIsLive = true;
   if (priorState?.metadata && created.metaUpdatedAt === 0) {
     hydrateEntryFromPersistedMeta(created, priorState.metadata);
+    agentViewIsLive = false;
     logger.info(
       {
         threadId,
@@ -897,7 +920,7 @@ async function ensureAcpSessionInner(
   // Push the restored intent back onto the agent. Not awaited: the knobs
   // are independent of the first prompt, and a slow agent must not delay
   // session open. Errors are handled per-selection inside.
-  void reconcileSessionSelections(created, logger);
+  void reconcileSessionSelections(created, logger, { agentViewIsLive });
 
   // The durable record is refreshed via the up-report channel (I9.7): the
   // owning handle installs `reportState` on this entry the moment it

@@ -54,6 +54,14 @@ function configOption(id: string, currentValue: string | boolean) {
   };
 }
 
+/**
+ * Most cases below exercise the diffing itself, which only applies when a
+ * live agent push established the entry's `current*` view — so that is the
+ * default here. The resume case that does NOT have one passes `false`.
+ */
+const replay = (e: AcpSessionEntry, agentViewIsLive = true) =>
+  reconcileSessionSelections(e, logger, { agentViewIsLive });
+
 describe('selection hydration', () => {
   it('restores selections even after the agent already pushed meta', () => {
     // `metaUpdatedAt !== 0` is the state the bootstrap `config_option_update`
@@ -103,7 +111,7 @@ describe('selection replay', () => {
       selections: { model: 'claude-opus-4.8', allow_all: 'on' },
     });
 
-    await reconcileSessionSelections(e, logger);
+    await replay(e);
 
     const c = e.client as unknown as ReturnType<typeof client>;
     expect(c.setSessionConfigOption.mock.calls).toEqual([
@@ -112,7 +120,37 @@ describe('selection replay', () => {
     ]);
   });
 
-  it('skips knobs the agent already agrees with', async () => {
+  it('replays even when the restored record mirrors the selection', async () => {
+    // The exact state a resume produces. `recordSessionSelection` mirrors a
+    // mode pick onto `currentModeId`, and the agent echoes a config-option
+    // pick back as `currentValue`; BOTH are persisted, and
+    // `hydrateEntryFromPersistedMeta` restores them when no live push
+    // beat it. So the agent-reported fields carry a copy of the user's own
+    // choice, not the agent's view — the fresh agent is still on its
+    // defaults and must be told.
+    const e = entry({
+      currentModeId: 'agent-full-access',
+      configOptions: [
+        configOption('allow_all', true),
+      ] as unknown as AcpSessionEntry['configOptions'],
+      selections: { mode: 'agent-full-access', allow_all: true },
+    });
+
+    await replay(e, false);
+
+    const c = e.client as unknown as ReturnType<typeof client>;
+    expect(c.setSessionMode).toHaveBeenCalledWith(
+      'session_1',
+      'agent-full-access',
+    );
+    expect(c.setSessionConfigOption).toHaveBeenCalledWith(
+      'session_1',
+      'allow_all',
+      true,
+    );
+  });
+
+  it('skips knobs a live agent push says it already agrees with', async () => {
     const e = entry({
       configOptions: [
         configOption('allow_all', 'on'),
@@ -120,7 +158,7 @@ describe('selection replay', () => {
       selections: { allow_all: 'on' },
     });
 
-    await reconcileSessionSelections(e, logger);
+    await replay(e);
 
     const c = e.client as unknown as ReturnType<typeof client>;
     expect(c.setSessionConfigOption).not.toHaveBeenCalled();
@@ -131,7 +169,7 @@ describe('selection replay', () => {
       selections: { model: 'claude-opus-4.8', mode: 'plan' },
     });
 
-    await reconcileSessionSelections(e, logger);
+    await replay(e);
 
     const c = e.client as unknown as ReturnType<typeof client>;
     expect(c.setSessionModel).toHaveBeenCalledWith(
@@ -150,7 +188,7 @@ describe('selection replay', () => {
       new RequestError(-32602, 'unknown model'),
     );
 
-    await reconcileSessionSelections(e, logger);
+    await replay(e);
 
     expect(e.selections).toEqual({ mode: 'plan' });
     expect(c.setSessionMode).toHaveBeenCalledWith('session_1', 'plan');
@@ -163,7 +201,7 @@ describe('selection replay', () => {
       new RequestError(-32601, 'method not found'),
     );
 
-    await reconcileSessionSelections(e, logger);
+    await replay(e);
 
     expect(e.selections).toEqual({});
   });
@@ -175,7 +213,7 @@ describe('selection replay', () => {
     const c = e.client as unknown as ReturnType<typeof client>;
     c.setSessionModel.mockRejectedValue(new Error('ACP connection closed'));
 
-    await reconcileSessionSelections(e, logger);
+    await replay(e);
 
     expect(e.selections).toEqual({ model: 'claude-opus-4.8', mode: 'plan' });
   });
@@ -188,7 +226,7 @@ describe('selection replay', () => {
       new RequestError(-32603, 'internal error'),
     );
 
-    await reconcileSessionSelections(e, logger);
+    await replay(e);
 
     expect(e.selections).toEqual({ model: 'claude-opus-4.8' });
   });
@@ -198,7 +236,7 @@ describe('selection replay', () => {
     const c = e.client as unknown as ReturnType<typeof client>;
     c.setSessionModel.mockRejectedValue(new Error('ACP connection closed'));
 
-    await reconcileSessionSelections(e, logger);
+    await replay(e);
 
     // Nothing was applied and nothing was dropped, so there is no state
     // change to up-report — the next open retries from the same record.
@@ -209,7 +247,7 @@ describe('selection replay', () => {
   it('does nothing when there is no remembered intent', async () => {
     const e = entry();
 
-    await reconcileSessionSelections(e, logger);
+    await replay(e, false);
 
     const c = e.client as unknown as ReturnType<typeof client>;
     expect(c.setSessionConfigOption).not.toHaveBeenCalled();
