@@ -7,20 +7,26 @@
  *
  *   • `column` — N **columns**, each child stacks top-to-bottom inside
  *                its column, left-aligned. Drop column = column under
- *                the cursor (passed through `frameSlot`).
+ *                the cursor (persisted as `data.frameColumn`).
  *   • `row`    — N **rows**, mirror of column on the other axis
- *                (children stack left-to-right, top-aligned).
+ *                (children stack left-to-right, top-aligned; persisted
+ *                as `data.frameRow`).
  *
  * Both masonry modes enforce a "no empty track" invariant: as long as
  * the child count ≥ N, every track has at least one item. If a track
- * would be left empty (because a stored `frameSlot` accidentally
- * collapsed all children into a subset of tracks), one neighbour is
- * pulled in. The new slot assignment is written back to
- * `data.frameSlot` so subsequent passes stay stable.
+ * would be left empty (because a stored index accidentally collapsed
+ * all children into a subset of tracks), one neighbour is pulled in.
+ * The new assignment is written back to the axis-named field so
+ * subsequent passes stay stable.
  *
- *   • `grid`   — N **columns** with persistent `(frameSlot, frameRow)`
- *                cells. Every member of a row shares one Y origin. See
- *                {@link applyGridLayout}.
+ *   • `grid`   — N **columns** with persistent
+ *                `(frameColumn, frameRow)` cells. Every member of a row
+ *                shares one Y origin. See {@link applyGridLayout}.
+ *
+ * All three read intent off the children's geometry when there is no
+ * persisted assignment to honour — see {@link bandChildrenByGeometry}.
+ * That is the only thing standing between "switch the layout mode" and
+ * "scatter the arrangement the user built".
  */
 import { EDGE_LABEL_MAX_INVERSE_SCALE } from '../../types/canvas/edge.js';
 import {
@@ -142,6 +148,46 @@ export function clampGridCount(raw: number | undefined): number {
 }
 
 /**
+ * Upper bound for a `grid` child's **row index**, as a function of the
+ * frame's child count.
+ *
+ * This guards one specific input: `cells[].row`, which callers supply
+ * as a raw index with no upper bound of its own. The solver allocates
+ * one band per row index, so without a ceiling a single
+ * `SET_FRAME_LAYOUT` carrying `row: 1e9` allocates a billion bands and
+ * takes down whichever process runs the executor (a web tab, or the
+ * headless server).
+ *
+ * It is deliberately NOT a track count and NOT clamped to the number of
+ * children: blank cells carry meaning in `grid`, so rows are allowed to
+ * be sparse. Twice the child count admits the sparsest arrangement that
+ * still says something — a blank row between every pair of children —
+ * while keeping the allocation O(children).
+ *
+ * It does **not** apply to `gridRowCount`, which arrives already capped
+ * at {@link FRAME_GRID_MAX_COUNT}; clamping that against a
+ * child-count-derived ceiling would silently discard rows the user
+ * explicitly asked for.
+ */
+export function gridRowCeiling(childCount: number): number {
+  return Math.max(0, childCount) * 2;
+}
+
+/**
+ * Read the user-pinned minimum row count off a `grid` Frame. Absent
+ * (or non-positive) means the row count follows the content.
+ */
+export function readFrameGridRowCount(
+  node: { data?: unknown } | undefined,
+): number {
+  const raw = (node?.data as { gridRowCount?: number } | undefined)
+    ?.gridRowCount;
+  return typeof raw === 'number' && Number.isFinite(raw)
+    ? Math.max(0, Math.round(raw))
+    : 0;
+}
+
+/**
  * The structured layout modes, i.e. every `FrameLayoutMode` except
  * `free`. `column` and `grid` both count **columns** and both store
  * the column index in each child's `data.frameSlot`; `row` counts
@@ -153,10 +199,19 @@ export type FrameGridAxis = 'column' | 'row' | 'grid';
 /**
  * Read the layout config persisted on a frame. Returns `null` for
  * non-frame nodes or frames in `free` mode (caller no-ops).
+ *
+ * `count` is `undefined` when the frame has no pinned track count.
+ * That is the normal state right after a layout-mode switch: the
+ * number of tracks is a property of the arrangement, so the solver
+ * derives it from the children's geometry rather than inheriting a
+ * stale value or falling back to a default that would flatten the
+ * frame into a single track. Callers that need a concrete number
+ * before the solver runs (the drag-time pickers) use
+ * {@link resolveFrameTrackCount}.
  */
 export function readFrameGridConfig(
   node: Node | undefined,
-): { axis: FrameGridAxis; count: number } | null {
+): { axis: FrameGridAxis; count: number | undefined } | null {
   if (!node || node.type !== 'frame') return null;
   const data = node.data as
     | { layoutMode?: FrameLayoutMode; gridCount?: number }
@@ -165,7 +220,10 @@ export function readFrameGridConfig(
   if (mode !== 'column' && mode !== 'row' && mode !== 'grid') return null;
   return {
     axis: mode,
-    count: clampGridCount(data?.gridCount),
+    count:
+      typeof data?.gridCount === 'number' && Number.isFinite(data.gridCount)
+        ? clampGridCount(data.gridCount)
+        : undefined,
   };
 }
 
@@ -244,10 +302,79 @@ export function readFrameGridRow(node: { data?: unknown }): number | undefined {
 }
 
 /**
+ * Fraction of the median child extent within which two children are
+ * read as sharing a band. Generous enough to absorb the few pixels of
+ * slop in a hand-made arrangement, small enough that two genuinely
+ * stacked children never merge.
+ */
+const BAND_TOLERANCE_RATIO = 0.5;
+
+/**
+ * Group children into visual bands along one axis: children whose
+ * leading edges sit within a tolerance of each other share a band, and
+ * bands are numbered in axis order (left→right for `column`, top→bottom
+ * for `row`).
+ *
+ * This is how a structured Frame reads intent off a layout it did not
+ * produce. A child with no persisted index has never been through the
+ * solver — the Frame just switched out of `free`, or the child was
+ * arranged by hand — so its on-screen position is the only statement of
+ * intent that exists. Bucketing recovers the arrangement the user can
+ * actually see; the alternatives (round-robin over track counts, or
+ * ordering by node id) look plausible on an empty Frame and shuffle
+ * every Frame the user already arranged.
+ *
+ * Bands are cut on the **leading edge** rather than on interval
+ * overlap, and each band's reference edge is its first member rather
+ * than a running maximum. Overlap with a running maximum chains: one
+ * tall child swallows every later child that overlaps *it*, even when
+ * those children are nowhere near each other, and a masonry column
+ * whose first card is tall collapses the whole Frame into one band.
+ * Anchoring to the first member also stops a long run of slightly
+ * offset children from drifting into one enormous band.
+ */
+function bandChildrenByGeometry(
+  children: ChildSlot[],
+  axis: FrameAxis,
+): { band: Map<string, number>; count: number } {
+  const band = new Map<string, number>();
+  if (children.length === 0) return { band, count: 0 };
+
+  const startOf = (child: ChildSlot) =>
+    axis === 'column' ? child.node.position.x : child.node.position.y;
+  const extentOf = (child: ChildSlot) =>
+    axis === 'column' ? child.width : child.height;
+
+  const tolerance = Math.max(
+    MIN_GAP,
+    median(children.map(extentOf)) * BAND_TOLERANCE_RATIO,
+  );
+
+  const ordered = [...children].sort((a, b) => {
+    const delta = startOf(a) - startOf(b);
+    return delta !== 0 ? delta : a.node.id.localeCompare(b.node.id);
+  });
+
+  let index = -1;
+  let bandStart = Number.NEGATIVE_INFINITY;
+  for (const child of ordered) {
+    const start = startOf(child);
+    if (start - bandStart > tolerance) {
+      index += 1;
+      bandStart = start;
+    }
+    band.set(child.node.id, index);
+  }
+  return { band, count: index + 1 };
+}
+
+/**
  * Assign each child to a track index (0..count-1):
  *   1. Honour the stored count-axis index when present.
- *   2. Unassigned children go into the track with the fewest items
- *      (ties → first such track).
+ *   2. Unassigned children are seeded from their current geometry
+ *      (see {@link bandChildrenByGeometry}) when the frame has no
+ *      persisted assignment to respect; otherwise they go into the
+ *      track with the fewest items (ties → first such track).
  *   3. Resolve empty tracks per `emptyTrackPolicy`:
  *      - `'fill'`    — pull the nearest item from the busiest track into
  *        each empty one (the "no empty track" invariant). Used when the
@@ -266,13 +393,33 @@ export function readFrameGridRow(node: { data?: unknown }): number | undefined {
  */
 function assignTrackSlots(
   children: ChildSlot[],
-  count: number,
+  count: number | undefined,
   sortKey: (c: ChildSlot) => number,
   emptyTrackPolicy: 'fill' | 'compact',
   trackAxis: FrameAxis,
 ): { assignment: Map<string, number>; count: number } {
+  // Geometry is consulted up front because it answers two questions at
+  // once: how many tracks there are (when the caller pinned no count)
+  // and which track each unplaced child belongs to. Both readings are
+  // only valid while NOTHING is assigned yet — see the seeding note in
+  // pass 2.
+  const storedIndices = children
+    .map((child) => readFrameTrack(child.node, trackAxis))
+    .filter((index): index is number => index !== undefined);
+  const seed =
+    storedIndices.length === 0
+      ? bandChildrenByGeometry(children, trackAxis)
+      : null;
+  const resolvedCount = clampGridCount(
+    count ??
+      seed?.count ??
+      // Partially-assigned frame with no pinned count: span the stored
+      // indices so none of them is clamped away.
+      Math.max(...storedIndices, 0) + 1,
+  );
+
   const ordered = [...children].sort((a, b) => sortKey(a) - sortKey(b));
-  const buckets: string[][] = Array.from({ length: count }, () => []);
+  const buckets: string[][] = Array.from({ length: resolvedCount }, () => []);
   const assignment = new Map<string, number>();
 
   // Pass 1 — honour stored slots.
@@ -280,7 +427,7 @@ function assignTrackSlots(
   for (const child of ordered) {
     const raw = readFrameTrack(child.node, trackAxis);
     if (raw !== undefined) {
-      const slot = clampInt(raw, 0, count - 1);
+      const slot = clampInt(raw, 0, resolvedCount - 1);
       buckets[slot].push(child.node.id);
       assignment.set(child.node.id, slot);
     } else {
@@ -288,20 +435,44 @@ function assignTrackSlots(
     }
   }
 
-  // Pass 2 — place leftovers into the least-full track.
-  for (const child of unassigned) {
-    let target = 0;
-    for (let i = 1; i < count; i += 1) {
-      if (buckets[i].length < buckets[target].length) target = i;
+  // Pass 2 — place leftovers.
+  //
+  // Geometry seeding applies only when NOTHING was pre-assigned, i.e.
+  // the whole frame is entering a structured mode at once. That is the
+  // case where the visual arrangement is the user's only expressed
+  // intent and must survive. A frame that already has assigned children
+  // is being topped up (a node arrived without going through the drag
+  // picker), and there the least-full track remains the right answer —
+  // a lone newcomer carries no band structure to read.
+  //
+  // Bands beyond `resolvedCount` collapse into the last track, which
+  // only happens when the user pinned a count smaller than the number
+  // of visual bands.
+  if (seed) {
+    for (const child of unassigned) {
+      const slot = clampInt(
+        seed.band.get(child.node.id) ?? 0,
+        0,
+        resolvedCount - 1,
+      );
+      buckets[slot].push(child.node.id);
+      assignment.set(child.node.id, slot);
     }
-    buckets[target].push(child.node.id);
-    assignment.set(child.node.id, target);
+  } else {
+    for (const child of unassigned) {
+      let target = 0;
+      for (let i = 1; i < resolvedCount; i += 1) {
+        if (buckets[i].length < buckets[target].length) target = i;
+      }
+      buckets[target].push(child.node.id);
+      assignment.set(child.node.id, target);
+    }
   }
 
   // Pass 3 — resolve empty tracks (fill vs. compact).
   if (emptyTrackPolicy === 'fill') {
-    rebalanceEmptyTracks(buckets, count, assignment);
-    return { assignment, count };
+    rebalanceEmptyTracks(buckets, resolvedCount, assignment);
+    return { assignment, count: resolvedCount };
   }
   const compactCount = compactEmptyTracks(buckets, assignment);
   return { assignment, count: compactCount };
@@ -374,8 +545,9 @@ function compactEmptyTracks(
 /**
  * Pure-compute output of {@link applyColumnLayout} / {@link applyRowLayout}:
  * the new positions for each child, the resulting frame size, and the
- * track-slot assignment that should be persisted on each child's
- * `data.frameSlot`. Callers translate this into commands
+ * track assignment that should be persisted on each child's axis-named
+ * cell field (`data.frameColumn` for `column` / `grid`,
+ * `data.frameRow` for `row`). Callers translate this into commands
  * (`SET_NODE_GEOMETRY`, `MERGE_NODE_DATA`).
  *
  * `null` is returned by the wrapper functions when the frame is missing,
@@ -552,7 +724,7 @@ function planAxisGutters(
 export function applyColumnLayout(
   nodes: Node[],
   frameId: string,
-  count: number,
+  count: number | undefined,
   emptyTrackPolicy: 'fill' | 'compact' = 'compact',
   options: StructuredLayoutOptions = {},
 ): FrameGridLayoutResult | null {
@@ -562,10 +734,9 @@ export function applyColumnLayout(
   const children = collectChildren(nodes, frameId);
   if (children.length === 0) return null;
 
-  const cols = clampGridCount(count);
   const { assignment, count: effectiveCols } = assignTrackSlots(
     children,
-    cols,
+    count,
     (c) => c.node.position.y,
     emptyTrackPolicy,
     'column',
@@ -672,7 +843,7 @@ export function applyColumnLayout(
 export function applyRowLayout(
   nodes: Node[],
   frameId: string,
-  count: number,
+  count: number | undefined,
   emptyTrackPolicy: 'fill' | 'compact' = 'compact',
   options: StructuredLayoutOptions = {},
 ): FrameGridLayoutResult | null {
@@ -682,10 +853,9 @@ export function applyRowLayout(
   const children = collectChildren(nodes, frameId);
   if (children.length === 0) return null;
 
-  const rows = clampGridCount(count);
   const { assignment, count: effectiveRows } = assignTrackSlots(
     children,
-    rows,
+    count,
     (c) => c.node.position.x,
     emptyTrackPolicy,
     'row',
@@ -767,15 +937,47 @@ export function applyRowLayout(
 
 // ── Row-aligned grid ──────────────────────────────────────────────────
 
-/** Resolve persistent Grid rows while enforcing one child per cell. */
+/**
+ * Resolve persistent Grid rows while enforcing one child per cell.
+ *
+ * A frame with no persisted rows at all is entering `grid` for the
+ * first time, and its rows are seeded from the children's current
+ * vertical bands — **globally, across columns**. That global scope is
+ * the whole point: two children sitting side by side must stay side by
+ * side, and seeding per column (or by node id) is exactly what breaks
+ * the correspondence `grid` exists to express. Once seeded, rows are
+ * persistent, so later drags move one child instead of reshuffling
+ * every row against the rendered geometry.
+ *
+ * Row indices are clamped to {@link gridRowCeiling}. Rows are allowed
+ * to be sparse — a deliberately blank cell is meaningful here — but the
+ * band array is allocated per row index, so an unclamped index turns a
+ * single command into an unbounded allocation.
+ */
 function assignGridRows(
   children: ChildSlot[],
   columnOf: (child: ChildSlot) => number,
+  minRows = 0,
 ): { bands: ChildSlot[][]; assignment: Map<string, number> } {
+  const hasPersistedRow = children.some(
+    (child) => readFrameGridRow(child.node) !== undefined,
+  );
+  const seeded = hasPersistedRow
+    ? null
+    : bandChildrenByGeometry(children, 'row').band;
+
+  const ceiling = gridRowCeiling(children.length);
   const rowOf = (child: ChildSlot) =>
-    Math.max(0, readFrameGridRow(child.node) ?? 0);
+    clampInt(
+      readFrameGridRow(child.node) ?? seeded?.get(child.node.id) ?? 0,
+      0,
+      ceiling,
+    );
   const ordered = [...children].sort(
-    (a, b) => rowOf(a) - rowOf(b) || a.node.id.localeCompare(b.node.id),
+    (a, b) =>
+      rowOf(a) - rowOf(b) ||
+      a.node.position.y - b.node.position.y ||
+      a.node.id.localeCompare(b.node.id),
   );
 
   const assignment = new Map<string, number>();
@@ -788,8 +990,29 @@ function assignGridRows(
     assignment.set(child.node.id, row);
   }
 
-  const rowCount = Math.max(0, ...assignment.values()) + 1;
-  const bands: ChildSlot[][] = Array.from({ length: rowCount }, () => []);
+  // Collision bumping can push past the ceiling by at most one row per
+  // child, so the band array stays O(children).
+  let maxRow = 0;
+  for (const row of assignment.values()) {
+    if (row > maxRow) maxRow = row;
+  }
+  // `minRows` only ever adds bands: the content decides how many rows
+  // are *needed*, and a floor below that cannot be honoured. It is
+  // capped by FRAME_GRID_MAX_COUNT rather than by `ceiling`, which
+  // guards untrusted row indices and would otherwise shrink a floor the
+  // user explicitly asked for (a one-child frame has a ceiling of 2, so
+  // "12 rows" would silently become 3).
+  // `minRows` only ever adds bands: the content decides how many rows
+  // are *needed*, and a floor below that cannot be honoured. It is
+  // capped by FRAME_GRID_MAX_COUNT rather than by `ceiling`, which
+  // guards untrusted row indices and would otherwise shrink a floor the
+  // user explicitly asked for (a one-child frame has a ceiling of 2, so
+  // "12 rows" would silently become 3).
+  const bandCount = Math.max(
+    maxRow + 1,
+    clampInt(minRows, 0, FRAME_GRID_MAX_COUNT),
+  );
+  const bands: ChildSlot[][] = Array.from({ length: bandCount }, () => []);
   for (const child of children) {
     const row = assignment.get(child.node.id) ?? 0;
     bands[row].push(child);
@@ -802,7 +1025,7 @@ function assignGridRows(
  * N-column layout with **aligned rows**.
  *
  * Columns behave exactly like {@link applyColumnLayout} — same
- * `frameSlot` assignment, same content-driven column widths, same
+ * `frameColumn` assignment, same content-driven column widths, same
  * per-axis padding / gap derivation — so the drag-time column pickers
  * and the resize gesture are reused verbatim. The difference is the Y
  * axis: instead of each column stacking independently from the top,
@@ -814,7 +1037,9 @@ function assignGridRows(
  * meant to line up are placed side by side, and a column with no
  * member in a row simply leaves that cell blank rather than pulling
  * its next item up. Row membership is persistent and independent of
- * rendered geometry.
+ * rendered geometry once assigned; the first pass over a frame that
+ * has none seeds it from the children's vertical bands, so entering
+ * the mode preserves what the user already lined up.
  *
  * Frame sizing stays content-driven and per-axis self-consistent:
  * scaling every child width by `sx` scales the column widths, the
@@ -824,7 +1049,7 @@ function assignGridRows(
 export function applyGridLayout(
   nodes: Node[],
   frameId: string,
-  count: number,
+  count: number | undefined,
   emptyTrackPolicy: 'fill' | 'compact' = 'compact',
   options: StructuredLayoutOptions = {},
 ): FrameGridLayoutResult | null {
@@ -834,10 +1059,9 @@ export function applyGridLayout(
   const children = collectChildren(nodes, frameId);
   if (children.length === 0) return null;
 
-  const cols = clampGridCount(count);
   const { assignment, count: effectiveCols } = assignTrackSlots(
     children,
-    cols,
+    count,
     (c) => c.node.position.y,
     emptyTrackPolicy,
     'column',
@@ -881,6 +1105,7 @@ export function applyGridLayout(
   const { bands, assignment: rowAssignments } = assignGridRows(
     children,
     columnOf,
+    readFrameGridRowCount(frame),
   );
   const bandByNodeId = new Map<string, number>();
   for (let bandIndex = 0; bandIndex < bands.length; bandIndex += 1) {
@@ -939,6 +1164,72 @@ export function applyGridLayout(
     gutters: [...xGutters, ...yGutters],
     effectiveCount: effectiveCols,
   };
+}
+
+/**
+ * Resolve a concrete track count for a structured Frame.
+ *
+ * The solvers accept an absent count and derive it from geometry, but
+ * the drag-time pickers need a number before any layout runs. By then
+ * the Frame has been through the solver at least once, so the stored
+ * count is normally present; deriving from geometry is the fallback
+ * for the first gesture after a mode switch.
+ */
+export function resolveFrameTrackCount(nodes: Node[], frameId: string): number {
+  const frame = nodes.find((node) => node.id === frameId);
+  const config = readFrameGridConfig(frame);
+  if (!config) return FRAME_GRID_DEFAULT_COUNT;
+  if (config.count !== undefined) return config.count;
+  const trackAxis: FrameAxis = config.axis === 'row' ? 'row' : 'column';
+  const children = collectChildren(nodes, frameId);
+  const stored = children
+    .map((child) => readFrameTrack(child.node, trackAxis))
+    .filter((index): index is number => index !== undefined);
+  return clampGridCount(
+    stored.length > 0
+      ? Math.max(...stored) + 1
+      : bandChildrenByGeometry(children, trackAxis).count,
+  );
+}
+
+/**
+ * Plan a fresh row-major cell assignment for a `grid` Frame asked to
+ * hold a specific number of columns.
+ *
+ * Naming a column count is a re-flow instruction, and a grid cannot
+ * honour it by keeping its row bands: three children that shared a row
+ * cannot stay level once there are only two columns, so preserving the
+ * bands just collides them and bumps the losers downward — a tidy 3x2
+ * degrades into a ragged `AB | CD | E | F`. Re-flowing in reading order
+ * (left-to-right within a row band, top-to-bottom between bands) is
+ * what the user means by "make it N columns", and it keeps the result
+ * an actual grid.
+ *
+ * Reading order comes from the children's current geometry, so the
+ * re-flow follows what is on screen rather than array order.
+ */
+export function planGridReflow(
+  nodes: Node[],
+  frameId: string,
+  count: number,
+): Map<string, { column: number; row: number }> {
+  const columns = clampGridCount(count);
+  const children = collectChildren(nodes, frameId);
+  const ordered = [...children].sort(
+    (a, b) =>
+      a.node.position.y - b.node.position.y ||
+      a.node.position.x - b.node.position.x ||
+      a.node.id.localeCompare(b.node.id),
+  );
+
+  const plan = new Map<string, { column: number; row: number }>();
+  ordered.forEach((child, index) => {
+    plan.set(child.node.id, {
+      column: index % columns,
+      row: Math.floor(index / columns),
+    });
+  });
+  return plan;
 }
 
 /** Resolve one structured Frame through its configured canonical solver. */
@@ -1644,7 +1935,7 @@ export function describeStructuredDropZone(
  *
  * Mutations applied per handled frame:
  * - Children's `position` — `result.childPositions`
- * - Children's `data.frameSlot` — `result.slotAssignments`
+ * - Children's axis-named cell field — `result.slotAssignments`
  * - Grid children's `data.frameRow` — `result.rowAssignments`
  * - Frame's `data.gridCount` — `result.effectiveCount` (so a track the
  *   layout dropped is reflected in the stored count and the UI stepper)

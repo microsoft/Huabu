@@ -411,6 +411,7 @@
     "frameLayoutGrid": "网格",
     "columns": "列数",
     "rows": "行数",
+    "gridRowsMin": "行数（最少；放不下时会自动增加）",
     "columnsRange": "列数（1–{{max}}）",
     "rowsRange": "行数（1–{{max}}）",
     "unframe": "取消框架",

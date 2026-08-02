@@ -265,16 +265,20 @@ export type CanvasCommand =
     }
   | {
       /**
-       * Set a frame's child-layout mode. When switching into `column`
-       * or `row`, the engine auto-assigns each child to a track and
+       * Set a frame's child-layout mode. When switching into `column`,
+       * `row` or `grid`, the engine assigns each child to a track and
        * resizes the frame to fit its content; when switching to `free`
        * children keep their current positions but the engine still
        * runs a final fit-to-content pass.
        *
-       * `gridCount` is honoured only for `column` / `row` modes; it is
-       * clamped to `[FRAME_GRID_MIN_COUNT, FRAME_GRID_MAX_COUNT]`. When
-       * omitted while staying in a grid mode, the frame keeps its
-       * previously-stored `gridCount` (or `FRAME_GRID_DEFAULT_COUNT`).
+       * `gridCount` is the track count: columns for `column` and
+       * `grid`, rows for `row`. Clamped to [`FRAME_GRID_MIN_COUNT`,
+       * `FRAME_GRID_MAX_COUNT`]. Naming it is an instruction to re-flow
+       * into that many tracks. **Omit it when only changing `mode`** —
+       * a mode change drops the stored count so the engine can derive
+       * the track structure from the children's current geometry, and
+       * passing a number chosen for the previous axis re-flows an
+       * arrangement the caller did not mean to change.
        *
        * `sizing` toggles the frame's size policy independently of
        * `mode`. When omitted the previously-stored `sizing` is kept
@@ -286,6 +290,12 @@ export type CanvasCommand =
       frameId: CanvasNodeId;
       mode: FrameLayoutMode;
       gridCount?: number;
+      /**
+       * Minimum row bands for `grid`. A floor, not an exact count:
+       * rows below what the children require cannot be honoured, so
+       * this only ever adds blank rows. Ignored by other modes.
+       */
+      gridRowCount?: number;
       sizing?: FrameSizing;
       /**
        * Optional cell assignments applied to direct children in the same

@@ -411,6 +411,7 @@
     "frameLayoutGrid": "Grid",
     "columns": "Columns",
     "rows": "Rows",
+    "gridRowsMin": "Rows (minimum \u2014 more are added when needed)",
     "columnsRange": "Columns (1–{{max}})",
     "rowsRange": "Rows (1–{{max}})",
     "unframe": "Unframe",

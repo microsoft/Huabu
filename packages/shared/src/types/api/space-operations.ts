@@ -361,6 +361,15 @@ export const setFrameLayoutCommandSchema = z
       .describe(
         'Track count: columns for `column` and `grid`, rows for `row`. Ignored for `free`.',
       ),
+    gridRowCount: z
+      .number()
+      .int()
+      .min(FRAME_GRID_MIN_COUNT)
+      .max(FRAME_GRID_MAX_COUNT)
+      .optional()
+      .describe(
+        'Minimum row bands for `grid`, ignored by other modes. A floor, not an exact count — rows fewer than the children need cannot be honoured, so this only adds blank rows. Omit unless you deliberately want empty rows reserved.',
+      ),
     cells: z
       .array(
         z
@@ -373,7 +382,7 @@ export const setFrameLayoutCommandSchema = z
       )
       .optional()
       .describe(
-        'Where each direct child sits. A structured frame computes every child position from its cell, so `position` cannot express this — pass `cells` whenever placement matters. `column` addresses columns, `row` addresses rows, `grid` addresses both; an index for an axis the mode lacks is ignored. Children you omit keep their current cell, or are auto-assigned if they have none. Skipping a row number in one column is how you leave that cell blank in `grid`.',
+        'Where each direct child sits. A structured frame computes every child position from its cell, so `position` cannot express this — pass `cells` whenever placement matters. `column` addresses columns, `row` addresses rows, `grid` addresses both; an index for an axis the mode lacks is ignored. Children you omit keep their current cell, or are auto-assigned from their current on-screen position if they have none. Skipping a row number in one column is how you leave that cell blank in `grid`. Keep indices small and contiguous — they are positions, not labels, and a row far beyond the child count is clamped, so do not encode meaning (a year, an ID) in them.',
       ),
     sizing: z
       .enum(FRAME_SIZING_MODES)

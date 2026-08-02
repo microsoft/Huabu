@@ -13,6 +13,7 @@ import {
   readFrameGridConfig,
   readFrameGridRow,
   readFrameTrack,
+  resolveFrameTrackCount,
   type FrameAxis,
   type FrameGridAxis,
   type NestableNode,
@@ -388,6 +389,7 @@ function collectGridDropPlans(
     if (!frame) continue;
     const cfg = readFrameGridConfig(frame);
     if (!cfg) continue;
+    const count = resolveFrameTrackCount(preDragNodes, frame.id);
 
     // Convert cursor → frame-local space; fall back to child top-left.
     const framePoint = pointerFlowPosition
@@ -399,14 +401,14 @@ function collectGridDropPlans(
 
     const target =
       cfg.axis === 'row'
-        ? pickRowDropTarget(preDragNodes, frame.id, framePoint, cfg.count)
-        : pickColumnDropTarget(preDragNodes, frame.id, framePoint, cfg.count);
+        ? pickRowDropTarget(preDragNodes, frame.id, framePoint, count)
+        : pickColumnDropTarget(preDragNodes, frame.id, framePoint, count);
 
     plans.push({
       nodeId: id as CanvasNodeId,
       frameId: frame.id,
       axis: cfg.axis,
-      count: cfg.count,
+      count,
       target,
       ...(cfg.axis === 'grid'
         ? {

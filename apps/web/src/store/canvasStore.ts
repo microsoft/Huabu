@@ -33,6 +33,7 @@ import {
   wouldUnframe,
   wouldAutoFrame,
   readFrameGridConfig,
+  resolveFrameTrackCount,
   solveStructuredFrameLayout,
   describeStructuredDropZone,
   getNodeSize,
@@ -2823,7 +2824,7 @@ const useCanvasStore = create<RFState>()(
                 targetFrameId,
                 framePoint,
                 gridCfg.axis,
-                gridCfg.count,
+                resolveFrameTrackCount(nodes, targetFrameId),
                 draggedRect,
                 { edges },
               )

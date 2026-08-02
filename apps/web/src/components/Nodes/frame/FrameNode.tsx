@@ -5,7 +5,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
-  FRAME_GRID_DEFAULT_COUNT,
   FRAME_GRID_MAX_COUNT,
   FRAME_GRID_MIN_COUNT,
   type FrameLayoutMode,
@@ -100,6 +99,22 @@ export const FrameNode = memo(
     const countsRows = layoutMode === 'row';
     const count = clampGridCount(data.gridCount);
 
+    // `grid` is the one two-dimensional mode, so a single count input
+    // could only ever tell half the story. This is the live row total —
+    // what the layout actually resolved to, which is not always what was
+    // asked for: rows can be added (blank cells are meaningful in
+    // `grid`) but never dropped below what the children need.
+    const gridRowCount = useCanvasStore((state) => {
+      if (layoutMode !== 'grid') return 0;
+      let maxRow = -1;
+      for (const node of state.nodes) {
+        if (node.parentId !== id) continue;
+        const row = (node.data as { frameRow?: number } | undefined)?.frameRow;
+        if (typeof row === 'number' && row > maxRow) maxRow = row;
+      }
+      return Math.max(maxRow + 1, data.gridRowCount ?? 0);
+    });
+
     // Sizing policy lives in `data.sizing` (default `'hug'`) and is
     // surfaced through the shared size picker's auto-toggle that
     // `NodeFloatingToolbar` renders for frame nodes. The toggle and
@@ -115,6 +130,15 @@ export const FrameNode = memo(
     useEffect(() => {
       setCountDraft(String(count));
     }, [count]);
+
+    // Same pattern for the `grid` row input. It is re-synced from the
+    // RESOLVED row total, not from what was typed: asking for fewer
+    // rows than the children need cannot be honoured, and echoing the
+    // request back would claim otherwise.
+    const [rowDraft, setRowDraft] = useState(String(gridRowCount));
+    useEffect(() => {
+      setRowDraft(String(gridRowCount));
+    }, [gridRowCount]);
 
     /**
      * Effective upper bound for the count input:
@@ -221,16 +245,47 @@ export const FrameNode = memo(
       });
     };
 
+    const commitRowCount = () => {
+      const trimmed = rowDraft.trim();
+      const parsed = Number.parseInt(trimmed, 10);
+      if (trimmed === '' || !Number.isFinite(parsed)) {
+        setRowDraft(String(gridRowCount));
+        return;
+      }
+      const next = Math.min(
+        FRAME_GRID_MAX_COUNT,
+        Math.max(FRAME_GRID_MIN_COUNT, parsed),
+      );
+      // Compare against the PERSISTED floor, not the displayed total.
+      // They differ whenever the content already needs more rows than
+      // were pinned, and comparing the displayed value would swallow
+      // the most natural request there is: "keep what I see now", i.e.
+      // pin the current row count so later deletions cannot shrink it.
+      if (next === data.gridRowCount) {
+        setRowDraft(String(gridRowCount));
+        return;
+      }
+      dispatchUiIntent({
+        type: 'SET_FRAME_LAYOUT_MODE',
+        frameId: id,
+        mode: layoutMode,
+        gridRowCount: next,
+      });
+      // Deliberately no optimistic draft update: the request is a floor,
+      // so the resolved total may be higher. The effect above re-syncs
+      // once the solver has spoken.
+    };
+
     const setMode = (next: FrameLayoutMode) => {
       dispatchUiIntent({
         type: 'SET_FRAME_LAYOUT_MODE',
         frameId: id,
         mode: next,
-        // Seed the track count when switching into a structured mode so
-        // the very first layout pass has a stable value.
-        ...(next !== 'free' && {
-          gridCount: data.gridCount ?? FRAME_GRID_DEFAULT_COUNT,
-        }),
+        // Deliberately no `gridCount` / `gridRowCount`: naming either
+        // here would re-flow the frame against a number chosen for the
+        // previous mode. Omitting them lets the solver read the track
+        // structure off the children's current positions, so switching
+        // modes preserves the arrangement instead of collapsing it.
       });
     };
 
@@ -253,34 +308,78 @@ export const FrameNode = memo(
         />
 
         {isStructuredLayout && (
-          <input
-            type="number"
-            inputMode="numeric"
-            aria-label={countsRows ? t('node.rows') : t('node.columns')}
-            title={
-              countsRows
-                ? t('node.rowsRange', { max: maxCount })
-                : t('node.columnsRange', { max: maxCount })
-            }
-            min={FRAME_GRID_MIN_COUNT}
-            max={maxCount}
-            step={1}
-            value={countDraft}
-            onChange={(e) => setCountDraft(e.target.value)}
-            onBlur={commitCount}
-            onMouseDown={(e) => e.stopPropagation()}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === 'Enter') {
-                commitCount();
-                (e.target as HTMLInputElement).blur();
-              } else if (e.key === 'Escape') {
-                setCountDraft(String(count));
-                (e.target as HTMLInputElement).blur();
+          <div className="flex items-center gap-1">
+            {/*
+              `grid` reads "rows x columns", matching how a matrix is
+              written and how the pair is said out loud. The row box
+              therefore comes first even though the column count is the
+              stronger constraint (exact, vs. a floor for rows) — the
+              convention the user already carries beats our internal
+              ordering.
+            */}
+            {layoutMode === 'grid' && (
+              <>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  aria-label={t('node.rows')}
+                  title={t('node.gridRowsMin')}
+                  min={FRAME_GRID_MIN_COUNT}
+                  max={FRAME_GRID_MAX_COUNT}
+                  step={1}
+                  value={rowDraft}
+                  onChange={(e) => setRowDraft(e.target.value)}
+                  onBlur={commitRowCount}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') {
+                      commitRowCount();
+                      (e.target as HTMLInputElement).blur();
+                    } else if (e.key === 'Escape') {
+                      setRowDraft(String(gridRowCount));
+                      (e.target as HTMLInputElement).blur();
+                    }
+                  }}
+                  className={COUNT_INPUT_CLASS}
+                />
+                <span
+                  className="text-fg-subtle text-xs select-none"
+                  aria-hidden="true"
+                >
+                  {'\u00d7'}
+                </span>
+              </>
+            )}
+            <input
+              type="number"
+              inputMode="numeric"
+              aria-label={countsRows ? t('node.rows') : t('node.columns')}
+              title={
+                countsRows
+                  ? t('node.rowsRange', { max: maxCount })
+                  : t('node.columnsRange', { max: maxCount })
               }
-            }}
-            className={COUNT_INPUT_CLASS}
-          />
+              min={FRAME_GRID_MIN_COUNT}
+              max={maxCount}
+              step={1}
+              value={countDraft}
+              onChange={(e) => setCountDraft(e.target.value)}
+              onBlur={commitCount}
+              onMouseDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                  commitCount();
+                  (e.target as HTMLInputElement).blur();
+                } else if (e.key === 'Escape') {
+                  setCountDraft(String(count));
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              className={COUNT_INPUT_CLASS}
+            />
+          </div>
         )}
 
         <FloatingToolbar.Divider />
