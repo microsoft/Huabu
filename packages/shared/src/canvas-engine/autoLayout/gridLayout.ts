@@ -1677,6 +1677,185 @@ export function pickGridRowTarget(
   return ordered[ordered.length - 1][0] + 1;
 }
 
+/**
+ * One dragged node's resolved drop, as the pickers reported it.
+ */
+export interface StructuredDropRequest {
+  nodeId: string;
+  /** Where the count-axis picker landed. */
+  target: StructuredDropTarget;
+  /** `grid` only: the row band the pointer picked. */
+  row?: number;
+}
+
+/**
+ * Where every child of a structured Frame ends up after a drop.
+ *
+ * `tracks` is indexed on the mode's count axis (columns for `column`
+ * and `grid`, rows for `row`); `rows` is populated for `grid` only.
+ * Both cover every child of the frame, not just the dragged ones —
+ * opening a track shifts its neighbours, and a grid swap moves the
+ * child that was already in the target cell.
+ */
+export interface StructuredDropAssignment {
+  tracks: Map<string, number>;
+  rows: Map<string, number>;
+  /** Track count after the drop; `count` unless tracks were opened or emptied. */
+  count: number;
+}
+
+/**
+ * Resolve a drop into concrete cell assignments.
+ *
+ * This is the single definition of what a drop *means*: which track the
+ * dragged children take, who gets displaced, and what happens to the
+ * tracks and rows they vacate. Both the live preview and the committed
+ * drop run it, against the same pre-drag geometry, so what the user
+ * sees during the drag is what lands on release.
+ *
+ * It used to exist twice — once in the preview helper, once in the drag
+ * resolver — and the copies had already drifted: only the resolver
+ * compacted rows that a move emptied, so releasing the last child of a
+ * row made the layout jump. The two also decided "who occupies the
+ * target cell" against different column values (pre- vs post-shift),
+ * which happened to agree only because opening a track and swapping a
+ * cell cannot occur in the same gesture.
+ */
+export function planStructuredDrop(
+  nodes: Node[],
+  frameId: string,
+  axis: FrameGridAxis,
+  count: number,
+  requests: readonly StructuredDropRequest[],
+): StructuredDropAssignment {
+  const trackAxis: FrameAxis = axis === 'row' ? 'row' : 'column';
+  const isGrid = axis === 'grid';
+
+  // Stored cells for every existing child, clamped into range.
+  const origTrack = new Map<string, number>();
+  const origRow = new Map<string, number>();
+  const childIds: string[] = [];
+  for (const node of nodes) {
+    if (node.parentId !== frameId) continue;
+    origTrack.set(
+      node.id,
+      clampInt(readFrameTrack(node, trackAxis) ?? 0, 0, count - 1),
+    );
+    if (isGrid) origRow.set(node.id, Math.max(0, readFrameGridRow(node) ?? 0));
+    childIds.push(node.id);
+  }
+
+  const tracks = new Map(origTrack);
+  const rows = new Map(origRow);
+  // A dragged node arriving from outside the frame has no stored cell.
+  for (const request of requests) {
+    if (!tracks.has(request.nodeId)) childIds.push(request.nodeId);
+  }
+
+  // ── Count axis ──────────────────────────────────────────────────
+  // Opening a track is only offered for a single-node drag: several
+  // dragged nodes share one cursor, so there is no one gap to open.
+  const insertRequest =
+    requests.length === 1 &&
+    requests[0].target.kind === 'insert-new' &&
+    count < FRAME_GRID_MAX_COUNT
+      ? requests[0]
+      : null;
+
+  if (insertRequest) {
+    const opened = insertRequest.target.slot; // ∈ [0, count]
+    for (const id of childIds) {
+      if (id === insertRequest.nodeId) continue;
+      const track = tracks.get(id);
+      if (track !== undefined && track >= opened) tracks.set(id, track + 1);
+    }
+    tracks.set(insertRequest.nodeId, opened);
+  } else {
+    for (const request of requests) {
+      const slot =
+        request.target.kind === 'into-existing'
+          ? request.target.slot
+          : Math.min(request.target.slot, count - 1);
+      tracks.set(request.nodeId, slot);
+    }
+  }
+
+  // ── Grid rows ───────────────────────────────────────────────────
+  if (isGrid) {
+    for (const request of requests) {
+      const targetRow = request.row ?? 0;
+      const targetTrack = tracks.get(request.nodeId) ?? 0;
+      // Read the occupant against the POST-shift columns, so the answer
+      // does not depend on whether a track was opened this gesture.
+      const occupantId = childIds.find(
+        (id) =>
+          id !== request.nodeId &&
+          tracks.get(id) === targetTrack &&
+          rows.get(id) === targetRow,
+      );
+      const sourceRow = origRow.get(request.nodeId);
+      const sourceTrack = origTrack.get(request.nodeId);
+
+      if (sourceRow !== undefined && sourceTrack !== undefined) {
+        // Moving within the frame: trade places with the occupant so no
+        // unrelated cell has to shift.
+        if (occupantId) {
+          tracks.set(occupantId, sourceTrack);
+          rows.set(occupantId, sourceRow);
+        }
+        rows.set(request.nodeId, targetRow);
+        continue;
+      }
+
+      // Arriving from outside: there is no cell to trade, so the
+      // occupied row and everything below it move down one.
+      if (occupantId) {
+        for (const id of childIds) {
+          const row = rows.get(id);
+          if (row !== undefined && row >= targetRow) rows.set(id, row + 1);
+        }
+      }
+      rows.set(request.nodeId, targetRow);
+    }
+
+    // Rows the move emptied disappear; later rows close the gap. Rows
+    // that were already blank before the drag are left alone — a blank
+    // cell is a statement in `grid`, and only the row this gesture
+    // vacated is incidental.
+    const occupiedRows = new Set(rows.values());
+    const emptiedRow = [...new Set(origRow.values())].some(
+      (row) => !occupiedRows.has(row),
+    );
+    if (emptiedRow) {
+      const remap = new Map<number, number>();
+      [...occupiedRows]
+        .sort((a, b) => a - b)
+        .forEach((row, index) => remap.set(row, index));
+      for (const [id, row] of rows) rows.set(id, remap.get(row) ?? 0);
+    }
+  }
+
+  // ── Count-axis compaction ───────────────────────────────────────
+  const occupiedTracks = new Set(tracks.values());
+  const trackEmptied = [...origTrack.values()].some(
+    (track) => !occupiedTracks.has(track),
+  );
+  if (insertRequest || trackEmptied) {
+    const remap = new Map<number, number>();
+    [...occupiedTracks]
+      .sort((a, b) => a - b)
+      .forEach((track, index) => remap.set(track, index));
+    for (const [id, track] of tracks) tracks.set(id, remap.get(track) ?? 0);
+    return {
+      tracks,
+      rows,
+      count: Math.max(FRAME_GRID_MIN_COUNT, occupiedTracks.size),
+    };
+  }
+
+  return { tracks, rows, count };
+}
+
 function describeGridDropZone(
   nodes: Node[],
   frameId: string,
@@ -1688,34 +1867,18 @@ function describeGridDropZone(
 ): StructuredDropZone | null {
   const opensTrack =
     target.kind === 'insert-new' && count < FRAME_GRID_MAX_COUNT;
-  const targetSlot = opensTrack
-    ? target.slot
-    : Math.min(target.slot, count - 1);
-  const effectiveCount = opensTrack ? count + 1 : count;
   const targetRow = pickGridRowTarget(nodes, frameId, pointerY, options.edges);
-  const source = nodes.find(
-    (node) => node.id === dragged.id && node.parentId === frameId,
-  );
-  const columnOf = (node: Node) =>
-    clampInt(readFrameTrack(node, 'column') ?? 0, 0, count - 1);
-  const rowOf = (node: Node) => Math.max(0, readFrameGridRow(node) ?? 0);
-  const sourceRow = source ? rowOf(source) : 0;
-  const sourceSlot = source ? columnOf(source) : 0;
-  const occupant = opensTrack
-    ? undefined
-    : nodes.find((node) => {
-        if (node.id === dragged.id || node.parentId !== frameId) return false;
-        return columnOf(node) === targetSlot && rowOf(node) === targetRow;
-      });
-  const insertsRow = !source && !!occupant;
-  let foundDragged = false;
 
+  // The drop's meaning is resolved once, by the same planner the commit
+  // path uses, so the preview cannot describe a different outcome.
+  const plan = planStructuredDrop(nodes, frameId, 'grid', count, [
+    { nodeId: dragged.id, target, row: targetRow },
+  ]);
+
+  let foundDragged = false;
   const simulated = nodes.map((node) => {
-    if (node.id === frameId && effectiveCount !== count) {
-      return {
-        ...node,
-        data: { ...node.data, gridCount: effectiveCount },
-      };
+    if (node.id === frameId && plan.count !== count) {
+      return { ...node, data: { ...node.data, gridCount: plan.count } };
     }
     if (node.id === dragged.id) {
       foundDragged = true;
@@ -1723,30 +1886,27 @@ function describeGridDropZone(
         ...node,
         parentId: frameId,
         position: { x: dragged.x, y: dragged.y },
-        data: { ...node.data, frameColumn: targetSlot, frameRow: targetRow },
+        data: {
+          ...node.data,
+          frameColumn: plan.tracks.get(dragged.id) ?? 0,
+          frameRow: plan.rows.get(dragged.id) ?? targetRow,
+        },
         style: { ...node.style, width: dragged.width, height: dragged.height },
         measured: { width: dragged.width, height: dragged.height },
       };
     }
     if (node.parentId !== frameId) return node;
-
-    const slot = columnOf(node);
-    const shiftedSlot = opensTrack && slot >= targetSlot ? slot + 1 : slot;
-    const row = rowOf(node);
-    const nextRow =
-      source && node.id === occupant?.id
-        ? sourceRow
-        : insertsRow && row >= targetRow
-          ? row + 1
-          : row;
-    const nextSlot =
-      source && node.id === occupant?.id ? sourceSlot : shiftedSlot;
-    return nextSlot === slot && nextRow === row
-      ? node
-      : {
-          ...node,
-          data: { ...node.data, frameColumn: nextSlot, frameRow: nextRow },
-        };
+    const nextTrack = plan.tracks.get(node.id);
+    const nextRow = plan.rows.get(node.id);
+    if (nextTrack === undefined && nextRow === undefined) return node;
+    return {
+      ...node,
+      data: {
+        ...node.data,
+        ...(nextTrack === undefined ? {} : { frameColumn: nextTrack }),
+        ...(nextRow === undefined ? {} : { frameRow: nextRow }),
+      },
+    };
   });
 
   if (!foundDragged) {
@@ -1755,7 +1915,10 @@ function describeGridDropZone(
       type: 'text',
       parentId: frameId,
       position: { x: dragged.x, y: dragged.y },
-      data: { frameColumn: targetSlot, frameRow: targetRow },
+      data: {
+        frameColumn: plan.tracks.get(dragged.id) ?? 0,
+        frameRow: plan.rows.get(dragged.id) ?? targetRow,
+      },
       style: { width: dragged.width, height: dragged.height },
       measured: { width: dragged.width, height: dragged.height },
     } as Node);
@@ -1782,7 +1945,10 @@ function describeGridDropZone(
     context: {
       axis: 'grid',
       tracks: bands.tracks,
-      activeTrack: layout.slotAssignments.get(dragged.id) ?? targetSlot,
+      activeTrack:
+        layout.slotAssignments.get(dragged.id) ??
+        plan.tracks.get(dragged.id) ??
+        0,
       rows: bands.rows,
       activeRow: layout.rowAssignments?.get(dragged.id) ?? targetRow,
     },

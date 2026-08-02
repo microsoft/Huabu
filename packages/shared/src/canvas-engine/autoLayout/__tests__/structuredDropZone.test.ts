@@ -65,6 +65,34 @@ const dragged = {
   height: 40,
 };
 
+/**
+ * Build the post-drop fixture by hand.
+ *
+ * The `grid` cases below share one gesture: `dragged` leaves
+ * (col 0, row 0) for column 1, which vacates row 0 entirely, so the
+ * rows beneath close the gap. That compaction is what the commit path
+ * has always done, and the preview now does too — these expectations
+ * are spelled out rather than obtained from the planner, so they stay
+ * a check on it rather than a restatement of it.
+ */
+function simulateGridDrop(
+  nodes: Node[],
+  moved: { x: number; y: number },
+  cells: Record<string, { column: number; row: number }>,
+): Node[] {
+  return nodes.map((node) => {
+    const cell = cells[node.id];
+    if (!cell) return node;
+    return {
+      ...node,
+      ...(node.id === 'dragged'
+        ? { position: { x: moved.x, y: moved.y } }
+        : {}),
+      data: { ...node.data, frameColumn: cell.column, frameRow: cell.row },
+    } as Node;
+  });
+}
+
 describe('describeStructuredDropZone context', () => {
   it('reports column tracks and the frame size the drop resolves to', () => {
     const nodes = [
@@ -184,15 +212,11 @@ describe('describeStructuredDropZone context', () => {
       2,
       movedDragged,
     );
-    const simulated = nodes.map((node) =>
-      node.id === 'dragged'
-        ? {
-            ...node,
-            position: { x: movedDragged.x, y: movedDragged.y },
-            data: { ...node.data, frameColumn: 1, frameRow: 1 },
-          }
-        : node,
-    );
+    const simulated = simulateGridDrop(nodes, movedDragged, {
+      dragged: { column: 1, row: 0 },
+      'same-row': { column: 0, row: 0 },
+      'target-column-next-row': { column: 1, row: 1 },
+    });
     const solved = applyGridLayout(simulated, 'frame', 2);
     const finalPosition = solved?.childPositions.get('dragged');
 
@@ -228,15 +252,11 @@ describe('describeStructuredDropZone context', () => {
       2,
       movedDragged,
     );
-    const simulated = nodes.map((node) =>
-      node.id === 'dragged'
-        ? {
-            ...node,
-            position: { x: movedDragged.x, y: movedDragged.y },
-            data: { ...node.data, frameColumn: 1, frameRow: 1 },
-          }
-        : node,
-    );
+    const simulated = simulateGridDrop(nodes, movedDragged, {
+      dragged: { column: 1, row: 0 },
+      'same-row': { column: 0, row: 0 },
+      'target-column-next-row': { column: 1, row: 1 },
+    });
     const solved = applyGridLayout(simulated, 'frame', 2);
 
     // Bands mirror the solver's own track geometry, so the overlay can
@@ -258,7 +278,7 @@ describe('describeStructuredDropZone context', () => {
       })),
     );
     expect(zone?.context.activeTrack).toBe(1);
-    expect(zone?.context.activeRow).toBe(1);
+    expect(zone?.context.activeRow).toBe(0);
   });
 
   it('reports masonry tracks on the count axis only', () => {
@@ -358,15 +378,11 @@ describe('describeStructuredDropZone reflow', () => {
       movedDragged,
     );
 
-    const simulated = nodes.map((node) =>
-      node.id === 'dragged'
-        ? {
-            ...node,
-            position: { x: movedDragged.x, y: movedDragged.y },
-            data: { ...node.data, frameColumn: 1, frameRow: 1 },
-          }
-        : node,
-    );
+    const simulated = simulateGridDrop(nodes, movedDragged, {
+      dragged: { column: 1, row: 0 },
+      'same-row': { column: 0, row: 0 },
+      'next-row': { column: 1, row: 1 },
+    });
     const solved = applyGridLayout(simulated, 'frame', 2);
 
     expect(zone?.reflow.map((entry) => entry.id).sort()).toEqual([

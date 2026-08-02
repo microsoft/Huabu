@@ -111,6 +111,10 @@ Naming a count explicitly is the opposite instruction: re-flow into that many tr
 
 `describeStructuredDropZone` returns, alongside the drop footprint, a `reflow` list: where every **existing** child of the hovered Frame lands in the simulated post-drop layout. The web store writes those positions onto the real nodes each drag tick, so the Frame's contents visibly open a gap under the cursor instead of the drop being narrated by overlay rects. The dragged node is excluded — React Flow owns its position until release, and writing a solved position for it would fight the cursor.
 
+What a drop _means_ is resolved by `planStructuredDrop`: which track the dragged children take, who they displace, and what becomes of the cell they vacate. Preview and commit both call it against the same pre-drag geometry, so the release cannot land somewhere the drag did not show. The rule previously existed twice — once in the preview helper, once in the drag resolver — and the copies had drifted: only the resolver compacted a row that a move emptied, so releasing the last child of a row made the layout jump. They also decided cell occupancy against different column values (pre- vs post-shift), which agreed only because opening a track and swapping a cell cannot happen in one gesture.
+
+The drop target is resolved before the frame-fit preview pass rather than after it, so that pass can skip the frame the drop zone is about to solve anyway; the skipped frame's size is reported from the zone, and only recomputed if the zone fails to resolve. Solving it in both places was the same work twice, with the fit pass's answer discarded.
+
 The preview is transient in the strictest sense: it is applied through `_setStateNoAutosave`, so it never schedules a save, never enters undo history, and never reaches a `CanvasCommand`. Reversal is owned by [`createStructuredReflowController`](../../apps/web/src/store/canvasStore/slices/structuredReflow.ts), which records each peer's pre-drag position on its first displacement and can rebuild the untouched geometry on demand.
 
 Two invariants keep it honest:

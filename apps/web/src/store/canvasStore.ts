@@ -2677,34 +2677,94 @@ const useCanvasStore = create<RFState>()(
         // wrongly mute the only relevant overlay.
         const previews: FrameFitPreview[] = [];
 
+        // ── Where the drop would land ────────────────────────────────
+        // Resolved BEFORE the fit-preview pass, because the structured
+        // drop zone below already solves the target frame's post-drop
+        // layout. Solving it here too is the same work twice, and the
+        // fit pass's answer would only be overwritten by the zone's.
+        const primary = nodes.find((n) => n.id === draggedNode.id) as
+          | NestableNode
+          | undefined;
+        const enteringFrameId = bypassReparent
+          ? undefined
+          : wouldAutoFrame(liveNodes, draggedNode.id, {
+              threshold: 0.5,
+              pointer: pointerFlow,
+            });
+        let targetFrameId = enteringFrameId ?? primary?.parentId;
+        // Sticky case (node already lives in a frame): only keep showing the
+        // structured indicator while the cursor is still inside that frame's
+        // capture zone — the frame rect expanded by the dragged node's size.
+        // This mirrors NODE_DRAG_STOP, which keeps a node in its structured
+        // frame iff the release pointer is in the same zone — so the preview
+        // and the committed drop never disagree (no "shows insert, lands
+        // outside") while the outer prepend / append bands stay reachable.
+        if (!enteringFrameId && targetFrameId && pointerFlow) {
+          const fAbs = getFrameAbsolutePosition(liveNodes, targetFrameId);
+          const fNode = liveNodes.find((n) => n.id === targetFrameId);
+          const fSize = fNode ? getNodeSize(fNode) : null;
+          const dragNode = liveNodes.find((n) => n.id === draggedNode.id);
+          const dragSize = dragNode
+            ? getNodeSize(dragNode)
+            : { width: 0, height: 0 };
+          const inside =
+            fAbs &&
+            fSize &&
+            pointerFlow.x >= fAbs.x - dragSize.width &&
+            pointerFlow.x <= fAbs.x + fSize.width + dragSize.width &&
+            pointerFlow.y >= fAbs.y - dragSize.height &&
+            pointerFlow.y <= fAbs.y + fSize.height + dragSize.height;
+          if (!inside) targetFrameId = undefined;
+        }
+        const targetFrame = targetFrameId
+          ? liveNodes.find((n) => n.id === targetFrameId)
+          : undefined;
+        const gridCfg = readFrameGridConfig(targetFrame);
+
+        /** Content-driven fit preview for one structured frame. */
+        const solveStructuredPreview = (
+          frameId: string,
+        ): FrameFitPreview | null => {
+          const leaving = leavingByFrame.get(frameId);
+          const entering = enteringByFrame.get(frameId);
+          const previewNodes = leaving?.size
+            ? liveNodes.filter((node) => !leaving.has(node.id))
+            : liveNodes;
+          const layout = solveStructuredFrameLayout(
+            previewNodes,
+            frameId,
+            'compact',
+            { edges },
+          );
+          const frameAbs = getFrameAbsolutePosition(liveNodes, frameId);
+          if (!layout || !frameAbs) return null;
+          return {
+            frameId,
+            position: frameAbs,
+            width: layout.frameSize.width,
+            height: layout.frameSize.height,
+            role: leaving && !entering ? 'source' : 'target',
+          };
+        };
+
+        // Skipped in the pass below and reported from the drop zone
+        // instead; recomputed there only if the zone fails to resolve.
+        const deferredStructuredTarget =
+          gridCfg && targetFrameId && getFrameSizing(targetFrame) === 'hug'
+            ? targetFrameId
+            : null;
+
         for (const frameId of previewFrameIds) {
+          if (frameId === deferredStructuredTarget) continue;
           // Per-frame sizing gate: only `hug` frames preview a refit;
           // `manual` frames keep their pinned size during the drag.
           const frameNode = liveNodes.find((n) => n.id === frameId);
           if (getFrameSizing(frameNode) !== 'hug') continue;
           const leaving = leavingByFrame.get(frameId);
           const entering = enteringByFrame.get(frameId);
-          const structuredConfig = readFrameGridConfig(frameNode);
-          if (structuredConfig) {
-            const previewNodes = leaving?.size
-              ? liveNodes.filter((node) => !leaving.has(node.id))
-              : liveNodes;
-            const layout = solveStructuredFrameLayout(
-              previewNodes,
-              frameId,
-              'compact',
-              { edges },
-            );
-            const frameAbs = getFrameAbsolutePosition(liveNodes, frameId);
-            if (layout && frameAbs) {
-              previews.push({
-                frameId,
-                position: frameAbs,
-                width: layout.frameSize.width,
-                height: layout.frameSize.height,
-                role: leaving && !entering ? 'source' : 'target',
-              });
-            }
+          if (readFrameGridConfig(frameNode)) {
+            const preview = solveStructuredPreview(frameId);
+            if (preview) previews.push(preview);
             continue;
           }
           const fit = computeFrameFit(liveNodes, frameId, {
@@ -2745,49 +2805,9 @@ const useCanvasStore = create<RFState>()(
 
         // ── Structured-frame drop indicator ──────────────────────────
         // Mirror what NODE_DRAG_STOP will decide, live: if the primary
-        // dragged node is hovering a column / row frame, show where it
-        // would land — a precise insertion line within an existing
-        // track, or a ghost track at the gap when a new one opens. Free
-        // frames have no tracks → no indicator.
-        const primary = nodes.find((n) => n.id === draggedNode.id) as
-          | NestableNode
-          | undefined;
-        const enteringFrameId = bypassReparent
-          ? undefined
-          : wouldAutoFrame(liveNodes, draggedNode.id, {
-              threshold: 0.5,
-              pointer: pointerFlow,
-            });
-        let targetFrameId = enteringFrameId ?? primary?.parentId;
-        // Sticky case (node already lives in a frame): only keep showing the
-        // structured indicator while the cursor is still inside that frame's
-        // capture zone — the frame rect expanded by the dragged node's size.
-        // This mirrors NODE_DRAG_STOP, which keeps a node in its structured
-        // frame iff the release pointer is in the same zone — so the preview
-        // and the committed drop never disagree (no "shows insert, lands
-        // outside") while the outer prepend / append bands stay reachable.
-        if (!enteringFrameId && targetFrameId && pointerFlow) {
-          const fAbs = getFrameAbsolutePosition(liveNodes, targetFrameId);
-          const fNode = liveNodes.find((n) => n.id === targetFrameId);
-          const fSize = fNode ? getNodeSize(fNode) : null;
-          const dragNode = liveNodes.find((n) => n.id === draggedNode.id);
-          const dragSize = dragNode
-            ? getNodeSize(dragNode)
-            : { width: 0, height: 0 };
-          const inside =
-            fAbs &&
-            fSize &&
-            pointerFlow.x >= fAbs.x - dragSize.width &&
-            pointerFlow.x <= fAbs.x + fSize.width + dragSize.width &&
-            pointerFlow.y >= fAbs.y - dragSize.height &&
-            pointerFlow.y <= fAbs.y + fSize.height + dragSize.height;
-          if (!inside) targetFrameId = undefined;
-        }
-        const targetFrame = targetFrameId
-          ? liveNodes.find((n) => n.id === targetFrameId)
-          : undefined;
-        const gridCfg = readFrameGridConfig(targetFrame);
-
+        // dragged node is hovering a column / row / grid frame, show
+        // where it would land. Free frames have no tracks → no
+        // indicator.
         if (targetFrameId && targetFrame && gridCfg) {
           const frameAbs = getFrameAbsolutePosition(liveNodes, targetFrameId);
           // Frame-local drop point: prefer the cursor, fall back to the
@@ -2873,6 +2893,15 @@ const useCanvasStore = create<RFState>()(
             setSnapStructuredSuppressed(true);
             commitReflow(zone.reflow);
           } else {
+            // The zone did not resolve, so nothing reported the size of
+            // the frame the fit pass skipped. Compute it after all.
+            if (deferredStructuredTarget) {
+              const preview = solveStructuredPreview(deferredStructuredTarget);
+              if (preview) {
+                previews.push(preview);
+                useGesturePreviewStore.getState().setFrameFitPreviews(previews);
+              }
+            }
             useGesturePreviewStore.getState().clearStructuredDropPreview();
             setSnapStructuredSuppressed(false);
             commitReflow(null);

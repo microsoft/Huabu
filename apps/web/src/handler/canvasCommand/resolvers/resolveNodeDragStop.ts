@@ -1,4 +1,3 @@
-import { FRAME_GRID_MAX_COUNT, FRAME_GRID_MIN_COUNT } from '@sediment/shared';
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
@@ -10,6 +9,7 @@ import {
   pickColumnDropTarget,
   pickGridRowTarget,
   pickRowDropTarget,
+  planStructuredDrop,
   readFrameGridConfig,
   readFrameGridRow,
   readFrameTrack,
@@ -476,10 +476,24 @@ function buildGridDropCommands(
     const trackAxis: FrameAxis = axis === 'row' ? 'row' : 'column';
     const trackField = axis === 'row' ? 'frameRow' : 'frameColumn';
 
-    // Stored cell for every existing child of this frame (clamped).
+    // What the drop means is decided by the shared planner — the same
+    // call the live preview makes, against the same pre-drag geometry,
+    // so the commit cannot land somewhere the preview did not show.
+    const plan = planStructuredDrop(
+      preDragNodes as NestableNode[],
+      frameId,
+      axis,
+      count,
+      framePlans.map((framePlan) => ({
+        nodeId: framePlan.nodeId as string,
+        target: framePlan.target,
+        row: framePlan.row,
+      })),
+    );
+
+    // Stored cells, to emit patches only where something moved.
     const origSlot = new Map<string, number>();
     const origRow = new Map<string, number>();
-    const childIds: string[] = [];
     for (const node of preDragNodes) {
       if (node.parentId !== frameId) continue;
       origSlot.set(
@@ -489,155 +503,27 @@ function buildGridDropCommands(
       if (axis === 'grid') {
         origRow.set(node.id, Math.max(0, readFrameGridRow(node) ?? 0));
       }
-      childIds.push(node.id);
     }
 
-    // Working assignment = stored slots; dragged nodes overwritten below.
-    const slotOf = new Map<string, number>(origSlot);
-    const rowOf = new Map<string, number>(origRow);
-    // Include any dragged node that just entered this frame from outside.
-    for (const plan of framePlans) {
-      if (!slotOf.has(plan.nodeId)) childIds.push(plan.nodeId);
+    if (plan.count !== count) {
+      out.commands.push({
+        type: 'SET_FRAME_LAYOUT',
+        frameId: frameId as CanvasNodeId,
+        mode: axis,
+        gridCount: plan.count,
+      });
+      out.frameDataPatches.push({
+        nodeId: frameId,
+        patch: { layoutMode: axis, gridCount: plan.count },
+      });
     }
 
-    const insertPlan =
-      framePlans.length === 1 &&
-      framePlans[0].target.kind === 'insert-new' &&
-      count < FRAME_GRID_MAX_COUNT
-        ? framePlans[0]
-        : null;
-
-    if (insertPlan && insertPlan.target.kind === 'insert-new') {
-      // Open a new track at `k`: shift existing children at/after it up
-      // by one, then drop the inserter into the freshly-opened index.
-      const k = insertPlan.target.slot; // ∈ [0, count]
-      for (const id of childIds) {
-        if (id === insertPlan.nodeId) continue;
-        const s = slotOf.get(id);
-        if (s !== undefined && s >= k) slotOf.set(id, s + 1);
-      }
-      slotOf.set(insertPlan.nodeId, k);
-    } else {
-      // Drop each dragged node into an existing track (a demoted
-      // insert-new clamps into range).
-      for (const plan of framePlans) {
-        const slot =
-          plan.target.kind === 'into-existing'
-            ? plan.target.slot
-            : Math.min(plan.target.slot, count - 1);
-        slotOf.set(plan.nodeId, slot);
-      }
-    }
-
-    if (axis === 'grid') {
-      for (const plan of framePlans) {
-        const targetRow = plan.row ?? 0;
-        const targetSlot = slotOf.get(plan.nodeId) ?? 0;
-        const occupantId = childIds.find(
-          (id) =>
-            id !== plan.nodeId &&
-            slotOf.get(id) === targetSlot &&
-            rowOf.get(id) === targetRow,
-        );
-        const sourceRow = origRow.get(plan.nodeId);
-        const sourceSlot = origSlot.get(plan.nodeId);
-
-        if (sourceRow !== undefined && sourceSlot !== undefined) {
-          if (occupantId) {
-            slotOf.set(occupantId, sourceSlot);
-            rowOf.set(occupantId, sourceRow);
-          }
-          rowOf.set(plan.nodeId, targetRow);
-          continue;
-        }
-
-        if (occupantId) {
-          for (const id of childIds) {
-            const row = rowOf.get(id);
-            if (row !== undefined && row >= targetRow) rowOf.set(id, row + 1);
-          }
-        }
-        rowOf.set(plan.nodeId, targetRow);
-      }
-
-      const occupiedRows = new Set(rowOf.values());
-      const rowEmptied = [...new Set(origRow.values())].some(
-        (row) => !occupiedRows.has(row),
-      );
-      if (rowEmptied) {
-        const orderedRows = [...occupiedRows].sort((a, b) => a - b);
-        const rowRemap = new Map<number, number>();
-        orderedRows.forEach((row, index) => rowRemap.set(row, index));
-        for (const [id, row] of rowOf) {
-          rowOf.set(id, rowRemap.get(row) ?? 0);
-        }
-      }
-    }
-
-    // Did the move leave any previously-occupied track empty?
-    const newOccupied = new Set(slotOf.values());
-    let trackEmptied = false;
-    for (const t of origSlot.values()) {
-      if (!newOccupied.has(t)) {
-        trackEmptied = true;
-        break;
-      }
-    }
-
-    if (insertPlan || trackEmptied) {
-      // Compact occupied tracks to a contiguous 0..K-1 range so empty
-      // columns / rows are dropped and gridCount tracks the survivors.
-      const occupied = [...newOccupied].sort((a, b) => a - b);
-      const remap = new Map<number, number>();
-      occupied.forEach((track, i) => remap.set(track, i));
-      const nextCount = Math.max(FRAME_GRID_MIN_COUNT, occupied.length);
-
-      if (nextCount !== count) {
-        out.commands.push({
-          type: 'SET_FRAME_LAYOUT',
-          frameId: frameId as CanvasNodeId,
-          mode: axis,
-          gridCount: nextCount,
-        });
-        out.frameDataPatches.push({
-          nodeId: frameId,
-          patch: { layoutMode: axis, gridCount: nextCount },
-        });
-      }
-
-      const mergePatches: Array<{
-        nodeId: CanvasNodeId;
-        patch: Record<string, unknown>;
-      }> = [];
-      for (const id of childIds) {
-        const finalSlot = remap.get(slotOf.get(id) ?? 0) ?? 0;
-        const finalRow = rowOf.get(id);
-        const slotChanged = origSlot.get(id) !== finalSlot;
-        const rowChanged =
-          typeof finalRow === 'number' && origRow.get(id) !== finalRow;
-        if (!slotChanged && !rowChanged) continue;
-        const patch: FrameCellPatch = {
-          ...(slotChanged ? { [trackField]: finalSlot } : {}),
-          ...(rowChanged ? { frameRow: finalRow } : {}),
-        };
-        mergePatches.push({ nodeId: id as CanvasNodeId, patch });
-        out.cellPatches.push({ nodeId: id as CanvasNodeId, patch });
-      }
-      if (mergePatches.length > 0) {
-        out.commands.push({ type: 'MERGE_NODE_DATA', patches: mergePatches });
-      }
-      continue;
-    }
-
-    // ── Plain move that doesn't empty its source track: only the
-    //    dragged nodes change slot; the grid keeps its current count.
     const mergePatches: Array<{
       nodeId: CanvasNodeId;
       patch: Record<string, unknown>;
     }> = [];
-    for (const id of childIds) {
-      const slot = slotOf.get(id) ?? 0;
-      const row = rowOf.get(id);
+    for (const [id, slot] of plan.tracks) {
+      const row = plan.rows.get(id);
       const slotChanged = origSlot.get(id) !== slot;
       const rowChanged = typeof row === 'number' && origRow.get(id) !== row;
       if (!slotChanged && !rowChanged) continue;
@@ -648,11 +534,9 @@ function buildGridDropCommands(
       mergePatches.push({ nodeId: id as CanvasNodeId, patch });
       out.cellPatches.push({ nodeId: id as CanvasNodeId, patch });
     }
-    if (mergePatches.length === 0) continue;
-    out.commands.push({
-      type: 'MERGE_NODE_DATA',
-      patches: mergePatches,
-    });
+    if (mergePatches.length > 0) {
+      out.commands.push({ type: 'MERGE_NODE_DATA', patches: mergePatches });
+    }
   }
 
   return out;
