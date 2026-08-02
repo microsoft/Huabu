@@ -425,6 +425,34 @@ function isSelectionUnusable(err: unknown): boolean {
 }
 
 /**
+ * Whether a config option has taken over one of the reserved legacy keys.
+ *
+ * Renderers decide that a config option covers the mode / model knob by its
+ * `category`, not its id, so the moment an agent publishes
+ * `{ id: 'model_id', category: 'model' }` the synthesised legacy pill
+ * disappears from the toolbar. A `selections.model` recorded before that
+ * upgrade then becomes unreachable: invisible in the UI, yet still replayed
+ * through `setSessionModel` on every open — overriding whatever the user
+ * picks in the config-option pill that replaced it.
+ */
+function shadowedByConfigOption(
+  entry: AcpSessionEntry,
+  selectionId: string,
+): boolean {
+  return entry.configOptions.some((raw) => {
+    const option = raw as { id?: unknown; category?: unknown };
+    // Same id means this IS the knob, addressed through the modern channel.
+    if (String(option.id ?? '') === selectionId) return false;
+    return normalizeSelectionKey(option.category) === selectionId;
+  });
+}
+
+const normalizeSelectionKey = (value: unknown): string =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase();
+
+/**
  * Replay this thread's selections onto a freshly opened session.
  *
  * Resume restores the user's intent locally, but the agent knows nothing
@@ -451,7 +479,9 @@ function isSelectionUnusable(err: unknown): boolean {
  * forgotten so a retired model id cannot wedge the thread on every open;
  * a value that merely failed to reach the agent is kept, because the
  * selection is durable user intent and a dead socket is no reason to
- * destroy it.
+ * destroy it. A reserved key a config option has taken over is forgotten
+ * up front (see {@link shadowedByConfigOption}), since replaying it would
+ * fight the pill that replaced it.
  */
 async function reconcileSessionSelections(
   entry: AcpSessionEntry,
@@ -461,6 +491,19 @@ async function reconcileSessionSelections(
   let dropped = false;
   let applied = 0;
   let retained = 0;
+  let shadowed = 0;
+
+  for (const reserved of [MODE_SELECTION_ID, MODEL_SELECTION_ID]) {
+    if (!(reserved in entry.selections)) continue;
+    if (!shadowedByConfigOption(entry, reserved)) continue;
+    delete entry.selections[reserved];
+    shadowed += 1;
+    logger.info(
+      { sessionId: entry.sessionId, optionId: reserved },
+      '[acp] forgot a legacy selection a config option now owns',
+    );
+  }
+
   for (const [optionId, value] of Object.entries(entry.selections)) {
     if (agentViewIsLive && agentReportedValue(entry, optionId) === value) {
       continue;
@@ -488,12 +531,13 @@ async function reconcileSessionSelections(
       logger.warn(detail, '[acp] dropped a selection the agent rejected');
     }
   }
-  if (applied === 0 && !dropped) return;
-  if (dropped) entry.selectionsUpdatedAt = Date.now();
+  const forgot = dropped || shadowed > 0;
+  if (applied === 0 && !forgot) return;
+  if (forgot) entry.selectionsUpdatedAt = Date.now();
   entry.metaUpdatedAt = Date.now();
   reportEntryState(entry);
   logger.info(
-    { sessionId: entry.sessionId, applied, dropped, retained },
+    { sessionId: entry.sessionId, applied, dropped, retained, shadowed },
     '[acp] replayed per-thread selections onto the resumed session',
   );
 }

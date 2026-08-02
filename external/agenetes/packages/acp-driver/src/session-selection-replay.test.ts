@@ -246,6 +246,47 @@ describe('selection replay', () => {
     expect(e.selectionsUpdatedAt).toBe(0);
   });
 
+  it('forgets a legacy selection a config option has taken over', async () => {
+    // An agent upgrade that moves model onto the modern channel under its
+    // own id: renderers key the takeover off `category`, so the legacy pill
+    // vanishes while `selections.model` lingers — invisible, yet replayed
+    // through setSessionModel on every open, fighting the pill that
+    // replaced it.
+    const e = entry({
+      configOptions: [
+        { ...configOption('model_id', 'gpt-5.6-sol'), category: 'model' },
+      ] as unknown as AcpSessionEntry['configOptions'],
+      selections: { model: 'claude-opus-4.8', model_id: 'gpt-5.6-sol' },
+    });
+
+    await replay(e, false);
+
+    const c = e.client as unknown as ReturnType<typeof client>;
+    expect(e.selections).toEqual({ model_id: 'gpt-5.6-sol' });
+    expect(c.setSessionModel).not.toHaveBeenCalled();
+  });
+
+  it('keeps a legacy selection the config option addresses under the same id', async () => {
+    // `{ id: 'mode', category: 'mode' }` is the same knob reached through the
+    // modern channel, not a replacement — the key still names something real.
+    const e = entry({
+      configOptions: [
+        configOption('mode', 'default'),
+      ] as unknown as AcpSessionEntry['configOptions'],
+      selections: { mode: 'agent-full-access' },
+    });
+
+    await replay(e, false);
+
+    const c = e.client as unknown as ReturnType<typeof client>;
+    expect(e.selections).toEqual({ mode: 'agent-full-access' });
+    expect(c.setSessionConfigOption).toHaveBeenCalledWith(
+      'session_1',
+      'mode',
+      'agent-full-access',
+    );
+  });
+
   it('does nothing when there is no remembered intent', async () => {
     const e = entry();
 
