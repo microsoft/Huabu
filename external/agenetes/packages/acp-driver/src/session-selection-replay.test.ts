@@ -286,6 +286,35 @@ describe('selection replay ordering', () => {
     expect(proceeded).toBe(true);
   });
 
+  it('holds a caller that arrives while another is already waiting', async () => {
+    // The overlap `control()` actually hits: run() is holding the prompt on
+    // the replay when the user clicks a pill. If the second caller sails
+    // past, the remembered value lands behind its set-RPC and reverts the
+    // choice the user just made — the exact revert this wait prevents.
+    let landed!: () => void;
+    const e = entry({
+      selectionsReplay: new Promise<void>((resolve) => {
+        landed = resolve;
+      }),
+    });
+
+    let firstDone = false;
+    let secondDone = false;
+    const first = awaitSelectionReplay(e).then(() => {
+      firstDone = true;
+    });
+    const second = awaitSelectionReplay(e).then(() => {
+      secondDone = true;
+    });
+    await Promise.resolve();
+    expect(firstDone).toBe(false);
+    expect(secondDone).toBe(false);
+
+    landed();
+    await Promise.all([first, second]);
+    expect(secondDone).toBe(true);
+  });
+
   it('gives up after the bound so an unresponsive agent cannot hang the turn', async () => {
     vi.useFakeTimers();
     try {

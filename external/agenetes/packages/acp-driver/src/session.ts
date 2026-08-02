@@ -520,16 +520,20 @@ const SELECTION_REPLAY_WAIT_MS = 3_000;
  * the user set. A user set-RPC has the mirrored problem: the replay's
  * remembered value could overwrite the choice the user just made.
  *
- * Waiting is bounded, and waited out at most once per session: if the
- * replay is slow enough to hit the bound, charging every later caller for
- * it again would turn one delayed turn into a permanently sluggish thread.
+ * Waiting is bounded. The bound is released only once the first waiter is
+ * through: a caller that arrives while another is still waiting must wait
+ * too, or the guarantee evaporates for exactly the case it exists for —
+ * `run()` holding the prompt while the user clicks a pill, whose set-RPC
+ * would then sail past and be reverted by the remembered value landing
+ * behind it. Once a waiter has returned, later callers go straight
+ * through, so a replay slow enough to hit the bound costs one delayed turn
+ * rather than a permanently sluggish thread.
  */
 export async function awaitSelectionReplay(
   entry: AcpSessionEntry,
 ): Promise<void> {
   const pending = entry.selectionsReplay;
   if (!pending) return;
-  entry.selectionsReplay = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
@@ -540,6 +544,11 @@ export async function awaitSelectionReplay(
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+    // Cleared here, not on entry: clearing before the await would let a
+    // concurrent caller read `null` and overtake the very replay this call
+    // is waiting on. Callers overlapping the first waiter each arm their
+    // own bound, which is still bounded.
+    entry.selectionsReplay = null;
   }
 }
 
