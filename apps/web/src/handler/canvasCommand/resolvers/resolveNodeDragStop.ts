@@ -505,25 +505,31 @@ function buildGridDropCommands(
       }
     }
 
-    if (plan.count !== count) {
-      out.commands.push({
-        type: 'SET_FRAME_LAYOUT',
-        frameId: frameId as CanvasNodeId,
-        mode: axis,
-        gridCount: plan.count,
-      });
-      out.frameDataPatches.push({
-        nodeId: frameId,
-        patch: { layoutMode: axis, gridCount: plan.count },
-      });
-    }
-
+    // A track count change re-interprets every cell in the frame, so the
+    // drop states all of them on the layout command itself. `cells`
+    // outranks that command's own "explicit count ⇒ re-flow in reading
+    // order" fallback, which exists for a caller that names a count
+    // WITHOUT knowing where anything should go (the frame toolbar). The
+    // drop does know, and letting the fallback run against the cells it
+    // did not restate left the ones it happened to agree with re-dealt —
+    // two children in the same cell, and a commit the preview never
+    // showed.
+    const cells: Array<{
+      nodeId: CanvasNodeId;
+      column?: number;
+      row?: number;
+    }> = [];
     const mergePatches: Array<{
       nodeId: CanvasNodeId;
       patch: Record<string, unknown>;
     }> = [];
     for (const [id, slot] of plan.tracks) {
       const row = plan.rows.get(id);
+      cells.push({
+        nodeId: id as CanvasNodeId,
+        ...(axis === 'row' ? { row: slot } : { column: slot }),
+        ...(axis === 'grid' && typeof row === 'number' ? { row } : {}),
+      });
       const slotChanged = origSlot.get(id) !== slot;
       const rowChanged = typeof row === 'number' && origRow.get(id) !== row;
       if (!slotChanged && !rowChanged) continue;
@@ -534,7 +540,22 @@ function buildGridDropCommands(
       mergePatches.push({ nodeId: id as CanvasNodeId, patch });
       out.cellPatches.push({ nodeId: id as CanvasNodeId, patch });
     }
-    if (mergePatches.length > 0) {
+
+    if (plan.count !== count) {
+      out.commands.push({
+        type: 'SET_FRAME_LAYOUT',
+        frameId: frameId as CanvasNodeId,
+        mode: axis,
+        gridCount: plan.count,
+        cells,
+      });
+      out.frameDataPatches.push({
+        nodeId: frameId,
+        patch: { layoutMode: axis, gridCount: plan.count },
+      });
+    } else if (mergePatches.length > 0) {
+      // The cells are unambiguous without the count change, so only the
+      // children that actually moved are written.
       out.commands.push({ type: 'MERGE_NODE_DATA', patches: mergePatches });
     }
   }

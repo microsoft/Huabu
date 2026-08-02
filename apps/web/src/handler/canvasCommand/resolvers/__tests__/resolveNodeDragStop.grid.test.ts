@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyGridLayout } from '@sediment/shared/canvas-engine';
+import {
+  applyGridLayout,
+  executeCanvasCommands,
+} from '@sediment/shared/canvas-engine';
 
 import { resolveUiIntent } from '../../uiIntent';
 
@@ -238,5 +241,60 @@ describe('resolveNodeDragStop Grid cells', () => {
     });
     expect(patches.get('occupant')).toMatchObject({ frameRow: 1 });
     expect(patches.get('next-row')).toMatchObject({ frameRow: 2 });
+  });
+
+  // A drop that leaves a column empty compacts the grid, and the track
+  // count is what re-interprets every cell in it. `SET_FRAME_LAYOUT`
+  // re-deals cells in reading order when it is handed a count on its
+  // own — the right answer for the toolbar, and the wrong one here,
+  // where the drop already knows every cell. Executing the batch is the
+  // only way to catch the disagreement: the emitted patches look
+  // correct in isolation.
+  it('commits the planned cells when the drop empties a column', () => {
+    const scene = layoutScene([
+      makeFrame(),
+      makeChild('dragged', 0, 0),
+      makeChild('top', 1, 0),
+      makeChild('bottom', 1, 1),
+    ]);
+    // Aim below the last occupied cell of the surviving column.
+    const bottom = scene.positions.get('bottom');
+    if (!bottom) throw new Error('Bottom fixture is missing');
+    const target = {
+      x: bottom.x + CHILD_SIZE.width / 2,
+      y: bottom.y + CHILD_SIZE.height * 1.5,
+    };
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: target,
+        cachedDecisions: new Map([
+          ['dragged', { unframe: false, enterFrameId: null }],
+        ]),
+      },
+      state(scene.nodes),
+    );
+
+    const committed = executeCanvasCommands(
+      { source: 'ui', commands: resolution.commands },
+      { nodes: scene.nodes, edges: [], canvasId: 'canvas' },
+    );
+    const cells = new Map(
+      committed.writeResult.nodes
+        .filter((node) => node.parentId === 'frame')
+        .map((node) => {
+          const data = node.data as { frameColumn?: number; frameRow?: number };
+          return [node.id, `${data.frameColumn}:${data.frameRow}`];
+        }),
+    );
+
+    // The column the drag vacated is gone, so everything lives in
+    // column 0 — each on its own row, exactly as the drag showed.
+    expect(cells.get('top')).toBe('0:0');
+    expect(cells.get('bottom')).toBe('0:1');
+    expect(cells.get('dragged')).toBe('0:2');
+    expect(new Set(cells.values()).size).toBe(cells.size);
   });
 });
