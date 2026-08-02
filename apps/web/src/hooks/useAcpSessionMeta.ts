@@ -43,11 +43,13 @@
  *   session. Wired to `/` menu open, message-send, and set-RPC
  *   handlers in ChatPanel.
  *
- * - **SSE events** — `applyEvent` (registered via
- *   `setAcpSessionMetaSink`) merges live `session_*_update` frames
- *   into the cached snapshot without a round-trip. Mirrored to disk
- *   on the server side (both per-thread and per-profile), so the next
+ * - **SSE events** — live `session_*_update` frames are merged into
+ *   the cached snapshot without a round-trip by an internal sink the
+ *   hook registers via `setAcpSessionMetaSink`. Mirrored to disk on
+ *   the server side (both per-thread and per-profile), so the next
  *   `/cached-meta` fetch from any client sees the freshest state.
+ *   Consumers never merge frames themselves — the sink is a singleton
+ *   and the hook owns it.
  *
  * Errors from `refresh` are stored on `error` but never thrown — meta
  * is a polish surface; a failure should degrade to no selectors rather
@@ -159,13 +161,6 @@ export interface UseAcpSessionMetaResult {
   refresh: () => Promise<void>;
   /** TTL-gated re-fetch (see file header). */
   refreshIfStale: (ttlMs?: number) => void;
-  /**
-   * Merge a `session_*_update` / `config_options_update` SSE event into
-   * the snapshot. Safe to call from a render effect — performs a
-   * shallow comparison and skips the state set when the event is a
-   * no-op (e.g. duplicate id).
-   */
-  applyEvent: (event: AcpSessionMetaEvent) => void;
   /**
    * Apply a client-side optimistic patch (no SSE equivalent required).
    * Use for set-RPC handlers that want the selector to update
@@ -509,7 +504,6 @@ export function useAcpSessionMeta({
     errorCode: deriveErrorCode(error),
     refresh,
     refreshIfStale,
-    applyEvent,
     applyOptimistic,
   };
 }
