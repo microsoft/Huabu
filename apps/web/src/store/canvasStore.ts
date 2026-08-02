@@ -87,7 +87,6 @@ import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDe
 import { createStructureScheduler } from './canvasStore/save/structureScheduler';
 import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
-import { createStructuredReflowController } from './canvasStore/slices/structuredReflow';
 import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
@@ -1224,13 +1223,6 @@ let _dragPreviewRafId: number | null = null;
 // parent change is involved — so a plain free-node move produces no
 // command and would otherwise never schedule the autosave PUT.
 let _dragStartPositions: Map<string, { x: number; y: number }> | null = null;
-
-// ── Live structured-frame reflow preview ──────────────────────────────
-// While a node hovers a `column` / `row` / `grid` frame, the solver's
-// projected child positions are written onto the REAL peers so they
-// slide aside under the cursor. The reversal bookkeeping (and the two
-// invariants that keep it safe) live in the controller module.
-const structuredReflow = createStructuredReflowController();
 
 // Resize-preview state (per-paint rAF coalescing + free-frame child
 // baseline snapshot) lives in `./canvasStore/slices/resizePreview.ts`.
@@ -2495,29 +2487,28 @@ const useCanvasStore = create<RFState>()(
         // Re-read store inside the rAF callback so we always use the
         // latest node positions (ReactFlow may have applied intermediate
         // updates between the event and the rAF tick).
-        const { nodes: storeNodes, edges } = get();
+        const { nodes, edges } = get();
 
-        // Every predicate / picker / solver below runs against the
-        // pre-drag geometry, with the live reflow preview undone. See
-        // `createStructuredReflowController` for why this matters.
-        const nodes = structuredReflow.strip(storeNodes);
-
-        // Commit the reflow preview for this tick (or undo it when the
+        // Publish this tick's peer slide-aside (or withdraw it when the
         // node no longer hovers a structured frame). Called exactly once
-        // per tick, at every exit point below. Dragged nodes are filtered
-        // out: React Flow owns their position until release, so writing a
-        // solved position for them would fight the cursor.
+        // per tick, at every exit point below. The positions live in the
+        // gesture-preview store, never on `nodes`, so the pickers and
+        // solvers above always see the real pre-drag geometry and no
+        // mid-drag save / snapshot can capture a previewed position.
+        // Dragged nodes are filtered out: React Flow owns their position
+        // until release, so projecting one would fight the cursor.
         const draggedIds = new Set(draggedNodes.map((d) => d.id));
         const commitReflow = (
           reflow: readonly StructuredReflowEntry[] | null,
         ) => {
-          const next = reflow
-            ? structuredReflow.apply(
-                storeNodes,
-                reflow.filter((entry) => !draggedIds.has(entry.id)),
-              )
-            : structuredReflow.clear(storeNodes);
-          if (next) get()._setStateNoAutosave({ nodes: next });
+          const preview = useGesturePreviewStore.getState();
+          if (!reflow) {
+            preview.clearStructuredReflowPositions();
+            return;
+          }
+          preview.setStructuredReflowPositions(
+            reflow.filter((entry) => !draggedIds.has(entry.id)),
+          );
         };
 
         // Space-held drag opts out of *parent membership changes* only.
@@ -2923,15 +2914,12 @@ const useCanvasStore = create<RFState>()(
       }
       useGesturePreviewStore.getState().clearFrameFitPreview();
       useGesturePreviewStore.getState().clearStructuredDropPreview();
-
-      // Undo the live reflow BEFORE the drop is resolved: the resolver's
-      // pickers must classify the release against pre-drag geometry —
-      // exactly what the preview was computed from. Restoring here (rather
-      // than after the commit) also avoids a visible flash, because the
-      // restore and the authoritative `SET_NODE_GEOMETRY` land in the same
-      // tick, so React never paints the intermediate state.
-      const restoredNodes = structuredReflow.clear(get().nodes);
-      if (restoredNodes) get()._setStateNoAutosave({ nodes: restoredNodes });
+      // Withdraw the peer slide-aside. Purely visual — the nodes never
+      // moved — so the resolver below already classifies the release
+      // against the same geometry the preview was derived from, and the
+      // peers snap to their committed positions in the same tick the
+      // authoritative `SET_NODE_GEOMETRY` lands.
+      useGesturePreviewStore.getState().clearStructuredReflowPositions();
 
       // Read the Space-bypass snapshot taken by `endSnapSession`.
       // The snap session is normally torn down by `onNodesChange`
@@ -3039,9 +3027,7 @@ const useCanvasStore = create<RFState>()(
       const preview = useGesturePreviewStore.getState();
       preview.clearFrameFitPreview();
       preview.clearStructuredDropPreview();
-
-      const withoutReflow = structuredReflow.clear(get().nodes);
-      if (withoutReflow) get()._setStateNoAutosave({ nodes: withoutReflow });
+      preview.clearStructuredReflowPositions();
 
       const startPositions = _dragStartPositions;
       _dragStartPositions = null;
@@ -3084,8 +3070,7 @@ const useCanvasStore = create<RFState>()(
       resizePreviewController.cancelPendingRaf();
       useGesturePreviewStore.getState().clearFrameFitPreview();
       useGesturePreviewStore.getState().clearStructuredDropPreview();
-      const restored = structuredReflow.clear(get().nodes);
-      if (restored) get()._setStateNoAutosave({ nodes: restored });
+      useGesturePreviewStore.getState().clearStructuredReflowPositions();
       _dragStartPositions = null;
       endSnapSession();
     },

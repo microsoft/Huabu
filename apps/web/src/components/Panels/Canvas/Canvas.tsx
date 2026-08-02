@@ -429,6 +429,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   const isStructuredReflowing = useGesturePreviewStore(
     (state) => state.structuredDropPreview !== null,
   );
+  // Where those peers slide to. Lives in the gesture-preview store rather
+  // than on `canvasStore.nodes` so a mid-drag save / undo snapshot can
+  // never capture a position the user has not committed; it is folded
+  // into the node array below, at the render boundary only.
+  const structuredReflowPositions = useGesturePreviewStore(
+    (state) => state.structuredReflowPositions,
+  );
 
   // ── Non-reactive action handles ──────────────────────────────
   // Action functions are defined once in the Zustand `create()` factory
@@ -837,9 +844,18 @@ export const Canvas: React.FC<CanvasProps> = ({
       const nextClassName = wantsLassoClass
         ? clsx(baseClassName, 'canvas-lasso-preview')
         : baseClassName;
+      // Transient slide-aside offset; absent for every node outside the
+      // hovered structured frame, and for the dragged node itself.
+      const previewPosition = structuredReflowPositions?.get(node.id);
+      const nextPosition = previewPosition ?? node.position;
 
       const cached = prevCache.get(node);
-      if (cached && cached.zIndex === z && cached.className === nextClassName) {
+      if (
+        cached &&
+        cached.zIndex === z &&
+        cached.className === nextClassName &&
+        cached.position === nextPosition
+      ) {
         nextCache.set(node, cached);
         return cached;
       }
@@ -852,13 +868,15 @@ export const Canvas: React.FC<CanvasProps> = ({
       const needsWrap =
         nextClassName !== baseClassName ||
         node.zIndex !== z ||
-        node.draggable !== touchDraggable;
+        node.draggable !== touchDraggable ||
+        nextPosition !== node.position;
       const wrapped = needsWrap
         ? {
             ...node,
             className: nextClassName,
             zIndex: z,
             draggable: touchDraggable,
+            position: nextPosition,
           }
         : node;
       nextCache.set(node, wrapped);
@@ -867,7 +885,13 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     zWrapCacheRef.current = nextCache;
     return result;
-  }, [isNotMouse, lassoPreviewNodeIdSet, nodes, zByNode]);
+  }, [
+    isNotMouse,
+    lassoPreviewNodeIdSet,
+    nodes,
+    structuredReflowPositions,
+    zByNode,
+  ]);
 
   // Override marker colors on selected edges so arrows match the selection
   // highlight color (--color-info). CSS cannot style SVG <marker> referenced
