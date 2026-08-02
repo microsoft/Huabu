@@ -28,6 +28,7 @@
  */
 
 import { getAgentletGateway } from '@agenetes/agentlet-host';
+import { RequestError } from '@agentclientprotocol/sdk';
 
 import { AcpAgentClient } from './client.js';
 import { AcpServiceError } from './errors.js';
@@ -392,6 +393,38 @@ function applySelectionToAgent(
 }
 
 /**
+ * JSON-RPC codes on which a replayed selection is permanently unusable and
+ * may therefore be forgotten:
+ *
+ *   • `-32601 method not found` — the agent dropped the channel entirely, so
+ *     this knob can never be set again on this binding;
+ *   • `-32602 invalid params` — the agent refused the value itself, which is
+ *     what a model id retired by an agent upgrade looks like.
+ *
+ * Every other code is a verdict about the *call*, not the value: `-32603`
+ * is an agent-side internal failure and server-defined codes are opaque.
+ */
+const UNUSABLE_SELECTION_RPC_CODES: ReadonlySet<number> = new Set([
+  -32601, -32602,
+]);
+
+/**
+ * Whether a failed replay proves the remembered value is unusable, as
+ * opposed to merely undeliverable right now.
+ *
+ * The SDK makes this a clean split: an error *response* from the agent is
+ * rejected as a {@link RequestError} carrying the agent's JSON-RPC code,
+ * while a closed connection, a dead transport or a client-side guard
+ * rejects with a plain `Error`. Only the former says anything about the
+ * value we tried to set.
+ */
+function isSelectionUnusable(err: unknown): boolean {
+  return (
+    err instanceof RequestError && UNUSABLE_SELECTION_RPC_CODES.has(err.code)
+  );
+}
+
+/**
  * Replay this thread's selections onto a freshly opened session.
  *
  * Resume restores the user's intent locally, but the agent knows nothing
@@ -400,10 +433,12 @@ function applySelectionToAgent(
  * the persisted `allow_all` is remembered yet never honoured, and the
  * first prompt runs under the wrong model.
  *
- * Fire-and-forget: a knob the agent rejects (a retired model id, a
- * capability it dropped) must not block the first prompt, so it is
- * removed from the map and the thread falls back to the agent's own value
- * rather than retrying on every open.
+ * Fire-and-forget: a knob the agent cannot accept must not block the first
+ * prompt. A value the agent *rejects* (see {@link isSelectionUnusable}) is
+ * forgotten so a retired model id cannot wedge the thread on every open;
+ * a value that merely failed to reach the agent is kept, because the
+ * selection is durable user intent and a dead socket is no reason to
+ * destroy it.
  */
 async function reconcileSessionSelections(
   entry: AcpSessionEntry,
@@ -411,22 +446,30 @@ async function reconcileSessionSelections(
 ): Promise<void> {
   let dropped = false;
   let applied = 0;
+  let retained = 0;
   for (const [optionId, value] of Object.entries(entry.selections)) {
     if (agentReportedValue(entry, optionId) === value) continue;
     try {
       await applySelectionToAgent(entry, optionId, value);
       applied += 1;
     } catch (err) {
+      const detail = {
+        sessionId: entry.sessionId,
+        optionId,
+        ...(err instanceof RequestError ? { rpcCode: err.code } : {}),
+        err: err instanceof Error ? err.message : String(err),
+      };
+      if (!isSelectionUnusable(err)) {
+        retained += 1;
+        logger.warn(
+          detail,
+          '[acp] selection replay failed; keeping it for the next open',
+        );
+        continue;
+      }
       delete entry.selections[optionId];
       dropped = true;
-      logger.warn(
-        {
-          sessionId: entry.sessionId,
-          optionId,
-          err: err instanceof Error ? err.message : String(err),
-        },
-        '[acp] dropped a selection the agent rejected',
-      );
+      logger.warn(detail, '[acp] dropped a selection the agent rejected');
     }
   }
   if (applied === 0 && !dropped) return;
@@ -434,7 +477,7 @@ async function reconcileSessionSelections(
   entry.metaUpdatedAt = Date.now();
   reportEntryState(entry);
   logger.info(
-    { sessionId: entry.sessionId, applied, dropped },
+    { sessionId: entry.sessionId, applied, dropped, retained },
     '[acp] replayed per-thread selections onto the resumed session',
   );
 }

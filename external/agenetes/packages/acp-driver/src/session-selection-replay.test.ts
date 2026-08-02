@@ -1,3 +1,4 @@
+import { RequestError } from '@agentclientprotocol/sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -141,15 +142,68 @@ describe('selection replay', () => {
     expect(c.setSessionConfigOption).not.toHaveBeenCalled();
   });
 
-  it('drops a selection the agent rejects instead of retrying it forever', async () => {
+  it('drops a selection the agent refuses instead of retrying it forever', async () => {
     const e = entry({ selections: { model: 'retired-model', mode: 'plan' } });
     const c = e.client as unknown as ReturnType<typeof client>;
-    c.setSessionModel.mockRejectedValue(new Error('unknown model'));
+    // -32602 invalid params: the agent looked at the value and said no.
+    c.setSessionModel.mockRejectedValue(
+      new RequestError(-32602, 'unknown model'),
+    );
 
     await reconcileSessionSelections(e, logger);
 
     expect(e.selections).toEqual({ mode: 'plan' });
     expect(c.setSessionMode).toHaveBeenCalledWith('session_1', 'plan');
+  });
+
+  it('drops a selection whose channel the agent no longer implements', async () => {
+    const e = entry({ selections: { model: 'claude-opus-4.8' } });
+    const c = e.client as unknown as ReturnType<typeof client>;
+    c.setSessionModel.mockRejectedValue(
+      new RequestError(-32601, 'method not found'),
+    );
+
+    await reconcileSessionSelections(e, logger);
+
+    expect(e.selections).toEqual({});
+  });
+
+  it('keeps a selection the agent never got to see', async () => {
+    // A dead socket says nothing about the value. Forgetting it here would
+    // destroy durable user intent over a transport blip.
+    const e = entry({ selections: { model: 'claude-opus-4.8', mode: 'plan' } });
+    const c = e.client as unknown as ReturnType<typeof client>;
+    c.setSessionModel.mockRejectedValue(new Error('ACP connection closed'));
+
+    await reconcileSessionSelections(e, logger);
+
+    expect(e.selections).toEqual({ model: 'claude-opus-4.8', mode: 'plan' });
+  });
+
+  it('keeps a selection the agent failed to apply internally', async () => {
+    // -32603 is a verdict about the call, not about the value.
+    const e = entry({ selections: { model: 'claude-opus-4.8' } });
+    const c = e.client as unknown as ReturnType<typeof client>;
+    c.setSessionModel.mockRejectedValue(
+      new RequestError(-32603, 'internal error'),
+    );
+
+    await reconcileSessionSelections(e, logger);
+
+    expect(e.selections).toEqual({ model: 'claude-opus-4.8' });
+  });
+
+  it('leaves the record untouched when every replay merely failed to land', async () => {
+    const e = entry({ selections: { model: 'claude-opus-4.8' } });
+    const c = e.client as unknown as ReturnType<typeof client>;
+    c.setSessionModel.mockRejectedValue(new Error('ACP connection closed'));
+
+    await reconcileSessionSelections(e, logger);
+
+    // Nothing was applied and nothing was dropped, so there is no state
+    // change to up-report — the next open retries from the same record.
+    expect(e.metaUpdatedAt).toBe(0);
+    expect(e.selectionsUpdatedAt).toBe(0);
   });
 
   it('does nothing when there is no remembered intent', async () => {
