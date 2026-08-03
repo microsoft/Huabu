@@ -504,7 +504,13 @@ async function reconcileSessionSelections(
     );
   }
 
-  for (const [optionId, value] of Object.entries(entry.selections)) {
+  for (const optionId of Object.keys(entry.selections)) {
+    // Re-read each knob at its turn rather than trusting the snapshot this
+    // loop started from: the wait in `awaitSelectionReplay` is bounded, so
+    // a set-RPC can overtake a slow replay, and pushing the pre-click value
+    // here would silently revert the choice the user just made.
+    const value = entry.selections[optionId];
+    if (value === undefined) continue;
     if (agentViewIsLive && agentReportedValue(entry, optionId) === value) {
       continue;
     }
@@ -571,7 +577,9 @@ const SELECTION_REPLAY_WAIT_MS = 3_000;
  * would then sail past and be reverted by the remembered value landing
  * behind it. Once a waiter has returned, later callers go straight
  * through, so a replay slow enough to hit the bound costs one delayed turn
- * rather than a permanently sluggish thread.
+ * rather than a permanently sluggish thread. A set-RPC that overtakes a
+ * timed-out replay this way cannot be reverted by it either, because the
+ * replay re-reads each selection at the moment it pushes it.
  */
 export async function awaitSelectionReplay(
   entry: AcpSessionEntry,

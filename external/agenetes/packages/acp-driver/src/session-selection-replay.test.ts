@@ -287,6 +287,21 @@ describe('selection replay', () => {
     );
   });
 
+  it('pushes the value a set-RPC installed mid-replay, not the stale one', async () => {
+    // The wait in `awaitSelectionReplay` is bounded, so a user's set-RPC can
+    // overtake a slow replay; a value captured before that click would land
+    // behind it and revert the choice.
+    const e = entry({ selections: { mode: 'plan', model: 'claude-opus-4.8' } });
+    const c = e.client as unknown as ReturnType<typeof client>;
+    c.setSessionMode.mockImplementation(async () => {
+      e.selections.model = 'gpt-5.6-sol';
+    });
+
+    await replay(e);
+
+    expect(c.setSessionModel).toHaveBeenCalledWith('session_1', 'gpt-5.6-sol');
+  });
+
   it('does nothing when there is no remembered intent', async () => {
     const e = entry();
 
