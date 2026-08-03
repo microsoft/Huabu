@@ -1,9 +1,9 @@
 /**
  * Storage module — public entry point.
  *
- * Provides the `CanvasStore` factory, workspace-wide canvas listing /
- * creation / deletion, and a small instance cache so repeated lookups
- * don't allocate.
+ * Re-exports the two storage ports and their composition root, the
+ * `CanvasStore` factory, and workspace-wide canvas listing / creation /
+ * deletion.
  */
 
 import { existsSync } from 'node:fs';
@@ -18,7 +18,7 @@ import {
   requireWorldCanvasId,
   suggestCanvasDir,
 } from './canvas-dirs.js';
-import { CanvasStore } from './canvas-store.js';
+import { forgetCanvasStore, getCanvasStore } from './canvas-store-cache.js';
 import { atomicWriteJson, mkdirp, sanitizeId } from './io.js';
 import { toSafeFilename } from './naming.js';
 import { canvasJsonPath, SPACE_JSON_FILENAME } from './paths.js';
@@ -29,11 +29,51 @@ import type { CanvasSummary } from '@sediment/shared';
 
 export { CanvasStore } from './canvas-store.js';
 export { getWorldCanvasId, isWorldCanvasId, requireWorldCanvasId };
+export { getCanvasStore, resetStorageCache } from './canvas-store-cache.js';
 export {
   withCanvasMutex,
   updateNode,
   applyNodeUpdate,
 } from './write-coordinator.js';
+
+// ─── Storage ports and composition ─────────────────────────────────────────
+
+export {
+  canvasBlobs,
+  createStorage,
+  getBlobStore,
+  getStorage,
+  getStructuredStore,
+  initStorage,
+  setStorageForTesting,
+  storageHealth,
+} from './storage.js';
+export type { Storage } from './storage.js';
+export {
+  parseStorageProfile,
+  StorageProfileError,
+  validateStorageProfile,
+} from './profile.js';
+export type { StorageProfile } from './profile.js';
+export { BlobNameError, normalizeBlobName } from './ports/blob.js';
+export type {
+  BlobBackendKind,
+  BlobInfo,
+  BlobLease,
+  BlobPutOptions,
+  BlobRange,
+  BlobRead,
+  BlobScope,
+  BlobScopeRef,
+  BlobStore,
+} from './ports/blob.js';
+export type { StorageHealth } from './ports/common.js';
+export type {
+  SpaceHandle,
+  StructuredBackendKind,
+  StructuredStore,
+} from './ports/structured.js';
+
 export type {
   UpdateNodeOptions,
   UpdateNodeOutcome,
@@ -45,42 +85,6 @@ export type {
   NodeContent,
   NodeContentSummary,
 } from './canvas-store.js';
-
-// ─── Instance cache (LRU-ish, max 16) ───────────────────────────────────────
-
-const MAX_CACHE = 16;
-const cache = new Map<string, CanvasStore>();
-
-function rememberInstance(store: CanvasStore): CanvasStore {
-  cache.delete(store.canvasId);
-  cache.set(store.canvasId, store);
-  if (cache.size > MAX_CACHE) {
-    const firstKey = cache.keys().next().value;
-    if (firstKey !== undefined) cache.delete(firstKey);
-  }
-  return store;
-}
-
-/**
- * Get (or create) the `CanvasStore` for the given canvas id. Instances
- * are cheap; the cache only avoids re-validating ids on hot paths.
- */
-export function getCanvasStore(canvasId: string): CanvasStore {
-  const safeId = sanitizeId(canvasId, 'canvasId');
-  const cached = cache.get(safeId);
-  if (cached) {
-    cache.delete(safeId);
-    cache.set(safeId, cached);
-    return cached;
-  }
-  return rememberInstance(new CanvasStore(safeId));
-}
-
-/** Clear the instance cache. Call on workspace path changes. */
-export function resetStorageCache(): void {
-  cache.clear();
-  refreshCanvasDirIndex();
-}
 
 // ─── Workspace-wide canvas operations ──────────────────────────────────────
 
@@ -193,6 +197,6 @@ export function createCanvas(
 export function deleteCanvas(canvasId: string): boolean {
   const store = getCanvasStore(canvasId);
   const ok = store.destroy();
-  cache.delete(store.canvasId);
+  forgetCanvasStore(store.canvasId);
   return ok;
 }
