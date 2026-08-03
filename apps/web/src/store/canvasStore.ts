@@ -3155,6 +3155,17 @@ const useCanvasStore = create<RFState>()(
                   width: snappedRect.size.width,
                   height: snappedRect.size.height,
                 },
+                // `getNodeSize` resolves `measured` before `style`, and the
+                // ResizeObserver only refreshes it a frame or two after the
+                // DOM has already resized. Leaving it behind would let every
+                // geometry consumer (selection outline, snap engine, frame
+                // rects) trail the live gesture, so keep the pair in lockstep
+                // exactly like `materializeAutoHeight` does.
+                measured: {
+                  ...n.measured,
+                  width: snappedRect.size.width,
+                  height: snappedRect.size.height,
+                },
               }
             : n,
         );
