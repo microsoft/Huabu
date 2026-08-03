@@ -187,6 +187,19 @@ function resolveValue(
     : { currentValue: agentValue, source: 'agent' };
 }
 
+/**
+ * The spellings a fork that serialises booleans as strings uses for off.
+ * Anything else keeps the truthiness of the raw string, so an unlisted
+ * on-word such as `'enabled'` still reads as on.
+ */
+const BOOLEAN_OFF_STRINGS: ReadonlySet<string> = new Set([
+  '',
+  'false',
+  '0',
+  'off',
+  'no',
+]);
+
 /** Build the selector descriptor for one `configOptions` entry. */
 function selectorFromConfigOption(
   raw: unknown,
@@ -203,9 +216,15 @@ function selectorFromConfigOption(
   const selection = selections[id];
 
   if (declaredType === 'boolean') {
+    // Plain truthiness would report the string `'false'` as on.
+    const rawValue = opt.currentValue;
+    const agentValue =
+      typeof rawValue === 'string'
+        ? !BOOLEAN_OFF_STRINGS.has(rawValue.trim().toLowerCase())
+        : Boolean(rawValue);
     const { currentValue, source } = resolveValue(
       selection,
-      Boolean(opt.currentValue),
+      agentValue,
       'boolean',
       [],
     );

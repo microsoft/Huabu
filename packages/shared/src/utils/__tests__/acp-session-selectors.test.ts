@@ -177,6 +177,44 @@ describe('buildAcpSessionSelectors', () => {
     expect(selector.source).toBe('agent');
   });
 
+  it('reads a boolean a fork serialised as a string', () => {
+    // Every non-empty string is truthy, so `'false'` would otherwise
+    // render the pill as on.
+    const [selector] = buildAcpSessionSelectors(
+      source({
+        configOptions: [
+          {
+            id: 'allow_all',
+            name: 'Allow all',
+            type: 'boolean',
+            currentValue: 'false',
+          },
+        ],
+      }),
+    );
+
+    expect(selector.currentValue).toBe(false);
+  });
+
+  it('keeps reading an unlisted on-word as on', () => {
+    // Only the explicit off spellings flip; anything else keeps the raw
+    // string's truthiness, so a fork emitting `'on'` does not regress.
+    const [selector] = buildAcpSessionSelectors(
+      source({
+        configOptions: [
+          {
+            id: 'allow_all',
+            name: 'Allow all',
+            type: 'boolean',
+            currentValue: 'on',
+          },
+        ],
+      }),
+    );
+
+    expect(selector.currentValue).toBe(true);
+  });
+
   it('applies a per-thread selection to a legacy channel', () => {
     const [selector] = buildAcpSessionSelectors(
       source({
