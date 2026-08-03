@@ -73,6 +73,8 @@ A freshly drawn sketch is created **unselected**: `SketchOverlay` passes `select
 
 On pointer-up a new stroke either starts a fresh sketch node or is appended onto the **nearest existing sketch region** within a screen-space proximity threshold ([findMergeTarget](../../apps/web/src/components/Nodes/sketch/sketchMerge.ts), threshold `SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX / zoom`; same parent frame only). Merging is **purely spatial — time plays no role in the boundary**: coming back to write next to an old region still merges into it, so a mid-writing think-pause can never split a line across nodes. It only ever targets one existing region per stroke; merging two existing regions ("bridging") is a later concern. Per-stroke `createdAt` is preserved as intra-region metadata but no longer influences the region boundary; a unified node-level "modified-after-a-gap" provenance is a separate cross-cutting concern (see [sketch-region-redesign proposal](../proposals/sketch-region-redesign.md)).
 
+When a merge expands a sketch region bbox, geometry reads the synchronously authored `style` size before React Flow's asynchronous `measured` echo. Existing stroke coordinates are rebased against that same authoritative size, preventing fractional measurement differences from shifting the region's prior ink.
+
 ### 3.3 Draw and erase controls
 
 Desktop and touch input share `toolStore.sketchDraft` and the same mode/parameter components, but expose the frequent mode switch at different levels:

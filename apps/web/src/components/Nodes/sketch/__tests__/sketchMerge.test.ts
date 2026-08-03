@@ -480,6 +480,60 @@ describe('buildMergeCommands', () => {
     expect(patch.strokes[1].points[0]).toEqual([210, 0]);
   });
 
+  it('preserves world coordinates when an outside stroke expands the bbox past stale measured dimensions', () => {
+    setNodes([
+      {
+        id: 'a',
+        type: 'sketch',
+        position: { x: 100, y: 100 },
+        style: { width: 100.25, height: 50.5 },
+        measured: { width: 100, height: 50 },
+        data: {
+          type: 'sketch',
+          strokes: [
+            {
+              id: 's1',
+              points: [[50, 25]],
+              color: '#000',
+              size: 4,
+              createdAt: NOW,
+            },
+          ],
+          initialSize: { width: 100, height: 50 },
+        },
+      } as unknown as Node,
+    ]);
+
+    const cmds = buildMergeCommands(
+      'a' as never,
+      null,
+      [[0, 0]],
+      { x: 90, y: 90, width: 5, height: 5 },
+      '#000',
+      4,
+      NOW,
+      'n',
+    );
+    const merge = cmds[0] as Extract<
+      (typeof cmds)[number],
+      { type: 'MERGE_NODE_DATA' }
+    >;
+    const geometry = cmds[1] as Extract<
+      (typeof cmds)[number],
+      { type: 'SET_NODE_GEOMETRY' }
+    >;
+    const patch = merge.patches[0].patch as {
+      strokes: Array<{ points: number[][] }>;
+    };
+
+    const mergedOrigin = geometry.items[0].position;
+    const bakedPoint = patch.strokes[0].points[0];
+    expect(mergedOrigin).toBeDefined();
+    if (!mergedOrigin) throw new Error('Expected merged geometry position');
+    expect(mergedOrigin.x + bakedPoint[0]).toBeCloseTo(150.125, 10);
+    expect(mergedOrigin.y + bakedPoint[1]).toBeCloseTo(125.25, 10);
+  });
+
   it('preserves the third (pressure) tuple component on baked points', () => {
     setNodes([
       makeSketch({

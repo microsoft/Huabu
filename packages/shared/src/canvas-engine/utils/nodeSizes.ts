@@ -168,11 +168,13 @@ export function getLayoutNodeSize(node: Node): { w: number; h: number } {
  * (persisted `CanvasNode`, which is structurally the same ReactFlow node).
  * The priority chain is a superset that each side self-selects from, so no
  * per-side conversion is needed:
- *   `measured` → `node.width` → `style.{width,height}` → `initialSize` → 0.
- * The web renderer writes size into `measured` / `node.width`; the canvas
- * engine persists it into `style` (which may be a `"420px"`-style string,
- * parsed here). Whichever fields a given runtime does not populate are
- * simply `undefined` and skipped.
+ *   `style.{width,height}` → `measured` → `node.width` → `initialSize` → 0.
+ * Explicit sketch geometry is authored synchronously into `style`; React
+ * Flow's measured size is an asynchronous DOM echo that can lag or round by a
+ * fraction of a pixel. Using that stale value while rebasing strokes would
+ * bake a visible micro-shift into every existing point. Persisted CSS-length
+ * strings (for example `"420px"`) are parsed here. Whichever fields a given
+ * runtime does not populate are simply `undefined` and skipped.
  */
 export function getSketchRenderedSize(node: Node): {
   width: number;
@@ -189,15 +191,15 @@ export function getSketchRenderedSize(node: Node): {
     | undefined;
 
   const width =
+    parseDimension(style?.width) ??
     parseDimension(measured?.width) ??
     parseDimension(node.width) ??
-    parseDimension(style?.width) ??
     data?.initialSize?.width ??
     0;
   const height =
+    parseDimension(style?.height) ??
     parseDimension(measured?.height) ??
     parseDimension(node.height) ??
-    parseDimension(style?.height) ??
     data?.initialSize?.height ??
     0;
 

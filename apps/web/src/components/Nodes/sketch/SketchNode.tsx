@@ -3,6 +3,7 @@ import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveAccent } from '@sediment/shared';
+import { getSketchRenderedSize } from '@sediment/shared/canvas-engine';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { MissingFileBanner } from '@/components/Nodes/MissingFileBanner';
@@ -56,8 +57,20 @@ const StrokePath = memo(function StrokePath({
 export const SketchNode = memo(
   ({ id, data, selected, width, height }: NodeProps<SketchNodeType>) => {
     const { t } = useTranslation();
-    const w = width ?? data.initialSize?.width ?? 1;
-    const h = height ?? data.initialSize?.height ?? 1;
+    // The explicit `style` size is the store's synchronous source of truth for
+    // sizing: `SET_NODE_GEOMETRY` writes it, and a live resize mirrors onto it
+    // in the same `set`. The `width`/`height` props are the *measured* size,
+    // which lags a frame behind a programmatic resize. Reading the measured
+    // size here made a stroke-merge that grows the bbox briefly render every
+    // stroke at `oldMeasured / newInitialSize` ≠ 1 — a one-frame jitter of the
+    // whole sketch. Preferring `style` keeps the render scale in lockstep with
+    // the merge's geometry + initialSize update.
+    const storeNode = useCanvasStore((s) => s.nodes.find((n) => n.id === id));
+    const renderedSize = storeNode
+      ? getSketchRenderedSize(storeNode)
+      : { width: 0, height: 0 };
+    const w = renderedSize.width || width || data.initialSize?.width || 1;
+    const h = renderedSize.height || height || data.initialSize?.height || 1;
     const scaleX = w / (data.initialSize?.width || 1);
     const scaleY = h / (data.initialSize?.height || 1);
     const isContentMissing = data.contentMissing === true;

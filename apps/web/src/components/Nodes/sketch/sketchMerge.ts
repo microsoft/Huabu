@@ -215,8 +215,8 @@ export function buildMergeCommands(
   const data = node.data as CanvasSketchNodeData;
   const baseW = data.initialSize?.width || 1;
   const baseH = data.initialSize?.height || 1;
-  // Single source of truth for the rendered size (measured -> node.width ->
-  // style -> initialSize), so this stays in sync with the hit-test that
+  // Single source of truth for the rendered size (style -> measured ->
+  // node.width -> initialSize), so this stays in sync with the hit-test that
   // selected this node as the merge target. Falls back to the baked base
   // size only for a degenerate node with no size info at all.
   const rendered = getSketchRenderedSize(node);
@@ -375,8 +375,8 @@ export function computeEraseCommands(
 
   const baseW = data.initialSize?.width || 1;
   const baseH = data.initialSize?.height || 1;
-  // Same rendered-size source as the hit-test (measured -> node.width ->
-  // style -> initialSize) so erase geometry matches what was tested.
+  // Same rendered-size source as the hit-test (style -> measured ->
+  // node.width -> initialSize) so erase geometry matches what was tested.
   const rendered = getSketchRenderedSize(node);
   const curW = rendered.width || baseW;
   const curH = rendered.height || baseH;
@@ -479,8 +479,8 @@ export function buildMoveStrokesCommands(
 
   const baseW = data.initialSize?.width || 1;
   const baseH = data.initialSize?.height || 1;
-  // Same rendered-size source as the hit-test (measured -> node.width ->
-  // style -> initialSize) so move geometry matches what was tested.
+  // Same rendered-size source as the hit-test (style -> measured ->
+  // node.width -> initialSize) so move geometry matches what was tested.
   const rendered = getSketchRenderedSize(node);
   const curW = rendered.width || baseW;
   const curH = rendered.height || baseH;
@@ -572,13 +572,13 @@ export function buildMoveStrokesCommands(
 // and destination share a parent the offsets cancel and this reduces to the
 // same math the in-node builders use.
 
-/** Current render scale of a sketch node (measured size ÷ baked initialSize). */
+/** Current render scale of a sketch node (authored size ÷ baked initialSize). */
 function sketchNodeScale(node: Node): { scaleX: number; scaleY: number } {
   const data = node.data as CanvasSketchNodeData;
   const baseW = data.initialSize?.width || 1;
   const baseH = data.initialSize?.height || 1;
-  // Same rendered-size source as the hit-test (measured -> node.width ->
-  // style -> initialSize) so cross-region transfer geometry matches.
+  // Same rendered-size source as the hit-test (style -> measured ->
+  // node.width -> initialSize) so cross-region transfer geometry matches.
   const rendered = getSketchRenderedSize(node);
   const curW = rendered.width || baseW;
   const curH = rendered.height || baseH;

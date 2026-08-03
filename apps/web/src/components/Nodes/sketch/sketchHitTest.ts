@@ -70,8 +70,8 @@ function sketchFlowTransform(
 } {
   const baseW = data.initialSize?.width || 1;
   const baseH = data.initialSize?.height || 1;
-  // Single source of truth for the rendered size (measured -> node.width ->
-  // style -> initialSize). Keeps every hit-test / bounds helper aligned with
+  // Single source of truth for the rendered size (style -> measured ->
+  // node.width -> initialSize). Keeps every hit-test / bounds helper aligned with
   // the geometry builders in sketchMerge; falls back to the baked base size
   // only for a degenerate node with no size info at all.
   const rendered = getSketchRenderedSize(node);
