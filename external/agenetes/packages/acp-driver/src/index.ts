@@ -91,7 +91,12 @@ export {
   _resetSpawnOrchestratorForTests,
 } from './spawn-orchestrator.js';
 
-export { ensureAcpSession, setAcpProfileCachePort } from './session.js';
+export {
+  MODE_SELECTION_ID,
+  MODEL_SELECTION_ID,
+  ensureAcpSession,
+  setAcpProfileCachePort,
+} from './session.js';
 export type {
   EnsureAcpSessionOptions,
   AcpProfileCachePort,

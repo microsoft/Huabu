@@ -233,9 +233,24 @@ export function useChatHistory(
     const lastMsg = msgs[msgs.length - 1];
     if (lastMsg.role !== 'user' && lastMsg.role !== 'intent-select') return;
 
+    // This client already owns a live consumer for the thread — either the
+    // POST stream `startStream` opened for the message just sent, or an
+    // earlier reconnect that is still pumping. Attaching a second consumer
+    // would replay the same in-flight turn under a fresh `assistantId` and
+    // render the answer twice. `loadingThreadIds` is never persisted, so a
+    // page refresh (the case this reconnect exists for) still passes.
+    //
+    // The window matters most right after a send: the assistant message
+    // does not exist until the first event, so `lastMsg` stays `user` for
+    // the whole lead time — seconds on a resumed ACP session, during which
+    // any re-render that changes `effectiveConversationView` (e.g.
+    // re-opening the same question thread) re-runs this effect.
+    if (useChatStore.getState().loadingThreadIds.has(threadId)) return;
+
     let cancelled = false;
     const ownerThreadId = threadId;
     const ownerView = effectiveConversationView;
+    const abortController = new AbortController();
 
     const tryReconnect = async () => {
       if (ownerView) {
@@ -395,6 +410,7 @@ export function useChatHistory(
             });
           },
         },
+        abortController.signal,
       );
 
       if (connected && !cancelled) {
@@ -406,6 +422,9 @@ export function useChatHistory(
 
     return () => {
       cancelled = true;
+      // Release the HTTP stream (and the server-side tail behind it) so a
+      // superseded attempt doesn't keep draining the run's event log.
+      abortController.abort();
     };
   }, [
     isHistoryLoaded,

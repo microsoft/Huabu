@@ -170,8 +170,31 @@ export interface AcpSessionEntry {
    * publishes four: model / mode / thought-level / auto-approve).
    * Updated wholesale by `config_option_update` notifications and
    * also returned by `setSessionConfigOption`.
+   *
+   * Carries the AGENT's view of each knob. Copilot CLI reports its
+   * process-global user setting here, so `currentValue` is NOT a
+   * per-thread answer — see {@link AcpSessionEntry.selections}.
    */
   configOptions: AcpSessionConfigOption[];
+  /**
+   * Explicit user selections for THIS thread, keyed by config-option id
+   * (`mode` / `model` / agent-defined ids like `allow_all`).
+   *
+   * Written only by a successful set-RPC, never by an agent push, so it
+   * survives the global broadcasts that overwrite `configOptions` and
+   * `current*`. Authoritative for display and replayed onto the agent
+   * when the session is resumed.
+   */
+  selections: Record<string, string | boolean>;
+  /** Epoch ms the selection map was last written by a set-RPC. */
+  selectionsUpdatedAt: number;
+  /**
+   * The in-flight replay of {@link AcpSessionEntry.selections} onto the
+   * agent, or `null` once nothing is pending. Anything that must not
+   * overtake it — a turn's `session/prompt`, a user's set-RPC — waits on it
+   * through `awaitSelectionReplay`.
+   */
+  selectionsReplay: Promise<void> | null;
   /**
    * Last `session_info_update` payload — title + activity stamp.
    * `null` until the agent pushes one.

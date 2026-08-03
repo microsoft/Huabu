@@ -45,7 +45,11 @@ import { AcpServiceError } from './errors.js';
 import { applyToolExt } from './overlay.js';
 import { acpSessionRegistry } from './session-registry.js';
 import {
+  MODEL_SELECTION_ID,
+  MODE_SELECTION_ID,
+  awaitSelectionReplay,
   ensureAcpSession,
+  recordSessionSelection,
   registerAcpStateListener,
   reportEntryState,
 } from './session.js';
@@ -451,6 +455,14 @@ export class AcpAgentHandle<
     // on the generator's first `next()` exactly as before.
     const entry = await this.ensureSession(logger);
 
+    // If this call is what opened the session, it also kicked off the replay
+    // of the thread's remembered mode / model / config knobs. Prompting
+    // before that lands runs the turn under whatever defaults the agent
+    // booted with — precisely what the replay exists to prevent — so let it
+    // finish first. Bounded inside, so an unresponsive agent delays this
+    // turn rather than hanging it.
+    await awaitSelectionReplay(entry);
+
     if (signal?.aborted) return;
 
     // Fire an initial up-report (I9.7) now that the entry is resolved and
@@ -692,17 +704,27 @@ export class AcpAgentHandle<
           await client.cancel(sessionId);
           return { ok: true };
         case 'set_mode':
+          await awaitSelectionReplay(entry);
           await client.setSessionMode(sessionId, msg.data.modeId);
+          recordSessionSelection(entry, MODE_SELECTION_ID, msg.data.modeId);
           return { ok: true };
         case 'set_model':
+          await awaitSelectionReplay(entry);
           await client.setSessionModel(sessionId, msg.data.modelId);
+          recordSessionSelection(entry, MODEL_SELECTION_ID, msg.data.modelId);
           return { ok: true };
         case 'set_config_option':
+          // Let the replay drain first (`cancel` and `answer_permission`
+          // deliberately do not): it may still be pushing this thread's
+          // remembered value for the very knob being set, and arriving
+          // after this call would revert the user's fresh choice.
+          await awaitSelectionReplay(entry);
           await client.setSessionConfigOption(
             sessionId,
             msg.data.optionId,
             msg.data.value,
           );
+          recordSessionSelection(entry, msg.data.optionId, msg.data.value);
           return { ok: true };
         case 'answer_permission': {
           const matched = client.resolvePermission(

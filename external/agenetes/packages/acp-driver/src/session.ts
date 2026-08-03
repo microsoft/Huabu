@@ -28,6 +28,7 @@
  */
 
 import { getAgentletGateway } from '@agenetes/agentlet-host';
+import { RequestError } from '@agentclientprotocol/sdk';
 
 import { AcpAgentClient } from './client.js';
 import { AcpServiceError } from './errors.js';
@@ -264,6 +265,8 @@ function snapshotEntryMeta(entry: AcpSessionEntry): AgentMetadata {
     availableModels: entry.availableModels,
     currentModelId: entry.currentModelId,
     configOptions: entry.configOptions,
+    selections: entry.selections,
+    selectionsUpdatedAt: entry.selectionsUpdatedAt,
     sessionInfo: entry.sessionInfo,
     usage: entry.usage,
     metaUpdatedAt: entry.metaUpdatedAt,
@@ -293,6 +296,312 @@ export function snapshotEntryState(
     },
     metadata: snapshotEntryMeta(entry),
   };
+}
+
+/**
+ * Config-option ids that also have a dedicated legacy ACP field
+ * (`session/setSessionMode` / `session/setSessionModel`). Agents that
+ * publish a `category: 'mode' | 'model'` config option address the same
+ * knob through both channels, so we key both onto one selection id.
+ */
+export const MODE_SELECTION_ID = 'mode';
+export const MODEL_SELECTION_ID = 'model';
+
+/**
+ * Record an explicit user selection for this thread and up-report it.
+ *
+ * The only writer of {@link AcpSessionEntry.selections}. Agent pushes
+ * deliberately never reach it: for agents whose config options are
+ * process-global (Copilot CLI), a broadcast would otherwise replace the
+ * user's per-thread choice with "whatever was picked last, anywhere".
+ */
+export function recordSessionSelection(
+  entry: AcpSessionEntry,
+  optionId: string,
+  value: string | boolean,
+): void {
+  entry.selections[optionId] = value;
+  entry.selectionsUpdatedAt = Date.now();
+  if (typeof value === 'string') {
+    if (optionId === MODE_SELECTION_ID) entry.currentModeId = value;
+    else if (optionId === MODEL_SELECTION_ID) entry.currentModelId = value;
+  }
+  entry.metaUpdatedAt = entry.selectionsUpdatedAt;
+  reportEntryState(entry);
+}
+
+/**
+ * Restore this thread's remembered selections onto a fresh entry.
+ *
+ * Deliberately unconditional, unlike {@link hydrateEntryFromPersistedMeta}:
+ * that one is gated on `metaUpdatedAt === 0` so a live agent push wins over
+ * a stale snapshot, but the gate closes the moment the agent's bootstrap
+ * `config_option_update` drains — which it always does, synchronously, when
+ * the session listener is installed. Selections are user intent that no
+ * agent push can supersede, so they must survive that race.
+ *
+ * Only `selections` itself is touched: `currentModeId` / `currentModelId`
+ * keep carrying the agent's own view so {@link reconcileSessionSelections}
+ * can still tell whether the agent already agrees.
+ */
+function hydrateSelectionsFromPersistedMeta(
+  entry: AcpSessionEntry,
+  meta: AgentMetadata | undefined,
+): void {
+  if (!meta?.selections) return;
+  entry.selections = { ...meta.selections };
+  entry.selectionsUpdatedAt = meta.selectionsUpdatedAt ?? 0;
+}
+
+/** @internal Exported for tests. */
+export { hydrateSelectionsFromPersistedMeta };
+
+/** The value the agent currently reports for one selectable knob. */
+function agentReportedValue(
+  entry: AcpSessionEntry,
+  optionId: string,
+): string | boolean | undefined {
+  const option = entry.configOptions.find(
+    (o) => String((o as { id?: unknown }).id ?? '') === optionId,
+  );
+  if (option) {
+    return (option as { currentValue?: string | boolean }).currentValue;
+  }
+  if (optionId === MODE_SELECTION_ID) return entry.currentModeId ?? undefined;
+  if (optionId === MODEL_SELECTION_ID) return entry.currentModelId ?? undefined;
+  return undefined;
+}
+
+/** Route one selection to the channel the agent actually publishes it on. */
+function applySelectionToAgent(
+  entry: AcpSessionEntry,
+  optionId: string,
+  value: string | boolean,
+): Promise<unknown> {
+  const publishedAsConfigOption = entry.configOptions.some(
+    (o) => String((o as { id?: unknown }).id ?? '') === optionId,
+  );
+  if (!publishedAsConfigOption && typeof value === 'string') {
+    if (optionId === MODE_SELECTION_ID) {
+      return entry.client.setSessionMode(entry.sessionId, value);
+    }
+    if (optionId === MODEL_SELECTION_ID) {
+      return entry.client.setSessionModel(entry.sessionId, value);
+    }
+  }
+  return entry.client.setSessionConfigOption(entry.sessionId, optionId, value);
+}
+
+/**
+ * JSON-RPC codes on which a replayed selection is permanently unusable and
+ * may therefore be forgotten:
+ *
+ *   • `-32601 method not found` — the agent dropped the channel entirely, so
+ *     this knob can never be set again on this binding;
+ *   • `-32602 invalid params` — the agent refused the value itself, which is
+ *     what a model id retired by an agent upgrade looks like.
+ *
+ * Every other code is a verdict about the *call*, not the value: `-32603`
+ * is an agent-side internal failure and server-defined codes are opaque.
+ */
+const UNUSABLE_SELECTION_RPC_CODES: ReadonlySet<number> = new Set([
+  -32601, -32602,
+]);
+
+/**
+ * Whether a failed replay proves the remembered value is unusable, as
+ * opposed to merely undeliverable right now.
+ *
+ * The SDK makes this a clean split: an error *response* from the agent is
+ * rejected as a {@link RequestError} carrying the agent's JSON-RPC code,
+ * while a closed connection, a dead transport or a client-side guard
+ * rejects with a plain `Error`. Only the former says anything about the
+ * value we tried to set.
+ */
+function isSelectionUnusable(err: unknown): boolean {
+  return (
+    err instanceof RequestError && UNUSABLE_SELECTION_RPC_CODES.has(err.code)
+  );
+}
+
+/**
+ * Whether a config option has taken over one of the reserved legacy keys.
+ *
+ * Renderers decide that a config option covers the mode / model knob by its
+ * `category`, not its id, so the moment an agent publishes
+ * `{ id: 'model_id', category: 'model' }` the synthesised legacy pill
+ * disappears from the toolbar. A `selections.model` recorded before that
+ * upgrade then becomes unreachable: invisible in the UI, yet still replayed
+ * through `setSessionModel` on every open — overriding whatever the user
+ * picks in the config-option pill that replaced it.
+ */
+function shadowedByConfigOption(
+  entry: AcpSessionEntry,
+  selectionId: string,
+): boolean {
+  return entry.configOptions.some((raw) => {
+    const option = raw as { id?: unknown; category?: unknown };
+    // Same id means this IS the knob, addressed through the modern channel.
+    if (String(option.id ?? '') === selectionId) return false;
+    return normalizeSelectionKey(option.category) === selectionId;
+  });
+}
+
+const normalizeSelectionKey = (value: unknown): string =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase();
+
+/**
+ * Replay this thread's selections onto a freshly opened session.
+ *
+ * Resume restores the user's intent locally, but the agent knows nothing
+ * about it — for agents with process-global config options it starts the
+ * session on whatever was picked last in some other thread. Without this
+ * the persisted `allow_all` is remembered yet never honoured, and the
+ * first prompt runs under the wrong model.
+ *
+ * `agentViewIsLive` says whether the entry's agent-reported fields
+ * (`currentModeId` / `currentModelId` / `configOptions[].currentValue`)
+ * were established by this session's own traffic. They are NOT a reliable
+ * mirror of the agent whenever they came off disk instead:
+ * `recordSessionSelection` copies a mode/model pick onto `current*`, and
+ * the agent echoes a config-option pick back as `currentValue`, so the
+ * persisted snapshot contains the USER's last choice wearing the agent's
+ * clothes. Diffing against that concludes "the agent already agrees" about
+ * a fresh agent still sitting on its defaults, and skips the one push that
+ * mattered. So the shortcut is only taken when the view is live; otherwise
+ * every remembered knob is pushed, which is idempotent and off the
+ * critical path.
+ *
+ * Fire-and-forget: a knob the agent cannot accept must not block the first
+ * prompt. A value the agent *rejects* (see {@link isSelectionUnusable}) is
+ * forgotten so a retired model id cannot wedge the thread on every open;
+ * a value that merely failed to reach the agent is kept, because the
+ * selection is durable user intent and a dead socket is no reason to
+ * destroy it. A reserved key a config option has taken over is forgotten
+ * up front (see {@link shadowedByConfigOption}), since replaying it would
+ * fight the pill that replaced it.
+ */
+async function reconcileSessionSelections(
+  entry: AcpSessionEntry,
+  logger: AcpSessionLogger,
+  { agentViewIsLive }: { agentViewIsLive: boolean },
+): Promise<void> {
+  let dropped = false;
+  let applied = 0;
+  let retained = 0;
+  let shadowed = 0;
+
+  for (const reserved of [MODE_SELECTION_ID, MODEL_SELECTION_ID]) {
+    if (!(reserved in entry.selections)) continue;
+    if (!shadowedByConfigOption(entry, reserved)) continue;
+    delete entry.selections[reserved];
+    shadowed += 1;
+    logger.info(
+      { sessionId: entry.sessionId, optionId: reserved },
+      '[acp] forgot a legacy selection a config option now owns',
+    );
+  }
+
+  for (const optionId of Object.keys(entry.selections)) {
+    // Re-read each knob at its turn rather than trusting the snapshot this
+    // loop started from: the wait in `awaitSelectionReplay` is bounded, so
+    // a set-RPC can overtake a slow replay, and pushing the pre-click value
+    // here would silently revert the choice the user just made.
+    const value = entry.selections[optionId];
+    if (value === undefined) continue;
+    if (agentViewIsLive && agentReportedValue(entry, optionId) === value) {
+      continue;
+    }
+    try {
+      await applySelectionToAgent(entry, optionId, value);
+      applied += 1;
+    } catch (err) {
+      const detail = {
+        sessionId: entry.sessionId,
+        optionId,
+        ...(err instanceof RequestError ? { rpcCode: err.code } : {}),
+        err: err instanceof Error ? err.message : String(err),
+      };
+      if (!isSelectionUnusable(err)) {
+        retained += 1;
+        logger.warn(
+          detail,
+          '[acp] selection replay failed; keeping it for the next open',
+        );
+        continue;
+      }
+      delete entry.selections[optionId];
+      dropped = true;
+      logger.warn(detail, '[acp] dropped a selection the agent rejected');
+    }
+  }
+  const forgot = dropped || shadowed > 0;
+  if (applied === 0 && !forgot) return;
+  if (forgot) entry.selectionsUpdatedAt = Date.now();
+  entry.metaUpdatedAt = Date.now();
+  reportEntryState(entry);
+  logger.info(
+    { sessionId: entry.sessionId, applied, dropped, retained, shadowed },
+    '[acp] replayed per-thread selections onto the resumed session',
+  );
+}
+
+/** @internal Exported for tests. */
+export { reconcileSessionSelections };
+
+/**
+ * How long a caller will wait for the selection replay before giving up on
+ * it. The replay is one round-trip per remembered knob, so this only bites
+ * when the agent is unresponsive — and then proceeding on stale settings
+ * beats hanging the turn on an agent that may never answer.
+ */
+const SELECTION_REPLAY_WAIT_MS = 3_000;
+
+/**
+ * Let the session's selection replay finish before acting on the agent.
+ *
+ * Session open is lazy, so the replay is kicked off by the very turn that
+ * needs it and races the `session/prompt` that follows. The first knob is
+ * written to the wire before open returns, but the loop is sequential, so
+ * every later knob would otherwise land after the prompt — the first turn
+ * of a resumed thread runs on the wrong model, or without the auto-approve
+ * the user set. A user set-RPC has the mirrored problem: the replay's
+ * remembered value could overwrite the choice the user just made.
+ *
+ * Waiting is bounded. The bound is released only once the first waiter is
+ * through: a caller that arrives while another is still waiting must wait
+ * too, or the guarantee evaporates for exactly the case it exists for —
+ * `run()` holding the prompt while the user clicks a pill, whose set-RPC
+ * would then sail past and be reverted by the remembered value landing
+ * behind it. Once a waiter has returned, later callers go straight
+ * through, so a replay slow enough to hit the bound costs one delayed turn
+ * rather than a permanently sluggish thread. A set-RPC that overtakes a
+ * timed-out replay this way cannot be reverted by it either, because the
+ * replay re-reads each selection at the moment it pushes it.
+ */
+export async function awaitSelectionReplay(
+  entry: AcpSessionEntry,
+): Promise<void> {
+  const pending = entry.selectionsReplay;
+  if (!pending) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      pending,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, SELECTION_REPLAY_WAIT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    // Cleared here, not on entry: clearing before the await would let a
+    // concurrent caller read `null` and overtake the very replay this call
+    // is waiting on. Callers overlapping the first waiter each arm their
+    // own bound, which is still bounded.
+    entry.selectionsReplay = null;
+  }
 }
 
 /**
@@ -623,6 +932,9 @@ async function ensureAcpSessionInner(
     availableModels: [],
     currentModelId: null,
     configOptions: [],
+    selections: {},
+    selectionsUpdatedAt: 0,
+    selectionsReplay: null,
     sessionInfo: null,
     usage: null,
     metaUpdatedAt: 0,
@@ -649,6 +961,11 @@ async function ensureAcpSessionInner(
     logger,
   );
 
+  // Unconditional, and before the listener: the agent's bootstrap push
+  // would otherwise close the `metaUpdatedAt === 0` gate below and strand
+  // the user's remembered choices.
+  hydrateSelectionsFromPersistedMeta(created, priorState?.metadata);
+
   // Installing the listener synchronously drains Gateway pre-attach messages
   // that AcpAgentClient retained as orphan updates during construction.
   client.registerSessionListener(sessionId, (update) => {
@@ -659,8 +976,15 @@ async function ensureAcpSessionInner(
   // server lifetime), use it as a fallback seed — it may carry
   // modes/models/configOptions that the agent doesn't re-push after
   // bootstrap.
+  //
+  // Doing so also means the entry's agent-reported fields are now a disk
+  // copy of the user's own last choice rather than anything this agent
+  // said, which `reconcileSessionSelections` must not mistake for
+  // agreement — hence the flag.
+  let agentViewIsLive = true;
   if (priorState?.metadata && created.metaUpdatedAt === 0) {
     hydrateEntryFromPersistedMeta(created, priorState.metadata);
+    agentViewIsLive = false;
     logger.info(
       {
         threadId,
@@ -696,6 +1020,24 @@ async function ensureAcpSessionInner(
   }
 
   acpSessionRegistry.set(agentletId, threadId, created);
+
+  // Push the restored intent back onto the agent. Not awaited here: a slow
+  // agent must not delay session open itself. The handle waits on this
+  // before the turn's prompt and before any user set-RPC, so nothing
+  // overtakes it. Errors are handled per-selection inside; the catch only
+  // guards against an unexpected throw so awaiting is always safe.
+  created.selectionsReplay = reconcileSessionSelections(created, logger, {
+    agentViewIsLive,
+  }).catch((err: unknown) => {
+    logger.warn(
+      {
+        threadId,
+        sessionId,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      '[acp] selection replay aborted',
+    );
+  });
 
   // The durable record is refreshed via the up-report channel (I9.7): the
   // owning handle installs `reportState` on this entry the moment it

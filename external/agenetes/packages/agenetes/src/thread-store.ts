@@ -75,7 +75,11 @@ export class FileThreadStore implements ThreadStore {
     throw new AgenetesError('invalid_persisted_record', message, details);
   }
 
-  #parseRecord(threadId: string, raw: unknown): ThreadRecord {
+  #parseRecord(
+    namespace: Namespace,
+    threadId: string,
+    raw: unknown,
+  ): ThreadRecord {
     if (!raw || typeof raw !== 'object') {
       return this.#invalid(`invalid persisted record '${threadId}'`);
     }
@@ -109,9 +113,31 @@ export class FileThreadStore implements ThreadStore {
     }
     return {
       driverSchemaVersion: value.driverSchemaVersion as number,
-      spec: parsedSpec.data,
+      spec: {
+        ...parsedSpec.data,
+        namespace: {
+          name: parsedSpec.data.namespace.name,
+          ...(namespace.storage ? { storage: namespace.storage } : {}),
+        },
+      },
       state: parsedState.data,
     };
+  }
+
+  #writeFile(namespace: Namespace, file: ThreadStoreFile): void {
+    const records = Object.fromEntries(
+      Object.entries(file.records).map(([threadId, record]) => [
+        threadId,
+        {
+          ...record,
+          spec: {
+            ...record.spec,
+            namespace: { name: record.spec.namespace.name },
+          },
+        },
+      ]),
+    );
+    atomicWriteJson(this.#path(namespace), { ...file, records });
   }
 
   #readFile(namespace: Namespace): ThreadStoreFile {
@@ -143,7 +169,7 @@ export class FileThreadStore implements ThreadStore {
     for (const [threadId, record] of Object.entries(
       value.records as Record<string, unknown>,
     )) {
-      records[threadId] = this.#parseRecord(threadId, record);
+      records[threadId] = this.#parseRecord(namespace, threadId, record);
     }
     return { schemaVersion: THREAD_STORE_SCHEMA_VERSION, records };
   }
@@ -152,7 +178,7 @@ export class FileThreadStore implements ThreadStore {
     sanitizeId(threadId, 'threadId');
     const file = this.#readFile(namespace);
     file.records[threadId] = record;
-    atomicWriteJson(this.#path(namespace), file);
+    this.#writeFile(namespace, file);
   }
 
   get(namespace: Namespace, threadId: string): ThreadRecord | undefined {
@@ -167,6 +193,6 @@ export class FileThreadStore implements ThreadStore {
     const file = this.#readFile(namespace);
     if (!(threadId in file.records)) return;
     delete file.records[threadId];
-    atomicWriteJson(this.#path(namespace), file);
+    this.#writeFile(namespace, file);
   }
 }

@@ -81,6 +81,7 @@ const meta: AcpSessionMetaSnapshot = {
       options: modeOptions,
     },
   ],
+  selections: {},
   sessionInfo: null,
   usage: null,
   updatedAt: 0,
@@ -230,5 +231,117 @@ describe('AcpSessionSelectors full-access confirmation', () => {
     expect(document.body.textContent).not.toContain(
       'chat.fullAccessConfirmTitle',
     );
+  });
+});
+
+describe('AcpSessionSelectors channel routing', () => {
+  const render = (
+    snapshot: AcpSessionMetaSnapshot,
+    handlers: {
+      onSelectMode?: () => void;
+      onSelectModel?: () => void;
+      onSelectConfigOption?: () => void;
+    },
+  ) => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root?.render(
+        <AcpSessionSelectors
+          meta={snapshot}
+          onSelectMode={handlers.onSelectMode ?? vi.fn()}
+          onSelectModel={handlers.onSelectModel ?? vi.fn()}
+          onSelectConfigOption={handlers.onSelectConfigOption ?? vi.fn()}
+        />,
+      );
+    });
+  };
+
+  it('routes a legacy model pill through the model set-RPC', () => {
+    const onSelectModel = vi.fn();
+    render(
+      {
+        ...meta,
+        configOptions: [],
+        availableModels: [
+          { modelId: 'sonnet', name: 'Sonnet' },
+          { modelId: 'opus', name: 'Opus' },
+        ],
+        currentModelId: 'sonnet',
+      } as AcpSessionMetaSnapshot,
+      { onSelectModel },
+    );
+
+    const select = document.querySelector<HTMLSelectElement>(
+      'select[aria-label="chat.model"]',
+    );
+    expect(select).not.toBeNull();
+    act(() => {
+      if (!select) return;
+      select.value = 'opus';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(onSelectModel).toHaveBeenCalledWith('opus');
+  });
+
+  it('shows the per-thread selection instead of the agent-reported value', () => {
+    render(
+      {
+        ...meta,
+        configOptions: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'sonnet',
+            options: [
+              { name: 'Sonnet', value: 'sonnet' },
+              { name: 'Haiku', value: 'haiku' },
+            ],
+          },
+        ],
+        selections: { model: 'haiku' },
+      } as AcpSessionMetaSnapshot,
+      {},
+    );
+
+    const select = document.querySelector<HTMLSelectElement>(
+      'select[aria-label="Model"]',
+    );
+    expect(select?.value).toBe('haiku');
+  });
+
+  it('renders a boolean config option as an on/off pill', () => {
+    const onSelectConfigOption = vi.fn();
+    render(
+      {
+        ...meta,
+        configOptions: [
+          {
+            id: 'allow_all',
+            name: 'Allow all',
+            category: 'permissions',
+            type: 'boolean',
+            currentValue: false,
+          },
+        ],
+      } as AcpSessionMetaSnapshot,
+      { onSelectConfigOption },
+    );
+
+    const select = document.querySelector<HTMLSelectElement>(
+      'select[aria-label="Allow all"]',
+    );
+    expect(select?.value).toBe('false');
+    act(() => {
+      if (!select) return;
+      select.value = 'true';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(onSelectConfigOption).toHaveBeenCalledWith('allow_all', true);
   });
 });

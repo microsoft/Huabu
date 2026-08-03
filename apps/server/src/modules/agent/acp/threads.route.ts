@@ -206,6 +206,7 @@ function snapshotSessionMeta(entry: AcpSessionEntry): AcpSessionMetaSnapshot {
     availableModels: entry.availableModels,
     currentModelId: entry.currentModelId,
     configOptions: entry.configOptions,
+    selections: entry.selections,
     sessionInfo: entry.sessionInfo,
     usage: entry.usage,
     updatedAt: entry.metaUpdatedAt,
@@ -220,6 +221,7 @@ function emptySessionMetaSnapshot(): AcpSessionMetaSnapshot {
     availableModels: [],
     currentModelId: null,
     configOptions: [],
+    selections: {},
     sessionInfo: null,
     usage: null,
     updatedAt: 0,
@@ -242,6 +244,7 @@ function snapshotMetaFromPersisted(
     availableModels: meta.availableModels ?? [],
     currentModelId: meta.currentModelId ?? null,
     configOptions: meta.configOptions ?? [],
+    selections: meta.selections ?? {},
     sessionInfo: meta.sessionInfo ?? null,
     usage: meta.usage ?? null,
     updatedAt: meta.metaUpdatedAt ?? 0,
@@ -254,6 +257,9 @@ function snapshotMetaFromPersisted(
  * fields (catalogues) and last-known defaults (`current*`) are
  * preserved; per-session fields (`sessionInfo`, `usage`) default to
  * neutral values because they're not profile-scoped.
+ *
+ * `selections` stays empty for the same reason: a user choice belongs to
+ * one thread and must never leak across threads of the same profile.
  */
 function snapshotMetaFromProfileCache(
   entry: AcpProfileSchemaCacheEntry,
@@ -264,6 +270,7 @@ function snapshotMetaFromProfileCache(
     availableModels: entry.availableModels ?? [],
     currentModelId: entry.currentModelId ?? null,
     configOptions: entry.configOptions ?? [],
+    selections: {},
     sessionInfo: null,
     usage: null,
     updatedAt: entry.metaUpdatedAt ?? 0,
@@ -548,11 +555,10 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     if (!resolved.ok) {
       return reply.status(resolved.status).send(resolved.body);
     }
-    const entry = resolved.entry;
     // Fold onto the long-lived handle's control plane (M3). L1 keeps the
-    // spawn orchestration (resolveSetRpcEntry get-or-create with spec) and
-    // the optimistic local cache update; the actual set-RPC goes through
-    // `handle.control()`, which resolves the same entry by threadId.
+    // spawn orchestration (resolveSetRpcEntry get-or-create with spec); the
+    // set-RPC goes through `handle.control()`, which resolves the same entry
+    // by threadId and records the selection on it before returning.
     const ack = await agenetes.create(resolved.spec).control({
       type: 'set_mode',
       data: { modeId: parsed.data.modeId },
@@ -567,10 +573,6 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: controlFailureCode('set_mode', ack.code),
       });
     }
-    // Optimistic local update so the next GET returns the new id even
-    // before the agent's confirmation notification lands.
-    entry.currentModeId = parsed.data.modeId;
-    entry.metaUpdatedAt = Date.now();
     return { ok: true as const, modeId: parsed.data.modeId };
   });
 
@@ -602,7 +604,6 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     if (!resolved.ok) {
       return reply.status(resolved.status).send(resolved.body);
     }
-    const entry = resolved.entry;
     const ack = await agenetes.create(resolved.spec).control({
       type: 'set_model',
       data: { modelId: parsed.data.modelId },
@@ -617,8 +618,6 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: controlFailureCode('set_model', ack.code),
       });
     }
-    entry.currentModelId = parsed.data.modelId;
-    entry.metaUpdatedAt = Date.now();
     return { ok: true as const, modelId: parsed.data.modelId };
   });
 
@@ -654,7 +653,6 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     if (!resolved.ok) {
       return reply.status(resolved.status).send(resolved.body);
     }
-    const entry = resolved.entry;
     const ack = await agenetes.create(resolved.spec).control({
       type: 'set_config_option',
       data: {
@@ -676,7 +674,6 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: controlFailureCode('set_config_option', ack.code),
       });
     }
-    entry.metaUpdatedAt = Date.now();
     return {
       ok: true as const,
       configOptionId: parsed.data.configOptionId,

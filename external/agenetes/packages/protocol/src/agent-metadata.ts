@@ -56,6 +56,22 @@ const agentUsageSchema = z.object({
 });
 
 /**
+ * Explicit user selections, keyed by config-option id (`mode`, `model`,
+ * and any agent-defined id such as `allow_all`).
+ *
+ * Separate from the agent-reported `current*` / `configOptions[].currentValue`
+ * fields on purpose: several agents (Copilot CLI among them) implement those
+ * as PROCESS-GLOBAL user settings and broadcast the same value to every live
+ * session, so they answer "what did the user last pick anywhere", not "what
+ * did the user pick for this thread". This map is written only by an explicit
+ * `ControlMsg` set-RPC and is therefore the authoritative per-thread intent.
+ */
+const agentSelectionsSchema = z.record(
+  z.string(),
+  z.union([z.string(), z.boolean()]),
+);
+
+/**
  * The driver-neutral agent-metadata snapshot: the current, folded value of
  * every selectable / usage surface an agent runtime exposes. A driver
  * supplies a translator mapping its native meta into this shape (the ACP
@@ -84,6 +100,10 @@ export const agentMetadataSchema = z.object({
   sessionInfo: agentSessionInfoSchema.nullish(),
   /** Token / cost budget; `null` ⇒ explicitly cleared. */
   usage: agentUsageSchema.nullish(),
+  /** Explicit per-thread user selections (see {@link agentSelectionsSchema}). */
+  selections: agentSelectionsSchema.optional(),
+  /** Epoch ms the selection map was last written by a set-RPC. */
+  selectionsUpdatedAt: z.number().optional(),
   /** Epoch ms of the last meta update folded into this snapshot. */
   metaUpdatedAt: z.number().optional(),
 });
