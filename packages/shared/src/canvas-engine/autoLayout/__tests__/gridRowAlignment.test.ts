@@ -4,10 +4,12 @@
  * `grid` reuses the `column` mode's track model (N columns, column
  * index stored in `data.frameColumn`) but aligns the Y axis as well:
  * children that share a `data.frameRow` are grouped into a **row band**
- * and share one Y origin.
+ * and are centred on one shared mid-line.
  *
  * The contract these tests pin down:
  *   • Members of a band line up exactly (that is the whole point).
+ *   • Unequal heights within a band centre rather than hang from the
+ *     band's top edge.
  *   • A column with no member in a band leaves the cell blank instead
  *     of pulling its next item up — this is what column masonry cannot
  *     express and what makes side-by-side correspondence survive a
@@ -89,16 +91,37 @@ function at(
   return position;
 }
 
+/** Vertical mid-line of a laid-out child. */
+function midY(
+  positions: Map<string, { x: number; y: number }>,
+  id: string,
+  height: number,
+): number {
+  return at(positions, id).y + height / 2;
+}
+
 describe('applyGridLayout', () => {
-  it('gives every member of a row band the same Y origin', () => {
+  it('gives every member of a row band the same mid-line', () => {
     const { childPositions } = positionsOf(makePairedNodes());
 
-    expect(at(childPositions, 'left-1').y).toBe(
-      at(childPositions, 'right-1').y,
+    expect(midY(childPositions, 'left-1', SIZE.height)).toBe(
+      midY(childPositions, 'right-1', SIZE.height),
     );
-    expect(at(childPositions, 'left-3').y).toBe(
-      at(childPositions, 'right-3').y,
+    expect(midY(childPositions, 'left-3', SIZE.height)).toBe(
+      midY(childPositions, 'right-3', 80),
     );
+  });
+
+  it('centres a shorter member inside a taller band', () => {
+    const { childPositions, rowTracks } = positionsOf(makePairedNodes());
+
+    // The last band is 80px tall for `right-3`; the 50px `left-3` sits
+    // 15px down from the band top rather than flush against it.
+    const lastBand = rowTracks?.[2];
+    if (!lastBand) throw new Error('no row track for the last band');
+    expect(lastBand.height).toBe(80);
+    expect(at(childPositions, 'right-3').y).toBe(lastBand.top);
+    expect(at(childPositions, 'left-3').y).toBe(lastBand.top + 15);
   });
 
   it('keeps a column aligned on one X origin', () => {
@@ -116,18 +139,18 @@ describe('applyGridLayout', () => {
   it('leaves the cell blank when a band has no member in a column', () => {
     const { childPositions } = positionsOf(makePairedNodes());
 
-    const bandTops = [
-      at(childPositions, 'left-1').y,
-      at(childPositions, 'left-2').y,
-      at(childPositions, 'left-3').y,
+    const bandMids = [
+      midY(childPositions, 'left-1', SIZE.height),
+      midY(childPositions, 'left-2', SIZE.height),
+      midY(childPositions, 'left-3', SIZE.height),
     ];
     // Three distinct bands, in the children's original vertical order.
-    expect(bandTops[0]).toBeLessThan(bandTops[1]);
-    expect(bandTops[1]).toBeLessThan(bandTops[2]);
+    expect(bandMids[0]).toBeLessThan(bandMids[1]);
+    expect(bandMids[1]).toBeLessThan(bandMids[2]);
 
     // `right-3` stays paired with `left-3` rather than sliding up into
     // the band `left-2` occupies alone.
-    expect(at(childPositions, 'right-3').y).toBe(bandTops[2]);
+    expect(midY(childPositions, 'right-3', 80)).toBe(bandMids[2]);
   });
 
   it('differs from column masonry, which pulls the second item up', () => {
@@ -149,12 +172,13 @@ describe('applyGridLayout', () => {
   });
 
   it('sizes the band to its tallest member', () => {
-    const { childPositions, frameSize } = positionsOf(makePairedNodes());
+    const { rowTracks, frameSize } = positionsOf(makePairedNodes());
 
     // The last band holds the 80px-tall `right-3`, so the frame must
     // clear that rather than the 50px `left-3`.
-    const lastBandTop = at(childPositions, 'left-3').y;
-    expect(frameSize.height).toBeGreaterThanOrEqual(lastBandTop + 80);
+    const lastBand = rowTracks?.[2];
+    if (!lastBand) throw new Error('no row track for the last band');
+    expect(frameSize.height).toBeGreaterThanOrEqual(lastBand.top + 80);
   });
 
   it('keeps rows stable when rendered Y positions change', () => {

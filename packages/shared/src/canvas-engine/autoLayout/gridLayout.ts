@@ -1027,7 +1027,7 @@ function assignGridRows(
  * and the resize gesture are reused verbatim. The difference is the Y
  * axis: instead of each column stacking independently from the top,
  * children are grouped by persistent `data.frameRow` and
- * every member of a row is placed at that row's shared origin, with
+ * every member of a row is centred on that row's mid-line, with
  * the row's height set by its tallest member.
  *
  * The point of the mode is **correspondence across columns**: items
@@ -1135,7 +1135,13 @@ export function applyGridLayout(
         : heightMedian;
     rowTracks.push({ top: y, height: bandHeight });
     for (const item of band) {
-      positions.set(item.node.id, { x: colOriginX[columnOf(item)], y });
+      // Centred within the band, not top-aligned: a row is a statement
+      // of correspondence, and unequal heights read as level only when
+      // they share a mid-line.
+      positions.set(item.node.id, {
+        x: colOriginX[columnOf(item)],
+        y: y + (bandHeight - item.height) / 2,
+      });
     }
     y += bandHeight + (yGutters[bandIndex]?.finalSize ?? interGapY);
   }
