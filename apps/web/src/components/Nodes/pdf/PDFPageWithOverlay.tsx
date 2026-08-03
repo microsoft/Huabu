@@ -254,6 +254,9 @@ export const PDFPageWithOverlay = ({
     <div
       ref={containerRef}
       data-pdf-page-index={pageIndex}
+      // Capture drags are horizontal too, so they must outrank the panel's
+      // arrow shortcuts and swipe navigation.
+      data-expanded-node-arrow-owner={captureEnabled ? '' : undefined}
       className={clsx(
         'relative',
         !rendered && 'min-h-40',

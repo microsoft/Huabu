@@ -26,6 +26,7 @@ import {
   isExpandedNodeNavigationBlocked,
   type ExpandedNodeDirection,
 } from './navigation';
+import { useSwipeNavigation } from './swipeNavigation';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useChatStore } from '../../../store/chatStore.ts';
 import { usePreviewStore } from '../../../store/previewStore.ts';
@@ -310,6 +311,23 @@ export const ExpandedNodePanel = ({
     [openExpandedCanvas, selectCanvasNodes],
   );
 
+  // Shared by the arrow shortcuts and the touch swipe. Returns whether the
+  // direction had anywhere to go, so callers can leave the input untouched.
+  const navigateDirection = useCallback(
+    (direction: ExpandedNodeDirection) => {
+      const neighbors =
+        direction === 'incoming' ? incomingNeighbors : outgoingNeighbors;
+      if (neighbors.length === 0) return false;
+      if (neighbors.length === 1) {
+        selectNeighbor(neighbors[0].id);
+      } else {
+        setOpenNeighborDirection(direction);
+      }
+      return true;
+    },
+    [incomingNeighbors, outgoingNeighbors, selectNeighbor],
+  );
+
   useEffect(() => {
     setOpenNeighborDirection(null);
   }, [expandedNodeId]);
@@ -393,21 +411,12 @@ export const ExpandedNodePanel = ({
           : null;
       if (!direction) return;
 
-      const neighbors =
-        direction === 'incoming' ? incomingNeighbors : outgoingNeighbors;
-      if (neighbors.length === 0) return;
-
-      e.preventDefault();
-      if (neighbors.length === 1) {
-        selectNeighbor(neighbors[0].id);
-      } else {
-        setOpenNeighborDirection(direction);
-      }
+      if (navigateDirection(direction)) e.preventDefault();
     };
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeItem, incomingNeighbors, outgoingNeighbors, selectNeighbor]);
+  }, [activeItem, navigateDirection]);
 
   // Scroll container of the preview body. Stored in component state
   // (not a plain ref) so that mounting the div triggers a re-render —
@@ -418,6 +427,18 @@ export const ExpandedNodePanel = ({
   const [previewBodyEl, setPreviewBodyEl] = useState<HTMLDivElement | null>(
     null,
   );
+
+  // Touch equivalent of the upstream/downstream arrow keys. Left off when there
+  // is nowhere to go, so isolated nodes keep the browser's fast-path scrolling
+  // instead of paying for a non-passive touchmove listener.
+  useSwipeNavigation(
+    previewBodyEl,
+    activeItem?.isNode &&
+      (incomingNeighbors.length > 0 || outgoingNeighbors.length > 0)
+      ? navigateDirection
+      : undefined,
+  );
+
   const setSelectionAttachment = useChatStore((s) => s.setSelectionAttachment);
 
   // Slot element rendered in the header bar. Nested previews use the

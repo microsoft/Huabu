@@ -88,6 +88,45 @@ function dispatchArrow(target: EventTarget, key: 'ArrowLeft' | 'ArrowRight') {
   });
 }
 
+function previewBody() {
+  const body =
+    container?.querySelector('[data-preview-node-id]')?.parentElement;
+  expect(body).not.toBeNull();
+  return body as HTMLElement;
+}
+
+function touchEvent(
+  type: 'touchstart' | 'touchmove' | 'touchend',
+  points: Array<{ id: number; x: number; y?: number }>,
+  changed = points,
+) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  const toTouch = (p: { id: number; x: number; y?: number }) => ({
+    identifier: p.id,
+    clientX: p.x,
+    clientY: p.y ?? 0,
+  });
+  Object.defineProperty(event, 'touches', { value: points.map(toTouch) });
+  Object.defineProperty(event, 'changedTouches', {
+    value: changed.map(toTouch),
+  });
+  return event;
+}
+
+/** Walks the finger across `to` in steps so the axis lock can engage. */
+function swipe(from: number, to: number, y = 0, target?: HTMLElement) {
+  const origin = target ?? previewBody();
+  act(() => {
+    origin.dispatchEvent(touchEvent('touchstart', [{ id: 1, x: from }]));
+    const midpoint = from + (to - from) / 2;
+    origin.dispatchEvent(
+      touchEvent('touchmove', [{ id: 1, x: midpoint, y: y / 2 }]),
+    );
+    origin.dispatchEvent(touchEvent('touchmove', [{ id: 1, x: to, y }]));
+    origin.dispatchEvent(touchEvent('touchend', [], [{ id: 1, x: to, y }]));
+  });
+}
+
 beforeEach(() => {
   testStorage.clear();
   usePreviewStore.setState({ previewType: null, previewData: null });
@@ -275,5 +314,157 @@ describe('ExpandedNodePanel edge navigation', () => {
 
     expect(useCanvasStore.getState().expandedNodeId).toBe('a');
     input.remove();
+  });
+});
+
+describe('ExpandedNodePanel swipe navigation', () => {
+  it('opens the downstream neighbor on a leftward touch swipe', () => {
+    renderPanel(
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
+      [edge('a-b', 'a', 'b')],
+      'replace',
+    );
+
+    swipe(240, 40);
+
+    expect(useCanvasStore.getState().expandedNodeId).toBe('b');
+    expect(useCanvasStore.getState().expandMode).toBe('replace');
+  });
+
+  it('opens the upstream neighbor on a rightward touch swipe', () => {
+    renderPanel(
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
+      [edge('b-a', 'b', 'a')],
+      'split',
+    );
+
+    swipe(40, 240);
+
+    expect(useCanvasStore.getState().expandedNodeId).toBe('b');
+  });
+
+  it('offers a chooser when several neighbors share a direction', () => {
+    renderPanel(
+      [
+        canvasNode('a', 'Alpha'),
+        canvasNode('c', 'Gamma'),
+        canvasNode('b', 'Beta'),
+      ],
+      [edge('a-b', 'a', 'b'), edge('a-c', 'a', 'c')],
+      'split',
+    );
+
+    swipe(240, 40);
+
+    const items = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    );
+    expect(items.map((item) => item.textContent)).toEqual(['Gamma', 'Beta']);
+  });
+
+  it('leaves mouse drags to text selection', () => {
+    renderPanel(
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
+      [edge('a-b', 'a', 'b')],
+      'split',
+    );
+    const body = previewBody();
+
+    act(() => {
+      body.dispatchEvent(
+        new MouseEvent('mousedown', { bubbles: true, clientX: 240 }),
+      );
+      body.dispatchEvent(
+        new MouseEvent('mousemove', { bubbles: true, clientX: 40 }),
+      );
+      body.dispatchEvent(
+        new MouseEvent('mouseup', { bubbles: true, clientX: 40 }),
+      );
+    });
+
+    expect(useCanvasStore.getState().expandedNodeId).toBe('a');
+  });
+
+  it('keeps working while the note editor holds focus', () => {
+    renderPanel(
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
+      [edge('a-b', 'a', 'b')],
+      'split',
+    );
+    const editor = document.createElement('div');
+    editor.setAttribute('contenteditable', 'true');
+    editor.tabIndex = 0;
+    const paragraph = document.createElement('p');
+    editor.appendChild(paragraph);
+    previewBody().appendChild(editor);
+    act(() => editor.focus());
+    expect(document.activeElement).toBe(editor);
+
+    swipe(240, 40, 0, paragraph);
+
+    expect(useCanvasStore.getState().expandedNodeId).toBe('b');
+  });
+
+  it('yields to controls that own a horizontal drag', () => {
+    renderPanel(
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
+      [edge('a-b', 'a', 'b')],
+      'split',
+    );
+    const slider = document.createElement('div');
+    slider.setAttribute('role', 'slider');
+    previewBody().appendChild(slider);
+
+    swipe(240, 40, 0, slider);
+
+    expect(useCanvasStore.getState().expandedNodeId).toBe('a');
+  });
+
+  it('hands a vertical drag back to native scrolling', () => {
+    renderPanel(
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
+      [edge('a-b', 'a', 'b')],
+      'split',
+    );
+
+    // Starts downwards, so the axis locks to vertical before drifting sideways.
+    swipe(240, 40, 400);
+
+    expect(useCanvasStore.getState().expandedNodeId).toBe('a');
+  });
+
+  it('abandons the swipe once a second finger joins', () => {
+    renderPanel(
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
+      [edge('a-b', 'a', 'b')],
+      'split',
+    );
+    const body = previewBody();
+
+    act(() => {
+      body.dispatchEvent(touchEvent('touchstart', [{ id: 1, x: 240 }]));
+      body.dispatchEvent(
+        touchEvent('touchmove', [
+          { id: 1, x: 140 },
+          { id: 2, x: 260 },
+        ]),
+      );
+      body.dispatchEvent(touchEvent('touchmove', [{ id: 1, x: 40 }]));
+      body.dispatchEvent(touchEvent('touchend', [], [{ id: 1, x: 40 }]));
+    });
+
+    expect(useCanvasStore.getState().expandedNodeId).toBe('a');
+  });
+
+  it('ignores a swipe that never leaves the starting area', () => {
+    renderPanel(
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
+      [edge('a-b', 'a', 'b')],
+      'split',
+    );
+
+    swipe(240, 220);
+
+    expect(useCanvasStore.getState().expandedNodeId).toBe('a');
   });
 });
