@@ -17,6 +17,7 @@ import { inputResolve } from './stages/input-resolve.js';
 import { normalize } from './stages/normalize.js';
 import { persist } from './stages/persist.js';
 import { project } from './stages/project.js';
+import { canvasBlobs } from '../storage/index.js';
 
 import type { ProviderManager } from './provider-manager.js';
 import type {
@@ -28,6 +29,7 @@ import type {
   PreprocessNodeResult,
 } from './types.js';
 import type { CanvasStore } from '../storage/canvas-store.js';
+import type { BlobLease } from '../storage/index.js';
 import type { PreprocessNodeRequest } from '@sediment/shared';
 
 /** Dependencies injected into the pipeline runner. */
@@ -38,6 +40,10 @@ export interface PipelineDeps {
 
 /**
  * Execute the preprocessing pipeline for a single node.
+ *
+ * Owns the lifetime of any artifact lease the run needs: document loaders
+ * take a real path, so artifact-backed nodes materialize their blob for
+ * the duration of the run and release it here regardless of outcome.
  */
 export async function runPipeline(
   request: PreprocessNodeRequest,
@@ -46,6 +52,32 @@ export async function runPipeline(
   bodyOwnership: BodyOwnership | undefined,
   deps: PipelineDeps,
 ): Promise<PreprocessNodeResult> {
+  const leases: BlobLease[] = [];
+  try {
+    return await runPipelineStages(
+      request,
+      plan,
+      contentKind,
+      bodyOwnership,
+      deps,
+      leases,
+    );
+  } finally {
+    for (const lease of leases) {
+      // Cleanup must never mask the pipeline's own result or error.
+      await lease.release().catch(() => {});
+    }
+  }
+}
+
+async function runPipelineStages(
+  request: PreprocessNodeRequest,
+  plan: Capability[],
+  contentKind: NodeContentKind | undefined,
+  bodyOwnership: BodyOwnership | undefined,
+  deps: PipelineDeps,
+  leases: BlobLease[],
+): Promise<PreprocessNodeResult> {
   const requestId = randomUUID();
   const ctx: PipelineContext = {};
   const diagnostics: PreprocessDiagnostic[] = [];
@@ -53,20 +85,23 @@ export async function runPipeline(
 
   const has = (cap: Capability) => plan.includes(cap);
 
-  // Manifest-aware artifact resolver. URL keys (`<artifactId><ext>`) are
-  // mapped to absolute on-disk paths via the canvas artifact index, so
-  // display-name renames don't break preprocessing.
-  const resolveArtifactByName = (filename: string): string | null =>
-    deps.store.resolveArtifactFilePath(filename);
-  const resolveArtifactForCanvas = (
-    _canvasId: string,
-    filename: string,
-  ): string | null => resolveArtifactByName(filename);
-
   // Stage 1 — Input Resolve
   if (has('resolve_input')) {
     try {
-      ctx.resolved = inputResolve(request, resolveArtifactByName);
+      ctx.resolved = inputResolve(request);
+      // Artifact-backed nodes need a real filename for the document
+      // loaders in `extract`. This is the only consumer that does — every
+      // other blob reader takes bytes.
+      const artifactName = ctx.resolved.artifactName;
+      if (artifactName) {
+        const lease = await canvasBlobs(deps.store.canvasId).materialize(
+          artifactName,
+        );
+        if (lease) {
+          leases.push(lease);
+          ctx.resolved.filePath = lease.path;
+        }
+      }
       usedCapabilities.push('resolve_input');
     } catch (error) {
       diagnostics.push({
@@ -124,8 +159,7 @@ export async function runPipeline(
         ctx.resolved.normalizedUri
       ) {
         try {
-          const artifactId = createId('artifact');
-          const ext = '.mhtml';
+          const artifactName = `${createId('artifact')}.mhtml`;
           const buffer = wrapAsMhtml(
             ctx.extracted.rawHtml,
             ctx.resolved.normalizedUri,
@@ -133,10 +167,9 @@ export async function runPipeline(
               ? ctx.extracted.title
               : ctx.resolved.normalizedUri,
           );
-          const record = await deps.store.writeArtifactBuffer(
-            { id: artifactId, ext, mimeType: 'message/rfc822' },
-            buffer,
-          );
+          await canvasBlobs(deps.store.canvasId).put(artifactName, buffer, {
+            mimeType: 'message/rfc822',
+          });
           // Inject the artifact key into metadata so the Normalize →
           // Persist chain writes it as a top-level YAML field on the
           // node sidecar. The web route reads `mhtmlArtifact` directly
@@ -145,7 +178,7 @@ export async function runPipeline(
             ...ctx.extracted,
             metadata: {
               ...(ctx.extracted.metadata ?? {}),
-              mhtmlArtifact: record.filename,
+              mhtmlArtifact: artifactName,
             },
           };
         } catch (snapshotError) {
@@ -224,7 +257,6 @@ export async function runPipeline(
           ctx.normalized,
           plan,
           deps.provider,
-          resolveArtifactForCanvas,
           deps.store.canvasId,
         );
         if (has('generate_label')) usedCapabilities.push('generate_label');

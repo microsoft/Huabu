@@ -22,6 +22,7 @@ import { forgetCanvasStore, getCanvasStore } from './canvas-store-cache.js';
 import { atomicWriteJson, mkdirp, sanitizeId } from './io.js';
 import { toSafeFilename } from './naming.js';
 import { canvasJsonPath, SPACE_JSON_FILENAME } from './paths.js';
+import { canvasBlobs } from './storage.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasFile } from './canvas-store.js';
@@ -191,12 +192,21 @@ export function createCanvas(
 }
 
 /**
- * Delete an entire canvas directory (`rm -rf <canvasDir>/`). Returns
- * true when the directory existed.
+ * Delete an entire Space — both its structured records and its blobs.
+ *
+ * This is the composition point for Space deletion: the two stores are
+ * independent, so neither can clean up the other. On Disk the blob sweep
+ * is a no-op second delete (the Space directory containing `.artifacts/`
+ * is already gone); on a remote backend it is what stops the Space's
+ * blobs from being orphaned.
+ *
+ * Returns true when the Space existed.
  */
-export function deleteCanvas(canvasId: string): boolean {
+export async function deleteCanvas(canvasId: string): Promise<boolean> {
   const store = getCanvasStore(canvasId);
+  // Throws for the World canvas — must run before anything is removed.
   const ok = store.destroy();
+  await canvasBlobs(store.canvasId).deleteAll();
   forgetCanvasStore(store.canvasId);
   return ok;
 }

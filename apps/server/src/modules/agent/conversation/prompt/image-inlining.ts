@@ -15,7 +15,6 @@
 
 import { isVisionImageMime } from '../../../../utils/mime.js';
 import { resolveArtifactImageUrl } from '../../../artifact/utils.js';
-import { getCanvasStore } from '../../../storage/index.js';
 
 /**
  * Hard cap on the decoded byte size of an image we are willing to
@@ -81,17 +80,7 @@ export async function resolveImageUrl(
   // (`<id><ext>`) rather than a full URL. Bare keys are the canonical
   // form that the front-end now sends; full URLs are kept for legacy
   // / external references.
-  const resolved = await resolveArtifactImageUrl(
-    url,
-    (canvasId, filename) => {
-      try {
-        return getCanvasStore(canvasId).resolveArtifactFilePath(filename);
-      } catch {
-        return null;
-      }
-    },
-    defaultCanvasId,
-  );
+  const resolved = await resolveArtifactImageUrl(url, defaultCanvasId);
   if (resolved.startsWith('data:')) {
     const parsed = parseDataUrl(resolved);
     if (!parsed) {

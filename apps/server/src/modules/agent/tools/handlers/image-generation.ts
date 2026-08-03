@@ -37,7 +37,6 @@
  * `isError: true` tool results.
  */
 
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { AzureOpenAI, OpenAI, toFile } from 'openai';
@@ -50,7 +49,7 @@ import {
 } from '@sediment/shared';
 
 import { getLogger } from '../../../../utils/logger.js';
-import { getCanvasStore } from '../../../storage/index.js';
+import { canvasBlobs } from '../../../storage/index.js';
 import { getAzureImageConfig } from '../../llm.js';
 
 import type { generateImageParamsSchema } from '../definitions.js';
@@ -126,24 +125,24 @@ export async function handleGenerateImage(
     );
   }
 
-  // ── Resolve reference artifacts to absolute paths upfront ─────────────
+  // ── Load reference artifacts upfront ──────────────────────────────────
   // Any missing/invalid ref is an early hard error — better than sending
   // a partial set to Azure and getting cryptic results.
-  const store = getCanvasStore(args.canvasId);
-  const refPaths: Array<{ key: string; absPath: string }> = [];
+  const blobs = canvasBlobs(args.canvasId);
+  const refImages: Array<{ key: string; bytes: Buffer }> = [];
   for (const key of refs) {
     if (typeof key !== 'string' || !key.trim()) {
       throw new Error(
         `Invalid reference artifact key: ${JSON.stringify(key)}. Use the bare \`src\` string returned by snapshot_nodes.`,
       );
     }
-    const abs = store.resolveArtifactFilePath(key);
-    if (!abs) {
+    const bytes = await blobs.read(key);
+    if (!bytes) {
       throw new Error(
         `Reference artifact "${key}" not found on canvas ${args.canvasId}. It may have been deleted.`,
       );
     }
-    refPaths.push({ key, absPath: abs });
+    refImages.push({ key, bytes });
   }
 
   // ── Pick the right OpenAI SDK client for the configured baseUrl ───────
@@ -168,7 +167,7 @@ export async function handleGenerateImage(
   // share one baseUrl without forcing the user to maintain two.
   const trimmedEndpoint = azure.endpoint.replace(/\/+$/, '');
   const isV1Style = /(?:^|\/)(?:openai\/)?v1$/i.test(trimmedEndpoint);
-  const isEdit = refPaths.length > 0;
+  const isEdit = refImages.length > 0;
 
   // The `openai` SDK uses `globalThis.fetch`, which Node routes
   // through the undici global dispatcher installed by `setup-proxy.ts`
@@ -197,7 +196,7 @@ export async function handleGenerateImage(
       family: azure.modelFamily,
       size,
       quality,
-      refs: refPaths.length,
+      refs: refImages.length,
     },
     'generate_image invoke',
   );
@@ -212,12 +211,9 @@ export async function handleGenerateImage(
   try {
     if (isEdit) {
       const imageFiles = await Promise.all(
-        refPaths.map(async (ref) => {
-          const bytes = await readFile(ref.absPath);
-          return toFile(bytes, path.basename(ref.absPath), {
-            type: 'image/png',
-          });
-        }),
+        refImages.map(async (ref) =>
+          toFile(ref.bytes, path.basename(ref.key), { type: 'image/png' }),
+        ),
       );
       const res = await client.images.edit({
         model: azure.deployment,
@@ -272,10 +268,8 @@ export async function handleGenerateImage(
   // — which start life as orphans until the agent follows up with a
   // `canvas_commands` insert or embeds them in a note body — from
   // user-uploaded artifacts that should never be auto-collected.
-  const record = await store.writeArtifactBuffer(
-    { id: createId('gen'), ext: '.png', mimeType: 'image/png' },
-    png,
-  );
+  const name = `${createId('gen')}.png`;
+  await blobs.put(name, png, { mimeType: 'image/png' });
 
   // The requested size string ("auto" included) drives what we
   // report back; gpt-image-* generally honours the request size, and
@@ -295,7 +289,7 @@ export async function handleGenerateImage(
     }
   }
   const result: Record<string, unknown> = {
-    src: record.filename,
+    src: name,
     width: w,
     height: h,
   };

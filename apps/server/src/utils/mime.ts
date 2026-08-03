@@ -77,14 +77,51 @@ export function isRasterizableImageMime(
 // Extension → MIME (all media – images + documents + video)
 // ---------------------------------------------------------------------------
 
-/** Extended extension → MIME type mapping (images, documents, video). */
+/**
+ * Extended extension → MIME type mapping.
+ *
+ * Covers every type the artifact upload route accepts (image, pdf, video,
+ * audio, html, office) plus the common variants a user's own filename can
+ * carry. Anything outside the map falls back to `application/octet-stream`,
+ * which browsers download rather than render — acceptable for a type the
+ * app has no renderer for anyway.
+ */
 export const MEDIA_MIME_MAP: Record<string, string> = {
   ...IMAGE_MIME_MAP,
   '.pdf': 'application/pdf',
+  // Video
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
   '.avi': 'video/x-msvideo',
+  '.mkv': 'video/x-matroska',
+  // Audio
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.flac': 'audio/flac',
+  // Markup / text
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.mhtml': 'message/rfc822',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.csv': 'text/csv',
+  '.json': 'application/json',
+  '.xml': 'application/xml',
+  // Office
+  '.doc': 'application/msword',
+  '.docx':
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.pptx':
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.zip': 'application/zip',
 };
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,10 @@
  *
  * Converts raw node snapshot data into a canonical `ResolvedInput` structure.
  * No external calls, no LLM, no persistence.
+ *
+ * Artifact-backed nodes record the blob *name* only. Turning that into a
+ * readable path is I/O, so the pipeline does it (and releases it) around
+ * this pure stage.
  */
 
 import path from 'node:path';
@@ -29,10 +33,7 @@ function extractArtifactFilename(artifactUri: string): string {
   return rawFilename ? path.basename(rawFilename) : '';
 }
 
-export function inputResolve(
-  request: PreprocessNodeRequest,
-  resolveArtifact?: (filename: string) => string | null,
-): ResolvedInput {
+export function inputResolve(request: PreprocessNodeRequest): ResolvedInput {
   const { nodeId, nodeType, snapshot } = request;
   const base: ResolvedInput = {
     nodeId,
@@ -61,7 +62,7 @@ export function inputResolve(
       //      remote-URL path. `normalizeUrl` is bypassed because URL
       //      normalisation is meaningless (and lossy) for data URLs.
       //   3. Local artifact key (e.g. `art_abc.html`) — uploaded by the
-      //      user; resolved to an absolute path so extract() can read it.
+      //      user; the pipeline materializes it so extract() can read it.
       const isRemoteUrl = /^https?:\/\//i.test(src);
       if (isRemoteUrl) {
         return {
@@ -77,39 +78,20 @@ export function inputResolve(
           normalizedUri: src,
         };
       }
-      // Local HTML artifact: resolve to absolute path so extract() can
-      // read it from disk.
-      const filename = extractArtifactFilename(src);
-      const filePath =
-        filename && resolveArtifact ? resolveArtifact(filename) : null;
       return {
         ...base,
         artifactUri: src || undefined,
-        filePath: filePath ?? undefined,
+        artifactName: extractArtifactFilename(src) || undefined,
       };
     }
 
-    case 'pdf': {
-      const src = ((snapshot.src as string) ?? '').trim();
-      const filename = extractArtifactFilename(src);
-      const filePath =
-        filename && resolveArtifact ? resolveArtifact(filename) : null;
-      return {
-        ...base,
-        artifactUri: src || undefined,
-        filePath: filePath ?? undefined,
-      };
-    }
-
+    case 'pdf':
     case 'office': {
       const src = ((snapshot.src as string) ?? '').trim();
-      const filename = extractArtifactFilename(src);
-      const filePath =
-        filename && resolveArtifact ? resolveArtifact(filename) : null;
       return {
         ...base,
         artifactUri: src || undefined,
-        filePath: filePath ?? undefined,
+        artifactName: extractArtifactFilename(src) || undefined,
       };
     }
 

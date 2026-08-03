@@ -65,7 +65,7 @@ import {
 import { getSketchRenderedSize } from '@sediment/shared/canvas-engine';
 
 import { RASTERIZABLE_IMAGE_EXT_MIME } from '../../utils/mime.js';
-import { getCanvasStore } from '../storage/index.js';
+import { canvasBlobs, getCanvasStore } from '../storage/index.js';
 
 import type {
   SketchNodeData,
@@ -436,14 +436,13 @@ async function loadContextImage(
 ): Promise<ContextImage | null> {
   const src = readSidecarString(store, node.id, 'src');
   if (!src) return null;
-  const abs = store.resolveArtifactFilePath(src);
-  if (!abs) return null;
-  const ext = path.extname(abs).toLowerCase();
+  const ext = path.extname(src).toLowerCase();
   const mimeType = IMAGE_EXT_MIME[ext];
   if (!mimeType) return null;
   const { width, height } = nodeBoxSize(node);
   if (width <= 0 || height <= 0) return null;
-  const bytes = await readFile(abs);
+  const bytes = await canvasBlobs(store.canvasId).read(src);
+  if (!bytes) return null;
   return { node, resolvedSrc: src, bytes, mimeType, width, height };
 }
 
@@ -791,39 +790,35 @@ async function maybeResizeImageArtifact(
   src: string,
   maxEdge: number,
 ): Promise<{ src: string; width: number; height: number } | null> {
-  const abs = store.resolveArtifactFilePath(src);
-  if (!abs) return null;
-  const ext = path.extname(abs).toLowerCase();
+  const blobs = canvasBlobs(store.canvasId);
+  const ext = path.extname(src).toLowerCase();
   const mimeType = IMAGE_EXT_MIME[ext];
   if (!mimeType) return null;
-  const bytes = await readFile(abs);
+  const bytes = await blobs.read(src);
+  if (!bytes) return null;
   const dims = readImageDimensions(bytes, mimeType);
   if (!dims) return null;
   if (Math.max(dims.width, dims.height) <= maxEdge) return null;
 
   // Content-address: <originalStem>-resized-<edge>.png. Keeping the
   // original stem in the filename makes the lineage obvious when
-  // browsing `.artifacts/` and prevents collisions across nodes.
+  // browsing the artifact scope and prevents collisions across nodes.
   const originalStem = path.basename(src, path.extname(src));
   const id = `${originalStem}-resized-${maxEdge}`;
   const filename = `${id}.png`;
-  const existing = store.resolveArtifactFilePath(filename);
-  if (existing) {
-    // Re-derive dimensions from the cached file so the result is
+  const cachedBytes = await blobs.read(filename);
+  if (cachedBytes) {
+    // Re-derive dimensions from the cached blob so the result is
     // accurate without paying for another resvg pass.
-    try {
-      const cachedBytes = await readFile(existing);
-      const cachedDims = readPngDimensions(cachedBytes);
-      if (cachedDims) {
-        return {
-          src: filename,
-          width: cachedDims.width,
-          height: cachedDims.height,
-        };
-      }
-    } catch {
-      // Fall through and re-render below.
+    const cachedDims = readPngDimensions(cachedBytes);
+    if (cachedDims) {
+      return {
+        src: filename,
+        width: cachedDims.width,
+        height: cachedDims.height,
+      };
     }
+    // Fall through and re-render below.
   }
   const resized = await resampleImageBytes(
     bytes,
@@ -832,10 +827,7 @@ async function maybeResizeImageArtifact(
     dims.height,
     maxEdge,
   );
-  await store.writeArtifactBuffer(
-    { id, ext: '.png', mimeType: 'image/png' },
-    resized.png,
-  );
+  await blobs.put(filename, resized.png, { mimeType: 'image/png' });
   return { src: filename, width: resized.width, height: resized.height };
 }
 
@@ -1059,13 +1051,12 @@ export async function snapshotNodesToArtifacts(
         ? `sketch-raster-${fingerprint}`
         : `sketch-raster-${fingerprint}-${maxEdge}`;
     const filename = `${id}.png`;
-    const existing = store.resolveArtifactFilePath(filename);
+    const existing = await canvasBlobs(store.canvasId).head(filename);
     if (!existing) {
       const png = await renderClusterPng(built.svg, built.width);
-      await store.writeArtifactBuffer(
-        { id, ext: '.png', mimeType: 'image/png' },
-        png,
-      );
+      await canvasBlobs(store.canvasId).put(filename, png, {
+        mimeType: 'image/png',
+      });
     }
     results.push({
       src: filename,
