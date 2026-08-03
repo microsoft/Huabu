@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { Suspense, useEffect } from 'react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router';
 
 import { DocsLayout } from './DocsLayout';
 import { allRoutes } from './navigation';

@@ -3,7 +3,7 @@
 
 import { Github, Menu, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router';
 
 import { withBasePath } from './basePath';
 import { cn } from './components/cn';
@@ -152,8 +152,8 @@ function MobileHeader({
   isSidebarOpen,
   onOpen,
 }: {
-  headerRef: RefObject<HTMLElement>;
-  menuButtonRef: RefObject<HTMLButtonElement>;
+  headerRef: RefObject<HTMLElement | null>;
+  menuButtonRef: RefObject<HTMLButtonElement | null>;
   isSidebarOpen: boolean;
   onOpen: () => void;
 }) {
@@ -205,8 +205,8 @@ function DocsSidebar({
   isOpen,
   onClose,
 }: {
-  sidebarRef: RefObject<HTMLElement>;
-  closeButtonRef: RefObject<HTMLButtonElement>;
+  sidebarRef: RefObject<HTMLElement | null>;
+  closeButtonRef: RefObject<HTMLButtonElement | null>;
   isOpen: boolean;
   onClose: () => void;
 }) {
