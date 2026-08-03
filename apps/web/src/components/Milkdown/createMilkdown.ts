@@ -25,6 +25,7 @@ import {
   wrapIn,
 } from '@milkdown/prose/commands';
 import { keymap } from '@milkdown/prose/keymap';
+import { Slice } from '@milkdown/prose/model';
 import {
   liftListItem,
   sinkListItem,
@@ -36,7 +37,7 @@ import {
   PluginKey,
   TextSelection,
 } from '@milkdown/prose/state';
-import { canJoin } from '@milkdown/prose/transform';
+import { canJoin, dropPoint } from '@milkdown/prose/transform';
 import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import { $markSchema, $prose, $remark, replaceAll } from '@milkdown/utils';
 
@@ -423,24 +424,22 @@ export interface MilkdownInstance {
    */
   insertBlocksAfter(anchorKey: string | null, markdown: string): boolean;
   /**
-   * Resolve a viewport-space coordinate to the fingerprint key of the
-   * top-level block that `insertBlocksAfter` should anchor on so the
-   * insertion lands where ProseMirror's drop cursor visually pointed.
+   * Insert one or more blocks parsed from `markdown` at the document
+   * position under the viewport-space point (`x`, `y`).
    *
-   * Return values:
-   *  - `string` — anchor on this block (`insertBlocksAfter(key, …)`).
-   *  - `null`   — the point sits in the gap ABOVE the first block;
-   *             caller should `insertBlocksAfter(null, …)` to insert
-   *             at the doc head.
-   *  - `undefined` — the point lies outside the editor surface
-   *             entirely (no insertion target). Caller decides the
-   *             fallback (e.g. append to end).
+   * The point is resolved through PM's own `dropPoint`, the same
+   * primitive `prosemirror-dropcursor` uses to place the blue bar, so
+   * the insertion lands where the indicator pointed — including
+   * inside a nested container. Anchoring on a top-level block key
+   * instead (`insertBlocksAfter`) cannot express those positions: a
+   * whole nested list is a single top-level block, so every drop
+   * inside it would land after the entire list.
    *
-   * Inside-block hits split on the block DOM's vertical midpoint to
-   * mirror PM's `dropcursor`: upper half maps to the block ABOVE
-   * (or `null` for the first block), lower half to the block itself.
+   * Returns `false` when the point lies outside the editor surface or
+   * no valid insertion point exists; the caller decides the fallback
+   * (e.g. append to the end).
    */
-  getBlockKeyAtPoint(x: number, y: number): string | null | undefined;
+  insertBlocksAtPoint(x: number, y: number, markdown: string): boolean;
   /**
    * Replace the active block-decoration set. Each entry highlights the
    * top-level block whose fingerprint key matches by adding `className`
@@ -3094,59 +3093,32 @@ export async function createMilkdown(
       return ok;
     },
 
-    getBlockKeyAtPoint: (x, y) => {
-      // Tri-state: `undefined` = outside editor (caller fallback),
-      // `null` = head gap, `string` = anchor key.
-      let result: string | null | undefined = undefined;
+    insertBlocksAtPoint: (x, y, markdown) => {
+      let ok = false;
       crepe.editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         // `posAtCoords` returns null when the point falls outside the
         // editor surface entirely.
         const coords = view.posAtCoords({ left: x, top: y });
         if (!coords) return;
-        const snap = buildSnapshotFromView(view, ctx.get(serializerCtx));
-        if (snap.keys.length === 0) {
-          result = null; // empty doc — anchor on head
-          return;
-        }
-        const $pos = view.state.doc.resolve(coords.pos);
-        // Depth 0 = the position resolves at the doc root, i.e. the
-        // gap BETWEEN two top-level blocks (or at the doc's leading /
-        // trailing edge). `$pos.index(0)` then equals the number of
-        // blocks that precede the gap, so the anchor for an "insert
-        // after" call is that-many-blocks-minus-one (null for the
-        // gap above the first block).
-        if ($pos.depth === 0) {
-          const beforeCount = $pos.index(0);
-          result =
-            beforeCount === 0 ? null : (snap.keys[beforeCount - 1] ?? null);
-          return;
-        }
-        // Inside a top-level block. `posAtCoords` resolves to a text
-        // position, so on its own it can't tell us whether the user
-        // meant "insert above" or "insert below" this block. Match
-        // PM's `dropcursor` behaviour by splitting on the block DOM's
-        // vertical midpoint: upper half maps to the previous block
-        // (or doc head), lower half maps to this block.
-        const blockIndex = $pos.index(0);
-        const blockKey = snap.keys[blockIndex];
-        if (!blockKey) return;
-        const dom = view.nodeDOM(snap.posByIndex[blockIndex] ?? 0);
-        if (!(dom instanceof HTMLElement)) {
-          // Couldn't measure — fall back to "insert after this block".
-          result = blockKey;
-          return;
-        }
-        const rect = dom.getBoundingClientRect();
-        const mid = (rect.top + rect.bottom) / 2;
-        if (y < mid) {
-          result =
-            blockIndex === 0 ? null : (snap.keys[blockIndex - 1] ?? null);
-        } else {
-          result = blockKey;
-        }
+        const parsed = ctx.get(parserCtx)(dedentMarkdownFragment(markdown));
+        if (!parsed || parsed.content.size === 0) return;
+        // `posAtCoords` resolves to a text position, which block
+        // content can't replace. `dropPoint` walks outwards from
+        // there until it finds a depth where the content fits and
+        // picks the near side of that node — the same resolution PM's
+        // `dropcursor` runs, so the insert lands under the bar even
+        // when the bar sits inside a nested list.
+        const pos = dropPoint(
+          view.state.doc,
+          coords.pos,
+          new Slice(parsed.content, 0, 0),
+        );
+        if (pos === null) return;
+        view.dispatch(view.state.tr.insert(pos, parsed.content));
+        ok = true;
       });
-      return result;
+      return ok;
     },
 
     setBlockDecorations: (specs) => {

@@ -510,21 +510,17 @@ export const NotePreview = ({
       e.stopPropagation();
 
       if (!editor) return;
-      const anchorKey = editor.getBlockKeyAtPoint(e.clientX, e.clientY);
-      // `getBlockKeyAtPoint` returns:
-      //   string    — anchor on this block (insert AFTER it)
-      //   null      — insert at doc head (the gap above the first
-      //               block was the visible drop target)
-      //   undefined — the drop landed outside the editor surface
-      //               (top / bottom padding); append to the last block.
-      let resolvedAnchor: string | null;
-      if (anchorKey === undefined) {
+      // Resolve the insertion point from the pointer itself so the
+      // content lands under the drop indicator, including inside a
+      // nested list. Returns false when the point isn't over the
+      // editor surface (top / bottom padding) — append in that case.
+      if (!editor.insertBlocksAtPoint(e.clientX, e.clientY, snippet)) {
         const keys = editor.getBlockKeys();
-        resolvedAnchor = keys.length > 0 ? keys[keys.length - 1] : null;
-      } else {
-        resolvedAnchor = anchorKey;
+        editor.insertBlocksAfter(
+          keys.length > 0 ? (keys[keys.length - 1] ?? null) : null,
+          snippet,
+        );
       }
-      editor.insertBlocksAfter(resolvedAnchor, snippet);
       // PM's `dropcursor` only clears the bar when it observes the
       // drop / dragend / out-of-editor dragleave on `view.dom`. Our
       // capture-phase `stopPropagation` above suppresses the drop

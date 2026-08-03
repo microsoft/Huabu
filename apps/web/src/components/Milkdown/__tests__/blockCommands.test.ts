@@ -31,8 +31,49 @@ afterEach(async () => {
   for (const root of roots) root.remove();
   instances = [];
   roots = [];
+  delete (document as Partial<CaretHitTesting>).caretRangeFromPoint;
   vi.restoreAllMocks();
 });
+
+interface CaretHitTesting {
+  caretRangeFromPoint: (x: number, y: number) => Range;
+}
+
+function firstTextIn(node: Node): Text | null {
+  if (node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim()) {
+    return node as Text;
+  }
+  for (const child of Array.from(node.childNodes)) {
+    const found = firstTextIn(child);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Pin PM's coordinate hit-testing to a known caret.
+ *
+ * happy-dom has no layout, so `document.elementFromPoint` finds
+ * nothing and every rect is zero-sized. Stubbing the two primitives
+ * `posAtCoords` consults is enough: with zero-sized rects its
+ * `posFromCaret` helper skips all geometry branches and resolves the
+ * position structurally from the caret node/offset.
+ */
+function stubCaretAt(selector: string, edge: 'start' | 'end', index = 0): void {
+  const hosts = Array.from(document.querySelectorAll(`.milkdown ${selector}`));
+  const host = index < 0 ? hosts[hosts.length + index] : hosts[index];
+  const node = host ? firstTextIn(host) : null;
+  if (!node) throw new Error(`No text node under ${selector}[${index}]`);
+  (document as unknown as CaretHitTesting).caretRangeFromPoint = () => {
+    const range = document.createRange();
+    range.setStart(node, edge === 'start' ? 0 : node.length);
+    range.collapse(true);
+    return range;
+  };
+  vi.spyOn(document, 'elementFromPoint').mockReturnValue(node.parentElement);
+}
+
+const NESTED_LIST = '- a\n  - b\n  - c\n- d\n\ntail';
 
 function clickLink(options: { modifier: boolean; href?: string }): MouseEvent {
   const anchor = document.querySelector('.milkdown a[href]');
@@ -602,5 +643,38 @@ describe('Milkdown block commands', () => {
 
     expect(() => instance.setBlockType('table')).not.toThrow();
     expect(instance.getMarkdown()).toContain('|');
+  });
+
+  it('inserts into the nested list item under the point', async () => {
+    const instance = await mount(NESTED_LIST);
+    stubCaretAt('li li', 'end');
+
+    expect(instance.insertBlocksAtPoint(10, 10, 'dropped')).toBe(true);
+    // Indented under `b`, i.e. still inside the list — not appended
+    // after the whole top-level list.
+    expect(instance.getMarkdown()).toContain('* b\n\n    dropped\n\n  * c');
+  });
+
+  it('inserts before the paragraph under the point', async () => {
+    const instance = await mount(NESTED_LIST);
+    stubCaretAt('p', 'start', -1);
+
+    expect(instance.insertBlocksAtPoint(10, 10, 'dropped')).toBe(true);
+    expect(instance.getMarkdown()).toContain('dropped\n\ntail');
+  });
+
+  it('inserts after the paragraph under the point', async () => {
+    const instance = await mount(NESTED_LIST);
+    stubCaretAt('p', 'end', -1);
+
+    expect(instance.insertBlocksAtPoint(10, 10, 'dropped')).toBe(true);
+    expect(instance.getMarkdown()).toContain('tail\n\ndropped');
+  });
+
+  it('reports failure when the point misses the editor surface', async () => {
+    const instance = await mount(NESTED_LIST);
+
+    expect(instance.insertBlocksAtPoint(10, 10, 'dropped')).toBe(false);
+    expect(instance.getMarkdown()).not.toContain('dropped');
   });
 });

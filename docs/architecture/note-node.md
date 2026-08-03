@@ -117,6 +117,7 @@ These exist only for notes, and none of them are guessable from the node model a
 | Block drag-out           | Dragging a block out of a note creates a new note and deletes the block from the source as **one** undo entry (`MOVE_NOTE_EXCERPT`).                                                                                                             |
 | Block move between notes | Dropping a block onto another note deletes and inserts atomically, again as one undo entry (`MOVE_NOTE_BLOCK_INTO_NOTE`).                                                                                                                        |
 | Drop onto a note         | Sediment payloads dropped on a note append a block; the copy modifier decides move vs. copy, and locked notes decline the drop so the canvas creates a new node instead.                                                                         |
+| Drop into an open note   | The insertion point is resolved from the pointer through PM's `dropPoint` — the same resolution that places the blue drop bar — so the content lands under the indicator, including inside a nested list item rather than after the whole list.  |
 | External `.md` import    | A `.md` file dropped into `<Space>/nodes/` from the OS file manager is picked up by a per-Space watcher and imported as a note — see [canvas-storage.md](./canvas-storage.md).                                                                   |
 
 ---
