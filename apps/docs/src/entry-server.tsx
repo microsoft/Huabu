@@ -12,6 +12,7 @@ export { docsBasePath, routeManifest };
 
 export async function renderRoute(pathname: string): Promise<string> {
   const location = `${routerBasename === '/' ? '' : routerBasename}${pathname}`;
+  const errors: unknown[] = [];
 
   const { prelude } = await prerenderToNodeStream(
     <StaticRouter basename={routerBasename} location={location}>
@@ -22,12 +23,20 @@ export async function renderRoute(pathname: string): Promise<string> {
       // large content into a streamed chunk with a fallback placeholder.
       progressiveChunkSize: Number.MAX_SAFE_INTEGER,
       onError(error) {
-        console.error(error);
+        errors.push(error);
       },
     },
   );
 
   const chunks: Buffer[] = [];
   for await (const chunk of prelude) chunks.push(Buffer.from(chunk));
+
+  if (errors.length > 0) {
+    for (const error of errors) console.error(error);
+    throw new Error(
+      `Failed to prerender ${pathname}: ${errors.length} render error(s).`,
+    );
+  }
+
   return Buffer.concat(chunks).toString('utf8');
 }

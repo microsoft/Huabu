@@ -11,6 +11,9 @@
     "format:check": "prettier --check .",
     "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck && pnpm run test && pnpm run build && node scripts/check-headers.mjs"
   },
+  "engines": {
+    "node": ">=22.22.0"
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "eslint": "^9.39.2",
