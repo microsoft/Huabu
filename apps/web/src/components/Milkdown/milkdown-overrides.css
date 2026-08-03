@@ -145,6 +145,13 @@
   display: flow-root;
 }
 
+/* Keep an inline highlight perceptible while its text is selected. The
+   translucent selection layer composes with the mark's own background,
+   while unhighlighted text retains the browser's native selection style. */
+.milkdown .ProseMirror span[data-sediment-background-color]::selection {
+  background-color: color-mix(in srgb, var(--info) 35%, transparent);
+}
+
 .milkdown .ProseMirror p {
   /* 14px base, matching the legacy `.bn-default-styles`. */
   font-size: 0.875rem;
@@ -229,6 +236,21 @@
 }
 .milkdown .milkdown-list-item-block li .label-wrapper .bullet svg {
   fill: var(--fg-muted);
+}
+
+/* Marker visibility — Crepe's bullet / checkbox icons wrap their shape in
+   `<g clip-path="url(#clip0_952_6527)">` and inline a `<clipPath>` with that
+   same hard-coded id into every rendered marker. The clip is a no-op (a
+   24×24 rect over a `0 0 24 24` viewBox), but the duplicated ids are not:
+   `url(#…)` resolves document-wide to the first match, so removing the item
+   that happened to render it first (deleting a list item, unmounting a note
+   panel) can leave the remaining markers referencing a detached definition
+   and clipping away to nothing. Ordered markers are plain text and stay
+   visible, which is why only bullets and checkboxes disappear. Dropping the
+   clip removes the shared dependency; a CSS declaration wins over the SVG
+   presentation attribute. */
+.milkdown .milkdown-list-item-block li .label-wrapper svg g {
+  clip-path: none;
 }
 
 /* Marker vertical alignment. Crepe hard-codes

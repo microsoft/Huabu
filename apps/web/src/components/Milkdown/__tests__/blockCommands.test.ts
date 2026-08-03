@@ -1,13 +1,18 @@
 // @vitest-environment happy-dom
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { isMac } from '@/utils/platform';
 
 import { createMilkdown, type MilkdownInstance } from '../createMilkdown';
 
 let instances: MilkdownInstance[] = [];
 let roots: HTMLElement[] = [];
 
-async function mount(markdown: string): Promise<MilkdownInstance> {
+async function mount(
+  markdown: string,
+  overrides?: { editable?: boolean },
+): Promise<MilkdownInstance> {
   const root = document.createElement('div');
   document.body.appendChild(root);
   roots.push(root);
@@ -15,6 +20,7 @@ async function mount(markdown: string): Promise<MilkdownInstance> {
     root,
     initialMarkdown: markdown,
     toolbarMode: 'none',
+    ...overrides,
   });
   instances.push(instance);
   return instance;
@@ -25,7 +31,26 @@ afterEach(async () => {
   for (const root of roots) root.remove();
   instances = [];
   roots = [];
+  vi.restoreAllMocks();
 });
+
+function clickLink(options: { modifier: boolean; href?: string }): MouseEvent {
+  const anchor = document.querySelector('.milkdown a[href]');
+  if (!anchor) throw new Error('Expected a rendered link');
+  if (options.href !== undefined) anchor.setAttribute('href', options.href);
+  const event = new MouseEvent('click', {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    ...(options.modifier
+      ? isMac
+        ? { metaKey: true }
+        : { ctrlKey: true }
+      : {}),
+  });
+  anchor.dispatchEvent(event);
+  return event;
+}
 
 describe('Milkdown block commands', () => {
   it('prepares a complete native move for partially selected blocks', async () => {
@@ -56,6 +81,44 @@ describe('Milkdown block commands', () => {
 
     instance.clearDraggingSlice();
     expect(instance.__getDraggingMarkdownForTest?.()).toBeNull();
+  });
+
+  it('converts every block of a multi-paragraph selection to a list', async () => {
+    const instance = await mount(
+      'first paragraph\n\nsecond paragraph\n\nthird paragraph',
+    );
+
+    instance.__selectTextBetweenForTest?.('first', 'third');
+    instance.setBlockType('bullet-list');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('first paragraph');
+    expect(markdown).toContain('second paragraph');
+    expect(markdown).toContain('third paragraph');
+    expect(markdown.match(/^\s*[-*]\s/gm)?.length).toBe(3);
+  });
+
+  it('converts every block of a multi-paragraph selection to a heading', async () => {
+    const instance = await mount('first paragraph\n\nsecond paragraph');
+
+    instance.__selectTextBetweenForTest?.('first', 'second');
+    instance.setBlockType('heading-2');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('## first paragraph');
+    expect(markdown).toContain('## second paragraph');
+  });
+
+  it('preserves inline marks when converting several blocks to a list', async () => {
+    const instance = await mount('**bold** one\n\n[link](https://example.com)');
+
+    instance.__selectTextBetweenForTest?.('bold', 'link');
+    instance.setBlockType('bullet-list');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('**bold**');
+    expect(markdown).toContain('[link](https://example.com)');
+    expect(markdown.match(/^\s*[-*]\s/gm)?.length).toBe(2);
   });
 
   it('applies and clears a link without using prompt', async () => {
@@ -304,6 +367,140 @@ describe('Milkdown block commands', () => {
     instance.__dispatchKeyDownForTest?.('Tab', true);
 
     expect(instance.getMarkdown()).toContain('* second');
+  });
+
+  it('indents a paragraph into the list above it with Tab', async () => {
+    const instance = await mount('- first\n\nsecond');
+
+    instance.__setCursorAfterTextForTest?.('second');
+    instance.__dispatchKeyDownForTest?.('Tab');
+
+    expect(instance.getMarkdown()).toContain('  * second');
+  });
+
+  it('opens a link in a new tab on modifier-click', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    await mount('see [docs](https://example.com) here');
+
+    const event = clickLink({ modifier: true });
+
+    expect(open).toHaveBeenCalledWith(
+      'https://example.com',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('leaves a plain click on a link to the caret', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    await mount('see [docs](https://example.com) here');
+
+    clickLink({ modifier: false });
+
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('opens a link on modifier-click in a read-only surface', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    await mount('see [docs](https://example.com) here', { editable: false });
+
+    clickLink({ modifier: true });
+
+    expect(open).toHaveBeenCalledWith(
+      'https://example.com',
+      '_blank',
+      'noopener,noreferrer',
+    );
+  });
+
+  it('refuses to open an unsafe link scheme on modifier-click', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    await mount('see [docs](https://example.com) here');
+
+    const event = clickLink({ modifier: true, href: 'javascript:alert(1)' });
+
+    expect(open).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('blocks a plain click on an unsafe link parsed from markdown', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    await mount('see [docs](javascript:alert(1)) here');
+
+    const event = clickLink({ modifier: false });
+
+    expect(open).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('nests several levels deep with repeated Tab', async () => {
+    const instance = await mount('- a\n- b\n- c');
+
+    instance.__setCursorAfterTextForTest?.('b');
+    instance.__dispatchKeyDownForTest?.('Tab');
+    instance.__setCursorAfterTextForTest?.('c');
+    instance.__dispatchKeyDownForTest?.('Tab');
+    instance.__dispatchKeyDownForTest?.('Tab');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('* a');
+    expect(markdown).toContain('  * b');
+    expect(markdown).toContain('    * c');
+  });
+
+  it('indents a paragraph into the ordered list above it with Tab', async () => {
+    const instance = await mount('1. first\n\nsecond');
+
+    instance.__setCursorAfterTextForTest?.('second');
+    instance.__dispatchKeyDownForTest?.('Tab');
+
+    expect(instance.getMarkdown()).toContain('   1. second');
+  });
+
+  it('indents a standalone paragraph into a top-level bullet with Tab', async () => {
+    const instance = await mount('intro\n\nsecond');
+
+    instance.__setCursorAfterTextForTest?.('second');
+    instance.__dispatchKeyDownForTest?.('Tab');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('* second');
+    expect(markdown).not.toContain('* intro');
+  });
+
+  it('returns an indented paragraph to plain text with Shift-Tab', async () => {
+    const instance = await mount('intro\n\nsecond');
+
+    instance.__setCursorAfterTextForTest?.('second');
+    instance.__dispatchKeyDownForTest?.('Tab');
+    expect(instance.getMarkdown()).toContain('* second');
+
+    instance.__dispatchKeyDownForTest?.('Tab', true);
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('second');
+    expect(markdown).not.toContain('* second');
+  });
+
+  it('keeps inline marks when Tab indents a paragraph', async () => {
+    const instance = await mount('intro\n\n**bold** tail');
+
+    instance.__setCursorAfterTextForTest?.('tail');
+    instance.__dispatchKeyDownForTest?.('Tab');
+
+    expect(instance.getMarkdown()).toContain('* **bold** tail');
+  });
+
+  it('leaves a code block a code block when Tab is pressed inside it', async () => {
+    const instance = await mount('```\ncode line\n```\n');
+
+    instance.__setCursorAfterTextForTest?.('code line');
+    instance.__dispatchKeyDownForTest?.('Tab');
+
+    const markdown = instance.getMarkdown();
+    expect(markdown).toContain('```');
+    expect(markdown).not.toContain('* code line');
   });
 
   it('replaces the current block with a valid table', async () => {
