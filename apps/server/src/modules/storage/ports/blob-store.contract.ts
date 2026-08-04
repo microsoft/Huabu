@@ -157,6 +157,23 @@ export function describeBlobStoreContract(
       expect((await blobs.list()).map((b) => b.name)).toEqual(['failing.bin']);
     });
 
+    it('resolves concurrent writers to one key without mixing bytes', async () => {
+      const blobs = await scope();
+      // Different lengths and fill bytes, so any interleaving of the two
+      // writes is visible in the result rather than hidden by equal sizes.
+      const a = Buffer.alloc(8192, 'a');
+      const b = Buffer.alloc(3072, 'b');
+
+      await Promise.all([blobs.put('race.bin', a), blobs.put('race.bin', b)]);
+
+      const settled = await blobs.read('race.bin');
+      expect(settled).not.toBeNull();
+      // One writer wins outright; the loser leaves no trace in the bytes.
+      const won = settled?.equals(a) === true || settled?.equals(b) === true;
+      expect(won).toBe(true);
+      expect((await blobs.list()).map((x) => x.name)).toEqual(['race.bin']);
+    });
+
     it('reports absence as null rather than throwing', async () => {
       const blobs = await scope();
       expect(await blobs.head('missing.txt')).toBeNull();
