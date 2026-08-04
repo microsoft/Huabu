@@ -22,10 +22,6 @@ import { EDGE_LABEL_MAX_INVERSE_SCALE } from '@sediment/shared';
 
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import useCanvasStore from '@/store/canvasStore';
-import {
-  markBoundaryPoint,
-  useNodeCollapseStore,
-} from '@/store/nodeCollapseStore';
 import { TEXT_NODE_PADDING_X } from '@/utils/node/nodeFontConfig';
 import { measureTextContent } from '@/utils/node/textMeasure';
 
@@ -62,8 +58,6 @@ function getEdgeStyle(data: EdgeProps['data']): EdgeStyle {
 export function LabelledEdge(props: EdgeProps) {
   const {
     id,
-    source,
-    target,
     sourceX,
     sourceY,
     targetX,
@@ -76,27 +70,6 @@ export function LabelledEdge(props: EdgeProps) {
     data,
     selected,
   } = props;
-
-  // When an endpoint node is collapsing into its zoom-LOD mark, walk the edge
-  // off the node's handle and onto that mark's circle. The endpoint stays on
-  // the BOUNDARY of a shape that morphs card → mark (see `markBoundaryPoint`),
-  // so it always touches something drawn; interpolating the point itself would
-  // send it across the card's interior and leave it hanging over the node's
-  // text mid-zoom. Only question nodes publish a mark; everything else keeps
-  // React Flow's handle point.
-  const sourceMark = useNodeCollapseStore((s) => s.marks[source]);
-  const targetMark = useNodeCollapseStore((s) => s.marks[target]);
-
-  let sx = sourceX;
-  let sy = sourceY;
-  let tx = targetX;
-  let ty = targetY;
-  if (sourceMark) {
-    ({ x: sx, y: sy } = markBoundaryPoint(sourceMark, sourceX, sourceY));
-  }
-  if (targetMark) {
-    ({ x: tx, y: ty } = markBoundaryPoint(targetMark, targetX, targetY));
-  }
 
   const edgeStyle = getEdgeStyle(data);
   // `data.edgeStyle.lineType` is the source of truth; fall back to the
@@ -114,26 +87,26 @@ export function LabelledEdge(props: EdgeProps) {
   let labelY: number;
   if (lineType === 'straight') {
     [edgePath, labelX, labelY] = getStraightPath({
-      sourceX: sx,
-      sourceY: sy,
-      targetX: tx,
-      targetY: ty,
+      sourceX,
+      sourceY,
+      targetX,
+      targetY,
     });
   } else if (lineType === 'step') {
     [edgePath, labelX, labelY] = getSmoothStepPath({
-      sourceX: sx,
-      sourceY: sy,
-      targetX: tx,
-      targetY: ty,
+      sourceX,
+      sourceY,
+      targetX,
+      targetY,
       sourcePosition,
       targetPosition,
     });
   } else {
     [edgePath, labelX, labelY] = getBezierPath({
-      sourceX: sx,
-      sourceY: sy,
-      targetX: tx,
-      targetY: ty,
+      sourceX,
+      sourceY,
+      targetX,
+      targetY,
       sourcePosition,
       targetPosition,
     });

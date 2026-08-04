@@ -1,25 +1,25 @@
 /**
  * Zoom-LOD takeover geometry for the question node's agent mark.
  *
- * The mark's SIZE and POSITION are a CONTINUOUS function of the node's
- * on-screen width, so across a zoom the badge smoothly shrinks and glides from
- * the readable card's corner into the centred collapsed mark — there is no
- * discrete stage swap and no one-shot tween; every frame is the exact geometry
- * for that zoom. A single {@link collapseProgress} `t ∈ [0,1]` drives it:
+ * The mark's SIZE is a CONTINUOUS function of the node's on-screen width, so
+ * across a zoom the badge shrinks smoothly with the card it is pinned to — no
+ * discrete size swap and no one-shot tween; every frame is the exact size for
+ * that zoom. A single {@link collapseProgress} `t ∈ [0,1]` drives it:
  *
  *   t = 0  — node wide enough to read: the card shows and the agent badge sits
  *            at the top-left corner, scaling WITH the card.
- *   0<t<1  — transition band: the badge continuously moves corner → centre and
- *            resizes badge → mark as the node shrinks.
+ *   0<t<1  — transition band: the badge continuously resizes badge → mark as
+ *            the node shrinks.
  *   t = 1  — node too small to read: the card is gone and a centred agent mark
  *            stands in for it. The mark's GLYPH is size-driven (a full agent
  *            avatar down to {@link MARK_FACE_MIN}px, then a solid dot).
  *
- * The discrete {@link QuestionLodStage} is derived from the same width ONLY to
- * decide card-body visibility + chrome (it flips once, with hysteresis, at the
- * band start); it never drives the mark's size or position. All numbers are
- * pure tuning knobs. Question-tuned for now; lift into a registry if a second
- * node type ever opts into staged takeover.
+ * The discrete {@link QuestionLodStage} is derived from the same width to decide
+ * card-body visibility + chrome (it flips once, with hysteresis, at the band
+ * start), and the mark's POSITION rides along with it over
+ * {@link TAKEOVER_GLIDE_MS} — but it never drives the mark's size. All numbers
+ * are pure tuning knobs. Question-tuned for now; lift into a registry if a
+ * second node type ever opts into staged takeover.
  */
 
 export type QuestionLodStage = 'readable' | 'collapsed';
@@ -44,12 +44,22 @@ export interface TakeoverState {
 export const TAKEOVER_START_WIDTH = 64;
 /**
  * Node screen WIDTH (px) at/below which the takeover is fully ON (t = 1): the
- * card body is gone and the mark sits centred. Between this and
- * {@link TAKEOVER_START_WIDTH} the mark continuously morphs corner → centre.
+ * card body is gone and the mark is at its collapsed size. Between this and
+ * {@link TAKEOVER_START_WIDTH} the mark continuously resizes badge → mark.
  */
 export const TAKEOVER_END_WIDTH = 24;
 /** Hysteresis (px) around the body-visibility boundary so it never flickers. */
 export const TAKEOVER_HYSTERESIS = 6;
+
+/**
+ * Duration (ms) of the mark's corner → centre glide. The glide is driven by the
+ * card's visibility, NOT by zoom: the mark must be at the corner for exactly as
+ * long as the card is there to hang off, and at the centre — where the node's
+ * edges converge — for exactly as long as it is standing in for the whole node.
+ * Kept in lockstep with the card's 200ms opacity transition in `index.css`, so
+ * the card dissolving and the mark taking its place are one movement.
+ */
+export const TAKEOVER_GLIDE_MS = 200;
 
 /**
  * Readable-stage badge diameter as a fraction of the node's shorter on-screen
@@ -98,9 +108,9 @@ export function lerp(a: number, b: number, t: number): number {
 /**
  * Continuous collapse progress `t ∈ [0,1]` for the current on-screen width:
  * 0 while the node is wider than {@link TAKEOVER_START_WIDTH} (readable card +
- * corner badge), ramping to 1 by {@link TAKEOVER_END_WIDTH} (centred mark).
- * Smoothstep-eased so the corner → centre glide starts and ends gently instead
- * of at a constant velocity. This is what makes the takeover track the zoom
+ * corner badge), ramping to 1 by {@link TAKEOVER_END_WIDTH} (collapsed mark).
+ * Smoothstep-eased so the resize starts and ends gently instead of at a
+ * constant velocity. This is what makes the mark's size track the zoom
  * continuously rather than snapping at a threshold.
  */
 export function collapseProgress(nodeScreenW: number): number {
@@ -151,13 +161,13 @@ export function badgeSizeForNode(
 }
 
 /**
- * Resolves the crisp card-body stage for the current on-screen width. This is
- * ONLY used to show/hide the card body and pick chrome — the mark's size and
- * position come from the continuous {@link collapseProgress}, not from here.
- * The body flips off once the node passes the takeover band start
- * ({@link TAKEOVER_START_WIDTH}), with hysteresis so it never flickers at the
- * edge. The face ↔ dot glyph is NOT a stage — it is size-driven in the mark
- * itself (see {@link MARK_FACE_MIN}).
+ * Resolves the crisp card-body stage for the current on-screen width. This
+ * shows/hides the card body, picks chrome, and drives the mark's corner →
+ * centre glide — the mark's SIZE comes from the continuous
+ * {@link collapseProgress}, not from here. The body flips off once the node
+ * passes the takeover band start ({@link TAKEOVER_START_WIDTH}), with
+ * hysteresis so it never flickers at the edge. The face ↔ dot glyph is NOT a
+ * stage — it is size-driven in the mark itself (see {@link MARK_FACE_MIN}).
  */
 export function resolveQuestionStage(
   prev: QuestionLodStage,
