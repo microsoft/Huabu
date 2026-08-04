@@ -191,21 +191,31 @@ export function createCanvas(
 }
 
 /**
- * Delete an entire Space — both its structured records and its blobs.
+ * Delete an entire Space — both its blobs and its structured records.
  *
  * This is the composition point for Space deletion: the two stores are
- * independent, so neither can clean up the other. On Disk the blob sweep
- * is a no-op second delete (the Space directory containing `.artifacts/`
- * is already gone); on a remote backend it is what stops the Space's
- * blobs from being orphaned.
+ * independent, so neither can clean up the other.
+ *
+ * Blobs go first. Once the structured record is gone, nothing names the
+ * Space's blobs any more, so a failure after that point would strand them
+ * with no reference to retry from. On Disk the ordering is invisible — the
+ * `.artifacts/` sweep is followed by removing the directory that contained
+ * it — but on a remote blob backend it is the difference between a failed
+ * delete the caller can retry and a permanent orphan. See
+ * docs/proposals/multi-backend-storage.md §8.
  *
  * Returns true when the Space existed.
  */
 export async function deleteCanvas(canvasId: string): Promise<boolean> {
   const store = getCanvasStore(canvasId);
-  // Throws for the World canvas — must run before anything is removed.
-  const ok = store.destroy();
+  // `destroy()` refuses the World canvas too, but that check has to happen
+  // before the blob sweep now that the sweep runs first — otherwise a
+  // refused deletion would still have destroyed the World's bytes.
+  if (isWorldCanvasId(store.canvasId)) {
+    throw new Error('World canvas cannot be deleted');
+  }
   await canvasBlobs(store.canvasId).deleteAll();
+  const ok = store.destroy();
   forgetCanvasStore(store.canvasId);
   return ok;
 }
