@@ -72,12 +72,16 @@ describe('MainLayout Chat motion', () => {
 
     expect(slot?.style.width).toBe('0px');
     expect(content?.dataset.visible).toBeUndefined();
+    expect(slot?.dataset.moving).toBeUndefined();
 
     act(() => usePanelStore.getState().toggleRightPanel());
 
     expect(slot?.style.width).toBe('420px');
     expect(content?.dataset.visible).toBeUndefined();
     expect(center?.dataset.rightPanelMotion).toBe('true');
+    // Promotion is committed before the transform changes so the slide does
+    // not pay a layer-promotion frame.
+    expect(slot?.dataset.moving).toBe('true');
 
     act(() => nextFrame?.(16));
 
@@ -90,5 +94,6 @@ describe('MainLayout Chat motion', () => {
     });
 
     expect(center?.dataset.rightPanelMotion).toBeUndefined();
+    expect(slot?.dataset.moving).toBeUndefined();
   });
 });

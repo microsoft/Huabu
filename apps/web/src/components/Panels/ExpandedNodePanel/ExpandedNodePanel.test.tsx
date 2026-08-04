@@ -89,8 +89,9 @@ function dispatchArrow(target: EventTarget, key: 'ArrowLeft' | 'ArrowRight') {
 }
 
 function previewBody() {
-  const body =
-    container?.querySelector('[data-preview-node-id]')?.parentElement;
+  const body = container?.querySelector(
+    '[data-preview-node-id]',
+  )?.parentElement;
   expect(body).not.toBeNull();
   return body as HTMLElement;
 }

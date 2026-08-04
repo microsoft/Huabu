@@ -313,6 +313,7 @@ export const MainLayout = ({
         className="relative shrink-0"
         data-right-panel-slot
         data-collapsed={isRightCollapsed ? 'true' : undefined}
+        data-moving={isRightPanelMoving ? 'true' : undefined}
         data-resizing={isResizing ? 'true' : undefined}
         style={{
           width: `${effectiveRightWidthPx}px`,
