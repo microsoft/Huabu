@@ -11,6 +11,7 @@ export const SKETCH_OPTIONS = {
   easing: (t: number) => t,
   start: { taper: 0, easing: (t: number) => t, cap: true },
   end: { taper: 0, easing: (t: number) => t, cap: true },
+  last: false,
 };
 
 /**
@@ -45,45 +46,39 @@ export const SKETCH_COLOR_OPTIONS: readonly ColorPickerOption[] = [
   ...ACCENT_PALETTE,
 ];
 
-/**
- * Convert a perfect-freehand stroke (array of [x,y] points) to an SVG
- * path `d` attribute using quadratic bezier curves.
- */
-function getSvgPathFromStroke(stroke: number[][]): string {
-  if (!stroke.length) return '';
+/** Canonical perfect-freehand outline for client renderers. */
+export function buildStrokeOutline(
+  points: number[][],
+  size: number = DEFAULT_STROKE_SIZE,
+): number[][] {
+  return getStroke(points, { ...SKETCH_OPTIONS, size });
+}
 
-  const d = stroke.reduce(
-    (acc: (string | number)[], [x0, y0], i, arr) => {
-      const [x1, y1] = arr[(i + 1) % arr.length];
-      acc.push(x0, y0, ',', (x0 + x1) / 2, (y0 + y1) / 2);
-      return acc;
+/** Convert a perfect-freehand outline to an SVG path. */
+function outlineToPath(outline: number[][]): string {
+  if (outline.length === 0) return '';
+
+  const d = outline.reduce(
+    (commands: (string | number)[], [x0, y0], index, vertices) => {
+      const [x1, y1] = vertices[(index + 1) % vertices.length];
+      commands.push(x0, y0, ',', (x0 + x1) / 2, (y0 + y1) / 2);
+      return commands;
     },
-    ['M', ...stroke[0], 'Q'],
+    ['M', ...outline[0], 'Q'],
   );
   d.push('Z');
   return d.join(' ');
 }
 
 /**
- * Convert raw input points ([x, y, pressure]) to an SVG path `d` attribute.
- * Uses perfect-freehand to produce smooth, pressure-sensitive strokes.
- *
- * @param points  Pressure-bearing input points.
- * @param zoom    Viewport zoom; the stroke base size is multiplied by this
- *                so on-screen thickness stays visually consistent across
- *                zoom levels.
- * @param size    Base stroke thickness in flow-space units. Defaults to
- *                {@link DEFAULT_STROKE_SIZE} for legacy nodes that never
- *                had `data.strokeSize`.
+ * Convert pressure-bearing input points to an SVG path. `zoom` is retained for
+ * the existing screen-space preview API; all outline generation flows through
+ * the same {@link buildStrokeOutline} helper.
  */
 export function pointsToPath(
   points: number[][],
   zoom = 1,
   size: number = DEFAULT_STROKE_SIZE,
 ): string {
-  const stroke = getStroke(points, {
-    ...SKETCH_OPTIONS,
-    size: size * zoom,
-  });
-  return getSvgPathFromStroke(stroke);
+  return outlineToPath(buildStrokeOutline(points, size * zoom));
 }
