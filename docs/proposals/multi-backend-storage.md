@@ -1,6 +1,6 @@
 # Multi-Backend Storage
 
-Status: Phase 1 in review; Phase 2 accepted
+Status: Phase 1 in review; Phase 2 ready to implement
 Last updated: 2026-08-04
 
 > **Scope and decision confidence.** This proposal records the two-port
@@ -12,20 +12,24 @@ Last updated: 2026-08-04
 > remaining candidate interfaces below are discussion aids, not implementation
 > instructions.
 >
-> **Implementation state.** Phase 1 is written but **not merged** — it lives on
-> `feat/structured-space-repositories` and is in review. `BlobStore` is a real
-> backend-neutral port with a Disk adapter and a reusable contract suite, and
-> artifact bytes are gone from `CanvasStore`. `StructuredStore` is a lifecycle
-> and backend-selection boundary only — `SpaceHandle` is still literally
-> `CanvasStore`. A 2026-08-04 adversarial review found five defects in that
-> branch; the fixes are on it and are described in §12.1.1. Phase 2 is
-> accepted and specified in §12.2: it makes `storage/` match the target
-> ports/backends/compatibility hierarchy, adds scoped Space-record and
-> Canvas-log repositories behind the existing facade, and migrates exactly one
-> read-only consumer through the new repository so the contract shape is
-> validated by a real caller before it is frozen. No SQLite, Postgres, or
-> Azure adapter exists. §12 is the authoritative phase plan; the decision
-> table in §2 marks what each phase has actually settled.
+> **Implementation state.** Phase 1 is written but **not merged to `main`** —
+> it lives on `proposal/multi-backend-storage` and is in review. `BlobStore`
+> is a real backend-neutral port with a Disk adapter and a reusable contract
+> suite, and artifact bytes are gone from `CanvasStore`. `StructuredStore` is
+> a lifecycle and backend-selection boundary only — `SpaceHandle` is still
+> literally `CanvasStore`. A 2026-08-04 adversarial review found five defects
+> on that branch; the fixes are on it and are described in §12.1.1.
+>
+> Phase 2 is specified in §12.2 and **ready to implement**: its plan is
+> committed, phase 1 is merged into its branch
+> (`feat/structured-space-repositories`), and the server suite is green. It
+> makes `storage/` match the target ports/backends/compatibility hierarchy,
+> adds scoped Space-record and Canvas-log repositories behind the existing
+> facade, and migrates exactly one read-only consumer through the new
+> repository so the contract shape is validated by a real caller before it is
+> frozen. No SQLite, Postgres, or Azure adapter exists. §12 is the
+> authoritative phase plan; the decision table in §2 marks what each phase has
+> actually settled.
 
 ---
 
@@ -630,15 +634,23 @@ cases — deliberately at the points where two adapters could disagree, since a
 suite that only asserts where they agree is what let the lease divergence
 through in the first place.
 
-The branch still inherits one failing test,
+The branch also carried one failing test it did not cause,
 `rfs.route.test.ts` → "returns an actionable error when World reconciliation
-is required" (expects 409, receives 200). It is not introduced here — the
-branch touches neither `rfs.route.ts` nor the World reconciliation path — but
-it must be fixed or explicitly rebaselined before merge, because every phase
-after this one uses "all three commands green" as its commit gate and that
-gate is meaningless if it starts red.
+is required" (expected 409, received 200), which had been red on `main` since
+2026-07-27. It turned out to be a stale expectation rather than a defect: the
+test was written when a missing canonical Portal was answered with a 409, and
+`ensureCanonicalPortals` subsequently made the router reconcile the Portal
+first, so the asserted failure could no longer occur. It is now split into the
+two contracts that do hold — reconcile-and-succeed for a live Space, 409 for a
+source that is not one — leaving the route's error branch covered. The server
+suite is green, which is what Phase 2 requires as a starting baseline.
 
-### 12.2 Phase 2 — storage module shape and scoped repositories — **accepted**
+### 12.2 Phase 2 — storage module shape and scoped repositories — **ready**
+
+The preconditions this phase sets for itself are met: the plan below is
+committed (§12.2.9 commit 1), phase 1 including its review corrections is
+merged into the implementation branch, and `typecheck` / `test` / `lint` are
+green. Implementation starts at commit 2.
 
 Phase 2 is a containment and ownership refactor. Its primary acceptance
 criterion is that `apps/server/src/modules/storage/` has the target
@@ -1082,10 +1094,11 @@ pnpm --filter @sediment/server test
 pnpm --filter @sediment/server lint
 ```
 
-Implementation starts from a green baseline. The `rfs.route.test.ts` failure
-described in §12.1.1 is a phase-1 merge blocker, so it is resolved before this
-phase begins rather than carried into it; if for any reason it is not, it is
-fixed or rebaselined before commit 2 rather than normalized as Phase 2 debt.
+Implementation starts from a green baseline, and does so literally: at the
+time this phase was made ready, `typecheck`, `test` (602 passing), and `lint`
+(no errors) all pass on the branch. The one inherited failure is resolved and
+described in §12.1.1. A red baseline must not be normalized as Phase 2 debt —
+if one appears, it is fixed or explicitly rebaselined before the next commit.
 
 1. `docs:` this plan.
 2. `refactor(server):` move Canvas DTOs, the write coordinator, generic
