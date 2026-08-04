@@ -24,7 +24,6 @@ export {
   resetStorageCache,
 } from './compatibility/canvas.js';
 export type {
-  NodeContentSummary,
   RenameResult,
   RenameSelfResult,
 } from './compatibility/canvas.js';

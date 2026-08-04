@@ -53,7 +53,6 @@ export {
   resetStorageCache,
 } from '../backends/disk/legacy/canvas-store-cache.js';
 export type {
-  NodeContentSummary,
   RenameResult,
   RenameSelfResult,
 } from '../backends/disk/legacy/canvas-store.js';

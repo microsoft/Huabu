@@ -6,7 +6,6 @@ import {
   existsSync,
   readdirSync,
   rmSync,
-  statSync,
   unlinkSync,
 } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -47,7 +46,6 @@ import {
   canvasRoot,
   changesPath,
   chatDir,
-  chatPath,
   deltaLogPath,
   eventsPath,
   intentPath,
@@ -61,7 +59,6 @@ import type {
   DeltaLogEntry,
   NodeContent,
 } from '../../../../canvas/persistence-types.js';
-import type { Context } from '@earendil-works/pi-ai';
 import type { IntentEpisode, RecentAction } from '@sediment/shared';
 import type { CanvasChangeRecord } from '@sediment/shared/canvas-engine';
 
@@ -77,13 +74,6 @@ const log = getLogger('canvas-store');
 interface NodeFileEntry {
   id: string;
   filename: string;
-}
-
-/** Summary projection of a node sidecar. */
-export interface NodeContentSummary {
-  nodeId: string;
-  type: string;
-  label: string | null;
 }
 
 export type RenameResult =
@@ -365,10 +355,6 @@ export class CanvasStore {
     }
   }
 
-  readVersion(): number | null {
-    return this.read()?.version ?? null;
-  }
-
   /**
    * Strict directory rename. Returns a structured conflict instead of
    * throwing so the route layer can map it to a 409.
@@ -428,7 +414,7 @@ export class CanvasStore {
     return idx;
   }
 
-  invalidateNodeIndex(): void {
+  private invalidateNodeIndex(): void {
     this.nodes = null;
   }
 
@@ -687,36 +673,6 @@ export class CanvasStore {
     this.nodes = idx;
     this.nodeDuplicateIds = duplicates;
     return contents;
-  }
-
-  /**
-   * Predict whether a strict {@link writeNode} for `nodeId` with `label`
-   * would collide with another node on disk. Pure: never touches the
-   * filesystem or mutates state. Returns `desired` (the filename that
-   * would land on disk) plus a non-null `conflict` when the slot is
-   * already owned by a different node.
-   *
-   * Used by the route layer to pre-validate a batch PUT and 409 before
-   * any partial writes happen.
-   */
-  checkNodeRename(
-    nodeId: string,
-    label: string | null,
-  ): { desired: string; conflict: { id: string; filename: string } | null } {
-    const idx = this.nodeIndex();
-    const existing = idx.get(nodeId);
-    const desired = nodeFilenameFor(nodeId, label);
-    if (existing && existing.filename === desired) {
-      return { desired, conflict: null };
-    }
-    const conflict = idx.findByName(desired);
-    if (!conflict || conflict.id === nodeId) {
-      return { desired, conflict: null };
-    }
-    return {
-      desired,
-      conflict: { id: conflict.id, filename: conflict.filename },
-    };
   }
 
   /**
@@ -984,30 +940,6 @@ export class CanvasStore {
     }
   }
 
-  listNodes(): NodeContentSummary[] {
-    const dir = nodesDir(this.canvasId);
-    if (!existsSync(dir)) return [];
-    const out: NodeContentSummary[] = [];
-    for (const entry of this.nodeIndex().list()) {
-      const raw = readText(path.join(dir, entry.filename));
-      if (raw == null) continue;
-      const { meta } = parseFrontmatter(raw);
-      // @deprecated Backward compat: pre-rename files wrote `title:`.
-      const label =
-        typeof meta['label'] === 'string'
-          ? meta['label']
-          : typeof meta['title'] === 'string'
-            ? meta['title']
-            : null;
-      out.push({
-        nodeId: entry.id,
-        type: typeof meta['type'] === 'string' ? meta['type'] : 'note',
-        label,
-      });
-    }
-    return out;
-  }
-
   // ── Artifacts ────────────────────────────────────────────────────────────
   //
   // Artifact bytes are NOT owned here. They live behind the `BlobStore`
@@ -1015,59 +947,12 @@ export class CanvasStore {
   // structured records only and a non-filesystem blob backend can be
   // configured independently. See docs/proposals/multi-backend-storage.md.
 
-  // ── Chat ─────────────────────────────────────────────────────────────────
-
-  readChat(threadId: string): Context | null {
-    return readJson<Context>(chatPath(this.canvasId, threadId));
-  }
-
-  writeChat(threadId: string, ctx: Context): void {
-    mkdirp(chatDir(this.canvasId));
-    atomicWriteJson(chatPath(this.canvasId, threadId), ctx);
-  }
-
-  loadLatestChat(): { threadId: string; context: Context } | null {
-    const dir = chatDir(this.canvasId);
-    if (!existsSync(dir)) return null;
-    let latest: { file: string; mtime: number } | null = null;
-    for (const file of readdirSync(dir)) {
-      // Skip non-thread sidecars (`<threadId>.parts.json` rich-ACP
-      // overlay and `<threadId>.changes.json` change-review list); they
-      // pair with a real thread file and aren't threads of their own.
-      if (
-        !file.endsWith('.json') ||
-        file.endsWith('.parts.json') ||
-        file.endsWith('.changes.json')
-      )
-        continue;
-      try {
-        const st = statSync(path.join(dir, file));
-        if (!latest || st.mtimeMs > latest.mtime) {
-          latest = { file, mtime: st.mtimeMs };
-        }
-      } catch {
-        continue;
-      }
-    }
-    if (!latest) return null;
-    const threadId = latest.file.replace(/\.json$/, '');
-    const context = readJson<Context>(path.join(dir, latest.file));
-    if (!context) return null;
-    return { threadId, context };
-  }
-
-  listChatThreads(): string[] {
-    const dir = chatDir(this.canvasId);
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir)
-      .filter(
-        (f) =>
-          f.endsWith('.json') &&
-          !f.endsWith('.parts.json') &&
-          !f.endsWith('.changes.json'),
-      )
-      .map((f) => f.replace(/\.json$/, ''));
-  }
+  // ── Chat (removed) ───────────────────────────────────────────────────────
+  //
+  // Chat threads and turns are owned by the agent runtime (agenetes thread
+  // and turn stores), not by this class. The read/write/list helpers that
+  // used to live here had no remaining call sites and were deleted in
+  // Phase 2; `chatDir()` survives because other domains own live files there.
 
   // ── Change-review records (ACP change card sidecar) ────────────────────────
 
@@ -1086,7 +971,7 @@ export class CanvasStore {
   }
 
   /** Overwrite the change-review records for a thread. */
-  writeChanges(threadId: string, records: CanvasChangeRecord[]): void {
+  private writeChanges(threadId: string, records: CanvasChangeRecord[]): void {
     mkdirp(chatDir(this.canvasId));
     atomicWriteJson(changesPath(this.canvasId, threadId), records);
   }
@@ -1139,17 +1024,6 @@ export class CanvasStore {
   }
 
   // ── Events ───────────────────────────────────────────────────────────────
-
-  /**
-   * Append one behavioural event as a single JSONL line.
-   * One `write(2)` per call — line-atomic on POSIX.
-   */
-  appendEvent(payload: RecentAction): void {
-    appendJsonLine<CanvasEvent>(eventsPath(this.canvasId), {
-      ts: Date.now(),
-      payload,
-    });
-  }
 
   /**
    * Bulk append used by the batch upload endpoint. Builds a single

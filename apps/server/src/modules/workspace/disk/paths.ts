@@ -141,13 +141,6 @@ export function chatDir(canvasId: string): string {
   return path.join(historyDir(canvasId), 'chat');
 }
 
-export function chatPath(canvasId: string, threadId: string): string {
-  return path.join(
-    chatDir(canvasId),
-    `${sanitizeId(threadId, 'threadId')}.json`,
-  );
-}
-
 /**
  * Pending change-review records for an ACP thread (the "what the agent
  * changed" card). A mutable sidecar — entries are removed on accept /
