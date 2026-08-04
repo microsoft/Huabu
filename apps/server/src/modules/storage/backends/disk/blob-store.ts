@@ -6,8 +6,9 @@
  * URL key, no manifest indirection.
  *
  * Stateless with respect to the workspace root — every operation resolves
- * through `paths.ts`, which reads `getWorkspacePath()` lazily. That is what
- * lets a free-mode workspace switch take effect with no invalidation step.
+ * through the Workspace layout module, which reads `getWorkspacePath()`
+ * lazily. That is what lets a free-mode workspace switch take effect with no
+ * invalidation step.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -24,8 +25,8 @@ import {
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
-import { artifactPath, artifactsDir } from '../../workspace/disk/paths.js';
-import { createBlobLease, normalizeBlobName } from '../ports/blob.js';
+import { artifactPath, artifactsDir } from '../../../workspace/disk/paths.js';
+import { createBlobLease, normalizeBlobName } from '../../ports/blob.js';
 
 import type {
   BlobInfo,
@@ -35,8 +36,8 @@ import type {
   BlobScope,
   BlobScopeRef,
   BlobStore,
-} from '../ports/blob.js';
-import type { StorageHealth } from '../ports/common.js';
+} from '../../ports/blob.js';
+import type { StorageHealth } from '../../ports/common.js';
 import type { Readable } from 'node:stream';
 
 /**

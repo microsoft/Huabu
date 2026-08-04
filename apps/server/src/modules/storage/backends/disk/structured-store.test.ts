@@ -6,13 +6,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const workspaceState = vi.hoisted(() => ({ path: '' }));
 
-vi.mock('../../workspace.js', () => ({
+vi.mock('../../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
 }));
 
-import { DiskStructuredStore } from './disk-structured.js';
-import { resetStorageCache } from '../canvas-store-cache.js';
-import { describeStructuredStoreContract } from '../ports/structured-store.contract.js';
+import { resetStorageCache } from './legacy/canvas-store-cache.js';
+import { DiskStructuredStore } from './structured-store.js';
+import { describeStructuredStoreContract } from '../../ports/contracts/structured-store.contract.js';
 
 describeStructuredStoreContract('DiskStructuredStore', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'huabu-structured-'));

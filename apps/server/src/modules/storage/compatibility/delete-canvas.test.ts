@@ -12,18 +12,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const workspaceState = vi.hoisted(() => ({ path: '' }));
 
-vi.mock('../workspace.js', () => ({
+vi.mock('../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
 }));
 
-import { DiskBlobStore } from './backends/disk-blob.js';
-import { DiskStructuredStore } from './backends/disk-structured.js';
-import { resetStorageCache } from './canvas-store-cache.js';
-import { setStorageForTesting, type Storage } from './storage.js';
-import { refreshCanvasDirIndex } from '../workspace/disk/canvas-dirs.js';
-import { artifactPath, canvasJsonPath } from '../workspace/disk/paths.js';
-
-import { deleteCanvas } from './index.js';
+import { refreshCanvasDirIndex } from '../../workspace/disk/canvas-dirs.js';
+import { artifactPath, canvasJsonPath } from '../../workspace/disk/paths.js';
+import { DiskBlobStore } from '../backends/disk/blob-store.js';
+import { resetStorageCache } from '../backends/disk/legacy/canvas-store-cache.js';
+import { DiskStructuredStore } from '../backends/disk/structured-store.js';
+import { deleteCanvas } from '../index.js';
+import { setStorageForTesting, type Storage } from '../storage.js';
 
 import type {
   BlobInfo,
@@ -32,7 +31,7 @@ import type {
   BlobScope,
   BlobScopeRef,
   BlobStore,
-} from './ports/blob.js';
+} from '../ports/blob.js';
 import type { Readable } from 'node:stream';
 
 function writeCanvas(directory: string, canvasId: string, title: string): void {

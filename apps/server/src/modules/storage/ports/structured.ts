@@ -17,8 +17,8 @@
  * concerns.
  */
 
-import type { CanvasStore } from '../canvas-store.js';
 import type { StorageHealth } from './common.js';
+import type { CanvasStore } from '../backends/disk/legacy/canvas-store.js';
 
 export type StructuredBackendKind = 'disk' | 'sqlite' | 'postgres';
 

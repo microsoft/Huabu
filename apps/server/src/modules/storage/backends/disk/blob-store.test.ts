@@ -7,12 +7,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const workspaceState = vi.hoisted(() => ({ path: '' }));
 
-vi.mock('../../workspace.js', () => ({
+vi.mock('../../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
 }));
 
-import { DiskBlobStore } from './disk-blob.js';
-import { describeBlobStoreContract } from '../ports/blob-store.contract.js';
+import { DiskBlobStore } from './blob-store.js';
+import { describeBlobStoreContract } from '../../ports/contracts/blob-store.contract.js';
 
 describeBlobStoreContract('DiskBlobStore', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'huabu-blob-'));

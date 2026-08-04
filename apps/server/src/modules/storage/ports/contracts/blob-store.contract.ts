@@ -21,9 +21,9 @@ import { Readable } from 'node:stream';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { BlobLeaseError, BlobNameError } from './blob.js';
+import { BlobLeaseError, BlobNameError } from '../blob.js';
 
-import type { BlobScope, BlobScopeRef, BlobStore } from './blob.js';
+import type { BlobScope, BlobScopeRef, BlobStore } from '../blob.js';
 
 export interface BlobContractHarness {
   store: BlobStore;

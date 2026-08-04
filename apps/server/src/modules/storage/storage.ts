@@ -18,8 +18,8 @@
  * through it.
  */
 
-import { DiskBlobStore } from './backends/disk-blob.js';
-import { DiskStructuredStore } from './backends/disk-structured.js';
+import { DiskBlobStore } from './backends/disk/blob-store.js';
+import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import {
   parseStorageProfile,
   requiresExplicitInit,

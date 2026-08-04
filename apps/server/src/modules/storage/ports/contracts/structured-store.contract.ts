@@ -10,7 +10,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { StructuredStore } from './structured.js';
+import type { StructuredStore } from '../structured.js';
 
 export interface StructuredContractHarness {
   store: StructuredStore;

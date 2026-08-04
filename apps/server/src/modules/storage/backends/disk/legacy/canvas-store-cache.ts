@@ -1,14 +1,24 @@
 /**
  * `CanvasStore` instance cache.
  *
- * Split out from `index.ts` so backend adapters can reach `getCanvasStore`
- * without importing the module's public entry point — which would make
- * `index.ts` → `storage.ts` → `backends/` → `index.ts` a cycle.
+ * The single owner of live legacy Disk instances. Both the Disk structured
+ * adapter and the compatibility facade resolve Space objects through here, so
+ * the two views never become separate in-memory authorities — a write through
+ * one is immediately observed through the other.
+ *
+ * It sits beside the legacy class (rather than in the module barrel) so a
+ * backend adapter can reach `getCanvasStore` without importing the module's
+ * public entry point, which would make `index.ts` → `storage.ts` →
+ * `backends/` → `index.ts` a cycle.
+ *
+ * The cache is a bounded LRU, so object identity across calls is not
+ * promised: an entry can be evicted and rebuilt. Anything that must survive
+ * eviction is durable state and belongs in a repository, not on an instance.
  */
 
 import { CanvasStore } from './canvas-store.js';
-import { sanitizeId } from '../../utils/fs.js';
-import { refreshCanvasDirIndex } from '../workspace/disk/canvas-dirs.js';
+import { sanitizeId } from '../../../../../utils/fs.js';
+import { refreshCanvasDirIndex } from '../../../../workspace/disk/canvas-dirs.js';
 
 const MAX_CACHE = 16;
 const cache = new Map<string, CanvasStore>();
