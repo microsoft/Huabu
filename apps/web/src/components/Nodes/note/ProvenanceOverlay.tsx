@@ -303,7 +303,7 @@ export function ProvenanceOverlay({
         if (!blockKeySet.has(slot.entry.key)) continue;
         const yIn = yLocal >= slot.top && yLocal <= slot.top + slot.height;
         const xIn =
-          xLocal >= slot.right - slot.height &&
+          xLocal >= slot.right - slot.width &&
           xLocal <= slot.right + GUTTER_OFFSET + 6;
         if (yIn && xIn) {
           cancelHide();
