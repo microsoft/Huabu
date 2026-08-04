@@ -55,10 +55,21 @@ export interface BlobRead {
  * loaders, external binaries). Everything else should take bytes via
  * {@link BlobScope.read} or {@link BlobScope.open}.
  *
- * Disk returns its own storage path and releases as a no-op; remote
- * backends spool to a temp file and unlink on release. Use with
- * `try`/`finally` — the repo targets ES2020, so `await using` is not
- * available.
+ * Two rules make the lease mean the same thing on every backend, because
+ * this is where adapters would otherwise diverge invisibly:
+ *
+ * 1. **The path is read-only.** Writing through it corrupts authoritative
+ *    bytes on Disk and silently mutates a doomed temp copy on a remote
+ *    backend. Neither is a supported operation.
+ * 2. **The path is invalid once {@link release} resolves.** Disk physically
+ *    keeps its file — the path *is* its storage — so reading a retained copy
+ *    of the string would keep working there and fail on a remote backend.
+ *    Accessing {@link path} after release therefore throws on every backend,
+ *    so the stronger Disk behavior can't be depended on by accident.
+ *
+ * Use with `try`/`finally` — the repo targets ES2020, so `await using` is
+ * not available. Build leases with {@link createBlobLease} rather than an
+ * object literal, so both rules hold without each adapter restating them.
  */
 export interface BlobLease {
   readonly path: string;
@@ -123,6 +134,41 @@ export interface BlobStore {
 /** Thrown when a blob name is not a usable single path segment. */
 export class BlobNameError extends Error {
   override name = 'BlobNameError';
+}
+
+/** Thrown when a released {@link BlobLease}'s path is used. */
+export class BlobLeaseError extends Error {
+  override name = 'BlobLeaseError';
+}
+
+/**
+ * Build a lease with the semantics {@link BlobLease} promises.
+ *
+ * Shared by every adapter for the same reason as {@link normalizeBlobName}:
+ * the behavior must not drift between backends. `onRelease` is whatever the
+ * adapter has to do to give the path back — nothing for Disk, an unlink for a
+ * backend that spooled a temp copy — and runs at most once.
+ */
+export function createBlobLease(
+  path: string,
+  onRelease: () => Promise<void>,
+): BlobLease {
+  let released = false;
+  return {
+    get path(): string {
+      if (released) {
+        throw new BlobLeaseError(
+          'Blob lease has been released; materialize() again for a fresh path',
+        );
+      }
+      return path;
+    },
+    async release(): Promise<void> {
+      if (released) return;
+      released = true;
+      await onRelease();
+    },
+  };
 }
 
 /**

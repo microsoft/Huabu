@@ -10,19 +10,22 @@
  * lets a free-mode workspace switch take effect with no invalidation step.
  */
 
+import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import {
   mkdir,
   readdir,
   readFile,
+  rename,
   rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
+import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
 import { artifactPath, artifactsDir } from '../paths.js';
-import { normalizeBlobName } from '../ports/blob.js';
+import { createBlobLease, normalizeBlobName } from '../ports/blob.js';
 
 import type {
   BlobInfo,
@@ -35,6 +38,19 @@ import type {
 } from '../ports/blob.js';
 import type { StorageHealth } from '../ports/common.js';
 import type { Readable } from 'node:stream';
+
+/**
+ * Prefix for the sibling file a write lands in before it is renamed into
+ * place. Dot-prefixed and unique per call, so a concurrent writer of the same
+ * name never shares one, and a process killed mid-write leaves something
+ * recognizably not-a-blob behind.
+ */
+const TEMP_PREFIX = '.blobtmp-';
+
+/** Scope directory entries that are in-flight writes, not blobs. */
+function isTempEntry(entry: string): boolean {
+  return entry.startsWith(TEMP_PREFIX);
+}
 
 /** Resolve a scope to its backing directory. */
 function scopeDir(ref: BlobScopeRef): string {
@@ -54,23 +70,44 @@ function isMissing(err: unknown): boolean {
 class DiskBlobScope implements BlobScope {
   constructor(private readonly ref: BlobScopeRef) {}
 
+  /**
+   * Write to a unique sibling, then rename into place.
+   *
+   * Matches the atomic-write invariant the rest of the storage module holds
+   * (`io.ts`): a reader either sees the previous blob or the new one, never a
+   * prefix of the new one. That matters because names are reused —
+   * content-derived snapshot filenames are regenerated — and because a failed
+   * write must not leave a truncated blob at a live key, which the port has
+   * no per-key delete to clean up.
+   */
   async put(name: string, body: Readable | Buffer): Promise<BlobInfo> {
     const safe = normalizeBlobName(name);
-    await mkdir(scopeDir(this.ref), { recursive: true });
+    const dir = scopeDir(this.ref);
+    await mkdir(dir, { recursive: true });
+
     const full = blobPath(this.ref, safe);
+    const temp = path.join(dir, `${TEMP_PREFIX}${randomUUID()}`);
 
-    if (Buffer.isBuffer(body)) {
-      await writeFile(full, body);
-    } else {
-      await pipeline(body, createWriteStream(full));
+    try {
+      if (Buffer.isBuffer(body)) {
+        await writeFile(temp, body);
+      } else {
+        await pipeline(body, createWriteStream(temp));
+      }
+      // Stat before the rename: `rename` preserves size and mtime, and this
+      // describes the bytes we wrote rather than whatever a concurrent
+      // writer may have put at `full` by the time we look.
+      const stats = await stat(temp);
+      await rename(temp, full);
+      return {
+        name: safe,
+        size: stats.size,
+        updatedAt: stats.mtimeMs,
+      };
+    } catch (err) {
+      await rm(temp, { force: true }).catch(() => {});
+      throw err;
     }
-
-    const stats = await stat(full);
-    return {
-      name: safe,
-      size: stats.size,
-      updatedAt: stats.mtimeMs,
-    };
   }
 
   async head(name: string): Promise<BlobInfo | null> {
@@ -121,7 +158,9 @@ class DiskBlobScope implements BlobScope {
       throw err;
     }
 
-    const candidates = entries.filter((entry) => requested.has(entry));
+    const candidates = entries.filter(
+      (entry) => !isTempEntry(entry) && requested.has(entry),
+    );
     const infos = await Promise.all(
       candidates.map((entry) => this.head(entry)),
     );
@@ -137,7 +176,9 @@ class DiskBlobScope implements BlobScope {
       throw err;
     }
 
-    const infos = await Promise.all(entries.map((entry) => this.head(entry)));
+    const infos = await Promise.all(
+      entries.filter((entry) => !isTempEntry(entry)).map((e) => this.head(e)),
+    );
     return infos.filter((info): info is BlobInfo => info !== null);
   }
 
@@ -145,11 +186,10 @@ class DiskBlobScope implements BlobScope {
     const info = await this.head(name);
     if (!info) return null;
     // Disk already *is* a filesystem: hand back the real path and make
-    // release a no-op. No copy, so this costs nothing today.
-    return {
-      path: blobPath(this.ref, info.name),
-      release: async () => {},
-    };
+    // release a no-op. No copy, so this costs nothing today. The lease
+    // still refuses to hand out its path after release, so a consumer
+    // can't come to depend on Disk keeping the file (see `createBlobLease`).
+    return createBlobLease(blobPath(this.ref, info.name), async () => {});
   }
 
   async deleteAll(): Promise<void> {

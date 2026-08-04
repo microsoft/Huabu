@@ -2,9 +2,16 @@
  * Backend-independent contract for {@link BlobStore}.
  *
  * Every claimed implementation runs this same suite — the validation
- * criterion in docs/proposals/multi-backend-storage.md §15. Nothing here
- * may assume a filesystem: assertions go through the port, so the suite
- * transfers verbatim to a future Azure adapter.
+ * criterion in docs/proposals/multi-backend-storage.md §15. Assertions go
+ * through the port so the suite transfers verbatim to a future Azure
+ * adapter. The one exception is the materialize case, which reads
+ * `lease.path` directly: a lease that can't be opened by path has no reason
+ * to exist, and proving that requires stepping outside the port.
+ *
+ * The suite deliberately covers the points where two adapters could disagree
+ * — lease lifetime and replacement atomicity — because a suite that only
+ * asserts where they already agree would pass for implementations with
+ * opposite semantics.
  *
  * Not named `*.test.ts` on purpose — it defines a suite, it isn't one.
  */
@@ -14,7 +21,7 @@ import { Readable } from 'node:stream';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { BlobNameError } from './blob.js';
+import { BlobLeaseError, BlobNameError } from './blob.js';
 
 import type { BlobScope, BlobScopeRef, BlobStore } from './blob.js';
 
@@ -94,6 +101,60 @@ export function describeBlobStoreContract(
       expect(await blobs.read('c.txt')).toEqual(Buffer.from('second'));
       const info = await blobs.head('c.txt');
       expect(info?.size).toBe('second'.length);
+    });
+
+    it('never exposes a half-written blob while replacing one', async () => {
+      const blobs = await scope();
+      const before = Buffer.from('the original bytes');
+      await blobs.put('atomic.bin', before);
+
+      // Hold the body open after its first chunk so the replacement is
+      // provably mid-flight when we read.
+      let emitRest = (): void => {};
+      const gate = new Promise<void>((resolve) => {
+        emitRest = resolve;
+      });
+      async function* slowBody(): AsyncGenerator<Buffer> {
+        yield Buffer.from('replacement ');
+        await gate;
+        yield Buffer.from('bytes, longer than before');
+      }
+
+      const writing = blobs.put('atomic.bin', Readable.from(slowBody()));
+      // Let the first chunk reach the backend.
+      await new Promise((resolve) => setTimeout(resolve, 25));
+
+      // A reader mid-replacement sees the whole previous blob, never a
+      // prefix of the new one.
+      expect(await blobs.read('atomic.bin')).toEqual(before);
+      // ...and the in-flight write is not visible as a blob of its own.
+      expect((await blobs.list()).map((b) => b.name)).toEqual(['atomic.bin']);
+
+      emitRest();
+      await writing;
+
+      expect(await blobs.read('atomic.bin')).toEqual(
+        Buffer.from('replacement bytes, longer than before'),
+      );
+      expect((await blobs.list()).map((b) => b.name)).toEqual(['atomic.bin']);
+    });
+
+    it('leaves the previous blob intact when a write fails', async () => {
+      const blobs = await scope();
+      const before = Buffer.from('survivor');
+      await blobs.put('failing.bin', before);
+
+      async function* brokenBody(): AsyncGenerator<Buffer> {
+        yield Buffer.from('partial');
+        throw new Error('body exploded');
+      }
+
+      await expect(
+        blobs.put('failing.bin', Readable.from(brokenBody())),
+      ).rejects.toThrow(/body exploded/);
+
+      expect(await blobs.read('failing.bin')).toEqual(before);
+      expect((await blobs.list()).map((b) => b.name)).toEqual(['failing.bin']);
     });
 
     it('reports absence as null rather than throwing', async () => {
@@ -181,6 +242,28 @@ export function describeBlobStoreContract(
       // the blob through the port would not prove that the lease path works.
       expect(await readFile(lease.path)).toEqual(body);
       await expect(lease.release()).resolves.toBeUndefined();
+    });
+
+    it('refuses to hand out a released lease path', async () => {
+      const blobs = await scope();
+      await blobs.put('leased.txt', Buffer.from('leased bytes'));
+
+      const lease = present(
+        await blobs.materialize('leased.txt'),
+        'materialize("leased.txt")',
+      );
+      await lease.release();
+
+      // Disk keeps the file — its path *is* the storage — so without this
+      // rule a consumer could read after release on Disk and fail on a
+      // backend that unlinks its temp copy.
+      expect(() => lease.path).toThrow(BlobLeaseError);
+      // Releasing twice is a no-op, so `finally` blocks stay simple.
+      await expect(lease.release()).resolves.toBeUndefined();
+      // The blob itself is untouched by the lease ending.
+      expect(await blobs.read('leased.txt')).toEqual(
+        Buffer.from('leased bytes'),
+      );
     });
 
     it('deleteAll empties the scope and is idempotent', async () => {
