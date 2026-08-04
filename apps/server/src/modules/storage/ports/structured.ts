@@ -38,9 +38,15 @@ export interface StructuredStore {
   health(): Promise<StorageHealth>;
   close(): Promise<void>;
   /**
-   * Return the cached handle for one validated Space id.
-   * Repeated calls for the same id return the same handle; different ids are
-   * isolated. The handle itself remains Disk-specific in this refactor phase.
+   * Return the handle for one validated Space id.
+   *
+   * Handles for the same id denote the same Space; handles for different ids
+   * are isolated. Object identity is deliberately *not* promised: the Disk
+   * adapter serves handles from a bounded cache, so a process working with
+   * more Spaces than that cache holds can be handed a fresh instance for an
+   * id it served before. Anything that must outlive that is durable state and
+   * belongs in a repository, not on a handle. The handle itself remains
+   * Disk-specific in this refactor phase.
    */
   space(canvasId: string): SpaceHandle;
 }

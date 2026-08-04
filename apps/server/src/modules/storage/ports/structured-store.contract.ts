@@ -46,12 +46,17 @@ export function describeStructuredStoreContract(
       await expect(store.close()).resolves.toBeUndefined();
     });
 
-    it('returns the same handle for the same valid Space id', async () => {
+    it('returns an equivalent handle for the same valid Space id', async () => {
       const store = await open();
       const first = store.space('canvas-a');
       const second = store.space('canvas-a');
 
-      expect(second).toBe(first);
+      // Object identity is a caching detail of one adapter, not a port
+      // promise: the Disk cache is bounded, so a process working with more
+      // Spaces than it holds can be handed a fresh instance for an id it
+      // served before. What the port guarantees is that both handles denote
+      // the same Space. The Disk adapter's own test covers its caching.
+      expect(second.canvasId).toBe(first.canvasId);
       expect(first.canvasId).toBe('canvas-a');
     });
 
@@ -60,7 +65,7 @@ export function describeStructuredStoreContract(
       const first = store.space('canvas-a');
       const second = store.space('canvas-b');
 
-      expect(second).not.toBe(first);
+      expect(second.canvasId).not.toBe(first.canvasId);
       expect(first.canvasId).toBe('canvas-a');
       expect(second.canvasId).toBe('canvas-b');
     });
