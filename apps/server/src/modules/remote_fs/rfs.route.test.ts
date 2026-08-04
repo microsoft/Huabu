@@ -410,28 +410,49 @@ describe('SNAPSHOT_NODES Space query', () => {
 });
 
 describe('POST /api/rfs/:canvasId/execute', () => {
-  it('returns an actionable error when World reconciliation is required', async () => {
-    const writeCanvas = (
-      directory: string,
-      canvasId: string,
-      nodes: unknown[],
-    ) => {
-      const root = join(tmp, directory);
-      mkdirSync(root, { recursive: true });
-      writeFileSync(
-        join(root, 'space.json'),
-        JSON.stringify({
-          canvasId,
-          title: directory,
-          version: 0,
-          state: { nodes, edges: [] },
-          createdAt: 1,
-          updatedAt: 1,
-        }),
-      );
-    };
-    writeCanvas('.world', 'canvas-world', []);
-    writeCanvas('Project', 'canvas-source', [
+  const writeWorldFixture = (
+    directory: string,
+    canvasId: string,
+    nodes: unknown[],
+  ): void => {
+    const root = join(tmp, directory);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(
+      join(root, 'space.json'),
+      JSON.stringify({
+        canvasId,
+        title: directory,
+        version: 0,
+        state: { nodes, edges: [] },
+        createdAt: 1,
+        updatedAt: 1,
+      }),
+    );
+  };
+
+  const pinPayload = (sourceCanvasId: string, sourceNodeId: string) => ({
+    commands: [
+      {
+        type: 'SET_PORTAL_NODE_PINS',
+        updates: [
+          {
+            sourceCanvasId,
+            sourceNodeIds: [sourceNodeId],
+            pinned: true,
+          },
+        ],
+      },
+    ],
+  });
+
+  // A live Space whose Portal does not exist yet used to be answered with
+  // 409 "refresh the World". Since `ensureCanonicalPortals`, the router
+  // reconciles the missing Portal first and the pin succeeds, so the route
+  // has no reason to fail. Router-level coverage of the reconciliation
+  // itself lives in canvas-command-router.test.ts.
+  it('reconciles a missing Portal instead of failing the request', async () => {
+    writeWorldFixture('.world', 'canvas-world', []);
+    writeWorldFixture('Project', 'canvas-source', [
       {
         id: 'node-source',
         type: 'note',
@@ -447,27 +468,55 @@ describe('POST /api/rfs/:canvasId/execute', () => {
         method: 'POST',
         url: '/rfs/canvas-source/execute',
         headers: { 'content-type': 'application/json' },
-        payload: {
-          commands: [
-            {
-              type: 'SET_PORTAL_NODE_PINS',
-              updates: [
-                {
-                  sourceCanvasId: 'canvas-source',
-                  sourceNodeIds: ['node-source'],
-                  pinned: true,
-                },
-              ],
-            },
-          ],
-        },
+        payload: pinPayload('canvas-source', 'node-source'),
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const worldNodes = getCanvasStore('canvas-world').read()?.state.nodes as
+        | { type?: string; data?: { targetCanvasId?: string } }[]
+        | undefined;
+      expect(
+        worldNodes?.some(
+          (node) =>
+            node.type === 'canvasRef' &&
+            node.data?.targetCanvasId === 'canvas-source',
+        ),
+      ).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+
+  // Reconciliation only mints Portals for live Spaces, so a pin naming a
+  // Space that is not one cannot be satisfied. That is the case the route's
+  // 409 branch exists for.
+  it('answers 409 when the pinned source Space owns no Portal', async () => {
+    writeWorldFixture('.world', 'canvas-world', []);
+    writeWorldFixture('Project', 'canvas-source', [
+      {
+        id: 'node-source',
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: {},
+      },
+    ]);
+    resetStorageCache();
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/canvas-source/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: pinPayload('canvas-ghost', 'node-ghost'),
       });
 
       expect(response.statusCode).toBe(409);
       expect(response.json()).toMatchObject({
         code: 'WORLD_PORTAL_MISSING',
       });
-      expect(response.json().message).toMatch(/refresh the World/i);
+      expect(response.json().message).toMatch(/not a live Space/i);
     } finally {
       await app.close();
     }
