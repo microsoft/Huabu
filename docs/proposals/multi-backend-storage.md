@@ -903,14 +903,20 @@ use a transaction or conditional update across all of its connections.
 
 That guarantee currently rests on the _absence of an `await`_ inside an
 `async` method, which is not a mechanism. Someone swapping a sync call for
-`fs/promises` breaks it silently, and the obvious contract test — two writers,
-one winner — will still pass, because both calls are issued from the same tick
-and never get the chance to interleave. Phase 2 therefore makes the invariant
+`fs/promises` breaks it silently. Phase 2 therefore makes the invariant
 enforceable rather than aspirational:
 
-- the concurrency case in the contract suite interleaves the two writers
-  deliberately (the harness yields between the read and the swap) instead of
-  firing them from one tick;
+- the concurrency case in the contract suite issues its two writers **from one
+  tick against a shared baseline**, with no `await` between them, because that
+  is the ordering that actually discriminates. Separating them with a yield —
+  which an earlier draft of this plan called for — makes the second writer read
+  the already-updated record, so it degenerates into a sequential
+  stale-baseline test and passes even for an adapter whose critical section
+  spans an `await`. This was verified by injecting that `await` into the Disk
+  adapter: the same-tick case reports two winners and a lost update, the
+  yielded case stays green. Both orderings are in the suite, but only the
+  same-tick one is the race; the yielded one is asserted separately as the
+  ordinary conflict path;
 - the Disk adapter's critical section is a named private method with a comment
   stating that it must not `await`, so the requirement is visible at the point
   where it would be violated.
@@ -1064,8 +1070,8 @@ adapter-local guarantees, for the reason given in §12.2.3:
 - `space-repository.contract.ts`: missing read, successful CAS, mismatched
   id, invalid next version, immutable identity/title fields, not-found and
   version-conflict results, and two concurrent writers with one winner — with
-  the two writers deliberately interleaved rather than issued from one tick
-  (§12.2.5);
+  the two writers issued from one tick against a shared baseline, which is the
+  ordering that detects a critical section spanning an `await` (§12.2.5);
 - `canvas-log-repository.contract.ts`: event order/tail/empty append,
   delta filtering and duplicate rejection, change coalescing, concurrent
   append/remove behavior, and intent read/insert/update/concurrent upsert.

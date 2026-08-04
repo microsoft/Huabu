@@ -81,7 +81,13 @@ export type {
 } from './ports/blob.js';
 export type { StorageHealth } from './ports/common.js';
 export type {
+  CanvasLogRepository,
+  LegacyNodeStore,
+  NewCanvasEvent,
+  NodeWriteResult,
   SpaceHandle,
+  SpaceRepository,
+  SpaceWriteResult,
   StructuredBackendKind,
   StructuredStore,
 } from './ports/structured.js';

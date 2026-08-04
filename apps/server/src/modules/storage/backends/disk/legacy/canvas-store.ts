@@ -1080,6 +1080,19 @@ export class CanvasStore {
     return all.filter((row) => row.version > fromVersion);
   }
 
+  /**
+   * The most recently appended delta row, or null when the log is empty.
+   *
+   * A tail read (one line), not a full scan: the log is append-only and
+   * versions increase monotonically, so the last row carries the highest
+   * version. The Disk log adapter uses it to reject a duplicate or
+   * out-of-order append without paying O(log size) on every write.
+   */
+  lastDeltaLogEntry(): DeltaLogEntry | null {
+    const tail = readJsonLines<DeltaLogEntry>(deltaLogPath(this.canvasId), 1);
+    return tail[tail.length - 1] ?? null;
+  }
+
   // ── Preferences (removed) ────────────────────────────────────────────────
   //
   // User and Space memory are owned by the memory sub-agent, not the
