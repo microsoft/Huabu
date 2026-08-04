@@ -22,7 +22,7 @@ import { EDGE_LABEL_MAX_INVERSE_SCALE } from '@sediment/shared';
 
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import useCanvasStore from '@/store/canvasStore';
-import { useNodeCollapseStore } from '@/store/nodeCollapseStore';
+import { easeToward, useNodeCollapseStore } from '@/store/nodeCollapseStore';
 import { TEXT_NODE_PADDING_X } from '@/utils/node/nodeFontConfig';
 import { measureTextContent } from '@/utils/node/textMeasure';
 
@@ -74,14 +74,13 @@ export function LabelledEdge(props: EdgeProps) {
     selected,
   } = props;
 
-  // When an endpoint node is collapsed to its zoom-LOD mark (a centred circle),
-  // terminate the edge on that circle instead of the node's hidden card
-  // footprint, so the edge stays visually attached to the mark at any aspect
-  // ratio. A collapsed node publishes its mark's LIVE canvas-space centre +
-  // clip radius, so the edge follows the mark wherever it sits during the
-  // corner → centre glide — not a phantom circle at the node centre. Only
-  // collapsed question nodes publish geometry; everything else keeps React
-  // Flow's handle point.
+  // When an endpoint node is collapsing into its zoom-LOD mark, ease the edge
+  // off the node's handle and onto that mark's circle. The mark's geometry is
+  // published from the discrete stage but glides in from the card's CORNER, so
+  // adopting it outright would snap the endpoint deep inside the still-visible
+  // card; `progress` is the same `t` that drives the glide, so the endpoint
+  // arrives on the circle exactly as the card finishes fading. Only question
+  // nodes publish a mark; everything else keeps React Flow's handle point.
   const sourceMark = useNodeCollapseStore((s) => s.marks[source]);
   const targetMark = useNodeCollapseStore((s) => s.marks[target]);
 
@@ -90,20 +89,20 @@ export function LabelledEdge(props: EdgeProps) {
   let tx = targetX;
   let ty = targetY;
   if (sourceMark) {
-    const { cx, cy, radius } = sourceMark;
+    const { cx, cy, radius, progress } = sourceMark;
     const dx = tx - cx;
     const dy = ty - cy;
     const len = Math.hypot(dx, dy) || 1;
-    sx = cx + (dx / len) * radius;
-    sy = cy + (dy / len) * radius;
+    sx = easeToward(sx, cx + (dx / len) * radius, progress);
+    sy = easeToward(sy, cy + (dy / len) * radius, progress);
   }
   if (targetMark) {
-    const { cx, cy, radius } = targetMark;
+    const { cx, cy, radius, progress } = targetMark;
     const dx = sx - cx;
     const dy = sy - cy;
     const len = Math.hypot(dx, dy) || 1;
-    tx = cx + (dx / len) * radius;
-    ty = cy + (dy / len) * radius;
+    tx = easeToward(tx, cx + (dx / len) * radius, progress);
+    ty = easeToward(ty, cy + (dy / len) * radius, progress);
   }
 
   const edgeStyle = getEdgeStyle(data);

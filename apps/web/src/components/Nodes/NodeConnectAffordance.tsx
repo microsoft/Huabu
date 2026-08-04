@@ -29,9 +29,9 @@ import { createQuestionNodeAndCompose } from '@/components/Nodes/question/questi
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useConnectPortStore } from '@/store/connectPortStore.ts';
 import {
-  collapsedMarkRect,
+  blendedMarkRect,
   useNodeCollapseStore,
-  type CollapsedMarkGeometry,
+  type MarkAnchorRect,
 } from '@/store/nodeCollapseStore.ts';
 
 /** Connection handle definitions – source + target on each side. */
@@ -455,11 +455,12 @@ function HotPortOverlay({
   const { x, y } = node.internals.positionAbsolute;
   const w = node.measured.width ?? 0;
   const h = node.measured.height ?? 0;
-  // Ports sit on the node's border box, centred on the side they name —
-  // or, once the card has faded into its takeover mark, on the mark.
+  const footprint = { x, y, width: w, height: h };
+  // Ports sit on the node's border box, centred on the side they name — easing
+  // onto the takeover mark as the card fades into it.
   const { cx, cy } = portPointOnRect(
     position,
-    mark ? collapsedMarkRect(mark) : { x, y, width: w, height: h },
+    mark ? blendedMarkRect(mark, footprint) : footprint,
   );
 
   return createPortal(
@@ -495,11 +496,11 @@ function HotPortOverlay({
  * geometry, this is paint only.
  */
 function CollapsedPortDots({
-  mark,
+  rect,
   hotPosition,
   size,
 }: {
-  mark: CollapsedMarkGeometry;
+  rect: MarkAnchorRect;
   hotPosition: Position | null;
   size: number;
 }) {
@@ -509,7 +510,6 @@ function CollapsedPortDots({
   if (!domNode) return null;
 
   const [tx, ty, zoom] = transform;
-  const rect = collapsedMarkRect(mark);
 
   return createPortal(
     <>
@@ -622,23 +622,29 @@ export const NodeConnectionHandles = memo(
     // mark. Handles are positioned inside the node's own box, which React
     // Flow lays out in flow units, so the mark's canvas-space rect converts
     // by plain translation.
+    let collapsedRect: MarkAnchorRect | null = null;
     let collapsedLocalRect: PortRect | null = null;
     if (mark && node) {
-      const rect = collapsedMarkRect(mark);
       const abs = node.internals.positionAbsolute;
+      collapsedRect = blendedMarkRect(mark, {
+        x: abs.x,
+        y: abs.y,
+        width: node.measured.width ?? 0,
+        height: node.measured.height ?? 0,
+      });
       collapsedLocalRect = {
-        x: rect.x - abs.x,
-        y: rect.y - abs.y,
-        width: rect.width,
-        height: rect.height,
+        x: collapsedRect.x - abs.x,
+        y: collapsedRect.y - abs.y,
+        width: collapsedRect.width,
+        height: collapsedRect.height,
       };
     }
 
     return (
       <>
-        {mark && (exposed || pinnedPosition) && (
+        {collapsedRect && (exposed || pinnedPosition) && (
           <CollapsedPortDots
-            mark={mark}
+            rect={collapsedRect}
             hotPosition={hotPosition}
             size={baseHandleSize}
           />

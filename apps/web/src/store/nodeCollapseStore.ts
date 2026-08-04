@@ -18,6 +18,16 @@ export interface CollapsedMarkGeometry {
   cy: number;
   /** Canvas-space clip radius of the mark this frame. */
   radius: number;
+  /**
+   * Continuous collapse progress `t ∈ [0,1]` for this frame — 0 while the mark
+   * still rests at the card's corner, 1 once it is the centred mark.
+   *
+   * Chrome is PUBLISHED on the discrete stage (which flips near `t ≈ 0.06`)
+   * but must be POSITIONED on this, blending footprint → mark. Reading the
+   * geometry alone would snap every edge, port, and outline onto a circle
+   * still parked at the node's top-left corner the instant the stage flipped.
+   */
+  progress: number;
 }
 
 interface NodeCollapseState {
@@ -57,6 +67,42 @@ export function collapsedMarkRect(mark: CollapsedMarkGeometry): {
   };
 }
 
+/** A rectangle in canvas space. */
+export interface MarkAnchorRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Eases `from` toward `to` by a clamped collapse progress. */
+export function easeToward(from: number, to: number, progress: number): number {
+  const t = Math.min(1, Math.max(0, progress));
+  return from + (to - from) * t;
+}
+
+/**
+ * The rect chrome should anchor to mid-takeover: the node's own footprint
+ * eased toward {@link collapsedMarkRect} by the mark's {@link
+ * CollapsedMarkGeometry.progress}.
+ *
+ * This is the geometry every consumer wants. The mark's own rect is only
+ * correct at `progress === 1`; before that the mark is still gliding in from
+ * the corner, so anchoring straight to it drops the chrome inside the card.
+ */
+export function blendedMarkRect(
+  mark: CollapsedMarkGeometry,
+  footprint: MarkAnchorRect,
+): MarkAnchorRect {
+  const target = collapsedMarkRect(mark);
+  return {
+    x: easeToward(footprint.x, target.x, mark.progress),
+    y: easeToward(footprint.y, target.y, mark.progress),
+    width: easeToward(footprint.width, target.width, mark.progress),
+    height: easeToward(footprint.height, target.height, mark.progress),
+  };
+}
+
 export const useNodeCollapseStore = create<NodeCollapseState>((set) => ({
   marks: {},
   setMark: (id, geometry) =>
@@ -72,7 +118,8 @@ export const useNodeCollapseStore = create<NodeCollapseState>((set) => ({
         current &&
         current.cx === geometry.cx &&
         current.cy === geometry.cy &&
-        current.radius === geometry.radius
+        current.radius === geometry.radius &&
+        current.progress === geometry.progress
       ) {
         return state;
       }

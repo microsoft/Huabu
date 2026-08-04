@@ -24,7 +24,7 @@ import { useIsNotMouse } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 import {
-  collapsedMarkRect,
+  blendedMarkRect,
   useNodeCollapseStore,
 } from '@/store/nodeCollapseStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
@@ -141,14 +141,14 @@ export const NodeFloatingToolbar = memo(
     // displayed value reflects the content-driven height.
     const anchor = useMemo(() => {
       if (!internalNode) return null;
-      if (mark) return collapsedMarkRect(mark);
       const x = internalNode.internals.positionAbsolute?.x ?? 0;
       const y = internalNode.internals.positionAbsolute?.y ?? 0;
       const styleW = internalNode.style?.width as number | undefined;
       const styleH = internalNode.style?.height as number | undefined;
       const width = styleW ?? internalNode.measured?.width ?? 0;
       const height = styleH ?? internalNode.measured?.height ?? 0;
-      return { x, y, width, height };
+      const footprint = { x, y, width, height };
+      return mark ? blendedMarkRect(mark, footprint) : footprint;
     }, [internalNode, mark]);
 
     // Current size shown in the size picker. Same source-of-truth

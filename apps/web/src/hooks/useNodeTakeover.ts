@@ -29,6 +29,12 @@ export interface NodeTakeoverGeometry {
    * edges can clip to it without recomputing on every zoom frame.
    */
   collapsedRadius: number | null;
+  /**
+   * Continuous collapse progress `t ∈ [0,1]` this frame. Published with the
+   * mark so chrome can ease footprint → mark instead of jumping to a circle
+   * still parked at the card's corner when the discrete stage flips.
+   */
+  collapseT: number;
 }
 
 /**
@@ -62,6 +68,7 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
       point: { x: 0, y: 0 },
       collapsedCenter: null,
       collapsedRadius: null,
+      collapseT: 0,
     };
   }
 
@@ -97,13 +104,22 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
   // to the actual mark circle. Radius in canvas space = screen size / zoom.
   const collapsedRadius = stage === 'readable' ? null : size / (2 * zoom);
 
-  // Live canvas-space centre of the mark (derived from the interpolated screen
-  // point) so edges clip to where the mark ACTUALLY is during the corner →
-  // centre glide, not to a phantom circle pinned at the node centre.
+  // Live canvas-space centre of the mark, so edges clip to where the mark
+  // ACTUALLY is during the corner → centre glide, not to a phantom circle
+  // pinned at the node centre. Built from `abs` + a canvas-space offset rather
+  // than by unprojecting `point`: `vp` cancels analytically, but `(a·z + vp) −
+  // vp` loses low bits at realistic pan magnitudes, so the round trip made the
+  // centre jitter on every pan frame — which `setMark`'s identity check reads
+  // as movement and re-renders every edge and outline anchored to the mark,
+  // during the one gesture React Flow otherwise handles with a CSS transform
+  // alone.
   const collapsedCenter =
     stage === 'readable'
       ? null
-      : { x: (point.x - vpX) / zoom, y: (point.y - vpY) / zoom };
+      : {
+          x: abs.x + lerp((badge * 0.3) / zoom, width / 2, t),
+          y: abs.y + lerp((badge * 0.05) / zoom, height / 2, t),
+        };
 
-  return { stage, size, point, collapsedCenter, collapsedRadius };
+  return { stage, size, point, collapsedCenter, collapsedRadius, collapseT: t };
 }

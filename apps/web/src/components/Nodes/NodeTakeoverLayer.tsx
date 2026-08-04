@@ -46,7 +46,7 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
   onActivate,
   nodeRootRef,
 }: NodeTakeoverLayerProps) {
-  const { stage, size, point, collapsedCenter, collapsedRadius } =
+  const { stage, size, point, collapsedCenter, collapsedRadius, collapseT } =
     useNodeTakeover(nodeId);
   const domNode = useStore((s) => s.domNode);
   const internalNode = useInternalNode(nodeId);
@@ -67,11 +67,16 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
   const markCy = collapsedCenter?.y ?? null;
   useLayoutEffect(() => {
     if (markCx !== null && markCy !== null && collapsedRadius !== null) {
-      setMark(nodeId, { cx: markCx, cy: markCy, radius: collapsedRadius });
+      setMark(nodeId, {
+        cx: markCx,
+        cy: markCy,
+        radius: collapsedRadius,
+        progress: collapseT,
+      });
     } else {
       setMark(nodeId, null);
     }
-  }, [nodeId, markCx, markCy, collapsedRadius, setMark]);
+  }, [nodeId, markCx, markCy, collapsedRadius, collapseT, setMark]);
   useLayoutEffect(() => () => setMark(nodeId, null), [nodeId, setMark]);
 
   // Binary card fade — written here (and only here) so NodeWrapper and the card
