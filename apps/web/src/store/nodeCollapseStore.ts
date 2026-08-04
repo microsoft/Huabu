@@ -1,5 +1,13 @@
 import { create } from 'zustand';
 
+/** A rectangle in canvas space. */
+export interface MarkAnchorRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /**
  * Canvas-space geometry of a node's zoom-LOD collapsed mark — the live centre
  * and clip radius of the circle its edges should terminate on while the node
@@ -28,6 +36,8 @@ export interface CollapsedMarkGeometry {
    * still parked at the node's top-left corner the instant the stage flipped.
    */
   progress: number;
+  /** The node's own canvas-space border box — the `progress === 0` end of the blend. */
+  footprint: MarkAnchorRect;
 }
 
 interface NodeCollapseState {
@@ -67,14 +77,6 @@ export function collapsedMarkRect(mark: CollapsedMarkGeometry): {
   };
 }
 
-/** A rectangle in canvas space. */
-export interface MarkAnchorRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 /** Eases `from` toward `to` by a clamped collapse progress. */
 export function easeToward(from: number, to: number, progress: number): number {
   const t = Math.min(1, Math.max(0, progress));
@@ -90,17 +92,50 @@ export function easeToward(from: number, to: number, progress: number): number {
  * correct at `progress === 1`; before that the mark is still gliding in from
  * the corner, so anchoring straight to it drops the chrome inside the card.
  */
-export function blendedMarkRect(
-  mark: CollapsedMarkGeometry,
-  footprint: MarkAnchorRect,
-): MarkAnchorRect {
+export function blendedMarkRect(mark: CollapsedMarkGeometry): MarkAnchorRect {
   const target = collapsedMarkRect(mark);
+  const { footprint, progress } = mark;
   return {
-    x: easeToward(footprint.x, target.x, mark.progress),
-    y: easeToward(footprint.y, target.y, mark.progress),
-    width: easeToward(footprint.width, target.width, mark.progress),
-    height: easeToward(footprint.height, target.height, mark.progress),
+    x: easeToward(footprint.x, target.x, progress),
+    y: easeToward(footprint.y, target.y, progress),
+    width: easeToward(footprint.width, target.width, progress),
+    height: easeToward(footprint.height, target.height, progress),
   };
+}
+
+/**
+ * Where an edge that used to land on `(fromX, fromY)` should land while the
+ * node is collapsing — the point on the {@link blendedMarkRect} boundary that
+ * lies along the ray from the shape's centre through that original handle.
+ *
+ * Boundary point, not an interpolated one. Easing the endpoint straight toward
+ * the mark's circle drags it through the card's interior, so mid-band the edge
+ * ends in open space over the node's text instead of touching anything. Here
+ * the shape itself morphs (border box → mark disc, rectangular → elliptical
+ * projection by the same `progress`), so the endpoint is always ON an edge of
+ * whatever is currently drawn: exactly the handle at `progress === 0`, exactly
+ * the mark's circle at 1.
+ */
+export function markBoundaryPoint(
+  mark: CollapsedMarkGeometry,
+  fromX: number,
+  fromY: number,
+): { x: number; y: number } {
+  const rect = blendedMarkRect(mark);
+  const halfW = rect.width / 2;
+  const halfH = rect.height / 2;
+  const cx = rect.x + halfW;
+  const cy = rect.y + halfH;
+  if (halfW <= 0 || halfH <= 0) return { x: cx, y: cy };
+  const dx = fromX - cx;
+  const dy = fromY - cy;
+  const nx = Math.abs(dx) / halfW;
+  const ny = Math.abs(dy) / halfH;
+  const norm = Math.hypot(nx, ny);
+  if (norm === 0) return { x: cx, y: cy };
+  // `1 / max` hits the rectangle, `1 / hypot` the inscribed ellipse.
+  const scale = easeToward(1 / Math.max(nx, ny), 1 / norm, mark.progress);
+  return { x: cx + dx * scale, y: cy + dy * scale };
 }
 
 export const useNodeCollapseStore = create<NodeCollapseState>((set) => ({
@@ -119,7 +154,11 @@ export const useNodeCollapseStore = create<NodeCollapseState>((set) => ({
         current.cx === geometry.cx &&
         current.cy === geometry.cy &&
         current.radius === geometry.radius &&
-        current.progress === geometry.progress
+        current.progress === geometry.progress &&
+        current.footprint.x === geometry.footprint.x &&
+        current.footprint.y === geometry.footprint.y &&
+        current.footprint.width === geometry.footprint.width &&
+        current.footprint.height === geometry.footprint.height
       ) {
         return state;
       }

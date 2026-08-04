@@ -46,8 +46,15 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
   onActivate,
   nodeRootRef,
 }: NodeTakeoverLayerProps) {
-  const { stage, size, point, collapsedCenter, collapsedRadius, collapseT } =
-    useNodeTakeover(nodeId);
+  const {
+    stage,
+    size,
+    point,
+    collapsedCenter,
+    collapsedRadius,
+    collapseT,
+    collapsedFootprint,
+  } = useNodeTakeover(nodeId);
   const domNode = useStore((s) => s.domNode);
   const internalNode = useInternalNode(nodeId);
   const markDrag = useTakeoverMarkDrag(nodeId);
@@ -65,18 +72,42 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
   // update never transiently nulls the mark (which would flicker the edge).
   const markCx = collapsedCenter?.x ?? null;
   const markCy = collapsedCenter?.y ?? null;
+  const footX = collapsedFootprint?.x ?? null;
+  const footY = collapsedFootprint?.y ?? null;
+  const footW = collapsedFootprint?.width ?? null;
+  const footH = collapsedFootprint?.height ?? null;
   useLayoutEffect(() => {
-    if (markCx !== null && markCy !== null && collapsedRadius !== null) {
+    if (
+      markCx !== null &&
+      markCy !== null &&
+      collapsedRadius !== null &&
+      footX !== null &&
+      footY !== null &&
+      footW !== null &&
+      footH !== null
+    ) {
       setMark(nodeId, {
         cx: markCx,
         cy: markCy,
         radius: collapsedRadius,
         progress: collapseT,
+        footprint: { x: footX, y: footY, width: footW, height: footH },
       });
     } else {
       setMark(nodeId, null);
     }
-  }, [nodeId, markCx, markCy, collapsedRadius, collapseT, setMark]);
+  }, [
+    nodeId,
+    markCx,
+    markCy,
+    collapsedRadius,
+    collapseT,
+    footX,
+    footY,
+    footW,
+    footH,
+    setMark,
+  ]);
   useLayoutEffect(() => () => setMark(nodeId, null), [nodeId, setMark]);
 
   // Binary card fade — written here (and only here) so NodeWrapper and the card

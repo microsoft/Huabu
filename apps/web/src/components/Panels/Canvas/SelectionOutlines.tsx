@@ -74,7 +74,7 @@ export const SelectionOutlines = () => {
       width: width || 200,
       height: height || 100,
     };
-    const rect = mark ? blendedMarkRect(mark, footprint) : footprint;
+    const rect = mark ? blendedMarkRect(mark) : footprint;
     const w = rect.width * zoom;
     const h = rect.height * zoom;
     const left = rect.x * zoom + vpX;

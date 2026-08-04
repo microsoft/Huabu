@@ -11,6 +11,8 @@ import {
   type TakeoverPoint,
 } from '@/config/nodeTakeover';
 
+import type { MarkAnchorRect } from '@/store/nodeCollapseStore';
+
 export interface NodeTakeoverGeometry {
   stage: QuestionLodStage;
   /** Rendered mark diameter (screen px). */
@@ -35,6 +37,13 @@ export interface NodeTakeoverGeometry {
    * still parked at the card's corner when the discrete stage flips.
    */
   collapseT: number;
+  /**
+   * The node's canvas-space border box while collapsed, or `null` when it is
+   * readable. This is the `t = 0` end of every chrome blend, published from
+   * here so edges, ports, and outlines all measure the node the same way the
+   * takeover itself does.
+   */
+  collapsedFootprint: MarkAnchorRect | null;
 }
 
 /**
@@ -69,6 +78,7 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
       collapsedCenter: null,
       collapsedRadius: null,
       collapseT: 0,
+      collapsedFootprint: null,
     };
   }
 
@@ -121,5 +131,16 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
           y: abs.y + lerp((badge * 0.05) / zoom, height / 2, t),
         };
 
-  return { stage, size, point, collapsedCenter, collapsedRadius, collapseT: t };
+  const collapsedFootprint =
+    stage === 'readable' ? null : { x: abs.x, y: abs.y, width, height };
+
+  return {
+    stage,
+    size,
+    point,
+    collapsedCenter,
+    collapsedRadius,
+    collapseT: t,
+    collapsedFootprint,
+  };
 }

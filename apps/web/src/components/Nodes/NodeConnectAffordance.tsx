@@ -455,12 +455,11 @@ function HotPortOverlay({
   const { x, y } = node.internals.positionAbsolute;
   const w = node.measured.width ?? 0;
   const h = node.measured.height ?? 0;
-  const footprint = { x, y, width: w, height: h };
   // Ports sit on the node's border box, centred on the side they name — easing
   // onto the takeover mark as the card fades into it.
   const { cx, cy } = portPointOnRect(
     position,
-    mark ? blendedMarkRect(mark, footprint) : footprint,
+    mark ? blendedMarkRect(mark) : { x, y, width: w, height: h },
   );
 
   return createPortal(
@@ -626,12 +625,7 @@ export const NodeConnectionHandles = memo(
     let collapsedLocalRect: PortRect | null = null;
     if (mark && node) {
       const abs = node.internals.positionAbsolute;
-      collapsedRect = blendedMarkRect(mark, {
-        x: abs.x,
-        y: abs.y,
-        width: node.measured.width ?? 0,
-        height: node.measured.height ?? 0,
-      });
+      collapsedRect = blendedMarkRect(mark);
       collapsedLocalRect = {
         x: collapsedRect.x - abs.x,
         y: collapsedRect.y - abs.y,

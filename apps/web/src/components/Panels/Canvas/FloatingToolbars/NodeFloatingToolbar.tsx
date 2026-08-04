@@ -147,8 +147,7 @@ export const NodeFloatingToolbar = memo(
       const styleH = internalNode.style?.height as number | undefined;
       const width = styleW ?? internalNode.measured?.width ?? 0;
       const height = styleH ?? internalNode.measured?.height ?? 0;
-      const footprint = { x, y, width, height };
-      return mark ? blendedMarkRect(mark, footprint) : footprint;
+      return mark ? blendedMarkRect(mark) : { x, y, width, height };
     }, [internalNode, mark]);
 
     // Current size shown in the size picker. Same source-of-truth
