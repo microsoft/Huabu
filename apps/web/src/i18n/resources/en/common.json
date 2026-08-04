@@ -435,7 +435,6 @@
     "nodeFileMissing": "Node file missing",
     "fileMissingDescription": "This node's file was deleted or renamed outside the app.",
     "expand": "Expand",
-    "showAllContent": "Show all content",
     "pendingEdits_one": "{{count}} change",
     "pendingEdits_other": "{{count}} changes",
     "editRawMarkdown": "Edit raw markdown",

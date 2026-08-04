@@ -435,7 +435,6 @@
     "nodeFileMissing": "节点文件缺失",
     "fileMissingDescription": "此节点的文件已在应用外被删除或重命名。",
     "expand": "展开",
-    "showAllContent": "显示全部内容",
     "pendingEdits_one": "{{count}} 个更改",
     "pendingEdits_other": "{{count}} 个更改",
     "editRawMarkdown": "编辑原始 Markdown",
