@@ -58,9 +58,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
     const name = `${id}${ext}`;
 
     try {
-      await canvasBlobs(canvasId).put(name, data.file, {
-        mimeType: data.mimetype ?? null,
-      });
+      await canvasBlobs(canvasId).put(name, data.file);
     } catch (error) {
       request.log.error({ err: error }, 'Failed to stream artifact to storage');
       return reply.code(500).send({ message: 'Failed to save file' });
@@ -90,7 +88,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       // we strip the wrapper on the fly and serve the inner HTML as
       // `text/html` so no browser-side MHTML handler is required.
       if (safeName.toLowerCase().endsWith('.mhtml')) {
-        const buffer = await blobs.read(safeName).catch(() => null);
+        const buffer = await blobs.read(safeName);
         if (!buffer) {
           return reply.code(404).send({ message: 'Artifact not found' });
         }
@@ -114,9 +112,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
         );
       }
 
-      const served = await sendBlob(request, reply, blobs, safeName).catch(
-        () => false,
-      );
+      const served = await sendBlob(request, reply, blobs, safeName);
       if (!served) {
         return reply.code(404).send({ message: 'Artifact not found' });
       }
@@ -181,8 +177,8 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
       id,
       uri: name,
       filename: name,
-      // The clone carries no declared MIME type, matching the previous
-      // behaviour where the copied record was written with `mimeType: null`.
+      // The byte store carries no MIME metadata; the HTTP boundary infers the
+      // representation type from this filename.
       mimetype: undefined,
     };
     return reply.send(response);

@@ -17,13 +17,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import fastify from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
 import canvasRoutes from './canvas.route.js';
-import { getCanvasStore } from '../storage/index.js';
+import {
+  getCanvasStore,
+  getStorage,
+  setStorageForTesting,
+} from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
+
+import type { BlobScope, BlobStore } from '../storage/index.js';
 
 let tmp: string;
 
@@ -450,6 +456,95 @@ describe('missing-sidecar barrier', () => {
       expect(store.readNode('pdf1')).toBeNull();
     } finally {
       await app.close();
+    }
+  });
+});
+
+describe('artifact presence hydration', () => {
+  function seedImageWithSidecar(canvasId: string, src: string): void {
+    const store = getCanvasStore(canvasId);
+    store.write({
+      canvasId,
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          {
+            id: 'image1',
+            type: 'image',
+            position: { x: 0, y: 0 },
+            data: {},
+          },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    store.writeNode('image1', {
+      nodeId: 'image1',
+      type: 'image',
+      label: 'Image',
+      src,
+      content: '',
+    });
+  }
+
+  function blobStore(scope: BlobScope): BlobStore {
+    return {
+      kind: 'disk',
+      async init() {},
+      async health() {
+        return { ok: true, kind: 'disk' };
+      },
+      async close() {},
+      scope: () => scope,
+    };
+  }
+
+  it('batches only artifact keys referenced by hydrated sidecars', async () => {
+    seedImageWithSidecar('artifact-batch', 'present.png');
+    const hasMany = vi.fn(async (names: readonly string[]) => new Set(names));
+    const current = getStorage();
+    const restore = setStorageForTesting({
+      ...current,
+      blobs: blobStore({ hasMany } as unknown as BlobScope),
+    });
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/canvas/artifact-batch',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(hasMany).toHaveBeenCalledOnce();
+      expect(hasMany).toHaveBeenCalledWith(['present.png']);
+    } finally {
+      await app.close();
+      restore();
+    }
+  });
+
+  it('propagates a failed artifact batch instead of marking files missing', async () => {
+    seedImageWithSidecar('artifact-failure', 'present.png');
+    const current = getStorage();
+    const restore = setStorageForTesting({
+      ...current,
+      blobs: blobStore({
+        hasMany: vi.fn(() => Promise.reject(new Error('backend unavailable'))),
+      } as unknown as BlobScope),
+    });
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/canvas/artifact-failure',
+      });
+      expect(response.statusCode).toBe(500);
+    } finally {
+      await app.close();
+      restore();
     }
   });
 });

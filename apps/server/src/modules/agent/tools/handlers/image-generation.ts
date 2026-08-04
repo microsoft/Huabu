@@ -269,7 +269,7 @@ export async function handleGenerateImage(
   // `canvas_commands` insert or embeds them in a note body — from
   // user-uploaded artifacts that should never be auto-collected.
   const name = `${createId('gen')}.png`;
-  await blobs.put(name, png, { mimeType: 'image/png' });
+  await blobs.put(name, png);
 
   // The requested size string ("auto" included) drives what we
   // report back; gpt-image-* generally honours the request size, and

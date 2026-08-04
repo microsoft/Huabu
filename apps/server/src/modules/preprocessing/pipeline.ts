@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 
 import { createId } from '@sediment/shared';
 
+import { getLogger } from '../../utils/logger.js';
 import { wrapAsMhtml } from '../web/mhtml.js';
 import { tryCacheShortCircuit } from './stages/cache-check.js';
 import { enrich } from './stages/enrich.js';
@@ -17,7 +18,6 @@ import { inputResolve } from './stages/input-resolve.js';
 import { normalize } from './stages/normalize.js';
 import { persist } from './stages/persist.js';
 import { project } from './stages/project.js';
-import { canvasBlobs } from '../storage/index.js';
 
 import type { ProviderManager } from './provider-manager.js';
 import type {
@@ -29,12 +29,15 @@ import type {
   PreprocessNodeResult,
 } from './types.js';
 import type { CanvasStore } from '../storage/canvas-store.js';
-import type { BlobLease } from '../storage/index.js';
+import type { BlobLease, BlobScope } from '../storage/index.js';
 import type { PreprocessNodeRequest } from '@sediment/shared';
+
+const log = getLogger('preprocessing.pipeline');
 
 /** Dependencies injected into the pipeline runner. */
 export interface PipelineDeps {
   store: CanvasStore;
+  blobs: BlobScope;
   provider: ProviderManager;
 }
 
@@ -65,7 +68,14 @@ export async function runPipeline(
   } finally {
     for (const lease of leases) {
       // Cleanup must never mask the pipeline's own result or error.
-      await lease.release().catch(() => {});
+      try {
+        await lease.release();
+      } catch (err) {
+        log.warn(
+          { err, canvasId: request.canvasId, nodeId: request.nodeId },
+          'Failed to release materialized artifact',
+        );
+      }
     }
   }
 }
@@ -94,9 +104,7 @@ async function runPipelineStages(
       // other blob reader takes bytes.
       const artifactName = ctx.resolved.artifactName;
       if (artifactName) {
-        const lease = await canvasBlobs(deps.store.canvasId).materialize(
-          artifactName,
-        );
+        const lease = await deps.blobs.materialize(artifactName);
         if (lease) {
           leases.push(lease);
           ctx.resolved.filePath = lease.path;
@@ -167,9 +175,7 @@ async function runPipelineStages(
               ? ctx.extracted.title
               : ctx.resolved.normalizedUri,
           );
-          await canvasBlobs(deps.store.canvasId).put(artifactName, buffer, {
-            mimeType: 'message/rfc822',
-          });
+          await deps.blobs.put(artifactName, buffer);
           // Inject the artifact key into metadata so the Normalize →
           // Persist chain writes it as a top-level YAML field on the
           // node sidecar. The web route reads `mhtmlArtifact` directly

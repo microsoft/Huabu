@@ -1,7 +1,7 @@
 import { Readable } from 'node:stream';
 
 import Fastify from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { resolveRange, sendBlob } from './send-blob.js';
 
@@ -16,7 +16,6 @@ function fakeScope(blobs: Record<string, Buffer>): BlobScope {
   const info = (name: string, body: Buffer): BlobInfo => ({
     name,
     size: body.byteLength,
-    mimeType: null,
     updatedAt: 1_700_000_000_000,
   });
   return {
@@ -39,6 +38,9 @@ function fakeScope(blobs: Record<string, Buffer>): BlobScope {
     async read(name) {
       return blobs[name] ?? null;
     },
+    async hasMany(names) {
+      return new Set(names.filter((name) => blobs[name] !== undefined));
+    },
     async list() {
       return Object.entries(blobs).map(([name, body]) => info(name, body));
     },
@@ -53,15 +55,24 @@ async function serve(
   blobs: Record<string, Buffer>,
   name: string,
   headers: Record<string, string> = {},
+  method: 'GET' | 'HEAD' = 'GET',
+) {
+  return serveScope(fakeScope(blobs), name, headers, method);
+}
+
+async function serveScope(
+  scope: BlobScope,
+  name: string,
+  headers: Record<string, string> = {},
+  method: 'GET' | 'HEAD' = 'GET',
 ) {
   const app = Fastify();
-  const scope = fakeScope(blobs);
   app.get('/blob', async (request, reply) => {
     const ok = await sendBlob(request, reply, scope, name);
     if (!ok) return reply.code(404).send({ message: 'Artifact not found' });
     return reply;
   });
-  const response = await app.inject({ method: 'GET', url: '/blob', headers });
+  const response = await app.inject({ method, url: '/blob', headers });
   await app.close();
   return response;
 }
@@ -109,6 +120,8 @@ describe('sendBlob', () => {
     expect(res.headers['content-type']).toBe('image/png');
     expect(res.headers['content-length']).toBe('10');
     expect(res.headers['accept-ranges']).toBe('bytes');
+    expect(res.headers['cache-control']).toBe('public, max-age=0');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
     expect(res.headers['etag']).toBeDefined();
     expect(res.headers['last-modified']).toBeDefined();
   });
@@ -121,6 +134,11 @@ describe('sendBlob', () => {
   it('falls back to octet-stream for an unknown extension', async () => {
     const res = await serve({ 'thing.xyz': body }, 'thing.xyz');
     expect(res.headers['content-type']).toBe('application/octet-stream');
+  });
+
+  it('adds a UTF-8 charset to text content', async () => {
+    const res = await serve({ 'note.txt': body }, 'note.txt');
+    expect(res.headers['content-type']).toBe('text/plain; charset=utf-8');
   });
 
   it('reports a missing blob to the caller', async () => {
@@ -137,6 +155,28 @@ describe('sendBlob', () => {
     expect(res.rawPayload.toString()).toBe('2345');
     expect(res.headers['content-range']).toBe('bytes 2-5/10');
     expect(res.headers['content-length']).toBe('4');
+  });
+
+  it('honours a fresh If-Range validator', async () => {
+    const first = await serve({ 'a.png': body }, 'a.png');
+    const res = await serve({ 'a.png': body }, 'a.png', {
+      range: 'bytes=2-5',
+      'if-range': first.headers['etag'] as string,
+    });
+
+    expect(res.statusCode).toBe(206);
+    expect(res.rawPayload.toString()).toBe('2345');
+  });
+
+  it('ignores Range when If-Range is stale', async () => {
+    const res = await serve({ 'a.png': body }, 'a.png', {
+      range: 'bytes=2-5',
+      'if-range': 'W/"stale-validator"',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload).toEqual(body);
+    expect(res.headers['content-range']).toBeUndefined();
   });
 
   it('rejects an unsatisfiable range with 416', async () => {
@@ -166,6 +206,20 @@ describe('sendBlob', () => {
     expect(res.statusCode).toBe(200);
   });
 
+  it('answers 412 when If-Match does not match', async () => {
+    const res = await serve({ 'a.png': body }, 'a.png', {
+      'if-match': 'W/"stale-validator"',
+    });
+    expect(res.statusCode).toBe(412);
+  });
+
+  it('answers 412 when the blob changed after If-Unmodified-Since', async () => {
+    const res = await serve({ 'a.png': body }, 'a.png', {
+      'if-unmodified-since': new Date(1_600_000_000_000).toUTCString(),
+    });
+    expect(res.statusCode).toBe(412);
+  });
+
   it('answers 304 when the blob is older than If-Modified-Since', async () => {
     const res = await serve({ 'a.png': body }, 'a.png', {
       'if-modified-since': new Date(1_700_000_500_000).toUTCString(),
@@ -178,5 +232,26 @@ describe('sendBlob', () => {
       'if-modified-since': new Date(1_600_000_000_000).toUTCString(),
     });
     expect(res.statusCode).toBe(200);
+  });
+
+  it('answers HEAD with representation headers and no body read', async () => {
+    const scope = fakeScope({ 'a.png': body });
+    scope.open = vi.fn(() => {
+      throw new Error('HEAD must not open the body');
+    });
+
+    const res = await serveScope(scope, 'a.png', {}, 'HEAD');
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload.length).toBe(0);
+    expect(res.headers['content-length']).toBe('10');
+    expect(scope.open).not.toHaveBeenCalled();
+  });
+
+  it('propagates storage failures as server errors', async () => {
+    const scope = fakeScope({});
+    scope.head = vi.fn(() => Promise.reject(new Error('backend unavailable')));
+
+    const res = await serveScope(scope, 'a.png');
+    expect(res.statusCode).toBe(500);
   });
 });

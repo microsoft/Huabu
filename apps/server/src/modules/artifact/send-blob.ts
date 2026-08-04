@@ -12,6 +12,8 @@
  * `open()`, so it works unchanged against a remote blob backend.
  */
 
+import { Readable } from 'node:stream';
+
 import { getMimeType } from '../../utils/mime.js';
 
 import type { BlobInfo, BlobScope } from '../storage/index.js';
@@ -24,6 +26,8 @@ interface ResolvedRange {
   start: number;
   end: number;
 }
+
+const CACHE_CONTROL = 'public, max-age=0';
 
 /**
  * Resolve a `Range` header against a known size.
@@ -65,12 +69,40 @@ function etagFor(info: BlobInfo): string {
   return `W/"${info.size.toString(16)}-${Math.floor(info.updatedAt).toString(16)}"`;
 }
 
-function isFresh(request: FastifyRequest, info: BlobInfo, etag: string): boolean {
+function matchesEtagList(header: string, etag: string): boolean {
+  if (header.trim() === '*') return true;
+  return header.split(',').some((candidate) => {
+    const tag = candidate.trim();
+    return tag === etag || `W/${tag}` === etag;
+  });
+}
+
+function preconditionFailed(
+  request: FastifyRequest,
+  lastModified: string,
+  etag: string,
+): boolean {
+  const ifMatch = request.headers['if-match'];
+  if (ifMatch && !matchesEtagList(ifMatch, etag)) return true;
+
+  const ifUnmodifiedSince = request.headers['if-unmodified-since'];
+  if (ifUnmodifiedSince) {
+    const since = Date.parse(ifUnmodifiedSince);
+    if (!Number.isNaN(since) && Date.parse(lastModified) > since) return true;
+  }
+  return false;
+}
+
+function isFresh(
+  request: FastifyRequest,
+  info: BlobInfo,
+  etag: string,
+): boolean {
+  if (request.headers['cache-control']?.includes('no-cache')) return false;
+
   const ifNoneMatch = request.headers['if-none-match'];
   if (ifNoneMatch) {
-    return ifNoneMatch
-      .split(',')
-      .some((candidate) => candidate.trim() === etag || candidate.trim() === '*');
+    return matchesEtagList(ifNoneMatch, etag);
   }
 
   const ifModifiedSince = request.headers['if-modified-since'];
@@ -82,6 +114,31 @@ function isFresh(request: FastifyRequest, info: BlobInfo, etag: string): boolean
     }
   }
   return false;
+}
+
+function isRangeFresh(
+  header: string | string[] | undefined,
+  lastModified: string,
+  etag: string,
+): boolean {
+  const ifRange = Array.isArray(header) ? header[0] : header;
+  if (!ifRange) return true;
+  if (ifRange.includes('"')) return ifRange.includes(etag);
+
+  const since = Date.parse(ifRange);
+  return !Number.isNaN(since) && Date.parse(lastModified) <= since;
+}
+
+function contentTypeFor(name: string): string {
+  const type = getMimeType(name);
+  if (
+    type.startsWith('text/') ||
+    type === 'application/json' ||
+    type === 'application/javascript'
+  ) {
+    return `${type}; charset=utf-8`;
+  }
+  return type;
 }
 
 /**
@@ -98,21 +155,34 @@ export async function sendBlob(
   if (!info) return false;
 
   const etag = etagFor(info);
+  const lastModified = new Date(info.updatedAt).toUTCString();
   // Validators apply to every outcome, including 304. The blob's own
   // Content-Type is set only on the paths that actually send its bytes —
   // setting it up front would make Fastify try to serialize the 416 JSON
   // body as an image.
   reply
     .header('Accept-Ranges', 'bytes')
+    .header('Cache-Control', CACHE_CONTROL)
     .header('ETag', etag)
-    .header('Last-Modified', new Date(info.updatedAt).toUTCString());
+    .header('Last-Modified', lastModified)
+    .header('X-Content-Type-Options', 'nosniff');
+
+  if (preconditionFailed(request, lastModified, etag)) {
+    await reply.code(412).send({ message: 'Precondition failed' });
+    return true;
+  }
 
   if (isFresh(request, info, etag)) {
     await reply.code(304).send();
     return true;
   }
 
-  const range = resolveRange(request.headers['range'], info.size);
+  const range = resolveRange(
+    isRangeFresh(request.headers['if-range'], lastModified, etag)
+      ? request.headers['range']
+      : undefined,
+    info.size,
+  );
 
   if (range === 'unsatisfiable') {
     await reply
@@ -122,9 +192,21 @@ export async function sendBlob(
     return true;
   }
 
-  const contentType = info.mimeType ?? getMimeType(info.name);
+  const contentType = contentTypeFor(info.name);
 
   if (range) {
+    if (request.method === 'HEAD') {
+      await reply
+        .code(206)
+        .header('Content-Type', contentType)
+        .header(
+          'Content-Range',
+          `bytes ${range.start}-${range.end}/${info.size}`,
+        )
+        .header('Content-Length', String(range.end - range.start + 1))
+        .send(Readable.from([]));
+      return true;
+    }
     const opened = await blobs.open(name, range);
     if (!opened) return false;
     await reply
@@ -136,6 +218,13 @@ export async function sendBlob(
     return true;
   }
 
+  if (request.method === 'HEAD') {
+    await reply
+      .header('Content-Type', contentType)
+      .header('Content-Length', String(info.size))
+      .send(Readable.from([]));
+    return true;
+  }
   const opened = await blobs.open(name);
   if (!opened) return false;
   await reply

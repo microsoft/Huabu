@@ -18,8 +18,15 @@ import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import artifactRoute from './artifact.route.js';
-import { canvasBlobs, resetStorageCache } from '../storage/index.js';
+import {
+  canvasBlobs,
+  getStorage,
+  resetStorageCache,
+  setStorageForTesting,
+} from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
+
+import type { BlobScope, BlobStore } from '../storage/index.js';
 
 let tmp: string;
 
@@ -77,8 +84,14 @@ describe('artifact route', () => {
     });
 
     expect(upload.statusCode).toBe(200);
-    const { uri } = upload.json() as { uri: string };
+    const { uri, mimetype } = upload.json() as {
+      uri: string;
+      mimetype: string;
+    };
     expect(uri).toMatch(/\.png$/);
+    // Preserve the main-branch upload response: the declared MIME is echoed
+    // to the caller even though Disk never persisted it as blob metadata.
+    expect(mimetype).toBe('image/png');
 
     const served = await app.inject({
       method: 'GET',
@@ -149,6 +162,37 @@ describe('artifact route', () => {
     });
     expect(res.statusCode).toBe(404);
     await app.close();
+  });
+
+  it('does not disguise a blob backend failure as a 404', async () => {
+    const current = getStorage();
+    const failingBlobs: BlobStore = {
+      kind: 'disk',
+      async init() {},
+      async health() {
+        return { ok: false, kind: 'disk' };
+      },
+      async close() {},
+      scope() {
+        return {
+          async head() {
+            throw new Error('blob backend unavailable');
+          },
+        } as unknown as BlobScope;
+      },
+    };
+    const restore = setStorageForTesting({ ...current, blobs: failingBlobs });
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/artifact/a.png',
+      });
+      expect(res.statusCode).toBe(500);
+    } finally {
+      await app.close();
+      restore();
+    }
   });
 
   it('rejects an unknown upload type', async () => {

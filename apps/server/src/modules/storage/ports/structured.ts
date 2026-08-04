@@ -37,5 +37,10 @@ export interface StructuredStore {
   init(): Promise<void>;
   health(): Promise<StorageHealth>;
   close(): Promise<void>;
+  /**
+   * Return the cached handle for one validated Space id.
+   * Repeated calls for the same id return the same handle; different ids are
+   * isolated. The handle itself remains Disk-specific in this refactor phase.
+   */
   space(canvasId: string): SpaceHandle;
 }

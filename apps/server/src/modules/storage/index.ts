@@ -61,7 +61,6 @@ export type {
   BlobBackendKind,
   BlobInfo,
   BlobLease,
-  BlobPutOptions,
   BlobRange,
   BlobRead,
   BlobScope,

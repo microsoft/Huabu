@@ -338,8 +338,8 @@ function isArtifactMissing(
 /**
  * Presence predicate covering a single node's artifact.
  *
- * Batch callers build theirs from one `list()`; a single-node endpoint
- * pays one `head()` for the only key that can matter.
+ * Batch callers build theirs from one `hasMany()`; a single-node endpoint
+ * submits a one-key batch for the only key that can matter.
  */
 async function singleArtifactProbe(
   canvasId: string,
@@ -347,10 +347,7 @@ async function singleArtifactProbe(
 ): Promise<(key: string) => boolean> {
   const key = extractArtifactKey(src);
   if (!key) return () => false;
-  const exists = await canvasBlobs(canvasId)
-    .head(key)
-    .then((info) => info !== null)
-    .catch(() => false);
+  const exists = (await canvasBlobs(canvasId).hasMany([key])).has(key);
   return (candidate) => candidate === key && exists;
 }
 
@@ -524,16 +521,23 @@ async function hydrateNodeContent(
   store: CanvasStore,
   nodes: NodeLike[],
 ): Promise<NodeLike[]> {
-  // One blob listing for the whole batch. The per-node artifact probe used
-  // to stat the filesystem once per node; on a remote backend that would be
-  // one request per node instead of a single list.
-  const [contentByNodeId, blobs] = await Promise.all([
-    store.readAllNodes(),
-    canvasBlobs(store.canvasId)
-      .list()
-      .catch(() => []),
-  ]);
-  const present = new Set(blobs.map((b) => b.name));
+  // Read sidecars first because they are the source of truth for `src`.
+  // Probe only the keys referenced by artifact-backed nodes; enumerating the
+  // entire scope would make hydration cost grow with unrelated blob count.
+  const contentByNodeId = await store.readAllNodes();
+  const referenced = new Set<string>();
+  for (const node of nodes) {
+    const nodeType = typeof node.type === 'string' ? node.type : '';
+    if (!ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) continue;
+    const nodeId = typeof node.id === 'string' ? node.id : '';
+    const key = extractArtifactKey(contentByNodeId.get(nodeId)?.src);
+    if (key) referenced.add(key);
+  }
+
+  const present =
+    referenced.size === 0
+      ? new Set<string>()
+      : await canvasBlobs(store.canvasId).hasMany([...referenced]);
   const artifactExists = (key: string): boolean => present.has(key);
 
   return nodes.map((node) => {

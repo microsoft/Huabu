@@ -358,9 +358,7 @@ async function downloadToArtifact(
     }
     const ext = pickDownloadExt(pathname, contentType);
     const key = `${createId('artifact')}${ext}`;
-    await canvasBlobs(store.canvasId).put(key, buffer, {
-      mimeType: contentType || null,
-    });
+    await canvasBlobs(store.canvasId).put(key, buffer);
     return key;
   } catch (err) {
     log.warn({ err, url }, 'Failed to download online node src into artifacts');

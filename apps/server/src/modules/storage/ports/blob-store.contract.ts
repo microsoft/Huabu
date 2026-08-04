@@ -9,6 +9,7 @@
  * Not named `*.test.ts` on purpose — it defines a suite, it isn't one.
  */
 
+import { readFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -69,10 +70,9 @@ export function describeBlobStoreContract(
       const blobs = await scope();
       const body = Buffer.from('hello blob');
 
-      const info = await blobs.put('a.txt', body, { mimeType: 'text/plain' });
+      const info = await blobs.put('a.txt', body);
       expect(info.name).toBe('a.txt');
       expect(info.size).toBe(body.byteLength);
-      expect(info.mimeType).toBe('text/plain');
 
       expect(await blobs.read('a.txt')).toEqual(body);
     });
@@ -150,6 +150,22 @@ export function describeBlobStoreContract(
       expect(listed.find((b) => b.name === 'g2.txt')?.size).toBe(6);
     });
 
+    it('checks only requested names in one batch', async () => {
+      const blobs = await scope();
+      await blobs.put('present.txt', Buffer.from('yes'));
+      await blobs.put('unrelated.txt', Buffer.from('not requested'));
+
+      expect(await blobs.hasMany([])).toEqual(new Set());
+      expect(
+        await blobs.hasMany([
+          'present.txt',
+          'missing.txt',
+          'nested/present.txt',
+          'present.txt',
+        ]),
+      ).toEqual(new Set(['present.txt']));
+    });
+
     it('materializes a readable path and tolerates release', async () => {
       const blobs = await scope();
       const body = Buffer.from('materialize me');
@@ -159,11 +175,11 @@ export function describeBlobStoreContract(
         await blobs.materialize('h.txt'),
         'materialize("h.txt")',
       );
-      // Read through the port rather than the filesystem so the assertion
-      // holds for a backend that spooled to a temp file.
-      expect(await blobs.read('h.txt')).toEqual(body);
       expect(typeof lease.path).toBe('string');
       expect(lease.path.length).toBeGreaterThan(0);
+      // `materialize` exists specifically for path-only consumers. Reading
+      // the blob through the port would not prove that the lease path works.
+      expect(await readFile(lease.path)).toEqual(body);
       await expect(lease.release()).resolves.toBeUndefined();
     });
 

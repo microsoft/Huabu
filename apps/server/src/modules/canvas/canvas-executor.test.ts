@@ -261,7 +261,6 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
       Buffer.from(
         '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>',
       ),
-      { mimeType: 'image/svg+xml' },
     );
 
     const out = await executeOnServer({
@@ -318,7 +317,6 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
       Buffer.from(
         '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>',
       ),
-      { mimeType: 'image/svg+xml' },
     );
 
     const out = await executeOnServer({

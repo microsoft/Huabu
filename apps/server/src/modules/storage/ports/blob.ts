@@ -6,10 +6,11 @@
  * not canvas-specific — canvas scoping is one derived view, and new scope
  * kinds extend {@link BlobScopeRef} without changing the connection.
  *
- * Artifact identity, ownership, MIME type, and lifecycle metadata are
- * structured records elsewhere; this port only moves bytes. Nothing here
- * exposes a permanent local path — see {@link BlobLease} for the one
- * bounded exception.
+ * Artifact identity, ownership, MIME representation, and lifecycle are
+ * application concerns; this port only moves bytes. Today the HTTP boundary
+ * infers MIME from the blob name, matching the previous `sendFile()` behavior.
+ * Nothing here exposes a permanent local path — see {@link BlobLease} for the
+ * one bounded exception.
  *
  * See docs/proposals/multi-backend-storage.md §6.2.
  */
@@ -31,13 +32,8 @@ export interface BlobInfo {
   /** Scope-relative name, e.g. `artifact_abc123.png`. */
   name: string;
   size: number;
-  mimeType: string | null;
   /** Last modification time, ms since epoch. */
   updatedAt: number;
-}
-
-export interface BlobPutOptions {
-  mimeType?: string | null;
 }
 
 /** Inclusive byte offsets, matching HTTP Range semantics. */
@@ -77,11 +73,7 @@ export interface BlobLease {
  * the disk layout has always enforced.
  */
 export interface BlobScope {
-  put(
-    name: string,
-    body: Readable | Buffer,
-    options?: BlobPutOptions,
-  ): Promise<BlobInfo>;
+  put(name: string, body: Readable | Buffer): Promise<BlobInfo>;
 
   /** Metadata for one blob, or null when absent. */
   head(name: string): Promise<BlobInfo | null>;
@@ -93,11 +85,16 @@ export interface BlobScope {
   read(name: string): Promise<Buffer | null>;
 
   /**
-   * Every blob in this scope.
+   * Return the normalized names that exist from a caller-supplied batch.
    *
-   * Exists so batch callers can answer many existence questions with one
-   * round-trip instead of N — on a remote backend the difference is a
-   * single list-by-prefix versus N requests.
+   * Unlike {@link list}, this does not enumerate unrelated blobs. Callers
+   * that already know the keys they care about should use this method so a
+   * remote implementation can issue one bounded batch request.
+   */
+  hasMany(names: readonly string[]): Promise<ReadonlySet<string>>;
+
+  /**
+   * Every blob in this scope.
    */
   list(): Promise<BlobInfo[]>;
 

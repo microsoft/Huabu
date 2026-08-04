@@ -11,7 +11,14 @@
  */
 
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 
 import { artifactPath, artifactsDir } from '../paths.js';
@@ -20,7 +27,6 @@ import { normalizeBlobName } from '../ports/blob.js';
 import type {
   BlobInfo,
   BlobLease,
-  BlobPutOptions,
   BlobRange,
   BlobRead,
   BlobScope,
@@ -48,11 +54,7 @@ function isMissing(err: unknown): boolean {
 class DiskBlobScope implements BlobScope {
   constructor(private readonly ref: BlobScopeRef) {}
 
-  async put(
-    name: string,
-    body: Readable | Buffer,
-    options?: BlobPutOptions,
-  ): Promise<BlobInfo> {
+  async put(name: string, body: Readable | Buffer): Promise<BlobInfo> {
     const safe = normalizeBlobName(name);
     await mkdir(scopeDir(this.ref), { recursive: true });
     const full = blobPath(this.ref, safe);
@@ -67,7 +69,6 @@ class DiskBlobScope implements BlobScope {
     return {
       name: safe,
       size: stats.size,
-      mimeType: options?.mimeType ?? null,
       updatedAt: stats.mtimeMs,
     };
   }
@@ -80,9 +81,6 @@ class DiskBlobScope implements BlobScope {
       return {
         name: safe,
         size: stats.size,
-        // Disk stores no per-blob metadata; MIME type lives with the
-        // structured artifact record.
-        mimeType: null,
         updatedAt: stats.mtimeMs,
       };
     } catch (err) {
@@ -111,6 +109,25 @@ class DiskBlobScope implements BlobScope {
     }
   }
 
+  async hasMany(names: readonly string[]): Promise<ReadonlySet<string>> {
+    const requested = new Set(names.map(normalizeBlobName));
+    if (requested.size === 0) return new Set();
+
+    let entries: string[];
+    try {
+      entries = await readdir(scopeDir(this.ref));
+    } catch (err) {
+      if (isMissing(err)) return new Set();
+      throw err;
+    }
+
+    const candidates = entries.filter((entry) => requested.has(entry));
+    const infos = await Promise.all(
+      candidates.map((entry) => this.head(entry)),
+    );
+    return new Set(infos.flatMap((info) => (info === null ? [] : [info.name])));
+  }
+
   async list(): Promise<BlobInfo[]> {
     let entries: string[];
     try {
@@ -120,12 +137,8 @@ class DiskBlobScope implements BlobScope {
       throw err;
     }
 
-    const out: BlobInfo[] = [];
-    for (const entry of entries) {
-      const info = await this.head(entry).catch(() => null);
-      if (info) out.push(info);
-    }
-    return out;
+    const infos = await Promise.all(entries.map((entry) => this.head(entry)));
+    return infos.filter((info): info is BlobInfo => info !== null);
   }
 
   async materialize(name: string): Promise<BlobLease | null> {

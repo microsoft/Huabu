@@ -827,7 +827,7 @@ async function maybeResizeImageArtifact(
     dims.height,
     maxEdge,
   );
-  await blobs.put(filename, resized.png, { mimeType: 'image/png' });
+  await blobs.put(filename, resized.png);
   return { src: filename, width: resized.width, height: resized.height };
 }
 
@@ -1054,9 +1054,7 @@ export async function snapshotNodesToArtifacts(
     const existing = await canvasBlobs(store.canvasId).head(filename);
     if (!existing) {
       const png = await renderClusterPng(built.svg, built.width);
-      await canvasBlobs(store.canvasId).put(filename, png, {
-        mimeType: 'image/png',
-      });
+      await canvasBlobs(store.canvasId).put(filename, png);
     }
     results.push({
       src: filename,
