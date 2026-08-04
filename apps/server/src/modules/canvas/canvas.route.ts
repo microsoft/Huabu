@@ -54,6 +54,7 @@ import {
   createCanvas,
   deleteCanvas,
   getCanvasStore,
+  getStructuredStore,
   listCanvases,
   listCanvasSummaries,
   updateNode,
@@ -1522,7 +1523,17 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     const limit = parsedQuery.data.limit ?? DEFAULT_EVENTS_LIMIT;
     const since = parsedQuery.data.since;
-    const events = store.readEvents(limit);
+    // The Phase-2 consumer slice: this read goes through the structured port
+    // rather than the compatibility facade, so the repository contract has a
+    // real caller before it is frozen. See
+    // docs/proposals/multi-backend-storage.md §12.2.8.
+    //
+    // The existence check above deliberately stays on the facade: Space
+    // catalogue and lifecycle are not on a portable contract this phase, and
+    // forcing them in through one route would expand it.
+    const events = await getStructuredStore()
+      .space(canvasId)
+      .logs.readEvents(limit);
     const filtered =
       since != null ? events.filter((e) => e.ts >= since) : events;
     const trimmed = filtered.length > limit ? filtered.slice(-limit) : filtered;
