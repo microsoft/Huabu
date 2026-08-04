@@ -87,7 +87,7 @@ docs/
 | [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.          |
 | [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Sediment-owned Milkdown toolbar and semantic editor commands.              |
 | [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                           |
-| [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                   | Proposed       | Structured/Blob backend split; agent filesystem integration remains open.  |
+| [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                   | Partly shipped | Structured/Blob backend split; agent filesystem integration remains open.  |
 | [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)             | Proposed       | Revision-aware offscreen Note measurement and stable auto-height geometry. |
 
 ### Shipped
