@@ -17,6 +17,7 @@ import {
 } from '@milkdown/core';
 import { Crepe } from '@milkdown/crepe';
 import { blockConfig } from '@milkdown/plugin-block';
+import { dropIndicatorState } from '@milkdown/plugin-cursor';
 import { findParent } from '@milkdown/prose';
 import {
   lift,
@@ -37,7 +38,7 @@ import {
   PluginKey,
   TextSelection,
 } from '@milkdown/prose/state';
-import { canJoin, dropPoint } from '@milkdown/prose/transform';
+import { canJoin } from '@milkdown/prose/transform';
 import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import { $markSchema, $prose, $remark, replaceAll } from '@milkdown/utils';
 
@@ -424,22 +425,21 @@ export interface MilkdownInstance {
    */
   insertBlocksAfter(anchorKey: string | null, markdown: string): boolean;
   /**
-   * Insert one or more blocks parsed from `markdown` at the document
-   * position under the viewport-space point (`x`, `y`).
+   * Insert one or more blocks parsed from `markdown` exactly where the
+   * drop indicator (the blue bar) is currently showing.
    *
-   * The point is resolved through PM's own `dropPoint`, the same
-   * primitive `prosemirror-dropcursor` uses to place the blue bar, so
-   * the insertion lands where the indicator pointed — including
-   * inside a nested container. Anchoring on a top-level block key
-   * instead (`insertBlocksAfter`) cannot express those positions: a
-   * whole nested list is a single top-level block, so every drop
-   * inside it would land after the entire list.
+   * The position is read straight out of `prosemirror-drop-indicator`'s
+   * own state rather than recomputed, so what the user sees and what
+   * lands can't disagree. That plugin picks its target by geometric
+   * proximity to every block edge at every depth, which no
+   * coordinate-to-position heuristic of ours reproduces.
    *
-   * Returns `false` when the point lies outside the editor surface or
-   * no valid insertion point exists; the caller decides the fallback
-   * (e.g. append to the end).
+   * Returns `false` when no indicator is showing (the pointer never
+   * hovered the editor surface, or the cursor feature is disabled);
+   * the caller decides the fallback (e.g. append to the end). Call it
+   * from a drop handler, before `clearDropIndicator`.
    */
-  insertBlocksAtPoint(x: number, y: number, markdown: string): boolean;
+  insertBlocksAtDropIndicator(markdown: string): boolean;
   /**
    * Replace the active block-decoration set. Each entry highlights the
    * top-level block whose fingerprint key matches by adding `className`
@@ -450,15 +450,14 @@ export interface MilkdownInstance {
   ): void;
 
   /**
-   * Force `prosemirror-dropcursor` (the blue insertion bar) to
-   * disappear. PM only clears the cursor when it observes a `drop` /
-   * `dragend` / out-of-editor `dragleave` on `view.dom`. When a host
-   * handler claims the drop in the capture phase (so PM's bubble
-   * listener never fires) AND the drag source lives outside this
-   * editor (so the browser's follow-up `dragend` fires on the source,
-   * not on `view.dom`), the cursor would otherwise linger until the
-   * 5s safety timeout. Call this from your drop handler after the
-   * insertion is committed.
+   * Force the drop indicator (the blue insertion bar drawn by
+   * `prosemirror-drop-indicator`) to disappear. It only hides on a
+   * `drop` / `dragend` / `dragleave` observed on `view.dom`. When a
+   * host handler claims the drop in the capture phase (so the
+   * plugin's listener never fires) AND the drag source lives outside
+   * this editor (so the browser's follow-up `dragend` fires on the
+   * source, not on `view.dom`), the bar would otherwise linger. Call
+   * this from your drop handler after the insertion is committed.
    */
   clearDropIndicator(): void;
 
@@ -3093,29 +3092,30 @@ export async function createMilkdown(
       return ok;
     },
 
-    insertBlocksAtPoint: (x, y, markdown) => {
+    insertBlocksAtDropIndicator: (markdown) => {
       let ok = false;
       crepe.editor.action((ctx) => {
+        let indicator: { pos: number } | null = null;
+        try {
+          indicator = ctx.get(dropIndicatorState.key);
+        } catch {
+          return; // Cursor feature not registered on this surface.
+        }
+        if (!indicator) return;
         const view = ctx.get(editorViewCtx);
-        // `posAtCoords` returns null when the point falls outside the
-        // editor surface entirely.
-        const coords = view.posAtCoords({ left: x, top: y });
-        if (!coords) return;
         const parsed = ctx.get(parserCtx)(dedentMarkdownFragment(markdown));
         if (!parsed || parsed.content.size === 0) return;
-        // `posAtCoords` resolves to a text position, which block
-        // content can't replace. `dropPoint` walks outwards from
-        // there until it finds a depth where the content fits and
-        // picks the near side of that node — the same resolution PM's
-        // `dropcursor` runs, so the insert lands under the bar even
-        // when the bar sits inside a nested list.
-        const pos = dropPoint(
-          view.state.doc,
-          coords.pos,
+        // `replaceRange`, not `insert`: the indicator can point between
+        // two list items, where a bare paragraph is not a legal child.
+        // `replaceRange` wraps the content to fit, the same way the
+        // indicator plugin handles its own native drops.
+        const tr = view.state.tr.replaceRange(
+          indicator.pos,
+          indicator.pos,
           new Slice(parsed.content, 0, 0),
         );
-        if (pos === null) return;
-        view.dispatch(view.state.tr.insert(pos, parsed.content));
+        if (tr.doc.eq(view.state.doc)) return;
+        view.dispatch(tr);
         ok = true;
       });
       return ok;
@@ -3129,15 +3129,14 @@ export async function createMilkdown(
     },
 
     clearDropIndicator: () => {
-      // `prosemirror-dropcursor` listens for `dragend` directly on
-      // `view.dom` (bubble phase) and clears the cursor through its
-      // own `scheduleRemoval(20)` path. Dispatching a synthetic
-      // `dragend` is the only public-API-friendly way to flush it
-      // when the real `dragend` lands on a drag source outside this
-      // editor (cross-source drops). The handler doesn't read any
-      // dataTransfer fields, so a plain `Event` is enough — no need
-      // to construct a full `DragEvent` (which would require a
-      // `DataTransfer` instance that isn't constructable in Safari).
+      // `prosemirror-drop-indicator` listens for `dragend` directly on
+      // `view.dom`. Dispatching a synthetic one is the only
+      // public-API-friendly way to flush it when the real `dragend`
+      // lands on a drag source outside this editor (cross-source
+      // drops). The handler doesn't read any dataTransfer fields, so a
+      // plain `Event` is enough — no need to construct a full
+      // `DragEvent` (which would require a `DataTransfer` instance
+      // that isn't constructable in Safari).
       try {
         crepe.editor.action((ctx) => {
           const view = ctx.get(editorViewCtx);

@@ -31,46 +31,79 @@ afterEach(async () => {
   for (const root of roots) root.remove();
   instances = [];
   roots = [];
-  delete (document as Partial<CaretHitTesting>).caretRangeFromPoint;
   vi.restoreAllMocks();
 });
 
-interface CaretHitTesting {
-  caretRangeFromPoint: (x: number, y: number) => Range;
-}
-
-function firstTextIn(node: Node): Text | null {
-  if (node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim()) {
-    return node as Text;
-  }
-  for (const child of Array.from(node.childNodes)) {
-    const found = firstTextIn(child);
-    if (found) return found;
-  }
-  return null;
+function editorSurface(): Element {
+  const surface = document.querySelector('.milkdown .ProseMirror');
+  if (!surface) throw new Error('Editor surface not mounted');
+  return surface;
 }
 
 /**
- * Pin PM's coordinate hit-testing to a known caret.
+ * Give the editor DOM a synthetic vertical layout.
  *
- * happy-dom has no layout, so `document.elementFromPoint` finds
- * nothing and every rect is zero-sized. Stubbing the two primitives
- * `posAtCoords` consults is enough: with zero-sized rects its
- * `posFromCaret` helper skips all geometry branches and resolves the
- * position structurally from the caret node/offset.
+ * happy-dom performs no layout, so every rect is zero-sized and
+ * `prosemirror-drop-indicator` — which picks its target purely by
+ * distance from the pointer to each block's top / bottom edge — has
+ * nothing to measure. Stack leaf elements one row apart and let each
+ * ancestor span its children.
  */
-function stubCaretAt(selector: string, edge: 'start' | 'end', index = 0): void {
-  const hosts = Array.from(document.querySelectorAll(`.milkdown ${selector}`));
-  const host = index < 0 ? hosts[hosts.length + index] : hosts[index];
-  const node = host ? firstTextIn(host) : null;
-  if (!node) throw new Error(`No text node under ${selector}[${index}]`);
-  (document as unknown as CaretHitTesting).caretRangeFromPoint = () => {
-    const range = document.createRange();
-    range.setStart(node, edge === 'start' ? 0 : node.length);
-    range.collapse(true);
-    return range;
+function stubBlockLayout(rowHeight = 20): void {
+  const rects = new Map<Element, DOMRect>();
+  let row = 0;
+  const assign = (el: Element): void => {
+    const start = row;
+    const children = Array.from(el.children);
+    if (children.length === 0) row += 1;
+    else children.forEach(assign);
+    const top = start * rowHeight;
+    const bottom = Math.max(row, start + 1) * rowHeight;
+    rects.set(el, {
+      x: 0,
+      y: top,
+      left: 0,
+      right: 100,
+      width: 100,
+      top,
+      bottom,
+      height: bottom - top,
+      toJSON: () => ({}),
+    });
   };
-  vi.spyOn(document, 'elementFromPoint').mockReturnValue(node.parentElement);
+  assign(editorSurface());
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(
+    function (this: Element) {
+      return (
+        rects.get(this) ??
+        ({
+          x: 0,
+          y: 0,
+          left: 0,
+          right: 0,
+          width: 0,
+          top: 0,
+          bottom: 0,
+          height: 0,
+          toJSON: () => ({}),
+        } as DOMRect)
+      );
+    },
+  );
+}
+
+/** Show the drop indicator at `y` (x = 0 keeps the match vertical). */
+function dragOverAt(y: number): void {
+  editorSurface().dispatchEvent(
+    new MouseEvent('dragover', { bubbles: true, clientX: 0, clientY: y }),
+  );
+}
+
+/** Bottom edge of a rendered block, per {@link stubBlockLayout}. */
+function bottomOf(selector: string, index = 0): number {
+  const el = document.querySelectorAll(`.milkdown ${selector}`)[index];
+  if (!el) throw new Error(`No element matching ${selector}[${index}]`);
+  return el.getBoundingClientRect().bottom;
 }
 
 const NESTED_LIST = '- a\n  - b\n  - c\n- d\n\ntail';
@@ -645,36 +678,30 @@ describe('Milkdown block commands', () => {
     expect(instance.getMarkdown()).toContain('|');
   });
 
-  it('inserts into the nested list item under the point', async () => {
-    const instance = await mount(NESTED_LIST);
-    stubCaretAt('li li', 'end');
+  it('inserts where the drop indicator points', async () => {
+    const instance = await mount('# Introduction\n\nbody text');
+    stubBlockLayout();
+    dragOverAt(bottomOf('h1'));
 
-    expect(instance.insertBlocksAtPoint(10, 10, 'dropped')).toBe(true);
-    // Indented under `b`, i.e. still inside the list — not appended
-    // after the whole top-level list.
+    expect(instance.insertBlocksAtDropIndicator('**dropped**')).toBe(true);
+    expect(instance.getMarkdown()).toBe(
+      '# Introduction\n\n**dropped**\n\nbody text\n',
+    );
+  });
+
+  it('inserts inside the list when the indicator points at a nested item', async () => {
+    const instance = await mount(NESTED_LIST);
+    stubBlockLayout();
+    dragOverAt(bottomOf('li li'));
+
+    expect(instance.insertBlocksAtDropIndicator('dropped')).toBe(true);
     expect(instance.getMarkdown()).toContain('* b\n\n    dropped\n\n  * c');
   });
 
-  it('inserts before the paragraph under the point', async () => {
-    const instance = await mount(NESTED_LIST);
-    stubCaretAt('p', 'start', -1);
-
-    expect(instance.insertBlocksAtPoint(10, 10, 'dropped')).toBe(true);
-    expect(instance.getMarkdown()).toContain('dropped\n\ntail');
-  });
-
-  it('inserts after the paragraph under the point', async () => {
-    const instance = await mount(NESTED_LIST);
-    stubCaretAt('p', 'end', -1);
-
-    expect(instance.insertBlocksAtPoint(10, 10, 'dropped')).toBe(true);
-    expect(instance.getMarkdown()).toContain('tail\n\ndropped');
-  });
-
-  it('reports failure when the point misses the editor surface', async () => {
+  it('reports failure when no indicator is showing', async () => {
     const instance = await mount(NESTED_LIST);
 
-    expect(instance.insertBlocksAtPoint(10, 10, 'dropped')).toBe(false);
+    expect(instance.insertBlocksAtDropIndicator('dropped')).toBe(false);
     expect(instance.getMarkdown()).not.toContain('dropped');
   });
 });

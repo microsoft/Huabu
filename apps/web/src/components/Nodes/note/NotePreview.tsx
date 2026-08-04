@@ -467,16 +467,16 @@ export const NotePreview = ({
       // final routing. Self-source still benefits from the cursor
       // showing as a drop target.
       //
-      // CRITICAL: do NOT stopPropagation here. ProseMirror's
-      // `prosemirror-dropcursor` plugin attaches its dragover
-      // listener directly on `editorView.dom` in the BUBBLE phase
-      // and only renders the drop indicator when it receives the
-      // event. Stopping propagation at the outer capture phase
-      // suppresses that listener entirely — the user sees no
-      // insertion indicator at all. preventDefault alone is enough
-      // to keep the browser drop allowed AND to flip
-      // `defaultPrevented` so PM's drop handler bails (see the drop
-      // handler's own check).
+      // CRITICAL: do NOT stopPropagation here.
+      // `prosemirror-drop-indicator` attaches its dragover listener
+      // directly on `editorView.dom` and only renders the drop
+      // indicator when it receives the event. Stopping propagation at
+      // the outer capture phase suppresses that listener entirely —
+      // the user sees no insertion indicator at all, and
+      // `insertBlocksAtDropIndicator` has no position to use.
+      // preventDefault alone is enough to keep the browser drop
+      // allowed AND to flip `defaultPrevented` so PM's drop handler
+      // bails (see the drop handler's own check).
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
     },
@@ -510,25 +510,22 @@ export const NotePreview = ({
       e.stopPropagation();
 
       if (!editor) return;
-      // Resolve the insertion point from the pointer itself so the
-      // content lands under the drop indicator, including inside a
-      // nested list. Returns false when the point isn't over the
-      // editor surface (top / bottom padding) — append in that case.
-      if (!editor.insertBlocksAtPoint(e.clientX, e.clientY, snippet)) {
+      // Insert exactly where the blue bar is showing. Falls back to
+      // appending when no bar was rendered (pointer never reached the
+      // editor surface, e.g. the container's outer padding).
+      if (!editor.insertBlocksAtDropIndicator(snippet)) {
         const keys = editor.getBlockKeys();
         editor.insertBlocksAfter(
           keys.length > 0 ? (keys[keys.length - 1] ?? null) : null,
           snippet,
         );
       }
-      // PM's `dropcursor` only clears the bar when it observes the
-      // drop / dragend / out-of-editor dragleave on `view.dom`. Our
-      // capture-phase `stopPropagation` above suppresses the drop
-      // event before it reaches PM, AND the browser's follow-up
-      // `dragend` fires on the drag source (a chat message / other
-      // note) which sits outside this editor — so without an
-      // explicit nudge the blue bar would linger until PM's 5s
-      // safety timeout.
+      // The indicator only hides when it observes the drop / dragend /
+      // dragleave on `view.dom`. Our capture-phase `stopPropagation`
+      // above suppresses the drop event before it reaches the plugin,
+      // AND the browser's follow-up `dragend` fires on the drag source
+      // (a chat message / other note) which sits outside this editor —
+      // so without an explicit nudge the blue bar would linger.
       editor.clearDropIndicator();
       // The editor's `onChange` fires synchronously after the insert
       // and patches `content` through `handleEditorChange`. Cross-note
