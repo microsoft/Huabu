@@ -9,6 +9,9 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
+import { forgetCanvasStore, getCanvasStore } from './canvas-store-cache.js';
+import { canvasBlobs } from './storage.js';
+import { atomicWriteJson, mkdirp, sanitizeId } from '../../utils/fs.js';
 import {
   getWorldCanvasId,
   isWorldCanvasId,
@@ -17,12 +20,9 @@ import {
   registerCanvasDir,
   requireWorldCanvasId,
   suggestCanvasDir,
-} from './canvas-dirs.js';
-import { forgetCanvasStore, getCanvasStore } from './canvas-store-cache.js';
-import { atomicWriteJson, mkdirp, sanitizeId } from './io.js';
-import { toSafeFilename } from './naming.js';
-import { canvasJsonPath, SPACE_JSON_FILENAME } from './paths.js';
-import { canvasBlobs } from './storage.js';
+} from '../workspace/disk/canvas-dirs.js';
+import { toSafeFilename } from '../workspace/disk/naming.js';
+import { canvasJsonPath, SPACE_JSON_FILENAME } from '../workspace/disk/paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasFile } from './canvas-store.js';
@@ -35,7 +35,7 @@ export {
   withCanvasMutex,
   updateNode,
   applyNodeUpdate,
-} from './write-coordinator.js';
+} from '../canvas/write-coordinator.js';
 
 // ─── Storage ports and composition ─────────────────────────────────────────
 
@@ -77,13 +77,14 @@ export type {
 export type {
   UpdateNodeOptions,
   UpdateNodeOutcome,
-} from './write-coordinator.js';
+} from '../canvas/write-coordinator.js';
 export type {
   CanvasFile,
   CanvasEvent,
   DeltaLogEntry,
   NodeContent,
   NodeContentSummary,
+  RenameResult,
 } from './canvas-store.js';
 
 // ─── Workspace-wide canvas operations ──────────────────────────────────────

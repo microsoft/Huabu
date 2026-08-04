@@ -35,7 +35,7 @@
 import { existsSync, readdirSync, renameSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-import { getLogger } from '../../utils/logger.js';
+import { getLogger } from '../../../utils/logger.js';
 
 const log = getLogger('migrate-canvas-to-space');
 

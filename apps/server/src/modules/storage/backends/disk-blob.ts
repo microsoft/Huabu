@@ -24,7 +24,7 @@ import {
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
-import { artifactPath, artifactsDir } from '../paths.js';
+import { artifactPath, artifactsDir } from '../../workspace/disk/paths.js';
 import { createBlobLease, normalizeBlobName } from '../ports/blob.js';
 
 import type {

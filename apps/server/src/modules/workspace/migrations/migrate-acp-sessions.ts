@@ -40,11 +40,11 @@ import path from 'node:path';
 import { FileThreadStore } from '@agenetes/agenetes';
 import { agentMetadataSchema } from '@agenetes/protocol';
 
-import { readJson } from './io.js';
 import { parseMigratableV3Records } from './legacy/acp-sessions-v3.js';
-import { SPACE_JSON_FILENAME } from './paths.js';
+import { readJson } from '../../../utils/fs.js';
+import { SPACE_JSON_FILENAME } from '../disk/paths.js';
 
-import type { AcpWorkloadSpec } from '../agent/agenetes/drivers.js';
+import type { AcpWorkloadSpec } from '../../agent/agenetes/drivers.js';
 import type { AgentStateSnapshot, Namespace } from '@agenetes/protocol';
 
 /**

@@ -30,7 +30,7 @@
 
 import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
-import { toSafeFilename } from '../storage/naming.js';
+import { toSafeFilename } from '../workspace/disk/naming.js';
 
 import type { CanvasNodeType, WireNodeRef } from '@sediment/shared';
 

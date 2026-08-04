@@ -15,15 +15,6 @@ import path from 'node:path';
 import { coalesceChanges } from '@sediment/shared/canvas-engine';
 
 import {
-  patchCanvasDirTitle,
-  refreshCanvasDirIndex,
-  registerCanvasDir,
-  renameCanvasDirOnDisk,
-  isWorldCanvasId,
-  unregisterCanvasDir,
-} from './canvas-dirs.js';
-import { parseFrontmatter, toFrontmatter } from './frontmatter.js';
-import {
   appendJsonLine,
   appendJsonLines,
   atomicWriteJson,
@@ -35,9 +26,22 @@ import {
   readText,
   readTextAsync,
   sanitizeId,
-} from './io.js';
-import { NameIndex } from './name-index.js';
-import { toSafeFilename } from './naming.js';
+} from '../../utils/fs.js';
+import { getLogger } from '../../utils/logger.js';
+import {
+  parseFrontmatter,
+  toFrontmatter,
+} from '../../utils/markdown-frontmatter.js';
+import {
+  patchCanvasDirTitle,
+  refreshCanvasDirIndex,
+  registerCanvasDir,
+  renameCanvasDirOnDisk,
+  isWorldCanvasId,
+  unregisterCanvasDir,
+} from '../workspace/disk/canvas-dirs.js';
+import { NameIndex } from '../workspace/disk/name-index.js';
+import { toSafeFilename } from '../workspace/disk/naming.js';
 import {
   canvasJsonPath,
   canvasRoot,
@@ -49,17 +53,24 @@ import {
   intentPath,
   nodeFilePath,
   nodesDir,
-} from './paths.js';
-import { getLogger } from '../../utils/logger.js';
+} from '../workspace/disk/paths.js';
 
-import type { Context } from '@earendil-works/pi-ai';
 import type {
-  CanvasEventRecord,
-  ExecuteOriginator,
-  IntentEpisode,
-  RecentAction,
-} from '@sediment/shared';
+  CanvasEvent,
+  CanvasFile,
+  DeltaLogEntry,
+  NodeContent,
+} from '../canvas/persistence-types.js';
+import type { Context } from '@earendil-works/pi-ai';
+import type { IntentEpisode, RecentAction } from '@sediment/shared';
 import type { CanvasChangeRecord } from '@sediment/shared/canvas-engine';
+
+export type {
+  CanvasEvent,
+  CanvasFile,
+  DeltaLogEntry,
+  NodeContent,
+} from '../canvas/persistence-types.js';
 
 const log = getLogger('canvas-store');
 
@@ -68,72 +79,11 @@ interface NodeFileEntry {
   filename: string;
 }
 
-/** On-disk shape of `<canvasDir>/space.json`. */
-export interface CanvasFile {
-  canvasId: string;
-  title: string | null;
-  version: number;
-  state: {
-    nodes: unknown[];
-    edges: unknown[];
-    [key: string]: unknown;
-  };
-  createdAt: number;
-  updatedAt: number;
-}
-
-/** Canonical content of a single node markdown file. */
-export interface NodeContent {
-  nodeId: string;
-  type: string;
-  /**
-   * Display label shown on the canvas (`data.label` at runtime). Persisted
-   * as `label:` in the markdown frontmatter.
-   */
-  label: string | null;
-  /**
-   * External URL or `artifacts/<file>` reference. Optional: only meaningful
-   * for source-backed nodes (web/pdf/image/audio/video). Note/text/frame
-   * nodes omit it entirely so it never lands in their frontmatter.
-   */
-  src?: string;
-  /** Canonical markdown body. */
-  content: string;
-  /** Loader/enrich-supplied frontmatter fields (summary, keywords, …). */
-  [key: string]: unknown;
-}
-
+/** Summary projection of a node sidecar. */
 export interface NodeContentSummary {
   nodeId: string;
   type: string;
   label: string | null;
-}
-
-/** Append-only behavioural event for a canvas (re-export of shared schema). */
-export type CanvasEvent = CanvasEventRecord;
-
-/**
- * One row in `<canvasDir>/.history/delta-log.jsonl` — the persisted
- * trace of a single headless-executor batch (M2).
- *
- * Field names are chosen so a future SQLite migration can use them
- * verbatim as column names (the planned `delta_log` table mirrors this
- * shape 1:1). The `command` and `deltas` fields stay opaque (`unknown`)
- * at the storage layer; the engine owns their schema in
- * `@sediment/shared/canvas-engine/delta`.
- */
-export interface DeltaLogEntry {
-  /** Canvas version this batch landed at — also the row's primary key. */
-  version: number;
-  /** Wall-clock time of the append (server clock). */
-  ts: number;
-  /** Optional run id; multiple rows can share one runId in M3 batches. */
-  runId?: string;
-  /** Annotated commands the executor actually applied (origin/labelSource stamped). */
-  commands: unknown[];
-  /** Coarse `Delta[]` produced by diffing prestate → poststate. */
-  deltas: unknown[];
-  originator: ExecuteOriginator;
 }
 
 export type RenameResult =

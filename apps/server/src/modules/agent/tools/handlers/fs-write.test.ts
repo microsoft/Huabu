@@ -48,7 +48,7 @@ beforeEach(() => {
   setWorkspacePath(tmp);
   // `canvasRoot(canvasId)` falls back to `<workspace>/<canvasId>` when the
   // canvas-dir index has no entry for the id (see `canvasDirName` in
-  // `storage/canvas-dirs.ts`). We just need the directory to exist so
+  // `workspace/disk/canvas-dirs.ts`). We just need the directory to exist so
   // writes can land in it.
   mkdirSync(join(tmp, canvasId), { recursive: true });
 });

@@ -78,7 +78,7 @@ import {
   openExternalNoteSession,
   resetExternalNoteSessions,
 } from './external-watcher.js';
-import { withSpaceDirHandlesReleased } from '../storage/space-dir-handles.js';
+import { withSpaceDirHandlesReleased } from '../workspace/disk/space-dir-handles.js';
 
 import type { ExternalNoteEvent } from '@sediment/shared';
 

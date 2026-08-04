@@ -9,11 +9,13 @@
  * map entry is cleaned up only when our own chain is still the head
  * (otherwise a newer schedule already extended it and owns the cleanup).
  *
- * This lock lives here (the storage layer) rather than in any one domain
- * module so **every** writer — the agent executor, the per-node content
- * write path, and preprocessing — can share the same lock instead of each
- * re-implementing its own. It is deliberately **mechanism only**: it owns
- * serialization, not field-ownership policy. Callers pass in what to write.
+ * This lock lives here (the Canvas domain) rather than in any one writer so
+ * **every** writer — the agent executor, the per-node content write path, and
+ * preprocessing — can share the same lock instead of each re-implementing its
+ * own. It coordinates Canvas mutations and revision policy; it is not a
+ * backend adapter, which is why it is not owned by `storage/`. It is
+ * deliberately **mechanism only**: it owns serialization, not field-ownership
+ * policy. Callers pass in what to write.
  *
  * Per-canvas (not per-node) granularity is intentional: an agent batch must
  * write topology and several `.md` files atomically under one lock, and
@@ -23,7 +25,7 @@
 
 import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
-import type { CanvasStore, NodeContent, RenameResult } from './canvas-store.js';
+import type { CanvasStore, NodeContent, RenameResult } from '../storage/index.js';
 
 const canvasMutexChains = new Map<string, Promise<unknown>>();
 

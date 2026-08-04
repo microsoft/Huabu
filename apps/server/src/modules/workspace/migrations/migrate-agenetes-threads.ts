@@ -23,7 +23,7 @@ import {
   type WorkloadSpec,
 } from '@agenetes/protocol';
 
-import { atomicWriteJson } from './io.js';
+import { atomicWriteJson } from '../../../utils/fs.js';
 
 const LEGACY_SCHEMA_VERSION = 'agenetes-v1';
 const BACKUP_SUFFIX = '.agenetes-v1.bak';

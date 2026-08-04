@@ -3,10 +3,10 @@ import path from 'node:path';
 
 import { createId } from '@sediment/shared';
 
-import { atomicWriteJson, readJson, sanitizeId } from './io.js';
 import { SPACE_JSON_FILENAME, WORLD_CANVAS_DIR_NAME } from './paths.js';
+import { atomicWriteJson, readJson, sanitizeId } from '../../../utils/fs.js';
 
-import type { CanvasFile } from './canvas-store.js';
+import type { CanvasFile } from '../../canvas/persistence-types.js';
 
 function readWorldCanvas(filePath: string): CanvasFile {
   const canvas = readJson<CanvasFile>(filePath);

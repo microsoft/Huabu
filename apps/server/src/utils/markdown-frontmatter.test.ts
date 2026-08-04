@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { parseFrontmatter } from './frontmatter.js';
+import { parseFrontmatter } from './markdown-frontmatter.js';
 
 describe('parseFrontmatter line-ending normalisation', () => {
   it('parses LF frontmatter into native scalar types', () => {

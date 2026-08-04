@@ -21,12 +21,12 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { readJsonLines } from './io.js';
 import {
   legacyContextToTurns,
   migrateLegacyChatThreads,
   migrateLegacyThreadFile,
 } from './migrate-chat-threads.js';
+import { readJsonLines } from '../../../utils/fs.js';
 
 import type { LegacyChatTurnRecord as ChatTurnRecord } from './legacy/chat-turn-record.js';
 import type { Context } from '@earendil-works/pi-ai';

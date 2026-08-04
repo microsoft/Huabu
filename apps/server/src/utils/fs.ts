@@ -1,5 +1,10 @@
 /**
- * Low-level filesystem helpers shared by the storage module.
+ * Low-level filesystem helpers.
+ *
+ * Atomic file IO and identifier/path validation are host utilities shared by
+ * several domains — storage adapters, the agent memory writers, ACP profile
+ * persistence, and the boot-time Workspace migrations — so they live here
+ * rather than inside any one of them.
  *
  * Every disk write goes through `atomic*` helpers — write to a `.tmp`
  * sibling first, then rename — so readers never observe partial files.

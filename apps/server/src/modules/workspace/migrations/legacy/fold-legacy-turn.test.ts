@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { legacyChatTurnToAgentTurn } from './fold-legacy-turn.js';
-import { HUABU_CHAT_SUBMISSION_TYPE } from '../../agent/agenetes/handle.js';
+import { HUABU_CHAT_SUBMISSION_TYPE } from '../../../agent/agenetes/handle.js';
 
 import type {
   LegacyChatEnvelope,

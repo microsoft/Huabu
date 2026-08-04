@@ -21,8 +21,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { readJsonLines } from './io.js';
 import { migrateLegacyChatTurns } from './migrate-chat-turns.js';
+import { readJsonLines } from '../../../utils/fs.js';
 
 import type { LegacyChatTurnRecord } from './legacy/chat-turn-record.js';
 import type { PersistedTurn } from '@agenetes/agenetes';

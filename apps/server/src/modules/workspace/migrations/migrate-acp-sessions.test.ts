@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { migrateLegacyAcpSessions } from './migrate-acp-sessions.js';
 
-import type { AcpWorkloadSpec } from '../agent/agenetes/drivers.js';
+import type { AcpWorkloadSpec } from '../../agent/agenetes/drivers.js';
 import type { Namespace } from '@agenetes/protocol';
 
 let tmp: string;

@@ -6,9 +6,9 @@
  * `index.ts` → `storage.ts` → `backends/` → `index.ts` a cycle.
  */
 
-import { refreshCanvasDirIndex } from './canvas-dirs.js';
 import { CanvasStore } from './canvas-store.js';
-import { sanitizeId } from './io.js';
+import { sanitizeId } from '../../utils/fs.js';
+import { refreshCanvasDirIndex } from '../workspace/disk/canvas-dirs.js';
 
 const MAX_CACHE = 16;
 const cache = new Map<string, CanvasStore>();

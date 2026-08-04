@@ -61,7 +61,7 @@ import {
   type UpdateNodeOutcome,
 } from '../storage/index.js';
 import { canvasRoot, nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
-import { withSpaceDirHandlesReleased } from '../storage/space-dir-handles.js';
+import { withSpaceDirHandlesReleased } from '../workspace/disk/space-dir-handles.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
@@ -726,7 +726,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // inside the shared canvas lock and hands it to this `apply` — so the
     // resolution below is atomic with the write and can't race another
     // writer (another tab / device / agent / preprocess). See
-    // `storage/write-coordinator.ts`.
+    // `canvas/write-coordinator.ts`.
     let persisted: NodeContent | undefined;
     const apply = (existing: NodeContent | null): NodeContent => {
       // Body resolution:

@@ -33,9 +33,9 @@ import path from 'node:path';
 
 import { FileTurnStore } from '@agenetes/agenetes';
 
-import { readJsonLines } from './io.js';
 import { isLegacyChatTurnRecord } from './legacy/chat-turn-record.js';
 import { legacyChatTurnToAgentTurn } from './legacy/fold-legacy-turn.js';
+import { readJsonLines } from '../../../utils/fs.js';
 
 import type { PersistedTurn } from '@agenetes/agenetes';
 import type { Namespace } from '@agenetes/protocol';

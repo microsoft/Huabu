@@ -13,7 +13,7 @@
 
 import { appendFileSync } from 'node:fs';
 
-import { mkdirp } from '../../../storage/io.js';
+import { mkdirp } from '../../../../utils/fs.js';
 import { chatDir, chatPromptLogPath } from '../../../storage/paths.js';
 
 import type { Context } from '@earendil-works/pi-ai';

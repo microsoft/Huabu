@@ -18,10 +18,10 @@ vi.mock('../workspace.js', () => ({
 
 import { DiskBlobStore } from './backends/disk-blob.js';
 import { DiskStructuredStore } from './backends/disk-structured.js';
-import { refreshCanvasDirIndex } from './canvas-dirs.js';
 import { resetStorageCache } from './canvas-store-cache.js';
-import { artifactPath, canvasJsonPath } from './paths.js';
 import { setStorageForTesting, type Storage } from './storage.js';
+import { refreshCanvasDirIndex } from '../workspace/disk/canvas-dirs.js';
+import { artifactPath, canvasJsonPath } from '../workspace/disk/paths.js';
 
 import { deleteCanvas } from './index.js';
 

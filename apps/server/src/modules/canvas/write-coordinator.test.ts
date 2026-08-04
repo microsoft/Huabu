@@ -11,13 +11,13 @@ import { describe, expect, it } from 'vitest';
 
 import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
-import { applyNodeUpdate, updateNode } from '../write-coordinator.js';
+import { applyNodeUpdate, updateNode } from './write-coordinator.js';
 
 import type {
   CanvasStore,
   NodeContent,
   RenameResult,
-} from '../canvas-store.js';
+} from '../storage/index.js';
 
 /** A minimal in-memory stand-in for the fields `updateNode` touches. */
 function fakeStore(canvasId = 'c1') {
