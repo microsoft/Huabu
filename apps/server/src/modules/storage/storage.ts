@@ -8,14 +8,22 @@
  * The module-level holder mirrors `workspace.ts`, which keeps the active
  * workspace path in module state set once at boot. Call {@link initStorage}
  * from the server entry point so a bad profile fails at startup with an
- * actionable message; anything that reaches for storage first — tests,
- * scripts — initializes lazily through the same path.
+ * actionable message.
+ *
+ * Anything that reaches for storage without that — tests, scripts — builds
+ * the adapters on demand. That path is synchronous, so it cannot `await
+ * init()`, and it is therefore only legal for backends that have nothing to
+ * open; see {@link requiresExplicitInit}. It is not a lazy version of
+ * {@link initStorage}, and a connection-holding backend must not be reached
+ * through it.
  */
 
 import { DiskBlobStore } from './backends/disk-blob.js';
 import { DiskStructuredStore } from './backends/disk-structured.js';
 import {
   parseStorageProfile,
+  requiresExplicitInit,
+  StorageProfileError,
   validateStorageProfile,
   type StorageProfile,
 } from './profile.js';
@@ -66,7 +74,21 @@ export function createStorage(profile: StorageProfile): Storage {
 let current: Storage | null = null;
 
 function ensure(): Storage {
-  current ??= createStorage(parseStorageProfile());
+  if (current) return current;
+
+  const profile = parseStorageProfile();
+  // Build first, so an unimplemented backend reports that rather than the
+  // initialization complaint below.
+  const storage = createStorage(profile);
+  if (requiresExplicitInit(profile)) {
+    throw new StorageProfileError(
+      `Storage was used before initStorage(). The ` +
+        `"${profile.structured.kind}" / "${profile.blobs.kind}" profile has ` +
+        `connections to open, and the on-demand path cannot await init(). ` +
+        `Call initStorage() during startup.`,
+    );
+  }
+  current = storage;
   return current;
 }
 

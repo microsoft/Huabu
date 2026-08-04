@@ -88,3 +88,24 @@ export function validateStorageProfile(profile: StorageProfile): void {
     );
   }
 }
+
+/**
+ * Backends whose `init()` has nothing to open, so building them on demand is
+ * safe.
+ *
+ * The lazy accessor in `storage.ts` is synchronous and therefore cannot
+ * `await init()`. That is harmless for backends which have no connection to
+ * establish, and silently wrong for any that do — they would be handed to
+ * callers unopened. Keeping the list here, next to the other backend facts,
+ * means adding an adapter forces a decision about it.
+ */
+const LAZY_SAFE_STRUCTURED: readonly StructuredBackendKind[] = ['disk'];
+const LAZY_SAFE_BLOBS: readonly BlobBackendKind[] = ['disk'];
+
+/** Whether this profile may only be built through an awaited `initStorage()`. */
+export function requiresExplicitInit(profile: StorageProfile): boolean {
+  return (
+    !LAZY_SAFE_STRUCTURED.includes(profile.structured.kind) ||
+    !LAZY_SAFE_BLOBS.includes(profile.blobs.kind)
+  );
+}

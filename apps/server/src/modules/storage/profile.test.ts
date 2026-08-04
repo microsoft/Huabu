@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   parseStorageProfile,
+  requiresExplicitInit,
   StorageProfileError,
   validateStorageProfile,
 } from './profile.js';
@@ -70,5 +71,28 @@ describe('validateStorageProfile', () => {
         blobs: { kind: 'azure' },
       }),
     ).toThrow(/not implemented yet.*disk/s);
+  });
+});
+
+describe('requiresExplicitInit', () => {
+  // The on-demand path in `storage.ts` is synchronous and so cannot await
+  // `init()`. Disk has nothing to open, which is why that path is legal at
+  // all; every backend that holds a connection must go through
+  // `initStorage()` instead of being built on first use.
+  it('allows the disk + disk profile to be built on demand', () => {
+    expect(
+      requiresExplicitInit({
+        structured: { kind: 'disk' },
+        blobs: { kind: 'disk' },
+      }),
+    ).toBe(false);
+  });
+
+  it.each([
+    { structured: { kind: 'postgres' }, blobs: { kind: 'disk' } },
+    { structured: { kind: 'sqlite' }, blobs: { kind: 'disk' } },
+    { structured: { kind: 'disk' }, blobs: { kind: 'azure' } },
+  ] as const)('requires an awaited init for %j', (profile) => {
+    expect(requiresExplicitInit(profile)).toBe(true);
   });
 });
