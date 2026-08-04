@@ -7,7 +7,6 @@ import {
   moveNodeIntoFrame,
   moveNodeOutOfFrame,
   pickColumnDropTarget,
-  pickGridRowTarget,
   pickRowDropTarget,
   planStructuredDrop,
   readFrameGridConfig,
@@ -336,7 +335,7 @@ interface GridDropPlan {
   axis: FrameGridAxis;
   count: number; // pre-drop count
   target: StructuredDropTarget;
-  row?: number;
+  rowTarget?: StructuredDropTarget;
 }
 
 /**
@@ -360,9 +359,9 @@ interface GridDropCommands {
  *  - Grid → column under the cursor plus the persistent row under the
  *    cursor. Column uses `frameSlot`; row uses `frameRow`.
  *
- * Either kind of target may be returned: drop into an existing track,
- * or insert a brand-new track at the cursor's gap position (used to
- * grow the grid by drag-and-drop).
+ * Either kind of target may be returned **on either axis**: drop into an
+ * existing track, or insert a brand-new one at the cursor's gap (used to
+ * grow the grid by drag-and-drop, along X and — for `grid` — along Y).
  *
  * Falls back to the child's own top-left when the cursor isn't
  * available (programmatic emits, touch). All dragged nodes in a
@@ -396,8 +395,8 @@ function collectGridDropPlans(
 
     const target =
       cfg.axis === 'row'
-        ? pickRowDropTarget(preDragNodes, frame.id, framePoint, count)
-        : pickColumnDropTarget(preDragNodes, frame.id, framePoint, count);
+        ? pickRowDropTarget(preDragNodes, frame.id, framePoint.y, edges)
+        : pickColumnDropTarget(preDragNodes, frame.id, framePoint.x, edges);
 
     plans.push({
       nodeId: id as CanvasNodeId,
@@ -407,7 +406,12 @@ function collectGridDropPlans(
       target,
       ...(cfg.axis === 'grid'
         ? {
-            row: pickGridRowTarget(preDragNodes, frame.id, framePoint.y, edges),
+            rowTarget: pickRowDropTarget(
+              preDragNodes,
+              frame.id,
+              framePoint.y,
+              edges,
+            ),
           }
         : {}),
     });
@@ -425,6 +429,9 @@ function collectGridDropPlans(
  *       at/after it up by one;
  *     - otherwise each dragged node moves into an existing track (a
  *       demoted insert-new clamps into range).
+ *     `grid` additionally resolves a row target the same way, except
+ *     that opening a row yields to opening a column in the same
+ *     gesture — the new column is empty, so nothing needs pushing down.
  *  2. **Compact** the occupied tracks to a contiguous `0..K-1` range
  *     whenever a move empties a previously-occupied track (or the grid
  *     just grew). This makes `gridCount` equal the number of occupied
@@ -482,7 +489,7 @@ function buildGridDropCommands(
       framePlans.map((framePlan) => ({
         nodeId: framePlan.nodeId as string,
         target: framePlan.target,
-        row: framePlan.row,
+        rowTarget: framePlan.rowTarget,
       })),
     );
 

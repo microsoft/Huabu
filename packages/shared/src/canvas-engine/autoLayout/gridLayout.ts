@@ -1294,221 +1294,138 @@ export type StructuredDropTarget =
   | { kind: 'into-existing'; slot: number }
   | { kind: 'insert-new'; slot: number };
 
+/** One solved track's extent along the axis being classified. */
+interface TrackBand {
+  start: number;
+  extent: number;
+}
+
 /**
- * Map a flow-space drop point to a column-mode drop target. The
- * geometry mirrors {@link applyColumnLayout} **exactly** — fully
- * content-driven: each column's width is the widest child in it (empty
- * columns are width 0 and collapse), and the inter-column gap +
- * X padding derive from the same median-of-child-widths the solver
- * uses.
+ * Project one axis of a solved layout into classifiable bands.
  *
- *  - The dragged node is **not** excluded from width computation — it
- *    is visually still in its pre-drag column during the drag, and
- *    excluding it would synthesise a fake gap right where the user is
- *    releasing.
- *
- * Classification rules (padding here means the per-axis `padX`
- * derived from the median of child widths — see {@link paddingFromExtent}):
- *
- *  1. Cursor in the left padding (`x < padX`) →
- *     `insert-new` at slot `0` (prepend).
- *  2. Cursor in the right padding
- *     (`x > frameWidth - padX`) → `insert-new` at slot
- *     `count` (append).
- *  3. Cursor in the gap between two **non-empty** adjacent columns
- *     (`c` and `c + 1`) → `insert-new` at slot `c + 1`. Gaps that
- *     touch an empty column are ignored (the empty side already
- *     provides an unused slot).
- *  4. Otherwise → `into-existing` at the column whose centre is
- *     closest to the cursor. Empty columns are not candidates. If no
- *     non-empty columns exist (first-ever drop into a fresh frame),
- *     fall back to slot `0`.
+ * Reading them off the solver rather than re-deriving them is what
+ * keeps the drop decision aligned with what is on screen: a track's
+ * position depends on its members *and* on gutters widened for edge
+ * labels, and the mirror the pickers used to keep modelled only the
+ * first — so a frame with a labelled edge aimed its insert bands at
+ * gaps that were no longer there.
  */
-export function pickColumnDropTarget(
-  nodes: Node[],
-  frameId: string,
-  framePoint: { x: number; y: number },
-  count: number,
+function axisBands(
+  layout: FrameGridLayoutResult | null | undefined,
+  axis: 'x' | 'y',
+): TrackBand[] {
+  if (!layout) return [];
+  return axis === 'x'
+    ? (layout.columnTracks ?? []).map((track) => ({
+        start: track.left,
+        extent: track.width,
+      }))
+    : (layout.rowTracks ?? []).map((track) => ({
+        start: track.top,
+        extent: track.height,
+      }));
+}
+
+/**
+ * Classify a frame-local coordinate against one axis' solved tracks.
+ * Every structured mode routes through here, so all of them answer
+ * "which track, or a new one where?" the same way:
+ *
+ *  1. Before the first track or past the last one → `insert-new` at
+ *     that end. Anything outside the content reads as "make room
+ *     here", including the slack of a manually-sized frame.
+ *  2. Inside the widened band around a gutter → `insert-new` between
+ *     the two tracks. The literal gutter is a handful of pixels, so it
+ *     is grown by {@link insertBetweenHalfBand} — never far enough to
+ *     reach either track's centre.
+ *  3. Otherwise → `into-existing` at the nearest track centre.
+ *
+ * Empty tracks need no special case: the masonry modes compact them
+ * away before this runs, and a `grid`'s blank row is a deliberate cell
+ * that must stay a drop target rather than a gap to wedge a row into.
+ */
+function pickAxisDropTarget(
+  layout: FrameGridLayoutResult | null | undefined,
+  axis: 'x' | 'y',
+  coord: number,
 ): StructuredDropTarget {
-  const frame = nodes.find((n) => n.id === frameId);
-  if (!frame) return { kind: 'into-existing', slot: 0 };
+  const bands = axisBands(layout, axis);
+  if (bands.length === 0) return { kind: 'into-existing', slot: 0 };
 
-  const allChildren = collectChildren(nodes, frameId);
-  const colItems: ChildSlot[][] = Array.from({ length: count }, () => []);
-  for (const child of allChildren) {
-    const c = clampInt(readFrameTrack(child.node, 'column') ?? 0, 0, count - 1);
-    colItems[c].push(child);
+  const minHalf =
+    axis === 'x' ? INSERT_BETWEEN_MIN_HALF_COLUMN : INSERT_BETWEEN_MIN_HALF_ROW;
+  const first = bands[0];
+  const last = bands[bands.length - 1];
+  if (coord < first.start) return { kind: 'insert-new', slot: 0 };
+  if (coord > last.start + last.extent) {
+    return { kind: 'insert-new', slot: bands.length };
   }
 
-  const colWidth = colItems.map((items) =>
-    items.length === 0 ? 0 : Math.max(...items.map((i) => i.width)),
-  );
-  // Mirror applyColumnLayout's per-axis spacing so the drop-zone math
-  // matches where children actually land after the solver re-packs.
-  // Only the X-axis (padX + interGapX) is consulted here — this picker
-  // classifies the cursor against horizontal column bands.
-  const widthMedian = median(allChildren.map((c) => c.width));
-  const interGapX = gapFromExtent(widthMedian);
-  const padX = paddingFromExtent(widthMedian);
-
-  // Cumulative left/right per column. Empty columns collapse — they
-  // share their neighbour's coord and don't advance the cursor.
-  const colLeft = new Array<number>(count).fill(padX);
-  const colRight = new Array<number>(count).fill(padX);
-  let cursor = padX;
-  // Right edge of the last non-empty column. `cursor` advances *past*
-  // the final column by one trailing `interGapX`, so it can't be used
-  // directly for the content-driven width (that would over-count by one
-  // gap vs. applyColumnLayout's `contentRight + padX`).
-  let contentRight = padX;
-  for (let c = 0; c < count; c += 1) {
-    colLeft[c] = cursor;
-    colRight[c] = cursor + colWidth[c];
-    if (colWidth[c] > 0) {
-      contentRight = cursor + colWidth[c];
-      cursor += colWidth[c] + interGapX;
-    }
-  }
-
-  // Prefer the actually-rendered frame width; fall back to the
-  // content-driven width we just computed (mirrors applyColumnLayout:
-  // contentRight + padX, with no trailing inter-column gap).
-  const frameWidth =
-    (frame.style as { width?: number } | undefined)?.width ??
-    (frame.measured as { width?: number } | undefined)?.width ??
-    contentRight + padX;
-
-  const x = framePoint.x;
-
-  if (x < padX) return { kind: 'insert-new', slot: 0 };
-  if (x > frameWidth - padX) {
-    return { kind: 'insert-new', slot: count };
-  }
-
-  for (let c = 0; c < count - 1; c += 1) {
-    if (colWidth[c] === 0 || colWidth[c + 1] === 0) continue;
-    // Widen the literal inter-column gap into an easier-to-hit band so a
-    // new column can be opened between two columns without pixel-perfect
-    // aiming, while the columns' centres stay `into-existing`.
-    const gapCenter = (colRight[c] + colLeft[c + 1]) / 2;
+  for (let i = 0; i < bands.length - 1; i += 1) {
+    const end = bands[i].start + bands[i].extent;
+    const gap = Math.max(0, bands[i + 1].start - end);
+    const centre = end + gap / 2;
     const half = insertBetweenHalfBand(
-      interGapX,
-      colWidth[c],
-      colWidth[c + 1],
-      INSERT_BETWEEN_MIN_HALF_COLUMN,
+      gap,
+      bands[i].extent,
+      bands[i + 1].extent,
+      minHalf,
     );
-    if (x >= gapCenter - half && x <= gapCenter + half) {
-      return { kind: 'insert-new', slot: c + 1 };
+    if (coord >= centre - half && coord <= centre + half) {
+      return { kind: 'insert-new', slot: i + 1 };
     }
   }
 
-  const candidates: number[] = [];
-  for (let c = 0; c < count; c += 1) {
-    if (colWidth[c] > 0) candidates.push(c);
-  }
-  if (candidates.length === 0) return { kind: 'into-existing', slot: 0 };
-  let best = candidates[0];
-  let bestDist = Math.abs(x - (colLeft[best] + colRight[best]) / 2);
-  for (let i = 1; i < candidates.length; i += 1) {
-    const c = candidates[i];
-    const d = Math.abs(x - (colLeft[c] + colRight[c]) / 2);
+  let best = 0;
+  let bestDist = Math.abs(coord - (first.start + first.extent / 2));
+  for (let i = 1; i < bands.length; i += 1) {
+    const d = Math.abs(coord - (bands[i].start + bands[i].extent / 2));
     if (d < bestDist) {
       bestDist = d;
-      best = c;
+      best = i;
     }
   }
   return { kind: 'into-existing', slot: best };
 }
 
-/** Mirror of {@link pickColumnDropTarget} for the row axis. */
+/**
+ * Map a frame-local X to a column drop target. Serves `column` and the
+ * column axis of `grid`, which share their geometry and their
+ * `data.frameColumn` cell field.
+ *
+ * The dragged node is deliberately still part of the solved layout: it
+ * is visually in its pre-drag column for the whole gesture, and taking
+ * it out would synthesise a fake gap exactly where the user is aiming.
+ */
+export function pickColumnDropTarget(
+  nodes: Node[],
+  frameId: string,
+  x: number,
+  edges: readonly Edge[] = [],
+): StructuredDropTarget {
+  return pickAxisDropTarget(
+    solveStructuredFrameLayout(nodes, frameId, 'compact', { edges }),
+    'x',
+    x,
+  );
+}
+
+/**
+ * Map a frame-local Y to a row drop target. Serves `row`'s masonry
+ * tracks and `grid`'s persistent rows alike — the mode decides which
+ * solver produces the bands, not how they are read.
+ */
 export function pickRowDropTarget(
   nodes: Node[],
   frameId: string,
-  framePoint: { x: number; y: number },
-  count: number,
+  y: number,
+  edges: readonly Edge[] = [],
 ): StructuredDropTarget {
-  const frame = nodes.find((n) => n.id === frameId);
-  if (!frame) return { kind: 'into-existing', slot: 0 };
-
-  const allChildren = collectChildren(nodes, frameId);
-  const rowItems: ChildSlot[][] = Array.from({ length: count }, () => []);
-  for (const child of allChildren) {
-    const r = clampInt(readFrameTrack(child.node, 'row') ?? 0, 0, count - 1);
-    rowItems[r].push(child);
-  }
-
-  const rowHeight = rowItems.map((items) =>
-    items.length === 0 ? 0 : Math.max(...items.map((i) => i.height)),
+  return pickAxisDropTarget(
+    solveStructuredFrameLayout(nodes, frameId, 'compact', { edges }),
+    'y',
+    y,
   );
-  // Mirror applyRowLayout's per-axis spacing so the drop-zone math
-  // matches where children actually land after the solver re-packs.
-  // Only the Y-axis (padY + interGapY) is consulted here.
-  const heightMedian = median(allChildren.map((c) => c.height));
-  const interGapY = gapFromExtent(heightMedian);
-  const padY = paddingFromExtent(heightMedian);
-
-  const rowTop = new Array<number>(count).fill(padY);
-  const rowBottom = new Array<number>(count).fill(padY);
-  let cursor = padY;
-  // Bottom edge of the last non-empty row. `cursor` advances *past* the
-  // final row by one trailing `interGapY`, so it can't be used directly
-  // for the content-driven height (that would over-count by one gap vs.
-  // applyRowLayout's `contentBottom + padY`).
-  let contentBottom = padY;
-  for (let r = 0; r < count; r += 1) {
-    rowTop[r] = cursor;
-    rowBottom[r] = cursor + rowHeight[r];
-    if (rowHeight[r] > 0) {
-      contentBottom = cursor + rowHeight[r];
-      cursor += rowHeight[r] + interGapY;
-    }
-  }
-
-  const frameHeight =
-    (frame.style as { height?: number } | undefined)?.height ??
-    (frame.measured as { height?: number } | undefined)?.height ??
-    contentBottom + padY;
-
-  const y = framePoint.y;
-
-  if (y < padY) return { kind: 'insert-new', slot: 0 };
-  if (y > frameHeight - padY) {
-    return { kind: 'insert-new', slot: count };
-  }
-
-  for (let r = 0; r < count - 1; r += 1) {
-    if (rowHeight[r] === 0 || rowHeight[r + 1] === 0) continue;
-    // Widen the literal inter-row gap into an easier-to-hit band so a new
-    // row can be opened between two rows without pixel-perfect aiming,
-    // while the rows' centres stay `into-existing`.
-    const gapCenter = (rowBottom[r] + rowTop[r + 1]) / 2;
-    const half = insertBetweenHalfBand(
-      interGapY,
-      rowHeight[r],
-      rowHeight[r + 1],
-      INSERT_BETWEEN_MIN_HALF_ROW,
-    );
-    if (y >= gapCenter - half && y <= gapCenter + half) {
-      return { kind: 'insert-new', slot: r + 1 };
-    }
-  }
-
-  const candidates: number[] = [];
-  for (let r = 0; r < count; r += 1) {
-    if (rowHeight[r] > 0) candidates.push(r);
-  }
-  if (candidates.length === 0) return { kind: 'into-existing', slot: 0 };
-  let best = candidates[0];
-  let bestDist = Math.abs(y - (rowTop[best] + rowBottom[best]) / 2);
-  for (let i = 1; i < candidates.length; i += 1) {
-    const r = candidates[i];
-    const d = Math.abs(y - (rowTop[r] + rowBottom[r]) / 2);
-    if (d < bestDist) {
-      bestDist = d;
-      best = r;
-    }
-  }
-  return { kind: 'into-existing', slot: best };
 }
 
 // ── Drag-time drop-zone geometry (live preview) ───────────────────────
@@ -1648,35 +1565,6 @@ function describeTrackBands(
   return { tracks: columnBands, rows: axis === 'grid' ? rowBands : [] };
 }
 
-/** Pick a persistent Grid row from a frame-local Y coordinate. */
-export function pickGridRowTarget(
-  nodes: Node[],
-  frameId: string,
-  y: number,
-  edges: readonly Edge[] = [],
-): number {
-  const frame = nodes.find((node) => node.id === frameId);
-  const config = readFrameGridConfig(frame);
-  if (!config || config.axis !== 'grid') return 0;
-  const layout = applyGridLayout(nodes, frameId, config.count, 'compact', {
-    edges,
-  });
-  if (!layout?.rowAssignments) return 0;
-
-  const ordered = (layout.rowTracks ?? []).map(
-    (track, row) =>
-      [row, { top: track.top, bottom: track.top + track.height }] as const,
-  );
-  if (ordered.length === 0) return 0;
-  for (let index = 0; index < ordered.length; index += 1) {
-    const [row, bounds] = ordered[index];
-    if (y <= bounds.bottom) return row;
-    const next = ordered[index + 1];
-    if (next && y < (bounds.bottom + next[1].top) / 2) return row;
-  }
-  return ordered[ordered.length - 1][0] + 1;
-}
-
 /**
  * One dragged node's resolved drop, as the pickers reported it.
  */
@@ -1684,8 +1572,8 @@ export interface StructuredDropRequest {
   nodeId: string;
   /** Where the count-axis picker landed. */
   target: StructuredDropTarget;
-  /** `grid` only: the row band the pointer picked. */
-  row?: number;
+  /** `grid` only: where the row picker landed. */
+  rowTarget?: StructuredDropTarget;
 }
 
 /**
@@ -1782,40 +1670,62 @@ export function planStructuredDrop(
 
   // ── Grid rows ───────────────────────────────────────────────────
   if (isGrid) {
-    for (const request of requests) {
-      const targetRow = request.row ?? 0;
-      const targetTrack = tracks.get(request.nodeId) ?? 0;
-      // Read the occupant against the POST-shift columns, so the answer
-      // does not depend on whether a track was opened this gesture.
-      const occupantId = childIds.find(
-        (id) =>
-          id !== request.nodeId &&
-          tracks.get(id) === targetTrack &&
-          rows.get(id) === targetRow,
-      );
-      const sourceRow = origRow.get(request.nodeId);
-      const sourceTrack = origTrack.get(request.nodeId);
+    // Opening a row mirrors the count axis: several dragged nodes share
+    // one cursor, so only a single-node drag names one gap. It is also
+    // never combined with opening a track in the same gesture — that
+    // drop lands in a column that is empty by construction, so there is
+    // nobody to push down and a row break would only add a blank stripe.
+    const rowInsertRequest =
+      !insertRequest &&
+      requests.length === 1 &&
+      requests[0].rowTarget?.kind === 'insert-new'
+        ? requests[0]
+        : null;
 
-      if (sourceRow !== undefined && sourceTrack !== undefined) {
-        // Moving within the frame: trade places with the occupant so no
-        // unrelated cell has to shift.
+    if (rowInsertRequest) {
+      const opened = rowInsertRequest.rowTarget?.slot ?? 0;
+      for (const id of childIds) {
+        if (id === rowInsertRequest.nodeId) continue;
+        const row = rows.get(id);
+        if (row !== undefined && row >= opened) rows.set(id, row + 1);
+      }
+      rows.set(rowInsertRequest.nodeId, opened);
+    } else {
+      for (const request of requests) {
+        const targetRow = request.rowTarget?.slot ?? 0;
+        const targetTrack = tracks.get(request.nodeId) ?? 0;
+        // Read the occupant against the POST-shift columns, so the answer
+        // does not depend on whether a track was opened this gesture.
+        const occupantId = childIds.find(
+          (id) =>
+            id !== request.nodeId &&
+            tracks.get(id) === targetTrack &&
+            rows.get(id) === targetRow,
+        );
+        const sourceRow = origRow.get(request.nodeId);
+        const sourceTrack = origTrack.get(request.nodeId);
+
+        if (sourceRow !== undefined && sourceTrack !== undefined) {
+          // Moving within the frame: trade places with the occupant so no
+          // unrelated cell has to shift.
+          if (occupantId) {
+            tracks.set(occupantId, sourceTrack);
+            rows.set(occupantId, sourceRow);
+          }
+          rows.set(request.nodeId, targetRow);
+          continue;
+        }
+
+        // Arriving from outside: there is no cell to trade, so the
+        // occupied row and everything below it move down one.
         if (occupantId) {
-          tracks.set(occupantId, sourceTrack);
-          rows.set(occupantId, sourceRow);
+          for (const id of childIds) {
+            const row = rows.get(id);
+            if (row !== undefined && row >= targetRow) rows.set(id, row + 1);
+          }
         }
         rows.set(request.nodeId, targetRow);
-        continue;
       }
-
-      // Arriving from outside: there is no cell to trade, so the
-      // occupied row and everything below it move down one.
-      if (occupantId) {
-        for (const id of childIds) {
-          const row = rows.get(id);
-          if (row !== undefined && row >= targetRow) rows.set(id, row + 1);
-        }
-      }
-      rows.set(request.nodeId, targetRow);
     }
 
     // Rows the move emptied disappear; later rows close the gap. Rows
@@ -1861,18 +1771,20 @@ function describeGridDropZone(
   frameId: string,
   count: number,
   target: StructuredDropTarget,
-  pointerY: number,
+  rowTarget: StructuredDropTarget,
   dragged: DraggedNodeRect,
   options: StructuredLayoutOptions,
 ): StructuredDropZone | null {
   const opensTrack =
     target.kind === 'insert-new' && count < FRAME_GRID_MAX_COUNT;
-  const targetRow = pickGridRowTarget(nodes, frameId, pointerY, options.edges);
+  // A track break outranks a row break (see `planStructuredDrop`), so the
+  // mark only advertises a new row when no new column is being opened.
+  const opensRow = !opensTrack && rowTarget.kind === 'insert-new';
 
   // The drop's meaning is resolved once, by the same planner the commit
   // path uses, so the preview cannot describe a different outcome.
   const plan = planStructuredDrop(nodes, frameId, 'grid', count, [
-    { nodeId: dragged.id, target, row: targetRow },
+    { nodeId: dragged.id, target, rowTarget },
   ]);
 
   let foundDragged = false;
@@ -1889,7 +1801,7 @@ function describeGridDropZone(
         data: {
           ...node.data,
           frameColumn: plan.tracks.get(dragged.id) ?? 0,
-          frameRow: plan.rows.get(dragged.id) ?? targetRow,
+          frameRow: plan.rows.get(dragged.id) ?? rowTarget.slot,
         },
         style: { ...node.style, width: dragged.width, height: dragged.height },
         measured: { width: dragged.width, height: dragged.height },
@@ -1917,7 +1829,7 @@ function describeGridDropZone(
       position: { x: dragged.x, y: dragged.y },
       data: {
         frameColumn: plan.tracks.get(dragged.id) ?? 0,
-        frameRow: plan.rows.get(dragged.id) ?? targetRow,
+        frameRow: plan.rows.get(dragged.id) ?? rowTarget.slot,
       },
       style: { width: dragged.width, height: dragged.height },
       measured: { width: dragged.width, height: dragged.height },
@@ -1935,7 +1847,7 @@ function describeGridDropZone(
   const bands = describeTrackBands(layout, 'grid');
 
   return {
-    kind: opensTrack ? 'insert-new' : 'into-existing',
+    kind: opensTrack || opensRow ? 'insert-new' : 'into-existing',
     x: position.x,
     y: position.y,
     width: dragged.width,
@@ -1950,7 +1862,7 @@ function describeGridDropZone(
         plan.tracks.get(dragged.id) ??
         0,
       rows: bands.rows,
-      activeRow: layout.rowAssignments?.get(dragged.id) ?? targetRow,
+      activeRow: layout.rowAssignments?.get(dragged.id) ?? rowTarget.slot,
     },
   };
 }
@@ -1992,10 +1904,18 @@ export function describeStructuredDropZone(
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || !dragged) return null;
 
+  // One pre-drop solve feeds every axis the mode consults, so a `grid`
+  // still costs the same two solves per tick it always did.
+  const preDrop = solveStructuredFrameLayout(
+    nodes,
+    frameId,
+    'compact',
+    options,
+  );
   const isCol = axis !== 'row';
   const target = isCol
-    ? pickColumnDropTarget(nodes, frameId, framePoint, count)
-    : pickRowDropTarget(nodes, frameId, framePoint, count);
+    ? pickAxisDropTarget(preDrop, 'x', framePoint.x)
+    : pickAxisDropTarget(preDrop, 'y', framePoint.y);
 
   if (axis === 'grid') {
     return describeGridDropZone(
@@ -2003,7 +1923,7 @@ export function describeStructuredDropZone(
       frameId,
       count,
       target,
-      framePoint.y,
+      pickAxisDropTarget(preDrop, 'y', framePoint.y),
       dragged,
       options,
     );
@@ -2015,14 +1935,14 @@ export function describeStructuredDropZone(
   const trackField = isCol ? 'frameColumn' : 'frameRow';
 
   let foundDragged = false;
-  const effectiveCount =
-    target.kind === 'insert-new' && count < FRAME_GRID_MAX_COUNT
-      ? count + 1
-      : count;
-  const targetSlot =
-    target.kind === 'insert-new'
-      ? target.slot
-      : Math.min(target.slot, count - 1);
+  // Demote exactly as the commit path does, so a frame already at the
+  // maximum track count never previews a break it cannot honour.
+  const opensTrack =
+    target.kind === 'insert-new' && count < FRAME_GRID_MAX_COUNT;
+  const effectiveCount = opensTrack ? count + 1 : count;
+  const targetSlot = opensTrack
+    ? target.slot
+    : Math.min(target.slot, count - 1);
   const simulated = nodes.map((node) => {
     if (node.id === frameId && effectiveCount !== count) {
       return {
@@ -2041,7 +1961,7 @@ export function describeStructuredDropZone(
         measured: { width: dragged.width, height: dragged.height },
       };
     }
-    if (target.kind !== 'insert-new' || node.parentId !== frameId) {
+    if (!opensTrack || node.parentId !== frameId) {
       return node;
     }
     const slot = clampInt(readFrameTrack(node, trackAxis) ?? 0, 0, count - 1);
@@ -2072,7 +1992,7 @@ export function describeStructuredDropZone(
   const bands = describeTrackBands(simulatedLayout, axis);
 
   return {
-    kind: target.kind,
+    kind: opensTrack ? 'insert-new' : 'into-existing',
     x: position.x,
     y: position.y,
     width: dragged.width,

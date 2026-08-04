@@ -81,7 +81,6 @@ export {
   resolveFrameTrackCount,
   pickColumnDropTarget,
   pickRowDropTarget,
-  pickGridRowTarget,
   describeStructuredDropZone,
   planStructuredDrop,
   readFrameTrack,

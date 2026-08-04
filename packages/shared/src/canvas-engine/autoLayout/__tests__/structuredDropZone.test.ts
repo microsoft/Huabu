@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { FRAME_GRID_MAX_COUNT } from '../../../types/canvas/node.js';
 import {
   applyGridLayout,
   describeStructuredDropZone,
@@ -448,5 +449,111 @@ describe('describeStructuredDropZone reflow', () => {
     );
 
     expect(zone?.reflow.map((entry) => entry.id)).toEqual(['peer']);
+  });
+});
+
+/**
+ * All three structured modes classify a drop against the *solved*
+ * tracks now, through one shared picker. These cases pin the rules that
+ * used to differ between the hand-rolled masonry mirrors and the grid
+ * row axis.
+ */
+describe('cross-mode drop classification', () => {
+  it('treats an oversized frame’s slack as room for a new track', () => {
+    // The frame is far wider than its two columns of content. The old
+    // masonry picker measured "past the end" from the frame's own right
+    // padding, so the whole empty right-hand half resolved to the last
+    // column; every mode now reads it as "make room here".
+    const nodes = [
+      {
+        ...makeFrame('column'),
+        style: { width: 800, height: 160 },
+        measured: { width: 800, height: 160 },
+      },
+      makeChild('a', 0, { x: 16, y: 16 }),
+      makeChild('b', 1, { x: 112, y: 16 }),
+    ];
+
+    const zone = describeStructuredDropZone(
+      nodes,
+      'frame',
+      { x: 600, y: 30 },
+      'column',
+      2,
+      dragged,
+    );
+
+    expect(zone?.kind).toBe('insert-new');
+    expect(zone?.context.activeTrack).toBe(2);
+  });
+
+  it('aims the insert band at the gutter a labelled edge widened', () => {
+    // A labelled edge crossing the two columns pushes them apart, so the
+    // real gutter centre no longer matches the content-only spacing the
+    // masonry picker used to re-derive.
+    const nodes = [
+      makeFrame('column'),
+      makeChild('a', 0, { x: 16, y: 16 }),
+      makeChild('b', 1, { x: 112, y: 16 }),
+    ];
+    const edges = [
+      {
+        id: 'labelled',
+        source: 'a',
+        target: 'b',
+        data: { label: 'A label wide enough to spread the columns apart' },
+      },
+    ];
+
+    const layout = solveStructuredFrameLayout(nodes, 'frame', 'compact', {
+      edges,
+    });
+    const tracks = layout?.columnTracks ?? [];
+    expect(tracks).toHaveLength(2);
+    const gutterCentre =
+      (tracks[0].left + tracks[0].width + tracks[1].left) / 2;
+
+    const zone = describeStructuredDropZone(
+      nodes,
+      'frame',
+      { x: gutterCentre, y: 30 },
+      'column',
+      2,
+      dragged,
+      { edges },
+    );
+
+    expect(zone?.kind).toBe('insert-new');
+    expect(zone?.context.activeTrack).toBe(1);
+  });
+
+  it('stops promising a new track once the frame is at the maximum', () => {
+    // The commit path has always refused to open track 13; the masonry
+    // preview used to advertise one anyway, so the dashed `+` plate
+    // promised something the drop could not deliver.
+    const count = FRAME_GRID_MAX_COUNT;
+    const nodes: Node[] = [
+      {
+        ...makeFrame('column'),
+        data: { layoutMode: 'column', gridCount: count },
+        style: { width: 2000, height: 160 },
+        measured: { width: 2000, height: 160 },
+      },
+      ...Array.from({ length: count }, (_, i) =>
+        makeChild(`c${i}`, i, { x: 16 + i * 96, y: 16 }),
+      ),
+    ];
+
+    const zone = describeStructuredDropZone(
+      nodes,
+      'frame',
+      { x: 1900, y: 30 },
+      'column',
+      count,
+      dragged,
+    );
+
+    expect(zone?.kind).toBe('into-existing');
+    expect(zone?.context.tracks).toHaveLength(count);
   });
 });

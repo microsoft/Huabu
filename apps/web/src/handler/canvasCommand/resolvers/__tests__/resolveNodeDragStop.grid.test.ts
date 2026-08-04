@@ -243,6 +243,45 @@ describe('resolveNodeDragStop Grid cells', () => {
     expect(patches.get('next-row')).toMatchObject({ frameRow: 2 });
   });
 
+  it('opens a row when an internal drag aims between two rows', () => {
+    // Without an `insert-new` target on the row axis this drop could
+    // only resolve to one of the neighbouring rows, so a grid could be
+    // permuted but never grown along Y.
+    const scene = layoutScene([
+      makeFrame(),
+      makeChild('top-left', 0, 0),
+      makeChild('top-right', 1, 0),
+      makeChild('middle', 0, 1),
+      makeChild('dragged', 1, 2),
+    ]);
+    const columnPosition = scene.positions.get('dragged');
+    const [firstRow, secondRow] = scene.rowTracks;
+    if (!columnPosition || !firstRow || !secondRow) {
+      throw new Error('Row gutter fixture is missing');
+    }
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: {
+          x: columnPosition.x + CHILD_SIZE.width / 2,
+          y: (firstRow.top + firstRow.height + secondRow.top) / 2,
+        },
+        cachedDecisions: new Map([
+          ['dragged', { unframe: false, enterFrameId: null }],
+        ]),
+      },
+      state(scene.nodes),
+    );
+    const patches = mergedPatches(resolution.commands);
+
+    expect(patches.get('dragged')).toMatchObject({ frameRow: 1 });
+    expect(patches.get('middle')).toMatchObject({ frameRow: 2 });
+    expect(patches.has('top-left')).toBe(false);
+    expect(patches.has('top-right')).toBe(false);
+  });
+
   // A drop that leaves a column empty compacts the grid, and the track
   // count is what re-interprets every cell in it. `SET_FRAME_LAYOUT`
   // re-deals cells in reading order when it is handed a count on its

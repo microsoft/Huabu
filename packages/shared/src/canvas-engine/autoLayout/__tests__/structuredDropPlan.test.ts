@@ -75,7 +75,11 @@ describe('planStructuredDrop — vacated rows', () => {
     ];
 
     const plan = planStructuredDrop(nodes, 'frame', 'grid', 2, [
-      { nodeId: 'solo', target: { kind: 'into-existing', slot: 1 }, row: 2 },
+      {
+        nodeId: 'solo',
+        target: { kind: 'into-existing', slot: 1 },
+        rowTarget: { kind: 'into-existing', slot: 2 },
+      },
     ]);
 
     expect(cellsOf(plan)).toEqual({
@@ -96,7 +100,11 @@ describe('planStructuredDrop — vacated rows', () => {
     ];
 
     const plan = planStructuredDrop(nodes, 'frame', 'grid', 2, [
-      { nodeId: 'top', target: { kind: 'into-existing', slot: 1 }, row: 0 },
+      {
+        nodeId: 'top',
+        target: { kind: 'into-existing', slot: 1 },
+        rowTarget: { kind: 'into-existing', slot: 0 },
+      },
     ]);
 
     expect(cellsOf(plan)).toEqual({
@@ -115,7 +123,11 @@ describe('planStructuredDrop — vacated rows', () => {
     ];
 
     const plan = planStructuredDrop(nodes, 'frame', 'grid', 2, [
-      { nodeId: 'mover', target: { kind: 'into-existing', slot: 1 }, row: 1 },
+      {
+        nodeId: 'mover',
+        target: { kind: 'into-existing', slot: 1 },
+        rowTarget: { kind: 'into-existing', slot: 1 },
+      },
     ]);
 
     // The occupant takes the mover's old cell, so no unrelated child
@@ -124,6 +136,64 @@ describe('planStructuredDrop — vacated rows', () => {
       mover: { column: 1, row: 1 },
       occupant: { column: 0, row: 0 },
       anchor: { column: 0, row: 1 },
+    });
+  });
+});
+
+describe('planStructuredDrop — opening a row', () => {
+  it('pushes later rows down instead of trading places', () => {
+    // Aiming between two rows has to mean "make room here". Before the
+    // row axis had an `insert-new` target this collapsed into a swap
+    // with whichever row the pointer was nearest, so a grid could only
+    // ever be permuted, never grown along Y.
+    const nodes = [
+      makeFrame('grid'),
+      makeChild('a', { column: 0, row: 0 }, { x: 16, y: 16 }),
+      makeChild('b', { column: 1, row: 0 }, { x: 112, y: 16 }),
+      makeChild('c', { column: 0, row: 1 }, { x: 16, y: 72 }),
+      makeChild('mover', { column: 1, row: 1 }, { x: 112, y: 72 }),
+    ];
+
+    const plan = planStructuredDrop(nodes, 'frame', 'grid', 2, [
+      {
+        nodeId: 'mover',
+        target: { kind: 'into-existing', slot: 0 },
+        rowTarget: { kind: 'insert-new', slot: 1 },
+      },
+    ]);
+
+    expect(cellsOf(plan)).toEqual({
+      a: { column: 0, row: 0 },
+      b: { column: 1, row: 0 },
+      mover: { column: 0, row: 1 },
+      c: { column: 0, row: 2 },
+    });
+  });
+
+  it('yields to a track break in the same gesture', () => {
+    // The dragged node is opening a column, so it lands in a column that
+    // is empty by construction — breaking a row as well would only add a
+    // blank stripe across the frame.
+    const nodes = [
+      makeFrame('grid'),
+      makeChild('a', { column: 0, row: 0 }, { x: 16, y: 16 }),
+      makeChild('b', { column: 1, row: 0 }, { x: 112, y: 16 }),
+      makeChild('mover', { column: 1, row: 1 }, { x: 112, y: 72 }),
+    ];
+
+    const plan = planStructuredDrop(nodes, 'frame', 'grid', 2, [
+      {
+        nodeId: 'mover',
+        target: { kind: 'insert-new', slot: 1 },
+        rowTarget: { kind: 'insert-new', slot: 1 },
+      },
+    ]);
+
+    expect(plan.count).toBe(3);
+    expect(cellsOf(plan)).toEqual({
+      a: { column: 0, row: 0 },
+      b: { column: 2, row: 0 },
+      mover: { column: 1, row: 1 },
     });
   });
 });

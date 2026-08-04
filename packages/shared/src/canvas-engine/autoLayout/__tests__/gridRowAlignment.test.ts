@@ -23,7 +23,7 @@ import { describe, it, expect } from 'vitest';
 import {
   applyColumnLayout,
   applyGridLayout,
-  pickGridRowTarget,
+  pickRowDropTarget,
 } from '../gridLayout.js';
 
 import type { Edge, Node } from '@xyflow/react';
@@ -234,14 +234,20 @@ describe('applyGridLayout', () => {
     const layout = positionsOf(nodes);
     const secondRowY = at(layout.childPositions, 'left-2').y + SIZE.height / 2;
 
-    expect(pickGridRowTarget(nodes, 'f', secondRowY)).toBe(1);
+    expect(pickRowDropTarget(nodes, 'f', secondRowY)).toEqual({
+      kind: 'into-existing',
+      slot: 1,
+    });
 
     const liveDragNodes = nodes.map((node) =>
       node.id === 'left-1'
         ? { ...node, position: { ...node.position, y: 10_000 } }
         : node,
     );
-    expect(pickGridRowTarget(liveDragNodes, 'f', secondRowY)).toBe(1);
+    expect(pickRowDropTarget(liveDragNodes, 'f', secondRowY)).toEqual({
+      kind: 'into-existing',
+      slot: 1,
+    });
   });
 
   it('uses edge-aware gutter geometry for row hit areas', () => {
@@ -258,7 +264,10 @@ describe('applyGridLayout', () => {
     if (!layout) throw new Error('applyGridLayout returned null');
     const secondRowY = at(layout.childPositions, 'left-2').y + SIZE.height / 2;
 
-    expect(pickGridRowTarget(nodes, 'f', secondRowY, edges)).toBe(1);
+    expect(pickRowDropTarget(nodes, 'f', secondRowY, edges)).toEqual({
+      kind: 'into-existing',
+      slot: 1,
+    });
   });
 
   it('preserves empty row indices instead of compacting later rows', () => {
