@@ -58,26 +58,36 @@ export interface NodeTakeoverGeometry {
  * it strands the mark mid-flight over a card that is still there, and leaves it
  * parked at a corner of nothing once the card has gone.
  */
-function useGlideProgress(stage: QuestionLodStage): number {
+function useGlideProgress(stage: QuestionLodStage | null): number {
   const target = stage === 'collapsed' ? 1 : 0;
-  const [progress, setProgress] = useState(target);
-  const liveRef = useRef(target);
+  const [, bumpFrame] = useState(0);
+  const liveRef = useRef(0);
+  const settledRef = useRef(false);
+
+  // A node has no stage until React Flow has measured it. Adopting the first
+  // measured stage outright rather than animating to it keeps a canvas that
+  // loads already zoomed out from sweeping every mark — and every edge endpoint
+  // that now follows it — in from the card's corner on load.
+  if (stage !== null && !settledRef.current) {
+    settledRef.current = true;
+    liveRef.current = target;
+  }
 
   useEffect(() => {
-    if (liveRef.current === target) return;
+    if (stage === null || liveRef.current === target) return;
     const from = liveRef.current;
     const startedAt = performance.now();
     let frame = requestAnimationFrame(function step(now) {
       const raw = Math.min(1, (now - startedAt) / TAKEOVER_GLIDE_MS);
       const eased = raw * raw * (3 - 2 * raw);
       liveRef.current = from + (target - from) * eased;
-      setProgress(liveRef.current);
+      bumpFrame((n) => n + 1);
       if (raw < 1) frame = requestAnimationFrame(step);
     });
     return () => cancelAnimationFrame(frame);
-  }, [target]);
+  }, [stage, target]);
 
-  return progress;
+  return liveRef.current;
 }
 
 /**
@@ -105,11 +115,11 @@ export function useNodeTakeover(nodeId: string): NodeTakeoverGeometry {
   const stage =
     abs && width > 0 && height > 0
       ? resolveQuestionStage(prevStage.current, screenW)
-      : 'readable';
-  prevStage.current = stage;
+      : null;
+  if (stage !== null) prevStage.current = stage;
   const p = useGlideProgress(stage);
 
-  if (!abs || width <= 0 || height <= 0) {
+  if (stage === null || !abs) {
     return {
       stage: 'readable',
       size: badgeSizeForNode(0, 0),

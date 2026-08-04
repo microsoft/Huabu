@@ -8,9 +8,10 @@ import {
   useConnection,
   useInternalNode,
   useStore,
+  useUpdateNodeInternals,
 } from '@xyflow/react';
 import { Plus } from 'lucide-react';
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -571,6 +572,20 @@ export const NodeConnectionHandles = memo(
       s.pending?.sourceId === nodeId ? s.pending.side : null,
     );
     const mark = useNodeCollapseStore((s) => s.marks[nodeId]);
+    // Committed edge endpoints are React Flow's cached handle bounds, and it
+    // only re-measures them on demand. The handles below move onto the mark as
+    // the card collapses, so without this the edges would keep terminating on
+    // the border box of a card that is no longer drawn. Re-measuring instead
+    // walks the endpoints in with the ports, onto the icon that replaced the
+    // node. Skipped entirely for nodes that never collapse.
+    const updateNodeInternals = useUpdateNodeInternals();
+    const hadMark = useRef(false);
+    useLayoutEffect(() => {
+      if (!mark && !hadMark.current) return;
+      hadMark.current = mark != null;
+      updateNodeInternals(nodeId);
+    }, [mark, nodeId, updateNodeInternals]);
+
     const baseHandleSize = isNotMouse ? 14 : 8;
     const hitSize = isNotMouse ? PORT_HIT_SIZE.touch : PORT_HIT_SIZE.mouse;
     // Distance the press area is shifted outward so its inner edge lands
