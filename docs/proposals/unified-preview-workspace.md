@@ -83,6 +83,10 @@ type PreviewTarget =
 type PreviewTab = {
   id: string;
   target: PreviewTarget;
+  /** Reusable inspection slot; see §9.2. */
+  transient: boolean;
+  /** Activation stamp driving most-recently-used eviction. */
+  lastActiveSeq: number;
 };
 
 type PreviewGroup = {
@@ -96,8 +100,12 @@ type CanvasPreviewWorkspace = {
   groups: PreviewGroup[];
   activeGroupId: string;
   splitRatio: number;
+  /** Source for `lastActiveSeq`, kept in state so ordering is deterministic. */
+  activationSeq: number;
 };
 ```
+
+Recency is a counter carried in the workspace rather than a wall-clock timestamp, so eviction order is reproducible in tests and survives serialization without depending on the device clock.
 
 `PreviewTab.id` identifies a UI instance for focus, ordering, drag-and-drop, and close operations. The first version enforces one tab per semantic target across the entire workspace; duplicate target instances are out of scope.
 
@@ -151,7 +159,7 @@ openPreviewTarget(
 ): string;
 ```
 
-The default operation searches every group for a tab whose target is equal according to `isSamePreviewTarget`. If found, it activates that tab, focuses its group, opens the workspace, and does not create another tab.
+The default operation searches every group for a tab whose target is equal according to `isSamePreviewTarget`. If found, it activates that tab, focuses its group, opens the workspace, and does not create another tab. Revealing does not relocate the tab; only Open to Side moves one.
 
 Double-clicking an already-open node therefore returns to its existing tab even when that tab is in the other group.
 
