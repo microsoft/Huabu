@@ -1,10 +1,11 @@
 /**
- * Compatibility facade — the current synchronous application storage API.
+ * Compatibility facade — the current legacy application storage API.
  *
  * This layer exists so Phase 2 can make the port/adapter side correct
  * without an `await` cascade through every consumer. It owns the surface the
  * application uses today: the `CanvasStore` factory and its cache, the Space
- * catalogue (list / summaries), and Space create / delete. Those are
+ * catalogue (list / summaries), synchronous Space creation, and async Space
+ * deletion. Those are
  * aggregate lifecycle and catalogue concerns that have no portable contract
  * yet; see docs/proposals/multi-backend-storage.md §12.2.3.
  *

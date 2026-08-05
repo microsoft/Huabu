@@ -1,6 +1,6 @@
 # Multi-Backend Storage
 
-Status: Phase 1 in review; Phase 2 implemented
+Status: Phase 1 merged; Phase 2 implemented
 Last updated: 2026-08-05
 
 > **Scope and decision confidence.** This proposal records the two-port
@@ -12,24 +12,25 @@ Last updated: 2026-08-05
 > remaining candidate interfaces below are discussion aids, not implementation
 > instructions.
 >
-> **Implementation state.** Phase 1 is written but **not merged to `main`** —
-> it lives on `proposal/multi-backend-storage` and is in review. `BlobStore`
+> **Implementation state.** Phase 1 merged to `main` in PR #416. `BlobStore`
 > is a real backend-neutral port with a Disk adapter and a reusable contract
 > suite, and artifact bytes are gone from `CanvasStore`. A 2026-08-04
-> adversarial review found five defects on that branch; the fixes are on it
-> and are described in §12.1.1.
+> adversarial review found five defects before merge; the corrections landed
+> with the phase and are described in §12.1.1.
 >
 > Phase 2 is specified in §12.2 and is **implemented** on
-> `feat/structured-space-repositories` (commits 2–7 of §12.2.9). `storage/`
-> now has the target ports/backends/compatibility hierarchy; `SpaceHandle` is
-> a composite of an async version-CAS `SpaceRepository`, a narrow repository
-> for each of events, deltas, changes, and intents, plus a narrow synchronous
-> `LegacyNodeStore`, and
-> `ports/structured.ts` imports no backend. Exactly one read-only consumer —
-> the canvas events route — goes through a repository; every other consumer
-> is still on the compatibility facade, which remains a second mutation entry
-> point, so the repository concurrency guarantees are adapter-local rather
-> than system-wide. Corrections made during implementation and adversarial
+> `feat/structured-space-repositories`; its core sequence is commits 2–7 of
+> §12.2.9, followed by Disk hardening and executor rollback work. `storage/`
+> now has the target ports/backends/compatibility hierarchy. `SpaceHandle` is
+> a composite of an async version-CAS `SpaceRepository`, four narrow async log
+> repositories, and a transitional `LegacyNodeStore` whose single-node
+> primitives remain synchronous. The canvas events handler is the only
+> application route migrated directly to repositories; cross-store
+> composition also reads `SpaceRepository` to guard blob puts, while other
+> structured-storage application consumers remain on the compatibility
+> facade. That facade remains a second mutation entry point, so repository
+> concurrency guarantees are adapter-local rather than system-wide.
+> Corrections made during implementation and adversarial
 > review are recorded in place, including the CAS race ordering (§12.2.5),
 > log-family interface segregation (§12.2.6), and retained-handle Workspace
 > guards (§12.2.4). No SQLite, Postgres, or Azure adapter exists. §12 is the
@@ -61,22 +62,22 @@ built above these ports, but its form is intentionally unresolved here.
 
 ## 2. Decision status
 
-| Topic                                                  | Status                       | Current position                                                                                                                                                                                                                                                                                                   |
-| ------------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Separate authoritative structured and blob ports       | **Accepted** (P1, in review) | Storage is composed from `StructuredStore` and `BlobStore`; there is no single backend interface that mixes both concerns.                                                                                                                                                                                         |
-| Structured backend family                              | **Settled direction**        | Support Disk, SQLite, and Postgres implementations. Only Disk exists.                                                                                                                                                                                                                                              |
-| Blob backend family                                    | **Settled direction**        | Support Disk and Azure Blob implementations. Only Disk exists.                                                                                                                                                                                                                                                     |
-| Independent composition                                | **Accepted** (P1, in review) | `StorageProfile` has two env-parsed axes; `validateStorageProfile` fails fast on unimplemented kinds and is the extension point for combination rules. Lazy `getStorage()` must stop skipping `init()` (§12.1.1).                                                                                                  |
-| Blob port contract                                     | **Accepted** (P1, in review) | Connection → scope, stream-oriented, no permanent absolute path in the common contract; `materialize()` returns a bounded lease for the one consumer needing a file. Replacement atomicity and post-release lease semantics are contract terms, not adapter accidents (§6.2, §12.1.1).                             |
-| Concrete interface shape and async migration           | Partly settled (P2 landed)   | Blob is async and backend-neutral. `StructuredStore.space()` now returns async record/log repositories plus a narrow synchronous node surface, and exactly one read-only route goes through them; every other application consumer stays on the Disk compatibility facade.                                         |
-| Exact structured repositories and aggregate boundaries | Partly settled (P2 landed)   | `SpaceRepository` plus the narrow `CanvasEventRepository`, `CanvasDeltaRepository`, `CanvasChangeRepository`, and `CanvasIntentRepository` exist, with reusable adapter-local contract suites. Catalogue/lifecycle, `NodeRepository`, title mutation, and the cross-repository `SpaceCommit` boundary remain open. |
-| Node Markdown ownership                                | Proposed                     | Keep authored node content with structured node records because it participates in revision CAS, search, and node mutation. Keep opaque and large bytes in BlobStore.                                                                                                                                              |
-| Blob key, staging, deletion, and GC semantics          | Proposed / open              | Names are the existing `<artifactId><ext>` keys; `deleteAll()` covers Space destruction. Staging, reference counting, and GC remain undesigned. Per-key deletion stays out of the public port, but the absence of any cleanup path is what makes atomic replace mandatory (§6.2).                                  |
-| Space-handle identity and caching                      | **Corrected** (P1)           | `space(id)` returning a stable handle is bounded by the LRU behind it, not guaranteed. In-memory tombstones and the filename index are therefore adapter-local caches, never durable state (§12.1.1, §12.2.4).                                                                                                     |
-| Backend selection scope                                | Open                         | Process-global today because the profile is read from env. Per-Workspace or per-Space selection has not been fixed.                                                                                                                                                                                                |
-| Logical filesystem view                                | Open                         | A possible `SpaceFileView` above both stores; name and contract are not accepted yet.                                                                                                                                                                                                                              |
-| Real agent workspace                                   | Open                         | Materialized directory, OS mount, protocol-only access, or a combination remain under evaluation.                                                                                                                                                                                                                  |
-| Agent-authored filesystem write-back                   | Open                         | Read-only projection, explicit checkout/commit, and live bidirectional sync are alternatives, not decisions.                                                                                                                                                                                                       |
+| Topic                                                  | Status                     | Current position                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Separate authoritative structured and blob ports       | **Accepted** (P1, merged)  | Storage is composed from `StructuredStore` and `BlobStore`; there is no single backend interface that mixes both concerns.                                                                                                                                                                                         |
+| Structured backend family                              | **Settled direction**      | Support Disk, SQLite, and Postgres implementations. Only Disk exists.                                                                                                                                                                                                                                              |
+| Blob backend family                                    | **Settled direction**      | Support Disk and Azure Blob implementations. Only Disk exists.                                                                                                                                                                                                                                                     |
+| Independent composition                                | **Accepted** (P1, merged)  | `StorageProfile` has two env-parsed axes; `validateStorageProfile` fails fast on unimplemented kinds and is the extension point for combination rules. The lazy `getStorage()` path now rejects profiles whose adapters require awaited initialization (§12.1.1).                                                  |
+| Blob port contract                                     | **Accepted** (P1, merged)  | Connection → scope, stream-oriented, no permanent absolute path in the common contract; `materialize()` returns a bounded lease for the one consumer needing a file. Replacement atomicity and post-release lease semantics are contract terms, not adapter accidents (§6.2, §12.1.1).                             |
+| Concrete interface shape and async migration           | Partly settled (P2 landed) | Blob is async and backend-neutral. `StructuredStore.space()` now returns async record/log repositories plus a transitional node surface with synchronous single-node primitives. One application route uses them directly, and cross-store composition uses the Space record to guard blob puts.                   |
+| Exact structured repositories and aggregate boundaries | Partly settled (P2 landed) | `SpaceRepository` plus the narrow `CanvasEventRepository`, `CanvasDeltaRepository`, `CanvasChangeRepository`, and `CanvasIntentRepository` exist, with reusable adapter-local contract suites. Catalogue/lifecycle, `NodeRepository`, title mutation, and the cross-repository `SpaceCommit` boundary remain open. |
+| Node Markdown ownership                                | Proposed                   | Keep authored node content with structured node records because it participates in revision CAS, search, and node mutation. Keep opaque and large bytes in BlobStore.                                                                                                                                              |
+| Blob key, staging, deletion, and GC semantics          | Proposed / open            | Names are the existing `<artifactId><ext>` keys; `deleteAll()` covers Space destruction. Staging, reference counting, and GC remain undesigned. Per-key deletion stays out of the public port, but the absence of any cleanup path is what makes atomic replace mandatory (§6.2).                                  |
+| Space-handle identity and caching                      | **Corrected** (P1)         | `space(id)` returning a stable handle is bounded by the LRU behind it, not guaranteed. In-memory tombstones and the filename index are therefore adapter-local caches, never durable state (§12.1.1, §12.2.4).                                                                                                     |
+| Backend selection scope                                | Open                       | Process-global today because the profile is read from env. Per-Workspace or per-Space selection has not been fixed.                                                                                                                                                                                                |
+| Logical filesystem view                                | Open                       | A possible `SpaceFileView` above both stores; name and contract are not accepted yet.                                                                                                                                                                                                                              |
+| Real agent workspace                                   | Open                       | Materialized directory, OS mount, protocol-only access, or a combination remain under evaluation.                                                                                                                                                                                                                  |
+| Agent-authored filesystem write-back                   | Open                       | Read-only projection, explicit checkout/commit, and live bidirectional sync are alternatives, not decisions.                                                                                                                                                                                                       |
 
 ## 3. Current system
 
@@ -182,14 +183,15 @@ not constrain Postgres or future remote implementations. This includes an
 explicit migration for Agenetes ports that are synchronous today; a blocking
 compatibility facade over Postgres is not an acceptable end state.
 
-**As implemented**, `StructuredStore` is not yet any of this. Phase 1 lands
-it as a lifecycle and backend-selection boundary whose `SpaceHandle` is
-literally `CanvasStore` — synchronous and filename-shaped, so no SQL adapter
-can be written against it. Phase 2 (§12.2) establishes the target module shape
-and vends async Space-record and Canvas-log repositories behind the unchanged
-Disk compatibility facade, with one read-only consumer moved onto them. Later
-phases migrate the rest, settle lifecycle, and replace the synchronous node
-surface. Until then, the paragraphs above describe the target, not the code.
+**As implemented**, `StructuredStore` is only partway to this target. Phase 1
+landed it as a lifecycle and backend-selection boundary whose `SpaceHandle`
+was literally `CanvasStore` — synchronous and filename-shaped. Phase 2
+(§12.2) establishes the target module shape and vends async Space-record and
+Canvas-log repositories behind the unchanged Disk compatibility facade, with
+one read-only application route moved onto them and cross-store composition
+using `SpaceRepository` internally to guard blob puts. Later phases migrate
+the rest, settle lifecycle, and replace the transitional node surface. Until
+then, the paragraphs above describe the target, not the complete code path.
 
 The public contract should express domain commits and preconditions rather
 than expose a lowest-common-denominator `withTransaction(callback)` API. The
@@ -411,14 +413,11 @@ no reference changes hands. Once a replacement can change what a stable key
 means, it needs the new-key-and-swap flow, and in-place overwrite becomes a
 dedup optimization rather than the replacement mechanism.
 
-`deleteCanvas` is the one place where this design already exists in code, and
-it currently runs in the order this section argues against: it destroys the
-structured records first, then calls `deleteAll()` on the blob scope. On Disk
-that is a harmless second delete of an already-removed directory. On a remote
-backend a failed `deleteAll()` leaves blobs that nothing can find again,
-because the catalogue entry that named them is already gone. The order is
-inverted as part of phase 1 (§12.1.1); the retry/outbox machinery around it
-stays open.
+`deleteCanvas` is the one place where this design already exists in code.
+Phase 1 inverted its order: it now sweeps blobs while the structured record
+that names them still exists, then destroys the structured records. This
+avoids leaving unreachable remote blobs if deletion fails; retry/outbox
+machinery remains open.
 
 This is a likely saga/outbox design, but the staging state machine, retry
 policy, reference counting, retention period, and garbage collector are open.
@@ -568,11 +567,11 @@ The current on-disk format remains readable throughout port extraction. A
 database adapter must not require Disk consumers to simulate tables, and the
 Disk adapter must not define semantics that Postgres cannot reproduce.
 
-### 12.1 Phase 1 — the split — **in review**
+### 12.1 Phase 1 — the split — **merged**
 
-Delivers the two-port composition with Disk adapters only. The work is on
-`feat/structured-space-repositories` and is not merged; §12.1.1 lists what
-must land before it is.
+Delivers the two-port composition with Disk adapters only. The work merged to
+`main` in PR #416; §12.1.1 records the review corrections included before
+merge.
 
 - `BlobStore` as a genuine backend-neutral port (§7.1): connection → scope,
   stream-oriented, no permanent absolute path in the common contract, one
@@ -585,11 +584,11 @@ must land before it is.
 - `preprocessing` was the only consumer genuinely needing a real filename;
   it uses `materialize()` with a `try/finally` lease release.
 
-`StructuredStore` lands as a **lifecycle and backend-selection boundary
-only**: `SpaceHandle` is `CanvasStore`, so no SQLite or Postgres adapter can
-be written against it. That limitation was stated rather than papered over,
-Phase 2 establishes the narrow seam; later consumer and node phases remove the
-legacy facade.
+`StructuredStore` landed as a **lifecycle and backend-selection boundary
+only**: its Phase-1 `SpaceHandle` was `CanvasStore`, so no SQLite or Postgres
+adapter could be written against it. That limitation was stated rather than
+papered over. Phase 2 establishes the narrow seam; later consumer and node
+phases remove the legacy facade.
 
 The agent filesystem surface (`fs-sandbox.ts`, ACP `/space`) and Space
 export/import stay Disk-coupled. They are the open `SpaceFileView` question
@@ -599,7 +598,7 @@ of §10, not an oversight.
 
 A 2026-08-04 adversarial review of the branch found five defects. Each was a
 property this proposal already claimed, contradicted by the code, so they were
-phase-1 corrections rather than new scope, and they are now on the branch.
+phase-1 corrections rather than new scope, and they landed with Phase 1.
 
 1. **`put()` is atomic.** It writes to a unique dot-prefixed sibling and
    renames into place, matching the invariant `io.ts` states for the rest of
@@ -645,16 +644,17 @@ cases — deliberately at the points where two adapters could disagree, since a
 suite that only asserts where they agree is what let the lease divergence
 through in the first place.
 
-The branch also carried one failing test it did not cause,
+The Phase 2 branch also exposed one failing test it did not cause,
 `rfs.route.test.ts` → "returns an actionable error when World reconciliation
 is required" (expected 409, received 200), which had been red on `main` since
 2026-07-27. It turned out to be a stale expectation rather than a defect: the
 test was written when a missing canonical Portal was answered with a 409, and
 `ensureCanonicalPortals` subsequently made the router reconcile the Portal
-first, so the asserted failure could no longer occur. It is now split into the
-two contracts that do hold — reconcile-and-succeed for a live Space, 409 for a
-source that is not one — leaving the route's error branch covered. The server
-suite is green, which is what Phase 2 requires as a starting baseline.
+first, so the asserted failure could no longer occur. A separate prerequisite
+PR owns that correction and splits the scenario into the two contracts that
+hold — reconcile-and-succeed for a live Space, 409 for a source that is not
+one — leaving the route's error branch covered without folding the unrelated
+test change into Phase 2.
 
 ### 12.2 Phase 2 — storage module shape and scoped repositories — **implemented**
 
@@ -669,8 +669,9 @@ Phase 2 is a containment and ownership refactor. Its primary acceptance
 criterion is that `apps/server/src/modules/storage/` has the target
 ports/backends/compatibility hierarchy and dependency direction. It exposes
 the first narrow structured repositories through `StructuredStore`, and it
-migrates **exactly one** read-only consumer onto them. Every other application
-consumer stays on the existing Disk facade.
+migrates exactly one application route onto them; later hardening also uses
+`SpaceRepository` internally to reject blob puts for missing Spaces. Other
+structured-storage application consumers stay on the existing Disk facade.
 
 That boundary is practical rather than cosmetic: the legacy `getCanvasStore()`
 surface has many consumers, and moving them is an async rewrite that has
@@ -683,11 +684,11 @@ from corrupt or unreadable durable state; JSONL readers tolerate only a final
 unterminated crash fragment and validate event/delta row shapes; cache entries
 and retained handles are Workspace-qualified; and Space deletion has a
 process-local admission gate plus an active-Workspace lease spanning blob and
-structured cleanup. The executor's multi-file rollback and the external-note
-watcher's directory recovery remain Disk/application implementation details,
-not a new generic transaction or watcher API. Coordination across multiple
-server processes and a portable cross-backend `SpaceCommit` are still later-
-phase work.
+structured cleanup. The executor's multi-file rollback remains a
+Disk/application implementation detail, not a new generic transaction API.
+External-note watcher recovery is owned by a separate watcher-recovery PR and
+is not part of Phase 2. Coordination across multiple server processes and a
+portable cross-backend `SpaceCommit` are still later-phase work.
 
 The one exception exists because a repository contract with no callers is a
 guess. Phase 2 freezes `SpaceRepository` and the four log-family repositories
@@ -698,22 +699,23 @@ now. One bounded slice through a real route costs little and converts the
 accepted shape from a proposal into something a caller has exercised. §12.2.8
 names the slice.
 
-| Axis                                        | Phase 2                                                               |
-| ------------------------------------------- | --------------------------------------------------------------------- |
-| Canonical module layout                     | `ports/`, `backends/disk/`, and `compatibility/`                      |
-| Space record (`space.json`)                 | Async, version-CAS `SpaceRepository` behind the facade                |
-| Canvas logs (4 families)                    | Four narrow async repositories with family-specific concurrency terms |
-| Node sidecars (`nodes/*.md`)                | Narrow synchronous `LegacyNodeStore`; no full-handle backdoor         |
-| Existing application storage API            | Preserved by the compatibility facade                                 |
-| Catalogue, World, create/delete, and title  | Existing Disk behavior retained; portable lifecycle remains open      |
-| Non-storage helpers currently in the folder | Moved to their actual owners                                          |
-| Application consumer migration              | One read-only route (§12.2.8); no other `await` or signature cascade  |
+| Axis                                        | Phase 2                                                                |
+| ------------------------------------------- | ---------------------------------------------------------------------- |
+| Canonical module layout                     | `ports/`, `backends/disk/`, and `compatibility/`                       |
+| Space record (`space.json`)                 | Async, version-CAS `SpaceRepository` behind the facade                 |
+| Canvas logs (4 families)                    | Four narrow async repositories with family-specific concurrency terms  |
+| Node sidecars (`nodes/*.md`)                | Transitional `LegacyNodeStore` with synchronous single-node primitives |
+| Existing application storage API            | Preserved by the compatibility facade                                  |
+| Catalogue, World, create/delete, and title  | Existing Disk behavior retained; portable lifecycle remains open       |
+| Non-storage helpers currently in the folder | Moved to their actual owners                                           |
+| Application consumer migration              | One read-only route (§12.2.8); no other `await` or signature cascade   |
 
 After this phase a SQLite application profile is still blocked by three
-separate facts: node persistence is synchronous and Disk-shaped, all but one
-application consumer still use the compatibility facade, and several product
-capabilities require a physical Space directory. Phase 2 claims the target
-module seam, not backend neutrality for the running application.
+separate facts: node mutation primitives are synchronous and Disk-shaped,
+structured-storage application consumers other than the one migrated route
+still use the compatibility facade, and several product capabilities require
+a physical Space directory. Phase 2 claims the target module seam, not backend
+neutrality for the running application.
 
 #### 12.2.1 Target hierarchy and dependency direction
 
@@ -797,9 +799,10 @@ contain logic, and no new call site may import one.
 
 #### 12.2.3 Compatibility boundary and blast-radius budget
 
-`storage/compatibility/canvas.ts` owns the current synchronous application
-surface: `getCanvasStore`, cache reset, Space list/summary/create/delete,
-the legacy `CanvasStore` class, and their existing result types.
+`storage/compatibility/canvas.ts` owns the legacy application-facing surface:
+the synchronous `getCanvasStore`, cache reset, and Space list/summary/create
+operations; async Space deletion; the legacy `CanvasStore` class; and their
+existing result types.
 `storage/index.ts` re-exports that surface alongside the new ports and
 composition API, so existing imports and behavior remain valid.
 
@@ -1157,9 +1160,11 @@ pnpm --filter @sediment/server lint
 
 Implementation starts from a green baseline, and does so literally: at the
 time this phase was made ready, `typecheck`, `test` (602 passing), and `lint`
-(no errors) all pass on the branch. The one inherited failure is resolved and
-described in §12.1.1. A red baseline must not be normalized as Phase 2 debt —
-if one appears, it is fixed or explicitly rebaselined before the next commit.
+(no errors) all pass on the branch. The inherited RFS failure is resolved by
+the separate prerequisite PR described in §12.1.1, so Phase 2 starts from a
+green baseline without owning that unrelated test change. A red baseline must
+not be normalized as Phase 2 debt — if one appears, it is fixed or explicitly
+rebaselined before the next commit.
 
 1. `docs:` this plan.
 2. `refactor(server):` move Canvas DTOs, the write coordinator, generic
@@ -1402,21 +1407,21 @@ Before a new backend is production-ready:
 
 ## 17. Code entry points
 
-| File/dir                                                                                                                                     | Responsibility                                                                                                                                                    |
-| -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`apps/server/src/modules/storage/`](../../apps/server/src/modules/storage/)                                                                 | Ports, composition, adapters, compatibility, tests, and three forwarding shims — the canonical Phase-2 tree (§12.2.1), guarded by `module-boundaries.test.ts`.    |
-| [`apps/server/src/modules/storage/ports/`](../../apps/server/src/modules/storage/ports/)                                                     | The two ports; reusable suites live in `ports/contracts/`. `blob.ts` is normative (§7.1); `structured.ts` is the composite record/log/node boundary (§12.2.4).    |
-| [`apps/server/src/modules/storage/storage.ts`](../../apps/server/src/modules/storage/storage.ts)                                             | Composition root: maps a validated `StorageProfile` to adapters and holds them for the process. The lazy path must stop bypassing `init()` (§12.1.1).             |
-| [`.../storage/backends/disk/legacy/canvas-store-cache.ts`](../../apps/server/src/modules/storage/backends/disk/legacy/canvas-store-cache.ts) | Bounded LRU of legacy Disk Space objects. The single owner both the adapter and the facade resolve through, and the real limit of `space(id)` identity (§12.2.4). |
-| [`apps/server/src/modules/storage/profile.ts`](../../apps/server/src/modules/storage/profile.ts)                                             | Two-axis backend selection from env, and the fail-fast validation hook for unsupported combinations.                                                              |
-| [`apps/server/src/modules/storage/backends/disk/`](../../apps/server/src/modules/storage/backends/disk/)                                     | Every Disk implementation: blob store, structured store, the record/log repositories, the narrow node wrapper, and the legacy class under `legacy/`.              |
-| [`.../storage/compatibility/canvas.ts`](../../apps/server/src/modules/storage/compatibility/canvas.ts)                                       | The synchronous application surface: `getCanvasStore`, cache reset, Space list/summary/create/delete. Still a second mutation entry point (§12.2.3).              |
-| [`apps/server/src/modules/canvas/write-coordinator.ts`](../../apps/server/src/modules/canvas/write-coordinator.ts)                           | Canvas mutation coordinator and per-Space write lock. Its atomicity argument is why `LegacyNodeStore` is synchronous (§12.2.7).                                   |
-| [`apps/server/src/modules/workspace/disk/`](../../apps/server/src/modules/workspace/disk/)                                                   | Cross-domain physical Workspace layout: paths, canvas dirs, naming, name index, dir handles, World bootstrap. `storage/paths.ts` forwards here.                   |
-| [`apps/server/src/modules/canvas/canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts)                               | Canonical canvas command execution and current multi-file persistence sequence.                                                                                   |
-| [`apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts`](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts)             | Current real-Disk path resolution and traversal for built-in agent file tools.                                                                                    |
-| [`apps/server/src/modules/agent/acp/capabilities/fs.ts`](../../apps/server/src/modules/agent/acp/capabilities/fs.ts)                         | Synthetic ACP `/space` read capability, currently not wired into the production driver.                                                                           |
-| [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                         | External-agent workload assembly, profile working directory, and RFS environment injection.                                                                       |
-| [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts)                                     | Current external-agent file/query/execute HTTP facade.                                                                                                            |
-| [`apps/server/src/modules/canvas/external-watcher.ts`](../../apps/server/src/modules/canvas/external-watcher.ts)                             | Current Disk-only external Markdown discovery.                                                                                                                    |
-| [`apps/server/src/modules/agent/agenetes/drivers.ts`](../../apps/server/src/modules/agent/agenetes/drivers.ts)                               | Current file-backed Agenetes thread, event, and turn stores that need future backend adapter/composition decisions while remaining L2-owned.                      |
+| File/dir                                                                                                                                     | Responsibility                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`apps/server/src/modules/storage/`](../../apps/server/src/modules/storage/)                                                                 | Ports, composition, adapters, compatibility, tests, and three forwarding shims — the canonical Phase-2 tree (§12.2.1), guarded by `module-boundaries.test.ts`.                    |
+| [`apps/server/src/modules/storage/ports/`](../../apps/server/src/modules/storage/ports/)                                                     | The two ports; reusable suites live in `ports/contracts/`. `blob.ts` is normative (§7.1); `structured.ts` is the composite record/log/node boundary (§12.2.4).                    |
+| [`apps/server/src/modules/storage/storage.ts`](../../apps/server/src/modules/storage/storage.ts)                                             | Composition root: maps a validated `StorageProfile` to adapters and holds them for the process. The lazy path rejects profiles whose adapters require awaited `init()` (§12.1.1). |
+| [`.../storage/backends/disk/legacy/canvas-store-cache.ts`](../../apps/server/src/modules/storage/backends/disk/legacy/canvas-store-cache.ts) | Bounded LRU of legacy Disk Space objects. The single owner both the adapter and the facade resolve through, and the real limit of `space(id)` identity (§12.2.4).                 |
+| [`apps/server/src/modules/storage/profile.ts`](../../apps/server/src/modules/storage/profile.ts)                                             | Two-axis backend selection from env, and the fail-fast validation hook for unsupported combinations.                                                                              |
+| [`apps/server/src/modules/storage/backends/disk/`](../../apps/server/src/modules/storage/backends/disk/)                                     | Every Disk implementation: blob store, structured store, the record/log repositories, the narrow node wrapper, and the legacy class under `legacy/`.                              |
+| [`.../storage/compatibility/canvas.ts`](../../apps/server/src/modules/storage/compatibility/canvas.ts)                                       | Legacy application surface: synchronous `getCanvasStore`, cache/list/summary/create, and async delete. Still a second mutation entry point (§12.2.3).                             |
+| [`apps/server/src/modules/canvas/write-coordinator.ts`](../../apps/server/src/modules/canvas/write-coordinator.ts)                           | Canvas mutation coordinator and per-Space write lock. Its atomicity argument keeps the legacy single-node primitives synchronous (§12.2.7).                                       |
+| [`apps/server/src/modules/workspace/disk/`](../../apps/server/src/modules/workspace/disk/)                                                   | Cross-domain physical Workspace layout: paths, canvas dirs, naming, name index, dir handles, World bootstrap. `storage/paths.ts` forwards here.                                   |
+| [`apps/server/src/modules/canvas/canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts)                               | Canonical canvas command execution and current multi-file persistence sequence.                                                                                                   |
+| [`apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts`](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts)             | Current real-Disk path resolution and traversal for built-in agent file tools.                                                                                                    |
+| [`apps/server/src/modules/agent/acp/capabilities/fs.ts`](../../apps/server/src/modules/agent/acp/capabilities/fs.ts)                         | Synthetic ACP `/space` read capability, currently not wired into the production driver.                                                                                           |
+| [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                         | External-agent workload assembly, profile working directory, and RFS environment injection.                                                                                       |
+| [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts)                                     | Current external-agent file/query/execute HTTP facade.                                                                                                                            |
+| [`apps/server/src/modules/canvas/external-watcher.ts`](../../apps/server/src/modules/canvas/external-watcher.ts)                             | Current Disk-only external Markdown discovery.                                                                                                                                    |
+| [`apps/server/src/modules/agent/agenetes/drivers.ts`](../../apps/server/src/modules/agent/agenetes/drivers.ts)                               | Current file-backed Agenetes thread, event, and turn stores that need future backend adapter/composition decisions while remaining L2-owned.                                      |
