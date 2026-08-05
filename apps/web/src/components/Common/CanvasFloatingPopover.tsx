@@ -20,7 +20,6 @@ import { createPortal } from 'react-dom';
 import { useCanvasAttentionStore } from '@/store/canvasAttentionStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
-import { usePreviewStore } from '@/store/previewStore';
 
 import { FLOATING_CHROME_PROPS } from './floatingChrome';
 
@@ -92,20 +91,12 @@ export function CanvasFloatingPopover({
   const domNode = useStore((s) => s.domNode);
 
   // Hide whenever the canvas is fully replaced by the ExpandedNodePanel
-  // (node edit or preview in 'replace' mode). The canvas itself is kept
-  // mounted at 0% width in that state, so anchor rectangles still resolve
-  // to on-screen coordinates and the portal'd toolbar would otherwise
-  // leak through on top of the expanded panel.
-  const canvasReplaced = useCanvasStore(
+  // ('replace' mode). The canvas itself is kept mounted at 0% width in that
+  // state, so anchor rectangles still resolve to on-screen coordinates and
+  // the portal'd toolbar would otherwise leak through on top of the panel.
+  const hiddenByExpandedPanel = useCanvasStore(
     (s) => s.expandedNodeId !== null && s.expandMode === 'replace',
   );
-  const previewReplaced = usePreviewStore(
-    (s) =>
-      s.previewType !== null &&
-      s.previewData !== null &&
-      s.expandMode === 'replace',
-  );
-  const hiddenByExpandedPanel = canvasReplaced || previewReplaced;
 
   // Hide whenever an app-wide modal (Settings / Keyboard Shortcuts) is
   // open. Those modals render their own dimmed backdrop over the whole

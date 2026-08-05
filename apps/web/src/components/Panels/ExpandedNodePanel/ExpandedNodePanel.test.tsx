@@ -6,7 +6,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import useCanvasStore from '@/store/canvasStore';
-import { usePreviewStore } from '@/store/previewStore';
 
 import { ExpandedNodePanel } from './ExpandedNodePanel';
 
@@ -133,7 +132,6 @@ function swipe(from: number, to: number, y = 0, target?: HTMLElement) {
 
 beforeEach(() => {
   testStorage.clear();
-  usePreviewStore.setState({ previewType: null, previewData: null });
 });
 
 afterEach(() => {

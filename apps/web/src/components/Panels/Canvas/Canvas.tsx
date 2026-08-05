@@ -115,7 +115,6 @@ import useCanvasStore from '../../../store/canvasStore.ts';
 import { useConnectPortStore } from '../../../store/connectPortStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
 import { usePanelStore } from '../../../store/panelStore.ts';
-import { usePreviewStore } from '../../../store/previewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
 import { useWorkspaceStore } from '../../../store/workspaceStore.ts';
 import {
@@ -1168,13 +1167,6 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (pendingNodeType) return;
 
       // 3. No tool active → background click closes the expanded view.
-      //    Priority preview > node mirrors ExpandedNodePanel's Escape handler.
-      const { previewType, previewData, closePreview } =
-        usePreviewStore.getState();
-      if (previewType && previewData) {
-        closePreview();
-        return;
-      }
       if (expandedNodeId) {
         closeExpanded();
       }

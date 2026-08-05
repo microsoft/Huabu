@@ -7,7 +7,6 @@ import { useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import useCanvasStore from '@/store/canvasStore';
-import { usePreviewStore } from '@/store/previewStore';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
 import { NODE_ICON } from '../../config/nodeIcons';
@@ -66,13 +65,9 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   // In this case the buttons become click-to-add with auto-placement.
   const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
   const canvasExpandMode = useCanvasStore((s) => s.expandMode);
-  const previewType = usePreviewStore((s) => s.previewType);
-  const previewExpandMode = usePreviewStore((s) => s.expandMode);
   const addNode = useCanvasStore((s) => s.addNode);
 
-  const isFullscreen =
-    (!!expandedNodeId && canvasExpandMode === 'replace') ||
-    (!!previewType && previewExpandMode === 'replace');
+  const isFullscreen = !!expandedNodeId && canvasExpandMode === 'replace';
 
   // Track whether a drag is in progress so we can suppress Popover's
   // outside-click dismiss until the drop completes.

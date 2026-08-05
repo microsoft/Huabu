@@ -14,7 +14,6 @@ import { ExpandedNodePanel } from '../../components/Panels/ExpandedNodePanel/Exp
 import { openUserHandbook } from '../../config/handbook';
 import { isElectron } from '../../hooks/useElectron';
 import useCanvasStore from '../../store/canvasStore';
-import { usePreviewStore } from '../../store/previewStore';
 
 const SPLIT_MIN_PX = 200;
 const SPLIT_DEFAULT_RATIO = 0.5;
@@ -44,10 +43,6 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
   const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
   const canvasExpandMode = useCanvasStore((s) => s.expandMode);
 
-  const previewData = usePreviewStore((s) => s.previewData);
-  const previewType = usePreviewStore((s) => s.previewType);
-  const previewExpandMode = usePreviewStore((s) => s.expandMode);
-
   // The custom Electron title bar already exposes Handbook + Settings
   // globally — suppress the duplicate floating versions on the canvas
   // when running inside the desktop shell.
@@ -59,17 +54,8 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
   // Suspends width transition during drag so the split bar tracks the cursor.
   const [isResizing, setIsResizing] = React.useState(false);
 
-  const hasPreview = !!previewData && !!previewType;
-  const hasExpanded = !!expandedNodeId || hasPreview;
-
-  // Determine effective expand mode based on what acts as the "expanded" content
-  // Priority: Preview > Node Edit
-  let isReplace = false;
-  if (hasPreview) {
-    isReplace = previewExpandMode === 'replace';
-  } else if (expandedNodeId) {
-    isReplace = canvasExpandMode === 'replace';
-  }
+  const hasExpanded = !!expandedNodeId;
+  const isReplace = hasExpanded && canvasExpandMode === 'replace';
 
   /* ---- Drag handle for split mode ---- */
   const onHandlePointerDown = useCallback(

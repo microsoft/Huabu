@@ -33,7 +33,6 @@ import { PreviewSearchAdapterProvider } from './PreviewSearchAdapterContext';
 import { useSwipeNavigation } from './swipeNavigation';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useChatStore } from '../../../store/chatStore.ts';
-import { usePreviewStore } from '../../../store/previewStore.ts';
 import { Button } from '../../Common/Button.tsx';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
 import { Input } from '../../Common/Input.tsx';
@@ -237,13 +236,6 @@ export const ExpandedNodePanel = ({
   // FrameNode's inline label editor).
   const tryRename = useCanvasStore((s) => s.tryRename);
 
-  // Preview Store State
-  const previewType = usePreviewStore((s) => s.previewType);
-  const previewData = usePreviewStore((s) => s.previewData);
-  const closePreview = usePreviewStore((s) => s.closePreview);
-  const previewExpandMode = usePreviewStore((s) => s.expandMode);
-  const setPreviewExpandMode = usePreviewStore((s) => s.setExpandMode);
-
   const node = useMemo(() => {
     if (!expandedNodeId) return null;
     return nodes.find((n) => n.id === expandedNodeId) ?? null;
@@ -336,48 +328,17 @@ export const ExpandedNodePanel = ({
     setOpenNeighborDirection(null);
   }, [expandedNodeId]);
 
-  // Priority: Preview > Node
-  // If preview is open, show it. Otherwise show node (if any).
-  const isPreview = !!(previewType && previewData);
-  const isNode = !!(expandedNodeId && node);
-
-  // Handling conflicts:
-  // If preview is newly opened, we want to ensure canvas expand is closed?
-  // Probably better handled at the trigger site (the component that opens
-  // the preview). Here we just render based on priority.
-
   const activeItem = useMemo(() => {
-    if (isPreview && previewType && previewData) {
-      return {
-        type: previewType,
-        data: previewData,
-        readOnly: true,
-        isNode: false,
-        expandMode: previewExpandMode,
-        close: closePreview,
-        setMode: setPreviewExpandMode,
-      };
-    }
-    if (isNode && node) {
-      return {
-        type: node.type || 'text',
-        data: node.data as Record<string, unknown>,
-        readOnly: false,
-        isNode: true,
-        expandMode: canvasExpandMode,
-        close: closeExpandedCanvas,
-        setMode: setCanvasExpandMode,
-      };
-    }
-    return null;
+    if (!expandedNodeId || !node) return null;
+    return {
+      type: node.type || 'text',
+      data: node.data as Record<string, unknown>,
+      expandMode: canvasExpandMode,
+      close: closeExpandedCanvas,
+      setMode: setCanvasExpandMode,
+    };
   }, [
-    isPreview,
-    previewType,
-    previewData,
-    previewExpandMode,
-    closePreview,
-    setPreviewExpandMode,
-    isNode,
+    expandedNodeId,
     node,
     canvasExpandMode,
     closeExpandedCanvas,
@@ -386,10 +347,10 @@ export const ExpandedNodePanel = ({
 
   // If the node was removed while expanded, close the panel.
   useEffect(() => {
-    if (expandedNodeId && !node && !isPreview) {
+    if (expandedNodeId && !node) {
       closeExpandedCanvas();
     }
-  }, [closeExpandedCanvas, expandedNodeId, node, isPreview]);
+  }, [closeExpandedCanvas, expandedNodeId, node]);
 
   // Global Escape key handler.
   // Bubble phase (no capture flag) so child components (e.g. inline editor menus)
@@ -404,7 +365,7 @@ export const ExpandedNodePanel = ({
         activeItem.close();
         return;
       }
-      if (!activeItem.isNode || isExpandedNodeNavigationBlocked(e.target)) {
+      if (isExpandedNodeNavigationBlocked(e.target)) {
         return;
       }
 
@@ -437,8 +398,7 @@ export const ExpandedNodePanel = ({
   // instead of paying for a non-passive touchmove listener.
   useSwipeNavigation(
     previewBodyEl,
-    activeItem?.isNode &&
-      (incomingNeighbors.length > 0 || outgoingNeighbors.length > 0)
+    activeItem && (incomingNeighbors.length > 0 || outgoingNeighbors.length > 0)
       ? navigateDirection
       : undefined,
   );
@@ -462,12 +422,9 @@ export const ExpandedNodePanel = ({
   // whenever we're not actively editing — covers external renames
   // (e.g. via the layer tree) and switches between expanded nodes.
   const liveLabel = useMemo(() => {
-    if (isPreview && previewData)
-      return typeof previewData.label === 'string' ? previewData.label : '';
-    if (isNode && node)
-      return typeof node.data.label === 'string' ? node.data.label : '';
-    return '';
-  }, [isPreview, previewData, isNode, node]);
+    if (!node) return '';
+    return typeof node.data.label === 'string' ? node.data.label : '';
+  }, [node]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(liveLabel);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -487,7 +444,7 @@ export const ExpandedNodePanel = ({
   // so an unsubmitted draft never leaks onto the next node's title.
   useEffect(() => {
     setIsEditingTitle(false);
-  }, [expandedNodeId, previewType]);
+  }, [expandedNodeId]);
 
   // Listen for text selection inside the panel and auto-attach as pending
   const handleSelectionChange = useCallback(() => {
@@ -538,9 +495,7 @@ export const ExpandedNodePanel = ({
 
   const isReplace = activeItem.expandMode === 'replace';
 
-  // Inline rename is available only when the panel is hosting a real
-  // canvas node (previews are intentionally read-only).
-  const canEditTitle = activeItem.isNode && !!expandedNodeId;
+  const canEditTitle = !!expandedNodeId;
   const commitTitle = () => {
     if (!canEditTitle || !expandedNodeId) {
       setIsEditingTitle(false);
@@ -561,15 +516,8 @@ export const ExpandedNodePanel = ({
 
   // Search node id — the find bar's scope dispatcher (see
   // `useGlobalSearchHotkey`) requires a non-empty value to open the
-  // in-preview find bar. Canvas-node previews always have one;
-  // free-floating previews (e.g. raw file preview) may not, in which
-  // case `previewNodeId` falls back to `''` and Cmd+F routes to the
-  // canvas-wide search overlay instead of the in-preview bar.
-  const previewNodeId = (() => {
-    if (activeItem.isNode && expandedNodeId) return expandedNodeId;
-    const id = previewData?.nodeId;
-    return typeof id === 'string' ? id : '';
-  })();
+  // in-preview find bar.
+  const previewNodeId = expandedNodeId ?? '';
 
   return (
     <div
@@ -588,7 +536,7 @@ export const ExpandedNodePanel = ({
             the action group and the header reads as having a giant
             empty middle. */}
         <div className="flex min-w-0 items-center gap-2">
-          {activeItem.isNode && connectedNodeGroups.length > 0 && (
+          {connectedNodeGroups.length > 0 && (
             <ConnectedNodeMenu
               groups={connectedNodeGroups}
               open={openNeighborDirection !== null}
@@ -655,11 +603,6 @@ export const ExpandedNodePanel = ({
                   : {})}
               >
                 {liveLabel || t('node.untitled')}
-              </span>
-            )}
-            {activeItem.readOnly && (
-              <span className="bg-bg-default text-fg-muted rounded px-1.5 py-0.5 text-xs uppercase">
-                {t('node.preview')}
               </span>
             )}
           </div>
@@ -739,13 +682,13 @@ export const ExpandedNodePanel = ({
           <InPreviewSearchBar scopeEl={previewBodyEl} nodeId={expandedNodeId} />
           <PreviewHeaderSlotContext.Provider value={headerSlotValue}>
             <NodePreviewContent
-              key={expandedNodeId ?? previewType}
+              key={expandedNodeId}
               id={expandedNodeId ?? undefined}
               type={activeItem.type}
               data={activeItem.data}
-              readOnly={activeItem.readOnly}
+              readOnly={false}
               onDataChange={
-                activeItem.isNode && expandedNodeId
+                expandedNodeId
                   ? (patch) => updateNodeData(expandedNodeId, patch)
                   : undefined
               }
