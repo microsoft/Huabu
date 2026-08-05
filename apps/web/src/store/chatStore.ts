@@ -24,38 +24,38 @@ const DEFAULT_BINDING: AgentBinding = { kind: 'internal' };
 
 export type QuestionThreadOpenPosition = 'last-user' | 'bottom';
 
+/**
+ * Everything cached for one conversation thread.
+ *
+ * Held as one complete object per thread rather than as parallel maps so a
+ * thread is created, migrated, and evicted atomically. Parallel maps could
+ * drift — messages present with the history flag already cleared, say — and
+ * every such combination is a state nobody designed.
+ */
+export interface ChatThreadState {
+  messages: ChatMessage[];
+  /** Composer draft; '' means an empty composer. */
+  draft: string;
+  /** Whether history has been fetched from the server at least once. */
+  historyLoaded: boolean;
+  /** Whether an agent run is streaming into this thread right now. */
+  isStreaming: boolean;
+}
+
 export interface ChatState {
   /**
-   * Per-thread message lists. Indexed by threadId, in-memory only.
-   * Each entry is the live message array for that thread; a missing
-   * key means "not yet hydrated from history". The user-visible chat
-   * panel is always `messagesByThread[threadId]` (see
-   * `selectCurrentMessages`).
+   * Per-thread caches, in-memory only. A missing key means "nothing cached
+   * for this thread yet"; the user-visible chat panel reads
+   * `threadsById[threadId]` through the thread-scoped selectors below.
    *
-   * Modelled per-thread (instead of a single `messages` array + stash
-   * pattern) so concurrent agent runs across multiple threads — e.g.
-   * canvas chat plus one or more question-node threads — each write
-   * to their own list without colliding when the user navigates away
-   * mid-stream.
+   * Modelled per thread (instead of a single `messages` array plus a stash
+   * pattern) so concurrent agent runs across multiple threads — canvas chat
+   * plus one or more question-node threads — each write to their own entry
+   * without colliding when the user navigates away mid-stream.
    */
-  messagesByThread: Record<string, ChatMessage[]>;
-  /**
-   * Per-thread composer drafts. Indexed by threadId, in-memory only.
-   * A missing key means "no draft" (empty composer). Keyed by thread so
-   * an unsent draft stays with its own session instead of leaking across
-   * threads when the user navigates the canvas or a question replay
-   * mid-compose. Read via `selectCurrentDraft`; cleaned up alongside
-   * `messagesByThread` in `evictInactiveThreads`.
-   */
-  draftsByThread: Record<string, string>;
+  threadsById: Record<string, ChatThreadState>;
   /** Current thread identifier for the active canvas. */
   threadId: string;
-  /**
-   * Set of threadIds whose history has been fetched at least once.
-   * Drives the `useChatHistory` effect — threads not in this set get
-   * a `fetchHistory` round-trip when they become current.
-   */
-  historyLoadedThreads: Set<string>;
   /** Last agent mode — persisted to determine which checkpoint to load on refresh */
   lastAction: AgentMode;
   /** Map of canvasId → threadId, persisted so each canvas keeps its own thread. */
@@ -127,7 +127,7 @@ export interface ChatState {
   /**
    * @internal Saved canvas thread ID so `closeQuestionThread` knows
    * which thread to restore. Messages are *not* stashed — they live in
-   * `messagesByThread` keyed by their own threadId and survive the
+   * `threadsById` keyed by their own threadId and survive the
    * round-trip naturally.
    */
   _savedCanvasThreadId?: string;
@@ -149,14 +149,6 @@ export interface ChatState {
    * set/cleared without index gymnastics or magic marker strings.
    */
   selectionAttachment: ChatAttachment | null;
-
-  /**
-   * Set of threadIds with an in-flight agent stream. Multiple threads
-   * may stream concurrently (e.g. canvas chat + a question node's
-   * thread), so the UI must read loading state per thread rather than
-   * from a single hook-local flag. In-memory only — never persisted.
-   */
-  loadingThreadIds: Set<string>;
 
   // Actions
   /**
@@ -232,9 +224,8 @@ export interface ChatState {
   clearPendingAttachments: () => void;
 
   /**
-   * Set (or clear) the current thread's composer draft. Passing an empty
-   * string deletes the key so `draftsByThread` doesn't accumulate empty
-   * entries. Sending a message clears the draft through this same path.
+   * Set (or clear) the current thread's composer draft. Sending a message
+   * clears the draft through this same path.
    */
   setDraft: (threadId: string, text: string) => void;
 
@@ -333,10 +324,10 @@ export interface ChatState {
   setThreadLoading: (threadId: string, loading: boolean) => void;
 
   /**
-   * Drop cached message lists for threads that aren't currently pinned.
+   * Drop cached state for threads that aren't currently pinned.
    * A thread is "pinned" if it is:
    *   - the currently-visible `threadId`,
-   *   - in `loadingThreadIds` (mid-stream),
+   *   - streaming,
    *   - or `_savedCanvasThreadId` (about to be restored on
    *     `closeQuestionThread`).
    *
@@ -349,21 +340,50 @@ export interface ChatState {
 }
 
 /**
- * Soft upper bound on cached thread message lists. Picked to comfortably
- * cover the realistic working set (1 canvas chat + a handful of recently
- * opened question threads) without holding on to dead history forever.
- * Crossing the threshold drops *all* non-pinned entries at once — simple
- * and predictable; refetch on re-visit is cheap.
+ * Soft upper bound on cached threads. Picked to comfortably cover the
+ * realistic working set (1 canvas chat + a handful of recently opened
+ * question threads) without holding on to dead history forever. Crossing the
+ * threshold drops *all* non-pinned entries at once — simple and predictable;
+ * refetch on re-visit is cheap.
  */
 const MAX_CACHED_THREADS = 10;
+
+/** Stable empty array so selectors that miss the cache don't trigger renders. */
+const EMPTY_MESSAGES: ChatMessage[] = [];
+
+/** Stable default returned for a thread with nothing cached yet. */
+const EMPTY_THREAD: ChatThreadState = {
+  messages: EMPTY_MESSAGES,
+  draft: '',
+  historyLoaded: false,
+  isStreaming: false,
+};
+
+function threadOf(state: ChatState, threadId: string): ChatThreadState {
+  return state.threadsById[threadId] ?? EMPTY_THREAD;
+}
+
+/** Immutably patches one thread entry, creating it when absent. */
+function patchThread(
+  state: ChatState,
+  threadId: string,
+  patch: Partial<ChatThreadState>,
+): Pick<ChatState, 'threadsById'> {
+  return {
+    threadsById: {
+      ...state.threadsById,
+      [threadId]: { ...threadOf(state, threadId), ...patch },
+    },
+  };
+}
 
 export const useChatStore = create<ChatState>()(
   persist(
     (set, get) => ({
       messagesByThread: {},
       draftsByThread: {},
+      threadsById: {},
       threadId: createId('thread'),
-      historyLoadedThreads: new Set<string>(),
       lastAction: 'ask',
       threadMap: {},
       agentBinding: DEFAULT_BINDING,
@@ -374,82 +394,61 @@ export const useChatStore = create<ChatState>()(
       viewingQuestionThread: null,
       questionReplayByCanvas: {},
       viewingSketchCluster: null,
-      loadingThreadIds: new Set<string>(),
 
       addMessage: (threadId, message) =>
-        set((state) => ({
-          messagesByThread: {
-            ...state.messagesByThread,
-            [threadId]: [...(state.messagesByThread[threadId] ?? []), message],
-          },
-        })),
+        set((state) =>
+          patchThread(state, threadId, {
+            messages: [...threadOf(state, threadId).messages, message],
+          }),
+        ),
 
       updateMessage: (threadId, id, updater) =>
         set((state) => {
-          const list = state.messagesByThread[threadId];
-          if (!list) return {};
-          return {
-            messagesByThread: {
-              ...state.messagesByThread,
-              [threadId]: list.map((m) => (m.id === id ? updater(m) : m)),
-            },
-          };
+          const entry = state.threadsById[threadId];
+          if (!entry) return {};
+          return patchThread(state, threadId, {
+            messages: entry.messages.map((m) => (m.id === id ? updater(m) : m)),
+          });
         }),
 
       upsertAssistantToolPart: (threadId, messageId, toolCallId, factory) =>
         set((state) => {
-          const list = state.messagesByThread[threadId];
-          if (!list) return {};
-          return {
-            messagesByThread: {
-              ...state.messagesByThread,
-              [threadId]: list.map((m) => {
-                if (m.id !== messageId || m.role !== 'assistant') return m;
-                let found = false;
-                const segments = m.segments.map((seg) => {
-                  if (seg.kind === 'tool' && seg.toolCallId === toolCallId) {
-                    found = true;
-                    return factory(seg);
-                  }
-                  return seg;
-                });
-                // If no existing tool part, append a new one. Callers
-                // can rely on the inserted part's `kind`/`toolCallId`
-                // being exactly what `factory(undefined)` produced.
-                if (!found) segments.push(factory(undefined));
-                return { ...m, segments };
-              }),
-            },
-          };
+          const entry = state.threadsById[threadId];
+          if (!entry) return {};
+          return patchThread(state, threadId, {
+            messages: entry.messages.map((m) => {
+              if (m.id !== messageId || m.role !== 'assistant') return m;
+              let found = false;
+              const segments = m.segments.map((seg) => {
+                if (seg.kind === 'tool' && seg.toolCallId === toolCallId) {
+                  found = true;
+                  return factory(seg);
+                }
+                return seg;
+              });
+              // If no existing tool part, append a new one. Callers
+              // can rely on the inserted part's `kind`/`toolCallId`
+              // being exactly what `factory(undefined)` produced.
+              if (!found) segments.push(factory(undefined));
+              return { ...m, segments };
+            }),
+          });
         }),
 
       setMessages: (threadId, messages) =>
-        set((state) => ({
-          messagesByThread: {
-            ...state.messagesByThread,
-            [threadId]: messages,
-          },
-        })),
+        set((state) => patchThread(state, threadId, { messages })),
 
       setHistoryLoaded: (threadId, loaded) =>
         set((state) => {
-          const isAlreadyLoaded = state.historyLoadedThreads.has(threadId);
-          if (isAlreadyLoaded === loaded) return {};
-          const next = new Set(state.historyLoadedThreads);
-          if (loaded) next.add(threadId);
-          else next.delete(threadId);
-          return { historyLoadedThreads: next };
+          if (threadOf(state, threadId).historyLoaded === loaded) return {};
+          return patchThread(state, threadId, { historyLoaded: loaded });
         }),
 
       setLastAction: (action) => set({ lastAction: action }),
 
       clearMessages: (canvasId, options) => {
-        const {
-          threadMap,
-          bindingMap,
-          messagesByThread,
-          historyLoadedThreads,
-        } = get();
+        const state = get();
+        const { threadMap, bindingMap } = state;
         const newThreadId = createId('thread');
         const initialBinding = options?.binding ?? DEFAULT_BINDING;
         // Seed the new thread with the caller-chosen mode so the
@@ -466,14 +465,14 @@ export const useChatStore = create<ChatState>()(
         const updatedBindings = canvasId
           ? { ...bindingMap, [canvasId]: initialBinding }
           : { ...bindingMap };
-        // Seed an empty messages list for the new thread and mark it
-        // history-loaded so the history hook doesn't try to fetch.
-        const nextLoaded = new Set(historyLoadedThreads);
-        nextLoaded.add(newThreadId);
+        // Seed the new thread as empty and already history-loaded so the
+        // history hook doesn't round-trip for a thread that cannot have any.
         set({
-          messagesByThread: { ...messagesByThread, [newThreadId]: [] },
+          ...patchThread(state, newThreadId, {
+            messages: [],
+            historyLoaded: true,
+          }),
           threadId: newThreadId,
-          historyLoadedThreads: nextLoaded,
           lastAction: initialLastAction,
           pendingAttachments: [],
           selectionAttachment: null,
@@ -547,7 +546,7 @@ export const useChatStore = create<ChatState>()(
         const binding = bindingMap[canvasId] ?? DEFAULT_BINDING;
         set({
           threadId: tid,
-          // Don't touch messagesByThread — if this canvas's thread is
+          // Don't touch `threadsById` — if this canvas's thread is
           // already cached, the user sees it instantly; otherwise the
           // history hook will populate it from the server.
           pendingAttachments: [],
@@ -582,15 +581,8 @@ export const useChatStore = create<ChatState>()(
 
       setDraft: (threadId, text) =>
         set((state) => {
-          const current = state.draftsByThread[threadId] ?? '';
-          if (text === current) return {};
-          const nextDrafts = { ...state.draftsByThread };
-          if (text === '') {
-            delete nextDrafts[threadId];
-          } else {
-            nextDrafts[threadId] = text;
-          }
-          return { draftsByThread: nextDrafts };
+          if (threadOf(state, threadId).draft === text) return {};
+          return patchThread(state, threadId, { draft: text });
         }),
 
       setSelectionAttachment: (attachment) =>
@@ -662,7 +654,7 @@ export const useChatStore = create<ChatState>()(
         // `lastAction` so `closeQuestionThread` can undo any pollution a
         // follow-up send caused via `startStream`'s `setLastAction`.
         //
-        // Messages aren't stashed — they live in `messagesByThread`
+        // Messages aren't stashed — they live in `threadsById`
         // keyed by their own threadId and survive the navigation. The
         // history hook handles first-time hydration of the question
         // thread; subsequent visits hit the cache.
@@ -770,15 +762,14 @@ export const useChatStore = create<ChatState>()(
       },
 
       openQuestionCompose: (view, options) => {
+        const state = get();
         const {
           threadId: currentThreadId,
           agentBinding: currentBinding,
           lastAction: currentLastAction,
           viewingQuestionThread: currentViewing,
-          messagesByThread,
-          historyLoadedThreads,
           bindingMap,
-        } = get();
+        } = state;
         const threadId = view.conversationOwner.threadId;
 
         // Already composing/viewing this exact thread — nothing to do.
@@ -801,8 +792,10 @@ export const useChatStore = create<ChatState>()(
         // Seed an empty message list for the node's thread and mark it
         // history-loaded so `useChatHistory` doesn't round-trip for a
         // thread that has never been sent.
-        const nextLoaded = new Set(historyLoadedThreads);
-        nextLoaded.add(threadId);
+        const seeded = patchThread(state, threadId, {
+          messages: threadOf(state, threadId).messages,
+          historyLoaded: true,
+        });
 
         // Stash the canvas chat state so leaving compose restores it —
         // but only when not already inside a question view, so the saved
@@ -810,6 +803,7 @@ export const useChatStore = create<ChatState>()(
         const isAlreadyViewing = currentViewing !== null;
 
         set({
+          ...seeded,
           viewingQuestionThread: {
             ...view,
             openPosition: 'bottom',
@@ -817,10 +811,6 @@ export const useChatStore = create<ChatState>()(
           },
           threadId,
           agentBinding: initialBinding,
-          messagesByThread: messagesByThread[threadId]
-            ? messagesByThread
-            : { ...messagesByThread, [threadId]: [] },
-          historyLoadedThreads: nextLoaded,
           pendingAttachments: [],
           selectionAttachment: null,
           viewingSketchCluster: null,
@@ -956,23 +946,19 @@ export const useChatStore = create<ChatState>()(
 
       setThreadLoading: (threadId, loading) =>
         set((state) => {
-          const isAlreadyLoading = state.loadingThreadIds.has(threadId);
-          if (isAlreadyLoading === loading) return {};
-          const next = new Set(state.loadingThreadIds);
-          if (loading) next.add(threadId);
-          else next.delete(threadId);
-          return { loadingThreadIds: next };
+          if (threadOf(state, threadId).isStreaming === loading) return {};
+          return patchThread(state, threadId, { isStreaming: loading });
         }),
 
       evictInactiveThreads: (maxKeep = MAX_CACHED_THREADS) =>
         set((state) => {
-          const cached = Object.keys(state.messagesByThread);
+          const cached = Object.keys(state.threadsById);
           if (cached.length <= maxKeep) return {};
 
-          const pinned = new Set<string>([
-            state.threadId,
-            ...state.loadingThreadIds,
-          ]);
+          const pinned = new Set<string>([state.threadId]);
+          for (const [tid, entry] of Object.entries(state.threadsById)) {
+            if (entry.isStreaming) pinned.add(tid);
+          }
           if (state._savedCanvasThreadId) {
             pinned.add(state._savedCanvasThreadId);
           }
@@ -980,19 +966,9 @@ export const useChatStore = create<ChatState>()(
           const evictable = cached.filter((tid) => !pinned.has(tid));
           if (evictable.length === 0) return {};
 
-          const nextMessages = { ...state.messagesByThread };
-          const nextDrafts = { ...state.draftsByThread };
-          const nextLoaded = new Set(state.historyLoadedThreads);
-          for (const tid of evictable) {
-            delete nextMessages[tid];
-            delete nextDrafts[tid];
-            nextLoaded.delete(tid);
-          }
-          return {
-            messagesByThread: nextMessages,
-            draftsByThread: nextDrafts,
-            historyLoadedThreads: nextLoaded,
-          };
+          const threadsById = { ...state.threadsById };
+          for (const tid of evictable) delete threadsById[tid];
+          return { threadsById };
         }),
     }),
     {
@@ -1065,16 +1041,12 @@ export const useChatStore = create<ChatState>()(
   ),
 );
 
-/** Stable empty array so selectors that miss the cache don't trigger renders. */
-const EMPTY_MESSAGES: ChatMessage[] = [];
-
 // ─── Thread-scoped reads ──────────────────────────────────────────────────
 //
 // Every read of a thread's cached state goes through one of these. They are
 // the seam the Preview Workspace migration needs: once two Chat renderers can
 // be mounted at once there is no "current thread" to read from, and callers
-// must name the thread they mean. Keeping the storage shape behind them also
-// means normalizing it into one object per thread touches this file only.
+// must name the thread they mean.
 
 /**
  * A thread's message list. Returns a stable empty array reference when the
@@ -1083,23 +1055,23 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 export const selectThreadMessages = (
   state: ChatState,
   threadId: string,
-): ChatMessage[] => state.messagesByThread[threadId] ?? EMPTY_MESSAGES;
+): ChatMessage[] => threadOf(state, threadId).messages;
 
 /** A thread's composer draft ('' when none). */
 export const selectThreadDraft = (state: ChatState, threadId: string): string =>
-  state.draftsByThread[threadId] ?? '';
+  threadOf(state, threadId).draft;
 
 /** True if a thread has been hydrated from the server. */
 export const selectThreadHistoryLoaded = (
   state: ChatState,
   threadId: string,
-): boolean => state.historyLoadedThreads.has(threadId);
+): boolean => threadOf(state, threadId).historyLoaded;
 
 /** True if a thread has an active streaming run. */
 export const selectThreadIsLoading = (
   state: ChatState,
   threadId: string,
-): boolean => state.loadingThreadIds.has(threadId);
+): boolean => threadOf(state, threadId).isStreaming;
 
 /**
  * Read the currently-visible thread's message list. Returns a stable

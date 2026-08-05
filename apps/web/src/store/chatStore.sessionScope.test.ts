@@ -15,6 +15,9 @@ import {
   selectCurrentHistoryLoaded,
   selectCurrentIsLoading,
   selectCurrentMessages,
+  selectThreadDraft,
+  selectThreadHistoryLoaded,
+  selectThreadMessages,
   useChatStore,
 } from './chatStore';
 
@@ -41,11 +44,8 @@ const STAGED_ATTACHMENT: ChatAttachment = {
 
 function resetStore() {
   useChatStore.setState({
-    messagesByThread: {},
-    draftsByThread: {},
+    threadsById: {},
     threadId: 'thread-initial',
-    historyLoadedThreads: new Set(),
-    loadingThreadIds: new Set(),
     lastAction: 'ask',
     threadMap: {},
     bindingMap: {},
@@ -216,8 +216,8 @@ describe('chatStore clearMessages', () => {
 
     const state = useChatStore.getState();
     expect(state.threadId).not.toBe(previous);
-    expect(state.messagesByThread[state.threadId]).toEqual([]);
-    expect(state.historyLoadedThreads.has(state.threadId)).toBe(true);
+    expect(selectThreadMessages(state, state.threadId)).toEqual([]);
+    expect(selectThreadHistoryLoaded(state, state.threadId)).toBe(true);
     expect(state.threadMap['canvas-1']).toBe(state.threadId);
     expect(state.agentBinding).toEqual(INTERNAL);
     expect(state.bindingMap['canvas-1']).toEqual(INTERNAL);
@@ -384,22 +384,18 @@ describe('chatStore evictInactiveThreads', () => {
     s.evictInactiveThreads(1);
 
     const state = useChatStore.getState();
-    expect(Object.keys(state.messagesByThread).sort()).toEqual([
-      't1',
-      't2',
-      't3',
-    ]);
-    expect(state.draftsByThread['t4']).toBeUndefined();
-    expect(state.historyLoadedThreads.has('t4')).toBe(false);
-    expect(state.draftsByThread['t1']).toBe('draft t1');
+    expect(Object.keys(state.threadsById).sort()).toEqual(['t1', 't2', 't3']);
+    expect(selectThreadDraft(state, 't4')).toBe('');
+    expect(selectThreadHistoryLoaded(state, 't4')).toBe(false);
+    expect(selectThreadDraft(state, 't1')).toBe('draft t1');
   });
 
   it('is a no-op while the cache is under the limit', () => {
     const s = useChatStore.getState();
     s.addMessage('t1', userMessage('m1', 'a'));
-    const before = useChatStore.getState().messagesByThread;
+    const before = useChatStore.getState().threadsById;
 
     s.evictInactiveThreads(10);
-    expect(useChatStore.getState().messagesByThread).toBe(before);
+    expect(useChatStore.getState().threadsById).toBe(before);
   });
 });

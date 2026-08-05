@@ -13,7 +13,7 @@ vi.mock('@/api/canvas', async (importOriginal) => ({
 }));
 
 import useCanvasStore from './canvasStore';
-import { useChatStore } from './chatStore';
+import { selectThreadIsLoading, useChatStore } from './chatStore';
 import {
   ConversationIntegrityError,
   conversationRequestScope,
@@ -80,7 +80,7 @@ beforeEach(() => {
   useChatStore.setState({
     threadId: 'thread-world',
     viewingQuestionThread: null,
-    loadingThreadIds: new Set(),
+    threadsById: {},
     questionReplayByCanvas: {},
   });
 });
@@ -315,7 +315,7 @@ describe('conversation owner routing', () => {
     expect(state.viewingQuestionThread?.conversationOwner).toEqual(
       second.conversationOwner,
     );
-    expect(state.loadingThreadIds.has('thread-source')).toBe(true);
+    expect(selectThreadIsLoading(state, 'thread-source')).toBe(true);
   });
 
   it('preserves the owner Canvas chat when moving a headless replay into it', () => {

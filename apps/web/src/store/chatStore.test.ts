@@ -3,7 +3,11 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { selectCurrentDraft, useChatStore } from './chatStore';
+import {
+  selectCurrentDraft,
+  selectThreadDraft,
+  useChatStore,
+} from './chatStore';
 
 const testStorage = vi.hoisted(() => {
   const values = new Map<string, string>();
@@ -28,7 +32,7 @@ describe('chatStore composer drafts', () => {
   beforeEach(() => {
     testStorage.clear();
     useChatStore.setState({
-      draftsByThread: {},
+      threadsById: {},
       threadId: 'thread-a',
     });
   });
@@ -45,9 +49,9 @@ describe('chatStore composer drafts', () => {
 
     setDraft('thread-b', '');
     expect(selectCurrentDraft(useChatStore.getState())).toBe('');
-    expect(useChatStore.getState().draftsByThread).toEqual({
-      'thread-a': 'first draft',
-    });
+    expect(selectThreadDraft(useChatStore.getState(), 'thread-a')).toBe(
+      'first draft',
+    );
   });
 });
 
