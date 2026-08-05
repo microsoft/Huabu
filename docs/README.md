@@ -92,6 +92,7 @@ docs/
 | [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                           |
 | [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                   | Partly shipped | Phases 1–3: Blob, structured repositories, catalogue, and bounded reads.   |
 | [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)             | Proposed       | Revision-aware offscreen Note measurement and stable auto-height geometry. |
+| [unified-preview-workspace.md](./proposals/unified-preview-workspace.md)                           | Proposed       | Unified tabbed and split workspace for node previews and unbound chats.    |
 
 ### Shipped
 
