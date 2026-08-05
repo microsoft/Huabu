@@ -79,8 +79,9 @@ export function describeSpaceRepositoryContract(
       expect(current).not.toBeNull();
 
       const next = bump(current!, [{ id: 'n1' }]);
-      await expect(repository.compareAndSwap(current!.version, next)).resolves
-        .toEqual({ ok: true });
+      await expect(
+        repository.compareAndSwap(current!.version, next),
+      ).resolves.toEqual({ ok: true });
 
       const stored = await repository.read();
       expect(stored?.version).toBe(next.version);

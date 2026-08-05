@@ -86,7 +86,9 @@ describe('storage module tree', () => {
   });
 
   it('keeps every other file inside ports/, backends/, or compatibility/', () => {
-    const nested = storageFiles.filter((f) => path.dirname(f) !== 'modules/storage');
+    const nested = storageFiles.filter(
+      (f) => path.dirname(f) !== 'modules/storage',
+    );
     const stray = nested.filter(
       (f) =>
         !inLayer(f, 'ports') &&

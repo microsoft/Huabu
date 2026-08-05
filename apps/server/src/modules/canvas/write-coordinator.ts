@@ -25,7 +25,11 @@
 
 import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
-import type { CanvasStore, NodeContent, RenameResult } from '../storage/index.js';
+import type {
+  CanvasStore,
+  NodeContent,
+  RenameResult,
+} from '../storage/index.js';
 
 const canvasMutexChains = new Map<string, Promise<unknown>>();
 

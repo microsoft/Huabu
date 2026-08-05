@@ -12,10 +12,7 @@
  * directory handle). Those belong to the Disk adapter.
  */
 
-import type {
-  CanvasEventRecord,
-  ExecuteOriginator,
-} from '@sediment/shared';
+import type { CanvasEventRecord, ExecuteOriginator } from '@sediment/shared';
 
 /** On-disk shape of `<canvasDir>/space.json`. */
 export interface CanvasFile {
