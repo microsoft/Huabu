@@ -50,6 +50,7 @@ import {
   type Delta,
 } from '@sediment/shared/canvas-engine';
 
+import { runCanvasPersistenceTransaction } from './canvas-persistence-transaction.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';
 import {
@@ -67,9 +68,35 @@ import {
   type CanvasStore,
   type DeltaLogEntry,
   type NodeContent,
+  type UpdateNodeOutcome,
 } from '../storage/index.js';
 
 const log = getLogger('canvas.executor');
+
+function insertedNodeIds(deltas: readonly Delta[]): Set<string> {
+  return new Set(
+    deltas.flatMap((delta) =>
+      delta.type === 'INSERT_NODE' ? [delta.node.id] : [],
+    ),
+  );
+}
+
+/** Executor persistence never accepts a partial/quiet sidecar outcome. */
+function requireNodeWrite(nodeId: string, outcome: UpdateNodeOutcome): void {
+  if (outcome.status === 'ok') return;
+  if (outcome.status === 'rejected') {
+    const detail =
+      outcome.result.reason === 'conflict'
+        ? `label conflicts with existing node "${outcome.result.conflictWith.filename}"`
+        : outcome.result.reason;
+    throw new Error(
+      `[canvas-executor] writeNode rejected ${nodeId}: ${detail}`,
+    );
+  }
+  throw new Error(
+    `[canvas-executor] writeNode did not commit ${nodeId}: ${outcome.status}`,
+  );
+}
 
 // ── Markdown-backed-node knowledge (mirrors canvas.route.ts) ─────────────
 //
@@ -857,10 +884,10 @@ export async function executeOnServer(
 
     const toVersion = fromVersion + 1;
 
-    // Persist .md sidecars first so topology never references a
-    // markdown file that does not exist on disk. A crash between this
-    // loop and the topology write leaves orphan .md files (harmless),
-    // not orphan node references (would render as `contentMissing`).
+    // Persist .md sidecars first so topology never references a markdown
+    // file that does not exist on disk. The synchronous commit section is
+    // wrapped in a before-image rollback: if topology or delta-log persistence
+    // fails, the sidecars, record, and log prefix all return to `fromVersion`.
     //
     // `writeNode` throws `CanvasStoreIOError` on environmental failures
     // (ENOSPC, EACCES, …); we deliberately do NOT catch it so the
@@ -872,54 +899,76 @@ export async function executeOnServer(
     // `strictRename` is rarely set for agent-authored labels); we throw
     // a regular Error rather than letting the in-memory mutation drift
     // away from disk.
-    for (const node of pendingEffects.mutatedNodes) {
-      const nodeContent = buildNodeContent(node);
-      if (!nodeContent) continue;
-      // Already inside `withCanvasMutex` (this whole batch holds the canvas
-      // lock), so use the non-locking core to route every `.md` write through
-      // the one coordinator entry point without a re-entrant deadlock. The
-      // executor's own prestate CAS (`collectMergeConflicts`) is the batch's
-      // freshness guard, so no per-node `expectRev` here.
-      const outcome = applyNodeUpdate(store, nodeContent.nodeId, {
-        apply: () => nodeContent,
-        strictRename: nodeContent['labelSource'] === 'user',
-      });
-      if (outcome.status === 'rejected') {
-        const detail =
-          outcome.result.reason === 'conflict'
-            ? `label conflicts with existing node "${outcome.result.conflictWith.filename}"`
-            : outcome.result.reason;
-        throw new Error(
-          `[canvas-executor] writeNode rejected ${nodeContent.nodeId}: ${detail}`,
-        );
-      }
-    }
-    for (const nodeId of pendingEffects.deletedNodeIds) {
-      store.deleteNode(nodeId);
-    }
+    // Pending effects preserve command order and can mention the same id in
+    // both collections (DELETE then CREATE, or mutate then DELETE). Persist
+    // only the effect matching the authoritative final topology so a
+    // re-created node is not written and then immediately unlinked.
+    const finalNodeIds = new Set(finalNodes.map((node) => node.id));
+    const mutatedNodesToPersist = pendingEffects.mutatedNodes.filter((node) =>
+      finalNodeIds.has(node.id),
+    );
+    const nodeIdsToDelete = pendingEffects.deletedNodeIds.filter(
+      (nodeId) => !finalNodeIds.has(nodeId),
+    );
+    const affectedNodeIds = new Set<string>([
+      ...mutatedNodesToPersist.map((node) => node.id),
+      ...nodeIdsToDelete,
+    ]);
+    const insertedIds = insertedNodeIds(deltas);
+    store.withValidatedNodeMutationTransaction(
+      { affectedNodeIds, insertedNodeIds: insertedIds },
+      () => {
+        runCanvasPersistenceTransaction({
+          canvasId,
+          affectedNodeIds,
+          nodeIdForFilename: (filename) => store.nodeIdForFilename(filename),
+          // Rollback restores exact record bytes without inferring a second
+          // tombstone transition; the enclosing transaction restores its
+          // captured process-local tombstone state after rollback completes.
+          resetRecordState: () => store.writeNodeMutationRollback(canvas),
+          commit: () => {
+            for (const node of mutatedNodesToPersist) {
+              const nodeContent = buildNodeContent(node);
+              if (!nodeContent) continue;
+              // Already inside `withCanvasMutex` (this whole batch holds the
+              // canvas lock), so use the non-locking core to avoid a
+              // re-entrant deadlock. The batch prestate CAS is the freshness
+              // guard.
+              const outcome = applyNodeUpdate(store, nodeContent.nodeId, {
+                apply: () => nodeContent,
+                strictRename: nodeContent['labelSource'] === 'user',
+              });
+              requireNodeWrite(nodeContent.nodeId, outcome);
+            }
+            for (const nodeId of nodeIdsToDelete) {
+              store.deleteNode(nodeId);
+            }
 
-    const slimNodes = stripNodesForCanvas(finalNodes);
-    const nextCanvas: CanvasFile = {
-      ...canvas,
-      version: toVersion,
-      state: {
-        ...canvas.state,
-        nodes: slimNodes,
-        edges: finalEdges,
+            const slimNodes = stripNodesForCanvas(finalNodes);
+            const nextCanvas: CanvasFile = {
+              ...canvas,
+              version: toVersion,
+              state: {
+                ...canvas.state,
+                nodes: slimNodes,
+                edges: finalEdges,
+              },
+              updatedAt: Date.now(),
+            };
+            store.write(nextCanvas);
+            const logEntry: DeltaLogEntry = {
+              version: toVersion,
+              ts: Date.now(),
+              ...(runId ? { runId } : {}),
+              commands: commands as unknown[],
+              deltas: deltas as unknown[],
+              originator,
+            };
+            store.appendDeltaLogEntry(logEntry);
+          },
+        });
       },
-      updatedAt: Date.now(),
-    };
-    store.write(nextCanvas);
-
-    const logEntry: DeltaLogEntry = {
-      version: toVersion,
-      ts: Date.now(),
-      ...(runId ? { runId } : {}),
-      commands: commands as unknown[],
-      deltas: deltas as unknown[],
-      originator,
-    };
-    store.appendDeltaLogEntry(logEntry);
+    );
 
     // Derive review records (ACP change cards) only when asked. Edge
     // endpoint labels are resolved against the post-state nodes.
@@ -1070,36 +1119,61 @@ export async function applyDeltasOnServer(input: {
         const node = d.type === 'INSERT_NODE' ? d.node : d.next;
         mutatedNodes.push(node);
         if (d.type === 'REPLACE_NODE') contentEditedNodeIds.push(node.id);
-        const content = buildNodeContent(node);
-        if (content) {
-          // Inside `withCanvasMutex` already → non-locking core (see above).
-          applyNodeUpdate(store, content.nodeId, {
-            apply: () => content,
-            strictRename: content['labelSource'] === 'user',
-          });
-        }
       } else if (d.type === 'DELETE_NODE') {
         deletedNodeIds.push(d.node.id);
-        store.deleteNode(d.node.id);
       }
     }
+    const affectedNodeIds = new Set<string>([
+      ...mutatedNodes.map((node) => node.id),
+      ...deletedNodeIds,
+    ]);
+    const insertedIds = insertedNodeIds(deltas);
+    store.withValidatedNodeMutationTransaction(
+      { affectedNodeIds, insertedNodeIds: insertedIds },
+      () => {
+        runCanvasPersistenceTransaction({
+          canvasId,
+          affectedNodeIds,
+          nodeIdForFilename: (filename) => store.nodeIdForFilename(filename),
+          resetRecordState: () => store.writeNodeMutationRollback(canvas),
+          commit: () => {
+            for (const d of deltas) {
+              if (d.type === 'INSERT_NODE' || d.type === 'REPLACE_NODE') {
+                const node = d.type === 'INSERT_NODE' ? d.node : d.next;
+                const content = buildNodeContent(node);
+                if (content) {
+                  // Inside `withCanvasMutex` already → non-locking core.
+                  const outcome = applyNodeUpdate(store, content.nodeId, {
+                    apply: () => content,
+                    strictRename: content['labelSource'] === 'user',
+                  });
+                  requireNodeWrite(content.nodeId, outcome);
+                }
+              } else if (d.type === 'DELETE_NODE') {
+                store.deleteNode(d.node.id);
+              }
+            }
 
-    const slimNodes = stripNodesForCanvas(finalNodes);
-    store.write({
-      ...canvas,
-      version: toVersion,
-      state: { ...canvas.state, nodes: slimNodes, edges: finalEdges },
-      updatedAt: Date.now(),
-    });
+            const slimNodes = stripNodesForCanvas(finalNodes);
+            store.write({
+              ...canvas,
+              version: toVersion,
+              state: { ...canvas.state, nodes: slimNodes, edges: finalEdges },
+              updatedAt: Date.now(),
+            });
 
-    store.appendDeltaLogEntry({
-      version: toVersion,
-      ts: Date.now(),
-      ...(runId ? { runId } : {}),
-      commands: [],
-      deltas: deltas as unknown[],
-      originator,
-    });
+            store.appendDeltaLogEntry({
+              version: toVersion,
+              ts: Date.now(),
+              ...(runId ? { runId } : {}),
+              commands: [],
+              deltas: deltas as unknown[],
+              originator,
+            });
+          },
+        });
+      },
+    );
 
     return {
       canvasId,

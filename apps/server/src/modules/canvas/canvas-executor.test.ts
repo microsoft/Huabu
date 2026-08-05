@@ -8,16 +8,31 @@
  * (label only) are never guarded.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
-import { executeOnServer } from './canvas-executor.js';
-import { canvasBlobs, getCanvasStore } from '../storage/index.js';
+import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
+import { runCanvasPersistenceTransaction } from './canvas-persistence-transaction.js';
+import {
+  applyNodeUpdate,
+  canvasBlobs,
+  getCanvasStore,
+} from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { CanvasCommand, ExecuteOriginator } from '@sediment/shared';
@@ -428,6 +443,7 @@ describe('executeOnServer — batch node writes route through the non-locking co
       label: 'B',
       content: 'b1',
     });
+    const batchGuard = vi.spyOn(store, 'withValidatedNodeMutationTransaction');
 
     const out = await executeOnServer({
       canvasId: 'c1',
@@ -444,8 +460,526 @@ describe('executeOnServer — batch node writes route through the non-locking co
     });
 
     expect(out.conflicts ?? []).toHaveLength(0);
+    // The aggregate is strictly checked once for the executor's synchronous
+    // sidecar section, rather than reparsed once per write (O(nodes²)).
+    expect(batchGuard).toHaveBeenCalledTimes(1);
     // Both `.md` sidecars landed — the batch completed, so no deadlock.
     expect(bodyOf('c1', 'n1')).toBe('a2');
     expect(bodyOf('c1', 'n2')).toBe('b2');
+  });
+});
+
+describe('executor tombstone resurrection', () => {
+  function restoredNode(content = 'restored') {
+    return {
+      id: 'n1',
+      type: 'note',
+      position: { x: 0, y: 0 },
+      data: { label: 'A', content },
+    };
+  }
+
+  async function deleteSeededNode() {
+    seedNote('c1', 'n1', 'before');
+    await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        { type: 'DELETE_NODES', nodeIds: ['n1'] } as unknown as CanvasCommand,
+      ],
+      originator: UI,
+    });
+    const store = getCanvasStore('c1');
+    expect(store.readNode('n1')).toBeNull();
+    expect(store.isNodeWriteSuppressed('n1')).toBe(true);
+    return store;
+  }
+
+  it('restores a just-deleted sidecar on an INSERT delta revert', async () => {
+    const store = await deleteSeededNode();
+
+    const out = await applyDeltasOnServer({
+      canvasId: 'c1',
+      deltas: [{ type: 'INSERT_NODE', node: restoredNode() }],
+      originator: UI,
+    });
+
+    expect(out.deltas.map((delta) => delta.type)).toEqual(['INSERT_NODE']);
+    expect(store.readNode('n1')?.content).toBe('restored');
+    expect(store.isNodeWriteSuppressed('n1')).toBe(false);
+  });
+
+  it('lets an intentional CREATE_NODES reuse a just-deleted id', async () => {
+    const store = await deleteSeededNode();
+
+    await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'n1',
+              nodeType: 'note',
+              position: { x: 0, y: 0 },
+              data: { label: 'A', content: 'created again' },
+            },
+          ],
+        } as unknown as CanvasCommand,
+      ],
+      originator: UI,
+    });
+
+    expect(store.readNode('n1')?.content).toBe('created again');
+    expect(store.isNodeWriteSuppressed('n1')).toBe(false);
+  });
+
+  it('keeps the recreated sidecar for DELETE then CREATE in one batch', async () => {
+    seedNote('c1', 'n1', 'before');
+    const store = getCanvasStore('c1');
+
+    await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        { type: 'DELETE_NODES', nodeIds: ['n1'] } as unknown as CanvasCommand,
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'n1',
+              nodeType: 'note',
+              position: { x: 0, y: 0 },
+              data: { label: 'A', content: 'same-batch recreate' },
+            },
+          ],
+        } as unknown as CanvasCommand,
+      ],
+      originator: UI,
+    });
+
+    expect(store.readNode('n1')?.content).toBe('same-batch recreate');
+    expect(store.isNodeWriteSuppressed('n1')).toBe(false);
+  });
+
+  it('rejects a non-ok sidecar outcome and rolls topology back', async () => {
+    const store = await deleteSeededNode();
+    const originalWriteNode = store.writeNode;
+    store.writeNode = () => ({ ok: false, reason: 'not-found' });
+    try {
+      await expect(
+        applyDeltasOnServer({
+          canvasId: 'c1',
+          deltas: [{ type: 'INSERT_NODE', node: restoredNode() }],
+          originator: UI,
+        }),
+      ).rejects.toThrow(/writeNode rejected n1: not-found/);
+    } finally {
+      store.writeNode = originalWriteNode;
+    }
+
+    expect(store.read()?.state.nodes).toEqual([]);
+    expect(store.readNode('n1')).toBeNull();
+    expect(store.isNodeWriteSuppressed('n1')).toBe(true);
+  });
+
+  it('retains the prior tombstone when delta append fails after resurrection', async () => {
+    const store = await deleteSeededNode();
+    const originalAppend = store.appendDeltaLogEntry;
+    store.appendDeltaLogEntry = (entry) => {
+      originalAppend.call(store, entry);
+      throw new Error('injected resurrection append failure');
+    };
+    try {
+      await expect(
+        applyDeltasOnServer({
+          canvasId: 'c1',
+          deltas: [{ type: 'INSERT_NODE', node: restoredNode() }],
+          originator: UI,
+        }),
+      ).rejects.toThrow('injected resurrection append failure');
+    } finally {
+      store.appendDeltaLogEntry = originalAppend;
+    }
+
+    expect(store.read()?.state.nodes).toEqual([]);
+    expect(store.readNode('n1')).toBeNull();
+    expect(store.isNodeWriteSuppressed('n1')).toBe(true);
+    expect(store.readDeltaLogSince(0).map((entry) => entry.version)).toEqual([
+      2,
+    ]);
+
+    await applyDeltasOnServer({
+      canvasId: 'c1',
+      deltas: [{ type: 'INSERT_NODE', node: restoredNode('retry') }],
+      originator: UI,
+    });
+    expect(store.readNode('n1')?.content).toBe('retry');
+    expect(store.isNodeWriteSuppressed('n1')).toBe(false);
+  });
+
+  it('does not clear a tombstone when an unrelated write retains the node', () => {
+    seedNote('c1', 'n1', 'before');
+    const store = getCanvasStore('c1');
+    expect(store.deleteNode('n1')).toBe('deleted');
+
+    const retained = store.read();
+    if (!retained) throw new Error('seeded Space missing');
+    store.write({
+      ...retained,
+      version: retained.version + 1,
+      updatedAt: retained.updatedAt + 1,
+    });
+    store.write({
+      ...retained,
+      version: retained.version + 2,
+      state: { ...retained.state, nodes: [] },
+      updatedAt: retained.updatedAt + 2,
+    });
+
+    const late = applyNodeUpdate(store, 'n1', {
+      apply: () => ({
+        nodeId: 'n1',
+        type: 'note',
+        label: 'A',
+        content: 'late',
+      }),
+    });
+    expect(late).toEqual({ status: 'skipped-deleted' });
+    expect(store.readNode('n1')).toBeNull();
+  });
+
+  it('removes a newly-created delete tombstone when the transaction rolls back', async () => {
+    seedNote('c1', 'n1', 'before');
+    const store = getCanvasStore('c1');
+    const originalAppend = store.appendDeltaLogEntry;
+    store.appendDeltaLogEntry = (entry) => {
+      originalAppend.call(store, entry);
+      throw new Error('injected delete append failure');
+    };
+    try {
+      await expect(
+        executeOnServer({
+          canvasId: 'c1',
+          commands: [
+            {
+              type: 'DELETE_NODES',
+              nodeIds: ['n1'],
+            } as unknown as CanvasCommand,
+          ],
+          originator: UI,
+        }),
+      ).rejects.toThrow('injected delete append failure');
+    } finally {
+      store.appendDeltaLogEntry = originalAppend;
+    }
+
+    const restored = store.read();
+    if (!restored) throw new Error('rolled-back Space missing');
+    expect(store.readNode('n1')?.content).toBe('before');
+    store.write({
+      ...restored,
+      version: restored.version + 1,
+      state: { ...restored.state, nodes: [] },
+      updatedAt: restored.updatedAt + 1,
+    });
+    expect(store.isNodeWriteSuppressed('n1')).toBe(false);
+  });
+});
+
+describe('executeOnServer — persistence failure atomicity', () => {
+  it('rolls record, affected sidecars, and an appended delta back before a retry', async () => {
+    const store = getCanvasStore('c1');
+    const before = {
+      canvasId: 'c1',
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          {
+            id: 'n1',
+            type: 'note',
+            position: { x: 0, y: 0 },
+            data: { label: 'A' },
+          },
+          {
+            id: 'n2',
+            type: 'note',
+            position: { x: 200, y: 0 },
+            data: { label: 'B' },
+          },
+        ],
+        edges: [],
+      },
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    store.write(before);
+    store.writeNode('n1', {
+      nodeId: 'n1',
+      type: 'note',
+      label: 'A',
+      content: 'a1',
+    });
+    store.writeNode('n2', {
+      nodeId: 'n2',
+      type: 'note',
+      label: 'B',
+      content: 'b1',
+    });
+    store.appendDeltaLogEntry({
+      version: 1,
+      ts: 1,
+      commands: [],
+      deltas: [],
+      originator: UI,
+    });
+    const logPath = join(tmp, 'c1', '.history', 'delta-log.jsonl');
+    appendFileSync(logPath, '{"crash-tail":', 'utf8');
+
+    const commands = [
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          { nodeId: 'n1', patch: { label: 'Renamed A', content: 'a2' } },
+        ],
+      },
+      { type: 'DELETE_NODES', nodeIds: ['n2'] },
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            id: 'n3',
+            nodeType: 'note',
+            position: { x: 400, y: 0 },
+            data: { label: 'C', content: 'c1' },
+          },
+        ],
+      },
+    ] as unknown as CanvasCommand[];
+
+    // Simulate the worst useful append failure: the complete row reached disk
+    // and then the adapter reported failure. Rollback must truncate that row,
+    // not merely repair topology and sidecars.
+    const originalAppend = store.appendDeltaLogEntry;
+    let failOnce = true;
+    store.appendDeltaLogEntry = (entry) => {
+      originalAppend.call(store, entry);
+      if (failOnce) {
+        failOnce = false;
+        // Model an unrelated external editor landing a sidecar during the
+        // failed commit. Rollback owns only ids in this transaction.
+        writeFileSync(
+          join(tmp, 'c1', 'nodes', 'External.md'),
+          '---\nid: external-concurrent\ntype: note\nlabel: External\n---\noutside\n',
+          'utf8',
+        );
+        throw new Error('injected delta append failure');
+      }
+    };
+
+    try {
+      await expect(
+        executeOnServer({ canvasId: 'c1', commands, originator: UI }),
+      ).rejects.toThrow('injected delta append failure');
+
+      expect(store.read()).toEqual(before);
+      expect(store.readNode('n1')).toMatchObject({
+        nodeId: 'n1',
+        label: 'A',
+        content: 'a1',
+      });
+      expect(store.readNode('n2')).toMatchObject({
+        nodeId: 'n2',
+        label: 'B',
+        content: 'b1',
+      });
+      expect(store.readNode('n3')).toBeNull();
+      expect(readdirSync(join(tmp, 'c1', 'nodes')).sort()).toEqual([
+        'A.md',
+        'B.md',
+        'External.md',
+      ]);
+      expect(store.readNode('external-concurrent')).toMatchObject({
+        label: 'External',
+        content: 'outside\n',
+      });
+      expect(store.readDeltaLogSince(0).map((entry) => entry.version)).toEqual([
+        1,
+      ]);
+      const repairedLog = readFileSync(logPath, 'utf8');
+      expect(repairedLog).not.toContain('crash-tail');
+      expect(repairedLog.endsWith('\n')).toBe(true);
+
+      const retried = await executeOnServer({
+        canvasId: 'c1',
+        commands,
+        originator: UI,
+      });
+
+      expect(retried.fromVersion).toBe(1);
+      expect(retried.toVersion).toBe(2);
+      expect(store.read()?.version).toBe(2);
+      expect(store.readNode('n1')).toMatchObject({
+        label: 'Renamed A',
+        content: 'a2',
+      });
+      expect(store.readNode('n2')).toBeNull();
+      expect(store.readNode('n3')).toMatchObject({ label: 'C', content: 'c1' });
+      expect(store.readDeltaLogSince(0).map((entry) => entry.version)).toEqual([
+        1, 2,
+      ]);
+    } finally {
+      store.appendDeltaLogEntry = originalAppend;
+    }
+  });
+
+  it('rejects a directory at delta-log.jsonl before mutation and retries at v2', async () => {
+    seedNote('c1', 'n1', 'before');
+    const store = getCanvasStore('c1');
+    const before = store.read();
+    if (!before) throw new Error('seeded canvas is missing');
+    const logPath = join(tmp, 'c1', '.history', 'delta-log.jsonl');
+    mkdirSync(logPath, { recursive: true });
+
+    const command = mergeContent('n1', 'after');
+    await expect(
+      executeOnServer({ canvasId: 'c1', commands: [command], originator: UI }),
+    ).rejects.toThrow('Delta log path is not a file');
+
+    // Snapshot validation happens before the commit callback: no sidecar,
+    // topology, or version mutation needs rollback.
+    expect(store.read()).toEqual(before);
+    expect(bodyOf('c1', 'n1')).toBe('before');
+    expect(readdirSync(join(tmp, 'c1', 'nodes'))).toEqual(['A.md']);
+
+    rmSync(logPath, { recursive: true });
+    const retried = await executeOnServer({
+      canvasId: 'c1',
+      commands: [command],
+      originator: UI,
+    });
+
+    expect(retried.fromVersion).toBe(1);
+    expect(retried.toVersion).toBe(2);
+    expect(bodyOf('c1', 'n1')).toBe('after');
+    expect(store.readDeltaLogSince(0).map((entry) => entry.version)).toEqual([
+      2,
+    ]);
+  });
+
+  it('removes a transaction-created empty history directory after append failure', async () => {
+    seedNote('c1', 'n1', 'before');
+    const store = getCanvasStore('c1');
+    const historyPath = join(tmp, 'c1', '.history');
+    const originalAppend = store.appendDeltaLogEntry;
+    store.appendDeltaLogEntry = (entry) => {
+      originalAppend.call(store, entry);
+      throw new Error('first append failed after write');
+    };
+
+    try {
+      await expect(
+        executeOnServer({
+          canvasId: 'c1',
+          commands: [mergeContent('n1', 'after')],
+          originator: UI,
+        }),
+      ).rejects.toThrow('first append failed after write');
+    } finally {
+      store.appendDeltaLogEntry = originalAppend;
+    }
+
+    expect(store.read()?.version).toBe(1);
+    expect(bodyOf('c1', 'n1')).toBe('before');
+    expect(existsSync(historyPath)).toBe(false);
+
+    const retried = await executeOnServer({
+      canvasId: 'c1',
+      commands: [mergeContent('n1', 'after')],
+      originator: UI,
+    });
+    expect(retried.toVersion).toBe(2);
+    expect(store.readDeltaLogSince(0).map((entry) => entry.version)).toEqual([
+      2,
+    ]);
+  });
+
+  it('preserves unrelated history content created during a failed first append', async () => {
+    seedNote('c1', 'n1', 'before');
+    const store = getCanvasStore('c1');
+    const historyPath = join(tmp, 'c1', '.history');
+    const unrelatedPath = join(historyPath, 'external.keep');
+    const logPath = join(historyPath, 'delta-log.jsonl');
+    const originalAppend = store.appendDeltaLogEntry;
+    store.appendDeltaLogEntry = (entry) => {
+      originalAppend.call(store, entry);
+      writeFileSync(unrelatedPath, 'unrelated', 'utf8');
+      throw new Error('first append failed with unrelated history content');
+    };
+
+    try {
+      await expect(
+        executeOnServer({
+          canvasId: 'c1',
+          commands: [mergeContent('n1', 'after')],
+          originator: UI,
+        }),
+      ).rejects.toThrow('first append failed with unrelated history content');
+    } finally {
+      store.appendDeltaLogEntry = originalAppend;
+    }
+
+    expect(store.read()?.version).toBe(1);
+    expect(bodyOf('c1', 'n1')).toBe('before');
+    expect(existsSync(logPath)).toBe(false);
+    expect(readFileSync(unrelatedPath, 'utf8')).toBe('unrelated');
+    expect(readdirSync(historyPath)).toEqual(['external.keep']);
+
+    const retried = await executeOnServer({
+      canvasId: 'c1',
+      commands: [mergeContent('n1', 'after')],
+      originator: UI,
+    });
+    expect(retried.toVersion).toBe(2);
+    expect(readFileSync(unrelatedPath, 'utf8')).toBe('unrelated');
+    expect(store.readDeltaLogSince(0).map((entry) => entry.version)).toEqual([
+      2,
+    ]);
+  });
+
+  it('captures an affected sidecar missed by a stale same-count filename index', () => {
+    seedNote('c1', 'n1', 'before');
+    const store = getCanvasStore('c1');
+    const before = store.read();
+    if (!before) throw new Error('seeded canvas is missing');
+    const nodesPath = join(tmp, 'c1', 'nodes');
+    renameSync(join(nodesPath, 'A.md'), join(nodesPath, 'Finder rename.md'));
+
+    // The warm index still points at A.md: a pure rename preserves the file
+    // count, so the cheap count probe alone cannot discover the new name.
+    expect(store.nodeIdForFilename('Finder rename.md')).toBeNull();
+
+    expect(() =>
+      runCanvasPersistenceTransaction({
+        canvasId: 'c1',
+        affectedNodeIds: new Set(['n1']),
+        nodeIdForFilename: (filename) => store.nodeIdForFilename(filename),
+        resetRecordState: () => store.write(before),
+        commit: () => {
+          store.writeNode('n1', {
+            nodeId: 'n1',
+            type: 'note',
+            label: 'Changed',
+            content: 'after',
+          });
+          throw new Error('injected after stale-index rename');
+        },
+      }),
+    ).toThrow('injected after stale-index rename');
+
+    expect(readdirSync(nodesPath)).toEqual(['Finder rename.md']);
+    expect(store.readNode('n1')).toMatchObject({
+      label: 'A',
+      content: 'before',
+    });
   });
 });
