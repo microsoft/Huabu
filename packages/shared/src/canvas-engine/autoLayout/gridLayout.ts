@@ -159,10 +159,11 @@ export function clampGridCount(raw: number | undefined): number {
  * headless server).
  *
  * It is deliberately NOT a track count and NOT clamped to the number of
- * children: blank cells carry meaning in `grid`, so rows are allowed to
- * be sparse. Twice the child count admits the sparsest arrangement that
- * still says something — a blank row between every pair of children —
- * while keeping the allocation O(children).
+ * children: callers may supply sparse row indices, so the solver must
+ * safely represent the intervening bands. Twice the child count permits
+ * one blank row between each pair of children while keeping allocation
+ * O(children). Blank row indices are not identity-bearing and may be
+ * compacted by a later structural drop.
  *
  * It does **not** apply to `gridRowCount`, which arrives already capped
  * at {@link FRAME_GRID_MAX_COUNT}; clamping that against a
@@ -952,10 +953,11 @@ export function applyRowLayout(
  * persistent, so later drags move one child instead of reshuffling
  * every row against the rendered geometry.
  *
- * Row indices are clamped to {@link gridRowCeiling}. Rows are allowed
- * to be sparse — a deliberately blank cell is meaningful here — but the
- * band array is allocated per row index, so an unclamped index turns a
- * single command into an unbounded allocation.
+ * Row indices are clamped to {@link gridRowCeiling}. Sparse indices are
+ * accepted as input, but the band array is allocated per row index, so an
+ * unclamped index turns a single command into an unbounded allocation.
+ * Blank rows remain addressable while present but have no stable identity
+ * across structural compaction.
  */
 function assignGridRows(
   children: ChildSlot[],
@@ -1341,8 +1343,9 @@ function axisBands(
  *  3. Otherwise → `into-existing` at the nearest track centre.
  *
  * Empty tracks need no special case: the masonry modes compact them
- * away before this runs, and a `grid`'s blank row is a deliberate cell
- * that must stay a drop target rather than a gap to wedge a row into.
+ * away before this runs, while a `grid` blank row remains an addressable
+ * drop target for as long as the solved layout contains it. It is not
+ * interpreted as a request to wedge in another row.
  */
 function pickAxisDropTarget(
   layout: FrameGridLayoutResult | null | undefined,
@@ -1525,8 +1528,8 @@ export interface StructuredDropContext {
   activeTrack: number;
   /**
    * Grid-only row bands under the simulated layout, in row order.
-   * Empty rows are included: they are real, addressable cells in
-   * `grid`, so hiding them would misreport the row count.
+   * Empty rows are included while present because they are addressable
+   * drop targets; hiding them would misreport the current row count.
    */
   rows: StructuredDropContextRect[];
   /** Index into {@link rows} the drop lands in; `-1` when unresolved. */
@@ -1728,10 +1731,9 @@ export function planStructuredDrop(
       }
     }
 
-    // Rows the move emptied disappear; later rows close the gap. Rows
-    // that were already blank before the drag are left alone — a blank
-    // cell is a statement in `grid`, and only the row this gesture
-    // vacated is incidental.
+    // Once a move empties any row, canonicalize every occupied row to a
+    // contiguous index. Blank row indices have no persistent identity;
+    // an explicit gridRowCount floor is materialized again by layout.
     const occupiedRows = new Set(rows.values());
     const emptiedRow = [...new Set(origRow.values())].some(
       (row) => !occupiedRows.has(row),
