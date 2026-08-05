@@ -25,7 +25,17 @@ const fileIO = vi.hoisted(() => ({
   readdir: vi.fn<() => Promise<Array<{ name: string; isFile: () => boolean }>>>(
     async () => [],
   ),
-  stat: vi.fn(async () => ({ mtimeMs: 1, isFile: () => true })),
+  stat: vi.fn<
+    (filePath: string) => Promise<{
+      mtimeMs: number;
+      isFile: () => boolean;
+      isDirectory: () => boolean;
+    }>
+  >(async () => ({
+    mtimeMs: 1,
+    isFile: () => true,
+    isDirectory: () => false,
+  })),
 }));
 
 vi.mock('node:fs/promises', () => fileIO);
@@ -109,7 +119,12 @@ beforeEach(() => {
   );
   fileIO.readdir.mockReset();
   fileIO.readdir.mockResolvedValue([]);
-  fileIO.stat.mockClear();
+  fileIO.stat.mockReset();
+  fileIO.stat.mockResolvedValue({
+    mtimeMs: 1,
+    isFile: () => true,
+    isDirectory: () => false,
+  });
   canvasStore.read.mockClear();
   canvasDirs.list.mockReturnValue([]);
   state.configured = true;
@@ -257,6 +272,180 @@ describe('openExternalNoteSession', () => {
 
     failed.close();
     retried.close();
+  });
+
+  it('watches the Space root until a missing nodes directory appears', async () => {
+    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
+    let nodesExists = false;
+    nativeWatchMock.mockImplementation(
+      (watchPath: string, _options: unknown, _callback: unknown) => {
+        if (
+          watchPath.split('\\').join('/').endsWith('/nodes') &&
+          !nodesExists
+        ) {
+          throw Object.assign(new Error('missing nodes directory'), {
+            code: 'ENOENT',
+          });
+        }
+        currentNative = makeFakeNativeWatcher();
+        return currentNative;
+      },
+    );
+    fileIO.stat.mockImplementation(async (filePath: string) => {
+      if (filePath.split('\\').join('/').endsWith('/nodes')) {
+        if (!nodesExists) {
+          throw Object.assign(new Error('missing nodes directory'), {
+            code: 'ENOENT',
+          });
+        }
+        return {
+          mtimeMs: 1,
+          isFile: () => false,
+          isDirectory: () => true,
+        };
+      }
+      return {
+        mtimeMs: 1,
+        isFile: () => true,
+        isDirectory: () => false,
+      };
+    });
+
+    const listener = vi.fn();
+    const first = await openExternalNoteSession('canvas-a', listener);
+    const second = await openExternalNoteSession('canvas-a', vi.fn());
+
+    expect(first.snapshot).toEqual([]);
+    expect(second.snapshot).toEqual([]);
+    expect(nativeWatchMock).toHaveBeenCalledTimes(2);
+    expect(
+      String(nativeWatchMock.mock.calls[0]?.[0]).split('\\').join('/'),
+    ).toMatch(/canvas-a[/]nodes$/);
+    expect(nativeWatchMock.mock.calls[1]?.[0]).toMatch(/canvas-a$/);
+    // The second subscriber shares the parent watcher instead of issuing a
+    // second failing readdir/watch against the missing child directory.
+    expect(fileIO.readdir).not.toHaveBeenCalled();
+
+    nodesExists = true;
+    const parentCallback = nativeWatchMock.mock.calls[1]?.[2] as
+      | ((eventType: string, filename: string) => void)
+      | undefined;
+    parentCallback?.('rename', 'nodes');
+
+    await vi.waitFor(() => {
+      expect(nativeWatchMock).toHaveBeenCalledTimes(3);
+      expect(fileIO.readdir).toHaveBeenCalledTimes(1);
+    });
+    expect(
+      String(nativeWatchMock.mock.calls[2]?.[0]).split('\\').join('/'),
+    ).toMatch(/canvas-a[/]nodes$/);
+
+    // The promoted child watcher remains live and reports later sidecars.
+    emitNativeWatcherEvent('later.md');
+    await vi.waitFor(() => {
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'added',
+          data: expect.objectContaining({ relativePath: 'nodes/later.md' }),
+        }),
+      );
+    });
+
+    first.close();
+    second.close();
+  });
+
+  it('falls back to the Space root when nodes is deleted, then watches its recreation', async () => {
+    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
+    let nodesExists = true;
+    nativeWatchMock.mockImplementation(
+      (watchPath: string, _options: unknown, _callback: unknown) => {
+        if (
+          watchPath.split('\\').join('/').endsWith('/nodes') &&
+          !nodesExists
+        ) {
+          throw Object.assign(new Error('missing nodes directory'), {
+            code: 'ENOENT',
+          });
+        }
+        currentNative = makeFakeNativeWatcher();
+        return currentNative;
+      },
+    );
+    fileIO.stat.mockImplementation(async (filePath: string) => {
+      if (filePath.split('\\').join('/').endsWith('/nodes')) {
+        if (!nodesExists) {
+          throw Object.assign(new Error('missing nodes directory'), {
+            code: 'ENOENT',
+          });
+        }
+        return {
+          mtimeMs: 1,
+          isFile: () => false,
+          isDirectory: () => true,
+        };
+      }
+      return {
+        mtimeMs: 1,
+        isFile: () => true,
+        isDirectory: () => false,
+      };
+    });
+
+    const events: ExternalNoteEvent[] = [];
+    const session = await openExternalNoteSession('canvas-a', (event) =>
+      events.push(event),
+    );
+    const originalChild = currentNative;
+    const originalChildCallback = nativeWatchMock.mock.calls[0]?.[2] as
+      | ((eventType: string, filename: string) => void)
+      | undefined;
+
+    nodesExists = false;
+    originalChildCallback?.('rename', 'nodes');
+
+    expect(originalChild.close).toHaveBeenCalledTimes(1);
+    expect(events.at(-1)).toEqual({
+      type: 'snapshot',
+      data: { items: [] },
+    });
+    expect(nativeWatchMock).toHaveBeenCalledTimes(3);
+    expect(nativeWatchMock.mock.calls[1]?.[0]).toMatch(/canvas-a[\\/]nodes$/);
+    expect(nativeWatchMock.mock.calls[2]?.[0]).toMatch(/canvas-a$/);
+
+    nodesExists = true;
+    const parentCallback = nativeWatchMock.mock.calls[2]?.[2] as
+      | ((eventType: string, filename: string) => void)
+      | undefined;
+    parentCallback?.('rename', 'nodes');
+
+    await vi.waitFor(
+      () => {
+        expect(nativeWatchMock).toHaveBeenCalledTimes(4);
+        expect(fileIO.readdir).toHaveBeenCalledTimes(2);
+      },
+      { timeout: 3_000 },
+    );
+    expect(
+      String(nativeWatchMock.mock.calls[3]?.[0]).split('\\').join('/'),
+    ).toMatch(/canvas-a[/]nodes$/);
+
+    emitNativeWatcherEvent('after-recreate.md');
+    await vi.waitFor(
+      () => {
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: 'added',
+            data: expect.objectContaining({
+              relativePath: 'nodes/after-recreate.md',
+            }),
+          }),
+        );
+      },
+      { timeout: 3_000 },
+    );
+
+    session.close();
   });
 
   it('delivers no events to a released subscriber while the session lives on', async () => {
