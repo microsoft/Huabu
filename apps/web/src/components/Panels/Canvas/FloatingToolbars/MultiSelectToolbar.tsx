@@ -342,6 +342,7 @@ export const MultiSelectToolbar = () => {
         <FloatingToolbar.NumberInput
           label="Font"
           ariaLabel="Font size"
+          name="font-size"
           value={textFlowSelection.fontSize}
           min={8}
           max={160}

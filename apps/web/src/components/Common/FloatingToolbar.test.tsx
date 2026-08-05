@@ -3,7 +3,7 @@
 
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FloatingToolbar } from './FloatingToolbar';
 
@@ -68,5 +68,53 @@ describe('FloatingToolbar.ColorPicker', () => {
     });
 
     expect(picked).toEqual(['red']);
+  });
+});
+
+describe('FloatingToolbar.SizePicker', () => {
+  it('renders auto height as static text with a 24px mode target', () => {
+    const onToggle = vi.fn();
+    const container = render(
+      <FloatingToolbar.SizePicker
+        width={320}
+        height={180}
+        onApply={vi.fn()}
+        autoSize={{ active: true, onToggle }}
+      />,
+    );
+
+    expect(container.querySelector('input[aria-label="Height"]')).toBeNull();
+
+    const autoValue = container.querySelector('span.text-fg-muted.italic');
+    expect(autoValue?.tagName).toBe('SPAN');
+    expect(autoValue?.classList.contains('h-6')).toBe(true);
+    expect(autoValue?.classList.contains('text-fg-subtle')).toBe(false);
+
+    const toggle = container.querySelector('button');
+    expect(toggle?.classList.contains('h-6')).toBe(true);
+    expect(toggle?.classList.contains('w-6')).toBe(true);
+
+    act(() => toggle?.click());
+    expect(onToggle).toHaveBeenCalledOnce();
+  });
+
+  it('keeps fixed height editable with a 24px input target', () => {
+    const container = render(
+      <FloatingToolbar.SizePicker
+        width={320}
+        height={180}
+        onApply={vi.fn()}
+        autoSize={{ active: false, onToggle: vi.fn() }}
+      />,
+    );
+
+    const heightInput = container.querySelector('input[aria-label="Height"]');
+    const widthInput = container.querySelector('input[aria-label="Width"]');
+    expect(widthInput?.getAttribute('name')).toBe('node-width');
+    expect(heightInput?.getAttribute('name')).toBe('node-height');
+    expect(heightInput?.classList.contains('h-6')).toBe(true);
+    expect(container.querySelector('button')?.classList.contains('h-6')).toBe(
+      true,
+    );
   });
 });

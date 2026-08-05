@@ -105,6 +105,8 @@ export const CanvasMenu: React.FC<CanvasMenuProps> = ({ onOpenShortcuts }) => {
       ) : (
         <input
           ref={inputRef}
+          name="space-title"
+          autoComplete="off"
           className="text-fg-default focus:shadow-bottom m-0 max-w-full min-w-8 overflow-hidden bg-transparent px-1 py-1 text-base font-medium text-ellipsis outline-none focus:rounded-md"
           value={draftTitle}
           onChange={(e) => setDraftTitle(e.target.value)}

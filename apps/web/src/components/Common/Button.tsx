@@ -103,7 +103,7 @@ const iconSizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
 };
 
 const iconOnlySizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
-  sm: 'p-1',
+  sm: 'min-h-6 min-w-6 p-1',
   md: 'p-1.5',
   lg: 'p-2',
 };

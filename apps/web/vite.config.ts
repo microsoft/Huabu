@@ -84,6 +84,12 @@ export default defineConfig(({ mode }) => {
     ],
     define: {
       __APP_VERSION__: JSON.stringify(appVersion),
+      // Milkdown/Crepe mounts Vue components internally. Declare Vue's
+      // esm-bundler flags explicitly using its fallback defaults so dev
+      // does not warn and production can tree-shake the guarded branches.
+      __VUE_OPTIONS_API__: JSON.stringify(true),
+      __VUE_PROD_DEVTOOLS__: JSON.stringify(false),
+      __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: JSON.stringify(false),
     },
     resolve: {
       alias: {

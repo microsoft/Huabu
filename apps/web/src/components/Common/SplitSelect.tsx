@@ -168,6 +168,14 @@ export function SplitSelect<T extends string = string>({
           disabled={disabled}
           onClick={handlePrimaryAction}
           title={primaryTitle}
+          aria-label={
+            iconOnly
+              ? (primaryTitle ??
+                current?.buttonLabel ??
+                current?.label ??
+                placeholder)
+              : undefined
+          }
           shortcutBadge={primaryShortcutBadge}
           shortcutBadgeActive={primaryShortcutBadgeActive}
           className={cn(
@@ -192,6 +200,7 @@ export function SplitSelect<T extends string = string>({
             disabled={disabled}
             onClick={handleToggle}
             title={menuTitle}
+            aria-label={menuTitle ?? `${current?.label ?? placeholder} options`}
             aria-expanded={isOpen}
             aria-haspopup="listbox"
             className={cn(

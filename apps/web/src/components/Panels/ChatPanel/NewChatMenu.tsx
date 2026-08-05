@@ -153,7 +153,7 @@ export const NewChatMenu = ({
           title={t('chat.startChatWith')}
           tooltipPlacement="bottom"
           className={cn(
-            'rounded-l-none px-0.5 [&_svg]:h-3 [&_svg]:w-3',
+            'min-w-6 rounded-l-none px-0.5 [&_svg]:h-3 [&_svg]:w-3',
             isOpen && 'bg-bg-default',
           )}
         >
