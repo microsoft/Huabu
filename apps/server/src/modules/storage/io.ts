@@ -13,7 +13,10 @@ import {
   renameSync,
   writeFileSync,
 } from 'node:fs';
-import { readFile as readFileAsync } from 'node:fs/promises';
+import {
+  readFile as readFileAsync,
+  rename as renameAsync,
+} from 'node:fs/promises';
 import path from 'node:path';
 
 /** Pattern allowed for canvas / node / thread identifiers. */
@@ -110,12 +113,84 @@ export async function mapWithConcurrency<T, R>(
   return results;
 }
 
+/**
+ * Backoff schedule (ms) for a rename whose target is momentarily locked.
+ * Bounded at ~310ms total: long enough to outlast a virus scan or a cloud
+ * sync client's read, short enough that a genuinely broken write still fails
+ * promptly.
+ */
+const RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160];
+
+/**
+ * Windows fails a rename whose destination is open in another handle. Unlike
+ * a POSIX `rename(2)`, which replaces the target atomically and cannot fail
+ * this way, `MoveFileEx` reports `EPERM` (or `EACCES` / `EBUSY`) whenever a
+ * virus scanner, a cloud-sync client, an editor, or a file watcher happens to
+ * hold the file open — none of which require a second writer to be present.
+ */
+function isTransientRenameError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
+}
+
+/**
+ * Blocks the calling thread. Only ever used between rename attempts, from the
+ * synchronous write path, which already runs inside the per-canvas mutex and
+ * whose critical section is otherwise microsecond-scale. The alternative — an
+ * immediate retry with no pause — loses to any holder that keeps the file
+ * longer than a few instructions, which is the common case.
+ */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** {@link renameSync} that rides out a transiently locked destination. */
+export function renameOverWithRetrySync(from: string, to: string): void {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (err) {
+      if (
+        attempt >= RENAME_RETRY_DELAYS_MS.length ||
+        !isTransientRenameError(err)
+      ) {
+        throw err;
+      }
+      sleepSync(RENAME_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
+/** Async counterpart of {@link renameOverWithRetrySync}. */
+export async function renameOverWithRetry(
+  from: string,
+  to: string,
+): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await renameAsync(from, to);
+      return;
+    } catch (err) {
+      if (
+        attempt >= RENAME_RETRY_DELAYS_MS.length ||
+        !isTransientRenameError(err)
+      ) {
+        throw err;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, RENAME_RETRY_DELAYS_MS[attempt]),
+      );
+    }
+  }
+}
+
 /** Atomic write of a UTF-8 text file. */
 export function atomicWriteText(filePath: string, contents: string): void {
   mkdirp(path.dirname(filePath));
   const tmp = `${filePath}.tmp`;
   writeFileSync(tmp, contents, 'utf-8');
-  renameSync(tmp, filePath);
+  renameOverWithRetrySync(tmp, filePath);
 }
 
 /** Atomic write of a JSON file (pretty-printed with 2-space indent). */

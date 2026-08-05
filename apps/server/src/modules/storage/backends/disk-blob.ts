@@ -16,7 +16,6 @@ import {
   mkdir,
   readdir,
   readFile,
-  rename,
   rm,
   stat,
   writeFile,
@@ -24,6 +23,7 @@ import {
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
+import { renameOverWithRetry } from '../io.js';
 import { artifactPath, artifactsDir } from '../paths.js';
 import { createBlobLease, normalizeBlobName } from '../ports/blob.js';
 
@@ -98,7 +98,7 @@ class DiskBlobScope implements BlobScope {
       // describes the bytes we wrote rather than whatever a concurrent
       // writer may have put at `full` by the time we look.
       const stats = await stat(temp);
-      await rename(temp, full);
+      await renameOverWithRetry(temp, full);
       return {
         name: safe,
         size: stats.size,
