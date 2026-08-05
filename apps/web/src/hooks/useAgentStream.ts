@@ -21,7 +21,12 @@ import { i18n } from '@/i18n';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
+import {
+  selectCurrentIsLoading,
+  selectThreadIsLoading,
+  selectThreadMessages,
+  useChatStore,
+} from '@/store/chatStore';
 import {
   conversationRequestScope,
   ConversationIntegrityError,
@@ -167,11 +172,11 @@ export function setAcpSessionMetaSink(sink: AcpSessionMetaSink | null): void {
  * the tool-call / plan handlers which may fire before any text_delta.
  */
 function ensureAssistantMessage(ctx: StreamEventContext): void {
-  const { addMessage, messagesByThread } = useChatStore.getState();
-  const list = messagesByThread[ctx.threadId] ?? [];
+  const state = useChatStore.getState();
+  const list = selectThreadMessages(state, ctx.threadId);
   const existing = list.find((m) => m.id === ctx.assistantId);
   if (!existing) {
-    addMessage(ctx.threadId, {
+    state.addMessage(ctx.threadId, {
       id: ctx.assistantId,
       role: 'assistant',
       segments: [],
@@ -367,14 +372,15 @@ function applyInternalToolResult(
   toolName: string,
   rawText: string,
 ): void {
-  const { upsertAssistantToolPart, messagesByThread } = useChatStore.getState();
+  const { upsertAssistantToolPart } = useChatStore.getState();
   const toolResponse = parseToolResponse(toolName, rawText);
   if (!toolResponse) return;
 
   const variant = variantForInternalTool(toolName);
-  const assistantMsg = (messagesByThread[ctx.threadId] ?? []).find(
-    (m) => m.id === ctx.assistantId,
-  );
+  const assistantMsg = selectThreadMessages(
+    useChatStore.getState(),
+    ctx.threadId,
+  ).find((m) => m.id === ctx.assistantId);
   let existingArgs: Record<string, unknown> = {};
   if (assistantMsg?.role === 'assistant') {
     const priorPart = assistantMsg.segments.find(
@@ -427,17 +433,13 @@ export function handleStreamEvent(
   event: AgentStreamEvent,
   ctx: StreamEventContext,
 ): void {
-  const {
-    addMessage,
-    updateMessage,
-    upsertAssistantToolPart,
-    messagesByThread,
-  } = useChatStore.getState();
+  const state = useChatStore.getState();
+  const { addMessage, updateMessage, upsertAssistantToolPart } = state;
   // All reads / writes below key off the owner thread captured on
   // `ctx`, never the currently-visible thread. This is what makes
   // mid-stream thread switches safe — events keep landing on the
   // thread that issued the request.
-  const ownerMessages = messagesByThread[ctx.threadId] ?? [];
+  const ownerMessages = selectThreadMessages(state, ctx.threadId);
 
   if (event.type === 'text_delta' || event.type === 'thinking_delta') {
     const delta = event.data.content;
@@ -641,9 +643,7 @@ export function useAgentStream(): UseAgentStreamReturn {
   // Loading is per-thread (a question node thread can stream
   // independently of the canvas chat), so read the flag for the
   // currently-visible thread from the store.
-  const isLoading = useChatStore((state) =>
-    state.loadingThreadIds.has(state.threadId),
-  );
+  const isLoading = useChatStore(selectCurrentIsLoading);
   const setThreadLoading = useChatStore((state) => state.setThreadLoading);
 
   const addMessage = useChatStore((state) => state.addMessage);
@@ -698,7 +698,7 @@ export function useAgentStream(): UseAgentStreamReturn {
       // different chat (canvas chat + question node both active).
       if (
         !prompt.trim() ||
-        useChatStore.getState().loadingThreadIds.has(threadId)
+        selectThreadIsLoading(useChatStore.getState(), threadId)
       )
         return;
 
@@ -1208,7 +1208,7 @@ export function useAgentStream(): UseAgentStreamReturn {
 
     // Mark any still-pending tool parts as cancelled so the renderer
     // can drop spinners / show a definitive end state.
-    const msgs = useChatStore.getState().messagesByThread[tid] ?? [];
+    const msgs = selectThreadMessages(useChatStore.getState(), tid);
     for (const msg of msgs) {
       if (msg.role !== 'assistant') continue;
       const hasInflight = msg.segments.some(

@@ -1068,21 +1068,54 @@ export const useChatStore = create<ChatState>()(
 /** Stable empty array so selectors that miss the cache don't trigger renders. */
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
+// ─── Thread-scoped reads ──────────────────────────────────────────────────
+//
+// Every read of a thread's cached state goes through one of these. They are
+// the seam the Preview Workspace migration needs: once two Chat renderers can
+// be mounted at once there is no "current thread" to read from, and callers
+// must name the thread they mean. Keeping the storage shape behind them also
+// means normalizing it into one object per thread touches this file only.
+
+/**
+ * A thread's message list. Returns a stable empty array reference when the
+ * thread has not been hydrated yet.
+ */
+export const selectThreadMessages = (
+  state: ChatState,
+  threadId: string,
+): ChatMessage[] => state.messagesByThread[threadId] ?? EMPTY_MESSAGES;
+
+/** A thread's composer draft ('' when none). */
+export const selectThreadDraft = (state: ChatState, threadId: string): string =>
+  state.draftsByThread[threadId] ?? '';
+
+/** True if a thread has been hydrated from the server. */
+export const selectThreadHistoryLoaded = (
+  state: ChatState,
+  threadId: string,
+): boolean => state.historyLoadedThreads.has(threadId);
+
+/** True if a thread has an active streaming run. */
+export const selectThreadIsLoading = (
+  state: ChatState,
+  threadId: string,
+): boolean => state.loadingThreadIds.has(threadId);
+
 /**
  * Read the currently-visible thread's message list. Returns a stable
  * empty array reference when the thread hasn't been hydrated yet.
  */
 export const selectCurrentMessages = (state: ChatState): ChatMessage[] =>
-  state.messagesByThread[state.threadId] ?? EMPTY_MESSAGES;
+  selectThreadMessages(state, state.threadId);
 
 /** Read the currently-visible thread's composer draft ('' when none). */
 export const selectCurrentDraft = (state: ChatState): string =>
-  state.draftsByThread[state.threadId] ?? '';
+  selectThreadDraft(state, state.threadId);
 
 /** True if the currently-visible thread has been hydrated from the server. */
 export const selectCurrentHistoryLoaded = (state: ChatState): boolean =>
-  state.historyLoadedThreads.has(state.threadId);
+  selectThreadHistoryLoaded(state, state.threadId);
 
 /** True if the currently-visible thread has an active streaming run. */
 export const selectCurrentIsLoading = (state: ChatState): boolean =>
-  state.loadingThreadIds.has(state.threadId);
+  selectThreadIsLoading(state, state.threadId);

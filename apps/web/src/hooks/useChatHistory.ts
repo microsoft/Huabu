@@ -9,7 +9,13 @@ import { agentApi } from '@/api/agent';
 import { isActivelyViewingQuestion } from '@/hooks/useActivelyViewingQuestion';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
+import {
+  selectCurrentHistoryLoaded,
+  selectThreadHistoryLoaded,
+  selectThreadIsLoading,
+  selectThreadMessages,
+  useChatStore,
+} from '@/store/chatStore';
 import {
   ConversationIntegrityError,
   filterClientOwnedQuestionPatch,
@@ -36,9 +42,7 @@ export function useChatHistory(
   setIsLoading: (threadId: string, loading: boolean) => void,
 ): void {
   const threadId = useChatStore((state) => state.threadId);
-  const isHistoryLoaded = useChatStore((state) =>
-    state.historyLoadedThreads.has(state.threadId),
-  );
+  const isHistoryLoaded = useChatStore(selectCurrentHistoryLoaded);
   const addMessage = useChatStore((state) => state.addMessage);
   const canvasId = useCanvasStore((state) => state.canvasId);
   const conversationView = useChatStore((state) => state.viewingQuestionThread);
@@ -68,7 +72,7 @@ export function useChatHistory(
     // mid-fetch, we still want to land the response on the originating
     // thread (cache survives navigation) rather than the current one.
     const tid = useChatStore.getState().threadId;
-    if (useChatStore.getState().historyLoadedThreads.has(tid)) return;
+    if (selectThreadHistoryLoaded(useChatStore.getState(), tid)) return;
 
     let cancelled = false;
 
@@ -233,7 +237,7 @@ export function useChatHistory(
     // streaming. If history is empty or ends with an assistant message,
     // there's nothing to reconnect to — skip the request entirely to
     // avoid a 404 in the browser console.
-    const msgs = useChatStore.getState().messagesByThread[threadId] ?? [];
+    const msgs = selectThreadMessages(useChatStore.getState(), threadId);
     if (msgs.length === 0) return;
     const lastMsg = msgs[msgs.length - 1];
     if (lastMsg.role !== 'user' && lastMsg.role !== 'intent-select') return;
@@ -250,7 +254,7 @@ export function useChatHistory(
     // the whole lead time — seconds on a resumed ACP session, during which
     // any re-render that changes `effectiveConversationView` (e.g.
     // re-opening the same question thread) re-runs this effect.
-    if (useChatStore.getState().loadingThreadIds.has(threadId)) return;
+    if (selectThreadIsLoading(useChatStore.getState(), threadId)) return;
 
     let cancelled = false;
     const ownerThreadId = threadId;
@@ -370,8 +374,10 @@ export function useChatHistory(
       // current run — the reconnect event buffer replays them fully.
       // Keep only messages up to and including the last user message.
       const clearStaleMessages = () => {
-        const current =
-          useChatStore.getState().messagesByThread[ownerThreadId] ?? [];
+        const current = selectThreadMessages(
+          useChatStore.getState(),
+          ownerThreadId,
+        );
         let lastUserIdx = -1;
         for (let i = current.length - 1; i >= 0; i--) {
           if (

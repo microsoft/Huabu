@@ -15,7 +15,7 @@ import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore.ts';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
-import { useChatStore } from '@/store/chatStore.ts';
+import { selectThreadMessages, useChatStore } from '@/store/chatStore.ts';
 import { findPendingPermissionRequestId } from '@/store/chatTypes.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
 import {
@@ -134,7 +134,7 @@ export const QuestionNode = memo(
       if (!data.threadId) return false;
       return (
         findPendingPermissionRequestId(
-          s.messagesByThread[data.threadId] ?? [],
+          selectThreadMessages(s, data.threadId),
         ) !== null
       );
     });

@@ -356,11 +356,13 @@ Every stage below is independently shippable. A stage may land as more than one 
 - Delete `previewStore` and the unreachable branches it fed. Landed ahead of this proposal; the state was unreachable because nothing called `openPreview`.
 - Add characterization tests for `chatStore` covering per-thread caches, the global singletons that Stage 2 will move, `switchToCanvas`, `clearMessages`, the Question open/close round trip, node-deletion rollback, and thread eviction. These are the regression net Stage 2 refactors against, and they must keep passing unchanged wherever the behavior is intended to survive.
 
-### Stage 1: Workspace model
+### Stage 1: Workspace model (shipped)
 
-- Add the target, tab, group, and per-Canvas workspace store with semantic target equality.
-- Add reducer-level tests for open, global target uniqueness, reorder, move, Open to Side, split, merge, close, transient-tab reuse, MRU eviction, validation, and persistence migration.
-- Keep compatibility adapters for the existing single-panel actions during migration. The adapters are one-directional: the workspace store is authoritative and the legacy actions delegate to it. Nothing writes back into `canvasStore.expandedNodeId` from the workspace, so there is never a second source of truth.
+- Add the target, tab, and group model with semantic target equality as pure reducers: no React, no store binding, no storage.
+- Add the per-Canvas persistence layer with a versioned record, repair-on-read, a capped Canvas index, and the seed from pre-workspace Chat state.
+- Cover open, global target uniqueness, reveal without relocation, reorder, move, Open to Side, split, merge, close, transient-tab reuse, MRU eviction, validation, defensive parsing, and index capping.
+
+The zustand binding and the compatibility adapters for the existing single-panel actions are deliberately **not** part of this stage. Bound to nothing, they would sit unused through all of Stage 2 while still having to be kept correct against two moving targets. They land in Stage 3 with their first real consumer. The pure model is not idle in the same way: it is a fully tested library that Stage 3 assembles rather than code waiting for a caller.
 
 ### Stage 2: Session-scoped Chat
 
@@ -371,6 +373,7 @@ Every stage below is independently shippable. A stage may land as more than one 
 
 ### Stage 3: Workspace UI
 
+- Bind the Stage 1 model into a zustand store and add the compatibility adapters for the existing single-panel actions. The adapters are one-directional: the workspace store is authoritative and the legacy actions delegate to it. Nothing writes back into `canvasStore.expandedNodeId` from the workspace, so there is never a second source of truth.
 - Build the tab strip, group, renderer dispatch, split handle, drag-and-drop, empty state, transient-tab affordance, and accessibility behavior.
 - Resolve L10 of §10.1 by scoping window-level keyboard and selection handlers to the focused group.
 - Mount only the active tab in each group and settle editable Note/Text content before switching or closing.
