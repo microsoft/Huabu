@@ -37,6 +37,8 @@ import {
   safeResolve,
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
+import { canvasBlobs } from '../storage/index.js';
+import { artifactsDir } from '../storage/paths.js';
 
 import type { CanvasStore } from '../storage/index.js';
 
@@ -262,8 +264,10 @@ async function resolveImportedSrc(
   }
 
   // Already inside `.artifacts/` (or a bare artifact key that resolves there)
-  // — nothing to import.
-  const artifactsRoot = store.artifactsDir();
+  // — nothing to import. This inspects the real local filesystem, as the
+  // whole local-import branch does; only the write below goes through the
+  // blob port.
+  const artifactsRoot = artifactsDir(canvasId);
   if (
     absPath === artifactsRoot ||
     absPath.startsWith(artifactsRoot + path.sep)
@@ -287,7 +291,7 @@ async function resolveImportedSrc(
   return await copyToArtifact(store, absPath, physicalRel);
 }
 
-/** Copy a canvas-local file into `.artifacts/`, returning the new key. */
+/** Copy a canvas-local file into blob storage, returning the new key. */
 async function copyToArtifact(
   store: CanvasStore,
   absPath: string,
@@ -296,12 +300,12 @@ async function copyToArtifact(
   try {
     const ext = path.extname(absPath) || '.bin';
     const id = createId('artifact');
-    const buffer = await readFile(absPath);
-    await store.writeArtifactBuffer({ id, ext, mimeType: null }, buffer);
     const key = `${id}${ext}`;
+    const buffer = await readFile(absPath);
+    await canvasBlobs(store.canvasId).put(key, buffer);
 
-    // Move semantics: reclaim RFS scratch uploads once they are safely in
-    // `.artifacts/`. Never delete user node files or other canvas content —
+    // Move semantics: reclaim RFS scratch uploads once they are safely
+    // stored. Never delete user node files or other canvas content —
     // only the hidden `.upload/` staging dir is fair game.
     const normalized = physicalRel.split(path.sep).join('/');
     if (normalized.startsWith(UPLOAD_DIR_NAME + '/')) {
@@ -353,12 +357,9 @@ async function downloadToArtifact(
       return null;
     }
     const ext = pickDownloadExt(pathname, contentType);
-    const id = createId('artifact');
-    await store.writeArtifactBuffer(
-      { id, ext, mimeType: contentType || null },
-      buffer,
-    );
-    return `${id}${ext}`;
+    const key = `${createId('artifact')}${ext}`;
+    await canvasBlobs(store.canvasId).put(key, buffer);
+    return key;
   } catch (err) {
     log.warn({ err, url }, 'Failed to download online node src into artifacts');
     return null;

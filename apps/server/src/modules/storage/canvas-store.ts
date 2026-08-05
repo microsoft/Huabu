@@ -3,16 +3,14 @@
  */
 
 import {
-  createWriteStream,
   existsSync,
   readdirSync,
   rmSync,
   statSync,
   unlinkSync,
 } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
 
 import { coalesceChanges } from '@sediment/shared/canvas-engine';
 
@@ -41,8 +39,6 @@ import {
 import { NameIndex } from './name-index.js';
 import { toSafeFilename } from './naming.js';
 import {
-  artifactPath,
-  artifactsDir,
   canvasJsonPath,
   canvasRoot,
   changesPath,
@@ -70,14 +66,6 @@ const log = getLogger('canvas-store');
 interface NodeFileEntry {
   id: string;
   filename: string;
-}
-
-/** On-disk artifact descriptor. Filename is always `<id><ext>`. */
-export interface ArtifactRecord {
-  id: string;
-  ext: string;
-  filename: string;
-  mimeType: string | null;
 }
 
 /** On-disk shape of `<canvasDir>/space.json`. */
@@ -199,14 +187,6 @@ export class CanvasStoreIOError extends Error {
     this.name = 'CanvasStoreIOError';
     if (options?.cause !== undefined) this.cause = options.cause;
   }
-}
-
-export interface WriteArtifactInput {
-  /** Stable artifact id. Doubles as the URL key stem. */
-  id: string;
-  /** File extension including the dot, e.g. `.pdf`. */
-  ext: string;
-  mimeType?: string | null;
 }
 
 /**
@@ -1080,60 +1060,10 @@ export class CanvasStore {
 
   // ── Artifacts ────────────────────────────────────────────────────────────
   //
-  // Files live in `<canvasDir>/.artifacts/` named `<artifactId><ext>`.
-  // The on-disk filename equals the URL key, so no manifest indirection
-  // is needed — `data.src` on a node carries the URL directly and the
-  // node's markdown carries it in frontmatter.
-
-  artifactsDir(): string {
-    return artifactsDir(this.canvasId);
-  }
-
-  artifactPath(filename: string): string {
-    return artifactPath(this.canvasId, filename);
-  }
-
-  private buildRecord(filename: string): ArtifactRecord {
-    const ext = path.extname(filename);
-    const id = ext ? filename.slice(0, -ext.length) : filename;
-    return { id, ext, filename, mimeType: null };
-  }
-
-  async writeArtifactStream(
-    input: WriteArtifactInput,
-    src: NodeJS.ReadableStream,
-  ): Promise<ArtifactRecord> {
-    mkdirp(artifactsDir(this.canvasId));
-    const filename = `${input.id}${input.ext}`;
-    await pipeline(src, createWriteStream(this.artifactPath(filename)));
-    return {
-      id: input.id,
-      ext: input.ext,
-      filename,
-      mimeType: input.mimeType ?? null,
-    };
-  }
-
-  async writeArtifactBuffer(
-    input: WriteArtifactInput,
-    data: Buffer,
-  ): Promise<ArtifactRecord> {
-    mkdirp(artifactsDir(this.canvasId));
-    const filename = `${input.id}${input.ext}`;
-    await writeFile(this.artifactPath(filename), data);
-    return {
-      id: input.id,
-      ext: input.ext,
-      filename,
-      mimeType: input.mimeType ?? null,
-    };
-  }
-
-  /** Resolve a URL key to an absolute path, or null when the file is gone. */
-  resolveArtifactFilePath(key: string): string | null {
-    const fullPath = this.artifactPath(path.basename(key));
-    return existsSync(fullPath) ? fullPath : null;
-  }
+  // Artifact bytes are NOT owned here. They live behind the `BlobStore`
+  // port — `canvasBlobs(canvasId)` in `storage.js` — so this store holds
+  // structured records only and a non-filesystem blob backend can be
+  // configured independently. See docs/proposals/multi-backend-storage.md.
 
   // ── Chat ─────────────────────────────────────────────────────────────────
 

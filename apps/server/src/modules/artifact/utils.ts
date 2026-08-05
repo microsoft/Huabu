@@ -1,10 +1,10 @@
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { ARTIFACT_URL_REGEX } from '@sediment/shared';
 
 import { getLogger } from '../../utils/logger.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
+import { canvasBlobs } from '../storage/index.js';
 
 const log = getLogger('artifact');
 
@@ -19,7 +19,7 @@ export { ARTIFACT_URL_REGEX, artifactApiPath } from '@sediment/shared';
  * Three input shapes are recognised:
  *
  *   1. Bare artifact key (`<artifactId><ext>`) — combined with
- *      `defaultCanvasId` to locate the file. This is the canonical form
+ *      `defaultCanvasId` to locate the blob. This is the canonical form
  *      that the front-end persists in `data.src` after the bare-key
  *      migration.
  *   2. Full canvas-scoped URL (`/api/canvas/<id>/artifact/<key>`) —
@@ -28,13 +28,11 @@ export { ARTIFACT_URL_REGEX, artifactApiPath } from '@sediment/shared';
  *   3. Anything else (data: URLs, absolute http(s) URLs, unrelated
  *      paths) — returned verbatim.
  *
- * The `resolvePath` callback may return `null` to signal that the URL
- * key has no matching stored artifact (e.g. a stale URL after the file
- * was deleted), in which case the original URL is returned unchanged.
+ * A URL whose key has no stored blob (e.g. a stale reference after the
+ * artifact was deleted) is returned unchanged.
  */
 export async function resolveArtifactImageUrl(
   url: string,
-  resolvePath: (canvasId: string, filename: string) => string | null,
   defaultCanvasId: string | null = null,
 ): Promise<string> {
   if (!url || url.startsWith('data:')) return url;
@@ -54,19 +52,17 @@ export async function resolveArtifactImageUrl(
 
   if (!canvasId || !filename) return url;
 
-  const filePath = resolvePath(canvasId, filename);
-  if (!filePath) return url;
-
   try {
-    const buffer = await readFile(filePath);
-    const ext = path.extname(filePath).toLowerCase();
+    const buffer = await canvasBlobs(canvasId).read(filename);
+    if (!buffer) return url;
+    const ext = path.extname(filename).toLowerCase();
     // Never guess `image/png` for an unknown extension: callers forward this
     // MIME to the LLM, which sniffs the real bytes and rejects the whole
     // request when the declared type doesn't match.
     const mime = IMAGE_MIME_MAP[ext] ?? 'application/octet-stream';
     return `data:${mime};base64,${buffer.toString('base64')}`;
   } catch (err) {
-    log.warn({ err, filePath }, 'Failed to read artifact');
+    log.warn({ err, canvasId, filename }, 'Failed to read artifact');
     return url;
   }
 }

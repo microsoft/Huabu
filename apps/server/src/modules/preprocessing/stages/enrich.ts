@@ -30,7 +30,6 @@ export async function enrich(
   normalized: NormalizeResult | undefined,
   capabilities: Capability[],
   provider: ProviderManager,
-  resolveArtifact: (canvasId: string, filename: string) => string | null,
   canvasId: string,
 ): Promise<EnrichResult> {
   const needsLabel = capabilities.includes('generate_label');
@@ -74,11 +73,7 @@ export async function enrich(
     if (nodeType === 'image') {
       const src = resolved.imageSrc;
       if (src) {
-        const label = await provider.generateImageLabel(
-          src,
-          resolveArtifact,
-          canvasId,
-        );
+        const label = await provider.generateImageLabel(src, canvasId);
         return label ? { suggestedLabel: label } : { skipped: true };
       }
     } else if (nodeType === 'frame') {

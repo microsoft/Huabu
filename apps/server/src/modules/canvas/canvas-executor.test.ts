@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
 import { executeOnServer } from './canvas-executor.js';
-import { getCanvasStore } from '../storage/index.js';
+import { canvasBlobs, getCanvasStore } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { CanvasCommand, ExecuteOriginator } from '@sediment/shared';
@@ -256,8 +256,8 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
       src: 'old.svg',
       content: '',
     });
-    await store.writeArtifactBuffer(
-      { id: 'new', ext: '.svg', mimeType: 'image/svg+xml' },
+    await canvasBlobs('c1').put(
+      'new.svg',
       Buffer.from(
         '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>',
       ),
@@ -312,8 +312,8 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
       src: 'pic.svg',
       content: '',
     });
-    await store.writeArtifactBuffer(
-      { id: 'pic', ext: '.svg', mimeType: 'image/svg+xml' },
+    await canvasBlobs('c1').put(
+      'pic.svg',
       Buffer.from(
         '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>',
       ),

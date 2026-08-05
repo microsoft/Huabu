@@ -50,6 +50,7 @@ import {
   suggestCanvasDir,
 } from '../storage/canvas-dirs.js';
 import {
+  canvasBlobs,
   createCanvas,
   deleteCanvas,
   getCanvasStore,
@@ -326,12 +327,28 @@ function extractArtifactKey(value: unknown): string | null {
  * out of scope for this check.
  */
 function isArtifactMissing(
-  store: CanvasStore,
+  artifactExists: (key: string) => boolean,
   data: Record<string, unknown>,
 ): boolean {
   const key = extractArtifactKey(data['src']);
   if (!key) return false;
-  return store.resolveArtifactFilePath(key) === null;
+  return !artifactExists(key);
+}
+
+/**
+ * Presence predicate covering a single node's artifact.
+ *
+ * Batch callers build theirs from one `hasMany()`; a single-node endpoint
+ * submits a one-key batch for the only key that can matter.
+ */
+async function singleArtifactProbe(
+  canvasId: string,
+  src: unknown,
+): Promise<(key: string) => boolean> {
+  const key = extractArtifactKey(src);
+  if (!key) return () => false;
+  const exists = (await canvasBlobs(canvasId).hasMany([key])).has(key);
+  return (candidate) => candidate === key && exists;
 }
 
 /**
@@ -352,6 +369,7 @@ function isArtifactMissing(
 function hydrateOneNode(
   store: CanvasStore,
   node: NodeLike,
+  artifactExists: (key: string) => boolean,
   preloaded?: NodeContent | null,
 ): NodeLike {
   const nodeId = typeof node.id === 'string' ? node.id : '';
@@ -474,7 +492,7 @@ function hydrateOneNode(
   // would unconditionally return `false`, silently masking deleted
   // artifacts.
   if (ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) {
-    if (isArtifactMissing(store, data)) {
+    if (isArtifactMissing(artifactExists, data)) {
       data['artifactMissing'] = true;
     } else if ('artifactMissing' in data) {
       delete data['artifactMissing'];
@@ -499,16 +517,38 @@ function hydrateOneNode(
  * `readText` on every file, making large canvases noticeably slow to
  * load on cold cache.
  */
-function hydrateNodeContent(
+async function hydrateNodeContent(
   store: CanvasStore,
   nodes: NodeLike[],
 ): Promise<NodeLike[]> {
-  return store.readAllNodes().then((contentByNodeId) =>
-    nodes.map((node) => {
-      const nodeId = typeof node.id === 'string' ? node.id : '';
-      return hydrateOneNode(store, node, contentByNodeId.get(nodeId) ?? null);
-    }),
-  );
+  // Read sidecars first because they are the source of truth for `src`.
+  // Probe only the keys referenced by artifact-backed nodes; enumerating the
+  // entire scope would make hydration cost grow with unrelated blob count.
+  const contentByNodeId = await store.readAllNodes();
+  const referenced = new Set<string>();
+  for (const node of nodes) {
+    const nodeType = typeof node.type === 'string' ? node.type : '';
+    if (!ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) continue;
+    const nodeId = typeof node.id === 'string' ? node.id : '';
+    const key = extractArtifactKey(contentByNodeId.get(nodeId)?.src);
+    if (key) referenced.add(key);
+  }
+
+  const present =
+    referenced.size === 0
+      ? new Set<string>()
+      : await canvasBlobs(store.canvasId).hasMany([...referenced]);
+  const artifactExists = (key: string): boolean => present.has(key);
+
+  return nodes.map((node) => {
+    const nodeId = typeof node.id === 'string' ? node.id : '';
+    return hydrateOneNode(
+      store,
+      node,
+      artifactExists,
+      contentByNodeId.get(nodeId) ?? null,
+    );
+  });
 }
 
 const canvasRoutes: FastifyPluginAsync = async (fastify) => {
@@ -845,14 +885,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     if (ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) {
       const srcForCheck =
         typeof persisted?.src === 'string' ? persisted.src : '';
-      if (
-        srcForCheck &&
-        isArtifactMissing(store, { src: srcForCheck } as Record<
-          string,
-          unknown
-        >)
-      ) {
-        response.artifactMissing = true;
+      if (srcForCheck) {
+        const probe = await singleArtifactProbe(store.canvasId, srcForCheck);
+        if (isArtifactMissing(probe, { src: srcForCheck })) {
+          response.artifactMissing = true;
+        }
       }
     }
     return reply.send(response);
@@ -915,11 +952,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Reuse the batched hydration helper so single-node and whole-
     // canvas reads stay in lock-step.
-    const hydrated = hydrateOneNode(store, {
-      id: nodeId,
-      type: nodeType,
-      data: { ...(stateNode?.data ?? {}) },
-    });
+    const hydrated = hydrateOneNode(
+      store,
+      {
+        id: nodeId,
+        type: nodeType,
+        data: { ...(stateNode?.data ?? {}) },
+      },
+      await singleArtifactProbe(store.canvasId, existing.src),
+    );
     const data = (hydrated.data ?? {}) as Record<string, unknown>;
 
     const resolvedContent =

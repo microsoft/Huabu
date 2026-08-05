@@ -26,9 +26,6 @@
  *     fine-grained `SET_*` deltas.
  */
 
-import { existsSync } from 'node:fs';
-import { open, readFile } from 'node:fs/promises';
-
 import { imageSize } from 'image-size';
 
 import {
@@ -61,15 +58,16 @@ import {
 } from './world-portal-policy.js';
 import { getLogger } from '../../utils/logger.js';
 import {
+  canvasBlobs,
   getCanvasStore,
   withCanvasMutex,
   applyNodeUpdate,
+  type BlobScope,
   type CanvasFile,
   type CanvasStore,
   type DeltaLogEntry,
   type NodeContent,
 } from '../storage/index.js';
-import { artifactPath } from '../storage/paths.js';
 
 const log = getLogger('canvas.executor');
 
@@ -321,9 +319,7 @@ async function aspectHeightForWidth(
   width: number,
 ): Promise<number | null> {
   try {
-    const fullPath = artifactPath(canvasId, src);
-    if (!existsSync(fullPath)) return null;
-    const dim = await readImageDimensions(fullPath);
+    const dim = await readImageDimensions(canvasBlobs(canvasId), src);
     if (!dim?.width || !dim?.height || dim.width <= 0 || dim.height <= 0) {
       return null;
     }
@@ -335,37 +331,40 @@ async function aspectHeightForWidth(
 }
 
 /**
- * Read just enough of an image file to extract its intrinsic dimensions.
+ * Read just enough of an image blob to extract its intrinsic dimensions.
  *
  * `imageSize` only needs the format header (a few KB for PNG/GIF/WEBP/BMP; a
- * little more for some JPEGs), so we read a 64 KB head chunk instead of the
- * whole file — a multi-MB artifact would otherwise be read fully into memory
+ * little more for some JPEGs), so we read a 64 KB head range instead of the
+ * whole blob — a multi-MB artifact would otherwise be read fully into memory
  * here, and this runs inside the executor's per-canvas write lock. Only when the
  * head chunk is too small to carry the dimension marker (e.g. a JPEG with a
  * large EXIF thumbnail before its SOF) do we fall back to reading the entire
- * file. Can throw (unreadable / not an image) — the caller treats that as null.
+ * blob. Returns null when the blob is absent; can throw when the bytes are not
+ * a recognized image — the caller treats both as null.
  */
 async function readImageDimensions(
-  fullPath: string,
+  blobs: BlobScope,
+  name: string,
 ): Promise<{ width?: number; height?: number } | null> {
   const HEAD_BYTES = 64 * 1024;
-  const handle = await open(fullPath, 'r');
-  let head: Buffer;
-  try {
-    const buf = Buffer.alloc(HEAD_BYTES);
-    const { bytesRead } = await handle.read(buf, 0, HEAD_BYTES, 0);
-    head = buf.subarray(0, bytesRead);
-  } finally {
-    await handle.close();
+  const opened = await blobs.open(name, { start: 0, end: HEAD_BYTES - 1 });
+  if (!opened) return null;
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of opened.body) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
+
   try {
-    const dim = imageSize(head);
+    const dim = imageSize(Buffer.concat(chunks));
     if (dim?.width && dim?.height) return dim;
   } catch {
     // Head chunk too small / dimension marker not reached yet — fall through
-    // to the (rare) full-file read below.
+    // to the (rare) full-blob read below.
   }
-  return imageSize(await readFile(fullPath));
+
+  const full = await blobs.read(name);
+  return full ? imageSize(full) : null;
 }
 
 /**

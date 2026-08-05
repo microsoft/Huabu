@@ -11,7 +11,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { importForeignNodeSources } from './import-node-src.js';
-import { getCanvasStore } from '../storage/index.js';
+import { canvasBlobs, getCanvasStore } from '../storage/index.js';
+import { canvasRoot } from '../storage/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { CanvasCommand } from '@sediment/shared';
@@ -29,9 +30,7 @@ afterEach(() => {
 
 /** Stage a file under the canvas's hidden `.upload/` scratch dir. */
 function stageUpload(canvasId: string, name: string, body: string): string {
-  const store = getCanvasStore(canvasId);
-  const canvasRoot = path.dirname(store.artifactsDir());
-  const uploadDir = path.join(canvasRoot, '.upload');
+  const uploadDir = path.join(canvasRoot(canvasId), '.upload');
   mkdirSync(uploadDir, { recursive: true });
   const abs = path.join(uploadDir, name);
   writeFileSync(abs, body);
@@ -107,7 +106,7 @@ describe('importForeignNodeSources — web nodes', () => {
     // …whose file exists in the artifact store…
     expect(src).toBeDefined();
     if (src === undefined) throw new Error('Expected a rewritten web src');
-    expect(store.resolveArtifactFilePath(src)).not.toBeNull();
+    expect(await canvasBlobs(canvasId).head(src)).not.toBeNull();
     // …and the staging upload was reclaimed (move semantics).
     expect(existsSync(uploadAbs)).toBe(false);
   });
@@ -203,7 +202,7 @@ describe('importForeignNodeSources — web nodes', () => {
     expect(src).toMatch(/^artifact-[^/]+\.html$/);
     expect(src).toBeDefined();
     if (src === undefined) throw new Error('Expected a rewritten web src');
-    expect(store.resolveArtifactFilePath(src)).not.toBeNull();
+    expect(await canvasBlobs(canvasId).head(src)).not.toBeNull();
     expect(existsSync(uploadAbs)).toBe(false);
   });
 
@@ -250,6 +249,6 @@ describe('importForeignNodeSources — media nodes (regression)', () => {
     expect(src).toMatch(/^artifact-[^/]+\.png$/);
     expect(src).toBeDefined();
     if (src === undefined) throw new Error('Expected a rewritten image src');
-    expect(store.resolveArtifactFilePath(src)).not.toBeNull();
+    expect(await canvasBlobs(canvasId).head(src)).not.toBeNull();
   });
 });

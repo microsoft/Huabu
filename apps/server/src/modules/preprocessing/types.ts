@@ -177,6 +177,16 @@ export interface ResolvedInput {
   prefetchedContent?: string;
 
   // Artifact-based nodes (pdf)
+  /**
+   * Blob name (`<artifactId><ext>`) this node's bytes live under, when the
+   * src is a local artifact rather than a remote or data URL.
+   */
+  artifactName?: string;
+  /**
+   * Local path the extract stage can hand to a document loader. Filled in
+   * by the pipeline from a blob lease — not by `inputResolve`, which stays
+   * pure — and only valid for the duration of the run.
+   */
   filePath?: string;
   artifactUri?: string;
 
