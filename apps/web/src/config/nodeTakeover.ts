@@ -98,7 +98,8 @@ const MARK_GAMMA = 0.7;
  */
 export const MARK_FACE_MIN = 7;
 
-const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
+/** Clamps to `[0,1]`. */
+export const clamp01 = (v: number): number => Math.min(1, Math.max(0, v));
 
 /** Linear interpolation. */
 export function lerp(a: number, b: number, t: number): number {
@@ -158,6 +159,43 @@ export function badgeSizeForNode(
       BADGE_FRACTION * Math.min(nodeScreenW, nodeScreenH),
     ),
   );
+}
+
+/**
+ * The mark's rect relative to the node's own top-left, in canvas units, eased
+ * from the full footprint at `glide = 0` to the mark's bounding square at 1.
+ *
+ * `glide` is clamped rather than trusted. Every length here is a screen-px
+ * constant divided by `zoom`, so an out-of-range glide does not merely
+ * overshoot — it scales those lengths without bound, and the result is written
+ * straight into a CSS offset. A caller must also pass the LIVE zoom of the
+ * frame it is laying out: the error there is multiplicative in the ratio of the
+ * two zooms.
+ */
+export function localMarkRect(
+  width: number,
+  height: number,
+  zoom: number,
+  glide: number,
+): { x: number; y: number; width: number; height: number } {
+  const g = clamp01(glide);
+  const screenW = width * zoom;
+  const screenH = height * zoom;
+  const badge = badgeSizeForNode(screenW, screenH);
+  const size = lerp(
+    badge,
+    collapsedMarkSize(screenW, screenH),
+    collapseProgress(screenW),
+  );
+  const radius = size / (2 * zoom);
+  const cx = lerp((badge * 0.3) / zoom, width / 2, g);
+  const cy = lerp((badge * 0.05) / zoom, height / 2, g);
+  return {
+    x: lerp(0, cx - radius, g),
+    y: lerp(0, cy - radius, g),
+    width: lerp(width, radius * 2, g),
+    height: lerp(height, radius * 2, g),
+  };
 }
 
 /**

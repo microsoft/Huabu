@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import {
   badgeSizeForNode,
+  clamp01,
   collapseProgress,
   collapsedMarkSize,
   lerp,
@@ -76,11 +77,19 @@ function useGlideProgress(stage: QuestionLodStage | null): number {
   useEffect(() => {
     if (stage === null || liveRef.current === target) return;
     const from = liveRef.current;
-    const startedAt = performance.now();
+    // Seeded from the first callback rather than `performance.now()`: the two
+    // are not guaranteed to share a time origin, and a negative elapsed time
+    // sends smoothstep outside its domain, where it diverges instead of
+    // saturating. `liveRef` then feeds the next run, so one bad frame compounds
+    // and never re-converges — which drove `progress` into the thousands and
+    // put the handles, and every edge endpoint measured from them, 10^8 units
+    // off the node.
+    let startedAt: number | null = null;
     let frame = requestAnimationFrame(function step(now) {
-      const raw = Math.min(1, (now - startedAt) / TAKEOVER_GLIDE_MS);
+      startedAt ??= now;
+      const raw = clamp01((now - startedAt) / TAKEOVER_GLIDE_MS);
       const eased = raw * raw * (3 - 2 * raw);
-      liveRef.current = from + (target - from) * eased;
+      liveRef.current = clamp01(from + (target - from) * eased);
       bumpFrame((n) => n + 1);
       if (raw < 1) frame = requestAnimationFrame(step);
     });

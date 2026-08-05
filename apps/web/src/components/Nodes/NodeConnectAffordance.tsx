@@ -27,6 +27,7 @@ import {
 import { cn } from '@/components/Common/cn.ts';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { createQuestionNodeAndCompose } from '@/components/Nodes/question/questionCompose.ts';
+import { localMarkRect } from '@/config/nodeTakeover.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useConnectPortStore } from '@/store/connectPortStore.ts';
 import {
@@ -582,7 +583,7 @@ export const NodeConnectionHandles = memo(
     const hadMark = useRef(false);
     useLayoutEffect(() => {
       if (!mark && !hadMark.current) return;
-      hadMark.current = mark != null;
+      hadMark.current = mark !== undefined;
       updateNodeInternals(nodeId);
     }, [mark, nodeId, updateNodeInternals]);
 
@@ -633,20 +634,25 @@ export const NodeConnectionHandles = memo(
     // handles are laid out against is invisible — ports pinned to its edges
     // would hang in empty canvas, and a connection dragged from one would
     // start nowhere near the thing the user aimed at. Rebase them onto the
-    // mark. Handles are positioned inside the node's own box, which React
-    // Flow lays out in flow units, so the mark's canvas-space rect converts
-    // by plain translation.
+    // mark.
+    //
+    // Only the glide `progress` is taken from the published mark. Its rect is
+    // canvas-space and zoom-derived, so during a viewport animation it can be a
+    // frame behind the zoom this render is laying out against — and because the
+    // error is multiplicative, that briefly threw the handles clear off the
+    // node. The rect is recomputed here from the live zoom instead.
     let collapsedRect: MarkAnchorRect | null = null;
     let collapsedLocalRect: PortRect | null = null;
     if (mark && node) {
-      const abs = node.internals.positionAbsolute;
+      // `||`, not `??`: an unset `style.width` is not always `undefined`, and
+      // the takeover hook this must agree with falls through on any falsy value.
+      const nodeW = (node.style?.width as number) || node.measured.width || 0;
+      const nodeH = (node.style?.height as number) || node.measured.height || 0;
       collapsedRect = blendedMarkRect(mark);
-      collapsedLocalRect = {
-        x: collapsedRect.x - abs.x,
-        y: collapsedRect.y - abs.y,
-        width: collapsedRect.width,
-        height: collapsedRect.height,
-      };
+      collapsedLocalRect =
+        nodeW > 0 && nodeH > 0 && zoom > 0
+          ? localMarkRect(nodeW, nodeH, zoom, mark.progress)
+          : null;
     }
 
     return (
