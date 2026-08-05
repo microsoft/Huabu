@@ -66,6 +66,7 @@ import {
   SNAP_THRESHOLD_SCREEN_PX,
 } from '@/config/canvas';
 import { buildCandidateIndex, computeSnap } from '@/handler/snap/snapEngine';
+import { isEditableTarget } from '@/hooks/shortcuts/isEditableTarget';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import type { ActiveEdges, Rect, SnapIndex } from '@/handler/snap/types';
@@ -431,7 +432,10 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
     window.addEventListener(
       'keydown',
       (e: KeyboardEvent) => {
-        if (e.key === ' ' || e.code === 'Space') {
+        if (
+          (e.key === ' ' || e.code === 'Space') &&
+          !isEditableTarget(e.target)
+        ) {
           _reparentBypassed = true;
           e.preventDefault();
         }
@@ -441,7 +445,10 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
     window.addEventListener(
       'keyup',
       (e: KeyboardEvent) => {
-        if (e.key === ' ' || e.code === 'Space') {
+        if (
+          (e.key === ' ' || e.code === 'Space') &&
+          !isEditableTarget(e.target)
+        ) {
           _reparentBypassed = false;
           e.preventDefault();
         }
