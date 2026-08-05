@@ -1,4 +1,10 @@
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -82,5 +88,46 @@ describe('DiskBlobStore temp file hygiene', () => {
     expect(
       readdirSync(path.join(root, 'concurrent-canvas', '.artifacts')),
     ).toEqual(['hot.bin']);
+  });
+
+  it('binds in-flight paths to their original workspace and rejects a held scope after activation', async () => {
+    const otherRoot = mkdtempSync(path.join(tmpdir(), 'huabu-blob-switched-'));
+    const scope = new DiskBlobStore().scope({ kind: 'canvas', canvasId });
+    let signalStarted = (): void => {};
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+    let releaseBody = (): void => {};
+    const bodyReleased = new Promise<void>((resolve) => {
+      releaseBody = resolve;
+    });
+
+    async function* slowBody(): AsyncGenerator<Buffer> {
+      signalStarted();
+      yield Buffer.from('bound ');
+      await bodyReleased;
+      yield Buffer.from('bytes');
+    }
+
+    try {
+      const writing = scope.put('bound.bin', Readable.from(slowBody()));
+      await started;
+      workspaceState.path = otherRoot;
+      releaseBody();
+      await writing;
+
+      expect(
+        readFileSync(path.join(root, canvasId, '.artifacts', 'bound.bin')),
+      ).toEqual(Buffer.from('bound bytes'));
+      expect(existsSync(path.join(otherRoot, canvasId))).toBe(false);
+
+      await expect(scope.read('bound.bin')).rejects.toThrow(
+        /inactive workspace/,
+      );
+      await expect(scope.deleteAll()).rejects.toThrow(/inactive workspace/);
+    } finally {
+      workspaceState.path = root;
+      rmSync(otherRoot, { recursive: true, force: true });
+    }
   });
 });

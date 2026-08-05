@@ -36,12 +36,15 @@ import {
   canvasJsonPath,
   SPACE_JSON_FILENAME,
 } from '../../workspace/disk/paths.js';
-import { getWorkspacePath } from '../../workspace.js';
+import {
+  acquireWorkspaceOperationLease,
+  getWorkspacePath,
+} from '../../workspace.js';
 import {
   forgetCanvasStore,
   getCanvasStore,
 } from '../backends/disk/legacy/canvas-store-cache.js';
-import { canvasBlobs } from '../storage.js';
+import { canvasBlobs, withCanvasDeletionAdmission } from '../storage.js';
 
 import type { CanvasFile } from '../../canvas/persistence-types.js';
 import type { CanvasSummary } from '@sediment/shared';
@@ -143,7 +146,7 @@ export function createCanvas(
   const dedupeSuffix =
     dirName === safeFromTitle ? '' : dirName.slice(safeFromTitle.length);
   const resolvedTitle =
-    title == null || dedupeSuffix === '' ? title : title + dedupeSuffix;
+    title === null || dedupeSuffix === '' ? title : title + dedupeSuffix;
 
   const now = Date.now();
   const canvas: CanvasFile = {
@@ -176,15 +179,25 @@ export function createCanvas(
  * Returns true when the Space existed.
  */
 export async function deleteCanvas(canvasId: string): Promise<boolean> {
-  const store = getCanvasStore(canvasId);
-  // `destroy()` refuses the World canvas too, but that check has to happen
-  // before the blob sweep now that the sweep runs first — otherwise a
-  // refused deletion would still have destroyed the World's bytes.
-  if (isWorldCanvasId(store.canvasId)) {
-    throw new Error('World canvas cannot be deleted');
+  // Blob deletion can yield before the synchronous record destroy. Pin the
+  // active workspace across both halves so a runtime workspace switch cannot
+  // make them operate on different roots.
+  const workspaceLease = acquireWorkspaceOperationLease();
+  try {
+    const store = getCanvasStore(canvasId);
+    // `destroy()` refuses the World canvas too, but that check has to happen
+    // before the blob sweep now that the sweep runs first — otherwise a
+    // refused deletion would still have destroyed the World's bytes.
+    if (isWorldCanvasId(store.canvasId)) {
+      throw new Error('World canvas cannot be deleted');
+    }
+    return await withCanvasDeletionAdmission(store.canvasId, async () => {
+      await canvasBlobs(store.canvasId).deleteAll();
+      const ok = store.destroy();
+      forgetCanvasStore(store.canvasId);
+      return ok;
+    });
+  } finally {
+    workspaceLease.release();
   }
-  await canvasBlobs(store.canvasId).deleteAll();
-  const ok = store.destroy();
-  forgetCanvasStore(store.canvasId);
-  return ok;
 }

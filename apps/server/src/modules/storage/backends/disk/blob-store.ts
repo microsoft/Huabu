@@ -5,10 +5,9 @@
  * the workspace format has always used: one file per blob, named by the
  * URL key, no manifest indirection.
  *
- * Stateless with respect to the workspace root — every operation resolves
- * through the Workspace layout module, which reads `getWorkspacePath()`
- * lazily. That is what lets a free-mode workspace switch take effect with no
- * invalidation step.
+ * Each scope is bound to the workspace active when it is created. A fresh
+ * scope follows a free-mode workspace switch; a retained scope rejects the
+ * next operation instead of silently redirecting it into the new workspace.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -25,7 +24,8 @@ import {
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
-import { artifactPath, artifactsDir } from '../../../workspace/disk/paths.js';
+import { artifactsDir } from '../../../workspace/disk/paths.js';
+import { getWorkspacePath } from '../../../workspace.js';
 import { createBlobLease, normalizeBlobName } from '../../ports/blob.js';
 
 import type {
@@ -58,9 +58,9 @@ function scopeDir(ref: BlobScopeRef): string {
   return artifactsDir(ref.canvasId);
 }
 
-/** Resolve one blob to its absolute path. */
-function blobPath(ref: BlobScopeRef, name: string): string {
-  return artifactPath(ref.canvasId, normalizeBlobName(name));
+/** Resolve one blob beneath an already-bound scope directory. */
+function blobPath(dir: string, name: string): string {
+  return path.join(dir, normalizeBlobName(name));
 }
 
 /** Treat a missing file as absence rather than an error. */
@@ -69,7 +69,43 @@ function isMissing(err: unknown): boolean {
 }
 
 class DiskBlobScope implements BlobScope {
-  constructor(private readonly ref: BlobScopeRef) {}
+  readonly #ref: BlobScopeRef;
+  readonly #workspacePath: string;
+
+  constructor(ref: BlobScopeRef) {
+    this.#ref = ref;
+    this.#workspacePath = path.resolve(getWorkspacePath());
+  }
+
+  #resolveDir(): string {
+    const active = path.resolve(getWorkspacePath());
+    if (active !== this.#workspacePath) {
+      throw new Error(
+        `DiskBlobScope(${this.#ref.canvasId}) belongs to an inactive workspace. ` +
+          `Resolve a fresh scope after workspace activation.`,
+      );
+    }
+    // Resolve once per operation, before its first await. Every later path in
+    // that operation is derived from this absolute directory, so a workspace
+    // switch cannot combine a temp in A with a destination in B.
+    return scopeDir(this.#ref);
+  }
+
+  async #headAt(dir: string, name: string): Promise<BlobInfo | null> {
+    const safe = normalizeBlobName(name);
+    try {
+      const stats = await stat(blobPath(dir, safe));
+      if (!stats.isFile()) return null;
+      return {
+        name: safe,
+        size: stats.size,
+        updatedAt: stats.mtimeMs,
+      };
+    } catch (err) {
+      if (isMissing(err)) return null;
+      throw err;
+    }
+  }
 
   /**
    * Write to a unique sibling, then rename into place.
@@ -83,10 +119,10 @@ class DiskBlobScope implements BlobScope {
    */
   async put(name: string, body: Readable | Buffer): Promise<BlobInfo> {
     const safe = normalizeBlobName(name);
-    const dir = scopeDir(this.ref);
+    const dir = this.#resolveDir();
     await mkdir(dir, { recursive: true });
 
-    const full = blobPath(this.ref, safe);
+    const full = blobPath(dir, safe);
     const temp = path.join(dir, `${TEMP_PREFIX}${randomUUID()}`);
 
     try {
@@ -112,26 +148,15 @@ class DiskBlobScope implements BlobScope {
   }
 
   async head(name: string): Promise<BlobInfo | null> {
-    const safe = normalizeBlobName(name);
-    try {
-      const stats = await stat(blobPath(this.ref, safe));
-      if (!stats.isFile()) return null;
-      return {
-        name: safe,
-        size: stats.size,
-        updatedAt: stats.mtimeMs,
-      };
-    } catch (err) {
-      if (isMissing(err)) return null;
-      throw err;
-    }
+    return this.#headAt(this.#resolveDir(), name);
   }
 
   async open(name: string, range?: BlobRange): Promise<BlobRead | null> {
-    const info = await this.head(name);
+    const dir = this.#resolveDir();
+    const info = await this.#headAt(dir, name);
     if (!info) return null;
     // `info.size` stays the full blob size; the range only bounds the body.
-    const body = createReadStream(blobPath(this.ref, info.name), {
+    const body = createReadStream(blobPath(dir, info.name), {
       start: range?.start,
       end: range?.end,
     });
@@ -139,8 +164,9 @@ class DiskBlobScope implements BlobScope {
   }
 
   async read(name: string): Promise<Buffer | null> {
+    const dir = this.#resolveDir();
     try {
-      return await readFile(blobPath(this.ref, name));
+      return await readFile(blobPath(dir, name));
     } catch (err) {
       if (isMissing(err)) return null;
       throw err;
@@ -148,12 +174,13 @@ class DiskBlobScope implements BlobScope {
   }
 
   async hasMany(names: readonly string[]): Promise<ReadonlySet<string>> {
+    const dir = this.#resolveDir();
     const requested = new Set(names.map(normalizeBlobName));
     if (requested.size === 0) return new Set();
 
     let entries: string[];
     try {
-      entries = await readdir(scopeDir(this.ref));
+      entries = await readdir(dir);
     } catch (err) {
       if (isMissing(err)) return new Set();
       throw err;
@@ -163,38 +190,42 @@ class DiskBlobScope implements BlobScope {
       (entry) => !isTempEntry(entry) && requested.has(entry),
     );
     const infos = await Promise.all(
-      candidates.map((entry) => this.head(entry)),
+      candidates.map((entry) => this.#headAt(dir, entry)),
     );
     return new Set(infos.flatMap((info) => (info === null ? [] : [info.name])));
   }
 
   async list(): Promise<BlobInfo[]> {
+    const dir = this.#resolveDir();
     let entries: string[];
     try {
-      entries = await readdir(scopeDir(this.ref));
+      entries = await readdir(dir);
     } catch (err) {
       if (isMissing(err)) return [];
       throw err;
     }
 
     const infos = await Promise.all(
-      entries.filter((entry) => !isTempEntry(entry)).map((e) => this.head(e)),
+      entries
+        .filter((entry) => !isTempEntry(entry))
+        .map((entry) => this.#headAt(dir, entry)),
     );
     return infos.filter((info): info is BlobInfo => info !== null);
   }
 
   async materialize(name: string): Promise<BlobLease | null> {
-    const info = await this.head(name);
+    const dir = this.#resolveDir();
+    const info = await this.#headAt(dir, name);
     if (!info) return null;
     // Disk already *is* a filesystem: hand back the real path and make
     // release a no-op. No copy, so this costs nothing today. The lease
     // still refuses to hand out its path after release, so a consumer
     // can't come to depend on Disk keeping the file (see `createBlobLease`).
-    return createBlobLease(blobPath(this.ref, info.name), async () => {});
+    return createBlobLease(blobPath(dir, info.name), async () => {});
   }
 
   async deleteAll(): Promise<void> {
-    await rm(scopeDir(this.ref), { recursive: true, force: true });
+    await rm(this.#resolveDir(), { recursive: true, force: true });
   }
 }
 

@@ -18,7 +18,14 @@
  * through it.
  */
 
+import path from 'node:path';
+
+import { getWorkspacePath } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
+import {
+  withSpaceDeleteAdmission,
+  withSpacePutAdmission,
+} from './backends/disk/legacy/space-lifecycle-admission.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import {
   parseStorageProfile,
@@ -28,9 +35,46 @@ import {
   type StorageProfile,
 } from './profile.js';
 
-import type { BlobScope, BlobStore } from './ports/blob.js';
+import type {
+  BlobInfo,
+  BlobLease,
+  BlobRange,
+  BlobRead,
+  BlobScope,
+  BlobStore,
+} from './ports/blob.js';
 import type { StorageHealth } from './ports/common.js';
 import type { StructuredStore } from './ports/structured.js';
+import type { Readable } from 'node:stream';
+
+function activeWorkspacePath(): string {
+  return path.resolve(getWorkspacePath());
+}
+
+function assertActiveWorkspace(workspacePath: string, canvasId: string): void {
+  if (activeWorkspacePath() !== workspacePath) {
+    throw new Error(
+      `Blob scope for Space "${canvasId}" belongs to an inactive workspace. ` +
+        `Resolve a fresh scope after workspace activation.`,
+    );
+  }
+}
+
+/**
+ * Release a rejected streaming body that storage never fully consumed.
+ *
+ * Multipart parsers cannot finish the request while a file part stays
+ * paused. Resume it to discard the remaining bytes; Buffer callers retain
+ * their existing value semantics and need no disposal.
+ */
+function drainRejectedBody(body: Readable | Buffer): void {
+  if (Buffer.isBuffer(body) || body.destroyed || body.readableEnded) return;
+
+  const ignoreError = (): void => {};
+  body.once('error', ignoreError);
+  body.once('end', () => body.off('error', ignoreError));
+  body.resume();
+}
 
 export interface Storage {
   readonly profile: StorageProfile;
@@ -119,9 +163,83 @@ export function getStructuredStore(): StructuredStore {
   return ensure().structured;
 }
 
-/** Blob scope for one Space — the only scope kind today. */
+/**
+ * Blob scope for one Space — the only scope kind today.
+ *
+ * The raw BlobStore intentionally knows nothing about structured lifecycle,
+ * so composition owns the one cross-store invariant: bytes may only be added
+ * to a Space whose record exists. Reads and `deleteAll()` stay available for
+ * cleanup/recovery when a record has already gone missing.
+ */
 export function canvasBlobs(canvasId: string): BlobScope {
-  return getBlobStore().scope({ kind: 'canvas', canvasId });
+  const storage = ensure();
+  const workspacePath = activeWorkspacePath();
+  const delegate = storage.blobs.scope({ kind: 'canvas', canvasId });
+
+  async function requireSpace(): Promise<void> {
+    const record = await storage.structured.space(canvasId).record.read();
+    if (!record) {
+      throw new Error(`Cannot write blobs for missing Space "${canvasId}"`);
+    }
+  }
+
+  return {
+    async put(name: string, body: Readable | Buffer): Promise<BlobInfo> {
+      try {
+        return await withSpacePutAdmission(
+          workspacePath,
+          canvasId,
+          async () => {
+            assertActiveWorkspace(workspacePath, canvasId);
+            await requireSpace();
+            assertActiveWorkspace(workspacePath, canvasId);
+            return delegate.put(name, body);
+          },
+        );
+      } catch (error) {
+        drainRejectedBody(body);
+        throw error;
+      }
+    },
+    head(name: string): Promise<BlobInfo | null> {
+      return delegate.head(name);
+    },
+    open(name: string, range?: BlobRange): Promise<BlobRead | null> {
+      return delegate.open(name, range);
+    },
+    read(name: string): Promise<Buffer | null> {
+      return delegate.read(name);
+    },
+    hasMany(names: readonly string[]): Promise<ReadonlySet<string>> {
+      return delegate.hasMany(names);
+    },
+    list(): Promise<BlobInfo[]> {
+      return delegate.list();
+    },
+    materialize(name: string): Promise<BlobLease | null> {
+      return delegate.materialize(name);
+    },
+    deleteAll(): Promise<void> {
+      return delegate.deleteAll();
+    },
+  };
+}
+
+/**
+ * Run Space deletion exclusively against blob puts admitted for the same
+ * workspace and Space. Kept here because it coordinates two otherwise
+ * independent storage ports; the compatibility lifecycle facade supplies the
+ * actual sweep and structured destroy operation.
+ */
+export function withCanvasDeletionAdmission<T>(
+  canvasId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const workspacePath = activeWorkspacePath();
+  return withSpaceDeleteAdmission(workspacePath, canvasId, async () => {
+    assertActiveWorkspace(workspacePath, canvasId);
+    return operation();
+  });
 }
 
 export async function storageHealth(): Promise<StorageHealth[]> {
