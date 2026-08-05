@@ -17,7 +17,7 @@ import {
 import { DiskStructuredStore } from './structured-store.js';
 import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
 import { toSafeFilename } from '../../../workspace/disk/naming.js';
-import { describeCanvasLogRepositoryContract } from '../../ports/contracts/canvas-log-repository.contract.js';
+import { describeCanvasLogRepositoriesContract } from '../../ports/contracts/canvas-log-repository.contract.js';
 import { describeSpaceRepositoryContract } from '../../ports/contracts/space-repository.contract.js';
 import { describeStructuredStoreContract } from '../../ports/contracts/structured-store.contract.js';
 
@@ -86,13 +86,23 @@ describeSpaceRepositoryContract('DiskSpaceRepository', () => {
   };
 });
 
-describeCanvasLogRepositoryContract('DiskCanvasLogRepository', () => {
+describeCanvasLogRepositoriesContract('Disk log-family repositories', () => {
   const root = freshWorkspace('huabu-log-repo-');
   seedSpace(root, 'canvas-a', 'Canvas A');
   const store = new DiskStructuredStore();
+  const handle = store.space('canvas-a');
+  const concurrent = store.space('canvas-a');
   return {
-    logs: store.space('canvas-a').logs,
-    concurrent: store.space('canvas-a').logs,
+    events: handle.events,
+    deltas: handle.deltas,
+    changes: handle.changes,
+    intents: handle.intents,
+    concurrent: {
+      events: concurrent.events,
+      deltas: concurrent.deltas,
+      changes: concurrent.changes,
+      intents: concurrent.intents,
+    },
     cleanup: () => {
       resetStorageCache();
       rmSync(root, { recursive: true, force: true });
@@ -142,5 +152,26 @@ describe('DiskStructuredStore instance caching', () => {
     // composite is deliberately rebuilt each call over the cached instance.
     expect(b).not.toBe(a);
     expect(b.canvasId).toBe(a.canvasId);
+  });
+
+  it('exposes four frozen, runtime-narrow log-family repositories', () => {
+    const handle = new DiskStructuredStore().space('canvas-c');
+    const runtime = handle as unknown as Record<string, unknown>;
+
+    expect(runtime['logs']).toBeUndefined();
+    expect(Object.keys(handle.events)).toEqual(['append', 'read']);
+    expect(Object.keys(handle.deltas)).toEqual(['append', 'readSince']);
+    expect(Object.keys(handle.changes)).toEqual(['read', 'append', 'remove']);
+    expect(Object.keys(handle.intents)).toEqual(['read', 'upsert']);
+
+    for (const repository of [
+      handle.events,
+      handle.deltas,
+      handle.changes,
+      handle.intents,
+    ]) {
+      expect(Object.isFrozen(repository)).toBe(true);
+      expect('store' in repository).toBe(false);
+    }
   });
 });

@@ -4,8 +4,7 @@
  * The connection ({@link StructuredStore}) owns backend identity and
  * lifecycle, and vends a {@link SpaceHandle} per Space. The handle is a
  * composite of narrow, asynchronous repositories: the versioned Space record
- * ({@link SpaceRepository}) and the four Canvas-owned log families
- * ({@link CanvasLogRepository}).
+ * ({@link SpaceRepository}) and four Canvas-owned log-family repositories.
  *
  * Scope note: node sidecars are still reached through
  * {@link LegacyNodeStore}, a deliberately narrow *synchronous* transitional
@@ -60,7 +59,10 @@ export interface StructuredStore {
 export interface SpaceHandle {
   readonly canvasId: string;
   readonly record: SpaceRepository;
-  readonly logs: CanvasLogRepository;
+  readonly events: CanvasEventRepository;
+  readonly deltas: CanvasDeltaRepository;
+  readonly changes: CanvasChangeRepository;
+  readonly intents: CanvasIntentRepository;
   /** Synchronous transitional surface; replaced in a later phase. */
   readonly nodes: LegacyNodeStore;
 }
@@ -111,47 +113,47 @@ export interface NewCanvasEvent {
   ts?: number;
 }
 
-/**
- * The four Canvas-owned append-oriented log families for one Space:
- * behavioural events, the executor delta log, per-thread change-review
- * records, and intent episodes.
- *
- * Synchronization semantics are part of the contract, not an accident of the
- * Disk implementation:
- *
- *  - one `appendEvents` batch lands contiguously, and reads preserve order;
- *  - delta versions are unique and strictly increasing per Space — a
- *    duplicate or older append rejects — and `readDeltasSince` returns
- *    version order;
- *  - `appendChanges` and `removeChange` are linearizable per Space/thread
- *    pair, so concurrent agents cannot lose one another's records;
- *  - `readChanges` and the value returned by `appendChanges` are coalesced by
- *    canvas entity;
- *  - `upsertIntent` is linearizable by episode id.
- *
- * The port deliberately exposes no generic transaction callback.
- */
-export interface CanvasLogRepository {
-  appendEvents(events: readonly NewCanvasEvent[]): Promise<void>;
+/** Behavioural events for one Space. One append batch lands contiguously. */
+export interface CanvasEventRepository {
+  append(events: readonly NewCanvasEvent[]): Promise<void>;
   /** Chronological; when `limit` is set, only the most recent `limit`. */
-  readEvents(limit?: number): Promise<CanvasEvent[]>;
+  read(limit?: number): Promise<CanvasEvent[]>;
+}
 
-  appendDelta(entry: DeltaLogEntry): Promise<void>;
+/**
+ * Executor deltas for one Space.
+ *
+ * Versions are unique and strictly increasing; duplicate or older appends
+ * reject, and reads preserve version order.
+ */
+export interface CanvasDeltaRepository {
+  append(entry: DeltaLogEntry): Promise<void>;
   /** Rows with `version` strictly greater than `fromVersion`, in order. */
-  readDeltasSince(fromVersion: number): Promise<DeltaLogEntry[]>;
+  readSince(fromVersion: number): Promise<DeltaLogEntry[]>;
+}
 
-  readChanges(threadId: string): Promise<CanvasChangeRecord[]>;
-  appendChanges(
+/**
+ * Per-thread change-review records for one Space.
+ *
+ * Appends and removals are linearizable per Space/thread pair. Reads and the
+ * value returned by `append` are coalesced by canvas entity.
+ */
+export interface CanvasChangeRepository {
+  read(threadId: string): Promise<CanvasChangeRecord[]>;
+  append(
     threadId: string,
     records: readonly CanvasChangeRecord[],
   ): Promise<CanvasChangeRecord[]>;
-  removeChange(
+  remove(
     threadId: string,
     changeId: string,
   ): Promise<CanvasChangeRecord | null>;
+}
 
-  readIntents(): Promise<IntentEpisode[]>;
-  upsertIntent(episode: IntentEpisode): Promise<void>;
+/** Intent episodes for one Space. Upserts are linearizable by episode id. */
+export interface CanvasIntentRepository {
+  read(): Promise<IntentEpisode[]>;
+  upsert(episode: IntentEpisode): Promise<void>;
 }
 
 // ─── Node sidecars (transitional) ───────────────────────────────────────────

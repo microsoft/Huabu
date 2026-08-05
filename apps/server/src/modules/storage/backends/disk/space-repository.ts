@@ -6,6 +6,16 @@
  * is read or written.
  */
 
+import path from 'node:path';
+
+import {
+  canvasFileShapeError,
+  readValidCanvasFile,
+} from './space-record-validation.js';
+import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
+import { canvasJsonPath } from '../../../workspace/disk/paths.js';
+import { getWorkspacePath } from '../../../workspace.js';
+
 import type { CanvasStore } from './legacy/canvas-store.js';
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
 import type {
@@ -14,10 +24,26 @@ import type {
 } from '../../ports/structured.js';
 
 export class DiskSpaceRepository implements SpaceRepository {
-  constructor(private readonly store: CanvasStore) {}
+  readonly #store: CanvasStore;
+  readonly #workspacePath: string;
+
+  constructor(store: CanvasStore) {
+    this.#store = store;
+    this.#workspacePath = path.resolve(getWorkspacePath());
+  }
+
+  private assertActiveWorkspace(): void {
+    if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
+      throw new Error(
+        `SpaceRepository(${this.#store.canvasId}) belongs to an inactive workspace. ` +
+          'Resolve a fresh Space handle after workspace activation.',
+      );
+    }
+  }
 
   async read(): Promise<CanvasFile | null> {
-    return this.store.read();
+    this.assertActiveWorkspace();
+    return readDiskSpaceRecord(this.#store);
   }
 
   /**
@@ -30,14 +56,21 @@ export class DiskSpaceRepository implements SpaceRepository {
     expectedVersion: number,
     next: CanvasFile,
   ): Promise<SpaceWriteResult> {
-    if (next.canvasId !== this.store.canvasId) {
-      throw new Error(
-        `SpaceRepository(${this.store.canvasId}) refusing to write record with id "${next.canvasId}"`,
+    this.assertActiveWorkspace();
+    if (!Number.isFinite(expectedVersion)) {
+      throw new TypeError(
+        `SpaceRepository(${this.#store.canvasId}) expectedVersion must be a finite number`,
+      );
+    }
+    const shapeError = canvasFileShapeError(next, this.#store.canvasId);
+    if (shapeError) {
+      throw new TypeError(
+        `SpaceRepository(${this.#store.canvasId}) received an invalid next record: ${shapeError}`,
       );
     }
     if (next.version !== expectedVersion + 1) {
       throw new Error(
-        `SpaceRepository(${this.store.canvasId}) expected next.version ` +
+        `SpaceRepository(${this.#store.canvasId}) expected next.version ` +
           `${expectedVersion + 1}, received ${next.version}`,
       );
     }
@@ -72,7 +105,7 @@ export class DiskSpaceRepository implements SpaceRepository {
     expectedVersion: number,
     next: CanvasFile,
   ): SpaceWriteResult {
-    const current = this.store.read();
+    const current = readDiskSpaceRecord(this.#store);
     if (!current) return { ok: false, reason: 'not-found' };
     if (current.version !== expectedVersion) {
       return {
@@ -85,11 +118,35 @@ export class DiskSpaceRepository implements SpaceRepository {
     // lifecycle stay on the compatibility path this phase (§12.2.5).
     if (next.title !== current.title || next.createdAt !== current.createdAt) {
       throw new Error(
-        `SpaceRepository(${this.store.canvasId}) refusing to change immutable ` +
+        `SpaceRepository(${this.#store.canvasId}) refusing to change immutable ` +
           `record fields; title and createdAt belong to the lifecycle path`,
       );
     }
-    this.store.write(next);
+    this.#store.write(next);
     return { ok: true };
   }
+}
+
+/**
+ * Read and validate one record, refreshing the directory index once when the
+ * indexed path is absent so externally renamed Spaces remain discoverable.
+ * The already-parsed value is then reconciled by the compatibility store;
+ * there is no second, lenient disk read that could hide corruption.
+ */
+export function readDiskSpaceRecord(store: CanvasStore): CanvasFile | null {
+  let record = readValidCanvasFile(
+    canvasJsonPath(store.canvasId),
+    store.canvasId,
+  );
+  if (!record) {
+    // Preserve Finder-rename recovery, but validate the newly indexed path
+    // before the compatibility reader gets a chance to self-heal its title.
+    refreshCanvasDirIndex();
+    record = readValidCanvasFile(
+      canvasJsonPath(store.canvasId),
+      store.canvasId,
+    );
+  }
+  if (!record) return null;
+  return store.reconcileValidatedRecord(record);
 }

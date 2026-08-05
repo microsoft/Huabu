@@ -10,12 +10,19 @@
  * sibling first, then rename — so readers never observe partial files.
  */
 
+import { randomUUID } from 'node:crypto';
 import {
   appendFileSync,
-  existsSync,
+  closeSync,
+  fstatSync,
+  ftruncateSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   renameSync,
+  rmSync,
+  writeSync,
   writeFileSync,
 } from 'node:fs';
 import { readFile as readFileAsync } from 'node:fs/promises';
@@ -55,9 +62,12 @@ export function mkdirp(dir: string): void {
   mkdirSync(dir, { recursive: true });
 }
 
+function isMissingFile(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
+}
+
 /** Read and parse a JSON file. Returns null when missing or unreadable. */
 export function readJson<T>(filePath: string): T | null {
-  if (!existsSync(filePath)) return null;
   try {
     const raw = readFileSync(filePath, 'utf-8');
     return JSON.parse(raw) as T;
@@ -66,9 +76,33 @@ export function readJson<T>(filePath: string): T | null {
   }
 }
 
+/**
+ * Read and parse JSON, treating only a genuinely missing path as absence.
+ *
+ * Unlike {@link readJson}, this is for persistence boundaries that must not
+ * collapse malformed data, permission failures, or an unexpected directory
+ * into a domain-level "not found" result. Callers can therefore distinguish
+ * absence from damaged or unreadable durable state.
+ */
+export function readJsonStrict<T>(filePath: string): T | null {
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf-8');
+  } catch (error) {
+    if (isMissingFile(error)) return null;
+    throw error;
+  }
+  const parsed = JSON.parse(raw) as unknown;
+  if (parsed === null) {
+    throw new SyntaxError(
+      `Expected a persisted JSON value in ${filePath}, received null`,
+    );
+  }
+  return parsed as T;
+}
+
 /** Read a UTF-8 text file. Returns null when missing or unreadable. */
 export function readText(filePath: string): string | null {
-  if (!existsSync(filePath)) return null;
   try {
     return readFileSync(filePath, 'utf-8');
   } catch {
@@ -118,9 +152,25 @@ export async function mapWithConcurrency<T, R>(
 /** Atomic write of a UTF-8 text file. */
 export function atomicWriteText(filePath: string, contents: string): void {
   mkdirp(path.dirname(filePath));
-  const tmp = `${filePath}.tmp`;
-  writeFileSync(tmp, contents, 'utf-8');
-  renameSync(tmp, filePath);
+  const tmp = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.tmp-${process.pid}-${randomUUID()}`,
+  );
+  try {
+    writeFileSync(tmp, contents, 'utf-8');
+    renameSync(tmp, filePath);
+  } catch (error) {
+    // A failed rename (locked destination, EISDIR, permissions, ...) must not
+    // accumulate invisible siblings. The UUID makes each writer independent;
+    // cleanup therefore cannot remove another writer's in-flight file.
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // Preserve the operation's original error. A cleanup failure is useful
+      // only if it does not hide why the durable write itself failed.
+    }
+    throw error;
+  }
 }
 
 /** Atomic write of a JSON file (pretty-printed with 2-space indent). */
@@ -138,6 +188,7 @@ export function atomicWriteJson(filePath: string, data: unknown): void {
  */
 export function appendJsonLine<T>(filePath: string, item: T): void {
   mkdirp(path.dirname(filePath));
+  repairJsonLinesTail(filePath);
   appendFileSync(filePath, `${JSON.stringify(item)}\n`, 'utf-8');
 }
 
@@ -154,11 +205,91 @@ export function appendJsonLines<T>(
 ): void {
   if (items.length === 0) return;
   mkdirp(path.dirname(filePath));
+  repairJsonLinesTail(filePath);
   let buf = '';
   for (const item of items) {
     buf += `${JSON.stringify(item)}\n`;
   }
   appendFileSync(filePath, buf, 'utf-8');
+}
+
+/**
+ * Restore a JSONL file to an append-safe line boundary after an interrupted
+ * write.
+ *
+ * A valid final JSON value without its newline is preserved by terminating
+ * it. A malformed final fragment is the crash tail and is truncated back to
+ * the preceding newline. Only ENOENT means there is nothing to repair; all
+ * other read/truncate/append failures propagate to the caller.
+ */
+export function repairJsonLinesTail(filePath: string): void {
+  let fd: number;
+  try {
+    fd = openSync(filePath, 'r+');
+  } catch (error) {
+    if (isMissingFile(error)) return;
+    throw error;
+  }
+
+  try {
+    const size = fstatSync(fd).size;
+    if (size === 0) return;
+
+    // Scan only the final physical row. In the steady state this is one
+    // bounded read, independent of total history size; unusually large rows
+    // are assembled chunk-by-chunk until their preceding newline is found.
+    const chunkSize = 64 * 1024;
+    const tailChunks: Buffer[] = [];
+    let cursor = size;
+    let tailStart = 0;
+    while (cursor > 0) {
+      const length = Math.min(chunkSize, cursor);
+      const start = cursor - length;
+      const chunk = Buffer.allocUnsafe(length);
+      let offset = 0;
+      while (offset < length) {
+        const bytesRead = readSync(
+          fd,
+          chunk,
+          offset,
+          length - offset,
+          start + offset,
+        );
+        if (bytesRead === 0) {
+          throw new Error(
+            `Unexpected EOF while repairing JSONL file ${filePath}`,
+          );
+        }
+        offset += bytesRead;
+      }
+
+      if (cursor === size && chunk[length - 1] === 0x0a) return;
+
+      const newline = chunk.lastIndexOf(0x0a);
+      if (newline >= 0) {
+        tailStart = start + newline + 1;
+        tailChunks.unshift(chunk.subarray(newline + 1));
+        break;
+      }
+      tailChunks.unshift(chunk);
+      cursor = start;
+    }
+
+    const tail = Buffer.concat(tailChunks).toString('utf8').trim();
+    try {
+      JSON.parse(tail);
+      const newline = Buffer.from('\n');
+      writeSync(fd, newline, 0, newline.length, size);
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        ftruncateSync(fd, tailStart);
+        return;
+      }
+      throw error;
+    }
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**
@@ -170,32 +301,34 @@ export function appendJsonLines<T>(
  * string to locate the start of the last `limit` lines before splitting,
  * so only a small slice of the buffer is materialised into strings.
  */
-export function readJsonLines<T>(filePath: string, limit?: number): T[] {
-  if (!existsSync(filePath)) return [];
-  let raw: string;
-  try {
-    raw = readFileSync(filePath, 'utf-8');
-  } catch {
-    return [];
-  }
+function parseJsonLines<T>(raw: string, limit?: number): T[] {
+  if (limit !== undefined && limit !== null) {
+    if (limit <= 0 || raw.length === 0) return [];
 
-  let slice = raw;
-  if (limit != null && raw.length > 0) {
-    // Scan backwards to find the byte offset where the last `limit` lines begin.
-    // This avoids splitting the entire file into an array of strings.
-    let newlines = 0;
-    let pos = raw.length - 1;
-    if (raw[pos] === '\n') pos--; // skip trailing newline
-    while (pos >= 0 && newlines < limit) {
-      if (raw[pos] === '\n') newlines++;
-      pos--;
+    // Walk complete physical lines backwards until `limit` *valid* records
+    // have been collected. Counting newlines first is insufficient: a
+    // crash-malformed final fragment would consume the whole limit and hide
+    // the preceding valid row (the exact tail a monotonic append needs).
+    const newestFirst: T[] = [];
+    let cursor = raw.length;
+    while (cursor > 0 && newestFirst.length < limit) {
+      if (raw[cursor - 1] === '\n') cursor--;
+      const previousNewline = raw.lastIndexOf('\n', cursor - 1);
+      const start = previousNewline + 1;
+      const trimmed = raw.slice(start, cursor).trim();
+      cursor = previousNewline < 0 ? 0 : previousNewline;
+      if (!trimmed) continue;
+      try {
+        newestFirst.push(JSON.parse(trimmed) as T);
+      } catch {
+        // Continue past malformed rows until enough valid records are found.
+      }
     }
-    // pos is now one position before the start of the first kept line.
-    slice = raw.slice(pos + 1);
+    return newestFirst.reverse();
   }
 
   const out: T[] = [];
-  for (const line of slice.split('\n')) {
+  for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
@@ -204,5 +337,84 @@ export function readJsonLines<T>(filePath: string, limit?: number): T[] {
       // Skip malformed (likely a crash-truncated tail line).
     }
   }
-  return limit != null && out.length > limit ? out.slice(-limit) : out;
+  return out;
+}
+
+export function readJsonLines<T>(filePath: string, limit?: number): T[] {
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf-8');
+  } catch {
+    return [];
+  }
+  return parseJsonLines<T>(raw, limit);
+}
+
+/**
+ * Parse a durable JSONL log without mistaking persistent corruption for a
+ * crash tail. A malformed final physical row is recoverable only when it is
+ * unterminated; malformed interior rows and malformed newline-terminated rows
+ * are durable corruption and reject even when a tail limit was requested.
+ */
+function parseJsonLinesStrict<T>(
+  raw: string,
+  filePath: string,
+  limit?: number,
+): T[] {
+  const hasLimit = limit !== undefined;
+  const retainedLimit =
+    typeof limit === 'number' && limit > 0 ? Math.ceil(limit) : 0;
+  const out: T[] = [];
+  let row = 0;
+  let start = 0;
+
+  while (start < raw.length) {
+    row += 1;
+    const newline = raw.indexOf('\n', start);
+    const unterminated = newline < 0;
+    const end = unterminated ? raw.length : newline;
+    const trimmed = raw.slice(start, end).trim();
+
+    if (trimmed) {
+      let parsed: T;
+      try {
+        parsed = JSON.parse(trimmed) as T;
+      } catch (error) {
+        if (unterminated) break;
+        const detail = error instanceof Error ? `: ${error.message}` : '';
+        throw new SyntaxError(
+          `Malformed JSONL row ${row} in ${filePath}${detail}`,
+        );
+      }
+
+      if (!hasLimit) {
+        out.push(parsed);
+      } else if (retainedLimit > 0) {
+        out.push(parsed);
+        if (out.length > retainedLimit) out.shift();
+      }
+    }
+
+    if (unterminated) break;
+    start = newline + 1;
+  }
+
+  return out;
+}
+
+/**
+ * Strict JSONL read for persistence boundaries: only a missing file is an
+ * empty log. Only a malformed final unterminated row is treated as a
+ * crash-truncated fragment; other malformed rows and non-ENOENT I/O failures
+ * propagate.
+ */
+export function readJsonLinesStrict<T>(filePath: string, limit?: number): T[] {
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf-8');
+  } catch (error) {
+    if (isMissingFile(error)) return [];
+    throw error;
+  }
+  return parseJsonLinesStrict<T>(raw, filePath, limit);
 }

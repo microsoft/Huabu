@@ -62,6 +62,7 @@ import {
   type UpdateNodeOutcome,
 } from '../storage/index.js';
 import { canvasRoot, nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
+import { toSafeFilename } from '../workspace/disk/naming.js';
 import { withSpaceDirHandlesReleased } from '../workspace/disk/space-dir-handles.js';
 import { getWorkspacePath } from '../workspace.js';
 
@@ -1253,6 +1254,25 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       updatedAt: timestamp,
     };
 
+    // A title rename may have yielded while an async Space deletion or a
+    // competing PUT completed. Recheck immediately before the synchronous
+    // write so a stale request that initially observed a real Space cannot
+    // recreate it after deletion (or overwrite a newer version). The legacy
+    // implicit-create path remains only for requests whose initial read was
+    // genuinely absent.
+    if (existing) {
+      const current = store.read();
+      if (!current) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      if (current.version !== existing.version) {
+        return reply.code(409).send({
+          code: 'CANVAS_VERSION_CONFLICT',
+          message: 'Canvas version mismatch',
+          serverVersion: current.version,
+        } satisfies CanvasConflictResponse);
+      }
+    }
     store.write(canvasFile);
 
     return reply.send({
@@ -1516,8 +1536,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    const store = getCanvasStore(canvasId);
-    if (!store.read()) {
+    const handle = getStructuredStore().space(canvasId);
+    if (!(await handle.record.read())) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
@@ -1528,12 +1548,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // real caller before it is frozen. See
     // docs/proposals/multi-backend-storage.md §12.2.8.
     //
-    // The existence check above deliberately stays on the facade: Space
-    // catalogue and lifecycle are not on a portable contract this phase, and
-    // forcing them in through one route would expand it.
-    const events = await getStructuredStore()
-      .space(canvasId)
-      .logs.readEvents(limit);
+    // Resolve existence and events through one handle so malformed or
+    // unreadable durable state cannot be collapsed into a false 404 by the
+    // compatibility facade's intentionally lenient legacy reader.
+    const events = await handle.events.read(limit);
     const filtered =
       since != null ? events.filter((e) => e.ts >= since) : events;
     const trimmed = filtered.length > limit ? filtered.slice(-limit) : filtered;
@@ -1757,11 +1775,19 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         const importedManifest = manifest as ImportManifest | null;
         const targetTitle =
           importedManifest?.title ?? parsed.title ?? 'Imported canvas';
+        const finalDirName = suggestCanvasDir(targetTitle, targetCanvasId);
+        const safeFromTitle = toSafeFilename(targetTitle, targetCanvasId);
+        const dedupeSuffix =
+          finalDirName === safeFromTitle
+            ? ''
+            : finalDirName.slice(safeFromTitle.length);
+        const resolvedTitle =
+          dedupeSuffix === '' ? targetTitle : targetTitle + dedupeSuffix;
 
         const remapped: CanvasFile = {
           ...parsed,
           canvasId: targetCanvasId,
-          title: targetTitle,
+          title: resolvedTitle,
           state: rewriteCanvasArtifactUrls(
             parsed.state,
             sourceCanvasId,
@@ -1779,11 +1805,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         // the on-disk basename matches the title and `read()` will not
         // self-heal-overwrite the title with the staging dir basename on
         // the next access.
-        const finalDirName = suggestCanvasDir(targetTitle, targetCanvasId);
         const finalDir = path.join(getWorkspacePath(), finalDirName);
         renameSync(stagingDir, finalDir);
         stagingCleanedUp = true;
-        registerCanvasDir(targetCanvasId, finalDirName, targetTitle);
+        registerCanvasDir(targetCanvasId, finalDirName, resolvedTitle);
         refreshCanvasDirIndex();
 
         const response: ImportCanvasResponse = {

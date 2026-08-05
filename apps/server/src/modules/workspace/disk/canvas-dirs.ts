@@ -10,7 +10,7 @@ import path from 'node:path';
 import { NameIndex, type NameIndexResult } from './name-index.js';
 import { dedupeName, normalizeForCompare, toSafeFilename } from './naming.js';
 import { SPACE_JSON_FILENAME, WORLD_CANVAS_DIR_NAME } from './paths.js';
-import { readJson, sanitizeId } from '../../../utils/fs.js';
+import { readJsonStrict, sanitizeId } from '../../../utils/fs.js';
 import { getWorkspacePath } from '../../workspace.js';
 
 export interface CanvasDirEntry {
@@ -37,14 +37,26 @@ function readCanvasDirEntry(
   filename: string,
   requireTopology = false,
 ): CanvasDirEntry | null {
-  const json = readJson<{
-    canvasId?: string;
-    title?: string | null;
+  const recordPath = path.join(fullPath, SPACE_JSON_FILENAME);
+  const parsed = readJsonStrict<unknown>(recordPath);
+  if (parsed === null) return null;
+  if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new SyntaxError(
+      `Invalid Space record in ${recordPath}: must be an object`,
+    );
+  }
+  const json = parsed as {
+    canvasId?: unknown;
+    title?: unknown;
     state?: { nodes?: unknown[]; edges?: unknown[] };
-    createdAt?: number;
-    updatedAt?: number;
-  }>(path.join(fullPath, SPACE_JSON_FILENAME));
-  if (!json?.canvasId) return null;
+    createdAt?: unknown;
+    updatedAt?: unknown;
+  };
+  if (typeof json.canvasId !== 'string' || json.canvasId.length === 0) {
+    throw new SyntaxError(
+      `Invalid Space record in ${recordPath}: canvasId must be a non-empty string`,
+    );
+  }
   if (
     requireTopology &&
     (!Array.isArray(json.state?.nodes) || !Array.isArray(json.state?.edges))
@@ -55,7 +67,8 @@ function readCanvasDirEntry(
   return {
     id: json.canvasId,
     filename,
-    title: json.title ?? null,
+    title:
+      typeof json.title === 'string' || json.title === null ? json.title : null,
     nodeCount: Array.isArray(json.state?.nodes) ? json.state.nodes.length : 0,
     createdAt: typeof json.createdAt === 'number' ? json.createdAt : 0,
     updatedAt: typeof json.updatedAt === 'number' ? json.updatedAt : 0,

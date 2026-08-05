@@ -117,7 +117,7 @@ describe('compatibility facade and composite handle observe each other', () => {
 
   it('shows a repository log append through the facade', async () => {
     const handle = new DiskStructuredStore().space(CANVAS_ID);
-    await handle.logs.appendEvents([
+    await handle.events.append([
       {
         payload: {
           action: 'node_selected',
@@ -127,7 +127,11 @@ describe('compatibility facade and composite handle observe each other', () => {
       },
     ]);
 
-    expect(getCanvasStore(CANVAS_ID).readEvents().map((e) => e.ts)).toEqual([7]);
+    expect(
+      getCanvasStore(CANVAS_ID)
+        .readEvents()
+        .map((e) => e.ts),
+    ).toEqual([7]);
   });
 });
 
@@ -210,9 +214,9 @@ describe('cross-surface Disk invariants', () => {
       'revalidateNodeForRead',
       'isNodeWriteSuppressed',
     ]) {
-      expect(typeof (nodes as unknown as Record<string, unknown>)[allowed]).toBe(
-        'function',
-      );
+      expect(
+        typeof (nodes as unknown as Record<string, unknown>)[allowed],
+      ).toBe('function');
     }
   });
 });

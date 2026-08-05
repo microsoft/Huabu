@@ -10,7 +10,7 @@
  * field assignments over an object the existing cache returns, so there is
  * nothing to gain by caching it twice.
  *
- * Because the record, log, and node adapters all wrap the *same* legacy
+ * Because the record, log-family, and node adapters all wrap the *same* legacy
  * object the compatibility facade resolves, a write through either view is
  * immediately observed through the other. That identity holds for as long as
  * the underlying cache entry lives, which is a bounded LRU — it is a
@@ -18,7 +18,7 @@
  * Space has one long-lived instance.
  */
 
-import { DiskCanvasLogRepository } from './canvas-log-repository.js';
+import { createDiskCanvasLogRepositories } from './canvas-log-repository.js';
 import { getCanvasStore } from './legacy/canvas-store-cache.js';
 import { DiskLegacyNodeStore } from './legacy-node-store.js';
 import { DiskSpaceRepository } from './space-repository.js';
@@ -43,10 +43,11 @@ export class DiskStructuredStore implements StructuredStore {
   space(canvasId: string): SpaceHandle {
     // `getCanvasStore` validates the id and owns the instance cache.
     const store = getCanvasStore(canvasId);
+    const logRepositories = createDiskCanvasLogRepositories(store);
     return {
       canvasId: store.canvasId,
       record: new DiskSpaceRepository(store),
-      logs: new DiskCanvasLogRepository(store),
+      ...logRepositories,
       nodes: new DiskLegacyNodeStore(store),
     };
   }

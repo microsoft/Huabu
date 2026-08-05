@@ -23,10 +23,7 @@ export {
   listCanvasSummaries,
   resetStorageCache,
 } from './compatibility/canvas.js';
-export type {
-  RenameResult,
-  RenameSelfResult,
-} from './compatibility/canvas.js';
+export type { RenameResult, RenameSelfResult } from './compatibility/canvas.js';
 
 export {
   getWorldCanvasId,
@@ -81,7 +78,10 @@ export type {
 } from './ports/blob.js';
 export type { StorageHealth } from './ports/common.js';
 export type {
-  CanvasLogRepository,
+  CanvasChangeRepository,
+  CanvasDeltaRepository,
+  CanvasEventRepository,
+  CanvasIntentRepository,
   LegacyNodeStore,
   NewCanvasEvent,
   NodeWriteResult,

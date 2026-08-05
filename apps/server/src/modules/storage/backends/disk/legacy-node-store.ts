@@ -19,23 +19,27 @@ import type {
 } from '../../ports/structured.js';
 
 export class DiskLegacyNodeStore implements LegacyNodeStore {
-  constructor(private readonly store: CanvasStore) {}
+  readonly #store: CanvasStore;
+
+  constructor(store: CanvasStore) {
+    this.#store = store;
+  }
 
   readNode(nodeId: string): NodeContent | null {
-    return this.store.readNode(nodeId);
+    return this.#store.readNode(nodeId);
   }
 
   async readAllNodes(options?: {
     strict?: boolean;
   }): Promise<Map<string, NodeContent>> {
-    return this.store.readAllNodes(options);
+    return this.#store.readAllNodes(options);
   }
 
   async streamAllNodes(
     onNode: (id: string, content: NodeContent) => void,
     signal?: { readonly aborted: boolean },
   ): Promise<Map<string, NodeContent>> {
-    return this.store.streamAllNodes(onNode, signal);
+    return this.#store.streamAllNodes(onNode, signal);
   }
 
   writeNode(
@@ -43,30 +47,30 @@ export class DiskLegacyNodeStore implements LegacyNodeStore {
     content: NodeContent,
     opts?: { strictRename?: boolean },
   ): NodeWriteResult {
-    return this.store.writeNode(nodeId, content, opts ?? {});
+    return this.#store.writeNode(nodeId, content, opts ?? {});
   }
 
   deleteNode(nodeId: string): 'deleted' | 'absent' {
-    return this.store.deleteNode(nodeId);
+    return this.#store.deleteNode(nodeId);
   }
 
   nodeIdForFilename(filename: string): string | null {
-    return this.store.nodeIdForFilename(filename);
+    return this.#store.nodeIdForFilename(filename);
   }
 
   isDuplicateNode(nodeId: string): boolean {
-    return this.store.isDuplicateNode(nodeId);
+    return this.#store.isDuplicateNode(nodeId);
   }
 
   duplicateNodeFiles(nodeId: string): string[] {
-    return this.store.duplicateNodeFiles(nodeId);
+    return this.#store.duplicateNodeFiles(nodeId);
   }
 
   revalidateNodeForRead(nodeId: string): void {
-    this.store.revalidateNodeForRead(nodeId);
+    this.#store.revalidateNodeForRead(nodeId);
   }
 
   isNodeWriteSuppressed(nodeId: string): boolean {
-    return this.store.isNodeWriteSuppressed(nodeId);
+    return this.#store.isNodeWriteSuppressed(nodeId);
   }
 }
