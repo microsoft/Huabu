@@ -2,13 +2,7 @@
  * Per-canvas storage facade. One instance per `<canvasDir>/`.
  */
 
-import {
-  existsSync,
-  readdirSync,
-  rmSync,
-  statSync,
-  unlinkSync,
-} from 'node:fs';
+import { existsSync, readdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
