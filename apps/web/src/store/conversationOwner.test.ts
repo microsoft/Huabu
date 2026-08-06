@@ -13,7 +13,11 @@ vi.mock('@/api/canvas', async (importOriginal) => ({
 }));
 
 import useCanvasStore from './canvasStore';
-import { selectThreadIsLoading, useChatStore } from './chatStore';
+import {
+  selectThreadBinding,
+  selectThreadIsLoading,
+  useChatStore,
+} from './chatStore';
 import {
   ConversationIntegrityError,
   conversationRequestScope,
@@ -347,7 +351,7 @@ describe('conversation owner routing', () => {
     const state = useChatStore.getState();
     expect(state.threadId).toBe('thread-source-canvas');
     expect(state.threadMap['canvas-source']).toBe('thread-source-canvas');
-    expect(state.agentBinding).toEqual({
+    expect(selectThreadBinding(state, 'thread-source-canvas')).toEqual({
       kind: 'external',
       profileId: 'profile-source',
       alias: 'Source Agent',

@@ -12,12 +12,15 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  selectCurrentBinding,
   selectCurrentHistoryLoaded,
   selectCurrentIsLoading,
   selectCurrentMessages,
+  selectThreadBinding,
   selectThreadDraft,
   selectThreadHistoryLoaded,
   selectThreadMessages,
+  selectThreadSettings,
   useChatStore,
 } from './chatStore';
 
@@ -49,8 +52,6 @@ function resetStore() {
     lastAction: 'ask',
     threadMap: {},
     bindingMap: {},
-    agentBinding: INTERNAL,
-    chatSettings: { threadId: null, modelId: null, reasoningEffort: null },
     viewingQuestionThread: null,
     viewingSketchCluster: null,
     questionReplayByCanvas: {},
@@ -60,6 +61,11 @@ function resetStore() {
     _savedCanvasBinding: undefined,
     _savedCanvasLastAction: undefined,
   });
+}
+
+/** The binding of whichever thread is currently visible. */
+function currentBinding() {
+  return selectCurrentBinding(useChatStore.getState());
 }
 
 function userMessage(id: string, content: string): ChatMessage {
@@ -108,15 +114,36 @@ describe('chatStore per-thread caches', () => {
   });
 });
 
-describe('chatStore global singletons (not yet per-thread)', () => {
-  it('shares one agentBinding across threads', () => {
+describe('chatStore per-thread agent binding', () => {
+  it('binds each thread independently', () => {
     const s = useChatStore.getState();
-    s.setAgentBinding(EXTERNAL);
+    s.setAgentBinding('thread-a', EXTERNAL);
 
-    useChatStore.setState({ threadId: 'thread-other' });
-    expect(useChatStore.getState().agentBinding).toEqual(EXTERNAL);
+    const state = useChatStore.getState();
+    expect(selectThreadBinding(state, 'thread-a')).toEqual(EXTERNAL);
+    expect(selectThreadBinding(state, 'thread-b')).toEqual(INTERNAL);
   });
 
+  it('keeps per-thread built-in settings apart', () => {
+    const s = useChatStore.getState();
+    s.setThreadSettings('thread-a', {
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+
+    const state = useChatStore.getState();
+    expect(selectThreadSettings(state, 'thread-a')).toEqual({
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    expect(selectThreadSettings(state, 'thread-b')).toEqual({
+      modelId: null,
+      reasoningEffort: null,
+    });
+  });
+});
+
+describe('chatStore global singletons (not yet per-thread)', () => {
   it('shares one pendingAttachments / selectionAttachment slot across threads', () => {
     const s = useChatStore.getState();
     s.addPendingAttachment(STAGED_ATTACHMENT);
@@ -158,15 +185,15 @@ describe('chatStore switchToCanvas', () => {
     const s = useChatStore.getState();
 
     s.switchToCanvas('canvas-1');
-    s.setAgentBinding(EXTERNAL, 'canvas-1');
+    s.setAgentBinding(useChatStore.getState().threadId, EXTERNAL, 'canvas-1');
     s.addPendingAttachment(STAGED_ATTACHMENT);
 
     s.switchToCanvas('canvas-2');
-    expect(useChatStore.getState().agentBinding).toEqual(INTERNAL);
+    expect(currentBinding()).toEqual(INTERNAL);
     expect(useChatStore.getState().pendingAttachments).toEqual([]);
 
     s.switchToCanvas('canvas-1');
-    expect(useChatStore.getState().agentBinding).toEqual(EXTERNAL);
+    expect(currentBinding()).toEqual(EXTERNAL);
   });
 
   it('drops a dangling question view when moving to a canvas with no replay', () => {
@@ -195,7 +222,7 @@ describe('chatStore switchToCanvas', () => {
 
     const state = useChatStore.getState();
     expect(state.threadId).toBe('thread-q');
-    expect(state.agentBinding).toEqual(EXTERNAL);
+    expect(currentBinding()).toEqual(EXTERNAL);
     expect(state.viewingQuestionThread?.presentationAnchor.nodeId).toBe(
       'node-1',
     );
@@ -208,7 +235,7 @@ describe('chatStore clearMessages', () => {
   it('mints a fresh thread, seeds it loaded-and-empty, and resets the binding', () => {
     const s = useChatStore.getState();
     s.switchToCanvas('canvas-1');
-    s.setAgentBinding(EXTERNAL, 'canvas-1');
+    s.setAgentBinding(useChatStore.getState().threadId, EXTERNAL, 'canvas-1');
     s.addPendingAttachment(STAGED_ATTACHMENT);
     const previous = useChatStore.getState().threadId;
 
@@ -219,7 +246,7 @@ describe('chatStore clearMessages', () => {
     expect(selectThreadMessages(state, state.threadId)).toEqual([]);
     expect(selectThreadHistoryLoaded(state, state.threadId)).toBe(true);
     expect(state.threadMap['canvas-1']).toBe(state.threadId);
-    expect(state.agentBinding).toEqual(INTERNAL);
+    expect(currentBinding()).toEqual(INTERNAL);
     expect(state.bindingMap['canvas-1']).toEqual(INTERNAL);
     expect(state.pendingAttachments).toEqual([]);
     expect(state.lastAction).toBe('ask');
@@ -231,7 +258,7 @@ describe('chatStore clearMessages', () => {
       .clearMessages('canvas-1', { binding: EXTERNAL, lastAction: 'operate' });
 
     const state = useChatStore.getState();
-    expect(state.agentBinding).toEqual(EXTERNAL);
+    expect(currentBinding()).toEqual(EXTERNAL);
     expect(state.bindingMap['canvas-1']).toEqual(EXTERNAL);
     expect(state.lastAction).toBe('operate');
   });
@@ -241,7 +268,7 @@ describe('chatStore question thread lifecycle', () => {
   it('round-trips thread, binding and lastAction through open/close', () => {
     const s = useChatStore.getState();
     s.switchToCanvas('canvas-1');
-    s.setAgentBinding(EXTERNAL, 'canvas-1');
+    s.setAgentBinding(useChatStore.getState().threadId, EXTERNAL, 'canvas-1');
     s.setLastAction('operate');
     const canvasThread = useChatStore.getState().threadId;
 
@@ -251,7 +278,7 @@ describe('chatStore question thread lifecycle', () => {
       'canvas-1',
     );
     expect(useChatStore.getState().threadId).toBe('thread-q');
-    expect(useChatStore.getState().agentBinding).toEqual(INTERNAL);
+    expect(currentBinding()).toEqual(INTERNAL);
 
     // A follow-up send inside the replay may pollute the global mode.
     useChatStore.getState().setLastAction('ask');
@@ -260,7 +287,7 @@ describe('chatStore question thread lifecycle', () => {
     const state = useChatStore.getState();
     expect(state.viewingQuestionThread).toBeNull();
     expect(state.threadId).toBe(canvasThread);
-    expect(state.agentBinding).toEqual(EXTERNAL);
+    expect(currentBinding()).toEqual(EXTERNAL);
     expect(state.lastAction).toBe('operate');
     expect(state.questionReplayByCanvas['canvas-1']).toBeUndefined();
   });

@@ -84,6 +84,8 @@ function seedStore(isStreaming: boolean) {
         draft: '',
         historyLoaded: true,
         isStreaming,
+        binding: { kind: 'internal' },
+        settings: { modelId: null, reasoningEffort: null },
       },
     },
     viewingQuestionThread: null,

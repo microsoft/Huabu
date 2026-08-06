@@ -40,6 +40,18 @@ export interface ChatThreadState {
   historyLoaded: boolean;
   /** Whether an agent run is streaming into this thread right now. */
   isStreaming: boolean;
+  /**
+   * The agent this thread is bound to. 1 thread = 1 binding for its entire
+   * lifetime; the only way to change it is to start a new thread.
+   */
+  binding: AgentBinding;
+  /**
+   * Built-in per-thread capability selection. `null` means "no override".
+   * Read at send time so a model picked before the first message is carried
+   * on the request. Lives on the thread, so a selection made in one Chat can
+   * never be applied to another thread's request.
+   */
+  settings: { modelId: string | null; reasoningEffort: string | null };
 }
 
 export interface ChatState {
@@ -62,31 +74,10 @@ export interface ChatState {
   threadMap: Record<string, string>;
 
   /**
-   * Active thread → agent binding. 1 thread = 1 binding for its entire
-   * lifetime; the only way to change it is to start a new thread
-   * (`clearMessages`).
-   */
-  agentBinding: AgentBinding;
-  /**
-   * The current thread's built-in per-thread capability selection
-   * (model / reasoning effort), tagged with the `threadId` it belongs to.
-   * Transient (not persisted) — synced from `useBuiltinThreadSettings` and
-   * read at message-send time so a selection picked before the first
-   * message is carried on the request. The send path only applies it when
-   * `threadId` matches the thread being sent, so a stale value from a
-   * just-switched thread is never written to another thread. `null` fields
-   * mean "no override".
-   */
-  chatSettings: {
-    threadId: string | null;
-    modelId: string | null;
-    reasoningEffort: string | null;
-  };
-  /**
    * Map of canvasId → AgentBinding, persisted so each canvas keeps its
-   * own binding across reloads. Source of truth on the client; the
-   * server is stateless about thread bindings and reads the binding
-   * from each request body.
+   * own binding across reloads. Seeds the binding of a canvas's chat
+   * thread; the server is stateless about thread bindings and reads the
+   * binding from each request body.
    */
   bindingMap: Record<string, AgentBinding>;
 
@@ -199,19 +190,22 @@ export interface ChatState {
   ) => void;
 
   /**
-   * Change the agent binding for the current thread. Pass `canvasId` to
-   * also persist the choice to `bindingMap` so it is remembered the
-   * next time the user opens this canvas. UI guards against calling
-   * this while a thread has any messages (1 thread = 1 binding).
+   * Change a thread's agent binding. Pass `canvasId` to also persist the
+   * choice to `bindingMap` so it seeds the next thread on this canvas. UI
+   * guards against calling this once a thread has messages (1 thread = 1
+   * binding).
    */
-  setAgentBinding: (binding: AgentBinding, canvasId?: string) => void;
+  setAgentBinding: (
+    threadId: string,
+    binding: AgentBinding,
+    canvasId?: string,
+  ) => void;
 
-  /** Replace the current thread's built-in capability selection. */
-  setChatSettings: (settings: {
-    threadId: string | null;
-    modelId: string | null;
-    reasoningEffort: string | null;
-  }) => void;
+  /** Replace a thread's built-in capability selection. */
+  setThreadSettings: (
+    threadId: string,
+    settings: { modelId: string | null; reasoningEffort: string | null },
+  ) => void;
 
   /** Switch to a canvas — loads or creates its threadId, resets in-memory messages. */
   switchToCanvas: (canvasId: string) => void;
@@ -357,6 +351,8 @@ const EMPTY_THREAD: ChatThreadState = {
   draft: '',
   historyLoaded: false,
   isStreaming: false,
+  binding: DEFAULT_BINDING,
+  settings: { modelId: null, reasoningEffort: null },
 };
 
 function threadOf(state: ChatState, threadId: string): ChatThreadState {
@@ -377,6 +373,43 @@ function patchThread(
   };
 }
 
+/**
+ * Leaves a question view and returns to the stashed canvas chat.
+ *
+ * The stashed binding is replayed into the restored thread's entry because
+ * after a refresh that entry does not exist yet: `threadsById` is in-memory
+ * while the replay pointer is persisted.
+ */
+function leaveQuestionView(
+  state: ChatState,
+  canvasId?: string,
+): Partial<ChatState> {
+  const restoredThreadId = state._savedCanvasThreadId ?? state.threadId;
+  const nextReplayMap =
+    canvasId && canvasId in state.questionReplayByCanvas
+      ? (() => {
+          const next = { ...state.questionReplayByCanvas };
+          delete next[canvasId];
+          return next;
+        })()
+      : state.questionReplayByCanvas;
+
+  return {
+    ...(state._savedCanvasBinding
+      ? patchThread(state, restoredThreadId, {
+          binding: state._savedCanvasBinding,
+        })
+      : {}),
+    viewingQuestionThread: null,
+    threadId: restoredThreadId,
+    lastAction: state._savedCanvasLastAction ?? state.lastAction,
+    _savedCanvasThreadId: undefined,
+    _savedCanvasBinding: undefined,
+    _savedCanvasLastAction: undefined,
+    questionReplayByCanvas: nextReplayMap,
+  };
+}
+
 export const useChatStore = create<ChatState>()(
   persist(
     (set, get) => ({
@@ -386,8 +419,6 @@ export const useChatStore = create<ChatState>()(
       threadId: createId('thread'),
       lastAction: 'ask',
       threadMap: {},
-      agentBinding: DEFAULT_BINDING,
-      chatSettings: { threadId: null, modelId: null, reasoningEffort: null },
       bindingMap: {},
       pendingAttachments: [],
       selectionAttachment: null,
@@ -471,32 +502,43 @@ export const useChatStore = create<ChatState>()(
           ...patchThread(state, newThreadId, {
             messages: [],
             historyLoaded: true,
+            binding: initialBinding,
           }),
           threadId: newThreadId,
           lastAction: initialLastAction,
           pendingAttachments: [],
           selectionAttachment: null,
           threadMap: updatedThreads,
-          agentBinding: initialBinding,
           bindingMap: updatedBindings,
         });
         get().evictInactiveThreads();
       },
 
-      setAgentBinding: (binding, canvasId) => {
-        const { bindingMap } = get();
+      setAgentBinding: (threadId, binding, canvasId) => {
+        const state = get();
         set({
-          agentBinding: binding,
+          ...patchThread(state, threadId, { binding }),
           bindingMap: canvasId
-            ? { ...bindingMap, [canvasId]: binding }
-            : bindingMap,
+            ? { ...state.bindingMap, [canvasId]: binding }
+            : state.bindingMap,
         });
       },
 
-      setChatSettings: (settings) => set({ chatSettings: settings }),
+      setThreadSettings: (threadId, settings) =>
+        set((state) => {
+          const current = threadOf(state, threadId).settings;
+          if (
+            current.modelId === settings.modelId &&
+            current.reasoningEffort === settings.reasoningEffort
+          ) {
+            return {};
+          }
+          return patchThread(state, threadId, { settings });
+        }),
 
       switchToCanvas: (canvasId: string) => {
-        const { threadMap, bindingMap, questionReplayByCanvas } = get();
+        const state = get();
+        const { threadMap, bindingMap, questionReplayByCanvas } = state;
         const replay = questionReplayByCanvas[canvasId];
 
         if (replay) {
@@ -504,14 +546,15 @@ export const useChatStore = create<ChatState>()(
           // saved canvas thread / binding / lastAction travel with the
           // entry so `closeQuestionThread` can roll back without
           // consulting the canvas, even after a full page refresh.
+          const replayThreadId = replay.view.conversationOwner.threadId;
           set({
+            ...patchThread(state, replayThreadId, { binding: replay.binding }),
             viewingQuestionThread: {
               ...replay.view,
               openPosition: 'bottom',
               openSequence: 0,
             },
-            threadId: replay.view.conversationOwner.threadId,
-            agentBinding: replay.binding,
+            threadId: replayThreadId,
             _savedCanvasThreadId: replay.savedCanvasThreadId,
             _savedCanvasBinding: replay.savedCanvasBinding,
             _savedCanvasLastAction: replay.savedCanvasLastAction,
@@ -545,14 +588,14 @@ export const useChatStore = create<ChatState>()(
         }
         const binding = bindingMap[canvasId] ?? DEFAULT_BINDING;
         set({
+          // Only the binding is seeded here — messages stay untouched so a
+          // cached thread renders instantly, and the history hook populates
+          // an uncached one from the server.
+          ...patchThread(state, tid, { binding }),
           threadId: tid,
-          // Don't touch `threadsById` — if this canvas's thread is
-          // already cached, the user sees it instantly; otherwise the
-          // history hook will populate it from the server.
           pendingAttachments: [],
           selectionAttachment: null,
           threadMap: { ...threadMap, [canvasId]: tid },
-          agentBinding: binding,
           bindingMap: bindingMap[canvasId]
             ? bindingMap
             : { ...bindingMap, [canvasId]: binding },
@@ -594,16 +637,17 @@ export const useChatStore = create<ChatState>()(
         canvasId,
         openPosition = 'bottom',
       ) => {
+        const state = get();
         const {
           threadId: currentThreadId,
-          agentBinding: currentBinding,
           lastAction: currentLastAction,
           viewingQuestionThread: currentViewing,
           _savedCanvasThreadId: savedThreadIdSlot,
           _savedCanvasBinding: savedBindingSlot,
           _savedCanvasLastAction: savedLastActionSlot,
           questionReplayByCanvas,
-        } = get();
+        } = state;
+        const currentBinding = threadOf(state, currentThreadId).binding;
         const threadId = view.conversationOwner.threadId;
 
         const nextOpenSequence = (currentViewing?.openSequence ?? 0) + 1;
@@ -677,13 +721,13 @@ export const useChatStore = create<ChatState>()(
           : currentLastAction;
 
         set({
+          ...patchThread(state, threadId, { binding: nextBinding }),
           viewingQuestionThread: {
             ...view,
             openPosition,
             openSequence: nextOpenSequence,
           },
           threadId: threadId,
-          agentBinding: nextBinding,
           ...(!isAlreadyViewing && {
             _savedCanvasThreadId: currentThreadId,
             _savedCanvasBinding: currentBinding,
@@ -706,13 +750,14 @@ export const useChatStore = create<ChatState>()(
       },
 
       openQuestionThreadInOwnerCanvas: (view, binding) => {
+        const state = get();
         const {
           threadMap,
           bindingMap,
           lastAction,
           questionReplayByCanvas,
           viewingQuestionThread,
-        } = get();
+        } = state;
         const canvasId = view.conversationOwner.canvasId;
         const savedCanvasThreadId = threadMap[canvasId] ?? createId('thread');
         const savedCanvasBinding = bindingMap[canvasId] ?? DEFAULT_BINDING;
@@ -726,13 +771,15 @@ export const useChatStore = create<ChatState>()(
         };
 
         set({
+          ...patchThread(state, view.conversationOwner.threadId, {
+            binding: nextBinding,
+          }),
           viewingQuestionThread: {
             ...ownerView,
             openPosition: 'bottom',
             openSequence: (viewingQuestionThread?.openSequence ?? 0) + 1,
           },
           threadId: view.conversationOwner.threadId,
-          agentBinding: nextBinding,
           _savedCanvasThreadId: savedCanvasThreadId,
           _savedCanvasBinding: savedCanvasBinding,
           _savedCanvasLastAction: lastAction,
@@ -765,11 +812,11 @@ export const useChatStore = create<ChatState>()(
         const state = get();
         const {
           threadId: currentThreadId,
-          agentBinding: currentBinding,
           lastAction: currentLastAction,
           viewingQuestionThread: currentViewing,
           bindingMap,
         } = state;
+        const currentBinding = threadOf(state, currentThreadId).binding;
         const threadId = view.conversationOwner.threadId;
 
         // Already composing/viewing this exact thread — nothing to do.
@@ -795,6 +842,7 @@ export const useChatStore = create<ChatState>()(
         const seeded = patchThread(state, threadId, {
           messages: threadOf(state, threadId).messages,
           historyLoaded: true,
+          binding: initialBinding,
         });
 
         // Stash the canvas chat state so leaving compose restores it —
@@ -810,7 +858,6 @@ export const useChatStore = create<ChatState>()(
             openSequence: (currentViewing?.openSequence ?? 0) + 1,
           },
           threadId,
-          agentBinding: initialBinding,
           pendingAttachments: [],
           selectionAttachment: null,
           viewingSketchCluster: null,
@@ -824,26 +871,7 @@ export const useChatStore = create<ChatState>()(
       },
 
       closeQuestionThread: (canvasId) => {
-        const state = get();
-        const nextReplayMap = (() => {
-          if (!canvasId) return state.questionReplayByCanvas;
-          if (!(canvasId in state.questionReplayByCanvas)) {
-            return state.questionReplayByCanvas;
-          }
-          const next = { ...state.questionReplayByCanvas };
-          delete next[canvasId];
-          return next;
-        })();
-        set({
-          viewingQuestionThread: null,
-          threadId: state._savedCanvasThreadId ?? state.threadId,
-          agentBinding: state._savedCanvasBinding ?? state.agentBinding,
-          lastAction: state._savedCanvasLastAction ?? state.lastAction,
-          _savedCanvasThreadId: undefined,
-          _savedCanvasBinding: undefined,
-          _savedCanvasLastAction: undefined,
-          questionReplayByCanvas: nextReplayMap,
-        });
+        set(leaveQuestionView(get(), canvasId));
         get().evictInactiveThreads();
       },
 
@@ -857,25 +885,7 @@ export const useChatStore = create<ChatState>()(
         // re-resurrect the replay underneath the sketch view.
         const state = get();
         if (state.viewingQuestionThread) {
-          const nextReplayMap = (() => {
-            if (!canvasId) return state.questionReplayByCanvas;
-            if (!(canvasId in state.questionReplayByCanvas)) {
-              return state.questionReplayByCanvas;
-            }
-            const next = { ...state.questionReplayByCanvas };
-            delete next[canvasId];
-            return next;
-          })();
-          set({
-            viewingQuestionThread: null,
-            threadId: state._savedCanvasThreadId ?? state.threadId,
-            agentBinding: state._savedCanvasBinding ?? state.agentBinding,
-            lastAction: state._savedCanvasLastAction ?? state.lastAction,
-            _savedCanvasThreadId: undefined,
-            _savedCanvasBinding: undefined,
-            _savedCanvasLastAction: undefined,
-            questionReplayByCanvas: nextReplayMap,
-          });
+          set(leaveQuestionView(state, canvasId));
         }
         set({ viewingSketchCluster: { clusterId } });
       },
@@ -1072,6 +1082,22 @@ export const selectThreadIsLoading = (
   state: ChatState,
   threadId: string,
 ): boolean => threadOf(state, threadId).isStreaming;
+
+/** The agent a thread is bound to. */
+export const selectThreadBinding = (
+  state: ChatState,
+  threadId: string,
+): AgentBinding => threadOf(state, threadId).binding;
+
+/** A thread's built-in model / reasoning-effort overrides. */
+export const selectThreadSettings = (
+  state: ChatState,
+  threadId: string,
+): ChatThreadState['settings'] => threadOf(state, threadId).settings;
+
+/** The currently-visible thread's agent binding. */
+export const selectCurrentBinding = (state: ChatState): AgentBinding =>
+  selectThreadBinding(state, state.threadId);
 
 /**
  * Read the currently-visible thread's message list. Returns a stable

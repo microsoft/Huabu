@@ -32,6 +32,7 @@ import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
+  selectCurrentBinding,
   selectCurrentHistoryLoaded,
   selectCurrentMessages,
   selectCurrentDraft,
@@ -224,7 +225,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // a thread; the only way to change it is to start a new thread via
   // the `NewChatMenu`. New threads default to `{kind:'internal'}`
   // unless the user picks an external agent from the menu.
-  const agentBinding = useChatStore((state) => state.agentBinding);
+  const agentBinding = useChatStore(selectCurrentBinding);
   const setAgentBinding = useChatStore((state) => state.setAgentBinding);
   const {
     profiles: acpProfiles,
@@ -256,7 +257,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       (p) => p.id === agentBinding.profileId,
     );
     if (profileExists) return;
-    setAgentBinding({ kind: 'internal' }, canvasId || undefined);
+    setAgentBinding(threadId, { kind: 'internal' }, canvasId || undefined);
   }, [
     isHistoryLoaded,
     messages.length,
@@ -267,6 +268,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     headlessConversation,
     viewingQuestionBindingIsFixed,
     setAgentBinding,
+    threadId,
   ]);
 
   // Load the persisted change-review records when a thread opens so the
@@ -766,7 +768,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       // The selector is already read-only then; keep this guard as defense in
       // depth in case a stale menu event arrives during the transition.
       if (isLoading || viewingQuestionBindingIsFixed) return;
-      setAgentBinding(choice.binding, canvasId || undefined);
+      setAgentBinding(threadId, choice.binding, canvasId || undefined);
       setLastAction(choice.mode);
     },
     [
@@ -775,6 +777,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       setAgentBinding,
       setLastAction,
       canvasId,
+      threadId,
     ],
   );
 

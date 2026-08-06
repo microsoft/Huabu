@@ -15,7 +15,11 @@ import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore.ts';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
-import { selectThreadMessages, useChatStore } from '@/store/chatStore.ts';
+import {
+  selectThreadBinding,
+  selectThreadMessages,
+  useChatStore,
+} from '@/store/chatStore.ts';
 import { findPendingPermissionRequestId } from '@/store/chatTypes.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
 import {
@@ -147,7 +151,11 @@ export const QuestionNode = memo(
     // authored/run yet (`idle`). Derived from the node's status, not a stored
     // `compose` flag.
     const isOpenForQuestion = showChatAnchor && status === 'idle';
-    const composeAgentBinding = useChatStore((s) => s.agentBinding);
+    // Compose-time binding lives on the node's own thread, so it stays correct
+    // even while another Chat is mounted on a different thread.
+    const composeAgentBinding = useChatStore((s) =>
+      data.threadId ? selectThreadBinding(s, data.threadId) : undefined,
+    );
     // While composing a brand-new question, the mode follows the user's inline
     // Chat/Agent pick (`lastAction`) rather than the node's not-yet-written
     // `agentMode` (mirrors ChatPanel's compose logic).
@@ -271,9 +279,10 @@ export const QuestionNode = memo(
 
     const isDoneUnviewed = status === 'done' && !viewed;
     const isErrorUnviewed = status === 'error' && !viewed;
-    const effectiveBinding = isOpenForQuestion
+    const effectiveBinding = (isOpenForQuestion
       ? composeAgentBinding
-      : (data.agentBinding ?? { kind: 'internal' as const });
+      : data.agentBinding) ??
+      data.agentBinding ?? { kind: 'internal' as const };
     const agentPresentation = resolveQuestionAgentPresentation({
       binding: effectiveBinding,
       fallbackIcon: data.agentIcon,

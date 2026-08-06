@@ -23,8 +23,10 @@ import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
   selectCurrentIsLoading,
+  selectThreadBinding,
   selectThreadIsLoading,
   selectThreadMessages,
+  selectThreadSettings,
   useChatStore,
 } from '@/store/chatStore';
 import {
@@ -887,7 +889,10 @@ export function useAgentStream(): UseAgentStreamReturn {
             .getState()
             .updateNodeData(questionNodeId, { content: prompt });
         }
-        const selectedBinding = useChatStore.getState().agentBinding;
+        const selectedBinding = selectThreadBinding(
+          useChatStore.getState(),
+          threadId,
+        );
         const selectedProfile =
           selectedBinding.kind === 'external'
             ? useAcpProfilesStore
@@ -947,10 +952,13 @@ export function useAgentStream(): UseAgentStreamReturn {
       // network blip to block the agent call.
       await useCanvasStore.getState().flushCanvasEvents();
 
-      // Snapshot the current picker binding at send time. The server uses it
-      // for selectable threads but replaces it with the persisted binding
-      // when the thread resolves to a fixed Agent Node.
-      const agentBinding = useChatStore.getState().agentBinding;
+  // Snapshot the current thread's picker binding at send time. The server
+  // uses it for selectable threads but replaces it with the persisted
+  // binding when the thread resolves to a fixed Agent Node.
+      const agentBinding = selectThreadBinding(
+        useChatStore.getState(),
+        threadId,
+      );
 
       // Build the canvas context, dropping the anchored question node
       // from `selectedNodes` for the same reason as `selectedNodeIds`
@@ -1086,18 +1094,18 @@ export function useAgentStream(): UseAgentStreamReturn {
             agentBinding,
             anchorNodeId: requestScope.anchorNodeId,
             invokedSkills,
-            // Carry the current built-in per-thread selection so a model /
+            // Carry this thread's built-in selection so a model /
             // reasoning effort picked before the first message is applied
-            // when the thread is created. Only when the stored selection
-            // belongs to THIS thread (guards a just-switched thread from
-            // writing the previous thread's model). Ignored server-side for
-            // external bindings.
+            // when the thread is created. Ignored server-side for external
+            // bindings.
             ...(() => {
-              const cs = useChatStore.getState().chatSettings;
-              if (cs.threadId !== threadId) return {};
+              const settings = selectThreadSettings(
+                useChatStore.getState(),
+                threadId,
+              );
               return {
-                modelId: cs.modelId ?? undefined,
-                reasoningEffort: cs.reasoningEffort ?? undefined,
+                modelId: settings.modelId ?? undefined,
+                reasoningEffort: settings.reasoningEffort ?? undefined,
               };
             })(),
             signal: abortController.signal,
