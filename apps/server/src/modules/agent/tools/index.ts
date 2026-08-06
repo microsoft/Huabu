@@ -51,8 +51,7 @@ export interface ToolBuildContext {
   /**
    * `NodeOrigin` stamp injected onto every node created by the
    * `canvas_commands` tool. Defaults to `{ type: 'ai-operate' }`
-   * inside the handler when unset; an agent may override it through
-   * `runtime.defaultOrigin`. Other tools ignore this field.
+   * inside the handler when unset. Other tools ignore this field.
    */
   origin?: NodeOrigin;
   /** ACP conversation thread to attribute canvas changes to. */

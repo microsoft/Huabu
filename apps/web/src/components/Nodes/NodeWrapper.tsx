@@ -307,8 +307,8 @@ export const NodeWrapper = memo(
     );
     const endResizePreview = useCanvasStore((state) => state.endResizePreview);
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
-    // Question nodes already surface their working state via the
-    // `StatusBadge` (running / done). Their content-ingestion spinner
+    // Question nodes already surface their working state via their agent
+    // badge (running / done). Their content-ingestion spinner
     // would otherwise overlap that badge with a redundant second spinner
     // the moment the prompt is authored on send, so suppress it here.
     const showIngestionOverlay =

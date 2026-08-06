@@ -77,8 +77,7 @@ const DEFAULT_ORIGIN: NodeOrigin = { type: 'ai-operate' };
  * Execute a batch of canvas commands and return the SSE-bound payload.
  *
  * `origin` controls the `NodeOrigin` stamp injected onto every CREATE /
- * MERGE command. Defaults to `{ type: 'ai-operate' }`; an agent may
- * override it through `runtime.defaultOrigin` in its AGENT.md.
+ * MERGE command. Defaults to `{ type: 'ai-operate' }`.
  * Provenance (`author: 'ai'`) and `labelSource: 'agent'` are still
  * injected regardless of `origin` — they describe who *wrote* the
  * content, which is the LLM in every case.

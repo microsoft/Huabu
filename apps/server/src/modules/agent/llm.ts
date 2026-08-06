@@ -1586,7 +1586,7 @@ export function getLLMModel(): Model<Api> {
   const apiKey = resolveApiKey(cfg.provider);
 
   // For OAuth providers, resolveApiKey may return null (async refresh needed)
-  // Sync check — the actual async resolution happens in llmStream/llmComplete
+  // Sync check — the actual async resolution happens in llmComplete
   if (!apiKey) {
     const provInfo = getProviderCatalog().find((p) => p.id === cfg.provider);
     if (provInfo?.authType !== 'oauth') {
@@ -1606,7 +1606,7 @@ export function getLLMModel(): Model<Api> {
  *
  * Exported so callers that own their own LLM call (e.g. pi-agent-core's
  * `getApiKey` callback) can reuse the same provider-aware resolution and
- * OAuth refresh logic without going through `llmStream` / `llmComplete`.
+ * OAuth refresh logic without going through `llmComplete`.
  */
 export async function ensureApiKey(): Promise<string> {
   const cfg = ensureConfig();

@@ -72,8 +72,9 @@ const BaseUrlRow: React.FC<BaseUrlRowProps> = ({
  * LLM provider/model configuration section.
  *
  * Two independent sub-sections:
- *  - **LLM Provider** (chat) — drives `llmStream` / `llmComplete`. Any
- *    provider pi-ai knows about (OpenAI, Anthropic, Azure, Copilot …).
+ *  - **LLM Provider** (chat) — drives `llmComplete` and the agent
+ *    runtime. Any provider pi-ai knows about (OpenAI, Anthropic,
+ *    Azure, Copilot …).
  *  - **Image Provider** (generate_image tool) — only Azure today, but
  *    fully decoupled from the chat provider, so users can pair a
  *    Copilot chat model with an Azure image deployment.

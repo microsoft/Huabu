@@ -68,7 +68,7 @@ const renderNodeIcon = (node: DataSourceNodeLike) => {
   // Question nodes carry an execution lifecycle (pending → running →
   // done | error). We overlay a tiny status dot so the layer panel
   // doubles as an "ambient" status board for in-flight conversations,
-  // mirroring what the on-canvas `StatusBadge` shows.
+  // mirroring what the on-canvas question badge shows.
   if (node.type === 'question') {
     const status = getQuestionNodeStatus(node.data);
     if (status === 'idle') return iconEl;

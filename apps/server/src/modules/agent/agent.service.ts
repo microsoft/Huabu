@@ -115,8 +115,7 @@ export interface AgentRunOptions {
   context: Context;
   /**
    * `NodeOrigin` stamp forwarded to `canvas_commands` (and ignored by
-   * other tools). Defaults inside the handler to `{ type: 'ai-operate' }`;
-   * an agent may override it through `runtime.defaultOrigin`.
+   * other tools). Defaults inside the handler to `{ type: 'ai-operate' }`.
    */
   origin?: NodeOrigin;
   /** Model role used to resolve the Chat or Utility tier for this workload. */
