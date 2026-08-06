@@ -1,72 +1,132 @@
-<h1 align="center">
-	<img src="assets/huabu-logo.svg" alt="Huabu logo" width="64" align="center" />
-	Huabu
-</h1>
+# Huabu
 
-<p align="center"><strong>Where you and your agents think together.</strong></p>
+> A Space-based framework for human–AI collaboration.
 
-<p align="center">
-	<img src="assets/huabu-collaboration.svg" alt="A blue human and three colorful agents organizing connected materials together in a shared Space" width="800" />
-</p>
+Huabu provides a shared two-dimensional Space where ideas, notes, documents, questions, and AI outputs live side by side as **persistent nodes**. Instead of treating AI as a chat window detached from your work, Huabu places the human and the AI inside the same Space so they can build on each other's contributions over time.
 
-<p align="center">
-	<a href="https://microsoft.github.io/Huabu/docs/">User Handbook</a> ·
-	<a href="https://github.com/microsoft/Huabu/releases/latest">Download</a> ·
-	<a href="https://github.com/microsoft/Huabu/issues">Feedback</a>
-</p>
+---
 
-Huabu gives you an infinite work surface where you and your agents think together. Bring ideas, files, open questions, and agents into one living surface, where they stay visible and connected across sessions—and turn clearer thinking into work that ships.
+## Two Principles
 
-## Core Features
+### 1. Externalize Thinking
 
-- **Bring scattered information together** — drag ideas, notes, documents, and outputs from different chat sessions and sources into one Space, so everything relevant stays visible and connected.
-- **Organize your thinking with AI** — work with AI to arrange information, uncover relationships, and clarify ideas while reviewing and controlling every proposed change.
-- **Let your agents work with richer context** — bring your own agents into a Space, where they can understand not only the materials you provide, but also how those materials relate to one another—helping them better grasp your intent and do more relevant work.
+Huabu makes the intermediate structure of thought visible in the Space. Ideas can be organized, revised, and revisited outside of working memory. The Space captures not only **content**, but also **structure** — spatial arrangement reflects relationships, priorities, uncertainty, and the emerging clusters of thought that usually stay implicit in a linear document or chat.
 
-  > Source code will be released in a future update.
+### 2. Share Cognitive Space
 
-## Download and Install
+Because the AI operates in the same Space as the human, it can access the broader context of the work rather than only the latest instruction. This lets it:
 
-This initial release distributes packaged desktop applications through [GitHub Releases](https://github.com/microsoft/Huabu/releases/latest).
+- help organize materials,
+- synthesize across nodes,
+- identify what remains unresolved,
+- and support the development of ideas into more structured and actionable
+  outputs.
 
-1. Download the latest package for your platform from the Releases page.
-2. On macOS, open the `.dmg`; on Windows, run the `.exe` installer.
-3. Launch Huabu and choose a local folder as your **Home**.
+The Space is the shared memory; both sides read from it and write to it.
 
-The current desktop packages target macOS on Apple silicon and Windows on x64. Available packages may vary by release; consult the release notes before installing.
+---
 
-## Quick Start
+## What's in a Space
 
-Follow the [Huabu User Handbook](https://microsoft.github.io/Huabu/docs/) for setup instructions, model configuration, core concepts, and guidance on creating and working in your first Space. The handbook is the canonical source for product usage instructions.
+A Huabu Space is an infinite 2D surface composed of typed, persistent nodes that the user and the AI can both create, modify, link, and group.
 
-Huabu does not provide an LLM service as part of the application. Use of a model or external capability may require a separate account, credentials, subscription, or usage charges from its provider.
+| Node type   | Purpose                                                      |
+| ----------- | ------------------------------------------------------------ |
+| Note        | Rich-text / Markdown notes for ideas and drafts              |
+| Text        | Lightweight text blocks for labels and annotations           |
+| Web         | Embedded web pages as living references                      |
+| PDF         | PDF reader with highlighting that flows back into the Space  |
+| Image/Video | Visual material kept next to the thinking it informs         |
+| Frame       | Grouping container that gives a region of the Space identity |
+| Edge        | Explicit relationships between nodes                         |
 
-## Data, Credentials, and Connected Services
+Around these primitives Huabu adds:
 
-Huabu stores Spaces and their materials in the Home folder selected by the user. Credentials saved in the packaged desktop application are encrypted at rest using operating-system-protected storage.
+- **Intent system** — press `Ctrl/Cmd+I` and the AI proposes the next useful moves based on what is currently in the Space.
+- **Per-Space node content storage** — each Space owns its node content locally, so the AI can read and write directly against the same material the user is working on without a separate indexing step.
+- **AI chat side panel** — a conversational surface whose actions land back in the Space as nodes and edges, not just as text replies.
 
-Huabu does not send telemetry, crash reports, diagnostic logs, or usage data to Microsoft.
+See the user guide in [docs/user-guide](./docs/user-guide/README.md) for
+details.
 
-When an AI feature is used, the configured model provider or connected service may receive the prompt and relevant Space content needed to fulfill the request. External agents may also read or modify files within the working directory configured for them. Review the terms, privacy practices, data-handling controls, and permissions of every provider or agent before connecting it, and do not provide sensitive material unless its use is authorized.
+---
 
-## Research Status and Responsible Use
+## Getting Started
 
-Huabu is released for research and experimental use. AI-generated output may be inaccurate, incomplete, biased, or unsafe, and Huabu has not been evaluated for every language, model, or downstream scenario. Do not use it for high-risk or time-critical decisions, or in workflows where output is acted upon without qualified human review.
+Requirements: Node.js 20+ and pnpm 10+.
 
-For the complete intended-use statement, evaluation summary, limitations, and responsible-use guidance, read [RAI_README.md](RAI_README.md).
+```bash
+pnpm install
+```
 
-## Support and Feedback
+The source development server needs a stable encryption key before credentials can be saved through the Settings UI. Copy `.env.example` to `.env`, generate a key with the following command, and paste its output into `HUABU_SECRET_KEY=`:
 
-Community support is available on a best-effort basis through the [Huabu issue tracker](https://github.com/microsoft/Huabu/issues). See [SUPPORT.md](SUPPORT.md) for support guidance. Report security vulnerabilities privately by following [SECURITY.md](SECURITY.md).
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
+```
 
-## Contributing
+Keep that key unchanged: existing encrypted credentials cannot be opened with a different key. The `.env` file is git-ignored. Packaged Electron releases use the operating system's secure storage and do not require `HUABU_SECRET_KEY`.
 
-We welcome bug reports, documentation feedback, and research feedback. See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidance and Contributor License Agreement requirements. This project follows the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
+Then launch the desktop development environment:
 
-## Trademarks
+```bash
+pnpm run dev:desktop
+```
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft trademarks or logos is subject to and must follow [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/legal/intellectualproperty/trademarks/usage/general). Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship. Any use of third-party trademarks or logos is subject to those third parties' policies.
+This launches the desktop app (recommended), starting the server, the web client, and the shared package in watch mode, then opening Huabu in its own desktop window.
+
+### Local quality checks (optional)
+
+The repository ships opt-in git hooks that give you fast feedback before
+you commit or push. Enable them once per clone:
+
+```bash
+pnpm run hooks:install
+```
+
+This generates the hooks into your local `.git/hooks` directory (they are
+not tracked in the repository), wiring up:
+
+- **pre-commit** — `lint-staged` (ESLint `--fix` + Prettier on staged files)
+- **pre-push** — `pnpm run typecheck`
+
+Skip a single run with `--no-verify`, or disable the hooks again with
+`pnpm run hooks:uninstall`. These hooks are purely a local convenience —
+the authoritative gate is CI (`.github/workflows/ci.yml`), which runs lint,
+format, and typecheck on every pull request regardless of local setup.
+
+---
+
+## Configuring an LLM
+
+Huabu needs an LLM to drive chat, intent suggestions, and other in-Space AI features. Open the Settings button → **LLM Provider**.
+
+1. Pick a **Provider** (OpenAI, Anthropic, Google Gemini, OpenRouter,
+   GitHub Copilot, and more).
+2. Pick a **Model**. If the provider doesn't expose a model list,
+   type one in (e.g. `gpt-4o`) and click **Save**.
+3. Authenticate:
+   - **API key** providers — click **Set key**, paste, save.
+   - **GitHub Copilot** (OAuth) — click **Login**, then enter the shown user code at the opened GitHub page.
+
+The config is persisted on the server side, so you only need to do this once per machine. Source development uses the `HUABU_SECRET_KEY` configured during setup; packaged Electron releases use OS-protected storage instead.
+
+> Coding agents you connect through **External Agents** (below) bring
+> their own auth and don't use this provider setting.
+
+---
+
+## Connecting external coding agents
+
+Huabu can talk to AI coding agents running on your machine — **GitHub Copilot**, **Claude Agent**, **Gemini**, **Codex**, **Qwen Code**, **Kimi Code CLI**, **OpenCode**, **Cursor**, **Hermes Agent**, and others that speak the [Agent Client Protocol](https://agentclientprotocol.com).
+
+First install the agent CLI(s) you want and complete their sign-in flow.
+Then open **Settings → External Agents**, create a profile for the agent
+and the project folder it should work in, and activate it. The agent
+appears in the chat panel and can read and modify files under that folder.
+
+---
 
 ## License
 
-The materials included directly in this repository are licensed under the [MIT License](LICENSE), except where otherwise noted. The packaged Huabu application distributed through GitHub Releases is provided under the license terms included with that release.
+See [LICENSE](./LICENSE).

@@ -1,0 +1,760 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+/* ===================================================================
+  App design-system tokens — single source of truth.
+  Naming: fg-* (text), bg-* (surfaces), edge-* (borders).
+  =================================================================== */
+:root {
+  /* Text hierarchy */
+  --fg-default: #191919;
+  --fg-muted: #515151;
+  --fg-subtle: #767676;
+  --fg-inverse: #ffffff;
+
+  /* Backgrounds */
+  --bg-default: #f5f5f5;
+  --bg-surface: #ffffff;
+
+  --bg-hover: #f2f2f2;
+  --bg-inverse: #1f1f1f;
+
+  /* Borders */
+  --edge-default: #e6e6e6;
+
+  /* Status: info */
+  --info: #2e90ff;
+  --info-light: #8ac2ff;
+  --info-bg: #f2f8ff;
+  --info-bg-hover: #dbeafe;
+
+  /* Status: success */
+  --success: #16a34a;
+  --success-light: #6faf4f;
+  --success-bg: #f0fdf4;
+  --success-bg-hover: #dcfce7;
+
+  /* Status: warning */
+  --warning: #d97a2b;
+  --warning-light: #f7c85c;
+  --warning-bg: #fef6e7;
+  --warning-bg-hover: #fbe7ad;
+
+  /* Status: danger */
+  --danger: #e43636;
+  --danger-light: #cf8181;
+  --danger-bg: #fcf8f8;
+  --danger-bg-hover: #fee2e2;
+
+  /* AI colors */
+  --ai: #bda6ce;
+  --ai-light: rgba(189, 166, 206, 0.3);
+  --ai-bg: rgba(189, 166, 206, 0.1);
+
+  /* Diff */
+  --diff-added-bg: var(--success-bg);
+  --diff-added-text: var(--success);
+  --diff-removed-bg: var(--danger-bg);
+  --diff-removed-text: var(--danger);
+
+  /* Question node */
+  --question-fg: #d97a2b;
+  --question-bg: #fbe7ad;
+  --question-border: #eec84e;
+
+  /* Special purpose */
+  --canvas-grid: #cccccc;
+  --pdf-selection-border: var(--info);
+  --pdf-selection-bg: color-mix(in srgb, var(--info) 12%, transparent);
+  --pdf-highlight-bg: color-mix(in srgb, var(--warning-light) 45%, transparent);
+  --shimmer-1: #d1d5db;
+  --shimmer-2: #6b7280;
+  --shimmer-3: #4b5563;
+  --skeleton-1: #f3f4f6;
+  --skeleton-2: #e5e7eb;
+  --skeleton-3: #dcdfe4;
+}
+/* Dark theme overrides.
+   TODO: migrate system tokens to fg/bg/edge naming in a follow-up pass. */
+.dark {
+  /* --- App design-system tokens --- */
+  --fg-default: oklch(0.985 0 0);
+  --fg-muted: oklch(0.78 0 0);
+  --fg-subtle: oklch(0.53 0 0);
+  --fg-inverse: #191919;
+  --bg-default: oklch(0.145 0 0);
+  --bg-surface: oklch(0.22 0 0);
+  --bg-hover: oklch(0.25 0 0);
+  --bg-inverse: oklch(0.87 0 0);
+  --edge-default: oklch(1 0 0 / 10%);
+
+  /* Status: success */
+  --success: #4ade80;
+  --success-light: #22c55e;
+  --success-bg: oklch(0.22 0.04 150);
+  --success-bg-hover: oklch(0.28 0.05 150);
+
+  /* Status: warning */
+  --warning: #fbbf24;
+  --warning-light: #f59e0b;
+  --warning-bg: oklch(0.22 0.05 80);
+  --warning-bg-hover: oklch(0.28 0.06 80);
+
+  /* Status: info */
+  --info: #60a5fa;
+  --info-light: #93c5fd;
+  --info-bg: oklch(0.22 0.04 260);
+  --info-bg-hover: oklch(0.28 0.05 260);
+
+  /* Status: danger */
+  --danger: oklch(0.704 0.191 22.216);
+  --danger-light: #f87171;
+  --danger-bg: oklch(0.28 0.06 25);
+  --danger-bg-hover: oklch(0.28 0.06 25);
+
+  --ai: #bda6ce;
+  --ai-light: rgba(189, 166, 206, 0.3);
+  --ai-bg: rgba(189, 166, 206, 0.1);
+
+  /* Diff */
+  --diff-added-bg: oklch(0.25 0.06 150);
+  --diff-added-text: #86efac;
+  --diff-removed-bg: oklch(0.25 0.06 25);
+  --diff-removed-text: #fca5a5;
+
+  /* Special purpose */
+  --question-fg: #d97a2b;
+  --question-bg: #eec84e;
+  --question-border: #8a7535;
+  --canvas-grid: oklch(0.35 0 0);
+  --shimmer-1: oklch(0.45 0 0);
+  --shimmer-2: oklch(0.6 0 0);
+  --shimmer-3: oklch(0.7 0 0);
+  --skeleton-1: oklch(0.2 0 0);
+  --skeleton-2: oklch(0.28 0 0);
+  --skeleton-3: oklch(0.32 0 0);
+}
+
+/* Extending Tailwind theme with utility classes.*/
+@theme inline {
+  /* --- System design tokens --- */
+  --color-fg-default: var(--fg-default);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-inverse: var(--fg-inverse);
+
+  --color-bg-default: var(--bg-default);
+  --color-surface: var(--bg-surface);
+  --color-hover: var(--bg-hover);
+  --color-inverse: var(--bg-inverse);
+
+  --color-edge-default: var(--edge-default);
+
+  --color-ai: var(--ai);
+  --color-ai-light: var(--ai-light);
+  --color-ai-bg: var(--ai-bg);
+
+  /* Status: danger */
+  --color-danger: var(--danger);
+  --color-danger-light: var(--danger-light);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-bg-hover: var(--danger-bg-hover);
+
+  /* Status: success */
+  --color-success: var(--success);
+  --color-success-light: var(--success-light);
+  --color-success-bg: var(--success-bg);
+  --color-success-bg-hover: var(--success-bg-hover);
+
+  /* Status: warning */
+  --color-warning: var(--warning);
+  --color-warning-light: var(--warning-light);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-bg-hover: var(--warning-bg-hover);
+
+  /* Status: info */
+  --color-info: var(--info);
+  --color-info-light: var(--info-light);
+  --color-info-bg: var(--info-bg);
+  --color-info-bg-hover: var(--info-bg-hover);
+
+  /* Diff */
+  --color-diff-added-bg: var(--diff-added-bg);
+  --color-diff-added-text: var(--diff-added-text);
+  --color-diff-removed-bg: var(--diff-removed-bg);
+  --color-diff-removed-text: var(--diff-removed-text);
+
+  /* Special purpose */
+  --color-canvas-grid: var(--canvas-grid);
+  --color-question-fg: var(--question-fg);
+  --color-question-bg: var(--question-bg);
+  --color-question-border: var(--question-border);
+}
+
+@theme {
+  /*shadow*/
+  --shadow-bottom: 0 2px 12px rgba(0, 0, 0, 0.08);
+
+  /* Preview blink animation (faster than default pulse) */
+  --animate-preview-blink: preview-blink 0.6s ease-in-out infinite;
+}
+
+@keyframes preview-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+html,
+body,
+#root {
+  @apply m-0 h-full w-full p-0;
+  background-color: var(--bg-default);
+  overflow: hidden;
+  /* Disable the browser's two-finger swipe back/forward navigation gesture
+     (commonly triggered by the macOS trackpad) so canvas panning is not
+     hijacked by history navigation. */
+  overscroll-behavior-x: none;
+}
+
+/* ---------------------------------------------------------------- */
+/* Global scrollbars                                                 */
+/* ---------------------------------------------------------------- */
+/* Goal: every scrollable surface in the app gets the same thin,
+   self-effacing scrollbar — invisible at rest, only visible when the
+   pointer actually approaches the scrollbar lane. macOS overlay
+   scrollbars do this natively; Windows / Linux Chromium normally
+   renders a fat opaque scrollbar that ruins the layout rhythm.
+   Overriding the webkit pseudo-elements applies to Electron too
+   (same Chromium under the hood).
+
+   Why we DON'T use `*:hover ::-webkit-scrollbar-thumb`: `:hover`
+   propagates up the ancestor chain, so the moment the cursor enters
+   any panel descendant, the panel itself matches `:hover` and its
+   scrollbar permanently shows. That looks like "scrollbar is always
+   on while I'm working in this panel" — exactly what we want to
+   avoid. Instead we hover-style the scrollbar pseudo-elements
+   themselves, which only fire when the cursor is over the scrollbar
+   lane (~8px on the trailing edge).
+
+   Design:
+   - 8px gutter, transparent track + transparent thumb at rest →
+     literally nothing visible until cursor approaches the lane.
+   - Hovering the scrollbar / track / thumb darkens the thumb to
+     `--fg-subtle`; dragging keeps it at `--fg-muted`.
+   - `[data-no-scrollbar]` escape hatch collapses the gutter to 0
+     for surfaces that must not show even an empty lane.
+   - Firefox: `scrollbar-width: thin` + `scrollbar-color` is the
+     best we get (no autohide hook); we mirror the resting "barely
+     there" look. */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 999px;
+  transition: background-color 120ms ease-out;
+}
+/* Cursor enters the scrollbar lane (over the track) → reveal the
+   thumb. This fires only when the pointer is in the ~8px gutter,
+   not when it's over the panel content. */
+*::-webkit-scrollbar-track:hover,
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--fg-subtle);
+}
+*::-webkit-scrollbar-thumb:active {
+  background-color: var(--fg-muted);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+[data-no-scrollbar]::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Firefox — no hover-driven autohide available, so we settle for
+   "thin + barely-there" which mirrors the resting webkit state. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*:hover {
+  scrollbar-color: var(--edge-default) transparent;
+}
+[data-no-scrollbar] {
+  scrollbar-width: none;
+}
+
+/* Click-to-place cursor overrides for ReactFlow pane */
+/* Prevent browser default gestures (double-tap zoom, pull-to-refresh)
+   from interfering with canvas pan/zoom managed by React Flow. */
+.react-flow {
+  touch-action: none;
+}
+
+[data-canvas-root] {
+  -webkit-touch-callout: none;
+}
+
+/* Touch/pen only: stop canvas gestures (draw, pan, lasso, node drag) from
+   selecting node/panel text and popping the iOS copy callout. Left as the
+   default for the mouse so desktop users can still select node text to
+   copy. Editable content and links re-enable selection below. */
+[data-canvas-root][data-not-mouse] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+[data-canvas-root]
+  :is(input, textarea, select, [contenteditable='true'], a[href]) {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* React Flow's bottom-right branding link is an <a href>, so the exception
+   above re-enabled selection on it — a stray finger would select its
+   "React Flow" text and pop the iOS callout. Keep it visible (attribution)
+   but never selectable, and make it click-through on touch so it can never
+   intercept a pan/tap. The link selector out-specifies the exception. */
+[data-canvas-root] .react-flow__attribution,
+[data-canvas-root] .react-flow__attribution a {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+[data-canvas-root][data-not-mouse] .react-flow__attribution {
+  pointer-events: none;
+}
+
+/* React Flow controls panel — remove the default subtle shadow and round the
+   corners so it blends with the app's soft surface aesthetic.
+   Tailwind's preflight resets <button> backgrounds to transparent, so we also
+   restore the button surface explicitly via React Flow's CSS variables.
+   `overflow: hidden` clips the child buttons inside the rounded shape. */
+.react-flow__controls {
+  --xy-controls-box-shadow: none;
+  --xy-controls-box-shadow-default: none;
+  --xy-controls-button-background-color: var(--bg-surface);
+  --xy-controls-button-background-color-hover: var(--bg-hover);
+  --xy-controls-button-color: var(--fg-default);
+  --xy-controls-button-color-hover: var(--fg-default);
+  --xy-controls-button-border-color: var(--edge-default);
+  border: 1px solid var(--edge-default);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  background-color: var(--bg-surface);
+  color: var(--fg-default);
+}
+
+.react-flow__controls-button:hover {
+  background-color: var(--bg-hover);
+}
+
+.canvas-pending-note .react-flow__pane,
+.canvas-pending-text .react-flow__pane,
+.canvas-pending-question .react-flow__pane,
+.canvas-pending-note .react-flow__node,
+.canvas-pending-text .react-flow__node,
+.canvas-pending-question .react-flow__node {
+  cursor: text !important;
+}
+
+.canvas-pending-frame .react-flow__pane,
+.canvas-pending-frame .react-flow__node {
+  cursor: crosshair !important;
+}
+
+/*
+ * Lasso tool: show the crosshair only where a lasso can actually START —
+ * the empty pane and a frame's own background (both `isLassoStartTarget`).
+ * Other nodes keep their normal cursor (a note reads as click-to-select,
+ * not lasso). The retained selection loop advertises its own `move`
+ * cursor for dragging the selection. Nodes are not draggable in lasso
+ * mode (see `nodesDraggable`), so no grab affordance is lost.
+ */
+.canvas-lasso .react-flow__pane,
+.canvas-lasso .react-flow__node-frame {
+  cursor: crosshair !important;
+}
+
+.canvas-pending-audio .react-flow__pane,
+.canvas-pending-audio .react-flow__node {
+  cursor: crosshair !important;
+}
+
+/* Apple Voice Memos-style equalizer bars during recording. */
+@keyframes audio-live-bar {
+  0%,
+  100% {
+    height: 25%;
+  }
+  50% {
+    height: 90%;
+  }
+}
+.audio-live-bars > span {
+  animation: audio-live-bar 900ms ease-in-out infinite;
+  height: 25%;
+}
+
+/* Disable node interactivity while placing a new node.
+   This lets click/drag events pass through existing nodes to the pane/wrapper
+   so creation handlers can fire even when clicking on top of a frame. */
+.canvas-pending-note .react-flow__node,
+.canvas-pending-text .react-flow__node,
+.canvas-pending-question .react-flow__node,
+.canvas-pending-audio .react-flow__node,
+.canvas-pending-frame .react-flow__node {
+  pointer-events: none !important;
+}
+
+/* Neutralize React Flow's built-in "selected/focus" stroke fallback (#555 in
+   light theme, #727272 in dark). Without this override, an unstyled edge that
+   gains :focus (e.g. between mousedown and the `.selected` class arriving, or
+   via keyboard nav) briefly flashes a dark-grey stroke that reads as black.
+   Edges with an explicit `style.stroke` are unaffected because inline styles
+   already beat these CSS variables. The `.selected` rule below still wins
+   thanks to `!important`. */
+.react-flow {
+  --xy-edge-stroke-selected: var(
+    --xy-edge-stroke,
+    var(--xy-edge-stroke-default)
+  );
+  --xy-edge-stroke-selected-default: var(--xy-edge-stroke-default);
+}
+
+/* Highlight selected edges with a glow effect for clear visual feedback. */
+.react-flow__edge.selected path,
+.react-flow__edge.selected .react-flow__edge-interaction {
+  stroke: var(--color-info) !important;
+  filter: drop-shadow(0 0 2px var(--color-info-light));
+}
+
+.sediment-edge-label:empty:not(:focus)::before {
+  content: 'Add label';
+  color: var(--color-fg-subtle);
+}
+
+/* Semantic zoom cross-fade.
+   Both layers stay mounted so entering and leaving minimal LOD animate
+   symmetrically. Visibility changes only after the outgoing opacity reaches
+   zero, keeping hidden editors out of focus navigation without cutting the
+   fade short. Only opacity is animated; node geometry remains immediate. */
+.semantic-lod-placeholder,
+.semantic-lod-content {
+  opacity: 1;
+  visibility: visible;
+  transition-property: opacity, visibility;
+  transition-duration: 120ms, 0s;
+  transition-timing-function: ease-out, linear;
+  transition-delay: 0s, 0s;
+}
+
+.semantic-lod-node[data-lod='full'] > .semantic-lod-placeholder,
+.semantic-lod-node[data-lod='minimal'] > .semantic-lod-content {
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition-delay: 0s, 120ms;
+}
+
+/* Discrete three-stage takeover (question node). The whole card — background,
+   border, depth board, and content — fades as ONE binary step when the node
+   leaves the readable stage, so the zoomed-out node reads as just its
+   portal-rendered avatar/dot mark rather than a fading yellow box behind it.
+   `data-lod-body` is written only by `NodeTakeoverLayer`; it is a binary
+   attribute (visible/hidden), so the card is always crisp at rest — never a
+   resting half-opacity — and only the boundary crossing animates (200ms). The
+   mark lives in a separate screen-space portal, so it is not faded with the
+   card. Pointer-events stay on so the (now invisible) node footprint remains
+   selectable; the read-only body's dbl-click still routes to the same activate
+   handler as the mark. */
+.semantic-lod-node[data-lod-body] {
+  transition: opacity 200ms ease;
+}
+.semantic-lod-node[data-lod-body='hidden'] {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .semantic-lod-placeholder,
+  .semantic-lod-content {
+    transition: none;
+  }
+}
+
+/* Live lasso preview uses a visual-only highlight without mutating selection state. */
+.react-flow__node.canvas-lasso-preview > div {
+  box-shadow:
+    0 0 0 1px var(--color-info),
+    0 0 0 3px color-mix(in srgb, var(--color-info) 18%, transparent);
+}
+
+/* Smooth frame resize animation when children are added/removed via
+   auto-layout. Suppressed while the user is actively dragging a
+   resize handle (`body.canvas-resize-active`, toggled by
+   `snapSession.ts`) — otherwise the frame's `width`/`height` would
+   animate ~200ms behind every gesture tick, making the body visibly
+   lag the handle and the selection outline. Also disabled while the
+   node is being dragged (ReactFlow adds `.dragging`). */
+body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
+  transition:
+    width 0.2s ease-out,
+    height 0.2s ease-out;
+}
+
+/* Live structured-frame reflow: while a node hovers a `column` / `row` /
+   `grid` frame, `canvasStore.onNodeDrag` writes the solver's projected
+   positions onto the real peers so they slide aside instead of the drop
+   being described by a stack of translucent overlay rects. The class is
+   toggled on the ReactFlow root by `Canvas.tsx` for the duration of the
+   hover; `:not(.dragging)` keeps the dragged node glued to the cursor. */
+.react-flow.structured-reflow .react-flow__node:not(.dragging) {
+  transition: transform 0.14s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-flow.structured-reflow .react-flow__node:not(.dragging) {
+    transition: none;
+  }
+}
+
+/* Sketch nodes: hit-test only the painted stroke pixels so clicks in the
+   blank area of the bounding box "drill through" to nodes underneath
+   (matching professional vector editors for overlapping freehand strokes).
+
+   Default state: every sketch wrapper (and its descendants) is
+   pointer-event-transparent — ReactFlow still renders, but the bounding
+   box does not intercept clicks. Selection / drag / connection require
+   the cursor to be over an actual stroke.
+
+   Active state: `useSketchHoverRouting` performs a JS hit test against
+   stored stroke points (same geometry as the eraser). When the cursor is
+   on a stroke, it tags the matching node with `data-sketch-hover` and
+   the rules below flip pointer-events back on plus draw a soft hover
+   ring so the user can see what they will grab. `!important` is needed
+   because ReactFlow's own stylesheet sets `pointer-events: all` on
+   `.react-flow__node` with the same specificity.
+
+   Resize handles and connection handles always remain clickable so a
+   selected sketch can be resized / connected without first hovering its
+   stroke. */
+.react-flow__node-sketch,
+.react-flow__node-sketch * {
+  pointer-events: none !important;
+}
+.react-flow__node-sketch[data-sketch-hover='true'],
+.react-flow__node-sketch[data-sketch-hover='true'] * {
+  pointer-events: auto !important;
+}
+/* A *selected* sketch behaves like an ordinary node: its whole bounding
+   box is grabbable, so it (or a multi-selection that includes it) can be
+   dragged from anywhere — not only from a hair-thin stroke, which made
+   sketches feel stuck on touch and awkward to move in a group. Unselected
+   sketches keep the stroke-only drill-through above. */
+.react-flow__node-sketch.selected,
+.react-flow__node-sketch.selected * {
+  pointer-events: auto !important;
+}
+.react-flow__node-sketch .react-flow__handle,
+.react-flow__node-sketch .react-flow__resize-control {
+  pointer-events: auto !important;
+}
+/* Soft glow on the hovered sketch so the user sees which stroke they
+   are about to grab when several sketches overlap. */
+.react-flow__node-sketch[data-sketch-hover='true'] svg path {
+  filter: drop-shadow(0 0 2px var(--color-info-light));
+}
+
+/* Expand the hit area of NodeResizer edge controls. xyflow defaults to a
+   1 px wide line, which is nearly impossible to grab precisely. The
+   visible border stays hidden via `lineClassName="!border-transparent"`
+   on `<NodeResizer>` (see `NodeWrapper.tsx`), so widening the line only
+   grows the invisible clickable strip — the selection outline still
+   appears as a hairline. Corner handles (`.handle`) are unaffected; their
+   size is controlled by `handleStyle` in `NodeWrapper.tsx`.
+
+   `!important` is required because `@xyflow/react/dist/style.css` is
+   imported AFTER this file (via `Canvas.tsx`) and would otherwise win
+   the cascade with the same selector specificity. The `z-index` keeps
+   the widened strip above the node body so internal content doesn't
+   intercept the click. */
+.react-flow__resize-control.line.left,
+.react-flow__resize-control.line.right {
+  width: 12px !important;
+  z-index: 5;
+}
+.react-flow__resize-control.line.top,
+.react-flow__resize-control.line.bottom {
+  height: 12px !important;
+  z-index: 5;
+}
+
+/* Keep pdf.js text-layer spans invisible during text selection so the
+  HTML text (which uses system fonts) doesn't bleed through the canvas
+  rendering that shows the actual PDF fonts.  A semi-transparent background
+  still shows the user which region is selected. */
+.textLayer span::selection {
+  color: transparent;
+  background: color-mix(in srgb, var(--pdf-highlight-bg) 45%, transparent);
+}
+
+/* Thinking indicator shimmer — gradient slides across text */
+@keyframes thinking-shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+.thinking-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--shimmer-1) 0%,
+    var(--shimmer-2) 25%,
+    var(--shimmer-3) 50%,
+    var(--shimmer-2) 75%,
+    var(--shimmer-1) 100%
+  );
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: thinking-shimmer 3s linear infinite;
+}
+
+/* Skeleton loading lines — three bars with sliding shimmer */
+.skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+
+.skeleton-line {
+  height: 10px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--skeleton-1) 0%,
+    var(--skeleton-2) 25%,
+    var(--skeleton-3) 50%,
+    var(--skeleton-2) 75%,
+    var(--skeleton-1) 100%
+  );
+  background-size: 200% auto;
+  animation: thinking-shimmer 1.8s ease-in-out infinite;
+}
+
+.skeleton-line:nth-child(2) {
+  width: 75%;
+  animation-delay: 0.15s;
+}
+
+.skeleton-line:nth-child(3) {
+  width: 50%;
+  animation-delay: 0.3s;
+}
+
+/* ===================================================================
+  Smooth layout transitions for collapsible / resizable containers.
+  Opt-in via `data-animate-width`. Drag handlers must set
+  `data-resizing="true"` on the same element to suspend animation
+  while the user drags, otherwise width updates would lag the cursor.
+  =================================================================== */
+[data-animate-width] {
+  transition: width 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+[data-animate-width][data-resizing='true'] {
+  transition: none;
+}
+
+/* Chat commits its final flex width once, then the panel and Canvas viewport
+   travel to that layout on compositor transforms without per-frame resizes. */
+[data-right-panel-content] {
+  left: 0;
+  transform: translateX(100%);
+  transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+[data-right-panel-slot][data-collapsed='true'] [data-right-panel-content] {
+  right: 0;
+  left: auto;
+}
+[data-right-panel-content][data-visible='true'] {
+  transform: translateX(0);
+}
+/* Promote only while the slide runs. The motion flags are set a frame before
+   the transform changes, so the layer still exists when the animation starts.
+   A permanent promotion instead parks the unbounded React Flow viewport on its
+   own compositor layer for the Canvas lifetime, where Chromium keeps serving
+   stale or never-rastered tiles until an unrelated repaint. */
+[data-right-panel-slot][data-moving='true'] [data-right-panel-content],
+[data-right-panel-motion='true'] .react-flow__viewport {
+  will-change: transform;
+}
+[data-right-panel-motion='true'] .react-flow__viewport {
+  transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-right-panel-content],
+  [data-right-panel-motion='true'] .react-flow__viewport {
+    transition: none;
+  }
+}
+
+/* ===================================================================
+  Canvas search — CSS Custom Highlight API paint rule.
+  The `useTextHighlight` hook registers ranges under the name
+  `sediment-search`; without this selector the browser has nowhere
+  to draw them. Uses the warning-bg token so it reads as a "found"
+  marker without competing with selection (which uses --info).
+
+  We intentionally do NOT set `color` here. pdf.js's text layer
+  paints `color: transparent` spans on top of the rendered page
+  bitmap so the user can select text; if our highlight forced a
+  visible foreground color, those normally-invisible glyphs would
+  appear in the text-layer font (typically a generic sans), ghosting
+  next to the actual PDF glyphs. Letting `color` inherit keeps the
+  text-layer transparent (matching native `::selection`) while still
+  showing the warning background.
+
+  The background uses the same semi-transparent token as native
+  `::selection` (`--pdf-highlight-bg`, ~45% alpha) so the highlight
+  rectangle on PDF text spans doesn't obscure the rendered glyphs
+  on the underlying canvas. Standard CSS Custom Highlight backgrounds
+  paint as opaque fills above the page bitmap, which is the correct
+  behavior on note / text bodies but hides PDF text.
+  =================================================================== */
+::highlight(sediment-search) {
+  background-color: var(--pdf-highlight-bg);
+}
+
+/* Inside pdf.js's text layer, match the dilution used by
+  `.textLayer span::selection` (~20% warning-light) so the search
+  highlight doesn't read as a grayer wash over the canvas-rendered
+  PDF glyphs than the user's own manual selection. CSS Custom
+  Highlight pseudo-elements can be scoped by ancestor selectors per
+  the CSS Highlight API spec. */
+.textLayer ::highlight(sediment-search) {
+  background-color: color-mix(
+    in srgb,
+    var(--pdf-highlight-bg) 45%,
+    transparent
+  );
+}

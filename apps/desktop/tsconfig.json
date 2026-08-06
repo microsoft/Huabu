@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "node16",
+    "moduleResolution": "node16",
+    "target": "ES2020",
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": ["node"]
+  },
+  "include": ["src"],
+  // Tests are run by vitest, never emitted into `dist/` (and therefore never
+  // shipped inside app.asar).
+  "exclude": ["src/**/*.test.ts"]
+}

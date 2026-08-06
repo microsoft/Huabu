@@ -1,0 +1,34 @@
+{
+  "name": "@agenetes/pi-driver",
+  "version": "0.1.0",
+  "description": "L2 standard driver: the in-process pi-agent-core driver with Job and Deployment lifecycles. Host-specific model, credential, and tool policy are injected via mount-time ports.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agenetes/protocol": "workspace:*",
+    "@agenetes/runtime": "workspace:*",
+    "@earendil-works/pi-agent-core": "^0.81.1",
+    "@earendil-works/pi-ai": "^0.81.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.18"
+  }
+}

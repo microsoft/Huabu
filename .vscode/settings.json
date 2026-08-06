@@ -1,0 +1,82 @@
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+
+  "eslint.enable": true,
+  "eslint.packageManager": "pnpm",
+  "eslint.workingDirectories": ["."],
+  "eslint.validate": [
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact"
+  ],
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[javascriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[css]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[html]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[markdown]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+
+  "prettier.prettierPath": "${workspaceFolder}/node_modules/prettier/index.cjs",
+  "prettier.configPath": "${workspaceFolder}/.prettierrc",
+  "prettier.requireConfig": true,
+  "editor.detectIndentation": false,
+  "chat.tools.terminal.autoApprove": {
+    "npx tsc": true,
+    "npx vitest": true
+  },
+
+  // Keep electron-builder output and the build-tooling scratch dir out of VS Code's
+  // file watcher / search / file explorer. Without these excludes, VS Code holds
+  // open handles to files like `dist-electron/win-unpacked/resources/app.asar`,
+  // which makes electron-builder fail with "The process cannot access the file
+  // because it is being used by another process."
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/dist-bundle/**": true,
+    "**/dist-electron/**": true,
+    "**/.stale/**": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/dist-bundle": true,
+    "**/dist-electron": true,
+    "**/.stale": true,
+    "**/pnpm-lock.yaml": true
+  },
+  "files.exclude": {
+    "**/.stale": true
+  }
+}

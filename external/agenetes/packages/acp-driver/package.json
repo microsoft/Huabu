@@ -1,0 +1,34 @@
+{
+  "name": "@agenetes/acp-driver",
+  "version": "0.1.0",
+  "description": "L2 standard driver: the ACP-connected external-agent driver and its session management (AgentHandle, session registry/store, ensureAcpSession, ACP meta handling). Built on the @agenetes base (protocol + runtime) and its ACP-private transport (@agenetes/agentlet-host). Host-specific concerns (storage root path, profile-schema cache, per-turn render closure) are injected by L1.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agenetes/agentlet-host": "workspace:*",
+    "@agenetes/protocol": "workspace:*",
+    "@agenetes/runtime": "workspace:*",
+    "@agentclientprotocol/sdk": "^0.22.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.18"
+  }
+}

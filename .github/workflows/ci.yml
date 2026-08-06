@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   quality:
-    name: Lint / Format / Typecheck / Test / Build / Headers
+    name: Lint / Format / Typecheck / Test / Build
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -36,8 +36,37 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Run quality checks
-        run: pnpm check
+      # typecheck pulls in workspace packages whose dist/ outputs don't exist
+      # on a fresh checkout, and `--ignore-scripts` skips the postinstall that
+      # would normally build them.
+      - name: Build workspace protocol/runtime packages
+        run: pnpm run build:agentlet && pnpm run build:agenetes
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Format check
+        run: pnpm run format:check
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      # `--no-bail` so one red package does not hide the rest; the exit code
+      # is still non-zero, so the gate holds.
+      - name: Unit tests
+        run: pnpm -r --if-present --no-bail run test
+
+      - name: i18n parity
+        run: pnpm run check:i18n
+
+      - name: Agent Team skills
+        run: pnpm run test:agent-team-skills && pnpm run check:agent-team-skills
+
+      - name: License headers
+        run: node scripts/check-headers.mjs
+
+      - name: Build
+        run: pnpm run build
         env:
           DOCS_BASE_PATH: /Huabu/
           DOCS_CANONICAL_ORIGIN: https://microsoft.github.io

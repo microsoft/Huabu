@@ -1,0 +1,171 @@
+appId: com.huabu.app
+productName: Huabu
+copyright: Copyright © 2025 ${author}
+
+# Where electron-builder places the packaged output.
+#
+# IMPORTANT — Windows file-lock workaround:
+# We deliberately output to a sibling of the workspace (../../../huabu-electron-out/
+# i.e. D:/code/huabu-electron-out/) instead of `dist-electron/` inside the repo.
+# On Windows, the VS Code main process opens `app.asar` files it discovers in the
+# workspace with FILE_SHARE_NONE, which prevents electron-builder from overwriting
+# the file on subsequent builds (ERR_ELECTRON_BUILDER_CANNOT_EXECUTE "The process
+# cannot access the file because it is being used by another process"). Placing the
+# output outside the workspace removes the file from VS Code's awareness entirely.
+directories:
+  output: ../../../huabu-electron-out
+  buildResources: build-resources
+
+# Source files for the main process (compiled JS)
+files:
+  - dist/**
+
+# Extra files bundled into the app's Resources directory:
+#   resources/server/server.js  — self-contained Fastify bundle (tsup full-bundle, ~13MB)
+#   resources/server/prompt/    — AGENT.md / SKILL.md / .md fragments read at
+#                                 runtime by the prompt loaders. The loaders
+#                                 resolve them as `path.join(HERE, 'prompt')`
+#                                 where `HERE` = the dir containing server.js
+#                                 (see apps/server/src/prompt/agents/loader.ts
+#                                 and skills/loader.ts). Without this entry,
+#                                 every LLM call 500s because no prompt can
+#                                 be assembled.
+#   resources/server/agentlet/  — agentlet daemon and isolated Agent Team
+#                                 setup worker (self-contained JS bundles).
+#                                 Forked by `DaemonSupervisor` at server
+#                                 startup; the supervisor resolves it as
+#                                 `<bundleDir>/agentlet/index.js` (see
+#                                 apps/server/src/modules/agent/acp/daemon-supervisor.ts).
+#                                 Without this entry, external-agent
+#                                 dispatch returns "agentlet daemon entry
+#                                 not found" and Settings shows the
+#                                 daemon as permanently offline.
+#   resources/web/              — compiled Vite SPA
+#
+# No node_modules needed: all npm deps (except @napi-rs native addons) are
+# inlined into server.js by tsup. @napi-rs/canvas is never called at runtime
+# since pdf2md only uses unpdf's text extraction path.
+extraResources:
+  - from: ../server/dist-bundle/server.js
+    to: server/server.js
+  # Isolated workspace-preparation worker (self-contained tsup bundle).
+  # Runtime Home-folder switches `fork()` this file; `defaultWorkerPath()`
+  # in apps/server/src/modules/workspace-activation.ts resolves it as a
+  # sibling of server.js. Without this entry the lookup falls back to the
+  # `.ts` source (absent in packaged builds), so switching workspaces at
+  # runtime fails in the installed app.
+  - from: ../server/dist-bundle/workspace-prepare.worker.js
+    to: server/workspace-prepare.worker.js
+  # @resvg/resvg-wasm — loaded on demand by the `rasterize_node` agent
+  # tool from the bundled server module's file URL (bundle layout
+  # fallback). Missing this file is non-fatal at boot but the tool
+  # throws "no such file" on first sketch rasterization.
+  - from: ../server/dist-bundle/resvg-bg.wasm
+    to: server/resvg-bg.wasm
+  - from: ../server/dist-bundle/prompt
+    to: server/prompt
+    filter:
+      # Only `.md` is read at runtime (AGENT.md / SKILL.md / fragments).
+      # The recursive `cpSync` in apps/server/tsup.config.ts unavoidably
+      # picks up sibling `.ts` source files too; exclude them so we don't
+      # bloat the installer with dead source.
+      - '**/*.md'
+  - from: ../server/dist-bundle/agentlet
+    to: server/agentlet
+    filter:
+      # Only the compiled .js + sourcemaps are needed at runtime; .d.ts
+      # files bloat the installer for no benefit.
+      - '**/*.js'
+      - '**/*.js.map'
+  # Fixed Huabu Agent Team templates. The Server scans this read-only
+  # collection through the locally supervised agentlet; users still choose
+  # each Profile's writable working directory before Setup.
+  - from: ../server/dist-bundle/agent-teams
+    to: server/agent-teams
+    filter:
+      - '**/*'
+  - from: ../web/dist
+    to: web
+    filter:
+      - '**/*'
+  # Runtime icons used by BrowserWindow / app.dock at app launch.
+  # (The platform installer icons themselves are still picked up from
+  # build-resources/icon.{ico,icns,png} automatically by electron-builder.)
+  - from: build-resources/icon.png
+    to: icons/icon.png
+  - from: build-resources/icon.ico
+    to: icons/icon.ico
+
+afterPack: scripts/after-pack.mjs
+
+# Auto-update feed (electron-updater). electron-builder bakes these
+# values into the app's `app-update.yml` and generates the update
+# metadata (`latest-mac.yml` / `latest.yml` + blockmaps) next to the
+# installers. The publishing itself is still done by `gh release upload`
+# in the release workflow — never by electron-builder — which is why the
+# `dist:*` scripts pass `--publish never`.
+#
+# The owner/repo are intentionally NOT hardcoded here: they are supplied
+# at build time via the HUABU_UPDATE_OWNER / HUABU_UPDATE_REPO env vars
+# (set from GitHub Actions repository *Variables* in the release
+# workflow). This lets the public update feed point at the distribution
+# repository (where releases are published) independently of the build
+# source repository, without embedding either name in the codebase.
+# Local `pnpm dist` runs must provide both variables too. electron-builder
+# treats a missing `${env.*}` macro as an invalid configuration and stops
+# the build before producing an installer.
+publish:
+  provider: github
+  owner: ${env.HUABU_UPDATE_OWNER}
+  repo: ${env.HUABU_UPDATE_REPO}
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    # Squirrel.Mac (the macOS auto-update engine electron-updater drives)
+    # applies updates from a `.zip`, not the `.dmg`. `latest-mac.yml`
+    # references this zip; without it macOS auto-update cannot install a
+    # downloaded update. The dmg remains the human-facing first install.
+    - target: zip
+      arch:
+        - arm64
+  category: public.app-category.productivity
+  darkModeSupport: true
+  # Sign + notarize in CI. The Developer ID certificate arrives via the
+  # CSC_LINK / CSC_KEY_PASSWORD env vars; notarization credentials via
+  # APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID (see
+  # .github/workflows/release.yml). Local `dist:mac` runs without those
+  # env vars still work: electron-builder falls back to ad-hoc signing
+  # and skips notarization with a warning.
+  hardenedRuntime: true
+  notarize: true
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  # Space-free installer name. The default nsis artifactName contains
+  # spaces ("Huabu Setup X.Y.Z.exe"); GitHub rewrites spaces to dots in
+  # release asset names, which then no longer match the hyphenated URL
+  # electron-builder records in latest.yml, so electron-updater 404s on
+  # download. A hyphenated name keeps the on-disk file, the uploaded
+  # asset, and the latest.yml URL identical.
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+dmg:
+  window:
+    width: 540
+    height: 380

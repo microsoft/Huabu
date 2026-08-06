@@ -1,0 +1,25 @@
+schema: agentlet-agent-schema-v1
+name: deepv-slides-maker
+description: >
+  DeepV is an AI agent that can make slides from given instructions. It can search materials, generate image slides, and finally deliver it in editable PowerPoint format.
+
+command:
+  claude: claude-agent-acp
+  copilot: copilot --acp --allow-all
+
+require:
+  env:
+    - name: DEEPV_SERVER_ENDPOINT
+      description: DeepV server base URL without a trailing slash
+      required: true
+      secret: false
+      default: http://localhost:8000
+    - name: DEEPV_SERVER_API_KEY
+      description: DeepV account API key
+      required: true
+      secret: true
+  prompts:
+    - system_prompt.md
+  copies:
+    - from: deepv.mjs
+      to: deepv.mjs

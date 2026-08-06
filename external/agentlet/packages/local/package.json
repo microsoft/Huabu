@@ -1,0 +1,29 @@
+{
+  "name": "agentlet",
+  "version": "0.1.0",
+  "description": "CLI tool that makes any local ACP agent remotely accessible over WebSocket",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "agentlet": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^0.22.1",
+    "@agentlet/agent-team": "workspace:*",
+    "@agentlet/protocol": "workspace:*",
+    "commander": "^13.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.0",
+    "typescript": "^5.9.0"
+  }
+}

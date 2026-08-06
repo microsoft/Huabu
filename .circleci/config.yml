@@ -1,0 +1,81 @@
+version: 2.1
+
+# The authoritative quality gate, mirroring the (now manual-only)
+# .github/workflows/ci.yml. Runs on every branch, so a pull request is
+# gated before it merges rather than only after it lands, and no GitHub
+# Actions minutes are consumed.
+#
+# Enable "Only build pull requests" in the CircleCI project's Advanced
+# settings to skip branches with no PR open, and add `quality` as a required
+# status check in branch protection so a red run actually blocks the merge.
+
+executors:
+  node:
+    docker:
+      - image: cimg/node:22.14
+    resource_class: large
+    working_directory: ~/sediment
+
+jobs:
+  quality:
+    executor: node
+    steps:
+      - checkout
+
+      # pnpm version is inferred from `packageManager` in package.json.
+      - run:
+          name: Enable pnpm via corepack
+          command: |
+            sudo corepack enable
+            corepack prepare --activate
+            pnpm --version
+
+      - restore_cache:
+          keys:
+            - pnpm-store-v1-{{ checksum "pnpm-lock.yaml" }}
+            - pnpm-store-v1-
+
+      # `postinstall` already builds the agentlet/agenetes workspaces, whose
+      # dist/ outputs typecheck depends on (same rationale as ci.yml).
+      - run:
+          name: Install dependencies
+          command: pnpm install --frozen-lockfile
+
+      - save_cache:
+          key: pnpm-store-v1-{{ checksum "pnpm-lock.yaml" }}
+          paths:
+            - ~/.local/share/pnpm/store
+
+      - run:
+          name: Lint
+          command: pnpm run lint
+
+      - run:
+          name: Format check
+          command: pnpm exec prettier --check .
+
+      - run:
+          name: Typecheck
+          command: pnpm run typecheck
+
+      # `--no-bail` so one red package does not hide the rest; the exit code
+      # is still non-zero, so the gate holds.
+      - run:
+          name: Unit tests
+          command: pnpm -r --if-present --no-bail run test
+
+      - run:
+          name: i18n parity
+          command: pnpm run check:i18n
+
+      - run:
+          name: Agent Team skills
+          command: pnpm run test:agent-team-skills && pnpm run check:agent-team-skills
+
+workflows:
+  ci:
+    jobs:
+      - quality:
+          filters:
+            branches:
+              ignore: []

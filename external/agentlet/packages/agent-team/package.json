@@ -1,0 +1,36 @@
+{
+  "name": "@agentlet/agent-team",
+  "version": "0.1.0",
+  "description": "Shared runtime for Agent Team packages — manifest parsing, harness detection, workspace creation, and CLI orchestration",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./setup-worker": {
+      "import": "./dist/setup/managed-setup-worker.js",
+      "default": "./dist/setup/managed-setup-worker.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^13.0.0",
+    "cross-spawn": "^7.0.6",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  }
+}
