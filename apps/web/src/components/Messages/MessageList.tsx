@@ -55,7 +55,6 @@ export const MessageList = ({
 }: MessageListProps) => {
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const prevMessageCountRef = useRef(messages.length);
   const currentMessageCountRef = useRef(messages.length);
@@ -109,12 +108,22 @@ export const MessageList = ({
     if (atBottom) setHasNewMessage(false);
   }, []);
 
+  // Scroll the thread's own container rather than `scrollIntoView` on a
+  // sentinel: that walks up every scrollable ancestor, and the app root is
+  // `overflow: hidden`, so any bubbling scroll shifts the whole UI with no
+  // scrollbar left to undo it.
+  const scrollThreadToBottom = useCallback((behavior: ScrollBehavior) => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+  }, []);
+
   // Auto-scroll when at bottom and content changes (including streaming tokens)
   useEffect(() => {
     if (isAtBottomRef.current) {
-      endRef.current?.scrollIntoView({ behavior: 'smooth' });
+      scrollThreadToBottom('smooth');
     }
-  }, [messages, isLoading]);
+  }, [messages, isLoading, scrollThreadToBottom]);
 
   // Show "new message" indicator when messages are added while scrolled up
   useEffect(() => {
@@ -128,9 +137,9 @@ export const MessageList = ({
   }, [messages.length]);
 
   const scrollToBottom = useCallback(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
+    scrollThreadToBottom('smooth');
     setHasNewMessage(false);
-  }, []);
+  }, [scrollThreadToBottom]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -219,8 +228,6 @@ export const MessageList = ({
             <Loading variant="skeleton" layout="bare" />
           </div>
         )}
-
-        <div ref={endRef} />
       </div>
 
       {hasNewMessage && (

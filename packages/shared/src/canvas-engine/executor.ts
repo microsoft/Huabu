@@ -53,6 +53,7 @@ import type {
   CanvasExecution,
   CanvasCommandResult,
 } from '../index.js';
+import type { StructuredGutterSizes } from './autoLayout/gridLayout.js';
 import type { CommandHandler } from './commands/index.js';
 
 export interface ExecutorOptions {
@@ -69,6 +70,8 @@ export interface ExecutorOptions {
    * `sizing` policy.
    */
   forceFitFrames?: boolean;
+  /** Per-frame gutter sizes frozen by a live resize gesture. */
+  frozenStructuredGutters?: ReadonlyMap<string, StructuredGutterSizes>;
 }
 
 export interface ExecutorOutput {
@@ -246,6 +249,10 @@ export function executeCanvasCommands(
       currentNodes,
       allAffectedFrameIds,
       fillFrameIds,
+      {
+        edges: currentEdges,
+        frozenGuttersByFrame: options.frozenStructuredGutters,
+      },
     );
     currentNodes = structured.nodes;
     if (fitTargets.size > 0) {

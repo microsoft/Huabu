@@ -1,13 +1,13 @@
 version: 2.1
 
 # The authoritative quality gate, mirroring the (now manual-only)
-# .github/workflows/ci.yml. Runs only on `main` — i.e. after a merge
-# lands, not before it — so nothing blocks a pull request and no
-# GitHub Actions minutes are consumed.
+# .github/workflows/ci.yml. Runs on every branch, so a pull request is
+# gated before it merges rather than only after it lands, and no GitHub
+# Actions minutes are consumed.
 #
-# To also gate pull requests, change the workflow filter at the bottom
-# to `ignore: []` and enable "Only build pull requests" in the CircleCI
-# project's Advanced settings.
+# Enable "Only build pull requests" in the CircleCI project's Advanced
+# settings to skip branches with no PR open, and add `quality` as a required
+# status check in branch protection so a red run actually blocks the merge.
 
 executors:
   node:
@@ -58,6 +58,12 @@ jobs:
           name: Typecheck
           command: pnpm run typecheck
 
+      # `--no-bail` so one red package does not hide the rest; the exit code
+      # is still non-zero, so the gate holds.
+      - run:
+          name: Unit tests
+          command: pnpm -r --if-present --no-bail run test
+
       - run:
           name: i18n parity
           command: pnpm run check:i18n
@@ -72,4 +78,4 @@ workflows:
       - quality:
           filters:
             branches:
-              only: [main]
+              ignore: []

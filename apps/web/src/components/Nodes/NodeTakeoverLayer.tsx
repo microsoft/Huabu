@@ -23,11 +23,10 @@ export interface NodeTakeoverLayerProps {
  * `NodeTakeoverLayer` — the screen-space overlay that realises the zoom
  * takeover for the question node.
  *
- *   - It positions the node-supplied mark at its CONTINUOUS target: the mark's
- *     size and screen point come from {@link useNodeTakeover}, which interpolates
- *     them by zoom (corner+badge → centre+mark). Because that geometry is exact
- *     every frame, the overlay simply re-renders at the new left/top/size as the
- *     canvas zooms — the badge glides and resizes smoothly with the gesture,
+ *   - It positions the node-supplied mark at the size + screen point supplied by
+ *     {@link useNodeTakeover}: size interpolated by zoom, so the badge resizes
+ *     smoothly with the gesture, and position glided corner → centre in step
+ *     with the card's fade rather than with the zoom.
  *     with no discrete stage swap and no one-shot animation to feel abrupt.
  *   - It publishes a binary `data-lod-body` attribute on the node root so the
  *     card body fades out once the takeover band starts; the mark lives in this
@@ -46,8 +45,15 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
   onActivate,
   nodeRootRef,
 }: NodeTakeoverLayerProps) {
-  const { stage, size, point, collapsedCenter, collapsedRadius } =
-    useNodeTakeover(nodeId);
+  const {
+    stage,
+    size,
+    point,
+    collapsedCenter,
+    collapsedRadius,
+    glideProgress,
+    collapsedFootprint,
+  } = useNodeTakeover(nodeId);
   const domNode = useStore((s) => s.domNode);
   const internalNode = useInternalNode(nodeId);
   const markDrag = useTakeoverMarkDrag(nodeId);
@@ -57,21 +63,49 @@ export const NodeTakeoverLayer = memo(function NodeTakeoverLayer({
     [domNode],
   );
 
-  // Publish the collapsed mark's live centre + radius (canvas space) so edges
-  // terminate on the visible mark circle wherever it currently sits during the
-  // corner → centre glide, instead of a phantom circle pinned at the node
-  // centre. Depend on primitives so the effect only re-runs when the geometry
-  // actually changes, and clear on unmount in a separate effect so a per-frame
-  // update never transiently nulls the mark (which would flicker the edge).
+  // Publish the collapsed mark's live centre + radius + footprint (canvas space)
+  // so interaction chrome can ease onto the mark as it glides in. Depend on
+  // primitives so the effect only re-runs when the geometry actually changes,
+  // and clear on unmount in a separate effect so a per-frame update never
+  // transiently nulls the mark (which would flicker the chrome).
   const markCx = collapsedCenter?.x ?? null;
   const markCy = collapsedCenter?.y ?? null;
+  const footX = collapsedFootprint?.x ?? null;
+  const footY = collapsedFootprint?.y ?? null;
+  const footW = collapsedFootprint?.width ?? null;
+  const footH = collapsedFootprint?.height ?? null;
   useLayoutEffect(() => {
-    if (markCx !== null && markCy !== null && collapsedRadius !== null) {
-      setMark(nodeId, { cx: markCx, cy: markCy, radius: collapsedRadius });
+    if (
+      markCx !== null &&
+      markCy !== null &&
+      collapsedRadius !== null &&
+      footX !== null &&
+      footY !== null &&
+      footW !== null &&
+      footH !== null
+    ) {
+      setMark(nodeId, {
+        cx: markCx,
+        cy: markCy,
+        radius: collapsedRadius,
+        progress: glideProgress,
+        footprint: { x: footX, y: footY, width: footW, height: footH },
+      });
     } else {
       setMark(nodeId, null);
     }
-  }, [nodeId, markCx, markCy, collapsedRadius, setMark]);
+  }, [
+    nodeId,
+    markCx,
+    markCy,
+    collapsedRadius,
+    glideProgress,
+    footX,
+    footY,
+    footW,
+    footH,
+    setMark,
+  ]);
   useLayoutEffect(() => () => setMark(nodeId, null), [nodeId, setMark]);
 
   // Binary card fade — written here (and only here) so NodeWrapper and the card

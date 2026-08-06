@@ -10,7 +10,8 @@ import {
 
 import useCanvasStore from '@/store/canvasStore';
 import {
-  collapsedMarkRect,
+  blendedMarkRect,
+  easeToward,
   useNodeCollapseStore,
 } from '@/store/nodeCollapseStore';
 
@@ -65,11 +66,15 @@ export const SelectionOutlines = () => {
     const abs =
       getAbsolutePosition(nodes as NestableNode[], n.id) ?? n.position;
     const { width, height } = getNodeSize(n);
-    const rect = mark
-      ? collapsedMarkRect(mark)
-      : // Fall back to xyflow's typical defaults when the node has no
-        // explicit measured size yet (e.g. a freshly added node mid-frame).
-        { x: abs.x, y: abs.y, width: width || 200, height: height || 100 };
+    // Fall back to xyflow's typical defaults when the node has no explicit
+    // measured size yet (e.g. a freshly added node mid-frame).
+    const footprint = {
+      x: abs.x,
+      y: abs.y,
+      width: width || 200,
+      height: height || 100,
+    };
+    const rect = mark ? blendedMarkRect(mark) : footprint;
     const w = rect.width * zoom;
     const h = rect.height * zoom;
     const left = rect.x * zoom + vpX;
@@ -87,13 +92,16 @@ export const SelectionOutlines = () => {
           width: w,
           height: h,
           outline: `1px solid var(--color-info)`,
-          outlineOffset: mark ? 2 : 0,
-          // A circle, not a rounded square. `collapsedRadius` makes this box
-          // exactly as wide as the mark's disc is across, so a circular
-          // outline hugs the mark with zero gap, while any squarer corner
-          // exposes up to 0.41r of bare canvas at each corner — which reads
-          // as a white plate behind the mark rather than a ring around it.
-          borderRadius: mark ? '50%' : NODE_RADIUS_PX * zoom,
+          outlineOffset: mark ? easeToward(0, 2, mark.progress) : 0,
+          // Eased to a full circle as the card collapses. `collapsedRadius`
+          // makes the box exactly as wide as the mark's disc is across, so at
+          // the end a circular outline hugs the mark with zero gap, while any
+          // squarer corner exposes up to 0.41r of bare canvas at each corner —
+          // which reads as a white plate behind the mark rather than a ring
+          // around it.
+          borderRadius: mark
+            ? easeToward(NODE_RADIUS_PX * zoom, w / 2, mark.progress)
+            : NODE_RADIUS_PX * zoom,
           // Soft `info-light` glow so the node selection reads the same
           // as the selected-edge treatment (info core + info-light halo,
           // see `.react-flow__edge.selected` in index.css). A larger blur

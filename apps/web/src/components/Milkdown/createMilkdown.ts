@@ -17,6 +17,7 @@ import {
 } from '@milkdown/core';
 import { Crepe } from '@milkdown/crepe';
 import { blockConfig } from '@milkdown/plugin-block';
+import { dropIndicatorState } from '@milkdown/plugin-cursor';
 import { findParent } from '@milkdown/prose';
 import {
   lift,
@@ -25,13 +26,19 @@ import {
   wrapIn,
 } from '@milkdown/prose/commands';
 import { keymap } from '@milkdown/prose/keymap';
-import { liftListItem, sinkListItem } from '@milkdown/prose/schema-list';
+import { Slice } from '@milkdown/prose/model';
+import {
+  liftListItem,
+  sinkListItem,
+  wrapInList,
+} from '@milkdown/prose/schema-list';
 import {
   NodeSelection,
   Plugin,
   PluginKey,
   TextSelection,
 } from '@milkdown/prose/state';
+import { canJoin } from '@milkdown/prose/transform';
 import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import { $markSchema, $prose, $remark, replaceAll } from '@milkdown/utils';
 
@@ -49,6 +56,7 @@ import {
   parseSedimentImageClipboard,
   readSedimentClipboardPayload,
 } from '@/utils/io/clipboard';
+import { isMac } from '@/utils/platform';
 
 import { normalizeMathDelimiters } from './markdownUtils';
 
@@ -417,24 +425,21 @@ export interface MilkdownInstance {
    */
   insertBlocksAfter(anchorKey: string | null, markdown: string): boolean;
   /**
-   * Resolve a viewport-space coordinate to the fingerprint key of the
-   * top-level block that `insertBlocksAfter` should anchor on so the
-   * insertion lands where ProseMirror's drop cursor visually pointed.
+   * Insert one or more blocks parsed from `markdown` exactly where the
+   * drop indicator (the blue bar) is currently showing.
    *
-   * Return values:
-   *  - `string` — anchor on this block (`insertBlocksAfter(key, …)`).
-   *  - `null`   — the point sits in the gap ABOVE the first block;
-   *             caller should `insertBlocksAfter(null, …)` to insert
-   *             at the doc head.
-   *  - `undefined` — the point lies outside the editor surface
-   *             entirely (no insertion target). Caller decides the
-   *             fallback (e.g. append to end).
+   * The position is read straight out of `prosemirror-drop-indicator`'s
+   * own state rather than recomputed, so what the user sees and what
+   * lands can't disagree. That plugin picks its target by geometric
+   * proximity to every block edge at every depth, which no
+   * coordinate-to-position heuristic of ours reproduces.
    *
-   * Inside-block hits split on the block DOM's vertical midpoint to
-   * mirror PM's `dropcursor`: upper half maps to the block ABOVE
-   * (or `null` for the first block), lower half to the block itself.
+   * Returns `false` when no indicator is showing (the pointer never
+   * hovered the editor surface, or the cursor feature is disabled);
+   * the caller decides the fallback (e.g. append to the end). Call it
+   * from a drop handler, before `clearDropIndicator`.
    */
-  getBlockKeyAtPoint(x: number, y: number): string | null | undefined;
+  insertBlocksAtDropIndicator(markdown: string): boolean;
   /**
    * Replace the active block-decoration set. Each entry highlights the
    * top-level block whose fingerprint key matches by adding `className`
@@ -445,15 +450,14 @@ export interface MilkdownInstance {
   ): void;
 
   /**
-   * Force `prosemirror-dropcursor` (the blue insertion bar) to
-   * disappear. PM only clears the cursor when it observes a `drop` /
-   * `dragend` / out-of-editor `dragleave` on `view.dom`. When a host
-   * handler claims the drop in the capture phase (so PM's bubble
-   * listener never fires) AND the drag source lives outside this
-   * editor (so the browser's follow-up `dragend` fires on the source,
-   * not on `view.dom`), the cursor would otherwise linger until the
-   * 5s safety timeout. Call this from your drop handler after the
-   * insertion is committed.
+   * Force the drop indicator (the blue insertion bar drawn by
+   * `prosemirror-drop-indicator`) to disappear. It only hides on a
+   * `drop` / `dragend` / `dragleave` observed on `view.dom`. When a
+   * host handler claims the drop in the capture phase (so the
+   * plugin's listener never fires) AND the drag source lives outside
+   * this editor (so the browser's follow-up `dragend` fires on the
+   * source, not on `view.dom`), the bar would otherwise linger. Call
+   * this from your drop handler after the insertion is committed.
    */
   clearDropIndicator(): void;
 
@@ -977,8 +981,32 @@ function insertNodeAtSelection(ctx: Ctx, type: NodeType): void {
   view.focus();
 }
 
+/**
+ * Strip the indentation a whole markdown fragment shares.
+ *
+ * Markdown extracted from nested content (e.g. a paragraph inside a nested
+ * list item) carries that nesting's indentation. Re-parsed at top level, four
+ * or more leading spaces would silently become an indented code block. Our own
+ * serializer always fences real code blocks, so a uniformly indented fragment
+ * is a nesting artifact rather than intended code.
+ */
+function dedentMarkdownFragment(markdown: string): string {
+  const lines = markdown.split('\n');
+  let common: number | null = null;
+  for (const line of lines) {
+    if (line.trim().length === 0) continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent === 0) return markdown;
+    if (common === null || indent < common) common = indent;
+  }
+  if (common === null) return markdown;
+  return lines
+    .map((line) => (line.trim().length === 0 ? line : line.slice(common)))
+    .join('\n');
+}
+
 function parseTopLevelMarkdown(ctx: Ctx, markdown: string): ProseNode[] {
-  const parsed = ctx.get(parserCtx)(markdown);
+  const parsed = ctx.get(parserCtx)(dedentMarkdownFragment(markdown));
   const nodes: ProseNode[] = [];
   parsed?.forEach((node) => nodes.push(node));
   return nodes;
@@ -1159,6 +1187,82 @@ function replaceCurrentTopLevelBlockWithMarkdown(
       .scrollIntoView(),
   );
   view.focus();
+}
+
+/**
+ * Turn a multi-block text selection into a single list, one item per block.
+ *
+ * Only plain top-level paragraphs / headings qualify: lists, tables, quotes,
+ * and code blocks keep their dedicated structure-preserving paths. The blocks'
+ * inline content is moved as-is rather than re-parsed from text, so bold,
+ * links, and color marks survive the conversion.
+ *
+ * Returns `false` when the selection doesn't qualify, so the caller can fall
+ * back to the single-block path.
+ */
+function convertSelectedBlocksToList(
+  ctx: Ctx,
+  key: 'bullet-list' | 'ordered-list' | 'task-list',
+): boolean {
+  const view = ctx.get(editorViewCtx);
+  const state = view.state;
+  if (state.selection instanceof NodeSelection) return false;
+  const { from: selectionFrom, to: selectionTo } = state.selection;
+  if (selectionFrom === selectionTo) return false;
+
+  const schema = state.schema;
+  const listType =
+    key === 'ordered-list'
+      ? schema.nodes.ordered_list
+      : schema.nodes.bullet_list;
+  const itemType = schema.nodes.list_item;
+  const paragraphType = schema.nodes.paragraph;
+  if (!listType || !itemType || !paragraphType) return false;
+
+  const itemAttrs = {
+    listType: key === 'ordered-list' ? 'ordered' : 'bullet',
+    checked: key === 'task-list' ? false : null,
+  };
+
+  let rangeFrom: number | null = null;
+  let rangeTo = 0;
+  const items: ProseNode[] = [];
+  let supported = true;
+
+  state.doc.forEach((node, offset) => {
+    if (!supported) return;
+    const end = offset + node.nodeSize;
+    if (end <= selectionFrom || offset >= selectionTo) return;
+    if (node.type.name !== 'paragraph' && node.type.name !== 'heading') {
+      supported = false;
+      return;
+    }
+    if (rangeFrom === null) rangeFrom = offset;
+    rangeTo = end;
+    items.push(
+      itemType.create(itemAttrs, paragraphType.create(null, node.content)),
+    );
+  });
+
+  if (!supported || rangeFrom === null || items.length < 2) return false;
+
+  const tr = state.tr.replaceWith(
+    rangeFrom,
+    rangeTo,
+    listType.create(null, items),
+  );
+  // Keep the converted blocks selected so the user can chain another action.
+  const start = Math.min(rangeFrom + 2, tr.doc.content.size);
+  const end = Math.max(start, Math.min(rangeTo, tr.doc.content.size));
+  view.dispatch(
+    tr
+      .setSelection(
+        TextSelection.between(tr.doc.resolve(start), tr.doc.resolve(end)),
+      )
+      .scrollIntoView(),
+  );
+  view.focus();
+  return true;
 }
 
 function replaceCurrentTopLevelBlockWithList(
@@ -1386,8 +1490,15 @@ const BLOCK_TYPE_NODE_NAME: Record<MilkdownBlockType, string> = {
 function runBlockTypeCommand(ctx: Ctx, key: MilkdownBlockType): void {
   const view = ctx.get(editorViewCtx);
 
+  // A selection spanning several blocks must convert all of them, not only
+  // the block holding `$from`. Tables keep their single-block replacement.
+  // A selection spanning several blocks must convert all of them, not only
+  // the block holding `$from`. Other block types already apply across the
+  // whole range through ProseMirror's own commands below.
   if (key === 'bullet-list' || key === 'ordered-list' || key === 'task-list') {
-    replaceCurrentTopLevelBlockWithList(ctx, key);
+    if (!convertSelectedBlocksToList(ctx, key)) {
+      replaceCurrentTopLevelBlockWithList(ctx, key);
+    }
     return;
   }
 
@@ -1477,6 +1588,140 @@ function runBlockTypeCommand(ctx: Ctx, key: MilkdownBlockType): void {
   } else if (key === 'table') {
     replaceCurrentTopLevelBlockWithTable(ctx);
   }
+}
+
+/**
+ * Follow the link under the cursor on a modifier-click, and block clicks on
+ * links the app would never create itself.
+ *
+ * A plain click has to keep placing the caret so link text stays editable, so
+ * navigation is bound to the platform's "follow" modifier instead — `Cmd` on
+ * macOS, where `Ctrl`-click is the secondary-click gesture, and `Ctrl`
+ * elsewhere.
+ *
+ * The href is validated here rather than trusted from the mark: only `setLink`
+ * screens what the user types, while markdown parsed from an agent reply, a
+ * paste or a synced file renders its `href` verbatim — so a `javascript:`
+ * target can reach the DOM. Anchors are the one place such a URL can still be
+ * activated (a click), so an unsafe href has its default suppressed while the
+ * event keeps flowing to ProseMirror's own selection handling.
+ */
+function handleLinkClick(view: EditorView, event: Event): boolean {
+  const mouseEvent = event as MouseEvent;
+  const target = mouseEvent.target;
+  if (!(target instanceof Element)) return false;
+  const anchor = target.closest('a[href]');
+  if (!anchor || !view.dom.contains(anchor)) return false;
+
+  const href = normalizeSafeLinkHref(anchor.getAttribute('href'));
+  if (!href) {
+    mouseEvent.preventDefault();
+    return false;
+  }
+
+  if (mouseEvent.button !== 0) return false;
+  if (!(isMac ? mouseEvent.metaKey : mouseEvent.ctrlKey)) return false;
+  mouseEvent.preventDefault();
+  window.open(href, '_blank', 'noopener,noreferrer');
+  return true;
+}
+
+type TabContext = 'list' | 'text' | 'other';
+/**
+ * Classify what `Tab` should mean at the cursor.
+ *
+ * `other` covers contexts that own the key themselves — table cells navigate
+ * between cells, code blocks and math indent their source — so those must fall
+ * through to their own handlers instead of being treated as an indent.
+ */
+function tabContext(state: EditorState): TabContext {
+  const { $from } = state.selection;
+  for (let depth = $from.depth; depth >= 0; depth--) {
+    const name = $from.node(depth).type.name;
+    if (name.startsWith('table')) return 'other';
+    if (name === 'list_item') return 'list';
+  }
+  const parent = $from.parent.type.name;
+  return parent === 'paragraph' || parent === 'heading' ? 'text' : 'other';
+}
+
+/**
+ * The top-level list immediately above the cursor's block, if any. Indenting a
+ * paragraph joins that list rather than starting a second one next to it.
+ */
+function precedingTopLevelList(state: EditorState): ProseNode | null {
+  const { $from } = state.selection;
+  if ($from.depth < 1) return null;
+  const previous = state.doc.resolve($from.before(1)).nodeBefore;
+  if (!previous) return null;
+  const name = previous.type.name;
+  return name === 'bullet_list' || name === 'ordered_list' ? previous : null;
+}
+
+/**
+ * Merge the freshly wrapped single-item list into the identical list before it,
+ * so the item can then sink into it. Also aligns the item's `listType` attr,
+ * which `wrapInList` fills from the schema default — a Milkdown plugin renders
+ * no marker at all when that attr disagrees with the parent list.
+ */
+function joinIndentedItemIntoPrecedingList(view: EditorView): void {
+  const { $from } = view.state.selection;
+  if ($from.depth < 1) return;
+  const listPos = $from.before(1);
+  if (!canJoin(view.state.doc, listPos)) return;
+  const tr = view.state.tr.join(listPos);
+  view.dispatch(tr);
+}
+
+/**
+ * `Tab` — indent.
+ *
+ * Markdown has no syntax for an indented paragraph, so indentation is mapped
+ * onto list nesting: inside a list the item sinks a level; a plain paragraph is
+ * wrapped into a list first and then sunk under the item above it, which leaves
+ * a top-level bullet when there is no such item. Each step runs against
+ * `view.state` because the previous one has already been dispatched.
+ *
+ * The key is consumed whenever it refers to text so a stray `Tab` mid-edit can
+ * never move focus out of the editor; `Escape` still closes the panel, which is
+ * the keyboard exit path.
+ */
+function indentSelection(
+  listItemType: NodeType,
+  bulletListType: NodeType | null,
+): Command {
+  return (state, dispatch, view) => {
+    if (sinkListItem(listItemType)(state, dispatch)) return true;
+    const context = tabContext(state);
+    if (context === 'other') return false;
+    if (context === 'list') return true;
+    if (!bulletListType || !view || !dispatch) return true;
+    const preceding = precedingTopLevelList(state);
+    const listType = preceding?.type ?? bulletListType;
+    const itemAttrs = preceding
+      ? {
+          listType:
+            preceding.type.name === 'ordered_list' ? 'ordered' : 'bullet',
+        }
+      : null;
+    if (wrapInList(listType, itemAttrs)(view.state, view.dispatch)) {
+      joinIndentedItemIntoPrecedingList(view);
+      sinkListItem(listItemType)(view.state, view.dispatch);
+    }
+    return true;
+  };
+}
+
+/**
+ * `Shift-Tab` — outdent. Reverses {@link indentSelection} one level at a time:
+ * a nested item becomes a sibling, and a top-level item becomes a paragraph
+ * again.
+ */
+function outdentSelection(listItemType: NodeType): Command {
+  return (state, dispatch) => {
+    if (liftListItem(listItemType)(state, dispatch)) return true;
+    return tabContext(state) !== 'other';
+  };
 }
 
 /**
@@ -1582,13 +1827,27 @@ export async function createMilkdown(
     .use(backgroundColorMarkSchema);
   crepe.editor.use(
     $prose((ctx) => {
-      const listItemType = ctx.get(schemaCtx).nodes.list_item;
+      const schema = ctx.get(schemaCtx);
+      const listItemType = schema.nodes.list_item;
       if (!listItemType) return new Plugin({});
       return keymap({
-        Tab: sinkListItem(listItemType),
-        'Shift-Tab': liftListItem(listItemType),
+        Tab: indentSelection(listItemType, schema.nodes.bullet_list ?? null),
+        'Shift-Tab': outdentSelection(listItemType),
       });
     }),
+  );
+  crepe.editor.use(
+    $prose(
+      () =>
+        new Plugin({
+          props: {
+            handleDOMEvents: {
+              click: handleLinkClick,
+              auxclick: handleLinkClick,
+            },
+          },
+        }),
+    ),
   );
   crepe.editor.use(
     $prose(
@@ -2784,7 +3043,7 @@ export async function createMilkdown(
         if (idx === -1) return;
         const from = snap.posByIndex[idx];
         const to = from + view.state.doc.child(idx).nodeSize;
-        const parsed = parser(markdown);
+        const parsed = parser(dedentMarkdownFragment(markdown));
         if (!parsed) return;
         // The parser returns a doc node; its content is the parsed blocks.
         const tr = view.state.tr.replaceWith(from, to, parsed.content);
@@ -2815,7 +3074,7 @@ export async function createMilkdown(
       crepe.editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         const parser = ctx.get(parserCtx);
-        const parsed = parser(markdown);
+        const parsed = parser(dedentMarkdownFragment(markdown));
         if (!parsed) return;
 
         let pos = 0;
@@ -2833,59 +3092,33 @@ export async function createMilkdown(
       return ok;
     },
 
-    getBlockKeyAtPoint: (x, y) => {
-      // Tri-state: `undefined` = outside editor (caller fallback),
-      // `null` = head gap, `string` = anchor key.
-      let result: string | null | undefined = undefined;
+    insertBlocksAtDropIndicator: (markdown) => {
+      let ok = false;
       crepe.editor.action((ctx) => {
+        let indicator: { pos: number } | null = null;
+        try {
+          indicator = ctx.get(dropIndicatorState.key);
+        } catch {
+          return; // Cursor feature not registered on this surface.
+        }
+        if (!indicator) return;
         const view = ctx.get(editorViewCtx);
-        // `posAtCoords` returns null when the point falls outside the
-        // editor surface entirely.
-        const coords = view.posAtCoords({ left: x, top: y });
-        if (!coords) return;
-        const snap = buildSnapshotFromView(view, ctx.get(serializerCtx));
-        if (snap.keys.length === 0) {
-          result = null; // empty doc — anchor on head
-          return;
-        }
-        const $pos = view.state.doc.resolve(coords.pos);
-        // Depth 0 = the position resolves at the doc root, i.e. the
-        // gap BETWEEN two top-level blocks (or at the doc's leading /
-        // trailing edge). `$pos.index(0)` then equals the number of
-        // blocks that precede the gap, so the anchor for an "insert
-        // after" call is that-many-blocks-minus-one (null for the
-        // gap above the first block).
-        if ($pos.depth === 0) {
-          const beforeCount = $pos.index(0);
-          result =
-            beforeCount === 0 ? null : (snap.keys[beforeCount - 1] ?? null);
-          return;
-        }
-        // Inside a top-level block. `posAtCoords` resolves to a text
-        // position, so on its own it can't tell us whether the user
-        // meant "insert above" or "insert below" this block. Match
-        // PM's `dropcursor` behaviour by splitting on the block DOM's
-        // vertical midpoint: upper half maps to the previous block
-        // (or doc head), lower half maps to this block.
-        const blockIndex = $pos.index(0);
-        const blockKey = snap.keys[blockIndex];
-        if (!blockKey) return;
-        const dom = view.nodeDOM(snap.posByIndex[blockIndex] ?? 0);
-        if (!(dom instanceof HTMLElement)) {
-          // Couldn't measure — fall back to "insert after this block".
-          result = blockKey;
-          return;
-        }
-        const rect = dom.getBoundingClientRect();
-        const mid = (rect.top + rect.bottom) / 2;
-        if (y < mid) {
-          result =
-            blockIndex === 0 ? null : (snap.keys[blockIndex - 1] ?? null);
-        } else {
-          result = blockKey;
-        }
+        const parsed = ctx.get(parserCtx)(dedentMarkdownFragment(markdown));
+        if (!parsed || parsed.content.size === 0) return;
+        // `replaceRange`, not `insert`: the indicator can point between
+        // two list items, where a bare paragraph is not a legal child.
+        // `replaceRange` wraps the content to fit, the same way the
+        // indicator plugin handles its own native drops.
+        const tr = view.state.tr.replaceRange(
+          indicator.pos,
+          indicator.pos,
+          new Slice(parsed.content, 0, 0),
+        );
+        if (tr.doc.eq(view.state.doc)) return;
+        view.dispatch(tr);
+        ok = true;
       });
-      return result;
+      return ok;
     },
 
     setBlockDecorations: (specs) => {
@@ -2896,15 +3129,14 @@ export async function createMilkdown(
     },
 
     clearDropIndicator: () => {
-      // `prosemirror-dropcursor` listens for `dragend` directly on
-      // `view.dom` (bubble phase) and clears the cursor through its
-      // own `scheduleRemoval(20)` path. Dispatching a synthetic
-      // `dragend` is the only public-API-friendly way to flush it
-      // when the real `dragend` lands on a drag source outside this
-      // editor (cross-source drops). The handler doesn't read any
-      // dataTransfer fields, so a plain `Event` is enough — no need
-      // to construct a full `DragEvent` (which would require a
-      // `DataTransfer` instance that isn't constructable in Safari).
+      // `prosemirror-drop-indicator` listens for `dragend` directly on
+      // `view.dom`. Dispatching a synthetic one is the only
+      // public-API-friendly way to flush it when the real `dragend`
+      // lands on a drag source outside this editor (cross-source
+      // drops). The handler doesn't read any dataTransfer fields, so a
+      // plain `Event` is enough — no need to construct a full
+      // `DragEvent` (which would require a `DataTransfer` instance
+      // that isn't constructable in Safari).
       try {
         crepe.editor.action((ctx) => {
           const view = ctx.get(editorViewCtx);

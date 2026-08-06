@@ -264,4 +264,50 @@ describe('rerouteAllEdges', () => {
     expect(out[0].sourceHandle).toBe('right-source');
     expect(out[0].targetHandle).toBe('left-target');
   });
+
+  it('keeps internal frame edges facing inward despite sibling obstacles', () => {
+    const frame = makeNode('frame', 0, 0, 500, 300, {
+      type: 'frame',
+      data: { layoutMode: 'column' },
+    });
+    const nodes = [
+      frame,
+      makeNode('s', 20, 80, 100, 100, { parentId: 'frame' }),
+      makeNode('t', 320, 80, 100, 100, { parentId: 'frame' }),
+      makeNode('blocker', 140, 80, 160, 100, { parentId: 'frame' }),
+    ];
+    const out = rerouteAllEdges(nodes, [makeEdge('s', 't')]);
+
+    expect(out[0]).toMatchObject({
+      sourceHandle: 'right-source',
+      targetHandle: 'left-target',
+    });
+  });
+
+  it('still routes around obstacles inside a free frame', () => {
+    // Facing handles are only safe where the solver guarantees children
+    // do not overlap. A `free` frame makes no such promise — its
+    // children sit wherever they were dropped — so an edge between two
+    // of them must still avoid whatever is in between. Applying the
+    // structured shortcut to every frame silently disabled avoidance
+    // for the one layout that actually needs it.
+    const build = (frameData: Record<string, unknown>) => [
+      makeNode('frame', 0, 0, 500, 300, { type: 'frame', data: frameData }),
+      makeNode('s', 0, 0, 100, 100, { parentId: 'frame' }),
+      makeNode('t', 300, 0, 100, 100, { parentId: 'frame' }),
+      makeNode('blocker', 110, 44, 40, 12, { parentId: 'frame' }),
+    ];
+
+    const free = rerouteAllEdges(build({}), [makeEdge('s', 't')])[0];
+    expect(free.sourceHandle).not.toBe('right-source');
+
+    // Same geometry in a structured frame keeps the direct pair.
+    const structured = rerouteAllEdges(build({ layoutMode: 'column' }), [
+      makeEdge('s', 't'),
+    ])[0];
+    expect(structured).toMatchObject({
+      sourceHandle: 'right-source',
+      targetHandle: 'left-target',
+    });
+  });
 });

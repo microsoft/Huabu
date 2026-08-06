@@ -8,11 +8,17 @@
  *      parented while the cursor stays inside the frame's capture halo,
  *      even when the node body momentarily extends past the frame edge.
  *   3. Behaviour without the pointer option is unchanged (back-compat).
+ *   4. A structured frame's much larger capture zone keeps a node
+ *      parented while the user aims at the append / prepend band.
  */
 
 import { describe, it, expect } from 'vitest';
 
-import { wouldAutoFrame, wouldUnframe } from '../detection.js';
+import {
+  wouldAutoFrame,
+  wouldUnframe,
+  wouldStickToStructuredFrame,
+} from '../detection.js';
 
 import type { NestableNode } from '../../container/tree.js';
 
@@ -221,5 +227,74 @@ describe('wouldUnframe — pointer capture halo', () => {
         pointerCaptureMargin: { x: 80, y: 20 },
       }),
     ).toBe(true);
+  });
+});
+
+// ── wouldStickToStructuredFrame: the append / prepend band ─────────────
+
+describe('wouldStickToStructuredFrame', () => {
+  const structuredFrame = () =>
+    makeFrame('f', 0, 0, 200, 200, {
+      data: { layoutMode: 'column', gridCount: 1 },
+    });
+
+  it('sticks in the band where a new track is opened, which the plain halo would unframe', () => {
+    const frame = structuredFrame();
+    // Dragged 60 px past the right edge — where the "insert a new
+    // column" indicator lives. Body fully outside, and the pointer is
+    // past the scaled halo (0.3 x 100 = 30 px) the free-frame rule uses.
+    const child = makeNode('c', 260, 50, 100, 100, { parentId: 'f' });
+    const pointer = { x: 260, y: 100 };
+
+    expect(
+      wouldUnframe([frame, child], 'c', {
+        epsilon: 0,
+        margin: 10,
+        pointer,
+        pointerCaptureMargin: { x: 30, y: 30 },
+      }),
+    ).toBe(true);
+
+    // The structured zone is the frame rect grown by the node's own
+    // size, so the same release keeps the node in the frame.
+    expect(wouldStickToStructuredFrame([frame, child], 'c', pointer)).toBe(
+      true,
+    );
+  });
+
+  it('lets go once the pointer is more than a node-size away', () => {
+    const frame = structuredFrame();
+    const child = makeNode('c', 400, 50, 100, 100, { parentId: 'f' });
+
+    expect(
+      wouldStickToStructuredFrame([frame, child], 'c', { x: 320, y: 100 }),
+    ).toBe(false);
+  });
+
+  it('does not apply to free frames or to root-level nodes', () => {
+    const freeFrame = makeFrame('f', 0, 0, 200, 200, {
+      data: { layoutMode: 'free' },
+    });
+    const child = makeNode('c', 260, 50, 100, 100, { parentId: 'f' });
+    expect(
+      wouldStickToStructuredFrame([freeFrame, child], 'c', { x: 260, y: 100 }),
+    ).toBe(false);
+
+    const orphan = makeNode('o', 260, 50, 100, 100);
+    expect(
+      wouldStickToStructuredFrame([structuredFrame(), orphan], 'o', {
+        x: 210,
+        y: 100,
+      }),
+    ).toBe(false);
+  });
+
+  it('needs a pointer — a keyboard / programmatic move never sticks', () => {
+    const frame = structuredFrame();
+    const child = makeNode('c', 260, 50, 100, 100, { parentId: 'f' });
+
+    expect(wouldStickToStructuredFrame([frame, child], 'c', undefined)).toBe(
+      false,
+    );
   });
 });

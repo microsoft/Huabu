@@ -33,6 +33,7 @@ import {
 } from '@sediment/shared/canvas-engine';
 
 import { resolveArtifactUrl } from '@/api/artifact';
+import { cn } from '@/components/Common/cn';
 import { Loading } from '@/components/Common/Loading';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
 import { CanvasRefNode } from '@/components/Nodes/canvasRef/CanvasRefNode';
@@ -422,6 +423,19 @@ export const Canvas: React.FC<CanvasProps> = ({
   const frameFitPreviews = useGesturePreviewStore(
     (state) => state.frameFitPreviews,
   );
+  // Enables the peer slide-aside transition while a node hovers a
+  // structured frame. Toggles once per hover (not per drag tick), and the
+  // CSS rule excludes `.dragging` so the dragged node stays on the cursor.
+  const isStructuredReflowing = useGesturePreviewStore(
+    (state) => state.structuredDropPreview !== null,
+  );
+  // Where those peers slide to. Lives in the gesture-preview store rather
+  // than on `canvasStore.nodes` so a mid-drag save / undo snapshot can
+  // never capture a position the user has not committed; it is folded
+  // into the node array below, at the render boundary only.
+  const structuredReflowPositions = useGesturePreviewStore(
+    (state) => state.structuredReflowPositions,
+  );
 
   // ── Non-reactive action handles ──────────────────────────────
   // Action functions are defined once in the Zustand `create()` factory
@@ -458,6 +472,12 @@ export const Canvas: React.FC<CanvasProps> = ({
   const clearRightPanelAnchor = usePanelStore(
     (state) => state.clearRightPanelAnchor,
   );
+  const layoutAnchorNodeId =
+    expandedNodeId && expandMode === 'split'
+      ? expandedNodeId
+      : rightPanelAnchorNodeId;
+  const layoutAnchorNodeIdRef = useRef(layoutAnchorNodeId);
+  layoutAnchorNodeIdRef.current = layoutAnchorNodeId;
 
   // Turning the World feature on/off changes whether this Space resolves
   // its derived pin state at all, so re-run the boundary refresh.
@@ -830,9 +850,18 @@ export const Canvas: React.FC<CanvasProps> = ({
       const nextClassName = wantsLassoClass
         ? clsx(baseClassName, 'canvas-lasso-preview')
         : baseClassName;
+      // Transient slide-aside offset; absent for every node outside the
+      // hovered structured frame, and for the dragged node itself.
+      const previewPosition = structuredReflowPositions?.get(node.id);
+      const nextPosition = previewPosition ?? node.position;
 
       const cached = prevCache.get(node);
-      if (cached && cached.zIndex === z && cached.className === nextClassName) {
+      if (
+        cached &&
+        cached.zIndex === z &&
+        cached.className === nextClassName &&
+        cached.position === nextPosition
+      ) {
         nextCache.set(node, cached);
         return cached;
       }
@@ -845,13 +874,15 @@ export const Canvas: React.FC<CanvasProps> = ({
       const needsWrap =
         nextClassName !== baseClassName ||
         node.zIndex !== z ||
-        node.draggable !== touchDraggable;
+        node.draggable !== touchDraggable ||
+        nextPosition !== node.position;
       const wrapped = needsWrap
         ? {
             ...node,
             className: nextClassName,
             zIndex: z,
             draggable: touchDraggable,
+            position: nextPosition,
           }
         : node;
       nextCache.set(node, wrapped);
@@ -860,7 +891,13 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     zWrapCacheRef.current = nextCache;
     return result;
-  }, [isNotMouse, lassoPreviewNodeIdSet, nodes, zByNode]);
+  }, [
+    isNotMouse,
+    lassoPreviewNodeIdSet,
+    nodes,
+    structuredReflowPositions,
+    zByNode,
+  ]);
 
   // Override marker colors on selected edges so arrows match the selection
   // highlight color (--color-info). CSS cannot style SVG <marker> referenced
@@ -1179,10 +1216,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       );
       previousSize = nextSize;
 
-      const anchorNodeId =
-        expandedNodeId && expandMode === 'split'
-          ? expandedNodeId
-          : rightPanelAnchorNodeId;
+      const anchorNodeId = layoutAnchorNodeIdRef.current;
       if (anchorNodeId) {
         const bounds = getReliableNodeBounds(instance, [anchorNodeId]);
         if (bounds) {
@@ -1202,7 +1236,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     });
     observer.observe(wrapper);
     return () => observer.disconnect();
-  }, [expandedNodeId, expandMode, rightPanelAnchorNodeId]);
+  }, []);
 
   // The Chat anchor is one-shot and must expire on its own clock. Opening
   // Chat from a node while the panel is already open changes no layout, so
@@ -1440,7 +1474,10 @@ export const Canvas: React.FC<CanvasProps> = ({
       }}
     >
       <ReactFlow
-        className={isInitialViewportPending ? 'invisible' : undefined}
+        className={cn(
+          isInitialViewportPending && 'invisible',
+          isStructuredReflowing && 'structured-reflow',
+        )}
         defaultViewport={defaultViewport}
         deleteKeyCode={null}
         nodes={displayNodes}

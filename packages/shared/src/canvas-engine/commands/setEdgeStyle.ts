@@ -1,14 +1,15 @@
 import { noop, type CommandDefinition } from './types.js';
-import { mergeEdgeStyle } from '../utils/edge.js';
+import { getInternalEdgeFrameIds, mergeEdgeStyle } from '../utils/edge.js';
 
 import type { CanvasCommand } from '../../index.js';
+import type { Edge } from '@xyflow/react';
 
 type Cmd = Extract<CanvasCommand, { type: 'SET_EDGE_STYLE' }>;
 
 const setEdgeStyle: CommandDefinition<Cmd> = {
   meta: {
     snapshot: 'yes',
-    requiresEdgeReroute: false,
+    requiresEdgeReroute: true,
   },
 
   handler(cmd, state) {
@@ -30,12 +31,15 @@ const setEdgeStyle: CommandDefinition<Cmd> = {
     }
 
     let changed = false;
+    const changedEdges: Edge[] = [];
     const nextEdges = state.edges.map((e) => {
       const patch =
         patchById.get(e.id) ?? patchByPair.get(`${e.source}|${e.target}`);
       if (!patch) return e;
       changed = true;
-      return mergeEdgeStyle(e, patch);
+      const next = mergeEdgeStyle(e, patch);
+      changedEdges.push(next);
+      return next;
     });
 
     if (!changed) return noop(state);
@@ -44,6 +48,7 @@ const setEdgeStyle: CommandDefinition<Cmd> = {
       applied: true,
       nodes: state.nodes,
       edges: nextEdges,
+      affectedFrameIds: getInternalEdgeFrameIds(state.nodes, changedEdges),
     };
   },
 };

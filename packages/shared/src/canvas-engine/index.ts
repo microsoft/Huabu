@@ -64,23 +64,39 @@ export {
   type CommandDefinition,
 } from './commands/index.js';
 
-// ── Frame grid layout (column / row child packing) ───────────────────────
+// ── Frame grid layout (column / row / grid child packing) ───────────────
 // The engine no longer ships a fallback layout for free-form nodes — every
 // caller must commit to an explicit `position` in `CREATE_NODES`. The only
 // structured layout that still lives here is
-// the column / row child packing for `frame` nodes.
+// the column / row / grid child packing for `frame` nodes.
 export {
   applyColumnLayout,
   applyRowLayout,
+  applyGridLayout,
+  solveStructuredFrameLayout,
   applyStructuredFrameRelayout,
+  getStructuredFrameGutterPlan,
   clampGridCount,
   readFrameGridConfig,
+  resolveFrameTrackCount,
   pickColumnDropTarget,
   pickRowDropTarget,
   describeStructuredDropZone,
+  planStructuredDrop,
+  readFrameTrack,
+  readFrameGridRow,
+  type FrameAxis,
+  type FrameGridAxis,
   type FrameGridLayoutResult,
+  type StructuredGutterPlan,
+  type StructuredGutterSizes,
   type StructuredDropTarget,
   type StructuredDropZone,
+  type StructuredDropRequest,
+  type StructuredDropAssignment,
+  type StructuredDropContext,
+  type StructuredDropContextRect,
+  type StructuredReflowEntry,
   type DraggedNodeRect,
 } from './autoLayout/gridLayout.js';
 
@@ -167,6 +183,7 @@ export {
   unframe,
   autoUnframeNodeByNonOverlap,
   wouldUnframe,
+  wouldStickToStructuredFrame,
   wouldAutoFrame,
   autoFrameNodeByOverlap,
   frameNodes,

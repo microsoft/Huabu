@@ -39,12 +39,54 @@ export function readJson<T>(filePath: string): T | null {
   }
 }
 
+/**
+ * Backoff schedule (ms) for a rename whose target is momentarily locked.
+ * Bounded at ~310ms: long enough to outlast a virus scan or a cloud-sync
+ * client's read, short enough that a genuinely broken write still fails fast.
+ */
+const RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160];
+
+/**
+ * Windows fails a rename whose destination is open in another handle. Unlike a
+ * POSIX `rename(2)`, which replaces the target atomically and cannot fail this
+ * way, `MoveFileEx` reports `EPERM` (or `EACCES` / `EBUSY`) whenever a virus
+ * scanner, a cloud-sync client, an editor, or a file watcher holds the file
+ * open — none of which require a second writer.
+ */
+function isTransientRenameError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
+}
+
+/** Blocks the thread; only ever between rename attempts. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** {@link renameSync} that rides out a transiently locked destination. */
+function renameOverWithRetry(from: string, to: string): void {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (err) {
+      if (
+        attempt >= RENAME_RETRY_DELAYS_MS.length ||
+        !isTransientRenameError(err)
+      ) {
+        throw err;
+      }
+      sleepSync(RENAME_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
 /** Atomic write of a JSON file (pretty-printed with 2-space indent). */
 export function atomicWriteJson(filePath: string, data: unknown): void {
   mkdirSync(path.dirname(filePath), { recursive: true });
   const tmp = `${filePath}.tmp`;
   writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-  renameSync(tmp, filePath);
+  renameOverWithRetry(tmp, filePath);
 }
 
 /**

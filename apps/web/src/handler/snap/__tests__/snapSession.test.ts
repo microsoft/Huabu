@@ -140,6 +140,47 @@ describe('snapSession — lifecycle', () => {
     endSnapSession();
     expect(useGesturePreviewStore.getState().snapGuides).toEqual([]);
   });
+
+  it('does not intercept Space from editable targets during a session', () => {
+    const A = makeNode('A', { x: 0, y: 0 }, { w: 50, h: 50 });
+    beginSnapSession({
+      nodes: [A],
+      gestureIds: new Set(['A']),
+      altPressed: false,
+    });
+    const textarea = document.createElement('textarea');
+    document.body.appendChild(textarea);
+
+    const keydown = new KeyboardEvent('keydown', {
+      key: ' ',
+      code: 'Space',
+      bubbles: true,
+      cancelable: true,
+    });
+    textarea.dispatchEvent(keydown);
+
+    expect(keydown.defaultPrevented).toBe(false);
+    textarea.remove();
+  });
+
+  it('still intercepts Space from non-editable targets during a session', () => {
+    const A = makeNode('A', { x: 0, y: 0 }, { w: 50, h: 50 });
+    beginSnapSession({
+      nodes: [A],
+      gestureIds: new Set(['A']),
+      altPressed: false,
+    });
+
+    const keydown = new KeyboardEvent('keydown', {
+      key: ' ',
+      code: 'Space',
+      bubbles: true,
+      cancelable: true,
+    });
+    document.body.dispatchEvent(keydown);
+
+    expect(keydown.defaultPrevented).toBe(true);
+  });
 });
 
 describe('snapSession — mixed parents disable snap', () => {

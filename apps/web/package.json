@@ -30,6 +30,7 @@
     "@milkdown/crepe": "^7.21.1",
     "@milkdown/ctx": "^7.21.1",
     "@milkdown/plugin-block": "^7.21.1",
+    "@milkdown/plugin-cursor": "^7.21.1",
     "@milkdown/prose": "^7.21.1",
     "@milkdown/react": "^7.21.1",
     "@milkdown/utils": "^7.21.1",
