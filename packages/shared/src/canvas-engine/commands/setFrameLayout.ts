@@ -94,9 +94,10 @@ const setFrameLayout: CommandDefinition<Cmd> = {
       ? new Map(cmd.cells.map((cell) => [cell.nodeId as string, cell]))
       : undefined;
 
-    // A re-flow instruction invalidates the children's stored cells, so
-    // the solver re-reads them from geometry instead of resolving new
-    // tracks against indices assigned for the old structure.
+    // A mode change invalidates the children's stored cells, so the solver
+    // re-reads them from geometry instead of resolving new tracks against
+    // indices assigned for the old structure. A `grid` column-count change is
+    // deliberately not a reset — see `reflowPlan` below.
     const resetsCells = modeChanged;
 
     // Naming a column count for `grid` goes further than a reset: its
