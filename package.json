@@ -27,6 +27,8 @@
     "vision:ocr": "node scripts/test-azure-vision.mjs",
     "subtree:pull:agentlet": "git subtree pull --prefix=external/agentlet agentlet-upstream main --squash",
     "subtree:push:agentlet": "git subtree push --prefix=external/agentlet agentlet-upstream main",
+    "subtree:pull:agenetes": "git subtree pull --prefix=external/agenetes agenetes-upstream main --squash",
+    "subtree:push:agenetes": "git subtree push --prefix=external/agenetes agenetes-upstream main",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
