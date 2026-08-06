@@ -1,4 +1,5 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -25,7 +26,6 @@ import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
 import type { NestableNode } from '@sediment/shared/canvas-engine';
 
 let workspace: string;
-let sequence = 0;
 
 interface TestStoredNode {
   id: string;
@@ -121,13 +121,12 @@ function referenceFor(sourceNodeId: string): TestStoredNode | undefined {
 }
 
 beforeEach(async () => {
-  sequence += 1;
-  workspace = path.resolve(
-    process.cwd(),
-    '.test-workspaces',
-    `portal-router-${process.pid}-${sequence}`,
-  );
-  mkdirSync(workspace, { recursive: true });
+  // Outside the repo: these tests rename over `space.json`, and on Windows that
+  // fails with EPERM while any handle is open on the target — which a dev
+  // server's file watcher, the IDE indexer, or antivirus will happily hold on
+  // anything inside the working tree. `mkdtemp` also makes the name unique, so
+  // parallel workers cannot collide.
+  workspace = mkdtempSync(path.join(tmpdir(), 'sediment-portal-router-'));
   setWorkspacePath(workspace);
   writeCanvas('.world', 'canvas-world');
   writeCanvas('Project A', 'canvas-a', [

@@ -39,6 +39,8 @@ The scale divides the node's **content** width, its box minus the shell border, 
 
 A resize gesture on an auto note pins it to `fixed`. That flip is implicit, so the toolbar's auto indicator reflects it at gesture end.
 
+The `fixed → auto` flip is reachable **only** from the node toolbar (and the multi-select toolbar). A truncated note draws a fade + chevron along its bottom edge, but that is a hint, not a control: as a click target it spanned the card's full width right where selection and resize gestures land, so it fired by accident far more often than on purpose.
+
 ## 4. Freshness
 
 A stored height is meaningless without proof of what it measured. `data.autoHeight.measuredFor` carries an [`AutoHeightKey`](../../packages/shared/src/canvas-engine/height/freshness.ts): `` `${HEIGHT_LAYOUT_VERSION}:${nodeRevisionOf({ content, src })}` ``.

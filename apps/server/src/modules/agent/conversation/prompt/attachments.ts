@@ -219,9 +219,8 @@ export async function buildAttachmentParts(
           }
           if (resolvedCanvasId && resolvedFilename) {
             try {
-              const bytes = await canvasBlobs(resolvedCanvasId).read(
-                resolvedFilename,
-              );
+              const bytes =
+                await canvasBlobs(resolvedCanvasId).read(resolvedFilename);
               // Attachments are inlined as text; binary bytes simply
               // decode to mojibake and the URL-only branch is used instead.
               if (bytes) fileContent = bytes.toString('utf-8');

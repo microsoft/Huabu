@@ -71,6 +71,21 @@ describe('Milkdown color marks', () => {
     ).not.toBeNull();
   });
 
+  it('keeps indented fragment content out of a code block when inserted', async () => {
+    const span =
+      '<span data-sediment-background-color="purple" style="background-color: color-mix(in srgb, #9B8AC4 25%, transparent)">Nan:  </span>';
+    const { instance, root } = await mount('intro\n');
+
+    // Markdown extracted from a nested list item carries its indentation.
+    instance.insertBlocksAfter(null, `    ${span}`);
+
+    expect(root.querySelector('.milkdown-code-block')).toBeNull();
+    expect(
+      root.querySelector('span[data-sediment-background-color="purple"]'),
+    ).not.toBeNull();
+    expect(instance.getMarkdown()).not.toContain('```');
+  });
+
   it('round-trips overlapping text and background color marks', async () => {
     const { instance } = await mount('hello');
 

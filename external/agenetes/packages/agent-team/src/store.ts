@@ -12,6 +12,48 @@ import { dirname, isAbsolute, join } from 'node:path';
 
 import { agentTeamMemberKey, agentTeamRootKey } from './identity.js';
 
+/**
+ * Backoff schedule (ms) for a rename whose target is momentarily locked.
+ * Bounded at ~310ms: long enough to outlast a virus scan or a cloud-sync
+ * client's read, short enough that a genuinely broken write still fails fast.
+ */
+const RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160];
+
+/**
+ * Windows fails a rename whose destination is open in another handle. Unlike a
+ * POSIX `rename(2)`, which replaces the target atomically and cannot fail this
+ * way, `MoveFileEx` reports `EPERM` (or `EACCES` / `EBUSY`) whenever a virus
+ * scanner, a cloud-sync client, an editor, or a file watcher holds the file
+ * open — none of which require a second writer.
+ */
+function isTransientRenameError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
+}
+
+/** Blocks the thread; only ever between rename attempts. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** {@link renameSync} that rides out a transiently locked destination. */
+function renameOverWithRetry(from: string, to: string): void {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (err) {
+      if (
+        attempt >= RENAME_RETRY_DELAYS_MS.length ||
+        !isTransientRenameError(err)
+      ) {
+        throw err;
+      }
+      sleepSync(RENAME_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
 import type {
   AcpCommandProfile,
   AgentProfile,
@@ -707,7 +749,7 @@ export class FileAgentTeamRegistryStore implements AgentTeamRegistryStore {
     mkdirSync(dirname(this.filePath), { recursive: true });
     const temporaryPath = `${this.filePath}.tmp`;
     writeFileSync(temporaryPath, `${JSON.stringify(file, null, 2)}\n`, 'utf8');
-    renameSync(temporaryPath, this.filePath);
+    renameOverWithRetry(temporaryPath, this.filePath);
     try {
       chmodSync(this.filePath, 0o600);
     } catch {
@@ -784,7 +826,7 @@ export class FileAgentTeamRegistryStore implements AgentTeamRegistryStore {
     const temporaryPath = `${path}.tmp`;
     const content = validated.map((entry) => JSON.stringify(entry)).join('\n');
     writeFileSync(temporaryPath, content ? `${content}\n` : '', 'utf8');
-    renameSync(temporaryPath, path);
+    renameOverWithRetry(temporaryPath, path);
     this.protectFile(path);
   }
 

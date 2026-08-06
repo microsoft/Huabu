@@ -827,6 +827,7 @@ export const NodeWrapper = memo(
             hovered={hovered}
             selected={!!selected}
             isNotMouse={isNotMouse}
+            dragging={isDragging}
           />
         </div>
       </>

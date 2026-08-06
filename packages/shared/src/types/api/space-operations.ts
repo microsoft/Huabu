@@ -350,7 +350,7 @@ export const setFrameLayoutCommandSchema = z
     mode: z
       .enum(FRAME_LAYOUT_MODES)
       .describe(
-        '`free` preserves child positions; `column` and `row` enable structured layout.',
+        '`free` preserves child positions. `column` / `row` pack children into N independent masonry tracks: each track stacks on its own, so a track holding fewer items pulls its next item up. `grid` counts columns like `column` but also aligns rows, so a column with no child in a given row leaves that cell blank. Choose `grid` when items in different columns must stay side by side even where one column has no counterpart.',
       ),
     gridCount: z
       .number()
@@ -358,7 +358,32 @@ export const setFrameLayoutCommandSchema = z
       .min(FRAME_GRID_MIN_COUNT)
       .max(FRAME_GRID_MAX_COUNT)
       .optional()
-      .describe('Track count for column or row layout. Ignored for free.'),
+      .describe(
+        'Track count: columns for `column` and `grid`, rows for `row`. Ignored for `free`.',
+      ),
+    gridRowCount: z
+      .number()
+      .int()
+      .min(FRAME_GRID_MIN_COUNT)
+      .max(FRAME_GRID_MAX_COUNT)
+      .optional()
+      .describe(
+        'Minimum row bands for `grid`, ignored by other modes. A floor, not an exact count — rows fewer than the children need cannot be honoured, so this only adds blank rows. Omit unless you deliberately want empty rows reserved.',
+      ),
+    cells: z
+      .array(
+        z
+          .object({
+            nodeId: z.string().min(1),
+            column: z.number().int().min(0).optional(),
+            row: z.number().int().min(0).optional(),
+          })
+          .strict(),
+      )
+      .optional()
+      .describe(
+        'Where each direct child sits. A structured frame computes every child position from its cell, so `position` cannot express this — pass `cells` whenever placement matters. `column` addresses columns, `row` addresses rows, `grid` addresses both; an index for an axis the mode lacks is ignored. Children you omit keep their current cell, or are auto-assigned from their current on-screen position if they have none. Skipping a row number in one column is how you leave that cell blank in `grid`. Keep indices small and contiguous — they are positions, not labels, and a row far beyond the child count is clamped, so do not encode meaning (a year, an ID) in them.',
+      ),
     sizing: z
       .enum(FRAME_SIZING_MODES)
       .optional()

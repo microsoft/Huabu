@@ -84,6 +84,9 @@ evals/
 | `response_contains` | Final assistant text contains any of the provided substrings (case-insensitive). | `anyOf: string[]`                                   |
 | `max_turns`         | Agent finished within the given turn budget.                                     | `max`                                               |
 | `no_error`          | Run produced a `done` event (not `error`).                                       | —                                                   |
+| `command_emitted`   | Some `space_commands` call carried a canvas command of this type.                | `type`, `where?`, `hasNonEmpty?`                    |
+
+`command_emitted` exists because `tool_called: space_commands` proves almost nothing: every mutation goes through that one tool, so the decision worth asserting lives in its arguments. `where` pins literal fields on the matched command (`{ mode: grid }`), and `hasNonEmpty` requires a field to be present and non-empty — the difference between reaching for the right command and reaching for it with the payload that makes it do anything.
 
 Add a new kind by appending to the `discriminatedUnion` in
 `case-loader.ts` and the `switch` in `assertions.ts`. They are the

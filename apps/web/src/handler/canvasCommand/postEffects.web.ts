@@ -30,13 +30,15 @@ import {
 import { canvasHistoryManager } from '@/store/canvasHistoryManager';
 import { useChatStore } from '@/store/chatStore';
 
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 
 export interface RunWebPostEffectsInput {
   effects: PendingEffects;
   canvasId: string;
   /** Read latest committed nodes from the store. */
   getNodes: () => Node[];
+  /** Read latest committed edges for edge-aware structured gutters. */
+  getEdges: () => Edge[];
   /** Apply a subsequent partial node update. */
   setNodes: (nodes: Node[]) => void;
   /**
@@ -68,6 +70,7 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     effects,
     canvasId,
     getNodes,
+    getEdges,
     setNodes,
     triggerPreprocessing,
     forgetNodeContent,
@@ -125,6 +128,7 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     scheduleDeferredFrameRelayout(
       effects.deferredFitFrameIds,
       getNodes,
+      getEdges,
       setNodes,
     );
   }
@@ -169,6 +173,7 @@ let pendingRelayoutScheduled = false;
 export function scheduleDeferredFrameRelayout(
   frameIds: Iterable<string>,
   getNodes: () => Node[],
+  getEdges: () => Edge[],
   setNodes: (nodes: Node[]) => void,
 ): void {
   let added = false;
@@ -192,7 +197,9 @@ export function scheduleDeferredFrameRelayout(
       // and sets the frame's content-driven size. `fitFrames` then
       // cascades to ancestor frames so outer wrappers stay sized
       // correctly.
-      const structured = applyStructuredFrameRelayout(current, ids);
+      const structured = applyStructuredFrameRelayout(current, ids, undefined, {
+        edges: getEdges(),
+      });
       const next = fitFrames(structured.nodes as NestableNode[], ids);
       if (next !== current) setNodes(next);
     });

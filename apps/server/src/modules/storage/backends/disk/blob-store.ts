@@ -16,7 +16,6 @@ import {
   mkdir,
   readdir,
   readFile,
-  rename,
   rm,
   stat,
   writeFile,
@@ -24,6 +23,7 @@ import {
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
+import { renameOverWithRetry } from '../../../../utils/fs.js';
 import { artifactsDir } from '../../../workspace/disk/paths.js';
 import { getWorkspacePath } from '../../../workspace.js';
 import { createBlobLease, normalizeBlobName } from '../../ports/blob.js';
@@ -111,7 +111,8 @@ class DiskBlobScope implements BlobScope {
    * Write to a unique sibling, then rename into place.
    *
    * Matches the atomic-write invariant the rest of the storage module holds
-   * (`io.ts`): a reader either sees the previous blob or the new one, never a
+   * (`utils/fs.ts`): a reader either sees the previous blob or the new one,
+   * never a
    * prefix of the new one. That matters because names are reused —
    * content-derived snapshot filenames are regenerated — and because a failed
    * write must not leave a truncated blob at a live key, which the port has
@@ -135,7 +136,7 @@ class DiskBlobScope implements BlobScope {
       // describes the bytes we wrote rather than whatever a concurrent
       // writer may have put at `full` by the time we look.
       const stats = await stat(temp);
-      await rename(temp, full);
+      await renameOverWithRetry(temp, full);
       return {
         name: safe,
         size: stats.size,

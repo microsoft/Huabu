@@ -31,9 +31,9 @@ describe('parseStorageProfile', () => {
   });
 
   it('names the supported set when a kind is unknown', () => {
-    expect(() =>
-      parseStorageProfile({ HUABU_BLOB_BACKEND: 's3' }),
-    ).toThrow(/HUABU_BLOB_BACKEND="s3".*disk, azure/s);
+    expect(() => parseStorageProfile({ HUABU_BLOB_BACKEND: 's3' })).toThrow(
+      /HUABU_BLOB_BACKEND="s3".*disk, azure/s,
+    );
   });
 
   it('rejects a structured kind from the blob axis', () => {

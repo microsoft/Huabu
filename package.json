@@ -19,6 +19,7 @@
     "build:desktop:linux": "pnpm run build:agentlet && pnpm run build:agenetes && pnpm --filter @sediment/shared build && pnpm --filter @sediment/server bundle && pnpm --filter @sediment/web build && pnpm --filter @sediment/desktop dist:linux",
     "check:i18n": "node scripts/check-i18n-parity.mjs",
     "check:agent-team-skills": "node scripts/check-agent-team-skills.mjs",
+    "test": "pnpm -r --if-present run test",
     "test:agent-team-skills": "node --test scripts/check-agent-team-skills.test.mjs",
     "test:shared": "pnpm --filter @sediment/shared test",
     "vision:ocr": "node scripts/test-azure-vision.mjs",

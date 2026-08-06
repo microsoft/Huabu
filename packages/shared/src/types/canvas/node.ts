@@ -261,13 +261,44 @@ export interface BaseNodeData {
    */
   duplicateFiles?: string[];
   /**
-   * Track index inside the parent frame when that frame is in a grid
-   * layout mode. Means the **column index** when the parent is in
-   * `column` mode, the **row index** when the parent is in `row`
-   * mode, and is ignored for `free` mode and root-level nodes.
+   * Column index inside a parent Frame laid out in `column` or `grid`
+   * mode. Ignored by `free` and `row` layouts and by root-level nodes.
    *
-   * Persisted so a child stays in its user-chosen lane across re-runs
+   * Persisted so a child stays in its user-chosen column across re-runs
    * of the layout pass (especially the "no empty track" rebalance).
+   * Absent on a child the solver has never placed — entering a
+   * structured mode seeds it from the child's on-screen position, which
+   * is the only statement of intent a hand-arranged layout carries.
+   *
+   * Each structured mode addresses the axes it actually has, and every
+   * field is named after its axis: `column` uses this, `row` uses
+   * {@link frameRow}, and `grid` — being two-dimensional — uses both as
+   * a persistent cell. Switching `column` → `grid` therefore carries the
+   * column over untranslated.
+   */
+  frameColumn?: number;
+  /**
+   * Row index inside a parent Frame laid out in `row` or `grid` mode.
+   * Ignored by `free` and `column` layouts and by root-level nodes. See
+   * {@link frameColumn} for how the two combine.
+   *
+   * Rows in `grid` are allowed to be sparse — a blank cell means
+   * something there — but the solver allocates one row band per index,
+   * so an index far beyond the frame's child count is clamped rather
+   * than honoured.
+   */
+  frameRow?: number;
+  /**
+   * Legacy single track index, written by builds before the axes were
+   * split into {@link frameColumn} / {@link frameRow}. It meant the
+   * column index under `column` / `grid` and the row index under `row`,
+   * which is exactly the mode-dependent reading the split removed.
+   *
+   * Read-only compatibility: each solver falls back to it on its own
+   * axis and writes only the new field, so a Frame sheds this on its
+   * first relayout. Delete once no unopened pre-split canvases remain.
+   *
+   * @deprecated Use {@link frameColumn} / {@link frameRow}.
    */
   frameSlot?: number;
   /**
@@ -441,8 +472,23 @@ export interface AudioNodeData extends BaseNodeData {
  *              are at least as many children as columns.
  * - `row`    — N rows × ∞ columns. Mirror of `column` on the other axis
  *              (children top-aligned within their row).
+ * - `grid`   — N columns like `column`, but rows are aligned too: all
+ *              children sharing a row band get one shared Y origin and
+ *              the band's height is the tallest member. A column may
+ *              legitimately have no member in a given band — that cell
+ *              is simply left blank instead of being back-filled. This
+ *              is what makes side-by-side correspondence survive a
+ *              missing counterpart.
+ *
+ *              Row membership is persisted in {@link BaseNodeData.frameRow}
+ *              so a drag moves one child rather than reshuffling every
+ *              row against the rendered geometry. On the frame's FIRST
+ *              pass through `grid` there is nothing to persist yet, so
+ *              rows are seeded once from the children's current vertical
+ *              overlap — globally, across columns, so whatever was
+ *              side by side on screen stays side by side.
  */
-export const FRAME_LAYOUT_MODES = ['free', 'column', 'row'] as const;
+export const FRAME_LAYOUT_MODES = ['free', 'column', 'row', 'grid'] as const;
 export type FrameLayoutMode = (typeof FRAME_LAYOUT_MODES)[number];
 
 /**
@@ -476,11 +522,33 @@ export interface FrameNodeData extends BaseNodeData {
   layoutMode?: FrameLayoutMode;
   /**
    * Number of tracks for the active grid mode — interpreted as columns
-   * when `layoutMode === 'column'`, as rows when `layoutMode === 'row'`,
-   * ignored otherwise. Clamped to [`FRAME_GRID_MIN_COUNT`,
-   * `FRAME_GRID_MAX_COUNT`]; defaults to `FRAME_GRID_DEFAULT_COUNT`.
+   * when `layoutMode === 'column'` or `'grid'`, as rows when
+   * `layoutMode === 'row'`, ignored otherwise. Clamped to
+   * [`FRAME_GRID_MIN_COUNT`, `FRAME_GRID_MAX_COUNT`].
+   *
+   * Absent means "not pinned": the solver derives the count from the
+   * children's visual bands and writes the result back here. A layout
+   * mode change clears the field for exactly that reason — a count
+   * chosen for one axis says nothing about another, and reusing it
+   * re-flows an arrangement the user did not ask to change.
    */
   gridCount?: number;
+  /**
+   * Minimum number of row bands for `grid` mode. Ignored by every other
+   * layout.
+   *
+   * A floor rather than an exact count, because the two axes cannot be
+   * pinned symmetrically: six children in three columns need two rows,
+   * and asking for one cannot make them fit. Rows can only be added
+   * (the surplus renders as blank, drop-target cells — blank cells are
+   * meaningful in `grid`), never removed below what the content
+   * requires.
+   *
+   * Absent means "no floor": the row count follows the content, which
+   * is the default behaviour. Cleared on a layout-mode change for the
+   * same reason {@link gridCount} is.
+   */
+  gridRowCount?: number;
   /**
    * Frame size policy. Defaults to `'hug'`. When `'manual'` the frame
    * is excluded from the engine's end-of-batch fit pass — its size is
@@ -506,6 +574,8 @@ export interface NodeRefNodeData extends BaseNodeData {
   artifactMissing?: never;
   contentDuplicate?: never;
   duplicateFiles?: never;
+  frameColumn?: never;
+  frameRow?: never;
   frameSlot?: never;
   target: {
     canvasId: string;
@@ -523,6 +593,8 @@ export interface FrameRefNodeData extends BaseNodeData {
   artifactMissing?: never;
   contentDuplicate?: never;
   duplicateFiles?: never;
+  frameColumn?: never;
+  frameRow?: never;
   frameSlot?: never;
   target: {
     canvasId: string;

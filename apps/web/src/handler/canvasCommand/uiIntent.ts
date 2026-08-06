@@ -42,6 +42,7 @@ import type {
   RecentAction,
   EdgeStyle,
 } from '@sediment/shared';
+import type { StructuredGutterSizes } from '@sediment/shared/canvas-engine';
 import type { Edge, Node } from '@xyflow/react';
 
 // ---------------------------------------------------------------------------
@@ -214,6 +215,8 @@ export type CanvasUiIntent =
        * exactly one event.
        */
       preview?: boolean;
+      /** Resize-start gutter plan; consumed only by transient previews. */
+      frozenStructuredGutters?: ReadonlyMap<string, StructuredGutterSizes>;
     }
   | {
       type: 'REORDER_NODE';
@@ -232,7 +235,10 @@ export type CanvasUiIntent =
        * Fields are independently optional in spirit:
        *  - `mode` is required (single source of truth for the
        *    structured-children axis);
-       *  - `gridCount` is honoured only for `column` / `row` modes;
+       *  - `gridCount` is the track count — columns for `column` and
+       *    `grid`, rows for `row`. Omit it when only changing `mode`,
+       *    so the engine re-derives the structure from geometry;
+       *  - `gridRowCount` is honoured only for `grid`;
        *  - `sizing` toggles the frame-size policy and is independent
        *    of `mode`. Omit to keep the frame's current sizing.
        */
@@ -240,6 +246,8 @@ export type CanvasUiIntent =
       frameId: string;
       mode: FrameLayoutMode;
       gridCount?: number;
+      /** Minimum row bands for `grid` — only ever adds blank rows. */
+      gridRowCount?: number;
       sizing?: FrameSizing;
     }
   | {
@@ -780,6 +788,9 @@ function resolveSetFrameLayoutMode(
         mode: intent.mode,
         ...(typeof intent.gridCount === 'number' && {
           gridCount: intent.gridCount,
+        }),
+        ...(typeof intent.gridRowCount === 'number' && {
+          gridRowCount: intent.gridRowCount,
         }),
         ...(intent.sizing && { sizing: intent.sizing }),
       },

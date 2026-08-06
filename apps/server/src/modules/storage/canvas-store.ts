@@ -7,5 +7,4 @@
  * imports keep resolving while they migrate; it must never contain logic, and
  * no new call site may import it (enforced by the module-boundary test).
  */
-
 export * from './backends/disk/legacy/canvas-store.js';

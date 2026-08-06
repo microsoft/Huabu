@@ -104,6 +104,7 @@ export type {
   EdgeStrokeWidth,
 } from './edge.js';
 export {
+  EDGE_LABEL_MAX_INVERSE_SCALE,
   EDGE_STROKE_WIDTHS,
   EDGE_LINE_TYPES,
   EDGE_LINE_STYLES,

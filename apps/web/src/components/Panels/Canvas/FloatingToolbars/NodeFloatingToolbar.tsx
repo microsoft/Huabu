@@ -24,7 +24,7 @@ import { useIsNotMouse } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 import {
-  collapsedMarkRect,
+  blendedMarkRect,
   useNodeCollapseStore,
 } from '@/store/nodeCollapseStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
@@ -141,14 +141,13 @@ export const NodeFloatingToolbar = memo(
     // displayed value reflects the content-driven height.
     const anchor = useMemo(() => {
       if (!internalNode) return null;
-      if (mark) return collapsedMarkRect(mark);
       const x = internalNode.internals.positionAbsolute?.x ?? 0;
       const y = internalNode.internals.positionAbsolute?.y ?? 0;
       const styleW = internalNode.style?.width as number | undefined;
       const styleH = internalNode.style?.height as number | undefined;
       const width = styleW ?? internalNode.measured?.width ?? 0;
       const height = styleH ?? internalNode.measured?.height ?? 0;
-      return { x, y, width, height };
+      return mark ? blendedMarkRect(mark) : { x, y, width, height };
     }, [internalNode, mark]);
 
     // Current size shown in the size picker. Same source-of-truth
@@ -166,24 +165,22 @@ export const NodeFloatingToolbar = memo(
     // ─── Note: fit-height ↔ H input linkage ────────────────────────────
     //
     // For note nodes, the H input shares state with the dedicated
-    // auto-fit toggle (mirrors `handleToggleAutoHeight` in NoteNode).
-    // Ownership is read through the shared resolver rather than from the
-    // presence of `style.height`: an auto note carries a materialized
-    // number too, so the old `=== undefined` check would report every
-    // note as pinned.
+    // auto-fit toggle. Ownership is read through the shared resolver
+    // rather than from the presence of `style.height`: an auto note
+    // carries a materialized number too, so the old `=== undefined`
+    // check would report every note as pinned.
     //
     // This indicator is also how the user learns that dragging the resize
     // handle pinned the height — an implicit auto → fixed flip that would
     // otherwise be invisible.
     //
-    // Both this toggle and the corner "show all content" affordance in
-    // NoteNode observe the same store state, so they stay in sync
-    // automatically. The "last pinned height" memory used by the
-    // auto → fixed seed lives in the shared `noteHeightMemory` module
-    // (populated by `useTrackNoteFixedHeight` on each NoteNode), so this
-    // toolbar doesn't need to track it locally — `setNoteHeightMode`
-    // reads from the same map regardless of which entry point triggers
-    // the toggle.
+    // This toggle is the *only* way to unpin a note: NoteNode's corner
+    // fade is a truncation hint, not a control, because a full-width
+    // click target at the card's bottom edge was hit by accident far
+    // more often than on purpose. The "last pinned height" memory used
+    // by the auto → fixed seed lives in the shared `noteHeightMemory`
+    // module (populated by `useTrackNoteFixedHeight` on each NoteNode),
+    // so this toolbar doesn't need to track it locally.
     const beginGesture = useCanvasStore((s) => s.beginGesture);
     const heightMode = useHeightMode(id);
     const isNoteAutoHeight = type === 'note' && heightMode === 'auto';

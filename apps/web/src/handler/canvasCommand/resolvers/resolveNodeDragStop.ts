@@ -1,9 +1,4 @@
 import {
-  FRAME_GRID_MAX_COUNT,
-  FRAME_GRID_MIN_COUNT,
-  type FrameLayoutMode,
-} from '@sediment/shared';
-import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
   fitFrames,
@@ -13,7 +8,14 @@ import {
   moveNodeOutOfFrame,
   pickColumnDropTarget,
   pickRowDropTarget,
+  planStructuredDrop,
   readFrameGridConfig,
+  readFrameGridRow,
+  readFrameTrack,
+  resolveFrameTrackCount,
+  wouldStickToStructuredFrame,
+  type FrameAxis,
+  type FrameGridAxis,
   type NestableNode,
   type StructuredDropTarget,
 } from '@sediment/shared/canvas-engine';
@@ -26,6 +28,7 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
+import type { FrameCellPatch } from '../utils/frameLayout';
 import type {
   CanvasCommand,
   CanvasNodeId,
@@ -111,18 +114,12 @@ export default function resolveNodeDragStop(
     // contradicting the live "insert column / row" preview. The node-size
     // margin makes the edge bands reachable while a clearly-away drag
     // (beyond one node-size) still unframes.
-    const preParent = preParentIds.get(id);
     const dragSize = nodeRectSize(nodes, id);
-    const stickToStructured =
-      !!preParent &&
-      !!intent.pointerFlowPosition &&
-      pointerInsideStructuredFrame(
-        nodes,
-        preParent,
-        intent.pointerFlowPosition,
-        dragSize.width,
-        dragSize.height,
-      );
+    const stickToStructured = wouldStickToStructuredFrame(
+      nodes as NestableNode[],
+      id,
+      intent.pointerFlowPosition,
+    );
     if (!stickToStructured) {
       // Free-mode frames use a pointer-capture halo so a child node
       // stays parented while the user repositions it inside the frame —
@@ -207,6 +204,7 @@ export default function resolveNodeDragStop(
     intent.draggedNodeIds,
     result,
     ui.nodes,
+    ui.edges,
     intent.pointerFlowPosition,
   );
   const dropOutcome = buildGridDropCommands(dropPlans, ui.nodes);
@@ -234,7 +232,7 @@ export default function resolveNodeDragStop(
     commands.push(...dropOutcome.commands);
     commands.push(
       ...buildStructuredFrameRelayoutCommands(affectedFrameIds, result, {
-        slotPatches: dropOutcome.slotPatches,
+        cellPatches: dropOutcome.cellPatches,
         frameDataPatches: dropOutcome.frameDataPatches,
       }),
     );
@@ -276,7 +274,7 @@ export default function resolveNodeDragStop(
   commands.push(...dropOutcome.commands);
   commands.push(
     ...buildStructuredFrameRelayoutCommands(affectedFrameIds, result, {
-      slotPatches: dropOutcome.slotPatches,
+      cellPatches: dropOutcome.cellPatches,
       frameDataPatches: dropOutcome.frameDataPatches,
     }),
   );
@@ -334,9 +332,10 @@ export default function resolveNodeDragStop(
 interface GridDropPlan {
   nodeId: CanvasNodeId;
   frameId: string;
-  axis: 'column' | 'row';
+  axis: FrameGridAxis;
   count: number; // pre-drop count
   target: StructuredDropTarget;
+  rowTarget?: StructuredDropTarget;
 }
 
 /**
@@ -347,7 +346,7 @@ interface GridDropPlan {
  */
 interface GridDropCommands {
   commands: CanvasCommand[];
-  slotPatches: Array<{ nodeId: CanvasNodeId; slot: number }>;
+  cellPatches: Array<{ nodeId: CanvasNodeId; patch: FrameCellPatch }>;
   frameDataPatches: Array<{ nodeId: string; patch: Record<string, unknown> }>;
 }
 
@@ -357,10 +356,12 @@ interface GridDropCommands {
  *
  *  - Column masonry → the column under the cursor (mouse X).
  *  - Row masonry    → the row under the cursor (mouse Y).
+ *  - Grid → column under the cursor plus the persistent row under the
+ *    cursor. Column uses `frameSlot`; row uses `frameRow`.
  *
- * Either kind of target may be returned: drop into an existing track,
- * or insert a brand-new track at the cursor's gap position (used to
- * grow the grid by drag-and-drop).
+ * Either kind of target may be returned **on either axis**: drop into an
+ * existing track, or insert a brand-new one at the cursor's gap (used to
+ * grow the grid by drag-and-drop, along X and — for `grid` — along Y).
  *
  * Falls back to the child's own top-left when the cursor isn't
  * available (programmatic emits, touch). All dragged nodes in a
@@ -371,6 +372,7 @@ function collectGridDropPlans(
   draggedIds: string[],
   postDragNodes: NestableNode[],
   preDragNodes: Node[],
+  edges: UiResolverState['edges'],
   pointerFlowPosition?: { x: number; y: number },
 ): GridDropPlan[] {
   const plans: GridDropPlan[] = [];
@@ -381,6 +383,7 @@ function collectGridDropPlans(
     if (!frame) continue;
     const cfg = readFrameGridConfig(frame);
     if (!cfg) continue;
+    const count = resolveFrameTrackCount(preDragNodes, frame.id);
 
     // Convert cursor → frame-local space; fall back to child top-left.
     const framePoint = pointerFlowPosition
@@ -391,16 +394,26 @@ function collectGridDropPlans(
       : { x: post.position.x, y: post.position.y };
 
     const target =
-      cfg.axis === 'column'
-        ? pickColumnDropTarget(preDragNodes, frame.id, framePoint, cfg.count)
-        : pickRowDropTarget(preDragNodes, frame.id, framePoint, cfg.count);
+      cfg.axis === 'row'
+        ? pickRowDropTarget(preDragNodes, frame.id, framePoint.y, edges)
+        : pickColumnDropTarget(preDragNodes, frame.id, framePoint.x, edges);
 
     plans.push({
       nodeId: id as CanvasNodeId,
       frameId: frame.id,
       axis: cfg.axis,
-      count: cfg.count,
+      count,
       target,
+      ...(cfg.axis === 'grid'
+        ? {
+            rowTarget: pickRowDropTarget(
+              preDragNodes,
+              frame.id,
+              framePoint.y,
+              edges,
+            ),
+          }
+        : {}),
     });
   }
   return plans;
@@ -416,6 +429,9 @@ function collectGridDropPlans(
  *       at/after it up by one;
  *     - otherwise each dragged node moves into an existing track (a
  *       demoted insert-new clamps into range).
+ *     `grid` additionally resolves a row target the same way, except
+ *     that opening a row yields to opening a column in the same
+ *     gesture — the new column is empty, so nothing needs pushing down.
  *  2. **Compact** the occupied tracks to a contiguous `0..K-1` range
  *     whenever a move empties a previously-occupied track (or the grid
  *     just grew). This makes `gridCount` equal the number of occupied
@@ -425,7 +441,7 @@ function collectGridDropPlans(
  *     A plain move that doesn't empty its source track keeps the
  *     current count and only re-slots the dragged node(s).
  *
- * `slotPatches` / `frameDataPatches` mirror the emitted commands so the
+ * `cellPatches` / `frameDataPatches` mirror the emitted commands so the
  * caller can feed them into {@link buildStructuredFrameRelayoutCommands}
  * as `pending` input.
  */
@@ -434,12 +450,16 @@ function buildGridDropCommands(
   preDragNodes: Node[],
 ): GridDropCommands {
   if (plans.length === 0) {
-    return { commands: [], slotPatches: [], frameDataPatches: [] };
+    return {
+      commands: [],
+      cellPatches: [],
+      frameDataPatches: [],
+    };
   }
 
   const out: GridDropCommands = {
     commands: [],
-    slotPatches: [],
+    cellPatches: [],
     frameDataPatches: [],
   };
 
@@ -453,124 +473,93 @@ function buildGridDropCommands(
 
   for (const [frameId, framePlans] of byFrame) {
     const { axis, count } = framePlans[0];
+    // The count axis is the one the mode is named after; `grid` counts
+    // columns and addresses rows separately.
+    const trackAxis: FrameAxis = axis === 'row' ? 'row' : 'column';
+    const trackField = axis === 'row' ? 'frameRow' : 'frameColumn';
 
-    // Stored slot for every existing child of this frame (clamped).
+    // What the drop means is decided by the shared planner — the same
+    // call the live preview makes, against the same pre-drag geometry,
+    // so the commit cannot land somewhere the preview did not show.
+    const plan = planStructuredDrop(
+      preDragNodes as NestableNode[],
+      frameId,
+      axis,
+      count,
+      framePlans.map((framePlan) => ({
+        nodeId: framePlan.nodeId as string,
+        target: framePlan.target,
+        rowTarget: framePlan.rowTarget,
+      })),
+    );
+
+    // Stored cells, to emit patches only where something moved.
     const origSlot = new Map<string, number>();
-    const childIds: string[] = [];
+    const origRow = new Map<string, number>();
     for (const node of preDragNodes) {
       if (node.parentId !== frameId) continue;
-      const raw = (node.data as { frameSlot?: number } | undefined)?.frameSlot;
-      const s =
-        typeof raw === 'number' && Number.isFinite(raw)
-          ? clampSlot(Math.round(raw), count)
-          : 0;
-      origSlot.set(node.id, s);
-      childIds.push(node.id);
-    }
-
-    // Working assignment = stored slots; dragged nodes overwritten below.
-    const slotOf = new Map<string, number>(origSlot);
-    // Include any dragged node that just entered this frame from outside.
-    for (const plan of framePlans) {
-      if (!slotOf.has(plan.nodeId)) childIds.push(plan.nodeId);
-    }
-
-    const insertPlan =
-      framePlans.length === 1 &&
-      framePlans[0].target.kind === 'insert-new' &&
-      count < FRAME_GRID_MAX_COUNT
-        ? framePlans[0]
-        : null;
-
-    if (insertPlan && insertPlan.target.kind === 'insert-new') {
-      // Open a new track at `k`: shift existing children at/after it up
-      // by one, then drop the inserter into the freshly-opened index.
-      const k = insertPlan.target.slot; // ∈ [0, count]
-      for (const id of childIds) {
-        if (id === insertPlan.nodeId) continue;
-        const s = slotOf.get(id);
-        if (s !== undefined && s >= k) slotOf.set(id, s + 1);
-      }
-      slotOf.set(insertPlan.nodeId, k);
-    } else {
-      // Drop each dragged node into an existing track (a demoted
-      // insert-new clamps into range).
-      for (const plan of framePlans) {
-        const slot =
-          plan.target.kind === 'into-existing'
-            ? plan.target.slot
-            : Math.min(plan.target.slot, count - 1);
-        slotOf.set(plan.nodeId, slot);
+      origSlot.set(
+        node.id,
+        clampSlot(readFrameTrack(node, trackAxis) ?? 0, count),
+      );
+      if (axis === 'grid') {
+        origRow.set(node.id, Math.max(0, readFrameGridRow(node) ?? 0));
       }
     }
 
-    // Did the move leave any previously-occupied track empty?
-    const newOccupied = new Set(slotOf.values());
-    let trackEmptied = false;
-    for (const t of origSlot.values()) {
-      if (!newOccupied.has(t)) {
-        trackEmptied = true;
-        break;
-      }
+    // A track count change re-interprets every cell in the frame, so the
+    // drop states all of them on the layout command itself. `cells`
+    // outranks that command's own "explicit count ⇒ re-flow in reading
+    // order" fallback, which exists for a caller that names a count
+    // WITHOUT knowing where anything should go (the frame toolbar). The
+    // drop does know, and letting the fallback run against the cells it
+    // did not restate left the ones it happened to agree with re-dealt —
+    // two children in the same cell, and a commit the preview never
+    // showed.
+    const cells: Array<{
+      nodeId: CanvasNodeId;
+      column?: number;
+      row?: number;
+    }> = [];
+    const mergePatches: Array<{
+      nodeId: CanvasNodeId;
+      patch: Record<string, unknown>;
+    }> = [];
+    for (const [id, slot] of plan.tracks) {
+      const row = plan.rows.get(id);
+      cells.push({
+        nodeId: id as CanvasNodeId,
+        ...(axis === 'row' ? { row: slot } : { column: slot }),
+        ...(axis === 'grid' && typeof row === 'number' ? { row } : {}),
+      });
+      const slotChanged = origSlot.get(id) !== slot;
+      const rowChanged = typeof row === 'number' && origRow.get(id) !== row;
+      if (!slotChanged && !rowChanged) continue;
+      const patch: FrameCellPatch = {
+        ...(slotChanged ? { [trackField]: slot } : {}),
+        ...(rowChanged ? { frameRow: row } : {}),
+      };
+      mergePatches.push({ nodeId: id as CanvasNodeId, patch });
+      out.cellPatches.push({ nodeId: id as CanvasNodeId, patch });
     }
 
-    if (insertPlan || trackEmptied) {
-      // Compact occupied tracks to a contiguous 0..K-1 range so empty
-      // columns / rows are dropped and gridCount tracks the survivors.
-      const occupied = [...newOccupied].sort((a, b) => a - b);
-      const remap = new Map<number, number>();
-      occupied.forEach((track, i) => remap.set(track, i));
-      const nextCount = Math.max(FRAME_GRID_MIN_COUNT, occupied.length);
-
-      if (nextCount !== count) {
-        out.commands.push({
-          type: 'SET_FRAME_LAYOUT',
-          frameId: frameId as CanvasNodeId,
-          mode: axis as FrameLayoutMode,
-          gridCount: nextCount,
-        });
-        out.frameDataPatches.push({
-          nodeId: frameId,
-          patch: { layoutMode: axis, gridCount: nextCount },
-        });
-      }
-
-      const mergePatches: Array<{
-        nodeId: CanvasNodeId;
-        patch: Record<string, unknown>;
-      }> = [];
-      for (const id of childIds) {
-        const finalSlot = remap.get(slotOf.get(id) ?? 0) ?? 0;
-        if (origSlot.get(id) === finalSlot) continue;
-        mergePatches.push({
-          nodeId: id as CanvasNodeId,
-          patch: { frameSlot: finalSlot },
-        });
-        out.slotPatches.push({ nodeId: id as CanvasNodeId, slot: finalSlot });
-      }
-      if (mergePatches.length > 0) {
-        out.commands.push({ type: 'MERGE_NODE_DATA', patches: mergePatches });
-      }
-      continue;
+    if (plan.count !== count) {
+      out.commands.push({
+        type: 'SET_FRAME_LAYOUT',
+        frameId: frameId as CanvasNodeId,
+        mode: axis,
+        gridCount: plan.count,
+        cells,
+      });
+      out.frameDataPatches.push({
+        nodeId: frameId,
+        patch: { layoutMode: axis, gridCount: plan.count },
+      });
+    } else if (mergePatches.length > 0) {
+      // The cells are unambiguous without the count change, so only the
+      // children that actually moved are written.
+      out.commands.push({ type: 'MERGE_NODE_DATA', patches: mergePatches });
     }
-
-    // ── Plain move that doesn't empty its source track: only the
-    //    dragged nodes change slot; the grid keeps its current count.
-    const slotPatches: Array<{ nodeId: CanvasNodeId; slot: number }> = [];
-    for (const plan of framePlans) {
-      const slot = slotOf.get(plan.nodeId) ?? 0;
-      if (origSlot.get(plan.nodeId) === slot) continue;
-      slotPatches.push({ nodeId: plan.nodeId as CanvasNodeId, slot });
-    }
-    if (slotPatches.length === 0) continue;
-    out.commands.push({
-      type: 'MERGE_NODE_DATA',
-      patches: slotPatches.map((p) => ({
-        nodeId: p.nodeId,
-        patch: { frameSlot: p.slot },
-      })),
-    });
-    out.slotPatches.push(...slotPatches);
   }
 
   return out;
@@ -611,28 +600,6 @@ function absoluteY(nodes: Node[], nodeId: string): number {
   return sum;
 }
 
-/** Absolute rect of a frame, or `null` when its size is unknown. */
-function frameAbsRect(
-  nodes: Node[],
-  frameId: string,
-): { x: number; y: number; width: number; height: number } | null {
-  const frame = nodes.find((n) => n.id === frameId);
-  if (!frame) return null;
-  const width =
-    (frame.style as { width?: number } | undefined)?.width ??
-    (frame.measured as { width?: number } | undefined)?.width;
-  const height =
-    (frame.style as { height?: number } | undefined)?.height ??
-    (frame.measured as { height?: number } | undefined)?.height;
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
-  return {
-    x: absoluteX(nodes, frameId),
-    y: absoluteY(nodes, frameId),
-    width: width as number,
-    height: height as number,
-  };
-}
-
 /** Width / height of a node from its measured size, then style, else 0. */
 function nodeRectSize(
   nodes: Node[],
@@ -648,32 +615,4 @@ function nodeRectSize(
     (node?.style as { height?: number } | undefined)?.height ??
     0;
   return { width, height };
-}
-
-/**
- * True when `frameId` is a structured (column / row) frame and `pointer`
- * (flow space) lies within its absolute bounds expanded by `marginX` /
- * `marginY` on each side. The margin (the dragged node's size) makes the
- * outer prepend / append padding reachable when the node's body — and
- * thus the cursor — is dragged slightly past the frame edge, so the
- * drag-stop resolver keeps the node parented instead of unframing on
- * insufficient body-overlap.
- */
-function pointerInsideStructuredFrame(
-  nodes: Node[],
-  frameId: string,
-  pointer: { x: number; y: number },
-  marginX = 0,
-  marginY = 0,
-): boolean {
-  const frame = nodes.find((n) => n.id === frameId);
-  if (!frame || !readFrameGridConfig(frame)) return false;
-  const rect = frameAbsRect(nodes, frameId);
-  if (!rect) return false;
-  return (
-    pointer.x >= rect.x - marginX &&
-    pointer.x <= rect.x + rect.width + marginX &&
-    pointer.y >= rect.y - marginY &&
-    pointer.y <= rect.y + rect.height + marginY
-  );
 }

@@ -225,6 +225,11 @@ describe('FileAgentTeamRegistryStore', () => {
     ).toEqual({ schemaVersion: 3, state });
   });
 
+  // Proving the 200-entry cap means rewriting the log 200 times, and each
+  // rewrite is a synchronous write + rename + chmod. That is ~600 filesystem
+  // round trips: about half a second on an idle machine, but ten times that
+  // when the rest of the suite is competing for the same disk, which the
+  // default 5s budget cannot absorb.
   it('appends, resets, and deletes sibling setup logs', () => {
     const storageDir = createStorageDir();
     const store = new FileAgentTeamRegistryStore(storageDir);
@@ -252,7 +257,7 @@ describe('FileAgentTeamRegistryStore', () => {
     expect(store.loadSetupLog('profile-1')).toEqual([]);
     store.deleteSetupLog('profile-1');
     expect(existsSync(join(storageDir, 'profile-1.setup.jsonl'))).toBe(false);
-  });
+  }, 30_000);
 
   it('fails explicitly without appending to a malformed setup log', () => {
     const storageDir = createStorageDir();

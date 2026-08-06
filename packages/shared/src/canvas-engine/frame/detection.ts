@@ -13,6 +13,7 @@ import {
   type AutoFrameByOverlapOptions,
   type AutoUnframeByNonOverlapOptions,
 } from './geometry.js';
+import { readFrameGridConfig } from '../autoLayout/gridLayout.js';
 import {
   createAbsolutePositionGetter,
   indexById,
@@ -50,6 +51,57 @@ export function wouldUnframe(
   if (!nodeRect || !parentRect) return false;
 
   return checkShouldUnframe(nodeRect, parentRect, options);
+}
+
+/**
+ * Pure predicate: does `nodeId` stay parented to its **structured**
+ * frame because the pointer is still inside that frame's capture zone?
+ *
+ * The zone is the frame rect expanded by the dragged node's own size on
+ * each side. Appending or prepending a track means aiming at the frame's
+ * outer padding, which usually drags the node's body — and with it the
+ * cursor — slightly past the frame edge and leaves zero body overlap. A
+ * plain {@link wouldUnframe} test would call that a departure and drop
+ * the node outside the frame, contradicting the "insert column / row"
+ * indicator the user is looking at.
+ *
+ * Every stage of the gesture has to ask this before it asks
+ * {@link wouldUnframe} — the live drag tick that records the decision
+ * and the drop resolver that commits it — or the preview and the commit
+ * disagree exactly in the band where new tracks are opened.
+ */
+export function wouldStickToStructuredFrame(
+  nodes: NestableNode[],
+  nodeId: string,
+  pointer: { x: number; y: number } | undefined,
+): boolean {
+  if (!pointer) return false;
+
+  const byId = indexById(nodes);
+  const node = byId.get(nodeId);
+  const parentId = node?.parentId;
+  if (!parentId) return false;
+
+  const parent = byId.get(parentId);
+  if (!parent || !readFrameGridConfig(parent)) return false;
+
+  const getAbs = createAbsolutePositionGetter(byId);
+  const getRect = createRectGetter(byId, getAbs);
+
+  const parentRect = getRect(parentId);
+  if (!parentRect) return false;
+  // An unmeasured node contributes no margin rather than disqualifying
+  // the test: the bare frame rect is still a valid capture zone.
+  const nodeRect = getRect(nodeId);
+  const marginX = nodeRect?.width ?? 0;
+  const marginY = nodeRect?.height ?? 0;
+
+  return (
+    pointer.x >= parentRect.x - marginX &&
+    pointer.x <= parentRect.x + parentRect.width + marginX &&
+    pointer.y >= parentRect.y - marginY &&
+    pointer.y <= parentRect.y + parentRect.height + marginY
+  );
 }
 
 /**

@@ -65,7 +65,6 @@ export const NoteNode = memo(
   ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     const { t } = useTranslation();
     const openExpanded = useCanvasStore((s) => s.openExpanded);
-    const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const moveNoteBlockIntoNote = useCanvasStore(
       (s) => s.moveNoteBlockIntoNote,
@@ -86,8 +85,8 @@ export const NoteNode = memo(
     const counterZoomScale = Math.min(3, Math.max(1, 1 / viewportZoom));
     // Who owns the height — never inferred from whether a number is
     // present, because after the ownership model an auto note carries one
-    // too. The body renders identically either way; this only drives the
-    // toggle's direction.
+    // too. The body renders identically either way; this only gates the
+    // measurement proposal and the observers that feed it.
     const isFixedHeight = useHeightMode(id) === 'fixed';
 
     // The wrapper hosts the height-measurement infrastructure and the
@@ -135,19 +134,6 @@ export const NoteNode = memo(
     // recording side; `setNoteHeightMode` (called by every toggle entry
     // point) reads from the same shared map.
     useTrackNoteFixedHeight(id);
-
-    // Toggle between fixed and auto height. Both the toolbar button and
-    // the corner "show all content" affordance call into this — they are
-    // semantically the same operation, so they share the store-level
-    // `setNoteHeightMode` orchestration (gesture wrap, parent-frame
-    // refit, width fallback, remembered-height seed, undo batching).
-    const handleToggleAutoHeight = useCallback(
-      (e: React.MouseEvent) => {
-        e.stopPropagation();
-        setNoteHeightMode([id], isFixedHeight ? 'auto' : 'fixed');
-      },
-      [isFixedHeight, id, setNoteHeightMode],
-    );
 
     const NoteActions = (
       <FloatingToolbar.ActionButton
@@ -500,24 +486,16 @@ export const NoteNode = memo(
               </div>
               {isTruncated && (
                 <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={handleToggleAutoHeight}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      handleToggleAutoHeight(e as unknown as React.MouseEvent);
-                    }
-                  }}
-                  className="group absolute right-0 bottom-0 left-0 flex h-10 cursor-pointer items-end justify-center pb-1"
-                  aria-label={t('node.showAllContent')}
+                  aria-hidden
+                  className="pointer-events-none absolute right-0 bottom-0 left-0 flex h-10 items-end justify-center pb-1"
                 >
-                  {/* Fade gradient — deepens on hover */}
+                  {/* Fade gradient */}
                   <div
                     aria-hidden
-                    className="from-fg-subtle/30 group-hover:from-fg-muted/30 absolute inset-0 bg-linear-to-t to-transparent transition-colors"
+                    className="from-fg-subtle/30 absolute inset-0 bg-linear-to-t to-transparent"
                   />
                   <div
-                    className="text-fg-subtle group-hover:text-fg-muted relative z-10 transition-colors"
+                    className="text-fg-subtle relative z-10"
                     style={{
                       transform: `scale(${counterZoomScale})`,
                       transformOrigin: 'bottom center',

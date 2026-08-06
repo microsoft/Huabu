@@ -1,6 +1,6 @@
 import { noop, type CommandDefinition } from './types.js';
 import { createId, type CanvasCommand } from '../../index.js';
-import { applyEdgeStyle } from '../utils/edge.js';
+import { applyEdgeStyle, getInternalEdgeFrameIds } from '../utils/edge.js';
 
 import type { Edge } from '@xyflow/react';
 
@@ -32,6 +32,7 @@ const connectNodes: CommandDefinition<Cmd> = {
     if (hasMissingEndpoint) return noop(state, 'invalid-target');
 
     const nextEdges: Edge[] = [...state.edges];
+    const addedEdges: Edge[] = [];
 
     for (const edgeInput of cmd.edges) {
       const source = edgeInput.source as string;
@@ -50,7 +51,9 @@ const connectNodes: CommandDefinition<Cmd> = {
         (e) => e.source === source && e.target === target,
       );
       if (!exists) {
-        nextEdges.push(applyEdgeStyle({ id, source, target }, edgeInput.style));
+        const edge = applyEdgeStyle({ id, source, target }, edgeInput.style);
+        nextEdges.push(edge);
+        addedEdges.push(edge);
       }
     }
 
@@ -58,6 +61,7 @@ const connectNodes: CommandDefinition<Cmd> = {
       applied: true,
       nodes: state.nodes,
       edges: nextEdges,
+      affectedFrameIds: getInternalEdgeFrameIds(state.nodes, addedEdges),
     };
   },
 };

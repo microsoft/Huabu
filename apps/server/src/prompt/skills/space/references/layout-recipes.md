@@ -34,9 +34,9 @@ Place the centre at `(cx, cy)`; place N children on a ring of radius `r`. For ev
 - **Position the frame first**, then position children. Child `position` is **frame-relative** (parent-local): a child at `(0, 0)` sits at the frame's top-left. So the coordinates in the patterns above are the child's offsets **inside** the frame, starting from `(0, 0)` + your padding.
 - Give the frame a clear `data.label` so the group is identifiable when zoomed out.
 
-### Structured frame layout (`column` / `row`)
+### Structured frame layout (`column` / `row` / `grid`)
 
-A frame can opt into a deterministic masonry layout that re-flows its children automatically whenever they change (added, removed, resized). Use `SET_FRAME_LAYOUT` to switch a frame between `free` (default), `column`, or `row`, optionally with `gridCount` (number of tracks, 1–12, default 1):
+A frame can opt into a deterministic layout that re-flows its children automatically whenever they change (added, removed, resized). Use `SET_FRAME_LAYOUT` to switch a frame between `free` (default), `column`, `row`, or `grid`, optionally with `gridCount` (number of tracks, 1–12, default 1):
 
 ```
 SET_FRAME_LAYOUT { frameId: "<frame-id>", mode: "column", gridCount: 3 }
@@ -44,11 +44,40 @@ SET_FRAME_LAYOUT { frameId: "<frame-id>", mode: "column", gridCount: 3 }
 
 - `column` — N columns, children stack top-to-bottom inside each column, left-aligned. Column width adapts to the widest child.
 - `row` — mirror on the other axis: N rows, children stack left-to-right inside each row, top-aligned. Row height adapts to the tallest child.
-- The engine assigns each child to a track automatically (least-full track wins) and writes the slot back to `data.frameSlot`. To pin a child to a specific track, pass `MERGE_NODE_DATA` with `patch: { frameSlot: <0..N-1> }` after the layout switch. To control vertical (column mode) or horizontal (row mode) order within a track, set initial child positions; the engine sorts by that axis.
+- `grid` — N columns like `column`, but rows are aligned too: every child holds a cell, children sharing a row sit on one row origin, and the row's height is its tallest member.
+- The engine assigns each child to a track automatically (least-full track wins). To place children yourself, pass `cells` on the same `SET_FRAME_LAYOUT`: `column` addresses columns, `row` addresses rows, `grid` addresses both. To control vertical (column mode) or horizontal (row mode) order _within_ a track, set initial child positions; the engine sorts by that axis. `grid` is the exception — it does not sort by position at all, see below.
 - Structured frames default to `sizing: "hug"`: the engine re-sizes the frame after every child change, so do not pass an explicit frame size in this mode. Use `sizing: "manual"` to preserve a pinned frame size while children still reflow; children that do not fit may overflow along the main axis.
 - Switch back to free positioning with `SET_FRAME_LAYOUT { frameId, mode: "free" }`.
 
-Use structured frames for: stacked column lists, kanban-style boards, row tracks where each lane represents a theme, deterministic comparison tables.
+Use `column` / `row` for: stacked column lists, kanban-style boards, row tracks where each lane represents a theme.
+
+#### Choosing `grid` over `column`
+
+`column` is masonry — each column packs independently, so a column holding fewer items pulls its next item up. That breaks any layout where a node in column A is supposed to line up with a specific node in column B. `grid` fixes exactly that case: a column with no item in a given row leaves the cell blank instead of back-filling it.
+
+Reach for `grid` whenever the columns are **parallel series** rather than independent stacks — question notes beside their answers, papers beside a per-paper summary, an original beside its translation — especially when some items have no counterpart.
+
+Rows are **not** derived from position. Each child holds a cell, and children left without one all default to row 0 and are then bumped down to resolve collisions inside their column — which pairs them essentially at random. So a `grid` frame is only worth switching into once you state the cells: give the two members of a pair the same `row`, and skip that row number in the column that has no counterpart.
+
+```
+# Row 1 has no right-hand counterpart, so column 1 simply skips it.
+SET_FRAME_LAYOUT {
+  frameId: "<frame-id>",
+  mode: "grid",
+  gridCount: 2,
+  cells: [
+    { nodeId: "<q1>", column: 0, row: 0 },
+    { nodeId: "<a1>", column: 1, row: 0 },
+    { nodeId: "<q2>", column: 0, row: 1 },
+    { nodeId: "<q3>", column: 0, row: 2 },
+    { nodeId: "<a3>", column: 1, row: 2 }
+  ]
+}
+```
+
+Do not send `SET_NODE_GEOMETRY` for these children: `grid` computes every child position from its cell, so any position you pass is overwritten.
+
+Adding a missing counterpart later is a two-command follow-up: create the node inside the frame, then re-issue `SET_FRAME_LAYOUT` with a `cells` entry naming its column and the row it should pair with. The solver re-derives the bands and the new node lands in the blank cell.
 
 ## Connecting layers
 

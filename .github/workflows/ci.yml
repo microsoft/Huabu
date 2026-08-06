@@ -58,6 +58,11 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      # `--no-bail` so one red package does not hide the rest; the exit code
+      # is still non-zero, so the gate holds.
+      - name: Unit tests
+        run: pnpm -r --if-present --no-bail run test
+
       - name: i18n parity
         run: pnpm run check:i18n
 

@@ -18,13 +18,14 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { EDGE_LABEL_MAX_INVERSE_SCALE } from '@sediment/shared';
+
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import useCanvasStore from '@/store/canvasStore';
-import { useNodeCollapseStore } from '@/store/nodeCollapseStore';
 import { TEXT_NODE_PADDING_X } from '@/utils/node/nodeFontConfig';
 import { measureTextContent } from '@/utils/node/textMeasure';
 
-import { getEdgeRenderZ } from './edgeZ';
+import { getEdgeLabelRenderZ } from './edgeZ';
 
 import type { CanvasEdgeId, EdgeStyle } from '@sediment/shared';
 import type { EdgeProps } from '@xyflow/react';
@@ -57,8 +58,6 @@ function getEdgeStyle(data: EdgeProps['data']): EdgeStyle {
 export function LabelledEdge(props: EdgeProps) {
   const {
     id,
-    source,
-    target,
     sourceX,
     sourceY,
     targetX,
@@ -71,38 +70,6 @@ export function LabelledEdge(props: EdgeProps) {
     data,
     selected,
   } = props;
-
-  // When an endpoint node is collapsed to its zoom-LOD mark (a centred circle),
-  // terminate the edge on that circle instead of the node's hidden card
-  // footprint, so the edge stays visually attached to the mark at any aspect
-  // ratio. A collapsed node publishes its mark's LIVE canvas-space centre +
-  // clip radius, so the edge follows the mark wherever it sits during the
-  // corner → centre glide — not a phantom circle at the node centre. Only
-  // collapsed question nodes publish geometry; everything else keeps React
-  // Flow's handle point.
-  const sourceMark = useNodeCollapseStore((s) => s.marks[source]);
-  const targetMark = useNodeCollapseStore((s) => s.marks[target]);
-
-  let sx = sourceX;
-  let sy = sourceY;
-  let tx = targetX;
-  let ty = targetY;
-  if (sourceMark) {
-    const { cx, cy, radius } = sourceMark;
-    const dx = tx - cx;
-    const dy = ty - cy;
-    const len = Math.hypot(dx, dy) || 1;
-    sx = cx + (dx / len) * radius;
-    sy = cy + (dy / len) * radius;
-  }
-  if (targetMark) {
-    const { cx, cy, radius } = targetMark;
-    const dx = sx - cx;
-    const dy = sy - cy;
-    const len = Math.hypot(dx, dy) || 1;
-    tx = cx + (dx / len) * radius;
-    ty = cy + (dy / len) * radius;
-  }
 
   const edgeStyle = getEdgeStyle(data);
   // `data.edgeStyle.lineType` is the source of truth; fall back to the
@@ -120,26 +87,26 @@ export function LabelledEdge(props: EdgeProps) {
   let labelY: number;
   if (lineType === 'straight') {
     [edgePath, labelX, labelY] = getStraightPath({
-      sourceX: sx,
-      sourceY: sy,
-      targetX: tx,
-      targetY: ty,
+      sourceX,
+      sourceY,
+      targetX,
+      targetY,
     });
   } else if (lineType === 'step') {
     [edgePath, labelX, labelY] = getSmoothStepPath({
-      sourceX: sx,
-      sourceY: sy,
-      targetX: tx,
-      targetY: ty,
+      sourceX,
+      sourceY,
+      targetX,
+      targetY,
       sourcePosition,
       targetPosition,
     });
   } else {
     [edgePath, labelX, labelY] = getBezierPath({
-      sourceX: sx,
-      sourceY: sy,
-      targetX: tx,
-      targetY: ty,
+      sourceX,
+      sourceY,
+      targetX,
+      targetY,
       sourcePosition,
       targetPosition,
     });
@@ -261,25 +228,19 @@ function EdgeLabelEditor({
   const executeCommands = useCanvasStore((s) => s.executeCommands);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Keep the label on the *same* layer as its edge instead of a fixed
-  // high value. The shared `.react-flow__edgelabel-renderer` portal has
-  // no z-index of its own and does NOT establish a stacking context, so
-  // this number competes directly with the edge SVGs and node wrappers
-  // in the viewport (DOM order: edges → edge-label renderer → nodes).
-  //
-  // Under `zIndexMode="manual"` React Flow paints the edge SVG at
-  // `edge.zIndex` verbatim (Sediment assigns that value in `Canvas.tsx`),
-  // so `getEdgeRenderZ` simply mirrors `edge.zIndex` and the label always
-  // shares its edge line's exact layer. Because DOM order paints the label
-  // after the edge but before nodes, at equal z the label sits above its
-  // own edge line yet behind any node on the same level — and naturally
-  // stays below higher nodes / above lower ones, exactly like the edge.
-  // Selection does NOT lift the label (design-tool style:
-  // `<ReactFlow elevateNodesOnSelect={false}>` and no edge-z bump);
-  // selection feedback comes from stroke/marker styling.
+  // The portal competes directly with node wrappers in the viewport. Lift
+  // only the HTML label above its two endpoints; the SVG edge keeps its
+  // normal manual z-index, and unrelated nodes on higher layers still win.
   const edgeZIndex = useStore(
     useCallback(
-      (s) => getEdgeRenderZ(s.edgeLookup.get(edgeId)?.zIndex),
+      (s) => {
+        const edge = s.edgeLookup.get(edgeId);
+        return getEdgeLabelRenderZ(
+          edge?.zIndex,
+          edge ? s.nodeLookup.get(edge.source)?.internals.z : undefined,
+          edge ? s.nodeLookup.get(edge.target)?.internals.z : undefined,
+        );
+      },
       [edgeId],
     ),
   );
@@ -380,7 +341,10 @@ function EdgeLabelEditor({
   // zoom (cap 2.5×). Only the pill scales (see `pillStyle`); the positioning
   // wrapper is untouched so the midpoint anchor never drifts.
   const zoom = useStore((s) => s.transform[2]);
-  const labelScale = Math.min(Math.max(1 / zoom, 1), 2.5);
+  const labelScale = Math.min(
+    Math.max(1 / zoom, 1),
+    EDGE_LABEL_MAX_INVERSE_SCALE,
+  );
   // The inverse scale keeps relationship text legible when zoomed out, but
   // scaling the pill's padding by the same amount makes its whitespace look
   // larger than a TextNode's. Counter-scale only the horizontal padding so

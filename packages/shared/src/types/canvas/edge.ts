@@ -25,6 +25,9 @@ export type EdgeDirection = (typeof EDGE_DIRECTIONS)[number];
 /** Edge stroke width presets (px). */
 export const EDGE_STROKE_WIDTHS = [2, 4, 8, 16] as const;
 
+/** Maximum inverse-zoom scale used by edge labels and gutter planning. */
+export const EDGE_LABEL_MAX_INVERSE_SCALE = 2.5;
+
 /** Union type of all allowed stroke widths. */
 export type EdgeStrokeWidth = (typeof EDGE_STROKE_WIDTHS)[number];
 

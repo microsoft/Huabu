@@ -7,6 +7,7 @@
 
 import { getLayoutNodeSize } from './nodeSizes.js';
 import { EDGE_STROKE_WIDTHS, resolveAccent } from '../../index.js';
+import { readFrameGridConfig } from '../autoLayout/gridLayout.js';
 
 import type { EdgeStyle } from '../../index.js';
 import type { Node, Edge } from '@xyflow/react';
@@ -30,6 +31,36 @@ export interface ObstacleRect {
   h: number;
 }
 
+/**
+ * **Structured** Frames whose direct children are joined by one of the
+ * given edges.
+ *
+ * Reported by the edge commands so the executor can recompute gutters —
+ * the lanes a structured Frame reserves for the edges running between
+ * its children — in the same batch. `free` Frames are excluded because
+ * they have no gutters to recompute: naming one here would only put it
+ * through the end-of-batch fit pass, turning an edge restyle into a
+ * frame resize that saves, broadcasts, and lands in the same undo step.
+ */
+export function getInternalEdgeFrameIds(
+  nodes: readonly Node[],
+  edges: readonly Edge[],
+): string[] {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const frameIds = new Set<string>();
+  for (const edge of edges) {
+    const sourceParentId = nodeById.get(edge.source)?.parentId;
+    if (!sourceParentId) continue;
+    if (frameIds.has(sourceParentId)) continue;
+    const targetParentId = nodeById.get(edge.target)?.parentId;
+    if (sourceParentId !== targetParentId) continue;
+    if (readFrameGridConfig(nodeById.get(sourceParentId))) {
+      frameIds.add(sourceParentId);
+    }
+  }
+  return [...frameIds];
+}
+
 /** Cardinal routing direction (source → target). */
 type RouteDir = 'right' | 'left' | 'down' | 'up';
 
@@ -40,6 +71,35 @@ const DIR_HANDLES: Record<RouteDir, HandlePair> = {
   down: { sourceHandle: 'bottom-source', targetHandle: 'top-target' },
   up: { sourceHandle: 'top-source', targetHandle: 'bottom-target' },
 };
+
+/**
+ * Handles for an edge whose endpoints share a **structured** Frame.
+ *
+ * There the solver owns every child position and guarantees they do not
+ * overlap, so the shortest mutually-facing pair on the dominant axis is
+ * always clean — and obstacle avoidance would only pick a detour that
+ * leaves the Frame it belongs to.
+ *
+ * A `free` Frame carries no such guarantee: its children can sit
+ * anywhere, including on top of each other, so those edges keep the
+ * general obstacle-aware router.
+ */
+function getInternalFrameHandles(source: Node, target: Node): HandlePair {
+  const sourceSize = getLayoutNodeSize(source);
+  const targetSize = getLayoutNodeSize(target);
+  const dx =
+    target.position.x +
+    targetSize.w / 2 -
+    (source.position.x + sourceSize.w / 2);
+  const dy =
+    target.position.y +
+    targetSize.h / 2 -
+    (source.position.y + sourceSize.h / 2);
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? DIR_HANDLES.right : DIR_HANDLES.left;
+  }
+  return dy >= 0 ? DIR_HANDLES.down : DIR_HANDLES.up;
+}
 
 /**
  * L-shaped candidates: source exits one side, target enters from a
@@ -596,7 +656,18 @@ export function rerouteAllEdges<
         ? target
         : { ...target, position: targetAbs };
 
-    const handles = getSmartHandles(srcNode, tgtNode, obstacles);
+    const sharedFrameId =
+      source.parentId && source.parentId === target.parentId
+        ? source.parentId
+        : null;
+    // Only a structured Frame guarantees non-overlapping children; a
+    // `free` one does not, so its internal edges still need to route
+    // around whatever sits between the endpoints.
+    const sharedFrame = sharedFrameId ? nodeMap.get(sharedFrameId) : undefined;
+    const handles =
+      sharedFrame?.type === 'frame' && readFrameGridConfig(sharedFrame)
+        ? getInternalFrameHandles(srcNode, tgtNode)
+        : getSmartHandles(srcNode, tgtNode, obstacles);
     if (
       edge.sourceHandle === handles.sourceHandle &&
       edge.targetHandle === handles.targetHandle

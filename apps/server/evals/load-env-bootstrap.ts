@@ -1,9 +1,18 @@
 /**
- * Tiny re-export so `cli.ts` can import the env loader as a static
- * side-effect (`import './load-env-bootstrap.js'`) without pulling in
- * any Server-side modules first. `src/load-env.ts` already implements
- * the multi-tier dotenv resolution; we just want it to run before any
- * code that touches `process.env.AZURE_OPENAI_API_KEY` etc.
+ * Startup side-effects the eval CLI shares with `server.ts`.
+ *
+ * `cli.ts` imports this statically (`import './load-env-bootstrap.js'`)
+ * so it runs before any module that touches `process.env`. The eval CLI
+ * is a *second* entry point into server code, and whatever `server.ts`
+ * does before serving its first request has to be repeated here — a
+ * missing step surfaces as every case failing, which reads as a broken
+ * agent rather than a broken runner.
+ *
+ * Order matters: env first, because `setup-proxy` decides whether to
+ * install an undici dispatcher by reading `HTTPS_PROXY` at module load.
+ * Reversed, a proxied network would silently go direct and every case
+ * would die with `fetch failed`.
  */
 
 import '../src/load-env.js';
+import '../src/setup-proxy.js';

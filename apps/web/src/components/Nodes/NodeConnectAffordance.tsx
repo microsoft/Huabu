@@ -8,9 +8,10 @@ import {
   useConnection,
   useInternalNode,
   useStore,
+  useUpdateNodeInternals,
 } from '@xyflow/react';
 import { Plus } from 'lucide-react';
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
@@ -26,12 +27,13 @@ import {
 import { cn } from '@/components/Common/cn.ts';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { createQuestionNodeAndCompose } from '@/components/Nodes/question/questionCompose.ts';
+import { localMarkRect } from '@/config/nodeTakeover.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useConnectPortStore } from '@/store/connectPortStore.ts';
 import {
-  collapsedMarkRect,
+  blendedMarkRect,
   useNodeCollapseStore,
-  type CollapsedMarkGeometry,
+  type MarkAnchorRect,
 } from '@/store/nodeCollapseStore.ts';
 
 /** Connection handle definitions – source + target on each side. */
@@ -455,11 +457,11 @@ function HotPortOverlay({
   const { x, y } = node.internals.positionAbsolute;
   const w = node.measured.width ?? 0;
   const h = node.measured.height ?? 0;
-  // Ports sit on the node's border box, centred on the side they name —
-  // or, once the card has faded into its takeover mark, on the mark.
+  // Ports sit on the node's border box, centred on the side they name — easing
+  // onto the takeover mark as the card fades into it.
   const { cx, cy } = portPointOnRect(
     position,
-    mark ? collapsedMarkRect(mark) : { x, y, width: w, height: h },
+    mark ? blendedMarkRect(mark) : { x, y, width: w, height: h },
   );
 
   return createPortal(
@@ -495,11 +497,11 @@ function HotPortOverlay({
  * geometry, this is paint only.
  */
 function CollapsedPortDots({
-  mark,
+  rect,
   hotPosition,
   size,
 }: {
-  mark: CollapsedMarkGeometry;
+  rect: MarkAnchorRect;
   hotPosition: Position | null;
   size: number;
 }) {
@@ -509,7 +511,6 @@ function CollapsedPortDots({
   if (!domNode) return null;
 
   const [tx, ty, zoom] = transform;
-  const rect = collapsedMarkRect(mark);
 
   return createPortal(
     <>
@@ -546,10 +547,23 @@ interface NodeConnectionHandlesProps {
   selected: boolean;
   /** True for touch / pen input; otherwise we treat as mouse. */
   isNotMouse: boolean;
+  /**
+   * Whether the node is currently being dragged. A move gesture keeps the
+   * pointer inside the node (and the node selected), so hover/selection
+   * alone would leave the ports lit for the whole drag — floating over the
+   * drop placeholder and inviting a connection the gesture cannot start.
+   */
+  dragging: boolean;
 }
 
 export const NodeConnectionHandles = memo(
-  ({ nodeId, hovered, selected, isNotMouse }: NodeConnectionHandlesProps) => {
+  ({
+    nodeId,
+    hovered,
+    selected,
+    isNotMouse,
+    dragging,
+  }: NodeConnectionHandlesProps) => {
     const { t } = useTranslation();
     const node = useInternalNode(nodeId);
     // Only the pinned *side* matters here, and only when the pending
@@ -559,6 +573,20 @@ export const NodeConnectionHandles = memo(
       s.pending?.sourceId === nodeId ? s.pending.side : null,
     );
     const mark = useNodeCollapseStore((s) => s.marks[nodeId]);
+    // Committed edge endpoints are React Flow's cached handle bounds, and it
+    // only re-measures them on demand. The handles below move onto the mark as
+    // the card collapses, so without this the edges would keep terminating on
+    // the border box of a card that is no longer drawn. Re-measuring instead
+    // walks the endpoints in with the ports, onto the icon that replaced the
+    // node. Skipped entirely for nodes that never collapse.
+    const updateNodeInternals = useUpdateNodeInternals();
+    const hadMark = useRef(false);
+    useLayoutEffect(() => {
+      if (!mark && !hadMark.current) return;
+      hadMark.current = mark !== undefined;
+      updateNodeInternals(nodeId);
+    }, [mark, nodeId, updateNodeInternals]);
+
     const baseHandleSize = isNotMouse ? 14 : 8;
     const hitSize = isNotMouse ? PORT_HIT_SIZE.touch : PORT_HIT_SIZE.mouse;
     // Distance the press area is shifted outward so its inner edge lands
@@ -580,7 +608,7 @@ export const NodeConnectionHandles = memo(
     // port the pointer is actually aiming at grows and reveals the `+`,
     // so the idle state stays four quiet dots instead of four buttons.
     const [hotSide, setHotSide] = useState<Position | null>(null);
-    const exposed = isNotMouse ? selected : hovered;
+    const exposed = !dragging && (isNotMouse ? selected : hovered);
     const hotHandleSize = isNotMouse ? 22 : 20;
 
     const pinnedPosition = pinnedSide ? SIDE_POSITION[pinnedSide] : null;
@@ -606,26 +634,32 @@ export const NodeConnectionHandles = memo(
     // handles are laid out against is invisible — ports pinned to its edges
     // would hang in empty canvas, and a connection dragged from one would
     // start nowhere near the thing the user aimed at. Rebase them onto the
-    // mark. Handles are positioned inside the node's own box, which React
-    // Flow lays out in flow units, so the mark's canvas-space rect converts
-    // by plain translation.
+    // mark.
+    //
+    // Only the glide `progress` is taken from the published mark. Its rect is
+    // canvas-space and zoom-derived, so during a viewport animation it can be a
+    // frame behind the zoom this render is laying out against — and because the
+    // error is multiplicative, that briefly threw the handles clear off the
+    // node. The rect is recomputed here from the live zoom instead.
+    let collapsedRect: MarkAnchorRect | null = null;
     let collapsedLocalRect: PortRect | null = null;
     if (mark && node) {
-      const rect = collapsedMarkRect(mark);
-      const abs = node.internals.positionAbsolute;
-      collapsedLocalRect = {
-        x: rect.x - abs.x,
-        y: rect.y - abs.y,
-        width: rect.width,
-        height: rect.height,
-      };
+      // `||`, not `??`: an unset `style.width` is not always `undefined`, and
+      // the takeover hook this must agree with falls through on any falsy value.
+      const nodeW = (node.style?.width as number) || node.measured.width || 0;
+      const nodeH = (node.style?.height as number) || node.measured.height || 0;
+      collapsedRect = blendedMarkRect(mark);
+      collapsedLocalRect =
+        nodeW > 0 && nodeH > 0 && zoom > 0
+          ? localMarkRect(nodeW, nodeH, zoom, mark.progress)
+          : null;
     }
 
     return (
       <>
-        {mark && (exposed || pinnedPosition) && (
+        {collapsedRect && (exposed || pinnedPosition) && (
           <CollapsedPortDots
-            mark={mark}
+            rect={collapsedRect}
             hotPosition={hotPosition}
             size={baseHandleSize}
           />
@@ -882,13 +916,11 @@ export const NodeConnectionHandles = memo(
                 'z-20 transition-opacity focus-within:opacity-100',
                 isPinned
                   ? 'opacity-100'
-                  : isNotMouse
-                    ? selected
+                  : !exposed
+                    ? 'pointer-events-none opacity-0'
+                    : isNotMouse
                       ? 'opacity-40 active:opacity-100'
-                      : 'pointer-events-none opacity-0'
-                    : hovered
-                      ? 'opacity-100'
-                      : 'pointer-events-none opacity-0',
+                      : 'opacity-100',
               )}
             >
               {/*

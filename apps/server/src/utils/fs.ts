@@ -25,7 +25,10 @@ import {
   writeSync,
   writeFileSync,
 } from 'node:fs';
-import { readFile as readFileAsync } from 'node:fs/promises';
+import {
+  readFile as readFileAsync,
+  rename as renameAsync,
+} from 'node:fs/promises';
 import path from 'node:path';
 
 /** Pattern allowed for canvas / node / thread identifiers. */
@@ -149,6 +152,69 @@ export async function mapWithConcurrency<T, R>(
   return results;
 }
 
+/**
+ * Backoff schedule (ms) for a rename whose target is momentarily locked.
+ * Bounded at ~310ms total: long enough to outlast a virus scan or a cloud
+ * sync client's read, short enough that a genuinely broken write still fails
+ * promptly.
+ */
+const RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160];
+
+/** Whether a rename failure may be caused by a transiently locked target. */
+function isTransientRenameError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === 'EPERM' || code === 'EACCES' || code === 'EBUSY';
+}
+
+/**
+ * Block between synchronous rename attempts. This is used only by the
+ * already-synchronous atomic write path, whose callers cannot yield.
+ */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** {@link renameSync} with bounded retries for a transiently locked target. */
+export function renameOverWithRetrySync(from: string, to: string): void {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (error) {
+      if (
+        attempt >= RENAME_RETRY_DELAYS_MS.length ||
+        !isTransientRenameError(error)
+      ) {
+        throw error;
+      }
+      sleepSync(RENAME_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
+/** Async counterpart of {@link renameOverWithRetrySync}. */
+export async function renameOverWithRetry(
+  from: string,
+  to: string,
+): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await renameAsync(from, to);
+      return;
+    } catch (error) {
+      if (
+        attempt >= RENAME_RETRY_DELAYS_MS.length ||
+        !isTransientRenameError(error)
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, RENAME_RETRY_DELAYS_MS[attempt]),
+      );
+    }
+  }
+}
+
 /** Atomic write of a UTF-8 text file. */
 export function atomicWriteText(filePath: string, contents: string): void {
   mkdirp(path.dirname(filePath));
@@ -158,7 +224,7 @@ export function atomicWriteText(filePath: string, contents: string): void {
   );
   try {
     writeFileSync(tmp, contents, 'utf-8');
-    renameSync(tmp, filePath);
+    renameOverWithRetrySync(tmp, filePath);
   } catch (error) {
     // A failed rename (locked destination, EISDIR, permissions, ...) must not
     // accumulate invisible siblings. The UUID makes each writer independent;
