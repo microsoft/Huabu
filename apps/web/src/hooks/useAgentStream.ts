@@ -26,6 +26,7 @@ import {
   selectThreadBinding,
   selectThreadIsLoading,
   selectThreadMessages,
+  selectThreadPendingAttachments,
   selectThreadSettings,
   useChatStore,
 } from '@/store/chatStore';
@@ -651,7 +652,9 @@ export function useAgentStream(): UseAgentStreamReturn {
   const addMessage = useChatStore((state) => state.addMessage);
   const updateMessage = useChatStore((state) => state.updateMessage);
   const setLastAction = useChatStore((state) => state.setLastAction);
-  const pendingAttachments = useChatStore((state) => state.pendingAttachments);
+  const pendingAttachments = useChatStore((state) =>
+    selectThreadPendingAttachments(state, state.threadId),
+  );
   const selectionAttachment = useChatStore(
     (state) => state.selectionAttachment,
   );
@@ -799,7 +802,7 @@ export function useAgentStream(): UseAgentStreamReturn {
       const attachments =
         mergedAttachments.length > 0 ? mergedAttachments : undefined;
       if (allPending.length > 0) {
-        clearPendingAttachments();
+        clearPendingAttachments(threadId);
         useChatStore.getState().setSelectionAttachment(null);
       }
 

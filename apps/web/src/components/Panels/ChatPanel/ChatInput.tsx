@@ -13,7 +13,11 @@ import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl, uploadImage, uploadPdf } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore';
-import { selectCurrentMessages, useChatStore } from '@/store/chatStore';
+import {
+  selectCurrentMessages,
+  selectThreadPendingAttachments,
+  useChatStore,
+} from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 
 import { ContextUsageRing } from './ContextUsageRing';
@@ -117,8 +121,11 @@ export const ChatInput = ({
   const historyIndexRef = useRef(-1);
   const draftRef = useRef('');
 
-  // Pending attachments from the store
-  const pendingAttachments = useChatStore((s) => s.pendingAttachments);
+  // Pending attachments belong to the thread this composer is sending to.
+  const threadId = useChatStore((s) => s.threadId);
+  const pendingAttachments = useChatStore((s) =>
+    selectThreadPendingAttachments(s, s.threadId),
+  );
   const selectionAttachment = useChatStore((s) => s.selectionAttachment);
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
   const removePendingAttachment = useChatStore(
@@ -168,7 +175,7 @@ export const ChatInput = ({
       try {
         if (file.type.startsWith('image/')) {
           const url = await uploadImage(file, canvasId);
-          addPendingAttachment({
+          addPendingAttachment(threadId, {
             type: 'image',
             source: 'upload',
             url,
@@ -176,7 +183,7 @@ export const ChatInput = ({
           });
         } else if (file.type === 'application/pdf') {
           const url = await uploadPdf(file, canvasId);
-          addPendingAttachment({
+          addPendingAttachment(threadId, {
             type: 'pdf',
             source: 'upload',
             url,
@@ -191,7 +198,7 @@ export const ChatInput = ({
           const textContent = isText ? await file.text() : undefined;
 
           const url = await uploadImage(file, canvasId);
-          addPendingAttachment({
+          addPendingAttachment(threadId, {
             type: 'file',
             source: 'upload',
             url,
@@ -204,7 +211,7 @@ export const ChatInput = ({
         console.error('Failed to upload file:', err);
       }
     },
-    [addPendingAttachment, canvasId, t],
+    [addPendingAttachment, canvasId, t, threadId],
   );
 
   // Handle paste — upload pasted images/files as attachments
@@ -435,7 +442,7 @@ export const ChatInput = ({
                     // Lock the selection: promote to a regular pending attachment
                     const locked = { ...att };
                     useChatStore.getState().setSelectionAttachment(null);
-                    addPendingAttachment(locked);
+                    addPendingAttachment(threadId, locked);
                   };
 
                   const tile = (
@@ -565,7 +572,7 @@ export const ChatInput = ({
                       shape="pill"
                       onClick={(e) => {
                         e.stopPropagation();
-                        removePendingAttachment(idx);
+                        removePendingAttachment(threadId, idx);
                       }}
                       tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
                       className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 p-0.5"

@@ -74,7 +74,6 @@ export const PDFPreview = ({
   const src = typeof data.src === 'string' ? data.src : '';
   const canvasId = useCanvasStore((s) => s.canvasId);
   const resolvedSrc = resolveArtifactUrl(src, canvasId);
-  const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
   const previewSearchNodeId = usePreviewSearchStore((s) => s.nodeId);
   const searchQuery = usePreviewSearchStore((s) => s.query);
   const isPreviewSearchOpen = usePreviewSearchStore((s) => s.isOpen);
@@ -493,12 +492,12 @@ export const PDFPreview = ({
   // ---------------------------------------------------------------------------
   // Send captured area to chat as a pending attachment
   // ---------------------------------------------------------------------------
-  const handleSendToChat = useCallback(
-    (attachment: ChatAttachment) => {
-      addPendingAttachment(attachment);
-    },
-    [addPendingAttachment],
-  );
+  // Send to Chat stages onto whichever thread is currently visible; that
+  // becomes the focused group's active tab once the workspace lands.
+  const handleSendToChat = useCallback((attachment: ChatAttachment) => {
+    const { threadId, addPendingAttachment } = useChatStore.getState();
+    addPendingAttachment(threadId, attachment);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Set captured area as the PDF node cover image

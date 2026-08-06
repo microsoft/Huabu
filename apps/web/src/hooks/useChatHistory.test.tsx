@@ -86,6 +86,7 @@ function seedStore(isStreaming: boolean) {
         isStreaming,
         binding: { kind: 'internal' },
         settings: { modelId: null, reasoningEffort: null },
+        pendingAttachments: [],
       },
     },
     viewingQuestionThread: null,

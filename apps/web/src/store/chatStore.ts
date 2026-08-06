@@ -52,6 +52,12 @@ export interface ChatThreadState {
    * never be applied to another thread's request.
    */
   settings: { modelId: string | null; reasoningEffort: string | null };
+  /**
+   * Attachments staged for this thread's next message — PDF captures, pasted
+   * files, dropped images. Thread-local so staging something in one Chat
+   * cannot ride along on a different Chat's send.
+   */
+  pendingAttachments: ChatAttachment[];
 }
 
 export interface ChatState {
@@ -128,16 +134,9 @@ export interface ChatState {
   _savedCanvasLastAction?: AgentMode;
 
   /**
-   * Staged attachments waiting to be sent with the next message.
-   * Populated by external actions (e.g. PDF capture "Send to Chat") and
-   * consumed when the user submits a chat message.
-   */
-  pendingAttachments: ChatAttachment[];
-
-  /**
-   * A text-selection-based attachment auto-managed by ExpandedNodePanel.
-   * Stored separately from pendingAttachments so it can be independently
-   * set/cleared without index gymnastics or magic marker strings.
+   * A text-selection excerpt shared by every visible Chat. This is
+   * presentation context, not thread state: several Chats may show the same
+   * hint, and only the one that sends snapshots it into its request.
    */
   selectionAttachment: ChatAttachment | null;
 
@@ -210,12 +209,12 @@ export interface ChatState {
   /** Switch to a canvas — loads or creates its threadId, resets in-memory messages. */
   switchToCanvas: (canvasId: string) => void;
 
-  /** Stage an attachment (e.g. from PDF capture) to be sent with the next chat message. */
-  addPendingAttachment: (attachment: ChatAttachment) => void;
-  /** Remove a staged attachment by index. */
-  removePendingAttachment: (index: number) => void;
-  /** Clear all staged attachments (called after message is sent). */
-  clearPendingAttachments: () => void;
+  /** Stage an attachment (e.g. from PDF capture) on a thread's next message. */
+  addPendingAttachment: (threadId: string, attachment: ChatAttachment) => void;
+  /** Remove one of a thread's staged attachments by index. */
+  removePendingAttachment: (threadId: string, index: number) => void;
+  /** Clear a thread's staged attachments (called after its message is sent). */
+  clearPendingAttachments: (threadId: string) => void;
 
   /**
    * Set (or clear) the current thread's composer draft. Sending a message
@@ -353,6 +352,7 @@ const EMPTY_THREAD: ChatThreadState = {
   isStreaming: false,
   binding: DEFAULT_BINDING,
   settings: { modelId: null, reasoningEffort: null },
+  pendingAttachments: [],
 };
 
 function threadOf(state: ChatState, threadId: string): ChatThreadState {
@@ -420,7 +420,6 @@ export const useChatStore = create<ChatState>()(
       lastAction: 'ask',
       threadMap: {},
       bindingMap: {},
-      pendingAttachments: [],
       selectionAttachment: null,
       viewingQuestionThread: null,
       questionReplayByCanvas: {},
@@ -506,7 +505,6 @@ export const useChatStore = create<ChatState>()(
           }),
           threadId: newThreadId,
           lastAction: initialLastAction,
-          pendingAttachments: [],
           selectionAttachment: null,
           threadMap: updatedThreads,
           bindingMap: updatedBindings,
@@ -570,7 +568,6 @@ export const useChatStore = create<ChatState>()(
             bindingMap: bindingMap[canvasId]
               ? bindingMap
               : { ...bindingMap, [canvasId]: replay.savedCanvasBinding },
-            pendingAttachments: [],
             selectionAttachment: null,
             // Sketch inspector is mutually exclusive with replay.
             viewingSketchCluster: null,
@@ -593,7 +590,6 @@ export const useChatStore = create<ChatState>()(
           // an uncached one from the server.
           ...patchThread(state, tid, { binding }),
           threadId: tid,
-          pendingAttachments: [],
           selectionAttachment: null,
           threadMap: { ...threadMap, [canvasId]: tid },
           bindingMap: bindingMap[canvasId]
@@ -608,19 +604,30 @@ export const useChatStore = create<ChatState>()(
         get().evictInactiveThreads();
       },
 
-      addPendingAttachment: (attachment) =>
-        set((state) => ({
-          pendingAttachments: [...state.pendingAttachments, attachment],
-        })),
+      addPendingAttachment: (threadId, attachment) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            pendingAttachments: [
+              ...threadOf(state, threadId).pendingAttachments,
+              attachment,
+            ],
+          }),
+        ),
 
-      removePendingAttachment: (index) =>
-        set((state) => ({
-          pendingAttachments: state.pendingAttachments.filter(
-            (_, i) => i !== index,
-          ),
-        })),
+      removePendingAttachment: (threadId, index) =>
+        set((state) =>
+          patchThread(state, threadId, {
+            pendingAttachments: threadOf(
+              state,
+              threadId,
+            ).pendingAttachments.filter((_, i) => i !== index),
+          }),
+        ),
 
-      clearPendingAttachments: () => set({ pendingAttachments: [] }),
+      clearPendingAttachments: (threadId) =>
+        set((state) =>
+          patchThread(state, threadId, { pendingAttachments: [] }),
+        ),
 
       setDraft: (threadId, text) =>
         set((state) => {
@@ -801,7 +808,6 @@ export const useChatStore = create<ChatState>()(
               savedCanvasLastAction: lastAction,
             },
           },
-          pendingAttachments: [],
           selectionAttachment: null,
           viewingSketchCluster: null,
         });
@@ -858,7 +864,6 @@ export const useChatStore = create<ChatState>()(
             openSequence: (currentViewing?.openSequence ?? 0) + 1,
           },
           threadId,
-          pendingAttachments: [],
           selectionAttachment: null,
           viewingSketchCluster: null,
           ...(!isAlreadyViewing && {
@@ -1094,6 +1099,12 @@ export const selectThreadSettings = (
   state: ChatState,
   threadId: string,
 ): ChatThreadState['settings'] => threadOf(state, threadId).settings;
+
+/** Attachments staged for a thread's next message. */
+export const selectThreadPendingAttachments = (
+  state: ChatState,
+  threadId: string,
+): ChatAttachment[] => threadOf(state, threadId).pendingAttachments;
 
 /** The currently-visible thread's agent binding. */
 export const selectCurrentBinding = (state: ChatState): AgentBinding =>

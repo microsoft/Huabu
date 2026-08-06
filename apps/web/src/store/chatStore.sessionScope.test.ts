@@ -20,6 +20,7 @@ import {
   selectThreadDraft,
   selectThreadHistoryLoaded,
   selectThreadMessages,
+  selectThreadPendingAttachments,
   selectThreadSettings,
   useChatStore,
 } from './chatStore';
@@ -55,7 +56,6 @@ function resetStore() {
     viewingQuestionThread: null,
     viewingSketchCluster: null,
     questionReplayByCanvas: {},
-    pendingAttachments: [],
     selectionAttachment: null,
     _savedCanvasThreadId: undefined,
     _savedCanvasBinding: undefined,
@@ -143,10 +143,34 @@ describe('chatStore per-thread agent binding', () => {
   });
 });
 
-describe('chatStore global singletons (not yet per-thread)', () => {
-  it('shares one pendingAttachments / selectionAttachment slot across threads', () => {
+describe('chatStore staged attachments', () => {
+  it('keeps staged attachments with their own thread', () => {
     const s = useChatStore.getState();
-    s.addPendingAttachment(STAGED_ATTACHMENT);
+    s.addPendingAttachment('thread-a', STAGED_ATTACHMENT);
+
+    const state = useChatStore.getState();
+    expect(selectThreadPendingAttachments(state, 'thread-a')).toHaveLength(1);
+    expect(selectThreadPendingAttachments(state, 'thread-b')).toEqual([]);
+  });
+
+  it('survives a canvas switch instead of being discarded', () => {
+    const s = useChatStore.getState();
+    s.switchToCanvas('canvas-1');
+    const canvasThread = useChatStore.getState().threadId;
+    s.addPendingAttachment(canvasThread, STAGED_ATTACHMENT);
+
+    s.switchToCanvas('canvas-2');
+    s.switchToCanvas('canvas-1');
+
+    expect(
+      selectThreadPendingAttachments(useChatStore.getState(), canvasThread),
+    ).toHaveLength(1);
+  });
+});
+
+describe('chatStore shared selection context', () => {
+  it('shows the same selection excerpt to every thread', () => {
+    const s = useChatStore.getState();
     s.setSelectionAttachment({
       type: 'text',
       source: 'excerpt',
@@ -155,7 +179,6 @@ describe('chatStore global singletons (not yet per-thread)', () => {
     });
 
     useChatStore.setState({ threadId: 'thread-other' });
-    expect(useChatStore.getState().pendingAttachments).toHaveLength(1);
     expect(useChatStore.getState().selectionAttachment?.content).toBe(
       'selected',
     );
@@ -181,16 +204,14 @@ describe('chatStore switchToCanvas', () => {
     });
   });
 
-  it('remembers each canvas binding and clears staged attachments', () => {
+  it('remembers each canvas binding', () => {
     const s = useChatStore.getState();
 
     s.switchToCanvas('canvas-1');
     s.setAgentBinding(useChatStore.getState().threadId, EXTERNAL, 'canvas-1');
-    s.addPendingAttachment(STAGED_ATTACHMENT);
 
     s.switchToCanvas('canvas-2');
     expect(currentBinding()).toEqual(INTERNAL);
-    expect(useChatStore.getState().pendingAttachments).toEqual([]);
 
     s.switchToCanvas('canvas-1');
     expect(currentBinding()).toEqual(EXTERNAL);
@@ -236,8 +257,8 @@ describe('chatStore clearMessages', () => {
     const s = useChatStore.getState();
     s.switchToCanvas('canvas-1');
     s.setAgentBinding(useChatStore.getState().threadId, EXTERNAL, 'canvas-1');
-    s.addPendingAttachment(STAGED_ATTACHMENT);
     const previous = useChatStore.getState().threadId;
+    s.addPendingAttachment(previous, STAGED_ATTACHMENT);
 
     s.clearMessages('canvas-1');
 
@@ -248,7 +269,8 @@ describe('chatStore clearMessages', () => {
     expect(state.threadMap['canvas-1']).toBe(state.threadId);
     expect(currentBinding()).toEqual(INTERNAL);
     expect(state.bindingMap['canvas-1']).toEqual(INTERNAL);
-    expect(state.pendingAttachments).toEqual([]);
+    // A brand-new thread starts with nothing staged.
+    expect(selectThreadPendingAttachments(state, state.threadId)).toEqual([]);
     expect(state.lastAction).toBe('ask');
   });
 
