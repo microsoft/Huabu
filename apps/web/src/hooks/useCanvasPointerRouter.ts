@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useEffect, useRef, type MutableRefObject } from 'react';
 
 import {

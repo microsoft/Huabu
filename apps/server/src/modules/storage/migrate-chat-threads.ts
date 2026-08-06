@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Legacy chat-thread migration — pi-ai `Context` → structured turns.
  *

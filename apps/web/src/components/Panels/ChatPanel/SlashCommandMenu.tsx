@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `SlashCommandMenu` — typeahead popover anchored above the chat textarea
  * for agent-defined slash commands.

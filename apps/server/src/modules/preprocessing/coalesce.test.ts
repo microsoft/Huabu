@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { describe, it, expect, vi } from 'vitest';
 
 import { coalesceInFlight } from './coalesce.js';

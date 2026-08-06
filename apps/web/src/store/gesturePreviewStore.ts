@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { create } from 'zustand';
 
 import type { Guide } from '@/handler/snap/types';

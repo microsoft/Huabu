@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * On-canvas overlay shown around in-progress sketch clusters.
  *

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Tests for external-note discovery: the per-active-Space native
  * `nodes/` watcher owned by an external-note SSE session, its lazy scan, and

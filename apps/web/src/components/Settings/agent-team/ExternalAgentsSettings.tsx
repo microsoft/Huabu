@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `ExternalAgentsSettings` — the single unified "External Agents" tab.
  *

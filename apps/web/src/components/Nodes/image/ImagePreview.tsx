@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { resolveArtifactUrl } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore';
 

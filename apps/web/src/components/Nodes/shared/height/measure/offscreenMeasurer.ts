@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Offscreen height measurer — one hidden Milkdown instance reused as a
  * measuring tape.

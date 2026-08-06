@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { resolveAccent } from '@huabu/shared';
 
 import { getAccentTokens } from './accentTokens';

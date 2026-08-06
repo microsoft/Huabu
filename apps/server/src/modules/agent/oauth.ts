@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * OAuth providers (GitHub Copilot, OpenAI Codex) — delegates login, token
  * refresh, and logout to pi-ai's `Models` manager (see {@link getPiModels}),

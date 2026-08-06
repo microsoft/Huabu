@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { ImagePreview } from './image/ImagePreview';
 import { NotePreview } from './note/NotePreview';
 import { OfficePreview } from './office/OfficePreview';

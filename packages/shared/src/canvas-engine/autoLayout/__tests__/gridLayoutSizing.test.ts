@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Tests for `applyStructuredFrameRelayout` per-frame sizing
  * behaviour (PR 2: structured + manual support).

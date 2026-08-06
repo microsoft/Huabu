@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Canvas change records — a human-readable summary of a mutation plus
  * the **inverse deltas** needed to undo it.

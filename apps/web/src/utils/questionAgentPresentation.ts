@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { getDefaultAgentIcon, readAgentIcon } from './agentIcon';
 
 import type { AgentIconValue } from '@/components/Common/AgentIcon';

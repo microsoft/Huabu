@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * FROZEN legacy schema — the pre-Agenetes chat turn record.
  *

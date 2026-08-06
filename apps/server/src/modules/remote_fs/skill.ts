@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Skill / prompt delivery for the RFS (`GET /api/rfs/:canvasId/skill`).
  *

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Canvas state deltas — the wire-friendly diff between two canvas states.
  *

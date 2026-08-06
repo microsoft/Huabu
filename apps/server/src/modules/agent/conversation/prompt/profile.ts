@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Backend render profile — the small set of knobs that differ between
  * the built-in (pi-ai) agent and the external (ACP) agent when turning

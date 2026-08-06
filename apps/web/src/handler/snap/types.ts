@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Smart-snap types shared between the engine, the canvas store, and
  * the overlay renderer.

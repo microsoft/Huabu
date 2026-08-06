@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { describe, expect, it } from 'vitest';
 
 import { EDGE_LABEL_MAX_INVERSE_SCALE } from '../../../types/canvas/edge.js';

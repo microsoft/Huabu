@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Per-node-type height policy — the single source of truth for
  * "who owns this node's height and how is it derived".

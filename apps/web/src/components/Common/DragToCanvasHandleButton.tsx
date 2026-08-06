@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { GripVertical } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 

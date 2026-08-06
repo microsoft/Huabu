@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import clsx from 'clsx';
 import { ChevronsDown, Fullscreen } from 'lucide-react';

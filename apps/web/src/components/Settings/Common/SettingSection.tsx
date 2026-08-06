@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { ChevronDown } from 'lucide-react';
 import React, { useState } from 'react';
 

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `AgentProfileEditor` — the single entry point for creating or editing an
  * external-agent Profile.

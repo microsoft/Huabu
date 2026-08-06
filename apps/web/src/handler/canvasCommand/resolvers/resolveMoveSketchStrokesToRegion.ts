@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { createId, type CanvasNodeId } from '@huabu/shared';
 
 import { buildSketchStrokeTransferCommands } from '@/components/Nodes/sketch/sketchMerge';

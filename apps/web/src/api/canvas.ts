@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { ApiError, apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
 

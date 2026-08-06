@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Builder functions that construct `AddNodeInput` from raw user input
  * (files, URLs, plain text). Shared by Canvas.tsx (drop) and

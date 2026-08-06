@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `useAcpProfilesStore` — Singleton Zustand store for the user's
  * external-agent profiles (the data behind {@link useAcpProfiles}).

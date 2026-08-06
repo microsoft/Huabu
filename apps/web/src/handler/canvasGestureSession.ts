@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import {
   MOUSE_DRAG_ACTIVATION_PX,
   PEN_DRAG_ACTIVATION_PX,

@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
 @keyframes question-icon-spin {
   from {
     transform: rotate(0deg);

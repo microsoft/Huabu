@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 // Cross-platform Electron launcher.
 // Removes ELECTRON_RUN_AS_NODE (which would otherwise make Electron run as a
 // plain Node process) before spawning the Electron GUI. This replaces the

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useState } from 'react';
 
 import { cn } from '@/components/Common/cn';

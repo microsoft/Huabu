@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Verifies `resolveMoveNoteBlockIntoNote`:
  *  - emits a single MERGE_NODE_DATA carrying both source + target

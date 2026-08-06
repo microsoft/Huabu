@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Single source of truth for markdown string handling in the Milkdown layer.
  *

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import useCanvasStore from './canvasStore';

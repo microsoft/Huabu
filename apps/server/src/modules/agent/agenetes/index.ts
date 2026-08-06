@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Agenetes — the in-process L1↔L2 seam (§3.6 / §7).
  *

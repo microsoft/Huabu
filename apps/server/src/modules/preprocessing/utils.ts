@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Normalize URL for consistent hashing of web sources.
  * - Remove query parameters

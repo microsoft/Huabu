@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useAppShortcuts, useShortcutsHelpHotkey } from '../../hooks/shortcuts';
 import { useSettingsUiStore } from '../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../store/shortcutsUiStore';

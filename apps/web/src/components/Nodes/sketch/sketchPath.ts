@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import getStroke from 'perfect-freehand';
 
 import { ACCENT_PALETTE, type ColorPickerOption } from '@huabu/shared';

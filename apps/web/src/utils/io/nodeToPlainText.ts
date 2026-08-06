@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Convert copied canvas nodes into the plain-text representation written to
  * the system clipboard.

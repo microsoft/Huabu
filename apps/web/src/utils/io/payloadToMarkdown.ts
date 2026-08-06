@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Convert a Sediment drag payload to a Markdown snippet that can be
  * inserted into a Note.

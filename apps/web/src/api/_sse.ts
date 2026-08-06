@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Server-Sent Events (SSE) parser shared by the agent and intent
  * streaming clients.

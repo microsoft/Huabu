@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import clsx from 'clsx';
 import { ArrowLeft, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';

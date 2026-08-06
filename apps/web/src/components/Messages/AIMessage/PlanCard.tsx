@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Display an ACP plan (`AcpPlanEntry[]`) as a checklist card.
  *

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { agentIconColorHex } from '@/components/Common/AgentIcon';
 
 import type { QuestionAgentPresentation } from '@/utils/questionAgentPresentation';

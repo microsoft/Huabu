@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Returns true when the target is an editable element
  * (input / textarea / contentEditable / role="textbox").

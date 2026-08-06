@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * ThinkingCard — renders a `kind: 'thinking'` segment of an assistant
  * turn (reasoning / chain-of-thought text streamed via the

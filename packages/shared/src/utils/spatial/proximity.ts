@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 // ── SpatialNode + proximity queries ──────────────────────────────
 //
 // `SpatialNode` is the lightweight projection of a canvas node we

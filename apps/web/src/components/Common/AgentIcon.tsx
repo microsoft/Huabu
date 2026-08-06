@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `AgentIcon` — a small, static avatar used to visually distinguish external
  * agents. It renders one of the hand-drawn "basic shapes" (circle, diamond,

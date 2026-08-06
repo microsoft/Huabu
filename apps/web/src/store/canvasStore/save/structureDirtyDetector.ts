@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Decides whether a store mutation actually warrants a structure save
  * (`PUT /api/canvas/:id`). Pure functions only — no timers, no I/O,

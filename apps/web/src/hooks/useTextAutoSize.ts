@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Hook that encapsulates text auto-sizing logic shared by TextNode and QuestionNode.
  *

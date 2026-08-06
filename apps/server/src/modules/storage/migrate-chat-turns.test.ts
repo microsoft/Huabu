@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Tests for the legacy chat-turn migration (M6.9 row 2).
  *

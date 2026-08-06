@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { parseArtifactUrl } from '@huabu/shared';
 
 import { apiFetch, apiUrl } from './_client';

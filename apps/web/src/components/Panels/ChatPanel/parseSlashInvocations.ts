@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Parse leading `/<id>` slash-command tokens from a chat-input message.
  *

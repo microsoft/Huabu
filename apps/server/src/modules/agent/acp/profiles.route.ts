@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `GET   /api/acp/profiles`            — list profiles + daemon snapshot
  * `POST  /api/acp/profiles`            — create

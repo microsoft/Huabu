@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { spawn } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';

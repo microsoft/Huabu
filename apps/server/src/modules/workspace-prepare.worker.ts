@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /** Child-process entry point for isolated workspace preparation. */
 
 import { prepareWorkspaceOnDisk } from './workspace-prepare.js';

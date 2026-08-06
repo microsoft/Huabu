@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * ImageGenerationCard — disclosure-shaped renderer for the
  * `generate_image` tool. Title is a self-describing summary

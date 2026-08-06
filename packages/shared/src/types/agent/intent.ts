@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import type { Rect } from '../../utils/spatial/index.js';
 import type { WireNodeRef } from '../api/agent.js';
 

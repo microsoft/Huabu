@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useStore, useStoreApi, useViewport } from '@xyflow/react';
 import { useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { usePanelStore } from './panelStore';

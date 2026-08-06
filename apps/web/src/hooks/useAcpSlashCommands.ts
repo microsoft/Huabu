@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `useAcpSlashCommands` — fetch and cache the agent-defined slash
  * commands for the active thread's external binding.

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 export interface SecretStore {
   /** Stable backend name for diagnostics. */
   readonly kind: string;

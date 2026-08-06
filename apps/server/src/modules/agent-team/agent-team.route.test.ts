@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { AgentTeamError } from '@agenetes/agentlet-host';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { validateToolArguments } from '@earendil-works/pi-ai';
 import { describe, expect, it } from 'vitest';
 

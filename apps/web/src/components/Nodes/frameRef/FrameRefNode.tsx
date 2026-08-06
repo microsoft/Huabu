@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useInternalNode, useViewport } from '@xyflow/react';
 import { Frame } from 'lucide-react';
 import { memo } from 'react';

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Single source of truth for the height (CSS pixels) of the HTML-painted
  * window chrome strip rendered by `WindowChrome` in the renderer.

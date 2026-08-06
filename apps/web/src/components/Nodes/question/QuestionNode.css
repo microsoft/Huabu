@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
 .question-sticky {
   --depth-offset: 8px;
   position: relative;

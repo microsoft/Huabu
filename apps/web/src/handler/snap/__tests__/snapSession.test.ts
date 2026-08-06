@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Unit tests for `snapSession` — the gesture-scoped wrapper
  * around `snapEngine` that owns drag-time state for the canvas.

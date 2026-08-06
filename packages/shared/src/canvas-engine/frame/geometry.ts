@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Frame Geometry - Internal rectangle / overlap helpers shared by the
  * detection and mutation submodules.

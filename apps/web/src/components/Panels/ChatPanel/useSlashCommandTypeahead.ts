@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `useSlashCommandTypeahead` — encapsulates everything ChatInput needs
  * to wire the slash-command typeahead to its textarea:

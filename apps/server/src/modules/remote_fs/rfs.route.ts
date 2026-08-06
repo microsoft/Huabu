@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Remote File System (RFS) API routes — `/api/rfs/:canvasId/*`.
  *

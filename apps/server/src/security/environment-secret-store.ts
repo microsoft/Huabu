@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { getEnvApiKey } from '@earendil-works/pi-ai/compat';
 
 import { parseLlmProviderApiKeySecretId, SECRET_IDS } from './secret-ids.js';

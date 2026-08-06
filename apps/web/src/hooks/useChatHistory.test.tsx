@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * The reconnect effect's own guard — "history ends with a user message" —
  * is also true for the whole lead time after a send, so it cannot tell a

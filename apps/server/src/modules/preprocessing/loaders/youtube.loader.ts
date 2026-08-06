@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { getLogger } from '../../../utils/logger.js';
 import { getRapidApiKey } from '../../integrations/integrations.js';
 

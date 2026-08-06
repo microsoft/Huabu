@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
 .built-in-avatar-bean {
   border-radius: 58% 42% 52% 48% / 44% 55% 45% 56%;
   transform: rotate(-6deg);

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import type { RecentAction } from './context.js';
 
 // ==================== Canvas Event Records ====================

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Per-profile ACP meta cache — `profileId → last-known
  * AcpSessionPersistedMeta`.

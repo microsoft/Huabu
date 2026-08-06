@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import clsx from 'clsx';
 import { ArrowUpRight } from 'lucide-react';
 import { useRef } from 'react';

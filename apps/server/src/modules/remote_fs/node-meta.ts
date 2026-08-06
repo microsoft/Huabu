@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Path mapping + node-metadata lookup for the Remote File System (RFS).
  *

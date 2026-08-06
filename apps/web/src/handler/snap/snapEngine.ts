@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Smart-snap engine — pure functions invoked from `canvasStore`'s
  * drag pipeline. Owns no state; the caller (canvasStore) is

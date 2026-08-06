@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 export type MessageListOpenPosition = 'last-user' | 'bottom';
 export type MessageListPreferredPosition = 'last-user' | 'bottom';
 

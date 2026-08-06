@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `SessionSelectorPill` — the shared presentation contract for the compact
  * dropdown "pills" rendered in the ChatPanel toolbar row by both

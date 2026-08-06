@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `AgentSelector` — compact, inline agent picker mounted at the left of
  * the `ChatInput` toolbar.

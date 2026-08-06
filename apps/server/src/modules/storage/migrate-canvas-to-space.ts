@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Canvas→Space on-disk filename migration (demo-stage rename).
  *

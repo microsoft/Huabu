@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Canonical runtime contracts for agent-facing Space queries and commands.
  *

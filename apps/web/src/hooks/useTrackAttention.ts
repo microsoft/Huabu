@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useEffect, useRef } from 'react';
 
 import { FLOATING_CHROME_SELECTOR } from '@/components/Common/floatingChrome';

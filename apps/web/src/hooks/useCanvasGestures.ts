@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useStoreApi, type ReactFlowInstance } from '@xyflow/react';
 import { useEffect, type MutableRefObject } from 'react';
 

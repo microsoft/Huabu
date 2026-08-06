@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 // ── Spatial geometry primitives ──────────────────────────────────
 //
 // Pure rectangle / point math. Zero dependencies, no concept of

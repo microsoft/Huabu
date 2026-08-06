@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * L1 wiring for the ACP profile-schema cache (M3 / A4).
  *

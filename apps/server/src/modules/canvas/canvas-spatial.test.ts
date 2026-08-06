@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Dual-field coordinate contract for the read side (`inspect_nodes` /
  * `get_canvas_outline`): every node reports `position` (parent-local,

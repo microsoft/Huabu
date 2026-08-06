@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { isEditableTarget } from '@/hooks/shortcuts';
 
 import type { EdgeStyle } from '@huabu/shared';

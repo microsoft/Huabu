@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Tests for the legacy ACP-session migration (M6.9 row 1).
  *

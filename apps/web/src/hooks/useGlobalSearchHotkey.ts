@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Global Cmd+F / Ctrl+F dispatcher for canvas search.
  *

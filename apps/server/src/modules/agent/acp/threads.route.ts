@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `POST /api/acp/threads/:threadId/session` — eagerly open (or reuse) the
  * per-thread ACP session so the web client can pull slash commands BEFORE

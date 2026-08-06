@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Off-screen first-page renderer used by {@link PDFNode} to capture a
  * thumbnail when the node has no manual `coverUrl`.

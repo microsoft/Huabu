@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Line-drawn icons for the two built-in agent modes, replacing the generic
  * lucide `MessageSquare` / `Sprout`.

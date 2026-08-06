@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Utility functions for auto-generated node labels.
  * Ensures consistency across canvas operations and ingestion.

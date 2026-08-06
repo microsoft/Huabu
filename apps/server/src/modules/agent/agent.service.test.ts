@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Output-delta tests for {@link runAgent} (single-channel dispatch).
  *

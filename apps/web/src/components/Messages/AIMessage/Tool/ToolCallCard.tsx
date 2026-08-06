@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Generic renderer for ACP-native tool calls (those without an
  * `internalToolName` escape hatch). External agents — and future

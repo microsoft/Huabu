@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 export interface LoadResult {
   content: string;
   metadata?: Record<string, unknown>;

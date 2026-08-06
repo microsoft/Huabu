@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Shared upload size limit for multipart file uploads (canvas imports,
  * artifact uploads, etc.).

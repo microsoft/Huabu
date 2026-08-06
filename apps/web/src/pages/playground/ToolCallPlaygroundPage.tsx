@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Chat-panel playground that renders a whole conversation straight from
  * JSON. Paste a message array (or a single assistant turn with a

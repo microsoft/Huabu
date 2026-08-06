@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import {
   NODE_REF_COLLISION_GAP,
   NODE_REF_DEFAULT_HEIGHT,

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Pure pretext-based text measurement, used by TextNode/QuestionNode
  * auto-sizing (via {@link computeFontSizeForHeight}, a preset over the shared

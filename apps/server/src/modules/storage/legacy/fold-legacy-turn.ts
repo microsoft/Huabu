@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Legacy turn fold — a stored {@link LegacyChatTurnRecord} → a folded
  * {@link AgentTurn} (README I9.8 / M6.9 row 2).

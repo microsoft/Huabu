@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { Bot, BookOpen } from 'lucide-react';
 import React, { useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';

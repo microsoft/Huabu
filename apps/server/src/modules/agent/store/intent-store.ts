@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Intent Store — thin wrapper over `CanvasStore` for intent log I/O.
  *

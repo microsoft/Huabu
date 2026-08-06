@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `runAcpAgent` \u2014 the external-binding counterpart of `runAgent`.
  *

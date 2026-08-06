@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Shared helpers for tool-call renderers under `Messages/AIMessage/Tool/`.
  *

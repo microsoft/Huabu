@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Contract for the lifecycle and Space-handle boundary currently exposed by
  * {@link StructuredStore}.

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AgentIconPicker } from './AgentIconPicker';

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `GET /api/acp/agent-cli` — host-side detection of installed ACP-capable
  * agent CLIs from the trusted built-in catalogue.

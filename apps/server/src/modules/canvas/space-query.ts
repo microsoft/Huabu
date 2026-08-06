@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { SPACE_SEARCH_DEFAULT_LIMIT } from '@huabu/shared';
 
 import { searchCanvas } from './canvas-search.js';

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';

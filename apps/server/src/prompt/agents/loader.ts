@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Agent loader — markdown AGENT.md files as the single source of truth.
  *

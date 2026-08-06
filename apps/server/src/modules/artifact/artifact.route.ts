@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import path from 'node:path';
 
 import { type FastifyPluginAsync } from 'fastify';

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useCallback, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 

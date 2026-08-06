@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { Type, type Tool } from '@earendil-works/pi-ai';
 import { z } from 'zod';
 

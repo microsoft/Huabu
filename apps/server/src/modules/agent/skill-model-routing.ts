@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import type { WorkloadType } from '@agenetes/protocol';
 import type { ModelRole } from '@huabu/shared';
 

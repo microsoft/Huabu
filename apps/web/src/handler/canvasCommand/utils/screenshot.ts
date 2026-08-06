@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Capture the React Flow canvas viewport as a base64-encoded PNG string.
  *

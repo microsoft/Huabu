@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Canvas-wide search result list rendered inside the left layer
  * panel. Replaces the layer tree whenever

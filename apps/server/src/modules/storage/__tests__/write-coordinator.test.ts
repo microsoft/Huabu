@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `updateNode` — the serialized, rev-CAS-guarded node-write primitive.
  *

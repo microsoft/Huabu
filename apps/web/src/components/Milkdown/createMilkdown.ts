@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Internal Milkdown factory. NOT exported from the package barrel — only
  * `MilkdownEditor` and `MilkdownPreview` consume it.

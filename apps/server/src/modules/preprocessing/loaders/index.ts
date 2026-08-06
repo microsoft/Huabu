@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 export * from './loader.interface.js';
 export * from './pdf.loader.js';
 export * from './office.loader.js';

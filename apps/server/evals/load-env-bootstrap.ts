@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Startup side-effects the eval CLI shares with `server.ts`.
  *

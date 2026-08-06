@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import type { PdfHighlight } from '@huabu/shared';
 
 /** Normalized rectangle: all values 0–1, relative to the page. */

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Unit tests for snapEngine — alignment & equal-spacing snap math.
  *

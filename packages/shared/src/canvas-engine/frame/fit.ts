@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Frame Fit - Frame policy over generic Container content-hug geometry.
  */

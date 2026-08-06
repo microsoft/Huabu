@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `NewChatMenu` — the split-button "new chat" control in the ChatPanel
  * header. Replaces the previous `ModeSelector` whose dropdown only

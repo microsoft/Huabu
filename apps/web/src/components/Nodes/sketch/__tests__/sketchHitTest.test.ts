@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Tests for `findSketchStrokesInPolygon` — the Stage 2 stroke-level
  * lasso hit-test. Mirrors the store-mock pattern in `sketchMerge.test.ts`:

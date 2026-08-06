@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Execution-layer types for command batching, validation, undo, and tracing.
  */

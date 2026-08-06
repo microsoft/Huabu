@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import clsx from 'clsx';
 import { Check, ChevronDown } from 'lucide-react';
 import { Fragment, useCallback, useRef, useState, type ReactNode } from 'react';

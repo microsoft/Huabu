@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Tests for `assignNodeZIndices` / `edgeZIndex` — the explicit
  * manual-mode stacking derivation that makes forest/array order the sole

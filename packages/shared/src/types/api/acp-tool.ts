@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Runtime zod schemas for ACP wire payloads. Server-side validators
  * paired with the type-only re-exports in `../agent/acp-tool.ts`;

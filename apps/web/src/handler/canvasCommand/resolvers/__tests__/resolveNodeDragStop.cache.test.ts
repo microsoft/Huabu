@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Verifies that `resolveNodeDragStop` honours the per-node
  * `cachedDecisions` snapshot from the live preview tick verbatim —

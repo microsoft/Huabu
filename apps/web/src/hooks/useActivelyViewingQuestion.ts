@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * "Actively viewing" a question's conversation means BOTH:
  *   1. its thread is the one the chat panel is currently pointed at

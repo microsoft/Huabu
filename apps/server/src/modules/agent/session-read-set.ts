@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Session-scoped read-sets, keyed by conversation `threadId`. Each maps
  * `nodeId → authored-content rev` — the revs the agent has actually

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Command-backed (`acp-command`) Profile form — the add/edit form plus its
  * supporting command-assembly helpers. Rendered inside {@link AgentProfileEditor}

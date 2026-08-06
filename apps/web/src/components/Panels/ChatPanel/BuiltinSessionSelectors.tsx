@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Per-thread capability selectors for the **built-in** (pi-ai) agent — the
  * built-in counterpart of {@link AcpSessionSelectors}. Renders the same pill

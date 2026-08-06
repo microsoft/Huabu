@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `runWebPostEffects` preprocessing fan-out (the P0.5 label-churn fix).
  *

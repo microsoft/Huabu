@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { noop, type CommandDefinition } from './types.js';
 import { getFrameSizing } from '../frame/sizing.js';
 import { materializeAutoHeight } from '../height/materialize.js';

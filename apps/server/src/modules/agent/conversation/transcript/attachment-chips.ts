@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Attachment chips — which of a turn's attachments the user sees as a
  * chip in the composer, and the slim shape they are projected to for

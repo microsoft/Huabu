@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import {
   PORTAL_BOTTOM_PADDING,
   PORTAL_DEFAULT_HEIGHT,

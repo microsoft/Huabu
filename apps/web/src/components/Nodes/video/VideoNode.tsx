@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { PlayCircle, Fullscreen, Play } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';

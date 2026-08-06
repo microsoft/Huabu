@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * End-to-end tests for the artifact route (`/api/canvas/:canvasId/artifact/*`).
  *

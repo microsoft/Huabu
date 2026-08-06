@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `AcpSessionSelectors` — the dropdown "pills" rendered next to the
  * NewChatMenu when the active thread is delegated to an external agent

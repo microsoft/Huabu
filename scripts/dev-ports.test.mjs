@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import net from 'node:net';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

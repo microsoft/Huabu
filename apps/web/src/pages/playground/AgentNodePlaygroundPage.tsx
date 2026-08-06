@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { AlertTriangle, Eye, Loader, ShieldQuestion, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 

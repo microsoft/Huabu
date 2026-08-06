@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 export { default as resolveAddNodes } from './resolveAddNodes';
 export { default as resolveDisconnectEdge } from './resolveDisconnectEdge';
 export { default as resolveGroupRectIntoFrame } from './resolveGroupRectIntoFrame';

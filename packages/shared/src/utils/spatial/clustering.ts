@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 // ── Clustering, reading order, arrangement, summary ──────────────
 //
 // Higher-level spatial reasoning built on geometry + SpatialNode:

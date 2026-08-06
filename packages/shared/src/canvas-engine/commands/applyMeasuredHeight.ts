@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `APPLY_MEASURED_HEIGHT` — write a completed content measurement onto an
  * auto-height node.

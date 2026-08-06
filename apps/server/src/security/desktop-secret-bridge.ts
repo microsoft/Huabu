@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { randomUUID } from 'node:crypto';
 
 import type { SecretStore } from './secret-store-types.js';

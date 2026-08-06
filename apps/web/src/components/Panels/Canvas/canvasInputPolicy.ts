@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import type { EffectiveInputMode } from '@/store/toolStore';
 
 export type CanvasTool = 'select' | 'pan' | 'lasso';

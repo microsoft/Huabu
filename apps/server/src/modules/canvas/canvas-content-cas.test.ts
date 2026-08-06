@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Tests for the per-node content endpoint's optimistic-concurrency
  * (compare-and-swap) guard: `PUT /api/canvas/:canvasId/nodes/:nodeId/content`

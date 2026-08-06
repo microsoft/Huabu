@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Inline amber banner shown only when the embedded agentlet daemon is in
  * a known-failed state. Extracted from the old `AcpSettings` so the

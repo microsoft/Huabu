@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Canvas read-only tool handlers.
  * Design doc: docs/architecture/agent-architecture.md

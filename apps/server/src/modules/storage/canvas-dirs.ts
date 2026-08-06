@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Workspace-level canvas directory index.
  * Maps `canvasId` → on-disk directory name. Falls back to the id itself

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `AcpConnectionBadge` — three-state pill summarising the live
  * transport health of the thread's bound external agent.

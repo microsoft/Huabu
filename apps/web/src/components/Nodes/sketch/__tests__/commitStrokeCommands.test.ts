@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Tests for `commitStrokeCommands` — the shared snapshot-folding seam
  * that guarantees a stroke move / erase (and the mixed variants that fold

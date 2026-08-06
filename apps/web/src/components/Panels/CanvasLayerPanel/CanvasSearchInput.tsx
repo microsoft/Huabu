@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Canvas-wide search input, hosted at the top of the left layer
  * panel and only mounted while `panelStore.isSearchOpen` is true.

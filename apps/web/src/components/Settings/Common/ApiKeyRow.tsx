@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { Check, Key } from 'lucide-react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';

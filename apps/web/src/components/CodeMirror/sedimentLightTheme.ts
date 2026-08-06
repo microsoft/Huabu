@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * CodeMirror 6 theme that maps onto Sediment's design tokens
  * (`apps/web/src/index.css` `:root`).

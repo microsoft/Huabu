@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { getQuestionNodeStatus } from '@huabu/shared';
 
 import { postCanvasExecute } from '@/api/canvas';

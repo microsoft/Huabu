@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import type { NodeRef } from './node-ref.js';
 import type { WireCanvasNode, WireSelectionNode } from '../api/agent.js';
 

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import React, { useMemo } from 'react';
 
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';

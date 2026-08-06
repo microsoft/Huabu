@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Geometry-edit resolution for `SET_NODE_GEOMETRY`.
  *

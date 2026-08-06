@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import type { ReactFlowInstance, Viewport } from '@xyflow/react';
 
 type NodeBounds = {

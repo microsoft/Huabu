@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `BuiltInAgentAvatar` — the built-in ("Huabu") agent's identity mark: a chubby
  * rounded "Huabu star" with a hand-drawn face, in a fixed Huabu blue. It belongs

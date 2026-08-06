@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * ChangeReviewCard — the "what the agent changed" review card shown
  * above the chat input for a conversation thread (built-in chat, question

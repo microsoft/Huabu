@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 type CryptoLike = {
   randomUUID?: () => string;
   getRandomValues?: (array: Uint8Array) => Uint8Array;

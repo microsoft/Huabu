@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Legacy PM-JSON block fingerprinter for the Milkdown editor.
  *

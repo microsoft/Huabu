@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /** ACP permission history record + the single actionable composer tray. */
 
 import { ShieldQuestion } from 'lucide-react';

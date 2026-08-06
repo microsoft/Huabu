@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { describe, expect, it } from 'vitest';
 
 import { getStructuredFrameGutterPlan } from '@huabu/shared/canvas-engine';

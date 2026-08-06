@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { SketchSizePicker } from './SketchSizePicker';
 
 import type { SketchSizePresets } from '@/store/toolStore';

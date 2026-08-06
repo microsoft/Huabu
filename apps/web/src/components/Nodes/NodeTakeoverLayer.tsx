@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useInternalNode, useStore } from '@xyflow/react';
 import { memo, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';

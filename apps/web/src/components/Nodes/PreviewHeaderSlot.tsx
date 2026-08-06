@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Slot mechanism that lets a preview component inject controls into
  * the chrome of its hosting panel (currently `ExpandedNodePanel`).

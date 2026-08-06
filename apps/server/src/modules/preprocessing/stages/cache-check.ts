@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Stage 1.5 — Cache short-circuit (web / pdf only).
  *

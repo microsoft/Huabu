@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 export {
   NODE_REF_DEFAULT_HEIGHT,
   NODE_REF_DEFAULT_WIDTH,

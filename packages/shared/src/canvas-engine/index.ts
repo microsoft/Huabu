@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @huabu/shared/canvas-engine — pure, server-portable canvas command engine.
  *

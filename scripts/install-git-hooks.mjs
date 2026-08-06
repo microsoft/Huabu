@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 // Installs optional local git hooks by generating them into the repository's
 // .git/hooks directory. The hook scripts are NOT tracked in the repository
 // tree, so they never get pushed (some upstream rulesets forbid committing

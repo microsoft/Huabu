@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import type { Edge } from '@xyflow/react';
 
 export function getEdgeIdsBetweenSelectedNodes(

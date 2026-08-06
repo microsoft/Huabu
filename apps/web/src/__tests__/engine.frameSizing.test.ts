@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Executor frame-sizing tests — verifies per-frame `data.sizing`
  *   gates the end-of-batch `fitFrames` pass independently of any

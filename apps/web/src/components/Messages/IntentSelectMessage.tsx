@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { ChevronDown, Sprout } from 'lucide-react';
 import { useCallback, useState } from 'react';
 

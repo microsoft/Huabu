@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Host-CLI detection hook shared by the External Agents editor forms.
  *

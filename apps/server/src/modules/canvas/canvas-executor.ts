@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Headless canvas executor — server-side runner for `CanvasCommand` batches.
  *

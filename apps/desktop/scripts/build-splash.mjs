@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Generate `dist/splash.html` — the page shown by the startup splash window.
  *

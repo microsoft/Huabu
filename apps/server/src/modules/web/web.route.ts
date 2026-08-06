@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 export const PORTAL_DEFAULT_WIDTH = 360;
 export const PORTAL_DEFAULT_HEIGHT = 240;
 export const PORTAL_HEADER_INSET = 64;

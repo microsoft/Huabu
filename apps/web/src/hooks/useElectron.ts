@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Detect whether the renderer is hosted inside the Sediment Electron
  * shell, and access the small set of constants the preload script

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { apiFetch } from './_client';
 import { routes } from './_routes';
 import { getElectronBridge } from '../hooks/useElectron';

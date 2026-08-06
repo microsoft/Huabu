@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { FloatingDelayGroup } from '@floating-ui/react';
 import {
   createContext,

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Shared sandbox + filesystem primitives for canvas-scoped tools.
  *

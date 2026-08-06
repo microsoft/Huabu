@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Tests for geometry seeding — how a structured Frame reads a
  * layout it did not produce.

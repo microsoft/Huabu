@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { noop, type CommandDefinition } from './types.js';
 import { getInternalEdgeFrameIds } from '../utils/edge.js';
 

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Streaming NDJSON client for `POST /api/canvas/:canvasId/search`.
  *

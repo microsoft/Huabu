@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `useInternalSlashCommands` — fetch and cache the user-invokable
  * skill catalogue for the active **internal**-bound thread.

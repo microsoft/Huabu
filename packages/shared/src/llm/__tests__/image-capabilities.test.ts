@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Tests for the image-capability registry — the static metadata
  * the server uses to validate `generate_image` args and the web

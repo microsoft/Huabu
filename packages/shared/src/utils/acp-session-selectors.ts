@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Normalisation of an ACP session-meta snapshot into a single, flat list
  * of renderable selector descriptors.

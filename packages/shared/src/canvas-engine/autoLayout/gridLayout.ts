@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Frame `column` / `row` masonry layouts and the `grid`
  * row-aligned layout.

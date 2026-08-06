@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 const SEDIMENT_NODES_KEY = '__sediment_nodes__';
 const SEDIMENT_EDGES_KEY = '__sediment_edges__';
 const SEDIMENT_CANVAS_ID_KEY = '__sediment_canvas_id__';

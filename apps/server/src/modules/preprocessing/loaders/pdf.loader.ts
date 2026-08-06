@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { readFile } from 'node:fs/promises';
 
 import pdf2mdImport from '@opendocsg/pdf2md';

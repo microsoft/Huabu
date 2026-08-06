@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { X } from 'lucide-react';
 import { Fragment, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';

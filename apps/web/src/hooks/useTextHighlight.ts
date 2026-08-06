@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Paint highlights over text nodes inside a container without mutating
  * the DOM, using the CSS Custom Highlight API.

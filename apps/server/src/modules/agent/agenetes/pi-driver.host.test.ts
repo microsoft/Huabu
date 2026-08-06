@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { resolveModelForRoleAsync, ensureApiKeyForRole } = vi.hoisted(() => ({

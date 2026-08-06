@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Shared utilities for detecting media types and handling file/URL classification.
  * Used by CanvasToolbar (link/file upload) and Canvas (paste/drop).

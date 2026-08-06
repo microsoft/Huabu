@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * ACP rich-update types re-exported from `@agentclientprotocol/sdk`
  * under `Acp*` aliases. Type-only — zero runtime cost; safe for the

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * A single consistent presentation for an immutable Profile field shown in
  * the edit editors (Agent, launch command, harness, working directory).

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { describe, expect, it } from 'vitest';
 
 import { agentCanvasCommandSchema } from '../../types/api/space-operations.js';

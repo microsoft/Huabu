@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
 

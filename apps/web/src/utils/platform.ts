@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Whether the current browser is running on macOS / iOS. Cached at module
  * load — the platform does not change at runtime, so there's no benefit to

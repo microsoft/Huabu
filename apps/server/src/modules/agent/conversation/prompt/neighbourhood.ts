@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `<canvas_neighbourhood>` section renderer — the anchor node's
  * surroundings.

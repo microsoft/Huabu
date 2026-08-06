@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Single-call hook that bundles everything a text-bearing canvas node
  * needs in order to render a `<TextNodeBody>`:

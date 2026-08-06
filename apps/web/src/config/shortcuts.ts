@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { isElectron } from '@/hooks/useElectron';
 import { formatShortcut, isMac } from '@/utils/platform';
 

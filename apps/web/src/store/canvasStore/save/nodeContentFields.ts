@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Shared constants describing which node fields participate in the
  * per-node markdown sidecar pipeline. Imported by both:

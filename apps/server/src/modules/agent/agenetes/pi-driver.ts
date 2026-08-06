@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Huabu adapter for the standard `@agenetes/pi-driver`.
  *

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { describe, it, expect, vi } from 'vitest';
 
 import { HEIGHT_LAYOUT_VERSION } from '@huabu/shared/canvas-engine';

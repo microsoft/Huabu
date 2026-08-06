@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Provenance overlay (Phase 4) — hover-triggered word-level diff
  * popover for AI-edited blocks AND tombstone markers for AI-deleted

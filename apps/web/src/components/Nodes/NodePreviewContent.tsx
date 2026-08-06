@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { NodePreviews } from '@/components/Nodes/previews';
 
 import { AiSummaryBanner } from './AiSummaryBanner';

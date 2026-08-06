@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { test, expect, type Page } from '@playwright/test';
 
 import { openNewCanvas, paneCenter } from './helpers';

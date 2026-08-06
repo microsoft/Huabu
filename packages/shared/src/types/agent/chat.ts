@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import type { AssistantHistoryPart } from './assistant-parts.js';
 import type { IntentCandidate } from './intent.js';
 

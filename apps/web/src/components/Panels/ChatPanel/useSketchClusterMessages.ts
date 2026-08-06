@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Synthesize a ChatMessage[] timeline for a sketch cluster.
  *

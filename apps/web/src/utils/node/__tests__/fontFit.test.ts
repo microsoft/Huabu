@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * The frame-resize cascade must derive a child's font from the SAME
  * insets the node renders and measures with. It used to add the node

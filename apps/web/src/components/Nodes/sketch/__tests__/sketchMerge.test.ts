@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Tests for sketchMerge — pure-geometry helpers used by
  * `SketchOverlay` to fold consecutive strokes into one node and to

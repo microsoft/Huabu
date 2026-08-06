@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { agentBindingSchema, getQuestionNodeStatus } from '@huabu/shared';
 
 import { describeNode } from './node-prompt.js';

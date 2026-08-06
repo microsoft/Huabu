@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Verifies `resolveMoveSketchStrokesToRegion` (Stage 4B stroke transfer):
  *  - SPLIT to blank canvas: source region reflows around survivors, and a

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `useUnifiedAgents` — data layer behind the single "External Agents"
  * Settings tab.

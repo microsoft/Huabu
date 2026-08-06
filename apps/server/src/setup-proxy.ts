@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Global proxy setup — must be imported before any other modules that use fetch.
  *

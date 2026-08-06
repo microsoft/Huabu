@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Read-only Milkdown surface for AI message bubbles and collapsed note
  * previews.

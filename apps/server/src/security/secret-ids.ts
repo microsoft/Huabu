@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 export const SECRET_IDS = {
   imageApiKey: 'llm:image:api-key',
   tavilyApiKey: 'integration:tavily:api-key',

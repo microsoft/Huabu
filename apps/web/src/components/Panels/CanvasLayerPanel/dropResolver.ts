@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Pure drop-intent resolution for the layer panel's DnD layer.
  *

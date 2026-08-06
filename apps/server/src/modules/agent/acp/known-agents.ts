@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Data catalogue of the ACP-capable agents the Settings UI knows how to
  * launch. Kept separate from the host probing logic in

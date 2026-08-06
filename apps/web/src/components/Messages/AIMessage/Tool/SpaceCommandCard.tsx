@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * SpaceCommandCard — display-only renderer for the `space_commands`
  * internal tool. Lists the Space mutations the agent performed. Revert

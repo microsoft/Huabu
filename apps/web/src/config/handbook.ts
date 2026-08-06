@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 export function validateHandbookUrl(
   configuredUrl: string,
   isProduction: boolean,

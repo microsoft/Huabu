@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Per-canvas storage facade. One instance per `<canvasDir>/`.
  */

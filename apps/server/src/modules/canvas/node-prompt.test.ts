@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Unit tests for the converged node → context assembly
  * ({@link describeNode} / {@link nodeLabel} / {@link renderNodes}).

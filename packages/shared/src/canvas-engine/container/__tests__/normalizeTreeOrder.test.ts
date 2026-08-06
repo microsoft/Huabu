@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Tests for `normalizeTreeOrder` — the tree-order invariant enforcer
  * React Flow depends on: parents must precede their children in the array,

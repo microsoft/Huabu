@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { PenLine, Send, X } from 'lucide-react';
 import React, {
   useCallback,

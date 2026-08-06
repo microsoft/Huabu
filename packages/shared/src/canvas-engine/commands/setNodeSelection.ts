@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { noop } from './types.js';
 
 import type { CommandDefinition } from './types.js';

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { createId, resolveAccent } from '@huabu/shared';

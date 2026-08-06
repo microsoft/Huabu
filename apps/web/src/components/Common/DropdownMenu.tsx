@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { ChevronRight } from 'lucide-react';
 import {
   cloneElement,

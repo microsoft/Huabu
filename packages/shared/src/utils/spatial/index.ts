@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 // ── Spatial reasoning utilities ──────────────────────────────────
 //
 // Pure spatial primitives + queries on canvas nodes.

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { FolderOpen, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';

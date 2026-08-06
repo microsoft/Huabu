@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Terminal-style block shared by assistant tool cards (`ToolCallCard`,
  * `PermissionCard`). Renders the command on a prompt line and, when

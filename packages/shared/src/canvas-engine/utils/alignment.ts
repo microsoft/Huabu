@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { getLayoutNodeSize } from './nodeSizes.js';
 import {
   getAbsolutePosition,

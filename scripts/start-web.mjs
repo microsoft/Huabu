@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Start the production-style standalone web app.
  *

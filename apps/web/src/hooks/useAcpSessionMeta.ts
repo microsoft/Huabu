@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `useAcpSessionMeta` — fetch and cache the agent-published session
  * metadata (modes / models / config options / info / usage) for the

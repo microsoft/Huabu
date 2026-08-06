@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { clsx } from 'clsx';
 import { Download, Fullscreen } from 'lucide-react';
 import { memo, useCallback } from 'react';

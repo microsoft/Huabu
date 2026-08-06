@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * The TCP port the host HTTP server bound to, captured by an
  * `onListen` hook in {@link ./app.ts}.

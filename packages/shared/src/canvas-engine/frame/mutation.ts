@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Frame Mutation - Operations that produce new nodes/edges arrays
  *

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Layout-related constants and helpers shared between the canvas-engine
  * (auto-layout, frame fitting) and web-side rendering (background grid,

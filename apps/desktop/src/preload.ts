@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Preload script — runs in an isolated context with access to both
  * the DOM and a limited set of Node.js APIs.

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { preprocessNodeIfNeeded } = vi.hoisted(() => ({

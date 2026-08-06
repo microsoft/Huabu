@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { isPanelTarget } from '@/components/Panels/Canvas/canvasInputPolicy';
 import { getDragActivationDistance } from '@/handler/canvasGestureSession';
 import { nodeIdAtScreenPoint } from '@/handler/canvasNodeAtPoint';

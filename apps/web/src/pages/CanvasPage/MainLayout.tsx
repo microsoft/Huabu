@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { usePanelStore } from '@/store/panelStore';

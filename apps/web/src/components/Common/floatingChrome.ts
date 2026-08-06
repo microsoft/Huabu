@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * DOM contract for chrome that is portalled out of the surface it
  * belongs to — floating toolbars, their colour pickers, anchored

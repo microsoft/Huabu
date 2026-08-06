@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Max characters of the first message shown on a question node while the
  * generated label is still pending. Bounds the auto-sized footprint so a very

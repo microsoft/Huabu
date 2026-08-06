@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `GET  /api/acp/agentlet`         — health snapshot of the embedded agentlet
  * `POST /api/acp/agentlet/restart` — force-restart the agentlet supervisor

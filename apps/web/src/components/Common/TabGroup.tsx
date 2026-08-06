@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { Button, type ButtonProps } from './Button';
 import { cn } from './cn';
 

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 

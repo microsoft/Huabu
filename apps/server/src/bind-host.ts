@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Resolve the network interface to bind on, defaulting to loopback so a
  * fresh install is never silently exposed to the local network.

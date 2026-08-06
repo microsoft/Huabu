@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { extractTitleFromText } from '../utils.js';
 
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';

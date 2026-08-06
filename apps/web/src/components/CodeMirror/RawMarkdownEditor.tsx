@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Controlled CodeMirror 6 editor specialised for raw Markdown source.
  *

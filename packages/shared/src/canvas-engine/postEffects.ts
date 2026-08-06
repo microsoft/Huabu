@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Shared post-commit graph cleanups that BOTH hosts (web + server) must
  * run after the executor's write result is committed.

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Integrations routes — read/update third-party API keys (Tavily,
  * RapidAPI). Mounted under `/api/integrations`.

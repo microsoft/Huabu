@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { ArrowUp, Square, X } from 'lucide-react';
 import {
   useCallback,

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Subscribe to the desktop auto-update lifecycle exposed by the Electron
  * main process over the `electronBridge.updater` bridge.

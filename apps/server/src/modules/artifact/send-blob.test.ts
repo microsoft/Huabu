@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { Readable } from 'node:stream';
 
 import Fastify from 'fastify';

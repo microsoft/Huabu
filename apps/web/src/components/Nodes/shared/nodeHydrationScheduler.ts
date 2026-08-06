@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Generic per-frame hydration scheduler for heavy node sub-trees.
  *

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Manifest-backed (Agent Team template) Profile form — one component that
  * handles both creating a Profile from a bundled template and editing an

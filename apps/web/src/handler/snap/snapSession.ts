@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Gesture-scoped state for the smart-snap engine (covers both drag
  * and single-node resize).

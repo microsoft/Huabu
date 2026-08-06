@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Shared building blocks for the agent picker dropdown, used by both
  * `NewChatMenu` (header split-button) and `AgentSelector` (inline chip).

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Tests focused on `AcpAgentClient` wire-level behaviour that cannot be
  * easily covered by integration tests.

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Dismiss an open overlay (popover, picker, menu) with the Escape key.
  *

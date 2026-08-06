@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 // Full workspace reset: removes build artifacts AND every package's
 // node_modules (root + all workspace packages). Requires a reinstall
 // (`pnpm install`) afterwards.

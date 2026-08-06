@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Dev orchestrator for the Electron desktop shell with full-stack HMR.
  *

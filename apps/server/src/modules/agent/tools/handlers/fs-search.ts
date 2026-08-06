@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Filesystem tools — grep, find, ls — scoped to the current canvas.
  *

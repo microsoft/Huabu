@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Filesystem-safe naming primitives. Pure functions; no I/O.
  *

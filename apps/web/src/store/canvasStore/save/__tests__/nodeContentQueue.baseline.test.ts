@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Baseline (optimistic-concurrency) lifecycle for the per-node content
  * queue. The `expectRev` a write carries must:

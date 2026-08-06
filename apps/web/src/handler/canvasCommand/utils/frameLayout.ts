@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Frame layout helpers — read the layout config persisted on a
  * frame node and translate the pure-compute grid layout results from

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `AgentIconPicker` — a compact popover that lets the user choose the avatar
  * (shape + color) for a single external agent. The trigger shows the current

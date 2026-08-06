@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Tests for pointer-aware enter / exit rules used by drag-and-drop
  * resolution and the live drag preview. Locks the additional pointer

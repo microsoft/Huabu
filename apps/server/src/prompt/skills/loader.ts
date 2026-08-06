@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Skill loader — markdown SKILL.md files as the single source of truth.
  *

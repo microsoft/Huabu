@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 

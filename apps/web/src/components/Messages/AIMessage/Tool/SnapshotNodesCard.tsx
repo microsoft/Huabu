@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * SnapshotNodesCard — disclosure-shaped renderer for the
  * `snapshot_nodes` tool. The collapsed row shows a single self-describing

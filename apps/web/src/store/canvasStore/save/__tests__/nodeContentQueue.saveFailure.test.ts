@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Save-failure surfacing for the per-node content queue (P0.5).
  *

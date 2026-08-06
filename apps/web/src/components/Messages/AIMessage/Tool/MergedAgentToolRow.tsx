@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * MergedAgentToolRow — collapsible row that merges N adjacent calls
  * to the same built-in agent tool (`read`, `grep`, `find`, `ls`,

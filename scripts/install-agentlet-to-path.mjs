@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * postinstall hook — make the `bin/` wrappers (`agentlet` and
  * `start-agentlet-daemon`) discoverable on the user's PATH so first-time

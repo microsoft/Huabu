@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * WebSearchToolDisplay — collapsible source-list rendering for the
  * `web_search` internal tool. Each search result becomes a draggable

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useInternalNode, useStore, useViewport } from '@xyflow/react';
 import clsx from 'clsx';
 import { Columns3, Grid2x2, Move, Rows3, Ungroup } from 'lucide-react';

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useReactFlow } from '@xyflow/react';
 import { useCallback, useRef } from 'react';
 

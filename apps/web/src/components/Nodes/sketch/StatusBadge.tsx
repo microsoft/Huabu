@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * StatusBadge — pill-shaped status indicator for the sketch processing
  * overlay. Colocated with its only rendering call site

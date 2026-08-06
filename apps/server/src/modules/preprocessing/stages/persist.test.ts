@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Persist-stage authored-body CAS guard (data-loss prevention).
  *

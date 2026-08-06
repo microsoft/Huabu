@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Unified surface for canvas nodes whose body is "a single auto-sizing
  * textarea" (TextNode, QuestionNode, ...).

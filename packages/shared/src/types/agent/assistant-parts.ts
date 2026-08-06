@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Assistant message parts — the data model the chat pipeline uses to
  * render an assistant turn as an ordered sequence of segments

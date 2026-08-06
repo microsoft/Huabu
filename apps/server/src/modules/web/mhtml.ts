@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Minimal MHTML (MIME HTML / RFC 2557) writer + reader.
  *

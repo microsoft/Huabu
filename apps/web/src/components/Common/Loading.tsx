@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import Lottie from 'lottie-react';
 import { Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';

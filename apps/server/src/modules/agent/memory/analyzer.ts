@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Memory analyzer — assemble context, call the LLM sub-agent, dispatch
  * writes via the memory tool.

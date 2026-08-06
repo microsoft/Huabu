@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Height contract of the text measurement used by TextNode / QuestionNode.
  *

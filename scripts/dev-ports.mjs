@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import net from 'node:net';
 
 const DEFAULT_SCAN_RANGE = 50;

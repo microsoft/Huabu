@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * One-shot `agenetes-v1` to `agenetes-v2` thread-store migration.
  *

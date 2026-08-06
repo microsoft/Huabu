@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { memo, useMemo } from 'react';
 
 import { resolveAccent } from '@huabu/shared';

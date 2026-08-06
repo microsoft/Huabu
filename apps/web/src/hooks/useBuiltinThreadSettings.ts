@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Per-thread capability selection for the built-in (pi-ai) agent: fetches
  * the active provider's models (capability) and the thread's persisted

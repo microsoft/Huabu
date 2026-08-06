@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * AssistantDisclosure — shared shell for the collapsible one-line
  * cards that appear inside an assistant turn (thinking summary,

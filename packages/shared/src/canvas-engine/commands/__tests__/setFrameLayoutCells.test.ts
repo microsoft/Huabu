@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file `SET_FRAME_LAYOUT`'s `cells` parameter.
  *

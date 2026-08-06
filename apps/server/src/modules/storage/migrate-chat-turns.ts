@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Legacy chat-turn migration (M6.9 row 2) — the second hop of the chat
  * history migration chain.

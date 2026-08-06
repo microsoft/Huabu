@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Tests for the `{{include:<rel>}}` template directive on `renderTemplate`.
  *

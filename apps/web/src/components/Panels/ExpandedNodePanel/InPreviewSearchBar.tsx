@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * In-preview find bar — the search surface for `ExpandedNodePanel`.
  *

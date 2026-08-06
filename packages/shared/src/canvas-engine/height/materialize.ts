@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * @file Materialization — turning a stored auto-height hint into concrete
  * geometry.

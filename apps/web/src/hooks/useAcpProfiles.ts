@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `useAcpProfiles` — Subscribe to the external-agent profiles list
  * with on-demand refresh.

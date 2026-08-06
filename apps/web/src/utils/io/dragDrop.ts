@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { normalizeOrigin } from '@huabu/shared';
 
 import type { NodeOrigin } from '@huabu/shared';

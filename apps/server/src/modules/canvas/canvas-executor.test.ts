@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Compare-and-swap (optimistic concurrency) tests for the headless
  * executor's `MERGE_NODE_DATA` content path.

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { useCallback, useMemo, useState } from 'react';
 
 import useCanvasStore from '@/store/canvasStore';

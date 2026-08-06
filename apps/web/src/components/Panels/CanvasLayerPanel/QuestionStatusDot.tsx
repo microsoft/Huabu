@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * QuestionStatusDot — small ambient indicator overlaid on a question
  * node's row icon in the Layer Panel.

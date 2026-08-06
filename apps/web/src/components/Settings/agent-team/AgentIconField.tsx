@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * `AgentIconField` — the labelled "Icon" settings row (title + hint + avatar
  * picker) shared by every Profile create/edit form so the row is defined once.

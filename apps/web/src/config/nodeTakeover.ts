@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Zoom-LOD takeover geometry for the question node's agent mark.
  *

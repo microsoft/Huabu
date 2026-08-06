@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import clsx from 'clsx';
 import { MessageSquare, Plus, Star } from 'lucide-react';
 import { useCallback, useRef } from 'react';

@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Legacy ACP-session migration (M6.9 row 1) — the removed
  * `acp-sessions.json` store → the Agenetes `threads.json` `ThreadStore`.

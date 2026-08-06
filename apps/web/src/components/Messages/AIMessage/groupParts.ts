@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * Group consecutive `kind:'tool'` segments in an assistant message
  * so the renderer can emit a single "merged row" per same-kind run.

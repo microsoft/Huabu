@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /**
  * The reserved `selections` keys are declared twice, on either side of a
  * boundary that cannot be crossed: `@agenetes/acp-driver` is a subtree
