@@ -185,7 +185,7 @@ export default typescriptEslint.config(
       'apps/server/src/**/*.{ts,tsx}',
       'apps/server/src/**/*.{js,mjs,cjs}',
       'apps/desktop/src/**/*.{ts,tsx}',
-      'apps/desktop/scripts/**/*.{js,mjs,cjs}',
+      'apps/*/scripts/**/*.{js,mjs,cjs}',
       'packages/shared/src/**/*.{ts,tsx}',
       'external/agenetes/packages/*/src/**/*.{ts,tsx}',
       'vite.config.ts',
