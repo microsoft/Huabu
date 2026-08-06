@@ -8,13 +8,13 @@
 // sessionId). See docs/proposals/layered-architecture.md §5 / §7 (M1).
 //
 // Design rules for this package (why it lives in the agenetes subtree,
-// not in @sediment/shared):
+// not in @huabu/shared):
 //   - It is owned by L2 and consumed by L1 — the same relationship
 //     @agentlet/protocol has with its clients. A second L2 implementation
 //     must be able to satisfy these contracts unchanged.
 //   - It must stay host-agnostic: it depends ONLY on `zod` (+ the ACP
 //     SDK for tool shapes, added when those contracts land). It must not
-//     import `@sediment/shared` or any canvas/Huabu-specific type.
+//     import `@huabu/shared` or any canvas/Huabu-specific type.
 //   - Every contract is a zod schema; the TS type is derived via
 //     `z.infer` so the validator and the type can never drift. Inbound
 //     (L1->L2) messages are validated with `safeParse` at the seam;
@@ -157,6 +157,6 @@ export type { AgentStateSnapshot } from './agent-state.js';
 // Agentlet daemon status (M4): the wire snapshot the L2 control plane
 // surfaces about the single embedded agentlet it supervises. Browser-safe
 // (zod-only) so L1's UI can consume it transitively through
-// @sediment/shared without depending on the fastify-bound host package.
+// @huabu/shared without depending on the fastify-bound host package.
 export { agentletStatusSchema } from './agentlet-status.js';
 export type { AgentletStatus } from './agentlet-status.js';

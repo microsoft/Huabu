@@ -22,7 +22,7 @@ import { Loading } from '../../Common/Loading';
 
 import type { AreaCapturedEvent, NormalizedRect } from './PDFPageWithOverlay';
 import type { PreviewComponentProps } from '../note/NotePreview';
-import type { ChatAttachment, PdfHighlight } from '@sediment/shared';
+import type { ChatAttachment, PdfHighlight } from '@huabu/shared';
 
 /**
  * When CSS scale-up exceeds this ratio the canvas is re-rendered at the

@@ -25,7 +25,7 @@
  *   (`NOTE_CONTENT_HOST_CLASS`), so the two cannot silently diverge.
  */
 
-import { getHeightRefWidth } from '@sediment/shared/canvas-engine';
+import { getHeightRefWidth } from '@huabu/shared/canvas-engine';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import {

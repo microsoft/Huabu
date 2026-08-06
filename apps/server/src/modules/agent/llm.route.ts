@@ -5,7 +5,7 @@ import {
   llmUtilityConfigUpdateSchema,
   oauthProviderBodySchema,
   oauthStatusQuerySchema,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import {
   getAvailableProviders,
@@ -42,7 +42,7 @@ import type {
   OAuthProviderBody,
   OAuthStatusQuery,
   OAuthStatusResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 const llmRoutes: FastifyPluginAsync = async (app) => {

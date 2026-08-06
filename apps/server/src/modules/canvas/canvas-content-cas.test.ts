@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import canvasRoutes from './canvas.route.js';
 import {

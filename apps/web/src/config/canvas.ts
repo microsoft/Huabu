@@ -8,9 +8,9 @@
 
 // Layout-grid primitives are owned by the shared canvas-engine so that
 // the headless executor and the web renderer agree on snapping & padding.
-export { GRID_SIZE, snapToGrid } from '@sediment/shared/canvas-engine';
+export { GRID_SIZE, snapToGrid } from '@huabu/shared/canvas-engine';
 
-import { GRID_SIZE } from '@sediment/shared/canvas-engine';
+import { GRID_SIZE } from '@huabu/shared/canvas-engine';
 
 /** Convenience tuple expected by React Flow's `snapGrid` prop. */
 export const SNAP_GRID: [number, number] = [GRID_SIZE, GRID_SIZE];

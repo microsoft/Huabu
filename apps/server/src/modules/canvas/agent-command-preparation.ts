@@ -2,7 +2,7 @@ import type {
   AgentOperationCommand,
   CanvasCommand,
   NodeOrigin,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 export interface PrepareAgentCommandsOptions {
   origin?: NodeOrigin;

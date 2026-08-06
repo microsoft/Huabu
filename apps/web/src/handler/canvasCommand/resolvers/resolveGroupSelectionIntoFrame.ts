@@ -2,8 +2,8 @@ import {
   createId,
   type CanvasCommand,
   type CanvasNodeId,
-} from '@sediment/shared';
-import { frameNodes, type NestableNode } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import { frameNodes, type NestableNode } from '@huabu/shared/canvas-engine';
 
 import { getSelectedNodeIds } from '../utils';
 

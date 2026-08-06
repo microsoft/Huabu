@@ -23,7 +23,7 @@
 import './AgentIcon.css';
 
 import type { AgentIconMotion } from './AgentIcon';
-import type { AgentMode } from '@sediment/shared';
+import type { AgentMode } from '@huabu/shared';
 
 /** Huabu-blue star fill. */
 const STAR_FILL = '#00A4EF';

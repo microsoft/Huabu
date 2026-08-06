@@ -23,7 +23,7 @@
 import { clsx } from 'clsx';
 import { forwardRef, type CSSProperties, type ReactNode } from 'react';
 
-import { NODE_SHELL_INSET } from '@sediment/shared/canvas-engine';
+import { NODE_SHELL_INSET } from '@huabu/shared/canvas-engine';
 
 /** Border (px) the node shell adds on each side. */
 const SHELL_BORDER = NODE_SHELL_INSET / 2;

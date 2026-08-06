@@ -15,14 +15,14 @@ import { memo, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
-import { createId, type EdgeStyle } from '@sediment/shared';
+import { createId, type EdgeStyle } from '@huabu/shared';
 import {
   createAbsolutePositionGetter,
   indexById,
   type NestableNode,
   getNodeDefaultSize,
   getNodeSize,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { cn } from '@/components/Common/cn.ts';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';

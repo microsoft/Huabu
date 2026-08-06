@@ -8,7 +8,7 @@ import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 
 /**
  * File-type hints accepted by the office loader. Mirrors `OfficeFormat`
- * in `@sediment/shared` plus the `'office'` umbrella alias used by the
+ * in `@huabu/shared` plus the `'office'` umbrella alias used by the
  * extract stage when a specific format has not been resolved yet.
  */
 const OFFICE_SOURCE_TYPES = new Set<string>(['office', 'docx', 'pptx', 'xlsx']);

@@ -27,7 +27,7 @@ import type {
   CanvasSearchEvent,
   CanvasSearchMatch,
   CanvasSearchRequest,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /** Where the overlay is mounted. `null` = nothing open. */
 export type SearchScope =

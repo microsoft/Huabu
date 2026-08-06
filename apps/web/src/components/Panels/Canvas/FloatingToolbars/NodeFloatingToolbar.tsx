@@ -9,8 +9,8 @@ import {
   type FrameNodeData,
   type FrameRefNodeData,
   type NodeRefNodeData,
-} from '@sediment/shared';
-import { isAlwaysAutoHeightNodeType } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import { isAlwaysAutoHeightNodeType } from '@huabu/shared/canvas-engine';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {

@@ -2,7 +2,7 @@
  * Legacy PM-JSON block fingerprinter for the Milkdown editor.
  *
  * The host-agnostic provenance algebra (diff / stamp / shift / accept /
- * reject) now lives in `@sediment/shared/canvas-engine`
+ * reject) now lives in `@huabu/shared/canvas-engine`
  * (`provenance/noteProvenance.ts`) so the server can compute provenance
  * authoritatively for AI edits. This module keeps ONLY the ProseMirror-
  * coupled fingerprinter that derives a stable key from a live PM node's
@@ -30,7 +30,7 @@ export {
   findBlockEntry,
   findTombstonesAfter,
   type StampInput,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 /* ------------------------------------------------------------------ */
 /* Snapshot type                                                       */

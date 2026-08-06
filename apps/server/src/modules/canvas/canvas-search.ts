@@ -37,7 +37,7 @@ import {
   type CanvasSearchMatch,
   type CanvasSearchRequest,
   type SearchField,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { agenetes } from '../agent/agenetes/drivers.js';
 import { chatEnvelopeFromSubmission } from '../agent/agenetes/handle.js';

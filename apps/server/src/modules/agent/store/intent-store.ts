@@ -7,7 +7,7 @@
 
 import { getCanvasStore } from '../../storage/index.js';
 
-import type { IntentEpisode } from '@sediment/shared';
+import type { IntentEpisode } from '@huabu/shared';
 
 /**
  * Append (or replace by id) an intent episode for a canvas.

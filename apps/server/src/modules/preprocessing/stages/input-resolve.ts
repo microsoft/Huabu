@@ -14,7 +14,7 @@ import path from 'node:path';
 import { normalizeUrl } from '../utils.js';
 
 import type { ResolvedInput } from '../types.js';
-import type { PreprocessNodeRequest } from '@sediment/shared';
+import type { PreprocessNodeRequest } from '@huabu/shared';
 
 /**
  * Extract a bare filename from an artifact URI such as

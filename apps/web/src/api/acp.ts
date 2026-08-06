@@ -43,7 +43,7 @@ import type {
   SetAcpSessionModeRequest,
   SetAcpSessionModeResponse,
   ExternalAgentRuntimeConfig,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 export type {
   AcpAgentCliInfo,
@@ -72,7 +72,7 @@ export type {
   SetAcpSessionModeRequest,
   SetAcpSessionModeResponse,
   ExternalAgentRuntimeConfig,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 // ── Agent CLI detection ──────────────────────────────────────────────
 

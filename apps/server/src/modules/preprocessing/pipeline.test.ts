@@ -9,7 +9,7 @@ import { runPipeline } from './pipeline.js';
 import type { ProviderManager } from './provider-manager.js';
 import type { CanvasStore } from '../storage/canvas-store.js';
 import type { BlobScope } from '../storage/index.js';
-import type { PreprocessNodeRequest } from '@sediment/shared';
+import type { PreprocessNodeRequest } from '@huabu/shared';
 
 const request: PreprocessNodeRequest = {
   canvasId: 'canvas-test',

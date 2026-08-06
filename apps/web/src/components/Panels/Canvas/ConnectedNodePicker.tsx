@@ -7,7 +7,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { applyEdgeStyle } from '@sediment/shared/canvas-engine';
+import { applyEdgeStyle } from '@huabu/shared/canvas-engine';
 
 import { Button } from '@/components/Common/Button.tsx';
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover.tsx';

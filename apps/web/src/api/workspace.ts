@@ -6,7 +6,7 @@ import type {
   PickFolderResult,
   WorkspaceInfo,
   WorkspacePathRequest,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 // Re-export so call sites can keep importing the wire types from `../api/workspace`.
 export type {
@@ -14,7 +14,7 @@ export type {
   WorkspaceCapabilities,
   WorkspaceInfo,
   WorkspaceMode,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 // ────────────────────────────────────────────────────────────────────
 // Wire format

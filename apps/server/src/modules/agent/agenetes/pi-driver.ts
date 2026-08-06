@@ -10,7 +10,7 @@
  * happen without leaking host singletons into the subtree package.
  */
 
-import { MODEL_ROLES } from '@sediment/shared';
+import { MODEL_ROLES } from '@huabu/shared';
 
 import { materializeHuabuHistory } from './history-replay.js';
 import {
@@ -32,7 +32,7 @@ import type {
 import type { Namespace, WorkloadType } from '@agenetes/protocol';
 import type { ToolExecutionMode } from '@earendil-works/pi-agent-core';
 import type { Message } from '@earendil-works/pi-ai';
-import type { ModelRole, NodeOrigin } from '@sediment/shared';
+import type { ModelRole, NodeOrigin } from '@huabu/shared';
 
 interface HuabuPiHostContext {
   readonly canvasId?: string;

@@ -11,7 +11,7 @@ import {
   createAgentProfileBodySchema,
   patchAgentProfileBodySchema,
   updateAgentTeamMemberConfigsBodySchema,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { isLoopbackRequest } from '../security/peer.js';
 
@@ -25,7 +25,7 @@ import type {
   CreateAgentProfileBody,
   PatchAgentProfileBody,
   UpdateAgentTeamMemberConfigsBody,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
 export type AgentTeamSettingsRegistry = Pick<

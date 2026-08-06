@@ -26,7 +26,7 @@ import { canvasBlobs } from './storage.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasFile } from './canvas-store.js';
-import type { CanvasSummary } from '@sediment/shared';
+import type { CanvasSummary } from '@huabu/shared';
 
 export { CanvasStore } from './canvas-store.js';
 export { getWorldCanvasId, isWorldCanvasId, requireWorldCanvasId };

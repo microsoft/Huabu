@@ -31,7 +31,7 @@
 
 import type { ToolAcpExtension } from '@agenetes/acp-driver';
 import type { Context } from '@earendil-works/pi-ai';
-import type { AcpPlanEntry, ChatAttachment } from '@sediment/shared';
+import type { AcpPlanEntry, ChatAttachment } from '@huabu/shared';
 
 /** A pi-ai message as stored on a legacy {@link Context}. */
 export type LegacyPiMessage = Context['messages'][number];

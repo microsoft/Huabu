@@ -20,7 +20,7 @@
  * See `docs/node-content-api-split.md`.
  */
 
-import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import {
   CanvasConflictError,
@@ -39,7 +39,7 @@ import {
 } from './nodeContentFields';
 import { createPerKeyDebouncer } from './perKeyDebouncer';
 
-import type { PutNodeContentRequest } from '@sediment/shared';
+import type { PutNodeContentRequest } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 /**

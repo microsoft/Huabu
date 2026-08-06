@@ -6,7 +6,7 @@ import {
   DEFAULT_IMAGE_MODEL_FAMILY,
   IMAGE_MODEL_FAMILIES,
   getImageCapabilities,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { Select } from '@/components/Common/Select';
 import { TextInput } from '@/components/Common/TextInput';
@@ -19,7 +19,7 @@ import { useLLMStore } from '@/store/llmStore';
 
 import { useDebouncedSave } from '../utils';
 
-import type { ImageModelFamily, LLMImageConfigUpdate } from '@sediment/shared';
+import type { ImageModelFamily, LLMImageConfigUpdate } from '@huabu/shared';
 
 /** Static family options for the model-family dropdown. */
 const IMAGE_MODEL_FAMILY_OPTIONS = IMAGE_MODEL_FAMILIES.map((f) => ({

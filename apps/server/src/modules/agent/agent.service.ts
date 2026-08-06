@@ -32,7 +32,7 @@ import { type ToolScope } from './tools/index.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type { WorkloadType } from '@agenetes/protocol';
 import type { Context, Message } from '@earendil-works/pi-ai';
-import type { AgentStreamEvent, ModelRole, NodeOrigin } from '@sediment/shared';
+import type { AgentStreamEvent, ModelRole, NodeOrigin } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /**

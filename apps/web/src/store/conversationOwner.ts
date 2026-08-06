@@ -1,4 +1,4 @@
-import { getQuestionNodeStatus } from '@sediment/shared';
+import { getQuestionNodeStatus } from '@huabu/shared';
 
 import { postCanvasExecute } from '@/api/canvas';
 import useCanvasStore from '@/store/canvasStore';
@@ -7,8 +7,8 @@ import type {
   AgentBinding,
   AgentConversationView,
   ResolvedWorldReference,
-} from '@sediment/shared';
-import type { Delta } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import type { Delta } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
 export type ConversationOwnerSource = {

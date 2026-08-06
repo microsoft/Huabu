@@ -40,7 +40,7 @@ import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
 import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { AcpBindingRecipe, AcpTurnOverlay } from '@agenetes/acp-driver';
 import type { AgentProfileSnapshot } from '@agenetes/agent-team';
-import type { AgentStreamEvent } from '@sediment/shared';
+import type { AgentStreamEvent } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 export interface RunAcpAgentOptions {

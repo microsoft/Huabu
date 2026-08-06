@@ -22,7 +22,7 @@ import { NodeRef } from '../../Common/NodeRef';
 import { Tooltip } from '../../Common/Tooltip';
 
 import type { ContextUsageOverride } from './ContextUsageRing';
-import type { AgentMode, AvailableCommand } from '@sediment/shared';
+import type { AgentMode, AvailableCommand } from '@huabu/shared';
 
 interface ChatInputProps {
   value: string;

@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { getAbsolutePosition } from '@sediment/shared/canvas-engine';
+import { getAbsolutePosition } from '@huabu/shared/canvas-engine';
 
 import {
   CanvasCommandRoutingError,
@@ -22,8 +22,8 @@ import { refreshCanvasDirIndex } from '../storage/canvas-dirs.js';
 import { getCanvasStore, resetStorageCache } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
-import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
-import type { NestableNode } from '@sediment/shared/canvas-engine';
+import type { CanvasCommand, CanvasNodeId } from '@huabu/shared';
+import type { NestableNode } from '@huabu/shared/canvas-engine';
 
 let workspace: string;
 

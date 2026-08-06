@@ -9,7 +9,7 @@
  * `canvasId`) is built by `buildToolsForScope` in `./index.ts`.
  *
  * Canvas query and command schemas come from the canonical Zod contracts in
- * `@sediment/shared` and are adapted to pi-ai's TypeBox-compatible shape.
+ * `@huabu/shared` and are adapted to pi-ai's TypeBox-compatible shape.
  * Other tools continue to use TypeBox directly.
  */
 
@@ -22,7 +22,7 @@ import {
   inspectEdgesQueryParamsSchema,
   inspectNodesQueryParamsSchema,
   snapshotNodesQueryParamsSchema,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { zodToToolSchema } from './zod-tool-schema.js';
 

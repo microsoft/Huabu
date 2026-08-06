@@ -19,7 +19,7 @@ import { Loading } from '../../../Common/Loading';
 import { NodeRef } from '../../../Common/NodeRef';
 import { AssistantDisclosure } from '../../AssistantDisclosure';
 
-import type { SnapshotEntry, SnapshotNodesToolPart } from '@sediment/shared';
+import type { SnapshotEntry, SnapshotNodesToolPart } from '@huabu/shared';
 
 interface SnapshotNodesCardProps {
   part: SnapshotNodesToolPart;

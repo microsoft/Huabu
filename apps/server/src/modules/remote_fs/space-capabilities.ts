@@ -12,12 +12,12 @@ import {
   SPACE_SEARCH_DEFAULT_LIMIT,
   SPACE_SEARCH_MAX_LIMIT,
   SPACE_SNAPSHOT_MAX_NODES,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import type {
   RfsCapabilitiesResponse,
   RfsOperationCapabilityResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 const QUERY_DETAILS: Record<
   (typeof SPACE_QUERY_TYPES)[number],

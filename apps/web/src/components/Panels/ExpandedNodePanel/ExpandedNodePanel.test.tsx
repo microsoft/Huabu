@@ -7,7 +7,7 @@ import { usePreviewStore } from '@/store/previewStore';
 
 import { ExpandedNodePanel } from './ExpandedNodePanel';
 
-import type { EdgeDirection } from '@sediment/shared';
+import type { EdgeDirection } from '@huabu/shared';
 import type { Edge, Node } from '@xyflow/react';
 
 (

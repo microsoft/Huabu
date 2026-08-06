@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-import { createId } from '@sediment/shared';
+import { createId } from '@huabu/shared';
 
 import { agentApi } from '@/api/agent';
 import { isActivelyViewingQuestion } from '@/hooks/useActivelyViewingQuestion';
@@ -17,7 +17,7 @@ import {
 import { handleStreamEvent } from './useAgentStream';
 
 import type { ChatMessage } from '../store/chatTypes';
-import type { AgentStreamEvent } from '@sediment/shared';
+import type { AgentStreamEvent } from '@huabu/shared';
 
 /**
  * Hook that loads chat history from the server and handles reconnection

@@ -1,5 +1,5 @@
 {
-  "name": "@sediment/server",
+  "name": "@huabu/server",
   "private": true,
   "type": "module",
   "scripts": {
@@ -38,7 +38,7 @@
     "@mozilla/readability": "^0.6.0",
     "@opendocsg/pdf2md": "^0.2.5",
     "@resvg/resvg-wasm": "^2.6.2",
-    "@sediment/shared": "workspace:*",
+    "@huabu/shared": "workspace:*",
     "archiver": "^7.0.1",
     "dotenv": "^17.2.3",
     "fastify": "^5.2.0",

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-import { createId } from '@sediment/shared';
+import { createId } from '@huabu/shared';
 
 import { atomicWriteJson, readJson, sanitizeId } from './io.js';
 import { SPACE_JSON_FILENAME, WORLD_CANVAS_DIR_NAME } from './paths.js';

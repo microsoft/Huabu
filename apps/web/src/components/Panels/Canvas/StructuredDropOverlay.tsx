@@ -5,7 +5,7 @@ import React, { useMemo } from 'react';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import type { StructuredDropPreview } from '@/store/gesturePreviewStore';
-import type { StructuredDropContextRect } from '@sediment/shared/canvas-engine';
+import type { StructuredDropContextRect } from '@huabu/shared/canvas-engine';
 import type { ReactFlowInstance } from '@xyflow/react';
 
 type ScreenRect = {

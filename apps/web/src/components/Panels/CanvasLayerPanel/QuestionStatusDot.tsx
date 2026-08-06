@@ -22,7 +22,7 @@
 import { Tooltip } from '@/components/Common/Tooltip';
 import { getStatusLabel } from '@/components/Nodes/sketch/StatusBadge';
 
-import type { QuestionNodeStatus } from '@sediment/shared';
+import type { QuestionNodeStatus } from '@huabu/shared';
 
 interface QuestionStatusDotProps {
   status: QuestionNodeStatus;

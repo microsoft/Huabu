@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Unified Agent Route
  *
  * Single SSE endpoint that handles all modes: chat, agent.
@@ -19,7 +19,7 @@ import {
   forkThreadBodySchema,
   setChatThreadModelRequestSchema,
   setChatThreadReasoningEffortRequestSchema,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { loadAgent } from '../../prompt/index.js';
 import { runAcpAgent } from '../agent/acp/service.js';
@@ -54,7 +54,7 @@ import type {
   ForkThreadResponse,
   SetChatThreadSettingResponse,
   StopThreadResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 // ==================== Helpers ====================

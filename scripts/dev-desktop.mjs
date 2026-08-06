@@ -295,9 +295,9 @@ async function main() {
   //    builds; the only reason to run it every time is that changes to
   //    these files require re-running the orchestrator anyway, so a
   //    fresh build is what the user expects when they kick this off.
-  await runStep('Compiling @sediment/desktop (main + preload)', 'pnpm', [
+  await runStep('Compiling @huabu/desktop (main + preload)', 'pnpm', [
     '--filter',
-    '@sediment/desktop',
+    '@huabu/desktop',
     'build',
   ]);
 
@@ -326,9 +326,9 @@ async function main() {
   //    shared's package main points at src/index.ts — tsx tracks imports
   //    and reloads the whole entry on any tracked file change.
   console.log(
-    `[dev-desktop] Starting @sediment/server (tsx watch) on :${serverPort} …`,
+    `[dev-desktop] Starting @huabu/server (tsx watch) on :${serverPort} …`,
   );
-  spawnLongRunning('@sediment/server', 'server', {
+  spawnLongRunning('@huabu/server', 'server', {
     SERVER_PORT: String(serverPort),
     HUABU_BIND_HOST: HOST,
     HUABU_DATA_DIR: serverDataDir,
@@ -341,8 +341,8 @@ async function main() {
   //    follows the server, and Vite itself binds the port we already
   //    probed as free (avoids Vite silently picking yet another port
   //    via its default strictPort:false fallback).
-  console.log(`[dev-desktop] Starting @sediment/web (Vite) on :${vitePort} …`);
-  spawnLongRunning('@sediment/web', 'web', {
+  console.log(`[dev-desktop] Starting @huabu/web (Vite) on :${vitePort} …`);
+  spawnLongRunning('@huabu/web', 'web', {
     SERVER_PORT: String(serverPort),
     WEB_PORT: String(vitePort),
     VITE_PORT: String(vitePort),
@@ -404,7 +404,7 @@ async function main() {
 // src/index.ts, so neither web (via Vite) nor server (via tsx) reads
 // from packages/shared/dist in dev mode — no build-shared step is
 // needed here. If you ever flip shared back to a built artifact, add a
-// one-shot `pnpm --filter @sediment/shared build` before the watchers.
+// one-shot `pnpm --filter @huabu/shared build` before the watchers.
 
 main().catch((err) => {
   console.error('[dev-desktop]', err);

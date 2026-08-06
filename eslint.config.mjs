@@ -146,7 +146,7 @@ export default typescriptEslint.config(
           // cache state can cause different machines to bucket `@/...`
           // into different groups, producing diverging lint:fix output.
           pathGroups: [
-            { pattern: '@sediment/**', group: 'external', position: 'after' },
+            { pattern: '@huabu/**', group: 'external', position: 'after' },
             { pattern: '@/**', group: 'internal', position: 'before' },
           ],
           pathGroupsExcludedImportTypes: ['type'],
@@ -219,7 +219,7 @@ export default typescriptEslint.config(
     },
   },
   {
-    // @sediment/shared boundary: the shared package is server-portable
+    // @huabu/shared boundary: the shared package is server-portable
     // and must not pull in browser-only runtime deps. `@xyflow/react`
     // types are allowed (Node/Edge shapes), but the runtime entry is
     // banned. Web-side aliases (`@/`) are also disallowed here because
@@ -233,7 +233,7 @@ export default typescriptEslint.config(
             {
               name: '@xyflow/react',
               message:
-                '@sediment/shared is server-portable. Use `import type` for Node/Edge shapes only.',
+                '@huabu/shared is server-portable. Use `import type` for Node/Edge shapes only.',
               allowTypeImports: true,
             },
           ],
@@ -241,7 +241,7 @@ export default typescriptEslint.config(
             {
               group: ['@/*'],
               message:
-                '@sediment/shared has no @/ alias. Use relative imports inside the package.',
+                '@huabu/shared has no @/ alias. Use relative imports inside the package.',
             },
           ],
         },
@@ -285,7 +285,7 @@ export default typescriptEslint.config(
       'react/jsx-uses-react': 'off',
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
-      // Keep zod (and any future runtime dep of @sediment/shared) out of
+      // Keep zod (and any future runtime dep of @huabu/shared) out of
       // the web bundle. Schemas may only be imported as `import type`
       // from web code — see docs/architecture/api-design.md §Rules #5.
       '@typescript-eslint/no-import-type-side-effects': 'error',

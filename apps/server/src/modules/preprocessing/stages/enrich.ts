@@ -14,7 +14,7 @@ import type {
   NormalizeResult,
   ResolvedInput,
 } from '../types.js';
-import type { CanvasNodeType } from '@sediment/shared';
+import type { CanvasNodeType } from '@huabu/shared';
 
 const TEXT_NODE_TYPES: ReadonlySet<string> = new Set([
   'web',

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentMenuOptions } from './agentMenu';
 
-import type { AgentProfileView } from '@sediment/shared';
+import type { AgentProfileView } from '@huabu/shared';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),

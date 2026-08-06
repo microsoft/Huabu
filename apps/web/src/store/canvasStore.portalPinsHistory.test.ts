@@ -21,7 +21,7 @@ import useCanvasStore from './canvasStore';
 import { useWorkspaceStore } from './workspaceStore';
 
 import type * as CanvasApi from '../api';
-import type { PortalNodePinUpdate } from '@sediment/shared';
+import type { PortalNodePinUpdate } from '@huabu/shared';
 
 const sourceCanvasId = 'canvas-source' as const;
 const sourceNodeId = 'node-source' as const;

@@ -41,7 +41,7 @@ import {
 import type { MemoryLogger } from './index.js';
 import type { WriteResult } from './writers.js';
 import type { Context, Message } from '@earendil-works/pi-ai';
-import type { IntentEpisode } from '@sediment/shared';
+import type { IntentEpisode } from '@huabu/shared';
 
 /**
  * Soft caps applied while assembling the context bundle. The

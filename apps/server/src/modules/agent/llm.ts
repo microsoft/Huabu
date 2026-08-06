@@ -30,7 +30,7 @@ import {
   DEFAULT_IMAGE_MODEL_FAMILY,
   isImageModelFamily,
   MODEL_ROLES,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import {
   getOAuthApiKey,
@@ -69,7 +69,7 @@ import type {
   LLMUtilityConfig,
   LLMUtilityConfigUpdate,
   ModelRole,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 const log = getLogger('llm');
 
@@ -242,7 +242,7 @@ interface ImageConfigPersisted {
   model?: string;
   /**
    * Model family this deployment belongs to (see
-   * `@sediment/shared/llm/image-capabilities`). When absent on a
+   * `@huabu/shared/llm/image-capabilities`). When absent on a
    * legacy entry we default to `gpt-image-2` at read time — that
    * matches the only image model Sediment shipped before this field
    * was introduced.

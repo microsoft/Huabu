@@ -23,12 +23,12 @@
 import { chmodSync } from 'node:fs';
 import path from 'node:path';
 
-import { acpAgentProfileSchema } from '@sediment/shared';
+import { acpAgentProfileSchema } from '@huabu/shared';
 
 import { getDataDir } from '../../../data-dir.js';
 import { atomicWriteJson, readJson } from '../../storage/io.js';
 
-import type { AcpAgentProfile } from '@sediment/shared';
+import type { AcpAgentProfile } from '@huabu/shared';
 
 /** Persistence file name under `data/`. */
 const PROFILES_FILE = 'agent-profiles.json';

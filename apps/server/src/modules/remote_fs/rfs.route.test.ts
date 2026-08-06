@@ -22,8 +22,8 @@ import {
   rfsExecuteResponseSchema,
   rfsOperationCapabilityResponseSchema,
   spaceQueryResponseSchema,
-} from '@sediment/shared';
-import { getNodeDefaultSize } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import { getNodeDefaultSize } from '@huabu/shared/canvas-engine';
 
 const agentMocks = vi.hoisted(() => ({
   runAgent: vi.fn(),

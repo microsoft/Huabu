@@ -13,7 +13,7 @@ import type {
   ChatAttachment,
   IntentCandidate,
   SelectedStrokeSubset,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /**
  * Ordered piece of an assistant turn. Aliased to {@link AssistantPart}

@@ -4,13 +4,13 @@ import {
   type AgentOperationCommand,
   type RfsExecuteRequest,
   type RfsExecuteResponse,
-} from '@sediment/shared';
-import { nodeRevision, type Delta } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import { nodeRevision, type Delta } from '@huabu/shared/canvas-engine';
 
 import { prepareAgentCanvasCommands } from '../canvas/agent-command-preparation.js';
 import { executeCanvasCommandsOnHost } from '../canvas/canvas-command-router.js';
 
-import type { CanvasCommand } from '@sediment/shared';
+import type { CanvasCommand } from '@huabu/shared';
 
 function projectCommand(command: CanvasCommand): AgentOperationCommand {
   if (command.type === 'CREATE_NODES') {

@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { SourceCard, type Source } from './SourceCard';
 import { Button } from '../../../Common/Button';
 
-import type { WebSearchToolPart } from '@sediment/shared';
+import type { WebSearchToolPart } from '@huabu/shared';
 
 export function WebSearchToolDisplay({ part }: { part: WebSearchToolPart }) {
   const { t } = useTranslation();

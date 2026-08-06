@@ -1,4 +1,4 @@
-import type { PdfHighlight } from '@sediment/shared';
+import type { PdfHighlight } from '@huabu/shared';
 
 /** Normalized rectangle: all values 0–1, relative to the page. */
 export type Rect = { x: number; y: number; width: number; height: number };

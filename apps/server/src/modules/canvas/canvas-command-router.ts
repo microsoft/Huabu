@@ -6,12 +6,12 @@ import {
   type PreparedPortalNodePin,
   type PreparedPortalNodePinsCommand,
   type PreparedPortalSourcePosition,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import {
   createAbsolutePositionGetter,
   getNodeSize,
   type NestableNode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import {
   executeOnServer,

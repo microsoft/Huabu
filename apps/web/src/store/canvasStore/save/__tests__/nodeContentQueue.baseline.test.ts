@@ -10,7 +10,7 @@
 
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
-import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import {
   CanvasConflictError,

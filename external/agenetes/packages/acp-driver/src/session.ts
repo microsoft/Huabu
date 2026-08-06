@@ -23,7 +23,7 @@
  * L1-assembled and handed in on `env`; the profile-schema cache is an
  * injected read-only {@link AcpProfileCachePort} (L1 owns the projection
  * and now feeds it from `notifications()`). This module never reads a host
- * port, assembles an RFS URL, or imports `@sediment/shared`. See
+ * port, assembles an RFS URL, or imports `@huabu/shared`. See
  * docs/proposals/layered-architecture.md §7 (M5).
  */
 

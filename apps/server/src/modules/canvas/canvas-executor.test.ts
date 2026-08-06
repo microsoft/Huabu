@@ -14,13 +14,13 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { executeOnServer } from './canvas-executor.js';
 import { canvasBlobs, getCanvasStore } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
-import type { CanvasCommand, ExecuteOriginator } from '@sediment/shared';
+import type { CanvasCommand, ExecuteOriginator } from '@huabu/shared';
 
 let tmp: string;
 

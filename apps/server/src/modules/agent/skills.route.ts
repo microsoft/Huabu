@@ -24,7 +24,7 @@ import {
   skillsListQuerySchema,
   type SkillCatalogueEntry,
   type SkillsListResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { listSkills, type LoadedSkill } from '../../prompt/skills/loader.js';
 

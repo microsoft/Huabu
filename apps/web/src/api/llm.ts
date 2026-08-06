@@ -17,7 +17,7 @@ import type {
   OAuthPollResponse,
   OAuthStatusResponse,
   SetChatThreadSettingResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 // ==================== Config ====================
 

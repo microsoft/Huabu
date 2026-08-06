@@ -8,7 +8,7 @@
 
 import { create } from 'zustand';
 
-import { createId } from '@sediment/shared';
+import { createId } from '@huabu/shared';
 
 import { captureCanvasScreenshot } from '@/handler/canvasCommand/utils/screenshot';
 import { clusterSketches, extractSketchContext } from '@/handler/sketch';
@@ -30,7 +30,7 @@ import type {
   IntentCandidate,
   IntentEpisode,
   SketchClusterContext,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 /**

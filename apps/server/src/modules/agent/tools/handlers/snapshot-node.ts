@@ -4,7 +4,7 @@ import {
   snapshotNodesToArtifacts,
 } from '../../../canvas/snapshot-nodes.js';
 
-import type { SnapshotNodesQueryParams } from '@sediment/shared';
+import type { SnapshotNodesQueryParams } from '@huabu/shared';
 
 export { clusterToSvg, filterSketchStrokes, snapshotNodesToArtifacts };
 export type {

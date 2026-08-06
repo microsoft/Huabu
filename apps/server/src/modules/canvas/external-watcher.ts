@@ -31,7 +31,7 @@ import { registerSpaceDirHandleOwner } from '../storage/space-dir-handles.js';
 import { getWorkspacePath, isWorkspaceConfigured } from '../workspace.js';
 
 import type { CanvasFile } from '../storage/index.js';
-import type { ExternalNoteEvent, ExternalNoteItem } from '@sediment/shared';
+import type { ExternalNoteEvent, ExternalNoteItem } from '@huabu/shared';
 
 type Listener = (event: ExternalNoteEvent) => void;
 

@@ -21,7 +21,7 @@ import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { AgentInput, AgentSubmission } from '@agenetes/protocol';
 import type { AgentHandle as RuntimeAgentHandle } from '@agenetes/runtime';
 import type { Message } from '@earendil-works/pi-ai';
-import type { AgentStreamEvent } from '@sediment/shared';
+import type { AgentStreamEvent } from '@huabu/shared';
 
 export type { AgentDriver, AgentRuntime } from '@agenetes/runtime';
 export { createAgentRuntime } from '@agenetes/runtime';

@@ -4,7 +4,7 @@ import { Tooltip } from './Tooltip';
 import { NODE_ICON } from '../../config/nodeIcons';
 import useCanvasStore from '../../store/canvasStore';
 
-import type { CanvasNodeType, ChatAttachment } from '@sediment/shared';
+import type { CanvasNodeType, ChatAttachment } from '@huabu/shared';
 
 interface NodeRefProps {
   /** Existing canvas node ID to focus. */

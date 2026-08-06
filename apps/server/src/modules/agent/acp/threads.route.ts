@@ -14,7 +14,7 @@
  *    read-only `agents` list easier to reason about.
  *
  * Wire contracts (`EnsureAcpSessionRequest` / `EnsureAcpSessionResponse`
- * / `AcpThreadCommandsResponse`) live in `@sediment/shared`; this route
+ * / `AcpThreadCommandsResponse`) live in `@huabu/shared`; this route
  * validates every body with `safeParse` per docs/architecture/api-design.md.
  *
  * Auth: relies on the global Basic-Auth gate (app.ts). No additional
@@ -34,7 +34,7 @@ import {
   setAcpSessionConfigOptionRequestSchema,
   setAcpSessionModeRequestSchema,
   setAcpSessionModelRequestSchema,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { ensureProfileCacheSubscription } from './profile-cache-port.js';
 import { getProfileSchemaCache } from './profile-schema-cache.js';
@@ -62,7 +62,7 @@ import type {
   SetAcpSessionConfigOptionResponse,
   SetAcpSessionModelResponse,
   SetAcpSessionModeResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 
 interface ThreadParams {

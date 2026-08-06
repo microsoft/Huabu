@@ -11,7 +11,7 @@
  * Run it after touching either serializer to eyeball that the two stay
  * in lock-step (selection, neighbourhood, attachments, user text):
  *
- *   pnpm -F @sediment/server dump:prompts
+ *   pnpm -F @huabu/server dump:prompts
  *
  * The canvas is mocked: every fixture is built with `canvasId: null` and
  * inline attachment content, so the script performs no canvas-store or
@@ -29,7 +29,7 @@ import type {
 } from '../src/modules/agent/conversation/envelope.js';
 import type { AgentNodeRef } from '../src/modules/agent/node-ref.js';
 import type { NodeNeighbourhoodContext } from '../src/modules/canvas/node-neighbourhood.js';
-import type { ChatAttachment } from '@sediment/shared';
+import type { ChatAttachment } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 // ─── Mock plumbing ───────────────────────────────────────────────────────────

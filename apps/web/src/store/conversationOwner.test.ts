@@ -21,7 +21,7 @@ import {
 } from './conversationOwner';
 
 import type * as CanvasApi from '@/api/canvas';
-import type { AgentConversationView } from '@sediment/shared';
+import type { AgentConversationView } from '@huabu/shared';
 
 const worldView: AgentConversationView = {
   presentationAnchor: {

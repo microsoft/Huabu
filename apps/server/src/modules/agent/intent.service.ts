@@ -17,7 +17,7 @@ import type {
   IntentContext,
   IntentEpisode,
   RecentAction,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 const log = getLogger('intent');
 

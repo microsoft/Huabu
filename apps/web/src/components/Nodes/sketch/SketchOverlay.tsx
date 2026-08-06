@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { createId, resolveAccent } from '@sediment/shared';
+import { createId, resolveAccent } from '@huabu/shared';
 
 import { SKETCH_STROKE_MERGE_MAX_DISTANCE_SCREEN_PX } from '@/config/canvas';
 import { resolveFrameAtPoint } from '@/handler/canvasCommand/utils';
@@ -35,7 +35,7 @@ import {
 } from './stylusRawTouch';
 
 import type { SketchPointer } from './stylusRawTouch';
-import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
+import type { CanvasCommand, CanvasNodeId } from '@huabu/shared';
 import type { ReactFlowInstance } from '@xyflow/react';
 
 /**

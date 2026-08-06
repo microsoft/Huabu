@@ -5,7 +5,7 @@
  * Anything Crepe / ProseMirror specific stays internal.
  */
 
-import type { AccentToken } from '@sediment/shared';
+import type { AccentToken } from '@huabu/shared';
 
 export type MilkdownToolbarMode = 'none' | 'sediment';
 

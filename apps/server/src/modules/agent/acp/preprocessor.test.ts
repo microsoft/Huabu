@@ -14,7 +14,7 @@ import { buildAgentNodePreview, buildAgentNodeRef } from '../node-ref.js';
 import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
 import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { AgentInput, AgentInputPart } from '@agenetes/protocol';
-import type { CanvasNodeType, ChatAttachment } from '@sediment/shared';
+import type { CanvasNodeType, ChatAttachment } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /** Minimal logger stub — only `debug` is exercised. */

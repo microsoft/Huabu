@@ -59,7 +59,7 @@ import {
   indexById,
   getNodeSize,
   type NestableNode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import {
   SNAP_MAX_GUIDES_PER_FRAME,

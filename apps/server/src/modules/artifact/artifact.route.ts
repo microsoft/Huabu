@@ -2,7 +2,7 @@ import path from 'node:path';
 
 import { type FastifyPluginAsync } from 'fastify';
 
-import { cloneArtifactBodySchema, createId } from '@sediment/shared';
+import { cloneArtifactBodySchema, createId } from '@huabu/shared';
 
 import { sendBlob } from './send-blob.js';
 import { canvasBlobs } from '../storage/index.js';
@@ -12,7 +12,7 @@ import type {
   ApiResult,
   ArtifactUploadResponse,
   CloneArtifactRequest,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /**
  * Canvas-scoped artifact route. Mount under `/api/canvas`.

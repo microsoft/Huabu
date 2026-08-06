@@ -7,7 +7,7 @@
  * NOTE: this is a verbatim, dependency-free copy of the host's
  * `commandFromRawInput` (packages/shared assistant-parts). It is
  * duplicated here rather than imported because this package must not
- * depend on `@sediment/shared`; the host keeps its own copy for the
+ * depend on `@huabu/shared`; the host keeps its own copy for the
  * history builder + web. The logic is a tiny, stable pure function.
  */
 export function commandFromRawInput(rawInput: unknown): string | undefined {

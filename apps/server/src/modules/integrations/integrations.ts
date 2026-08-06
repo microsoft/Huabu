@@ -21,7 +21,7 @@ import {
 import type {
   IntegrationsConfig,
   IntegrationsConfigUpdate,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /**
  * Return the masked read model — booleans only, never the plaintext keys.

@@ -52,7 +52,7 @@ import type { AgentIconValue } from '@/components/Common/AgentIcon';
 import type {
   AcpCommandProfileView,
   AgentTeamManifestProfileView,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /** The single open editor: create, or editing one of the two Profile kinds. */
 type EditorState =

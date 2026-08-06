@@ -26,7 +26,7 @@ import type {
   CanvasCommand,
   CanvasNodeId,
   SketchStroke,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /**
  * Floating toolbar for a Stage 2 stroke-level lasso selection. Aligns with

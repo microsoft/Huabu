@@ -20,7 +20,7 @@ import type {
   PreprocessDiagnostic,
   ResolvedInput,
 } from '../types.js';
-import type { PreprocessNodeRequest } from '@sediment/shared';
+import type { PreprocessNodeRequest } from '@huabu/shared';
 
 export type CacheCheckResult = { hit: boolean };
 

@@ -40,7 +40,7 @@ import {
   spaceQuerySchema,
   type RfsAgentEventMode,
   type RfsUploadResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { mimeForPath } from './mime.js';
 import {

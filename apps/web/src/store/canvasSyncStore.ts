@@ -8,9 +8,9 @@ import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 
-import type { CanvasSyncEvent } from '@sediment/shared';
-import type { AgentBinding } from '@sediment/shared';
-import type { CanvasChangeRecord, Delta } from '@sediment/shared/canvas-engine';
+import type { CanvasSyncEvent } from '@huabu/shared';
+import type { AgentBinding } from '@huabu/shared';
+import type { CanvasChangeRecord, Delta } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
 /**

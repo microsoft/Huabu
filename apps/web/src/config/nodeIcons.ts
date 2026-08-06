@@ -25,7 +25,7 @@ import {
   Pin,
 } from 'lucide-react';
 
-import type { CanvasNodeType, OfficeFormat } from '@sediment/shared';
+import type { CanvasNodeType, OfficeFormat } from '@huabu/shared';
 import type { LucideIcon } from 'lucide-react';
 
 /**

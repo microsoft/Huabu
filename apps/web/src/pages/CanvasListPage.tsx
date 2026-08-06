@@ -16,7 +16,7 @@ import { useCanvasActions } from '../hooks/useCanvasActions';
 import { isElectron } from '../hooks/useElectron';
 import { useWorkspaceLabel, useWorkspaceStore } from '../store/workspaceStore';
 
-import type { CanvasSummary } from '@sediment/shared';
+import type { CanvasSummary } from '@huabu/shared';
 
 /**
  * Home page that shows all canvases in the workspace.

@@ -302,8 +302,8 @@ console.log('[dev] starting agentlet watcher + shared + server …');
 // `predev` already populated protocol dist; this watcher keeps it current for
 // the daemon bundle and Agenetes Gateway consumers during development.
 spawnAgentletWatch('@agentlet/protocol', 'agentlet/protocol');
-spawnPnpmDev('@sediment/shared', 'shared');
-spawnPnpmDev('@sediment/server', 'server', {
+spawnPnpmDev('@huabu/shared', 'shared');
+spawnPnpmDev('@huabu/server', 'server', {
   SERVER_PORT: String(serverPort),
 });
 
@@ -315,7 +315,7 @@ try {
   // Pass the resolved ports through env so vite.config.ts binds the port we
   // already probed as free (its strictPort would otherwise abort) and its
   // `/api/*` proxy target follows the server wherever it actually bound.
-  spawnPnpmDev('@sediment/web', 'web', {
+  spawnPnpmDev('@huabu/web', 'web', {
     SERVER_PORT: String(serverPort),
     WEB_PORT: String(webPort),
     VITE_PORT: String(webPort),

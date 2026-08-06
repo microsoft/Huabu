@@ -1,4 +1,4 @@
-import { agentBindingSchema, getQuestionNodeStatus } from '@sediment/shared';
+import { agentBindingSchema, getQuestionNodeStatus } from '@huabu/shared';
 
 import { describeNode } from './node-prompt.js';
 import { readWorldTargetCanvasesStrict } from './world-target-access.js';
@@ -13,7 +13,7 @@ import type {
   CanvasNodeType,
   GetWorldReferencesResponse,
   ResolvedWorldReference,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 interface StoredNode {
   id: string;

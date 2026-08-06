@@ -12,7 +12,7 @@ import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import type {
   AgentTeamMemberConfigView,
   AgentTeamMemberDetailView,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 interface AgentTeamConfigsProps {
   config: AgentTeamMemberConfigView;

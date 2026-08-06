@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 import { publishCanvasUpdate, subscribeCanvasUpdates } from './canvas-sync.js';
 
-import type { CanvasSyncEvent } from '@sediment/shared';
+import type { CanvasSyncEvent } from '@huabu/shared';
 
 const update = (toVersion: number): CanvasSyncEvent => ({
   type: 'update',

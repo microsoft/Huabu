@@ -15,7 +15,7 @@ import { canvasBlobs, getCanvasStore } from '../storage/index.js';
 import { canvasRoot } from '../storage/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
-import type { CanvasCommand } from '@sediment/shared';
+import type { CanvasCommand } from '@huabu/shared';
 
 let tmp: string;
 

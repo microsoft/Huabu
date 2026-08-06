@@ -1,6 +1,6 @@
-import { normalizeOrigin } from '@sediment/shared';
+import { normalizeOrigin } from '@huabu/shared';
 
-import type { NodeOrigin } from '@sediment/shared';
+import type { NodeOrigin } from '@huabu/shared';
 
 export const SEDIMENT_DND_MIME = 'application/x-sediment-dnd';
 

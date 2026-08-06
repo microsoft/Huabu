@@ -27,7 +27,7 @@ import {
 } from 'react';
 
 import type { SlashCommandMenuRef } from './SlashCommandMenu';
-import type { AvailableCommand } from '@sediment/shared';
+import type { AvailableCommand } from '@huabu/shared';
 
 export interface UseSlashCommandTypeaheadOptions {
   /** Current textarea value. */

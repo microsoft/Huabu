@@ -5,7 +5,7 @@ import {
   isExpandedNodeNavigationBlocked,
 } from './navigation';
 
-import type { EdgeDirection } from '@sediment/shared';
+import type { EdgeDirection } from '@huabu/shared';
 import type { Edge, Node } from '@xyflow/react';
 
 const nodes = ['a', 'b', 'c', 'd'].map((id) => ({ id }) as Pick<Node, 'id'>);

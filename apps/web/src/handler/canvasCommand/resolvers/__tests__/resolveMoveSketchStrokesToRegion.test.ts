@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import { resolveUiIntent, type UiResolverState } from '../../uiIntent';
 
-import type { CanvasCommand, SketchStroke } from '@sediment/shared';
+import type { CanvasCommand, SketchStroke } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 function makeUi(nodes: Node[]): UiResolverState {

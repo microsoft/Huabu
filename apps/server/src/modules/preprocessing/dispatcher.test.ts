@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { buildPlan } from './dispatcher.js';
 import { getProfile } from './profiles.js';
 
-import type { PreprocessNodeRequest } from '@sediment/shared';
+import type { PreprocessNodeRequest } from '@huabu/shared';
 
 function req(
   nodeType: PreprocessNodeRequest['nodeType'],

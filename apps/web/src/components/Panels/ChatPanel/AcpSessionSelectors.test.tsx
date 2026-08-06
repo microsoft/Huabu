@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AcpSessionSelectors } from './AcpSessionSelectors';
 
-import type { AcpSessionMetaSnapshot } from '@sediment/shared';
+import type { AcpSessionMetaSnapshot } from '@huabu/shared';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),

@@ -18,7 +18,7 @@ import type {
   NodePreprocessProfile,
   PreprocessNodeResult,
 } from './types.js';
-import type { PreprocessNodeRequest } from '@sediment/shared';
+import type { PreprocessNodeRequest } from '@huabu/shared';
 
 /**
  * Build the execution plan: which capabilities need to run given the request.

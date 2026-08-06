@@ -21,7 +21,7 @@
 import { useStore } from '@xyflow/react';
 import { useEffect } from 'react';
 
-import { resolveHeightMode } from '@sediment/shared/canvas-engine';
+import { resolveHeightMode } from '@huabu/shared/canvas-engine';
 
 import type { Node } from '@xyflow/react';
 

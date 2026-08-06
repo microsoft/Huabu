@@ -37,7 +37,7 @@ Resolution: `isDesktopSecretId` now matches by **shape** instead of enumerating 
 
 Residual: adding a _new namespace_ (beyond `llm` / `integration` / `oauth`) still requires a desktop change. That is an explicit architectural step rather than something a routine secret addition can silently miss.
 
-Extraction into a zero-dependency `@sediment/shared/security` subpath is no longer motivated by drift risk. Should it ever be revisited, the constraints still hold: `@sediment/shared` is isomorphic (imported by web, zero node deps) → **no `fs` code may live there**; the two encrypted stores must **stay separate** (safeStorage opaque blob vs explicit AES-GCM formats differ); and `apps/desktop` is compiled by plain `tsc` with no bundler, so consuming the raw-TypeScript package requires giving it a bundler first.
+Extraction into a zero-dependency `@huabu/shared/security` subpath is no longer motivated by drift risk. Should it ever be revisited, the constraints still hold: `@huabu/shared` is isomorphic (imported by web, zero node deps) → **no `fs` code may live there**; the two encrypted stores must **stay separate** (safeStorage opaque blob vs explicit AES-GCM formats differ); and `apps/desktop` is compiled by plain `tsc` with no bundler, so consuming the raw-TypeScript package requires giving it a bundler first.
 
 ## Not doing
 

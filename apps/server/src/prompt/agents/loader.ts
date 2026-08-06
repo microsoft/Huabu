@@ -52,7 +52,7 @@ import { getSkillCatalogue } from '../skills/catalogue.js';
 
 import type { SkillScope } from '../skills/loader.js';
 import type { ToolExecutionMode } from '@earendil-works/pi-agent-core';
-import type { NodeOrigin } from '@sediment/shared';
+import type { NodeOrigin } from '@huabu/shared';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -241,7 +241,7 @@ function validateRuntime(raw: unknown, sourcePath: string): AgentRuntimeConfig {
     }
     // Trust the rest of the shape — the discriminated union allows a
     // few optional fields per branch and validating each here would
-    // drift from the source of truth in `@sediment/shared`.
+    // drift from the source of truth in `@huabu/shared`.
     out.defaultOrigin = o as NodeOrigin;
   }
 

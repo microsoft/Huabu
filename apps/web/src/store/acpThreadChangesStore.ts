@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-import { fingerprintNodeFields } from '@sediment/shared/canvas-engine';
+import { fingerprintNodeFields } from '@huabu/shared/canvas-engine';
 
 import {
   acceptThreadChange,
@@ -9,7 +9,7 @@ import {
 } from '@/api/threadChanges';
 import useCanvasStore from '@/store/canvasStore';
 
-import type { CanvasChangeRecord } from '@sediment/shared/canvas-engine';
+import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 import type { Node, Edge } from '@xyflow/react';
 
 /**

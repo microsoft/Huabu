@@ -16,7 +16,7 @@ import { useEffect, useState } from 'react';
 
 import { listAcpAgentClis } from '@/api/acp';
 
-import type { AcpAgentCliInfo } from '@sediment/shared';
+import type { AcpAgentCliInfo } from '@huabu/shared';
 
 let detectedClisCache: AcpAgentCliInfo[] | null = null;
 let detectedClisRequest: Promise<AcpAgentCliInfo[]> | null = null;

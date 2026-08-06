@@ -6,4 +6,4 @@ export {
   generateNextLabel,
   deduplicateLabel,
   getNodeDefaultSize,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';

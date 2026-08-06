@@ -5,7 +5,7 @@ import type {
   FrameFitResult,
   StructuredDropContext,
   StructuredReflowEntry,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 /**
  * Visual role of a frame-fit preview, used by the overlay layer to

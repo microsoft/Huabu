@@ -20,7 +20,7 @@ import {
 } from '../../utils/io/media';
 
 import type { AddNodeInput } from './uiIntent';
-import type { NodeOrigin } from '@sediment/shared';
+import type { NodeOrigin } from '@huabu/shared';
 
 type Point = { x: number; y: number };
 

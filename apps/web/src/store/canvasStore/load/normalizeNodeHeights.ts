@@ -38,7 +38,7 @@ import {
   getHeightPolicy,
   materializeAutoHeight,
   resolveHeightMode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import type { Node } from '@xyflow/react';
 

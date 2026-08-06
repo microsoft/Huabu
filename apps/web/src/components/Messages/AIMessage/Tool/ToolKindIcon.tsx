@@ -32,7 +32,7 @@ import {
   Wrench,
 } from 'lucide-react';
 
-import type { AcpToolKind, AssistantToolPart } from '@sediment/shared';
+import type { AcpToolKind, AssistantToolPart } from '@huabu/shared';
 
 type IconComponent = typeof Wrench;
 

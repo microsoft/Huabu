@@ -1,5 +1,5 @@
 {
-  "name": "@sediment/desktop",
+  "name": "@huabu/desktop",
   "version": "0.9.2",
   "private": true,
   "description": "Huabu desktop application (Electron wrapper)",

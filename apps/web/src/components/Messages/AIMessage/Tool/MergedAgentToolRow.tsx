@@ -14,7 +14,7 @@ import { ToolKindIcon } from './ToolKindIcon';
 import { Loading } from '../../../Common/Loading';
 import { NodeRef } from '../../../Common/NodeRef';
 
-import type { AgentToolPart } from '@sediment/shared';
+import type { AgentToolPart } from '@huabu/shared';
 
 /**
  * Canvas-relative path of a node markdown sidecar (`nodes/<safeLabel>.md`).

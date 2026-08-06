@@ -30,7 +30,7 @@ import {
   getAbsolutePosition,
   getNodeSize,
   indexById,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { cn } from '@/components/Common/cn';
@@ -147,7 +147,7 @@ import type { PointerRecognizer } from '@/handler/pointerRouter';
 import type {
   FrameFitResult,
   NestableNode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 const nodeTypes = {
   image: ImageNode,

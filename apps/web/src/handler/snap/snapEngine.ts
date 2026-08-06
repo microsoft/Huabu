@@ -31,7 +31,7 @@ import {
   getDescendantIds,
   indexById,
   type NestableNode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import type {
   CandidateLine,

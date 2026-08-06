@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 
 import { SKETCH_ERASER_RADIUS_SCREEN_PX } from '@/config/canvas';
 
-import type { CanvasNodeType } from '@sediment/shared';
+import type { CanvasNodeType } from '@huabu/shared';
 
 /**
  * Node type awaiting placement on canvas via click or drawing.

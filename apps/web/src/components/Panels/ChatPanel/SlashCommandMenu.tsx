@@ -27,7 +27,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { AvailableCommand } from '@sediment/shared';
+import type { AvailableCommand } from '@huabu/shared';
 
 export interface SlashCommandMenuRef {
   /** Returns the currently-highlighted command, or null when list is empty. */

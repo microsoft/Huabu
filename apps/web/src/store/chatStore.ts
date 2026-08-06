@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-import { createId } from '@sediment/shared';
+import { createId } from '@huabu/shared';
 
 import type { ChatMessage } from './chatTypes';
 import type {
@@ -10,7 +10,7 @@ import type {
   AgentMode,
   AssistantToolPart,
   ChatAttachment,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /**
  * Default binding for any newly opened canvas / cleared thread.

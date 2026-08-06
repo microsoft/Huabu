@@ -7,7 +7,7 @@ import {
   type ContextImage,
 } from './snapshot-nodes.js';
 
-import type { CanvasNode } from '@sediment/shared/canvas-engine';
+import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
 // Minimal 1x1 transparent PNG so we can verify the data URL embed
 // without bringing real image bytes into the test.

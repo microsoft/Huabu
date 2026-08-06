@@ -15,7 +15,7 @@ import type {
   PreprocessDiagnostic,
   PreprocessNodeResult,
 } from '../types.js';
-import type { PreprocessNodeRequest } from '@sediment/shared';
+import type { PreprocessNodeRequest } from '@huabu/shared';
 
 export function project(
   request: PreprocessNodeRequest,

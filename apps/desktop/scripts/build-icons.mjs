@@ -17,7 +17,7 @@
  * would require an SVGO step we don't need).
  *
  * Run via:
- *   pnpm --filter @sediment/desktop run icons:build
+ *   pnpm --filter @huabu/desktop run icons:build
  *
  * Pure JS — uses sharp (libvips, prebuilt) for SVG rasterisation and
  * png2icons for ICO/ICNS assembly. No native system tools required, so

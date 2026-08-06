@@ -14,7 +14,7 @@
 import { apiUrl } from './_client';
 import { routes } from './_routes';
 
-import type { CanvasSearchEvent, CanvasSearchRequest } from '@sediment/shared';
+import type { CanvasSearchEvent, CanvasSearchRequest } from '@huabu/shared';
 
 export interface SearchStreamOptions {
   request: CanvasSearchRequest;

@@ -6,7 +6,7 @@
  * so they intentionally live outside the shared canvas-engine.
  *
  * The barrel `./index.ts` re-exports everything here alongside the
- * pure helpers from `@sediment/shared/canvas-engine`, so call sites
+ * pure helpers from `@huabu/shared/canvas-engine`, so call sites
  * keep importing from `'@/handler/canvasCommand/utils'` regardless of
  * where each function actually lives.
  */
@@ -15,7 +15,7 @@ import {
   findFrameAtPoint,
   getAbsolutePosition,
   type NestableNode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import type {
   CanvasNodeType,
@@ -24,7 +24,7 @@ import type {
   NodeRef,
   NodeSize,
   RecentAction,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 /** Extract a lightweight NodeRef from a ReactFlow node. */

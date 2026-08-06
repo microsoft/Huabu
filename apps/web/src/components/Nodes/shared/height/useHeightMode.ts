@@ -14,9 +14,9 @@
 
 import { useStore } from '@xyflow/react';
 
-import { resolveHeightMode } from '@sediment/shared/canvas-engine';
+import { resolveHeightMode } from '@huabu/shared/canvas-engine';
 
-import type { HeightMode } from '@sediment/shared';
+import type { HeightMode } from '@huabu/shared';
 
 /**
  * Height owner for a node, or `'auto'` while the node is not in the

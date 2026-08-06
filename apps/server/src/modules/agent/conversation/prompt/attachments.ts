@@ -37,7 +37,7 @@ import { ARTIFACT_URL_REGEX } from '../../../artifact/utils.js';
 import { canvasBlobs } from '../../../storage/index.js';
 
 import type { AgentInputPart } from '@agenetes/protocol';
-import type { ChatAttachment } from '@sediment/shared';
+import type { ChatAttachment } from '@huabu/shared';
 
 /** pi-ai user-message content: text and/or vision parts. */
 export type ContentPart = AgentInputPart;

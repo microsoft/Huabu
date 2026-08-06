@@ -5,7 +5,7 @@
  * modes (chat, agent) with pi-ai streaming.
  */
 
-import { AGENT_SSE_EVENTS } from '@sediment/shared';
+import { AGENT_SSE_EVENTS } from '@huabu/shared';
 
 import { ApiError, apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
@@ -23,7 +23,7 @@ import type {
   ForkThreadResponse,
   IntentCandidate,
   StopThreadResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 // ==================== Stream Callbacks ====================
 

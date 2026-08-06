@@ -1,5 +1,5 @@
 import type { WorkloadType } from '@agenetes/protocol';
-import type { ModelRole } from '@sediment/shared';
+import type { ModelRole } from '@huabu/shared';
 
 /**
  * IDs of the built-in Skill-authoring commands that run on the Utility

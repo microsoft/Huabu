@@ -1,12 +1,12 @@
-import { fitPortals, getDescendantIds } from '@sediment/shared/canvas-engine';
+import { fitPortals, getDescendantIds } from '@huabu/shared/canvas-engine';
 
 import {
   isWorldCanvasId,
   listCanvasDirEntries,
 } from '../storage/canvas-dirs.js';
 
-import type { CanvasCommand } from '@sediment/shared';
-import type { NestableNode } from '@sediment/shared/canvas-engine';
+import type { CanvasCommand } from '@huabu/shared';
+import type { NestableNode } from '@huabu/shared/canvas-engine';
 
 interface StoredNode {
   id?: string;

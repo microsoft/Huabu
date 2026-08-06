@@ -6,7 +6,7 @@
  * wiring the protocol into the server/web runtime (that is M2). Two layers
  * of evidence:
  *
- *   - Type-level: the existing `@sediment/shared` `AgentStreamEvent`, once
+ *   - Type-level: the existing `@huabu/shared` `AgentStreamEvent`, once
  *     the protocol core is re-extended with the two documented host fields
  *     (`meta.mode`, `tool_call.internalToolName`), is assignable to the
  *     shared union — so the protocol schema has not dropped or mistyped

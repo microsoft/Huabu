@@ -4,7 +4,7 @@ import { readTypedSSEStream } from '@/api/_sse';
 import { externalStreamUrl, importExternalNote } from '@/api/externalImports';
 import useCanvasStore from '@/store/canvasStore';
 
-import type { ExternalNoteEvent, ExternalNoteItem } from '@sediment/shared';
+import type { ExternalNoteEvent, ExternalNoteItem } from '@huabu/shared';
 
 interface ExternalImportsState {
   pending: ExternalNoteItem[];

@@ -7,14 +7,14 @@
  * chat panel in compose mode, and focus the input. Keeping it in one place
  * ensures those steps stay in sync across callers.
  */
-import { createId } from '@sediment/shared';
+import { createId } from '@huabu/shared';
 
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent.ts';
-import type { AgentConversationView, CanvasNodeId } from '@sediment/shared';
+import type { AgentConversationView, CanvasNodeId } from '@huabu/shared';
 
 /**
  * Open the chat panel in compose mode for a question node's thread and

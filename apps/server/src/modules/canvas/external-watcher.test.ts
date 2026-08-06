@@ -80,7 +80,7 @@ import {
 } from './external-watcher.js';
 import { withSpaceDirHandlesReleased } from '../storage/space-dir-handles.js';
 
-import type { ExternalNoteEvent } from '@sediment/shared';
+import type { ExternalNoteEvent } from '@huabu/shared';
 
 /** Markdown reads issued so far — `space.json` topology reads excluded. */
 function markdownReads(): string[] {

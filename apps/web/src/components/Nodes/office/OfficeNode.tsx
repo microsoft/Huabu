@@ -3,7 +3,7 @@ import { Download, Fullscreen } from 'lucide-react';
 import { memo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { resolveAccent } from '@sediment/shared';
+import { resolveAccent } from '@huabu/shared';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
@@ -16,7 +16,7 @@ import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 
 import type { CanvasOfficeNodeData } from '../types';
-import type { OfficeFormat } from '@sediment/shared';
+import type { OfficeFormat } from '@huabu/shared';
 import type { Node, NodeProps } from '@xyflow/react';
 import type { LucideIcon } from 'lucide-react';
 

@@ -13,7 +13,7 @@
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import { getCanvasStore } from '../storage/index.js';
 
-import type { CanvasSyncEvent } from '@sediment/shared';
+import type { CanvasSyncEvent } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 function writeSSE(raw: NodeJS.WritableStream, event: CanvasSyncEvent): void {

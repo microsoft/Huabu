@@ -6,7 +6,7 @@
  * can stay focused on its own view logic.
  */
 
-import type { AssistantToolPart } from '@sediment/shared';
+import type { AssistantToolPart } from '@huabu/shared';
 
 /**
  * Display-only description of a single canvas mutation, reconstructed from a

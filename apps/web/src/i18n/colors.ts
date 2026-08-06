@@ -1,4 +1,4 @@
-import type { ColorPickerOption } from '@sediment/shared';
+import type { ColorPickerOption } from '@huabu/shared';
 import type { TFunction } from 'i18next';
 
 export function translateColorOptions(

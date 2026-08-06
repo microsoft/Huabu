@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { SessionSelectorPill } from './SessionSelectorPill';
 
 import type { SelectOption } from '../../Common/Select';
-import type { LLMModelInfo } from '@sediment/shared';
+import type { LLMModelInfo } from '@huabu/shared';
 
 interface BuiltinSessionSelectorsProps {
   /** The active provider's models (capability + labels). */

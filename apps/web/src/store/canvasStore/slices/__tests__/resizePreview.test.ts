@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getStructuredFrameGutterPlan } from '@sediment/shared/canvas-engine';
+import { getStructuredFrameGutterPlan } from '@huabu/shared/canvas-engine';
 
 import { getNodeFontFit, refitFont } from '@/utils/node/fontFit';
 import {

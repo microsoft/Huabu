@@ -38,7 +38,7 @@ import type {
   AcpAgentCliInfo,
   AcpCommandProfileView,
   CreateAcpCommandProfileBody,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 // ── Command Profile form ──────────────────────────────────────────────
 

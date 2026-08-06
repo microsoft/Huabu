@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { recentActionSchema } from '@sediment/shared';
+import { recentActionSchema } from '@huabu/shared';
 
 import { extractNodeRef } from '../local';
 

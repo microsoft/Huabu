@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import resolveAddNodes from '../resolveAddNodes';
 import resolvePasteClipboard from '../resolvePasteClipboard';
 
-import type { CanvasNodeType, SketchStroke } from '@sediment/shared';
+import type { CanvasNodeType, SketchStroke } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 const ui = { nodes: [], edges: [] };

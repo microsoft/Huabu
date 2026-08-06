@@ -30,7 +30,7 @@ import {
 import { userSkillsDir } from '../storage/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
-import type { SkillCatalogueEntry } from '@sediment/shared';
+import type { SkillCatalogueEntry } from '@huabu/shared';
 
 interface InjectListResponse {
   skills: SkillCatalogueEntry[];

@@ -35,7 +35,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ensureAcpSession, getAcpThreadCommands } from '@/api/acp';
 
-import type { AgentBinding, AvailableCommand } from '@sediment/shared';
+import type { AgentBinding, AvailableCommand } from '@huabu/shared';
 
 /**
  * Backoff schedule (ms) for the follow-up re-pulls issued while the

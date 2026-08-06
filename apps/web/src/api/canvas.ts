@@ -23,7 +23,7 @@ import type {
   RevealNodesFolderResponse,
   PostCanvasExecuteRequest,
   PostCanvasExecuteResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /**
  * Error thrown when a canvas mutation is rejected by the server with a

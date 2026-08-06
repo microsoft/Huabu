@@ -46,8 +46,8 @@ import {
   isAccentToken,
   resolveAccent,
   type AccentToken,
-} from '@sediment/shared';
-import { fingerprintMarkdownKeys } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import { fingerprintMarkdownKeys } from '@huabu/shared/canvas-engine';
 
 import { toast } from '@/components/Common/Toast';
 import { getAccentTokens } from '@/components/Nodes/accentTokens';

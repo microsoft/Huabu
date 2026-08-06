@@ -25,7 +25,7 @@ import {
   fitFrames,
   type NestableNode,
   type PendingEffects,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { canvasHistoryManager } from '@/store/canvasHistoryManager';
 import { useChatStore } from '@/store/chatStore';

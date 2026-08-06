@@ -13,7 +13,7 @@ import { AlertTriangle, Check, ChevronRight, Eye, Undo2 } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { applyDeltas } from '@sediment/shared/canvas-engine';
+import { applyDeltas } from '@huabu/shared/canvas-engine';
 
 import {
   useAcpThreadChangesStore,
@@ -25,7 +25,7 @@ import { Button } from '../../Common/Button';
 import { NodeRef } from '../../Common/NodeRef';
 import { Tooltip } from '../../Common/Tooltip';
 
-import type { CanvasChangeRecord, Delta } from '@sediment/shared/canvas-engine';
+import type { CanvasChangeRecord, Delta } from '@huabu/shared/canvas-engine';
 import type { Node, Edge } from '@xyflow/react';
 
 interface ChangeReviewCardProps {

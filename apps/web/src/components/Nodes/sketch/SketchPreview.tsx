@@ -1,6 +1,6 @@
 import { memo, useMemo } from 'react';
 
-import { resolveAccent } from '@sediment/shared';
+import { resolveAccent } from '@huabu/shared';
 
 import {
   pointsToPath,
@@ -9,7 +9,7 @@ import {
 } from './sketchPath';
 
 import type { PreviewComponentProps } from '../note/NotePreview';
-import type { SketchStroke } from '@sediment/shared';
+import type { SketchStroke } from '@huabu/shared';
 
 /**
  * Lightweight preview card for sketch nodes (used in search results, etc.).

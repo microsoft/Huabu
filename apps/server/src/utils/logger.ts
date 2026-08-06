@@ -18,7 +18,7 @@ import pino, {
 import { getDataDir } from '../data-dir.js';
 
 /**
- * Root pino logger for `@sediment/server`.
+ * Root pino logger for `@huabu/server`.
  *
  * One logger to rule them all:
  *   • HTTP routes get this instance via Fastify's `loggerInstance`

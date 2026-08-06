@@ -34,14 +34,14 @@ import {
   getHeightPolicy,
   readAutoHeightHint,
   resolveHeightMode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { measureNoteHeightOffscreen } from '@/components/Nodes/shared/height/measure/offscreenMeasurer';
 
 import type {
   CanvasNodeId,
   CanvasNodeMeasuredHeightUpdate,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { Edge, Node } from '@xyflow/react';
 
 /**

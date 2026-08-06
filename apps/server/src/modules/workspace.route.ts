@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { validatePathSchema, workspacePathSchema } from '@sediment/shared';
+import { validatePathSchema, workspacePathSchema } from '@huabu/shared';
 
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import { requireWorldCanvasId, resetStorageCache } from './storage/index.js';
@@ -27,7 +27,7 @@ import type {
   ValidatePathResponse,
   WorkspaceInfo,
   WorkspacePathRequest,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 
 /**

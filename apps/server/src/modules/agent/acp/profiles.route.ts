@@ -31,7 +31,7 @@ import {
 import {
   createAcpCommandProfileBodySchema,
   patchAgentProfileBodySchema,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { invalidateProfileSchemaCache } from './profile-schema-cache.js';
 import {
@@ -45,7 +45,7 @@ import type {
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
   ApiResult,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
 function denyRemote(request: FastifyRequest, reply: FastifyReply): boolean {

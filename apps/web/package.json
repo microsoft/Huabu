@@ -1,5 +1,5 @@
 {
-  "name": "@sediment/web",
+  "name": "@huabu/web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -34,7 +34,7 @@
     "@milkdown/prose": "^7.21.1",
     "@milkdown/react": "^7.21.1",
     "@milkdown/utils": "^7.21.1",
-    "@sediment/shared": "workspace:*",
+    "@huabu/shared": "workspace:*",
     "@xyflow/react": "^12.10.0",
     "axios": "^1.13.4",
     "clsx": "^2.1.1",

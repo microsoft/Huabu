@@ -54,7 +54,7 @@ import type { AgentIconValue } from '@/components/Common/AgentIcon';
 import type {
   AcpAgentCliInfo,
   AgentTeamMemberDetailView,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 type ManifestProfileFormProps =
   | {

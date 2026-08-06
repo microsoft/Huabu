@@ -16,12 +16,12 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import { resolveAccent } from '@sediment/shared';
+import { resolveAccent } from '@huabu/shared';
 import {
   createAbsolutePositionGetter,
   indexById,
   type NestableNode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { getNodeContent, revealCanvasNodesFolder } from '@/api/canvas.ts';
 import { Button } from '@/components/Common/Button.tsx';

@@ -14,7 +14,7 @@
  * `canvas_commands` server-side execution — is shared with `runAgent`.
  */
 
-import { createId } from '@sediment/shared';
+import { createId } from '@huabu/shared';
 
 import { runAgent } from './agent.service.js';
 import { loadAgent, renderAgentTemplate } from '../../prompt/index.js';
@@ -28,7 +28,7 @@ import type {
   SketchClusterContext,
   SketchCommandResponse,
   WireNodeRef,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 const log = getLogger('sketch');
 

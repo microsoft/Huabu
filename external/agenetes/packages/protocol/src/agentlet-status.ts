@@ -4,7 +4,7 @@
 // This lives in @agenetes/protocol (not the fastify-bound
 // @agenetes/agentlet-host package) because the L1 UI consumes it as a
 // browser-safe wire type: the web bundle reaches it transitively through
-// @sediment/shared, which must never depend on a package that drags in
+// @huabu/shared, which must never depend on a package that drags in
 // Fastify or WebSocket runtime dependencies. Keeping it here (zod-only) lets
 // both the supervisor's `getStatus()` return type and the browser share
 // one definition without a layering leak.

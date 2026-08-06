@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
-import { HEIGHT_LAYOUT_VERSION } from '@sediment/shared/canvas-engine';
-import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+import { HEIGHT_LAYOUT_VERSION } from '@huabu/shared/canvas-engine';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { normalizeNodeHeights } from '../normalizeNodeHeights';
 

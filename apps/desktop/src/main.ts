@@ -19,7 +19,7 @@
  *   the Electron shell is being iterated on. Run `pnpm dev:web` in a
  *   separate terminal first.
  *
- * Note: the npm/pnpm package name remains `@sediment/desktop` for monorepo
+ * Note: the npm/pnpm package name remains `@huabu/desktop` for monorepo
  * tooling continuity, but the product is branded as "Huabu" everywhere a
  * user can see it (window title, installer, Start Menu entry, log dir, etc.).
  */
@@ -129,7 +129,7 @@ function resolveAppName(): string {
  * - `dev:desktop` (HMR orchestrator)   → `Huabu Dev` (e.g. `.../Huabu Dev`)
  *
  * Naming it explicitly here also stops dev from falling back to the npm
- * package name `@sediment/desktop` (what `app.getName()` would otherwise
+ * package name `@huabu/desktop` (what `app.getName()` would otherwise
  * report when running via `electron .`), which would leak into dialogs
  * and filesystem paths.
  *
@@ -421,7 +421,7 @@ function getExternalServerUrl(): URL | undefined {
 
 /**
  * Resolve the path to the Fastify server entry point.
- * In dev: apps/server/dist-bundle/server.js (built with `pnpm --filter @sediment/server bundle`)
+ * In dev: apps/server/dist-bundle/server.js (built with `pnpm --filter @huabu/server bundle`)
  * In prod: extracted to Resources/server/server.js by electron-builder
  */
 function resolveServerEntry(): string {
@@ -443,7 +443,7 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
   // In production the SPA lives next to the server bundle in Resources/.
   // In dev, if the user opted into Vite HMR via WEB_DEV_SERVER_URL we
   // let Vite serve the SPA; otherwise fall back to serving the prebuilt
-  // `apps/web/dist` from Fastify (run `pnpm --filter @sediment/web build`
+  // `apps/web/dist` from Fastify (run `pnpm --filter @huabu/web build`
   // once before `pnpm dev`).
   const webDistPath = IS_DEV
     ? process.env.WEB_DEV_SERVER_URL
@@ -461,7 +461,7 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
   if (IS_DEV && webDistPath && !existsSync(webDistPath)) {
     console.warn(
       `[desktop] WEB_DIST_PATH "${webDistPath}" does not exist. ` +
-        `Run \`pnpm --filter @sediment/web build\` first, or set ` +
+        `Run \`pnpm --filter @huabu/web build\` first, or set ` +
         `WEB_DEV_SERVER_URL=http://localhost:5173 and run \`pnpm dev:web\`.`,
     );
   }
@@ -495,7 +495,7 @@ async function startServer(port: number): Promise<void> {
   if (!existsSync(serverEntry)) {
     await dialog.showErrorBox(
       'Huabu — Server not found',
-      `Could not find the server bundle at:\n${serverEntry}\n\nPlease rebuild the project (pnpm --filter @sediment/server build).`,
+      `Could not find the server bundle at:\n${serverEntry}\n\nPlease rebuild the project (pnpm --filter @huabu/server build).`,
     );
     app.quit();
     return;
@@ -875,7 +875,7 @@ function registerDiagnosticsIpc(): void {
  *     stdout parsing.
  *
  * The result shape matches `PickFolderResult` from
- * `@sediment/shared` so the renderer can use the same branching
+ * `@huabu/shared` so the renderer can use the same branching
  * (`ok`, `reason: 'cancelled'`) it already had for the server route.
  * `'no-picker'` is impossible in Electron — we always have a GUI.
  *

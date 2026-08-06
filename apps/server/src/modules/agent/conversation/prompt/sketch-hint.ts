@@ -14,7 +14,7 @@
 import { isSketchRasterAttachment } from '../transcript/attachment-chips.js';
 
 import type { RenderProfile } from './profile.js';
-import type { ChatAttachment } from '@sediment/shared';
+import type { ChatAttachment } from '@huabu/shared';
 
 /**
  * If `selection` includes pre-snapshotted sketch artifacts, build a

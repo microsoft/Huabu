@@ -18,7 +18,7 @@ import {
   type FrameGridAxis,
   type NestableNode,
   type StructuredDropTarget,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { extractNodeRef, canvasSizeFromStyle } from '../utils';
 import { buildStructuredFrameRelayoutCommands } from '../utils/frameLayout';
@@ -33,7 +33,7 @@ import type {
   CanvasCommand,
   CanvasNodeId,
   RecentAction,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 export default function resolveNodeDragStop(

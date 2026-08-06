@@ -18,14 +18,14 @@ import {
   autoHeightKey,
   getHeightPolicy,
   readAutoHeightHint,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { measureNoteHeightOffscreen } from '@/components/Nodes/shared/height/measure/offscreenMeasurer';
 
 import type {
   CanvasNodeId,
   CanvasNodeMeasuredHeightUpdate,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 /** Give up rather than leave the toggle hanging on a slow measurement. */

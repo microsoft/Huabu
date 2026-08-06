@@ -20,15 +20,15 @@ import {
   rectCenter,
   rectsOverlap,
   rectIntersectionArea,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import type {
   SketchCluster,
   SketchContext,
   CanvasNodeType,
   WireNodeRef,
-} from '@sediment/shared';
-import type { Rect } from '@sediment/shared';
+} from '@huabu/shared';
+import type { Rect } from '@huabu/shared';
 import type { Edge, Node } from '@xyflow/react';
 
 /** Maximum edge distance (px) to consider a node as "nearby". */

@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react';
 import { Button } from '../Common/Button';
 import { DropdownMenu, DropdownMenuItem } from '../Common/DropdownMenu';
 
-import type { IntentCandidate } from '@sediment/shared';
+import type { IntentCandidate } from '@huabu/shared';
 
 interface IntentSelectMessageProps {
   candidates: IntentCandidate[];

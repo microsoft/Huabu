@@ -5,14 +5,14 @@ import { useTranslation } from 'react-i18next';
 import {
   ACCENT_NONE_TOKEN,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import {
   DEFAULT_EDGE_STROKE_TOKEN,
   getSelectionBounds,
   getNodeSize,
   isAlwaysAutoHeightNodeType,
   resolveHeightMode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {
@@ -28,7 +28,7 @@ import { resolveGeometryEdit } from '@/utils/node/geometry';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
 import type { CanvasNode } from '@/components/Nodes/types';
-import type { CanvasEdgeId, CanvasNodeId } from '@sediment/shared';
+import type { CanvasEdgeId, CanvasNodeId } from '@huabu/shared';
 
 /** Sentinel token representing "no accent". */
 const ACCENT_NONE = ACCENT_NONE_TOKEN;

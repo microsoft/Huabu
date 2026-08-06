@@ -19,7 +19,7 @@ import type {
   AcpAgentletRestartResponse,
   AcpAgentletStatusResponse,
   ApiResult,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 const acpAgentletRoutes: FastifyPluginAsync = async (app) => {

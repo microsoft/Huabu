@@ -21,7 +21,7 @@
  * pi-agent-core catches and surfaces them as `isError: true`.
  */
 
-import { createId } from '@sediment/shared';
+import { createId } from '@huabu/shared';
 
 import { getLogger } from '../../../../utils/logger.js';
 import { prepareAgentCanvasCommands } from '../../../canvas/agent-command-preparation.js';
@@ -32,7 +32,7 @@ import type {
   BuiltInAgentOperationCommand,
   ExecuteConflict,
   NodeOrigin,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 const log = getLogger('tool.canvas-commands');
 

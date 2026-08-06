@@ -5,7 +5,7 @@ import {
   getAbsolutePosition,
   getFrameSizing,
   getSketchRenderedSize,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import {
   buildMoveStrokesCommands,
@@ -22,8 +22,8 @@ import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import type { FrameFitPreview } from '@/store/gesturePreviewStore';
-import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
-import type { NestableNode } from '@sediment/shared/canvas-engine';
+import type { CanvasCommand, CanvasNodeId } from '@huabu/shared';
+import type { NestableNode } from '@huabu/shared/canvas-engine';
 import type { Node, NodeChange, ReactFlowInstance } from '@xyflow/react';
 import type { MutableRefObject } from 'react';
 

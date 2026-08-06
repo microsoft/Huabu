@@ -6,7 +6,7 @@ import type {
   WebPageResponse,
   WebPreviewResponse,
   WebReaderResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 export type {
   WebLookupQuery,

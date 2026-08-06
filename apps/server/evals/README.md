@@ -17,19 +17,19 @@ every regression is invisible until a user trips over it.
 
 ```powershell
 # Run every case once, write report + per-seed traces under runs/<ts>/
-pnpm --filter @sediment/server eval
+pnpm --filter @huabu/server eval
 
 # Run a single case
-pnpm --filter @sediment/server eval -- --case read-node-content
+pnpm --filter @huabu/server eval -- --case read-node-content
 
 # Save the current run as a named baseline (for later diffing)
-pnpm --filter @sediment/server eval:baseline main
+pnpm --filter @huabu/server eval:baseline main
 
 # After modifying a skill or tool, diff the new run against that baseline
-pnpm --filter @sediment/server eval:diff main
+pnpm --filter @huabu/server eval:diff main
 
 # List discovered cases + saved baselines
-pnpm --filter @sediment/server eval:list
+pnpm --filter @huabu/server eval:list
 ```
 
 The runner uses your active `getLLMModel()` config (Azure OpenAI / etc.
@@ -73,7 +73,7 @@ evals/
    - `nodes/<safe(label)>.md` — one file per node, frontmatter must include `id` (matching the node's id in `space.json`), `type`, and `label`. Body is the markdown the agent will read.
      The directory name under `fixtures/<id>/` is arbitrary — `space.json`'s `canvasId` is what the storage layer uses to address the canvas.
 2. **Write `cases/<id>.yml`** following the `read-node-content.yml` example. Validation is enforced by `case-loader.ts`'s zod schema, so typos surface as "Invalid case file" with a per-field message.
-3. **Run it.** `pnpm --filter @sediment/server eval -- --case <id>`.
+3. **Run it.** `pnpm --filter @huabu/server eval -- --case <id>`.
 
 ## Assertion catalogue
 
@@ -128,14 +128,14 @@ seed, just open the file in VS Code.
 ```powershell
 # 1. On main, capture a baseline
 git checkout main
-pnpm --filter @sediment/server eval:baseline main
+pnpm --filter @huabu/server eval:baseline main
 
 # 2. Switch to your branch, change some skill / tool / prompt
 git checkout my-skill-tweak
 # … edit prompt/skills/space/SKILL.md …
 
 # 3. Diff
-pnpm --filter @sediment/server eval:diff main
+pnpm --filter @huabu/server eval:diff main
 ```
 
 The diff is a Markdown table of per-case deltas (`turns Δ`, `tools Δ`,

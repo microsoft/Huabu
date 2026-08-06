@@ -17,7 +17,7 @@ import {
 import { Loading } from '../../../Common/Loading';
 import { NodeRef } from '../../../Common/NodeRef';
 
-import type { SpaceCommandsToolPart } from '@sediment/shared';
+import type { SpaceCommandsToolPart } from '@huabu/shared';
 
 export function SpaceCommandCard({ part }: ToolPart<SpaceCommandsToolPart>) {
   const { i18n, t } = useTranslation();

@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { RFS_HEADERS } from '@sediment/shared';
+import { RFS_HEADERS } from '@huabu/shared';
 
 import { rfsMetaHeaders } from './node-meta.js';
 

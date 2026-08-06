@@ -15,7 +15,7 @@ import {
   describeQualitiesForPrompt,
   describeSizesForPrompt,
   getImageCapabilities,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { TOOL_REGISTRY, type ToolDefinition } from './definitions.js';
 import { executeTool } from './executor.js';
@@ -23,7 +23,7 @@ import { loadAgent, type AgentId } from '../../../prompt/index.js';
 import { getConfiguredImageModelFamily } from '../llm.js';
 
 import type { AgentTool } from '@earendil-works/pi-agent-core';
-import type { AgentMode, NodeOrigin } from '@sediment/shared';
+import type { AgentMode, NodeOrigin } from '@huabu/shared';
 
 export { executeTool } from './executor.js';
 export type { ToolDefinition } from './definitions.js';

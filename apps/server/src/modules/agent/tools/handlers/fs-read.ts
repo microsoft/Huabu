@@ -31,7 +31,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { normalizeRel, safeResolve } from './fs-sandbox.js';
 import { readSkillFile, resolveSkillPath } from '../../../../prompt/index.js';

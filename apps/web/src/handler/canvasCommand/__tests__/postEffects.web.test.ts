@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { runWebPostEffects } from '../postEffects.web';
 
-import type { PendingEffects } from '@sediment/shared/canvas-engine';
+import type { PendingEffects } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
 function node(id: string, type: string): Node {

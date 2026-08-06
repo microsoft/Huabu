@@ -8,7 +8,7 @@
 
 import { toPng } from 'html-to-image';
 
-import type { RecentAction } from '@sediment/shared';
+import type { RecentAction } from '@huabu/shared';
 
 /** Pixel ratio used for the capture — 3× keeps text legible on all displays. */
 const CAPTURE_RATIO = 3;

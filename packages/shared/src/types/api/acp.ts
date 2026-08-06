@@ -12,7 +12,7 @@
  *
  * Per docs/architecture/api-design.md, zod schemas defined here are server-side
  * truth; the web bundle imports the inferred TS types only
- * (`import type { ... } from '@sediment/shared'`) to keep zod out of
+ * (`import type { ... } from '@huabu/shared'`) to keep zod out of
  * the production browser bundle.
  */
 

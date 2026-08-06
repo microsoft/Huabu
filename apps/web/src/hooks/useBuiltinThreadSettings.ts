@@ -20,7 +20,7 @@ import {
 } from '@/api/llm';
 import { useChatStore } from '@/store/chatStore';
 
-import type { ChatThreadSettings, LLMModelInfo } from '@sediment/shared';
+import type { ChatThreadSettings, LLMModelInfo } from '@huabu/shared';
 
 interface UseBuiltinThreadSettingsArgs {
   threadId: string | null | undefined;

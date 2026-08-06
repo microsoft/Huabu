@@ -3,12 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   applyGridLayout,
   executeCanvasCommands,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { resolveUiIntent } from '../../uiIntent';
 
 import type { UiResolverState } from '../../uiIntent';
-import type { CanvasCommand } from '@sediment/shared';
+import type { CanvasCommand } from '@huabu/shared';
 import type { Node, XYPosition } from '@xyflow/react';
 
 const CHILD_SIZE = { width: 80, height: 40 };

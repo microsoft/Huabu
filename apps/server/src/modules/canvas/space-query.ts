@@ -1,4 +1,4 @@
-import { SPACE_SEARCH_DEFAULT_LIMIT } from '@sediment/shared';
+import { SPACE_SEARCH_DEFAULT_LIMIT } from '@huabu/shared';
 
 import { searchCanvas } from './canvas-search.js';
 import {
@@ -16,7 +16,7 @@ import type {
   CanvasSearchMatch,
   SpaceQuery,
   SpaceQueryResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 export class SpaceQueryError extends Error {
   constructor(

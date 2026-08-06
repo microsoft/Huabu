@@ -17,11 +17,11 @@ import {
   type AgentIconValue,
 } from '@/components/Common/AgentIcon';
 
-import type { AgentBinding, CustomData } from '@sediment/shared';
+import type { AgentBinding, CustomData } from '@huabu/shared';
 
 /**
  * Reserved `customData` key holding the avatar. Kept as a local literal (rather
- * than imported from `@sediment/shared`) so the web bundle stays zod-free.
+ * than imported from `@huabu/shared`) so the web bundle stays zod-free.
  */
 const ICON_KEY = 'icon';
 

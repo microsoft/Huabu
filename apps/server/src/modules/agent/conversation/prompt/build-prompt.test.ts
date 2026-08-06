@@ -32,7 +32,7 @@ import type {
   FoldedMessage,
 } from '@agenetes/protocol';
 import type { Api, Context, Message, Model } from '@earendil-works/pi-ai';
-import type { ChatAttachment } from '@sediment/shared';
+import type { ChatAttachment } from '@huabu/shared';
 
 /** Build an {@link AgentTurn} from an envelope + folded transcript. */
 function makeTurn(

@@ -13,7 +13,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { NODE_SHELL_INSET } from '@sediment/shared/canvas-engine';
+import { NODE_SHELL_INSET } from '@huabu/shared/canvas-engine';
 
 import {
   TEXT_NODE_PADDING_X,

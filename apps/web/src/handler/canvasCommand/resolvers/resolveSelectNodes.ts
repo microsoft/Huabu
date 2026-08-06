@@ -5,7 +5,7 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
-import type { CanvasNodeId, RecentAction } from '@sediment/shared';
+import type { CanvasNodeId, RecentAction } from '@huabu/shared';
 
 export default function resolveSelectNodes(
   intent: Extract<CanvasUiIntent, { type: 'SELECT_NODES' }>,

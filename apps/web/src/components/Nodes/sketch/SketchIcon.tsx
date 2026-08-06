@@ -1,10 +1,10 @@
 import { memo, useMemo } from 'react';
 
-import { resolveAccent } from '@sediment/shared';
+import { resolveAccent } from '@huabu/shared';
 
 import { DEFAULT_STROKE_COLOR } from './sketchPath';
 
-import type { SketchStroke } from '@sediment/shared';
+import type { SketchStroke } from '@huabu/shared';
 
 interface SketchIconProps {
   strokes: SketchStroke[];

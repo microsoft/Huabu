@@ -22,7 +22,7 @@ import useCanvasStore from '../../../../store/canvasStore';
 import { Loading } from '../../../Common/Loading';
 import { AssistantDisclosure } from '../../AssistantDisclosure';
 
-import type { ImageGenerationToolPart } from '@sediment/shared';
+import type { ImageGenerationToolPart } from '@huabu/shared';
 
 interface ImageGenerationCardProps {
   part: ImageGenerationToolPart;

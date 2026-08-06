@@ -13,7 +13,7 @@
  * command would corrupt the node's style and break parent-frame fitting.
  */
 
-import { getNodeSize, resolveHeightMode } from '@sediment/shared/canvas-engine';
+import { getNodeSize, resolveHeightMode } from '@huabu/shared/canvas-engine';
 
 import type { Node } from '@xyflow/react';
 

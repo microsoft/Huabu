@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { applyNodeUpdate, updateNode } from '../write-coordinator.js';
 

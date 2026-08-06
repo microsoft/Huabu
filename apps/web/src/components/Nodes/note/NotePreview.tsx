@@ -59,7 +59,7 @@ import type {
   MilkdownInstance,
 } from '@/components/Milkdown';
 import type { NoteDragPayload } from '@/utils/io/dragDrop';
-import type { MarkdownProvenance, NodeOrigin } from '@sediment/shared';
+import type { MarkdownProvenance, NodeOrigin } from '@huabu/shared';
 
 const PROVENANCE_ENABLED = (import.meta.env.VITE_PROVENANCE ?? 'on') !== 'off';
 

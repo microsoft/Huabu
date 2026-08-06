@@ -8,7 +8,7 @@
  * or overwrite credentials.
  */
 
-import { integrationsConfigUpdateSchema } from '@sediment/shared';
+import { integrationsConfigUpdateSchema } from '@huabu/shared';
 
 import {
   getIntegrationsConfig,
@@ -20,7 +20,7 @@ import type {
   ApiResult,
   IntegrationsConfig,
   IntegrationsConfigUpdate,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 const integrationsRoutes: FastifyPluginAsync = async (app) => {

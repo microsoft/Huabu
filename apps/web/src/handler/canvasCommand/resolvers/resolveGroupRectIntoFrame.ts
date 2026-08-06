@@ -2,11 +2,11 @@ import {
   createId,
   type CanvasCommand,
   type CanvasNodeId,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import {
   frameNodesInRect,
   type NestableNode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import type {
   CanvasUiIntent,

@@ -13,7 +13,7 @@ import { DragToCanvasHandleButton } from '../Common/DragToCanvasHandleButton';
 import { Loading } from '../Common/Loading';
 import { Popover } from '../Common/Popover';
 
-import type { ChatAttachment } from '@sediment/shared';
+import type { ChatAttachment } from '@huabu/shared';
 import type { FC } from 'react';
 
 type FloatingDragHandleProps = {

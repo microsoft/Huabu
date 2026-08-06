@@ -10,7 +10,7 @@
  */
 
 import type { FontOpts } from './textMeasure';
-import type { NodeFontFamily } from '@sediment/shared';
+import type { NodeFontFamily } from '@huabu/shared';
 
 /** Map logical font family names to CSS font stacks. */
 export const FONT_FAMILY_CSS: Record<NodeFontFamily, string> = {

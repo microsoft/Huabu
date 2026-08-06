@@ -2,8 +2,8 @@ import { Sparkles } from 'lucide-react';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { resolveAccent } from '@sediment/shared';
-import { getSketchRenderedSize } from '@sediment/shared/canvas-engine';
+import { resolveAccent } from '@huabu/shared';
+import { getSketchRenderedSize } from '@huabu/shared/canvas-engine';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { MissingFileBanner } from '@/components/Nodes/MissingFileBanner';
@@ -20,7 +20,7 @@ import {
 } from './sketchPath';
 
 import type { CanvasSketchNodeData } from '../types';
-import type { SketchStroke } from '@sediment/shared';
+import type { SketchStroke } from '@huabu/shared';
 import type { Node, NodeProps } from '@xyflow/react';
 
 export type SketchNodeType = Node<CanvasSketchNodeData, 'sketch'>;

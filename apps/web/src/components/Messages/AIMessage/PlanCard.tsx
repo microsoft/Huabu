@@ -22,7 +22,7 @@ import { copyToClipboard } from '../../../utils/io/clipboard';
 import { Button } from '../../Common/Button';
 import { Loading } from '../../Common/Loading';
 
-import type { AcpPlanEntry } from '@sediment/shared';
+import type { AcpPlanEntry } from '@huabu/shared';
 
 interface PlanCardProps {
   entries: AcpPlanEntry[];

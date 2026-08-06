@@ -411,7 +411,7 @@ CLI 子命令一一对应现有的 agent tool，**复用同一份业务逻辑**�
 
 | 渠道                  | 形态                                                 | 优先级  |
 | --------------------- | ---------------------------------------------------- | ------- |
-| **npm**               | `npm i -g @sediment/huabu-cli`（或直接 `npx huabu`） | v1 必做 |
+| **npm**               | `npm i -g @huabu/huabu-cli`（或直接 `npx huabu`） | v1 必做 |
 | **Homebrew tap**      | `brew install sediment/huabu`                        | v1.1    |
 | **standalone binary** | GitHub Releases，每平台一个 `.tar.gz` / `.zip`       | v1.2    |
 
@@ -533,7 +533,7 @@ v1 范围内可以**不签**（用户从 npm 装的 CLI 不触发 Gatekeeper）�
 - 决定 CLI 框架：推荐 [`commander`](https://github.com/tj/commander.js) 或 [`yargs`](https://github.com/yargs/yargs)。**不要**用 oclif（太重）。
 - 新建 `packages/cli-types/`，放 CLI ↔ server 通信契约 schema
 - 接入 `pnpm-workspace.yaml`
-- CI 加 `pnpm --filter @sediment/huabu-cli build` smoke test
+- CI 加 `pnpm --filter @huabu/huabu-cli build` smoke test
 
 **Exit criteria**：能 `pnpm cli huabu version` 输出版本号。
 
@@ -632,7 +632,7 @@ Bun build --compile 把 native binary 打进去，跨平台 matrix 验证麻烦�
 ### Q1：CLI 名字到底叫 `huabu` 还是 `sediment`？
 
 - `huabu` 跟数据目录、产品昵称一致，更贴近用户；
-- `sediment` 跟 npm scope `@sediment/` 一致，更"官方"。
+- `sediment` 跟 npm scope `@huabu/` 一致，更"官方"。
 - **推荐 `huabu`**，更短、更易输入、避免跟"sediment 这个组织"混淆。
 
 ### Q2：CLI 跟 server 是同一个仓库吗？

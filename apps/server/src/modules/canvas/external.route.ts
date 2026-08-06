@@ -7,7 +7,7 @@ import {
   type ExternalNoteEvent,
   type ImportExternalNoteRequest,
   type ImportExternalNoteResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import {
   openExternalNoteSession,

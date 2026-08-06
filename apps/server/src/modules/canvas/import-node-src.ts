@@ -30,7 +30,7 @@ import {
   createId,
   type CanvasCommand,
   type CanvasNodeCreateInput,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { getLogger } from '../../utils/logger.js';
 import {

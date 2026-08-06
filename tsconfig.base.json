@@ -6,8 +6,8 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "paths": {
-      "@sediment/shared": ["./packages/shared/src/index.ts"],
-      "@sediment/shared/canvas-engine": [
+      "@huabu/shared": ["./packages/shared/src/index.ts"],
+      "@huabu/shared/canvas-engine": [
         "./packages/shared/src/canvas-engine/index.ts"
       ]
     }

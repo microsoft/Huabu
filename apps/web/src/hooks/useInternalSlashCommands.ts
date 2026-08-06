@@ -31,7 +31,7 @@ import type {
   AgentBinding,
   AvailableCommand,
   SkillScope,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /**
  * Default staleness window for {@link UseInternalSlashCommandsResult.refreshIfStale}.

@@ -30,7 +30,7 @@ import type {
   ChatAttachment,
   SelectedStrokeSubset,
   WireSelectionNode,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 /** A user-invoked skill resolved to its body for this turn. */

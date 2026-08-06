@@ -16,7 +16,7 @@ import type {
   NodeRefNodeData as SharedNodeRefNodeData,
   SketchNodeData as SharedSketchNodeData,
   QuestionNodeData as SharedQuestionNodeData,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 export type { CanvasNodeType, NodeData, NodeStyle };

@@ -9,7 +9,7 @@ import {
   type SnapshotNodesData,
   type ToolResponse,
   type WebSearchToolResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { agentApi } from '@/api/agent';
 import { toast } from '@/components/Common/Toast';
@@ -37,7 +37,7 @@ import type {
   AgentMode,
   AgentStreamEvent,
   IntentCandidate,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 // ==================== Pure Utility Functions ====================
 

@@ -8,8 +8,8 @@ import {
   FRAME_GRID_MAX_COUNT,
   FRAME_GRID_MIN_COUNT,
   type FrameLayoutMode,
-} from '@sediment/shared';
-import { clampGridCount } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import { clampGridCount } from '@huabu/shared/canvas-engine';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { Input } from '@/components/Common/Input.tsx';

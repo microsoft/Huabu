@@ -2,12 +2,12 @@ import {
   stripTransientNodeFields,
   stripTransientEdgeFields,
   TRANSIENT_NODE_FIELDS,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { ApiError, deleteNode } from '../api';
 import { toast } from '../components/Common/Toast';
 
-import type { RecentAction } from '@sediment/shared';
+import type { RecentAction } from '@huabu/shared';
 import type { Node, Edge } from '@xyflow/react';
 
 const MAX_HISTORY = 50;

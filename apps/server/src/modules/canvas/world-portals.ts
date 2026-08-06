@@ -3,11 +3,11 @@ import {
   type CanvasCommand,
   type CanvasNodeCreateInput,
   type CanvasNodeId,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import {
   PORTAL_DEFAULT_HEIGHT,
   PORTAL_DEFAULT_WIDTH,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { executeOnServer } from './canvas-executor.js';
 import {

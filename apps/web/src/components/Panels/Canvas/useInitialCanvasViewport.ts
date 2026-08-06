@@ -4,7 +4,7 @@ import useCanvasStore from '@/store/canvasStore';
 
 import { fitNodesOnCanvas } from '../CanvasLayerPanel/focusNodesOnCanvas';
 
-import type { CanvasViewport } from '@sediment/shared';
+import type { CanvasViewport } from '@huabu/shared';
 import type { ReactFlowInstance } from '@xyflow/react';
 
 type InitialCanvasViewport = {

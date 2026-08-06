@@ -14,7 +14,7 @@ import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
-import type { AcpAgentletStatus } from '@sediment/shared';
+import type { AcpAgentletStatus } from '@huabu/shared';
 
 interface AgentletHealthBannerProps {
   agentlet: AcpAgentletStatus | null;

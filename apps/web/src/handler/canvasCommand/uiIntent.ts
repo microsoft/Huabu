@@ -41,8 +41,8 @@ import type {
   Point,
   RecentAction,
   EdgeStyle,
-} from '@sediment/shared';
-import type { StructuredGutterSizes } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import type { StructuredGutterSizes } from '@huabu/shared/canvas-engine';
 import type { Edge, Node } from '@xyflow/react';
 
 // ---------------------------------------------------------------------------

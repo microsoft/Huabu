@@ -61,8 +61,8 @@ import {
   SPACE_SNAPSHOT_MIN_PIXELS,
   findClusters,
   resolveAccent,
-} from '@sediment/shared';
-import { getSketchRenderedSize } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import { getSketchRenderedSize } from '@huabu/shared/canvas-engine';
 
 import { RASTERIZABLE_IMAGE_EXT_MIME } from '../../utils/mime.js';
 import { canvasBlobs, getCanvasStore } from '../storage/index.js';
@@ -71,8 +71,8 @@ import type {
   SketchNodeData,
   SnapshotNodesQueryParams,
   SpatialNode,
-} from '@sediment/shared';
-import type { CanvasNode } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
 export type SnapshotNodesArgs = SnapshotNodesQueryParams & {
   canvasId: string;

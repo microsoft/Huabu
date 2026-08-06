@@ -1,4 +1,4 @@
-import { resolveAccent } from '@sediment/shared';
+import { resolveAccent } from '@huabu/shared';
 
 import { cn } from '@/components/Common/cn';
 import { NODE_TYPE_LABEL } from '@/config/nodeIcons';

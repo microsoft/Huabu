@@ -1,13 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { externalAgentRuntimeConfigSchema } from '@sediment/shared';
+import { externalAgentRuntimeConfigSchema } from '@huabu/shared';
 
 import { getDataDir } from '../../../data-dir.js';
 import { getLogger } from '../../../utils/logger.js';
 import { atomicWriteJson } from '../../storage/io.js';
 
-import type { ExternalAgentRuntimeConfig } from '@sediment/shared';
+import type { ExternalAgentRuntimeConfig } from '@huabu/shared';
 
 export const DEFAULT_EXTERNAL_AGENT_RUNTIME_CONFIG: ExternalAgentRuntimeConfig =
   {

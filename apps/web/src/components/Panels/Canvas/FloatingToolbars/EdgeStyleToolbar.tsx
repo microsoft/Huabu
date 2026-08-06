@@ -2,11 +2,11 @@ import { Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { ACCENT_PALETTE, EDGE_STROKE_WIDTHS } from '@sediment/shared';
+import { ACCENT_PALETTE, EDGE_STROKE_WIDTHS } from '@huabu/shared';
 import {
   DEFAULT_EDGE_STROKE_TOKEN,
   DEFAULT_EDGE_STROKE_WIDTH,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
 import {
@@ -18,14 +18,14 @@ import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 
 import type { SelectOption } from '@/components/Common/Select';
-import type { CanvasEdgeId } from '@sediment/shared';
+import type { CanvasEdgeId } from '@huabu/shared';
 import type {
   EdgeLineType,
   EdgeLineStyle,
   EdgeDirection,
   EdgeStyle,
   EdgeStrokeWidth,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { Edge, Node } from '@xyflow/react';
 
 // ---- Icon helpers ----

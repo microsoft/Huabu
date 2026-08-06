@@ -16,7 +16,7 @@
  * only once user hand-edits also broadcast).
  */
 
-import type { CanvasSyncEvent } from '@sediment/shared';
+import type { CanvasSyncEvent } from '@huabu/shared';
 
 type Listener = (event: CanvasSyncEvent) => void;
 

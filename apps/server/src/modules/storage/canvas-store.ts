@@ -6,7 +6,7 @@ import { existsSync, readdirSync, rmSync, statSync, unlinkSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { coalesceChanges } from '@sediment/shared/canvas-engine';
+import { coalesceChanges } from '@huabu/shared/canvas-engine';
 
 import {
   patchCanvasDirTitle,
@@ -52,8 +52,8 @@ import type {
   ExecuteOriginator,
   IntentEpisode,
   RecentAction,
-} from '@sediment/shared';
-import type { CanvasChangeRecord } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
 const log = getLogger('canvas-store');
 
@@ -114,7 +114,7 @@ export type CanvasEvent = CanvasEventRecord;
  * verbatim as column names (the planned `delta_log` table mirrors this
  * shape 1:1). The `command` and `deltas` fields stay opaque (`unknown`)
  * at the storage layer; the engine owns their schema in
- * `@sediment/shared/canvas-engine/delta`.
+ * `@huabu/shared/canvas-engine/delta`.
  */
 export interface DeltaLogEntry {
   /** Canvas version this batch landed at — also the row's primary key. */
@@ -1230,7 +1230,7 @@ export class CanvasStore {
   // commands it applied, and the structural deltas the engine emitted.
   //
   // The wire schema (`Delta`, originator) lives in
-  // `@sediment/shared/canvas-engine/delta` and `…/api/canvas` to keep
+  // `@huabu/shared/canvas-engine/delta` and `…/api/canvas` to keep
   // the contract single-sourced. Lines are line-atomic on POSIX so a
   // crash mid-write drops the trailing partial line on read.
 

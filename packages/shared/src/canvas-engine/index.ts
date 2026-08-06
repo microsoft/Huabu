@@ -1,5 +1,5 @@
 /**
- * @sediment/shared/canvas-engine — pure, server-portable canvas command engine.
+ * @huabu/shared/canvas-engine — pure, server-portable canvas command engine.
  *
  * This subpath export bundles the executor, command handlers, runtime types,
  * auto-layout, and supporting utilities. The package is intentionally free

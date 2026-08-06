@@ -1,7 +1,7 @@
 /**
  * @file Frame layout helpers — read the layout config persisted on a
  * frame node and translate the pure-compute grid layout results from
- * `@sediment/shared/canvas-engine` into explicit canvas commands so
+ * `@huabu/shared/canvas-engine` into explicit canvas commands so
  * structured frames stay consistent after a child change.
  *
  * `AUTO_LAYOUT` no longer exists as a command (see CHANGELOG
@@ -17,7 +17,7 @@ import {
   readFrameGridConfig,
   readFrameGridRow,
   readFrameTrack,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import type {
   CanvasCommand,
@@ -25,8 +25,8 @@ import type {
   CanvasNodeDataMergePatch,
   CanvasNodeGeometryUpdate,
   FrameLayoutMode,
-} from '@sediment/shared';
-import type { FrameAxis } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import type { FrameAxis } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
 /**

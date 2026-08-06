@@ -18,7 +18,7 @@ import type {
   GetCanvasEventsResponse,
   PostCanvasEventsRequest,
   PostCanvasEventsResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /**
  * Append a batch of events to the canvas action log.

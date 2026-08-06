@@ -17,7 +17,7 @@ import { Blend, Check, Undo2 } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { applyDeltas } from '@sediment/shared/canvas-engine';
+import { applyDeltas } from '@huabu/shared/canvas-engine';
 
 import {
   useAcpThreadChangesStore,
@@ -32,7 +32,7 @@ import { StatusBadge } from './StatusBadge';
 import { Button } from '../../Common/Button';
 
 import type { SketchProcessingCluster } from '@/store/intentStore';
-import type { CanvasChangeRecord, Delta } from '@sediment/shared/canvas-engine';
+import type { CanvasChangeRecord, Delta } from '@huabu/shared/canvas-engine';
 import type { Node, Edge } from '@xyflow/react';
 
 const EMPTY_RECORDS: CanvasChangeRecord[] = [];

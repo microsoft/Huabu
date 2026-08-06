@@ -11,8 +11,8 @@ import {
   type CanvasNodeType,
   type NodeSize,
   type Point,
-} from '@sediment/shared';
-import { getNodeDefaultSize } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import { getNodeDefaultSize } from '@huabu/shared/canvas-engine';
 
 import { resolveFrameAtPoint } from '../utils';
 
@@ -22,7 +22,7 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
-import type { NestableNode } from '@sediment/shared/canvas-engine';
+import type { NestableNode } from '@huabu/shared/canvas-engine';
 
 // ---------------------------------------------------------------------------
 // Sizing helpers

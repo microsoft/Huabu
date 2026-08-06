@@ -18,7 +18,7 @@
 
 import { postCanvasEvents } from '@/api';
 
-import type { CanvasEventInput, RecentAction } from '@sediment/shared';
+import type { CanvasEventInput, RecentAction } from '@huabu/shared';
 
 const EVENT_BATCH_MAX = 200;
 

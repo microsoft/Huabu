@@ -32,7 +32,7 @@ import type {
   AgentTeamMemberConfigView,
   AgentTeamMemberDetailView,
   AgentTeamMemberView,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 function isCommandProfile(
   profile: AgentProfileView,

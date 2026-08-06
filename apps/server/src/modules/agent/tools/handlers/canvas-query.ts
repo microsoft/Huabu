@@ -26,7 +26,7 @@ import type {
   GetSpaceOutlineQueryParams,
   InspectEdgesQueryParams,
   InspectNodesQueryParams,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 // ---- Argument types ----
 //

@@ -23,7 +23,7 @@ import type {
   LLMProviderInfo,
   LLMUtilityConfig,
   LLMUtilityConfigUpdate,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /**
  * Collapse a noisy provider error into a single readable line.

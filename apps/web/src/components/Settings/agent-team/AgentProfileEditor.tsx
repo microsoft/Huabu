@@ -36,7 +36,7 @@ import type {
   AcpAgentCliInfo,
   AcpCommandProfileView,
   AgentTeamMemberDetailView,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 type AgentProfileEditorProps =
   | {

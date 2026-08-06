@@ -21,7 +21,7 @@
  * expensive pipeline stays outside the lock).
  */
 
-import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import type { CanvasStore, NodeContent, RenameResult } from './canvas-store.js';
 

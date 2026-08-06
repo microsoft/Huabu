@@ -2,7 +2,7 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { getQuestionNodeStatus } from '@sediment/shared';
+import { getQuestionNodeStatus } from '@huabu/shared';
 
 import { CanvasLayerTree } from './CanvasLayerTree';
 import { CanvasSearchInput } from './CanvasSearchInput';
@@ -29,7 +29,7 @@ import type {
   ExternalNoteItem,
   OfficeFormat,
   SketchStroke,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 interface CanvasLayerPanelProps {
   isCollapsed?: boolean;

@@ -17,7 +17,7 @@ import { copyToClipboard } from '@/utils/io/clipboard';
 
 import { useDebouncedSave } from '../utils';
 
-import type { LLMConfigUpdate, LLMUtilityConfigUpdate } from '@sediment/shared';
+import type { LLMConfigUpdate, LLMUtilityConfigUpdate } from '@huabu/shared';
 
 interface BaseUrlRowProps {
   description?: string;

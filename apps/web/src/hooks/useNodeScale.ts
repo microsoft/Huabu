@@ -1,7 +1,7 @@
 import {
   contentScaleFor,
   getHeightPolicy,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import useCanvasStore from '@/store/canvasStore';
 

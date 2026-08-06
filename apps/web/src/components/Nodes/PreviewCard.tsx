@@ -1,4 +1,4 @@
-import { resolveAccent } from '@sediment/shared';
+import { resolveAccent } from '@huabu/shared';
 
 import { getAccentTokens } from './accentTokens';
 import { getNodeIcon } from '../../config/nodeIcons.ts';

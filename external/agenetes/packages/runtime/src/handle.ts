@@ -13,7 +13,7 @@
 //   - It is owned by L2 and consumed by L1. A second L2 implementation
 //     must be able to satisfy these contracts unchanged.
 //   - It must stay host-agnostic: it depends ONLY on `@agenetes/protocol`.
-//     It must not import `@sediment/shared`, pi-ai / pi-agent-core, the
+//     It must not import `@huabu/shared`, pi-ai / pi-agent-core, the
 //     ACP SDK, or any canvas/Huabu-specific type. Host-shaped types
 //     (the request, the render output, the transcript result) enter
 //     purely as generic type parameters bound by the host.

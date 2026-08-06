@@ -39,7 +39,7 @@ import {
   isAccentToken,
   resolveAccent,
   type AccentToken,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { Button } from '@/components/Common/Button';
 import { cn } from '@/components/Common/cn';

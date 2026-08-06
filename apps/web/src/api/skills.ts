@@ -15,7 +15,7 @@
 import { apiFetch } from './_client';
 import { routes } from './_routes';
 
-import type { SkillsListResponse } from '@sediment/shared';
+import type { SkillsListResponse } from '@huabu/shared';
 
 /**
  * Fetch the user-invokable skill catalogue, optionally scoped to one

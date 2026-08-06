@@ -9,10 +9,10 @@
  * sketches that get separate intent resolution.
  */
 
-import { rectEdgeDistance } from '@sediment/shared';
+import { rectEdgeDistance } from '@huabu/shared';
 
-import type { SketchNodeRef, SketchCluster } from '@sediment/shared';
-import type { Rect } from '@sediment/shared';
+import type { SketchNodeRef, SketchCluster } from '@huabu/shared';
+import type { Rect } from '@huabu/shared';
 
 /**
  * Maximum edge-to-edge distance (px in flow coordinates) for two

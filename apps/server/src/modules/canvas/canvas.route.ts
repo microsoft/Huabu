@@ -19,8 +19,8 @@ import {
   putCanvasBodySchema,
   putNodeContentBodySchema,
   setPortalNodePinsCommandSchema,
-} from '@sediment/shared';
-import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import {
   CanvasCommandRoutingError,
@@ -65,7 +65,7 @@ import { withSpaceDirHandlesReleased } from '../storage/space-dir-handles.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
-import type { CanvasNodeType } from '@sediment/shared';
+import type { CanvasNodeType } from '@huabu/shared';
 import type {
   ApiResult,
   CanvasCommand,
@@ -97,7 +97,7 @@ import type {
   PutNodeContentRequest,
   PutNodeContentResponse,
   RevealNodesFolderResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 /**

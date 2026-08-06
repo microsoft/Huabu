@@ -1,4 +1,4 @@
-import { parseArtifactUrl } from '@sediment/shared';
+import { parseArtifactUrl } from '@huabu/shared';
 
 import { apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
@@ -7,7 +7,7 @@ import { API_CONFIG } from '../config/api';
 import type {
   ArtifactUploadResponse,
   CloneArtifactRequest,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 // Re-export the canonical wire helper from shared so the rest of the
 // web bundle has one obvious place to import from.

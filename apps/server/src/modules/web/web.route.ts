@@ -1,7 +1,7 @@
 import { marked } from 'marked';
 import sanitizeHtml from 'sanitize-html';
 
-import { webLookupQuerySchema } from '@sediment/shared';
+import { webLookupQuerySchema } from '@huabu/shared';
 
 import { getCanvasStore } from '../storage/index.js';
 
@@ -10,7 +10,7 @@ import type {
   WebPageResponse,
   WebPreviewResponse,
   WebReaderResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 type Querystring = WebLookupQuery;

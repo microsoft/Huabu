@@ -223,7 +223,7 @@ Link editing uses a React popover and routes writes through
    mark toggles, block type changes, color changes, focus restoration, and
    markdown output.
 2. Add interaction tests for note editing toolbar buttons in the web test suite.
-3. Run `pnpm --filter @sediment/web typecheck` after API changes.
+3. Run `pnpm --filter @huabu/web typecheck` after API changes.
 4. Manually verify desktop and narrow viewport layouts: no overlap with node
    toolbar, no duplicate Crepe toolbar, keyboard focus returns to the editor.
 5. Verify preview contexts: AI message cards, collapsed note previews, and

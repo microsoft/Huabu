@@ -14,7 +14,7 @@ import type { PermissionSegment } from '../../../store/chatTypes';
 import type {
   AcpPermissionOption,
   AcpPermissionOptionKind,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 interface PermissionCardProps {
   part: PermissionSegment;

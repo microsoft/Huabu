@@ -1,14 +1,14 @@
 /**
  * LLM-facing node reference ladder + builders.
  *
- * Server-only. The wire layer (`@sediment/shared`'s `WireNodeRef` /
+ * Server-only. The wire layer (`@huabu/shared`'s `WireNodeRef` /
  * `WireSelectionNode` / `WireCanvasNode`) carries raw canvas state
  * across the network; this module owns the *prompt-shaped*
  * enrichments — pre-computed `nodes/<safeLabel>.md` filename, picked
  * preview line, parent-frame label lookup — that the model actually
  * sees.
  *
- * Kept out of `@sediment/shared` because:
+ * Kept out of `@huabu/shared` because:
  *   - the web bundle never sends `filename` / `preview` /
  *     `parentFrame.label` to the server, so it has no reason to compute
  *     them or even know they exist;
@@ -28,11 +28,11 @@
  * forward them here.
  */
 
-import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { toSafeFilename } from '../storage/naming.js';
 
-import type { CanvasNodeType, WireNodeRef } from '@sediment/shared';
+import type { CanvasNodeType, WireNodeRef } from '@huabu/shared';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 

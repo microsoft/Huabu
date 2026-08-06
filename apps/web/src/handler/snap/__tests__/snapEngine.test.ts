@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { buildCandidateIndex, computeSnap } from '../snapEngine';
 
 import type { Rect, SnapOptions } from '../types';
-import type { NestableNode } from '@sediment/shared/canvas-engine';
+import type { NestableNode } from '@huabu/shared/canvas-engine';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 

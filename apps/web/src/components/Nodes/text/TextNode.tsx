@@ -2,7 +2,7 @@ import { Bold, Italic, Underline, Strikethrough } from 'lucide-react';
 import { memo, useCallback, useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { resolveAccent } from '@sediment/shared';
+import { resolveAccent } from '@huabu/shared';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
@@ -21,7 +21,7 @@ import { NodeWrapper } from '../NodeWrapper';
 import { resolveTextBodyBox, TextNodeBody } from '../shared/TextNodeBody';
 
 import type { CanvasTextNodeData, NodeStyle } from '../types';
-import type { NodeFontFamily } from '@sediment/shared';
+import type { NodeFontFamily } from '@huabu/shared';
 import type { Node, NodeProps } from '@xyflow/react';
 
 const FONT_FAMILY_OPTIONS: { name: string; value: NodeFontFamily }[] = [

@@ -18,11 +18,11 @@
  * can be used as React list keys and as `Set` members without any
  * structural-equality dance.
  */
-import { CANVAS_NODE_TYPES, OFFICE_FORMATS } from '@sediment/shared';
+import { CANVAS_NODE_TYPES, OFFICE_FORMATS } from '@huabu/shared';
 
 import { NODE_ICON, OFFICE_FORMAT_ICON } from '@/config/nodeIcons';
 
-import type { CanvasNodeType, OfficeFormat } from '@sediment/shared';
+import type { CanvasNodeType, OfficeFormat } from '@huabu/shared';
 import type { LucideIcon } from 'lucide-react';
 
 export type OfficeFilterKey = `office:${OfficeFormat}`;

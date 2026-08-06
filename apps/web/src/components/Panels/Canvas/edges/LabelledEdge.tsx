@@ -18,7 +18,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { EDGE_LABEL_MAX_INVERSE_SCALE } from '@sediment/shared';
+import { EDGE_LABEL_MAX_INVERSE_SCALE } from '@huabu/shared';
 
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import useCanvasStore from '@/store/canvasStore';
@@ -27,7 +27,7 @@ import { measureTextContent } from '@/utils/node/textMeasure';
 
 import { getEdgeLabelRenderZ } from './edgeZ';
 
-import type { CanvasEdgeId, EdgeStyle } from '@sediment/shared';
+import type { CanvasEdgeId, EdgeStyle } from '@huabu/shared';
 import type { EdgeProps } from '@xyflow/react';
 
 /** Hard cap matching the agent-facing `EdgeStyleSchema`. */

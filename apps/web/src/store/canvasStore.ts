@@ -20,7 +20,7 @@ import {
   markdownArtifactFields,
   parseArtifactRef,
   rewriteMarkdownArtifactRefs,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import {
   COMMAND_META,
   applyDeltas,
@@ -43,7 +43,7 @@ import {
   type Delta,
   type ExecutorOptions,
   type NestableNode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import {
   runWebPostEffects,
@@ -134,8 +134,8 @@ import type {
   WireCanvasNode,
   WireSelectionNode,
   ResolvedWorldReference,
-} from '@sediment/shared';
-import type { StructuredReflowEntry } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import type { StructuredReflowEntry } from '@huabu/shared/canvas-engine';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;

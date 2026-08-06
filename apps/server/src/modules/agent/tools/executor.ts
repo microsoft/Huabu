@@ -56,7 +56,7 @@ import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 import { resolveWorldReadCanvasId } from '../../canvas/world-target-access.js';
 
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
-import type { NodeOrigin } from '@sediment/shared';
+import type { NodeOrigin } from '@huabu/shared';
 
 /**
  * Per-request context every handler call receives.

@@ -44,7 +44,7 @@ export {
   moveNodeOutOfFrame,
   getSmartHandles,
   rerouteAllEdges,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 export { toScreenshotDataUrl, captureCanvasScreenshot } from './screenshot';
 

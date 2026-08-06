@@ -31,7 +31,7 @@
 import {
   intrinsicToLayoutHeight,
   resolveHeightMode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import useCanvasStore from '@/store/canvasStore';
 
@@ -44,7 +44,7 @@ import type {
   AutoHeightHint,
   CanvasNodeId,
   CanvasNodeMeasuredHeightUpdate,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 export interface HeightProposal {
   nodeId: string;

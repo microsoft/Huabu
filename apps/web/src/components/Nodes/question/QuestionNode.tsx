@@ -2,7 +2,7 @@ import { MessageSquare } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { createId, getQuestionNodeStatus } from '@sediment/shared';
+import { createId, getQuestionNodeStatus } from '@huabu/shared';
 
 import './QuestionNode.css';
 

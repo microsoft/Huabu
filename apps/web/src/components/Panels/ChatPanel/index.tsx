@@ -8,7 +8,7 @@ import {
   getQuestionNodeStatus,
   MODE_SELECTION_ID,
   MODEL_SELECTION_ID,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import {
   setAcpSessionConfigOption,
@@ -66,7 +66,7 @@ import type {
   AgentMode,
   IntentCandidate,
   IntentEpisode,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 interface ChatPanelProps {

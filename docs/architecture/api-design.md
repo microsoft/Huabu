@@ -19,7 +19,7 @@ and `apps/web`. Deviations require updating this file in the same PR.
    `{ ok: false }` for true business outcomes (e.g. user cancelled a
    dialog) returned with HTTP 200.
 5. **Web bundle stays zod-free.** Web code must `import type` only from
-   `@sediment/shared`. `sideEffects: false` + `consistent-type-imports`
+   `@huabu/shared`. `sideEffects: false` + `consistent-type-imports`
    ESLint rule enforce this.
 
 > **Carve-out — the L1↔L2 Agenetes control-plane contract.** The driver-agnostic, reusable control-plane primitives (`WorkloadSpec` building blocks, the `AgentStreamEvent` mirror, `ControlMsg`, `AgentCapabilities`) live in the extractable [`@agenetes/protocol`](../../external/agenetes/packages/protocol) package rather than `packages/shared/src/types/api/*` — they are a standalone control-plane contract meant to be adopted by other hosts, not Huabu-specific HTTP wire types. Rules 2–5 still hold there (zod single-source, `safeParse` at the trust boundary, web imports as `import type` only). Host-specific pieces (a driver's `spec`/`request`, e.g. `BuiltinAgentSpec` / `ChatEnvelope`) stay under `packages/shared` and bind into the protocol via `defineBinding`. See [layered-architecture.md §5](../proposals/layered-architecture.md#5-inter-layer-contracts-the-seams).
@@ -60,7 +60,7 @@ import {
   type ApiResult,
   type EchoBody,
   type EchoResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 const echoRoutes: FastifyPluginAsync = async (fastify) => {
@@ -87,7 +87,7 @@ export default echoRoutes;
 import { apiFetch } from './_client';
 import { routes } from './_routes';
 
-import type { EchoBody, EchoResponse } from '@sediment/shared';
+import type { EchoBody, EchoResponse } from '@huabu/shared';
 
 export async function postEcho(body: EchoBody): Promise<EchoResponse> {
   return apiFetch<EchoResponse>(routes.echo, {

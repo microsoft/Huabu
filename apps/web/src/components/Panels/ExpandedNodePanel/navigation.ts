@@ -1,6 +1,6 @@
 import { isEditableTarget } from '@/hooks/shortcuts';
 
-import type { EdgeStyle } from '@sediment/shared';
+import type { EdgeStyle } from '@huabu/shared';
 import type { Edge, Node } from '@xyflow/react';
 
 export type ExpandedNodeDirection = 'incoming' | 'undirected' | 'outgoing';

@@ -1,6 +1,6 @@
 import getStroke from 'perfect-freehand';
 
-import { ACCENT_PALETTE, type ColorPickerOption } from '@sediment/shared';
+import { ACCENT_PALETTE, type ColorPickerOption } from '@huabu/shared';
 
 export const SKETCH_OPTIONS = {
   size: 4,

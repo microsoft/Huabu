@@ -19,7 +19,7 @@ import { createChatSubmission } from '../../agenetes/handle.js';
 
 import type { ChatEnvelope } from '../envelope.js';
 import type { AgentTurn, FoldedMessage } from '@agenetes/protocol';
-import type { ChatHistoryItem } from '@sediment/shared';
+import type { ChatHistoryItem } from '@huabu/shared';
 
 function makeEnvelope(text: string): ChatEnvelope {
   return {

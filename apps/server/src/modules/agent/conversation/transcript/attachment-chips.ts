@@ -12,7 +12,7 @@
  * message's attachment chips), so both agree on the visible subset.
  */
 
-import type { ChatAttachment } from '@sediment/shared';
+import type { ChatAttachment } from '@huabu/shared';
 
 /**
  * Pre-snapshotted sketch artifacts are server-internal: they exist so

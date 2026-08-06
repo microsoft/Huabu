@@ -5,7 +5,7 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
-import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
+import type { CanvasCommand, CanvasNodeId } from '@huabu/shared';
 
 export default function resolveMoveNoteExcerpt(
   intent: Extract<CanvasUiIntent, { type: 'MOVE_NOTE_EXCERPT' }>,

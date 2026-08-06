@@ -218,8 +218,8 @@ where $W$ is the total watcher count and $A$ is the number of distinct Spaces wi
 Run the focused server checks first:
 
 ```bash
-pnpm --filter @sediment/server exec vitest run src/modules/canvas/external-watcher.test.ts
-pnpm --filter @sediment/server typecheck
+pnpm --filter @huabu/server exec vitest run src/modules/canvas/external-watcher.test.ts
+pnpm --filter @huabu/server typecheck
 ```
 
 Before review handoff, run the repository checks:

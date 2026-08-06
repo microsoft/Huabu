@@ -398,6 +398,6 @@ export type AssistantHistoryPart = AssistantPart;
 //
 // Tiny re-export to keep render-time imports concise. UI files only
 // need `AcpContentBlock` to type-check tool content; re-exporting from
-// here means they import from one place (`@sediment/shared`) rather
+// here means they import from one place (`@huabu/shared`) rather
 // than chasing the SDK alias.
 export type { AcpContentBlock };

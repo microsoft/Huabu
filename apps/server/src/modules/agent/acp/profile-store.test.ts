@@ -27,7 +27,7 @@ import {
   updateProfile,
 } from './profile-store.js';
 
-import type { AcpAgentProfile } from '@sediment/shared';
+import type { AcpAgentProfile } from '@huabu/shared';
 
 let tmp: string;
 let prevDataDir: string | undefined;

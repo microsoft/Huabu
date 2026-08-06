@@ -8,7 +8,7 @@
  * types, not the runtime zod barrel.
  *
  * Web-bundle hygiene: this file is zod runtime, so all web imports
- * of `@sediment/shared` must be `import type` (enforced by
+ * of `@huabu/shared` must be `import type` (enforced by
  * `__tests__/acp-tool-bundle.test.ts`).
  */
 

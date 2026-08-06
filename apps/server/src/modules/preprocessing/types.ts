@@ -4,7 +4,7 @@
  * These types flow between pipeline stages and are not part of the public API.
  */
 
-import type { CanvasNodeType, TriggerReason } from '@sediment/shared';
+import type { CanvasNodeType, TriggerReason } from '@huabu/shared';
 
 // ---------------------------------------------------------------------------
 // Capabilities — organized by pipeline stage

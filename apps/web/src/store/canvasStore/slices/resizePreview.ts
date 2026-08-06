@@ -51,7 +51,7 @@ import {
   getStructuredFrameGutterPlan,
   type NestableNode,
   type StructuredGutterSizes,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import {
   getNodeFontFit,
@@ -63,7 +63,7 @@ import { canvasHistoryManager } from '../../canvasHistoryManager';
 import { useGesturePreviewStore } from '../../gesturePreviewStore';
 
 import type { CanvasUiIntent } from '@/handler/canvasCommand/uiIntent';
-import type { FrameSizing, NodeStyle } from '@sediment/shared';
+import type { FrameSizing, NodeStyle } from '@huabu/shared';
 import type { Edge, Node } from '@xyflow/react';
 
 /**

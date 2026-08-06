@@ -39,7 +39,7 @@
 import {
   getAbsolutePosition,
   getSketchRenderedSize,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { canvasHistoryManager } from '@/store/canvasHistoryManager';
 import useCanvasStore from '@/store/canvasStore';
@@ -49,8 +49,8 @@ import type {
   CanvasCommand,
   CanvasNodeId,
   SketchStroke,
-} from '@sediment/shared';
-import type { NestableNode } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import type { NestableNode } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
 /** Axis-aligned bounding box in flow-space coordinates. */

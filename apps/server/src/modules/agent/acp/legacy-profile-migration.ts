@@ -1,5 +1,5 @@
 import type { CreateAcpCommandProfileInput } from '@agenetes/agent-team';
-import type { AcpAgentProfile } from '@sediment/shared';
+import type { AcpAgentProfile } from '@huabu/shared';
 
 /**
  * Convert spawnable legacy ACP profiles into unified command Profiles.

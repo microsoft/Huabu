@@ -6,7 +6,7 @@ import type {
   AgentIcon,
   AgentMode,
   CustomData,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 export type QuestionAgentProfile = {
   id: string;

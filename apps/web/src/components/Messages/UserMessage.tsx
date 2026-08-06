@@ -5,7 +5,7 @@ import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import { NodeRef } from '../Common/NodeRef';
 
-import type { ChatAttachment, SelectedStrokeSubset } from '@sediment/shared';
+import type { ChatAttachment, SelectedStrokeSubset } from '@huabu/shared';
 
 interface UserMessageProps {
   content: string;

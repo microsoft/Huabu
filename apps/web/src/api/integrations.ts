@@ -4,7 +4,7 @@ import { routes } from './_routes';
 import type {
   IntegrationsConfig,
   IntegrationsConfigUpdate,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /** Fetch the masked status of stored third-party API keys. */
 export async function getIntegrationsConfig(): Promise<IntegrationsConfig> {

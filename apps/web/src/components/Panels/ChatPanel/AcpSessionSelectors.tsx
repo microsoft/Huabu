@@ -8,7 +8,7 @@
  * (legacy `availableModes` / `availableModels` vs modern `configOptions`),
  * which of the two wins when an agent publishes both, and whether the value
  * to show is this thread's explicit selection or the agent's own report are
- * all decided by `buildAcpSessionSelectors` in `@sediment/shared` — one
+ * all decided by `buildAcpSessionSelectors` in `@huabu/shared` — one
  * normalisation shared with the server. Everything below reads
  * `AcpSessionSelector` and nothing else, so there is no second opinion
  * about the agent's shape to drift out of sync.
@@ -23,7 +23,7 @@ import { TriangleAlert } from 'lucide-react';
 import { useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { buildAcpSessionSelectors } from '@sediment/shared';
+import { buildAcpSessionSelectors } from '@huabu/shared';
 
 import { SessionSelectorPill } from './SessionSelectorPill';
 import { Button } from '../../Common/Button';
@@ -34,7 +34,7 @@ import type { SelectOption } from '../../Common/Select';
 import type {
   AcpSessionMetaSnapshot,
   AcpSessionSelector,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /** Mode value that hands the agent unrestricted tool access. */
 const FULL_ACCESS_VALUE = 'agent-full-access';

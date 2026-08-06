@@ -150,7 +150,7 @@ importers:
       '@resvg/resvg-wasm':
         specifier: ^2.6.2
         version: 2.6.2
-      '@sediment/shared':
+      '@huabu/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       archiver:
@@ -289,7 +289,7 @@ importers:
       '@milkdown/utils':
         specifier: ^7.21.1
         version: 7.21.2
-      '@sediment/shared':
+      '@huabu/shared':
         specifier: workspace:*
         version: link:../../packages/shared
       '@xyflow/react':

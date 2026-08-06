@@ -59,7 +59,7 @@ const log = getLogger('skill-loader');
  * Agent surfaces a skill is intended for.
  *
  * `ask` / `operate` mirror the public `AgentMode` enum from
- * `@sediment/shared`; `sketch` is the sketch-intent
+ * `@huabu/shared`; `sketch` is the sketch-intent
  * pipeline; `external` is reserved for skills that should also be
  * advertised to external agents (Copilot / Codex / Claude Code).
  */

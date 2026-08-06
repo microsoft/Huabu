@@ -6,7 +6,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 
 import { Loading } from '@/components/Common/Loading';
 
-import type { PdfHighlight } from '@sediment/shared';
+import type { PdfHighlight } from '@huabu/shared';
 
 import './pdfWorker';
 

@@ -40,7 +40,7 @@
 
 import { pushAction } from '@/handler/canvasCommand/utils';
 
-import type { RecentAction } from '@sediment/shared';
+import type { RecentAction } from '@huabu/shared';
 
 export type IntentActionWindow = {
   /** Append a single action to the window (caps at the shared {@link pushAction} max). */

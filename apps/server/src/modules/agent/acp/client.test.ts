@@ -24,7 +24,7 @@ import { AcpAgentClient, agentSupportsLoadSession } from '@agenetes/acp-driver';
 import { describe, expect, it } from 'vitest';
 
 import type { AgentConnection, AcpMessage } from '@agentlet/protocol';
-import type { AcpSessionUpdate } from '@sediment/shared';
+import type { AcpSessionUpdate } from '@huabu/shared';
 
 interface FakeConnection extends AgentConnection {
   pushMessage(msg: AcpMessage): void;

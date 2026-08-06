@@ -69,7 +69,7 @@ import type {
   AcpEnsureErrorCode,
   AcpSessionMetaSnapshot,
   AgentBinding,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 const STALE_TTL_MS = 10_000;
 

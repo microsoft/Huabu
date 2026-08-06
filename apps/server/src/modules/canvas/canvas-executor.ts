@@ -1,7 +1,7 @@
 /**
  * Headless canvas executor — server-side runner for `CanvasCommand` batches.
  *
- * Drives the shared engine (`@sediment/shared/canvas-engine`) against
+ * Drives the shared engine (`@huabu/shared/canvas-engine`) against
  * authoritative structural state, persists both the
  * canvas structure and the per-node markdown sidecars, computes the
  * structural deltas the engine produced, and appends one row per
@@ -36,7 +36,7 @@ import {
   type CanvasNodeId,
   type ExecuteConflict,
   type ExecuteOriginator,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import {
   applySharedPostEffectsFromWriteResult,
   applyDeltas,
@@ -48,7 +48,7 @@ import {
   type CanvasEdge,
   type CanvasNode,
   type Delta,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';

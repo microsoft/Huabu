@@ -4,7 +4,7 @@ import { routes } from './_routes';
 import type {
   ImportExternalNoteRequest,
   ImportExternalNoteResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 export function externalStreamUrl(canvasId: string): string {
   return apiUrl(routes.canvasExternalStream(canvasId));

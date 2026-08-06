@@ -23,7 +23,7 @@ import {
   getResizeContext,
 } from '../snapSession';
 
-import type { NestableNode } from '@sediment/shared/canvas-engine';
+import type { NestableNode } from '@huabu/shared/canvas-engine';
 import type {
   NodeChange,
   NodeDimensionChange,

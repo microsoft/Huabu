@@ -2,7 +2,7 @@
  * Intent recognition API client.
  */
 
-import { INTENT_SSE_EVENTS } from '@sediment/shared';
+import { INTENT_SSE_EVENTS } from '@huabu/shared';
 
 import { apiFetch, apiFetchVoid, apiUrl } from './_client';
 import { routes } from './_routes';
@@ -15,7 +15,7 @@ import type {
   IntentContext,
   IntentEpisode,
   IntentStreamEvent,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /**
  * Stream intent recognition via SSE — calls onCandidate for each candidate

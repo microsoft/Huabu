@@ -5,7 +5,7 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
-import type { CanvasEdgeId } from '@sediment/shared';
+import type { CanvasEdgeId } from '@huabu/shared';
 
 export default function resolveDisconnectEdge(
   intent: Extract<CanvasUiIntent, { type: 'DISCONNECT_EDGE' }>,

@@ -220,7 +220,7 @@ Mutations originated elsewhere — agent runs on the server, or commands posted 
 
 - `packages/shared/src/canvas-engine/` is pure TypeScript with no web runtime dependencies.
 - All existing user-facing behavior is unchanged (verified by evals).
-- `pnpm --filter web typecheck`, `pnpm --filter server typecheck`, and `pnpm --filter @sediment/shared typecheck` all pass.
+- `pnpm --filter web typecheck`, `pnpm --filter server typecheck`, and `pnpm --filter @huabu/shared typecheck` all pass.
 
 ### M2. Server-side execution + delta log
 
@@ -330,7 +330,7 @@ After M3 ships, revisit whether real usage justifies any of:
 
 Per milestone:
 
-1. **Static**: `pnpm --filter web typecheck && pnpm --filter server typecheck && pnpm --filter @sediment/shared typecheck && pnpm lint`.
+1. **Static**: `pnpm --filter web typecheck && pnpm --filter server typecheck && pnpm --filter @huabu/shared typecheck && pnpm lint`.
 2. **Behavioral**: existing `apps/server/evals/cases/*.yml` all pass.
 3. **Manual smoke (M2)**: trigger an agent that creates a node with content; verify server-side preprocessing fires; verify chat-message Revert removes the node.
 4. **Manual smoke (M3)**: open two tabs; drag a node in tab A; tab B converges within 100 ms; click Revert in tab A's chat; tab B sees the revert.

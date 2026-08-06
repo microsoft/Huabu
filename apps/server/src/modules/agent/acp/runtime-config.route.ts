@@ -1,4 +1,4 @@
-import { externalAgentRuntimeConfigSchema } from '@sediment/shared';
+import { externalAgentRuntimeConfigSchema } from '@huabu/shared';
 
 import {
   getExternalAgentRuntimeConfig,
@@ -6,7 +6,7 @@ import {
 } from './runtime-config.js';
 import { isLoopbackRequest } from '../../security/peer.js';
 
-import type { ApiResult, ExternalAgentRuntimeConfig } from '@sediment/shared';
+import type { ApiResult, ExternalAgentRuntimeConfig } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 const externalAgentRuntimeConfigRoutes: FastifyPluginAsync = async (app) => {

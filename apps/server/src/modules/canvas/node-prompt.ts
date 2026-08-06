@@ -29,7 +29,7 @@ import {
 
 import type { AgentNodeOutline, AgentNodePreview } from '../agent/node-ref.js';
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
-import type { CanvasNodeType } from '@sediment/shared';
+import type { CanvasNodeType } from '@huabu/shared';
 
 export { renderNodes } from '../agent/conversation/prompt/node-element.js';
 

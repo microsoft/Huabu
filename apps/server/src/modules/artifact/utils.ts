@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { ARTIFACT_URL_REGEX } from '@sediment/shared';
+import { ARTIFACT_URL_REGEX } from '@huabu/shared';
 
 import { getLogger } from '../../utils/logger.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
@@ -11,7 +11,7 @@ const log = getLogger('artifact');
 // Re-export the canonical wire helpers so existing server-side imports
 // (`./utils.js`) keep working without each call site reaching into the
 // shared package directly.
-export { ARTIFACT_URL_REGEX, artifactApiPath } from '@sediment/shared';
+export { ARTIFACT_URL_REGEX, artifactApiPath } from '@huabu/shared';
 
 /**
  * Resolve an artifact image URL to a base64 data URL.

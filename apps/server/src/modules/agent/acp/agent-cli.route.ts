@@ -18,7 +18,7 @@
 import { detectAgentClis } from './agent-cli-detect.js';
 import { isLoopbackRequest } from '../../security/peer.js';
 
-import type { AcpAgentCliListResponse, ApiResult } from '@sediment/shared';
+import type { AcpAgentCliListResponse, ApiResult } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 export function createAcpAgentCliRoutes(

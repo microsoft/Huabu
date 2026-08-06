@@ -3,7 +3,7 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
-import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
+import type { CanvasCommand, CanvasNodeId } from '@huabu/shared';
 
 /**
  * Resolver for `MOVE_NOTE_BLOCK_INTO_NOTE`.

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { buildLegacyCommandProfiles } from './legacy-profile-migration.js';
 
-import type { AcpAgentProfile } from '@sediment/shared';
+import type { AcpAgentProfile } from '@huabu/shared';
 
 function makeProfile(
   overrides: Partial<AcpAgentProfile> = {},

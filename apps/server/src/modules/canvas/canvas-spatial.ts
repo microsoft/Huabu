@@ -19,10 +19,10 @@
  *    direction / line style — outline only carries topology.
  *
  * Heavy lifting (clustering, proximity, arrangement detection) lives
- * in the zero-dep shared library `@sediment/shared/utils/spatial`.
+ * in the zero-dep shared library `@huabu/shared/utils/spatial`.
  * This module is just an adapter: it loads persisted topology, normalizes
  * node sizes via the canvas-engine helper
- * (`@sediment/shared/canvas-engine/utils/nodeSizes.ts → getNodeSize`),
+ * (`@huabu/shared/canvas-engine/utils/nodeSizes.ts → getNodeSize`),
  * resolves absolute positions for nested nodes, then forwards to the
  * shared primitives.
  *
@@ -43,11 +43,11 @@ import {
   findNearbyNodes,
   nodesInRect,
   sortByReadingOrder,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import {
   getLayoutNodeSize,
   type CanvasNode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { describeNode, nodeLabel, type NodeInput } from './node-prompt.js';
 import { getCanvasStore } from '../storage/index.js';
@@ -64,7 +64,7 @@ import type {
   EdgeStyle,
   LabelSource,
   SpatialNode,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 // ─── Loosely parsed topology shapes ─────────────────────────────────────────
 //
@@ -73,7 +73,7 @@ import type {
 // Persisted edges are generic JSON objects and still need
 // a narrow shim below because xyflow's `Edge['data']` does not know
 // about our {@link EdgeStyle} sub-object — the canonical edge style
-// lives in `@sediment/shared`.
+// lives in `@huabu/shared`.
 
 interface RawEdge {
   id?: string;

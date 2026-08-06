@@ -36,7 +36,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Tooltip } from '@/components/Common/Tooltip';
 
-import type { AcpEnsureErrorCode } from '@sediment/shared';
+import type { AcpEnsureErrorCode } from '@huabu/shared';
 import type { FC } from 'react';
 
 export type AcpConnectionStatus = 'connecting' | 'connected' | 'failed';

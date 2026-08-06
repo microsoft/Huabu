@@ -77,7 +77,7 @@ export default defineConfig({
   webServer: [
     {
       // Isolated backend: locked to temp workspace + data dir (managed mode).
-      command: 'pnpm --filter @sediment/server dev',
+      command: 'pnpm --filter @huabu/server dev',
       url: `http://localhost:${E2E_SERVER_PORT}/api/workspace`,
       reuseExistingServer: false,
       timeout: 120_000,
@@ -89,7 +89,7 @@ export default defineConfig({
     },
     {
       // Web dev server proxying `/api` to the isolated backend above.
-      command: 'pnpm --filter @sediment/web dev',
+      command: 'pnpm --filter @huabu/web dev',
       url: baseURL,
       reuseExistingServer: false,
       timeout: 120_000,

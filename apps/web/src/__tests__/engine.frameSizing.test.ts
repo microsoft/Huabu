@@ -14,14 +14,14 @@
  *   Co-located with the web app's vitest suite (instead of inside
  *   `packages/shared`) because the shared package has no test runner
  *   wiring; the test still exercises the published engine surface
- *   through `@sediment/shared/canvas-engine`.
+ *   through `@huabu/shared/canvas-engine`.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { executeCanvasCommands } from '@sediment/shared/canvas-engine';
+import { executeCanvasCommands } from '@huabu/shared/canvas-engine';
 
-import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
+import type { CanvasCommand, CanvasNodeId } from '@huabu/shared';
 import type { Node, Edge } from '@xyflow/react';
 
 type FrameSizing = 'hug' | 'manual';

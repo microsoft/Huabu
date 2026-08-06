@@ -6,11 +6,11 @@ import {
   type CanvasNodeType,
   type EdgeStyle,
   type Point,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import {
   deduplicateLabel,
   generateNextLabel,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { canvasSizeFromStyle, resolveFrameAtPoint } from '../utils';
 
@@ -19,7 +19,7 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
-import type { NestableNode } from '@sediment/shared/canvas-engine';
+import type { NestableNode } from '@huabu/shared/canvas-engine';
 
 const DEFAULT_PASTE_OFFSET = 40;
 

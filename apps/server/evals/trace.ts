@@ -15,7 +15,7 @@ import { runAgent } from '../src/modules/agent/agent.service.js';
 import { loadAgent } from '../src/prompt/index.js';
 
 import type { Context } from '@earendil-works/pi-ai';
-import type { AgentMode } from '@sediment/shared';
+import type { AgentMode } from '@huabu/shared';
 
 /** Bumped whenever the on-disk trace shape changes. */
 export const TRACE_SCHEMA_VERSION = 1;

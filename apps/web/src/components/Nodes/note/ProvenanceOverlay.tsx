@@ -31,7 +31,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/Common/Button';
 
 import type { MilkdownInstance } from '@/components/Milkdown';
-import type { BlockProvenance, DeletedBlockInfo } from '@sediment/shared';
+import type { BlockProvenance, DeletedBlockInfo } from '@huabu/shared';
 
 export interface ProvenanceOverlayProps {
   blocks: ReadonlyArray<BlockProvenance>;

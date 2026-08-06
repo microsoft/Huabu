@@ -27,7 +27,7 @@ import type {
   AgentMode,
   AgentProfileView,
   AgentTeamManifestProfileView,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { ReactNode } from 'react';
 
 /** A picked (mode, binding) pair emitted by either agent menu. */

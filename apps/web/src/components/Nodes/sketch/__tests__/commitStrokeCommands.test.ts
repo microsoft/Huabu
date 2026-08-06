@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import { commitStrokeCommands } from '../sketchMerge';
 
-import type { CanvasCommand } from '@sediment/shared';
+import type { CanvasCommand } from '@huabu/shared';
 
 // Hoisted so the spies exist before the (hoisted) `vi.mock` factories run.
 const {

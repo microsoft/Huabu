@@ -12,7 +12,7 @@
  * is unit-testable in isolation.
  */
 
-import { commandFromRawInput, variantForInternalTool } from '@sediment/shared';
+import { commandFromRawInput, variantForInternalTool } from '@huabu/shared';
 
 import { projectUserVisibleAttachments } from './attachment-chips.js';
 import { chatEnvelopeFromSubmission } from '../../agenetes/handle.js';
@@ -27,7 +27,7 @@ import type {
   SnapshotNodesData,
   ToolResponse,
   WebSearchToolResponse,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 /** The folded `tool_call` payload, plus the host-extension fields that
  *  ride verbatim through the fold (never declared on the base schema). */

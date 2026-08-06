@@ -23,7 +23,7 @@ import { promisify } from 'node:util';
 
 import { KNOWN_CLIS } from './known-agents.js';
 
-import type { AcpAgentCliInfo } from '@sediment/shared';
+import type { AcpAgentCliInfo } from '@huabu/shared';
 
 const execFileP = promisify(execFile);
 

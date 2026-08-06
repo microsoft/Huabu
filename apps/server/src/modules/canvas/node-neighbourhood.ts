@@ -34,7 +34,7 @@ import {
   rectCenter,
   rectEdgeDistance,
   sortByReadingOrder,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { buildSpatialBundle } from './canvas-spatial.js';
 import { describeNode } from './node-prompt.js';
@@ -46,7 +46,7 @@ import { buildAgentNodePreview } from '../agent/node-ref.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type { AgentNodePreview } from '../agent/node-ref.js';
-import type { CanvasNodeType, SpatialNode } from '@sediment/shared';
+import type { CanvasNodeType, SpatialNode } from '@huabu/shared';
 
 // ─── Public entry point ─────────────────────────────────────────────────────
 

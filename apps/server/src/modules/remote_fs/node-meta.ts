@@ -27,8 +27,8 @@ import {
   RFS_HEADERS,
   type RfsNodeEdges,
   type RfsNodeMeta,
-} from '@sediment/shared';
-import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import {
   ALWAYS_SKIP,
@@ -37,8 +37,8 @@ import {
 } from '../agent/tools/handlers/fs-sandbox.js';
 import { getCanvasStore } from '../storage/index.js';
 
-import type { CanvasNodeType } from '@sediment/shared';
-import type { CanvasNode, CanvasEdge } from '@sediment/shared/canvas-engine';
+import type { CanvasNodeType } from '@huabu/shared';
+import type { CanvasNode, CanvasEdge } from '@huabu/shared/canvas-engine';
 
 /** First path segment (used to gate private dirs). */
 function firstSegment(rel: string): string {

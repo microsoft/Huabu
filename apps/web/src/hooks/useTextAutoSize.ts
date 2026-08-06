@@ -27,7 +27,7 @@ import {
   type FontOpts,
 } from '@/utils/node/textMeasure';
 
-import type { NodeStyle } from '@sediment/shared';
+import type { NodeStyle } from '@huabu/shared';
 
 /** Maximum characters per line before wrapping in auto-width mode. */
 const MAX_CHARS_PER_LINE = 18;

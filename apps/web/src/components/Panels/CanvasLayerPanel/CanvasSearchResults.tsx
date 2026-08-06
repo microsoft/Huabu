@@ -49,7 +49,7 @@ import { cn } from '../../Common/cn';
 import { toast } from '../../Common/Toast';
 import { NodePreviews } from '../../Nodes/previews';
 
-import type { AgentBinding } from '@sediment/shared';
+import type { AgentBinding } from '@huabu/shared';
 
 const ROW_HEIGHT = 52;
 

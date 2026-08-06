@@ -4,7 +4,7 @@ import { ChevronsDown, Fullscreen } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { autoHeightKey } from '@sediment/shared/canvas-engine';
+import { autoHeightKey } from '@huabu/shared/canvas-engine';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Loading } from '@/components/Common/Loading';

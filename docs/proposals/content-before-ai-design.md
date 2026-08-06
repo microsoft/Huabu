@@ -151,4 +151,4 @@ Dynamic CSS rules generated per block via `useMemo`:
 
 ## Dependencies
 
-- `diff` npm package (`diffWords` function) — added to `@sediment/web`
+- `diff` npm package (`diffWords` function) — added to `@huabu/web`

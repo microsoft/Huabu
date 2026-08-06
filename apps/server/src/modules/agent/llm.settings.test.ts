@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   llmConfigUpdateSchema,
   llmUtilityConfigUpdateSchema,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import {
   getAvailableProviders,
@@ -15,7 +15,7 @@ import {
 } from './llm.js';
 
 import type { Api, Model } from '@earendil-works/pi-ai';
-import type { LLMModelInfo } from '@sediment/shared';
+import type { LLMModelInfo } from '@huabu/shared';
 
 describe('LLM provider catalog', () => {
   it('describes each provider base URL default and override capability', () => {

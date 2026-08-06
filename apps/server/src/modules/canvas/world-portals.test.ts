@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   fitPortalToChildren,
   fitPortals,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 const workspaceState = vi.hoisted(() => ({ path: '' }));
 
@@ -27,8 +27,8 @@ import {
 import { refreshCanvasDirIndex } from '../storage/canvas-dirs.js';
 import { getCanvasStore } from '../storage/index.js';
 
-import type { CanvasCommand, CanvasNodeId } from '@sediment/shared';
-import type { NestableNode } from '@sediment/shared/canvas-engine';
+import type { CanvasCommand, CanvasNodeId } from '@huabu/shared';
+import type { NestableNode } from '@huabu/shared/canvas-engine';
 
 function writeCanvas(
   directory: string,

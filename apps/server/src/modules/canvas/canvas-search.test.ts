@@ -23,7 +23,7 @@ import { createChatSubmission } from '../agent/agenetes/handle.js';
 import type { ChatEnvelope } from '../agent/conversation/envelope.js';
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type { AgentTurn } from '@agenetes/protocol';
-import type { CanvasSearchEvent, CanvasSearchRequest } from '@sediment/shared';
+import type { CanvasSearchEvent, CanvasSearchRequest } from '@huabu/shared';
 
 /**
  * In-memory chat-thread registry backing the mocked `agenetes.history`.

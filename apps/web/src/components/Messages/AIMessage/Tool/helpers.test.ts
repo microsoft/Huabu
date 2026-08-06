@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { AGENT_CANVAS_COMMAND_TYPES } from '@sediment/shared';
+import { AGENT_CANVAS_COMMAND_TYPES } from '@huabu/shared';
 
 import { reconstructChangesFromCommands } from './helpers';
 

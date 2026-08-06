@@ -6,7 +6,7 @@ import {
   selectUserVisibleAttachments,
 } from './attachment-chips.js';
 
-import type { ChatAttachment } from '@sediment/shared';
+import type { ChatAttachment } from '@huabu/shared';
 
 describe('selectUserVisibleAttachments', () => {
   it('drops sketch-raster artifacts', () => {

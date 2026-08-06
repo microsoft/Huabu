@@ -46,7 +46,7 @@ import {
   getImageCapabilities,
   validateImageQuality,
   validateImageSize,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import { getLogger } from '../../../../utils/logger.js';
 import { canvasBlobs } from '../../../storage/index.js';
@@ -67,7 +67,7 @@ const MAX_PROMPT_LEN = 4000;
 const REQUEST_TIMEOUT_MS = 120_000;
 
 /**
- * Format a {@link import('@sediment/shared').ValidationResult}
+ * Format a {@link import('@huabu/shared').ValidationResult}
  * failure as an actionable error message.
  */
 function formatValidationFailure(

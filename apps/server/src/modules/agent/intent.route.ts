@@ -12,7 +12,7 @@ import {
   sketchIntentRequestSchema,
   intentEpisodeRequestSchema,
   intentRequestSchema,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 import {
   recognizeIntent,
@@ -30,7 +30,7 @@ import type {
   IntentResponse,
   IntentStreamEvent,
   SketchIntentRequest,
-} from '@sediment/shared';
+} from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 /** Write a single typed SSE frame. */

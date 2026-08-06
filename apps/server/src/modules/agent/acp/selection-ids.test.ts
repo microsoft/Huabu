@@ -2,7 +2,7 @@
  * The reserved `selections` keys are declared twice, on either side of a
  * boundary that cannot be crossed: `@agenetes/acp-driver` is a subtree
  * pushed to its own upstream and must not depend on Sediment, so
- * `@sediment/shared` carries its own copy for the browser-safe selector
+ * `@huabu/shared` carries its own copy for the browser-safe selector
  * normalisation the toolbar renders from.
  *
  * Drift between the two is silent and total: the UI would record a choice
@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MODE_SELECTION_ID as SHARED_MODE_SELECTION_ID,
   MODEL_SELECTION_ID as SHARED_MODEL_SELECTION_ID,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 describe('reserved selection ids', () => {
   it('agree across the driver / shared package boundary', () => {

@@ -25,7 +25,7 @@ import { parserCtx, serializerCtx } from '@milkdown/core';
 import { Crepe } from '@milkdown/crepe';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { fingerprintMarkdownKeys } from '@sediment/shared/canvas-engine';
+import { fingerprintMarkdownKeys } from '@huabu/shared/canvas-engine';
 
 import type { Node as PMNode } from '@milkdown/prose/model';
 

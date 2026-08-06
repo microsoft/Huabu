@@ -2,7 +2,7 @@ import { Fullscreen, ArrowUpRight, ImageOff } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { resolveAccent } from '@sediment/shared';
+import { resolveAccent } from '@huabu/shared';
 
 import { getWebPreview } from '@/api/web';
 

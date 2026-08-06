@@ -22,7 +22,7 @@ import type {
   AgentBinding,
   AgentMode,
   AgentProfileView,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 export type NewChatChoice = AgentChoice;
 

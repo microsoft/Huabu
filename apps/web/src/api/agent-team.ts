@@ -8,7 +8,7 @@ import type {
   CreateAgentProfileBody,
   PatchAgentProfileBody,
   UpdateAgentTeamMemberConfigsBody,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 export async function getAgentTeamSettings(): Promise<AgentTeamSettingsState> {
   return apiFetch(routes.agentTeamSettings, {

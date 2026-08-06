@@ -7,7 +7,7 @@ import {
   getNodeSize,
   getAbsolutePosition,
   type NestableNode,
-} from '@sediment/shared/canvas-engine';
+} from '@huabu/shared/canvas-engine';
 
 import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import useCanvasStore from '@/store/canvasStore';

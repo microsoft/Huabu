@@ -4,8 +4,8 @@ import { routes } from './_routes';
 import type {
   DeleteThreadChangeResponse,
   GetThreadChangesResponse,
-} from '@sediment/shared';
-import type { CanvasChangeRecord } from '@sediment/shared/canvas-engine';
+} from '@huabu/shared';
+import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
 /** Load the pending change-review records for an ACP thread. */
 export async function getThreadChanges(

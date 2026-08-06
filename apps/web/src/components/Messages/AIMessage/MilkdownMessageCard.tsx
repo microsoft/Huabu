@@ -2,14 +2,14 @@
  * Milkdown-backed renderer for AI chat messages.
  */
 
-import { parseArtifactUrl } from '@sediment/shared';
+import { parseArtifactUrl } from '@huabu/shared';
 
 import { MilkdownPreview } from '@/components/Milkdown';
 import useCanvasStore from '@/store/canvasStore';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
 import type { ImageDragPayload, NoteDragPayload } from '@/utils/io/dragDrop';
-import type { NodeOrigin } from '@sediment/shared';
+import type { NodeOrigin } from '@huabu/shared';
 import type { FC } from 'react';
 
 interface MilkdownMessageCardProps {

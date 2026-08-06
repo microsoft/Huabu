@@ -8,7 +8,7 @@ import {
 import type {
   IntegrationsConfig,
   IntegrationsConfigUpdate,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 interface IntegrationsState {
   /** Masked config (booleans only) from the server. */

@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { createId } from '@sediment/shared';
+import { createId } from '@huabu/shared';
 
 import { getLogger } from '../../utils/logger.js';
 import { wrapAsMhtml } from '../web/mhtml.js';
@@ -30,7 +30,7 @@ import type {
 } from './types.js';
 import type { CanvasStore } from '../storage/canvas-store.js';
 import type { BlobLease, BlobScope } from '../storage/index.js';
-import type { PreprocessNodeRequest } from '@sediment/shared';
+import type { PreprocessNodeRequest } from '@huabu/shared';
 
 const log = getLogger('preprocessing.pipeline');
 

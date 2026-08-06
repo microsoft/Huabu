@@ -129,7 +129,7 @@ interface ElectronMenuApi {
  * which uses the modern Vista+ IFileOpenDialog on Windows (Explorer
  * sidebar + path bar + "New folder" button) and NSOpenPanel on macOS.
  *
- * The result shape mirrors `PickFolderResult` from `@sediment/shared`
+ * The result shape mirrors `PickFolderResult` from `@huabu/shared`
  * minus the `'no-picker'` reason — Electron always has a GUI, so only
  * `'cancelled'` is possible on the non-`ok` branch.
  */

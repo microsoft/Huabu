@@ -6,7 +6,7 @@
  */
 
 import type { NodePreprocessProfile } from './types.js';
-import type { CanvasNodeType } from '@sediment/shared';
+import type { CanvasNodeType } from '@huabu/shared';
 
 export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
   note: {

@@ -28,7 +28,7 @@ import {
 
 import { createPerKeyDebouncer } from './perKeyDebouncer';
 
-import type { CanvasNodeType } from '@sediment/shared';
+import type { CanvasNodeType } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 function hasMissingContent(node: Node): boolean {

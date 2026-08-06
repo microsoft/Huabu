@@ -28,7 +28,7 @@ import type {
   AcpContentBlock,
   AcpToolCallContent,
   GenericToolPart,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 interface ToolCallCardProps {
   part: GenericToolPart;

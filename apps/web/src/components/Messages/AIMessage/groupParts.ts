@@ -29,7 +29,7 @@ import type {
   ImageGenerationToolPart,
   SnapshotNodesToolPart,
   WebSearchToolPart,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 export type SegmentGroup =
   | { kind: 'segment'; segment: Exclude<AssistantSegment, { kind: 'tool' }> }

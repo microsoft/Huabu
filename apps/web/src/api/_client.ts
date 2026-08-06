@@ -21,7 +21,7 @@
 
 import { API_CONFIG } from '../config/api';
 
-import type { ApiErrorBody } from '@sediment/shared';
+import type { ApiErrorBody } from '@huabu/shared';
 
 /** Strongly-typed runtime error raised when the server returns a non-2xx. */
 export class ApiError extends Error {

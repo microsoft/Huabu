@@ -73,7 +73,7 @@ import type {
   AcpSessionConfigOption,
   AcpSessionMode,
   AvailableCommand,
-} from '@sediment/shared';
+} from '@huabu/shared';
 
 const CACHE_FILE = 'acp-profile-schema-cache.json';
 const SCHEMA_VERSION = 1;

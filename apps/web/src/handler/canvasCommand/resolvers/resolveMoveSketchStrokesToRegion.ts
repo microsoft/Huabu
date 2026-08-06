@@ -1,4 +1,4 @@
-import { createId, type CanvasNodeId } from '@sediment/shared';
+import { createId, type CanvasNodeId } from '@huabu/shared';
 
 import { buildSketchStrokeTransferCommands } from '@/components/Nodes/sketch/sketchMerge';
 
@@ -9,7 +9,7 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
-import type { NestableNode } from '@sediment/shared/canvas-engine';
+import type { NestableNode } from '@huabu/shared/canvas-engine';
 
 /**
  * Resolver for `MOVE_SKETCH_STROKES_TO_REGION` (Stage 4B).
