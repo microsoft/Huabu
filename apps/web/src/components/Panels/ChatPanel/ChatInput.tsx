@@ -12,9 +12,9 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl, uploadImage, uploadPdf } from '@/api/artifact';
-import useCanvasStore from '@/store/canvasStore';
+import { useChatSession } from '@/hooks/useChatSession';
 import {
-  selectCurrentMessages,
+  selectThreadMessages,
   selectThreadPendingAttachments,
   useChatStore,
 } from '@/store/chatStore';
@@ -122,9 +122,9 @@ export const ChatInput = ({
   const draftRef = useRef('');
 
   // Pending attachments belong to the thread this composer is sending to.
-  const threadId = useChatStore((s) => s.threadId);
+  const { threadId, canvasId } = useChatSession();
   const pendingAttachments = useChatStore((s) =>
-    selectThreadPendingAttachments(s, s.threadId),
+    selectThreadPendingAttachments(s, threadId),
   );
   const selectionAttachment = useChatStore((s) => s.selectionAttachment);
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
@@ -132,7 +132,6 @@ export const ChatInput = ({
     (s) => s.removePendingAttachment,
   );
   const [isDragOver, setIsDragOver] = useState(false);
-  const canvasId = useCanvasStore((s) => s.canvasId);
 
   // Focus the textarea whenever a surface requests it (e.g. opening a
   // question node into compose mode). Keyed on a monotonic nonce so
@@ -333,7 +332,7 @@ export const ChatInput = ({
         (e.key === 'ArrowUp' && atStart) ||
         (e.key === 'ArrowDown' && atEnd)
       ) {
-        const history = selectCurrentMessages(useChatStore.getState())
+        const history = selectThreadMessages(useChatStore.getState(), threadId)
           .filter((m) => m.role === 'user')
           .map((m) => (m.role === 'user' ? m.content : ''));
         if (history.length === 0) return;

@@ -10,7 +10,6 @@ import { isActivelyViewingQuestion } from '@/hooks/useActivelyViewingQuestion';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
-  selectCurrentHistoryLoaded,
   selectThreadHistoryLoaded,
   selectThreadIsLoading,
   selectThreadMessages,
@@ -27,6 +26,7 @@ import {
 
 import { handleStreamEvent } from './useAgentStream';
 
+import type { ChatSession } from './useChatSession';
 import type { ChatMessage } from '../store/chatTypes';
 import type { AgentStreamEvent } from '@huabu/shared';
 
@@ -40,34 +40,32 @@ const KNOWN_HISTORY_ROLES = new Set<string>(['user', 'assistant', 'status']);
  * Hook that loads chat history from the server and handles reconnection
  * to an active agent run after page refresh.
  *
+ * @param session - The conversation to load. All reads and writes are
+ *   addressed to `session.threadId`, so a reconnect on a backgrounded
+ *   thread never paints into a different renderer.
  * @param setIsLoading - Setter from useAgentStream to reflect reconnect
  *   loading state. Takes an explicit `threadId` so reconnects on a
  *   backgrounded thread don't flip loading on the visible one.
  */
 export function useChatHistory(
+  session: ChatSession,
   setIsLoading: (threadId: string, loading: boolean) => void,
 ): void {
-  const threadId = useChatStore((state) => state.threadId);
-  const isHistoryLoaded = useChatStore(selectCurrentHistoryLoaded);
+  const { threadId, canvasId } = session;
+  const isHistoryLoaded = useChatStore((state) =>
+    selectThreadHistoryLoaded(state, threadId),
+  );
   const addMessage = useChatStore((state) => state.addMessage);
-  const canvasId = useCanvasStore((state) => state.canvasId);
-  const conversationView = useChatStore((state) => state.viewingQuestionThread);
   const savedReplay = useChatStore((state) =>
     canvasId ? state.questionReplayByCanvas[canvasId]?.view : undefined,
   );
+  // History has to survive a refresh that lands before the viewed question is
+  // restored, so it falls back to the saved replay. The panel deliberately
+  // does not — it renders only what is actively open.
   const effectiveConversationView =
-    conversationView?.presentationAnchor.canvasId === canvasId
-      ? conversationView
-      : (savedReplay ?? null);
+    session.conversationView ?? savedReplay ?? null;
   const ownerCanvasId =
     effectiveConversationView?.conversationOwner.canvasId || canvasId;
-
-  // Switch chat thread when canvas changes
-  useEffect(() => {
-    if (canvasId) {
-      useChatStore.getState().switchToCanvas(canvasId);
-    }
-  }, [canvasId]);
 
   // Load history from server on first mount (once per thread).
   // Wait for canvasId to be available — on initial mount the canvas may
@@ -77,7 +75,7 @@ export function useChatHistory(
     // Snapshot the thread we're loading for. If the user switches threads
     // mid-fetch, we still want to land the response on the originating
     // thread (cache survives navigation) rather than the current one.
-    const tid = useChatStore.getState().threadId;
+    const tid = threadId;
     if (selectThreadHistoryLoaded(useChatStore.getState(), tid)) return;
 
     let cancelled = false;

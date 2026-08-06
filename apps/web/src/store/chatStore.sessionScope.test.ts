@@ -12,13 +12,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  selectCurrentBinding,
-  selectCurrentHistoryLoaded,
-  selectCurrentIsLoading,
-  selectCurrentMessages,
   selectThreadBinding,
   selectThreadDraft,
   selectThreadHistoryLoaded,
+  selectThreadIsLoading,
   selectThreadMessages,
   selectThreadPendingAttachments,
   selectThreadSettings,
@@ -64,7 +61,8 @@ function resetStore() {
 
 /** The binding of whichever thread is currently visible. */
 function currentBinding() {
-  return selectCurrentBinding(useChatStore.getState());
+  const state = useChatStore.getState();
+  return selectThreadBinding(state, state.threadId);
 }
 
 function userMessage(id: string, content: string): ChatMessage {
@@ -93,21 +91,20 @@ describe('chatStore per-thread caches', () => {
     s.setHistoryLoaded('thread-a', true);
     s.setThreadLoading('thread-b', true);
 
-    useChatStore.setState({ threadId: 'thread-a' });
-    expect(selectCurrentMessages(useChatStore.getState())).toHaveLength(1);
-    expect(selectCurrentHistoryLoaded(useChatStore.getState())).toBe(true);
-    expect(selectCurrentIsLoading(useChatStore.getState())).toBe(false);
+    const state = useChatStore.getState();
+    expect(selectThreadMessages(state, 'thread-a')).toHaveLength(1);
+    expect(selectThreadHistoryLoaded(state, 'thread-a')).toBe(true);
+    expect(selectThreadIsLoading(state, 'thread-a')).toBe(false);
 
-    useChatStore.setState({ threadId: 'thread-b' });
-    const current = selectCurrentMessages(useChatStore.getState())[0];
-    expect(current.role === 'user' && current.content).toBe('hello b');
-    expect(selectCurrentHistoryLoaded(useChatStore.getState())).toBe(false);
-    expect(selectCurrentIsLoading(useChatStore.getState())).toBe(true);
+    const b = selectThreadMessages(state, 'thread-b')[0];
+    expect(b.role === 'user' && b.content).toBe('hello b');
+    expect(selectThreadHistoryLoaded(state, 'thread-b')).toBe(false);
+    expect(selectThreadIsLoading(state, 'thread-b')).toBe(true);
   });
 
   it('returns a stable empty array for threads with no cache entry', () => {
-    const first = selectCurrentMessages(useChatStore.getState());
-    const second = selectCurrentMessages(useChatStore.getState());
+    const first = selectThreadMessages(useChatStore.getState(), 'nobody');
+    const second = selectThreadMessages(useChatStore.getState(), 'nobody');
     expect(first).toBe(second);
     expect(first).toHaveLength(0);
   });

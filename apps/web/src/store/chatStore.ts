@@ -137,7 +137,7 @@ export interface ChatState {
   /**
    * Append a message to a specific thread's list. All writers take a
    * threadId explicitly: SSE callbacks pass the owner-thread captured
-   * at send time, UI handlers pass the currently-visible thread.
+   * at send time, UI handlers pass their own session's thread.
    */
   addMessage: (threadId: string, message: ChatMessage) => void;
   updateMessage: (
@@ -1063,26 +1063,3 @@ export const selectThreadPendingAttachments = (
   state: ChatState,
   threadId: string,
 ): ChatAttachment[] => threadOf(state, threadId).pendingAttachments;
-
-/** The currently-visible thread's agent binding. */
-export const selectCurrentBinding = (state: ChatState): AgentBinding =>
-  selectThreadBinding(state, state.threadId);
-
-/**
- * Read the currently-visible thread's message list. Returns a stable
- * empty array reference when the thread hasn't been hydrated yet.
- */
-export const selectCurrentMessages = (state: ChatState): ChatMessage[] =>
-  selectThreadMessages(state, state.threadId);
-
-/** Read the currently-visible thread's composer draft ('' when none). */
-export const selectCurrentDraft = (state: ChatState): string =>
-  selectThreadDraft(state, state.threadId);
-
-/** True if the currently-visible thread has been hydrated from the server. */
-export const selectCurrentHistoryLoaded = (state: ChatState): boolean =>
-  selectThreadHistoryLoaded(state, state.threadId);
-
-/** True if the currently-visible thread has an active streaming run. */
-export const selectCurrentIsLoading = (state: ChatState): boolean =>
-  selectThreadIsLoading(state, state.threadId);

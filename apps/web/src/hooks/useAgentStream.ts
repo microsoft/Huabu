@@ -22,7 +22,6 @@ import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
-  selectCurrentIsLoading,
   selectThreadBinding,
   selectThreadIsLoading,
   selectThreadMessages,
@@ -45,6 +44,7 @@ import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
 
 import type { AssistantSegment } from '../store/chatTypes';
+import type { ChatSession } from '@/hooks/useChatSession';
 import type { AgentMode, AgentStreamEvent } from '@huabu/shared';
 
 // ==================== Pure Utility Functions ====================
@@ -632,20 +632,25 @@ export interface UseAgentStreamReturn {
 /**
  * Hook that manages agent streaming, including starting/stopping streams
  * and processing SSE events.
+ *
+ * Every read and write is addressed to `session.threadId`, never to whichever
+ * thread happens to be visible, so two mounted Chat renderers stream
+ * independently.
  */
-export function useAgentStream(): UseAgentStreamReturn {
-  const threadId = useChatStore((state) => state.threadId);
-  // Loading is per-thread (a question node thread can stream
-  // independently of the canvas chat), so read the flag for the
-  // currently-visible thread from the store.
-  const isLoading = useChatStore(selectCurrentIsLoading);
+export function useAgentStream(session: ChatSession): UseAgentStreamReturn {
+  const { threadId, canvasId, conversationView } = session;
+  // Loading is per-thread: a question node's thread can stream independently
+  // of the canvas chat.
+  const isLoading = useChatStore((state) =>
+    selectThreadIsLoading(state, threadId),
+  );
   const setThreadLoading = useChatStore((state) => state.setThreadLoading);
 
   const addMessage = useChatStore((state) => state.addMessage);
   const updateMessage = useChatStore((state) => state.updateMessage);
   const setLastAction = useChatStore((state) => state.setLastAction);
   const pendingAttachments = useChatStore((state) =>
-    selectThreadPendingAttachments(state, state.threadId),
+    selectThreadPendingAttachments(state, threadId),
   );
   const selectionAttachment = useChatStore(
     (state) => state.selectionAttachment,
@@ -657,7 +662,6 @@ export function useAgentStream(): UseAgentStreamReturn {
   const getAgentChatContext = useCanvasStore(
     (state) => state.getAgentChatContext,
   );
-  const canvasId = useCanvasStore((state) => state.canvasId);
 
   // Per-thread abort controllers. We can have multiple streams in
   // flight at once (canvas chat + one or more question threads), so a
@@ -691,8 +695,6 @@ export function useAgentStream(): UseAgentStreamReturn {
       )
         return;
 
-      const conversationView =
-        useChatStore.getState().viewingQuestionThread ?? null;
       if (conversationView) {
         try {
           await validateConversationView(conversationView);
@@ -705,6 +707,10 @@ export function useAgentStream(): UseAgentStreamReturn {
           }
           throw error;
         }
+        // Validation is async, so re-check that this conversation is still the
+        // one on screen before sending. Reads the globally viewed question
+        // because that is still where "what the user is looking at" lives;
+        // it retires with L4 when tabs own presentation.
         const currentChat = useChatStore.getState();
         if (
           currentChat.threadId !== threadId ||
@@ -1166,13 +1172,14 @@ export function useAgentStream(): UseAgentStreamReturn {
       getAgentChatContext,
       canvasId,
       setThreadLoading,
+      conversationView,
     ],
   );
 
   const stopStream = useCallback(() => {
-    // Stop the currently-visible thread. Tell the server, then abort
-    // our local subscription so callbacks stop firing.
-    const tid = useChatStore.getState().threadId;
+    // Stop this session's thread. Tell the server, then abort our local
+    // subscription so callbacks stop firing.
+    const tid = threadId;
     void agentApi.stopThread(tid);
 
     const controller = abortControllersRef.current.get(tid);
@@ -1211,7 +1218,7 @@ export function useAgentStream(): UseAgentStreamReturn {
         };
       });
     }
-  }, [addMessage, updateMessage, setThreadLoading]);
+  }, [addMessage, updateMessage, setThreadLoading, threadId]);
 
   // `useChatHistory` reconnect flips loading on/off explicitly for the
   // owner thread of the reconnect attempt. We simply re-expose

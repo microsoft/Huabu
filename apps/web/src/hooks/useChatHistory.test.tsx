@@ -65,8 +65,16 @@ const CANVAS_ID = 'canvas-1';
 /** Stable identity — the effect lists it as a dependency. */
 const noopSetIsLoading = () => {};
 
+/** Stable identity — the hook derives its effect dependencies from it. */
+const SESSION = {
+  threadId: THREAD_ID,
+  canvasId: CANVAS_ID,
+  ownerCanvasId: CANVAS_ID,
+  conversationView: null,
+};
+
 function Harness() {
-  useChatHistory(noopSetIsLoading);
+  useChatHistory(SESSION, noopSetIsLoading);
   return null;
 }
 
