@@ -54,10 +54,7 @@ import type {
   ManifestProfileRow,
 } from './useUnifiedAgents';
 import type { AgentIconValue } from '@/components/Common/AgentIcon';
-import type {
-  AcpAgentCliInfo,
-  AgentTeamMemberDetailView,
-} from '@huabu/shared';
+import type { AcpAgentCliInfo, AgentTeamMemberDetailView } from '@huabu/shared';
 
 type ManifestProfileFormProps =
   | {

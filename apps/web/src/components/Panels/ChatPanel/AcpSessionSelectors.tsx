@@ -34,10 +34,7 @@ import { Loading } from '../../Common/Loading';
 import { Popover } from '../../Common/Popover';
 
 import type { SelectOption } from '../../Common/Select';
-import type {
-  AcpSessionMetaSnapshot,
-  AcpSessionSelector,
-} from '@huabu/shared';
+import type { AcpSessionMetaSnapshot, AcpSessionSelector } from '@huabu/shared';
 
 /** Mode value that hands the agent unrestricted tool access. */
 const FULL_ACCESS_VALUE = 'agent-full-access';

@@ -147,10 +147,7 @@ import {
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
 import type { PointerRecognizer } from '@/handler/pointerRouter';
-import type {
-  FrameFitResult,
-  NestableNode,
-} from '@huabu/shared/canvas-engine';
+import type { FrameFitResult, NestableNode } from '@huabu/shared/canvas-engine';
 
 const nodeTypes = {
   image: ImageNode,

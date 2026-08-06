@@ -7,10 +7,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  fitPortalToChildren,
-  fitPortals,
-} from '@huabu/shared/canvas-engine';
+import { fitPortalToChildren, fitPortals } from '@huabu/shared/canvas-engine';
 
 const workspaceState = vi.hoisted(() => ({ path: '' }));
 

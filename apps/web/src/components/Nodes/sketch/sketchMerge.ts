@@ -48,11 +48,7 @@ import { canvasHistoryManager } from '@/store/canvasHistoryManager';
 import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasSketchNodeData } from '../types';
-import type {
-  CanvasCommand,
-  CanvasNodeId,
-  SketchStroke,
-} from '@huabu/shared';
+import type { CanvasCommand, CanvasNodeId, SketchStroke } from '@huabu/shared';
 import type { NestableNode } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 

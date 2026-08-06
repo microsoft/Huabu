@@ -32,11 +32,7 @@ import type {
   UiResolverState,
 } from '../uiIntent';
 import type { FrameCellPatch } from '../utils/frameLayout';
-import type {
-  CanvasCommand,
-  CanvasNodeId,
-  RecentAction,
-} from '@huabu/shared';
+import type { CanvasCommand, CanvasNodeId, RecentAction } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 export default function resolveNodeDragStop(

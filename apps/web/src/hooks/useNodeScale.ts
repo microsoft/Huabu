@@ -1,10 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import {
-  contentScaleFor,
-  getHeightPolicy,
-} from '@huabu/shared/canvas-engine';
+import { contentScaleFor, getHeightPolicy } from '@huabu/shared/canvas-engine';
 
 import useCanvasStore from '@/store/canvasStore';
 

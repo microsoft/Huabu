@@ -25,11 +25,7 @@ import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 import type { CanvasSketchNodeData } from '@/components/Nodes/types';
-import type {
-  CanvasCommand,
-  CanvasNodeId,
-  SketchStroke,
-} from '@huabu/shared';
+import type { CanvasCommand, CanvasNodeId, SketchStroke } from '@huabu/shared';
 
 /**
  * Floating toolbar for a Stage 2 stroke-level lasso selection. Aligns with

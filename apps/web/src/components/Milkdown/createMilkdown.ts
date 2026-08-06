@@ -45,11 +45,7 @@ import { canJoin } from '@milkdown/prose/transform';
 import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import { $markSchema, $prose, $remark, replaceAll } from '@milkdown/utils';
 
-import {
-  isAccentToken,
-  resolveAccent,
-  type AccentToken,
-} from '@huabu/shared';
+import { isAccentToken, resolveAccent, type AccentToken } from '@huabu/shared';
 import { fingerprintMarkdownKeys } from '@huabu/shared/canvas-engine';
 
 import { toast } from '@/components/Common/Toast';

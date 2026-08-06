@@ -21,11 +21,7 @@ import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
 import { Popover } from '../../Common/Popover';
 
-import type {
-  AgentBinding,
-  AgentMode,
-  AgentProfileView,
-} from '@huabu/shared';
+import type { AgentBinding, AgentMode, AgentProfileView } from '@huabu/shared';
 
 export type NewChatChoice = AgentChoice;
 

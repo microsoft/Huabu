@@ -1,11 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import {
-  createId,
-  type CanvasCommand,
-  type CanvasNodeId,
-} from '@huabu/shared';
+import { createId, type CanvasCommand, type CanvasNodeId } from '@huabu/shared';
 import { frameNodes, type NestableNode } from '@huabu/shared/canvas-engine';
 
 import { getSelectedNodeIds } from '../utils';

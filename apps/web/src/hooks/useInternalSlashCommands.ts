@@ -30,11 +30,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { listSkills } from '@/api/skills';
 
-import type {
-  AgentBinding,
-  AvailableCommand,
-  SkillScope,
-} from '@huabu/shared';
+import type { AgentBinding, AvailableCommand, SkillScope } from '@huabu/shared';
 
 /**
  * Default staleness window for {@link UseInternalSlashCommandsResult.refreshIfStale}.
