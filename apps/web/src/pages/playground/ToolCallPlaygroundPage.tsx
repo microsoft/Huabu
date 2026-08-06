@@ -330,7 +330,7 @@ function normalize(raw: unknown): NormalizeResult {
       continue;
     }
 
-    // status / intent-select / prepared-prompt pass through as-is.
+    // status / prepared-prompt pass through as-is.
     messages.push({ id, ...msg } as ChatMessage);
   }
 

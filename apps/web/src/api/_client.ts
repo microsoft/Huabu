@@ -139,18 +139,3 @@ export async function apiFetch<T>(
   if (!text) return undefined as T;
   return JSON.parse(text) as T;
 }
-
-/**
- * Fire-and-forget variant — swallows errors so the caller doesn't have
- * to. Used by best-effort endpoints (e.g. intent episode logging).
- */
-export async function apiFetchVoid(
-  path: string,
-  options: ApiFetchOptions = {},
-): Promise<void> {
-  try {
-    await apiFetch<void>(path, { ...options, raw: true });
-  } catch (err) {
-    console.error(`[api] ${path} failed:`, err);
-  }
-}

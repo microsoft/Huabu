@@ -9,9 +9,8 @@
  *
  *   1. Build the system prompt from `prompt/agents/memory/AGENT.md`.
  *   2. Assemble a compact context bundle from disk: canvas snapshot,
- *      chat-thread digest, recent ops, intent-episode digest, and
- *      the current contents of every memory surface (workspace,
- *      canvas, user-skill catalogue).
+ *      chat-thread digest, recent ops, and the current contents of
+ *      every memory surface (workspace, canvas, user-skill catalogue).
  *   3. Run the sub-agent against that context. The agent's only way
  *      to affect the world is via the `fs_write` tool, whose handler
  *      routes by virtual path into the writers in `./writers.ts`.

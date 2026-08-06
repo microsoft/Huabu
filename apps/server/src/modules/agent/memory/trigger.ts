@@ -14,7 +14,6 @@
  *   lastSeenThreadCursor pi-ai context timestamp of the last
  *                       analysed chat turn — lets `context.ts` (PR-C)
  *                       only pull "new" turns into the analysis prompt.
- *   lastSeenIntentCursor epoch ms of the last analysed intent episode.
  *
  * Persisted at `<canvasDir>/.memory/state.json` so the counter
  * survives process restarts. The file is kept tiny (<128 B) and

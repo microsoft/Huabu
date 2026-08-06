@@ -585,12 +585,6 @@ const agentRoutes: FastifyPluginAsync = async (
         .code(400)
         .send({ message: parsed.error.issues[0]?.message ?? 'Invalid body' });
     }
-    // TODO: `request.body.intentData` is sent by
-    // the client (see `apps/web/src/api/agent.ts` and
-    // `apps/web/src/hooks/useAgentStream.ts`) but is intentionally NOT
-    // destructured here — it is silently dropped. Either inject it as a
-    // `[SYSTEM IntentSelect]` user-role message before `runAgent`, or
-    // remove `intentData` from `AgentRequest` and the client.
     const {
       content,
       threadId,

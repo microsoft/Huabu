@@ -413,9 +413,9 @@ function stripNodeContentForStructurePut(nodes: readonly Node[]): Node[] {
 // from persisted topology (see `apps/server/src/modules/agent/
 // node-neighbourhood.ts`); the web bundle only sends `anchorNodeId`.
 //
-// Existing UI-side proximity queries (sketch clustering, frame
-// drop targets) call shared geometry helpers directly with their own
-// React Flow nodes — no central cache is needed.
+// Existing UI-side proximity queries (frame drop targets) call shared
+// geometry helpers directly with their own React Flow nodes — no central
+// cache is needed.
 
 type RFState = {
   nodes: Node[];

@@ -12,9 +12,9 @@
  *  - `done` + `viewed`   → not rendered (the answer was read; no need
  *                          to keep nagging).
  *  - everything else     → a 6px filled circle in the status color,
- *                          with a tooltip carrying the same wording
- *                          used by the on-canvas `StatusBadge` plus
- *                          the truncated `errorMessage` when relevant.
+ *                          with a tooltip carrying the status wording
+ *                          plus the truncated `errorMessage` when
+ *                          relevant.
  *
  * The dot is rendered with `pointer-events-auto` so its tooltip works
  * even though its parent `<span>` in `TreeRowItem` is
@@ -23,7 +23,6 @@
  */
 
 import { Tooltip } from '@/components/Common/Tooltip';
-import { getStatusLabel } from '@/components/Nodes/sketch/StatusBadge';
 
 import type { QuestionNodeStatus } from '@huabu/shared';
 
@@ -34,6 +33,12 @@ interface QuestionStatusDotProps {
 }
 
 const ERROR_MESSAGE_MAX = 200;
+
+const STATUS_LABELS: Record<Exclude<QuestionNodeStatus, 'idle'>, string> = {
+  running: 'Running',
+  done: 'Done',
+  error: 'Error',
+};
 
 const DOT_COLORS: Record<
   Exclude<QuestionNodeStatus, 'idle'>,
@@ -58,12 +63,12 @@ function tooltipFor(
           : trimmed;
       return `Error — ${clipped}`;
     }
-    return getStatusLabel('error');
+    return STATUS_LABELS.error;
   }
   if (status === 'done' && !viewed) {
-    return `${getStatusLabel('done')} · unread`;
+    return `${STATUS_LABELS.done} · unread`;
   }
-  return getStatusLabel(status);
+  return STATUS_LABELS[status];
 }
 
 export const QuestionStatusDot = ({

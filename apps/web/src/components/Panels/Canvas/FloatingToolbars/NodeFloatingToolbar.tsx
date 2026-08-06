@@ -53,8 +53,8 @@ interface NodeFloatingToolbarProps {
   /**
    * Group 4 — node actions.
    * Buttons that trigger operations on the node: open large/fullscreen
-   * view, apply AI sketch recognition, download, unframe, start/cancel
-   * AI runs, open conversation thread, etc.
+   * view, download, unframe, start/cancel AI runs, open conversation
+   * thread, etc.
    * Rendered as the last group before the optional delete button.
    */
   actions?: ReactNode;
@@ -77,8 +77,8 @@ interface NodeFloatingToolbarProps {
  *     rendered on the canvas — text formatting, sketch stroke controls, frame
  *     child layout, etc. Omitted when the prop is undefined.
  *  4. Actions (`actions` prop). Buttons that trigger operations — open
- *     large/fullscreen view, AI sketch recognition, download, unframe, run /
- *     cancel AI question, etc. Omitted when the prop is undefined.
+ *     large/fullscreen view, download, unframe, run / cancel AI question,
+ *     etc. Omitted when the prop is undefined.
  *
  * A trailing delete button is appended for non-mouse input (mouse users have
  * keyboard Delete / Backspace).
