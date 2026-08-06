@@ -83,11 +83,6 @@ export interface StopThreadResponse {
   stopped: boolean;
 }
 
-/** Response for `POST /api/intent/episode`. */
-export interface IntentEpisodeAck {
-  success: boolean;
-}
-
 /** Response for `POST /api/llm/oauth/logout`. */
 export interface OAuthLogoutResponse {
   ok: true;

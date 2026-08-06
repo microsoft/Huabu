@@ -99,12 +99,10 @@ describeCanvasLogRepositoriesContract('Disk log-family repositories', () => {
     events: handle.events,
     deltas: handle.deltas,
     changes: handle.changes,
-    intents: handle.intents,
     concurrent: {
       events: concurrent.events,
       deltas: concurrent.deltas,
       changes: concurrent.changes,
-      intents: concurrent.intents,
     },
     cleanup: () => {
       resetStorageCache();
@@ -157,7 +155,7 @@ describe('DiskStructuredStore instance caching', () => {
     expect(b.canvasId).toBe(a.canvasId);
   });
 
-  it('exposes four frozen, runtime-narrow log-family repositories', () => {
+  it('exposes three frozen, runtime-narrow log-family repositories', () => {
     const handle = new DiskStructuredStore().space('canvas-c');
     const runtime = handle as unknown as Record<string, unknown>;
 
@@ -165,14 +163,8 @@ describe('DiskStructuredStore instance caching', () => {
     expect(Object.keys(handle.events)).toEqual(['append', 'read']);
     expect(Object.keys(handle.deltas)).toEqual(['append', 'readSince']);
     expect(Object.keys(handle.changes)).toEqual(['read', 'append', 'remove']);
-    expect(Object.keys(handle.intents)).toEqual(['read', 'upsert']);
 
-    for (const repository of [
-      handle.events,
-      handle.deltas,
-      handle.changes,
-      handle.intents,
-    ]) {
+    for (const repository of [handle.events, handle.deltas, handle.changes]) {
       expect(Object.isFrozen(repository)).toBe(true);
       expect('store' in repository).toBe(false);
     }

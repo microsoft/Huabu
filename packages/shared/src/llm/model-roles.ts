@@ -52,7 +52,6 @@ export const MODEL_ROLES = {
     vision: true,
     label: 'Skill authoring',
   },
-  intent: { defaultTier: 'utility', vision: true, label: 'Intent suggestions' },
   imageLabel: {
     defaultTier: 'utility',
     vision: true,

@@ -36,11 +36,7 @@ import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
 
 import type { AssistantSegment } from '../store/chatTypes';
-import type {
-  AgentMode,
-  AgentStreamEvent,
-  IntentCandidate,
-} from '@huabu/shared';
+import type { AgentMode, AgentStreamEvent } from '@huabu/shared';
 
 // ==================== Pure Utility Functions ====================
 
@@ -615,10 +611,6 @@ export interface UseAgentStreamReturn {
   startStream: (
     prompt: string,
     agentMode: AgentMode,
-    intentData?: {
-      candidates: IntentCandidate[];
-      selectedIntent: string;
-    },
     /**
      * Optional skill ids the user explicitly invoked via leading
      * `/<id>` tokens. Forwarded to the server, which prepends each
@@ -683,15 +675,7 @@ export function useAgentStream(): UseAgentStreamReturn {
   }, []);
 
   const startStream = useCallback(
-    async (
-      prompt: string,
-      agentMode: AgentMode,
-      intentData?: {
-        candidates: IntentCandidate[];
-        selectedIntent: string;
-      },
-      invokedSkills?: string[],
-    ) => {
+    async (prompt: string, agentMode: AgentMode, invokedSkills?: string[]) => {
       // Per-thread guard: this thread's own loading flag, not any other
       // thread's. The user may already have a stream running in a
       // different chat (canvas chat + question node both active).
@@ -800,31 +784,19 @@ export function useAgentStream(): UseAgentStreamReturn {
         useChatStore.getState().setSelectionAttachment(null);
       }
 
-      // For intent-driven operate calls, show an intent-select widget instead of user bubble
-      if (intentData && agentMode === 'operate') {
-        addMessage(threadId, {
-          id: createId('intent'),
-          role: 'intent-select',
-          candidates: intentData.candidates,
-          selectedIntent: intentData.selectedIntent,
-        });
-      } else {
-        addMessage(threadId, {
-          id: createId('message'),
-          role: 'user',
-          content: prompt,
-          attachments,
-          ...(sentSelectedNodeIds.length > 0
-            ? { selectedNodeIds: sentSelectedNodeIds }
-            : {}),
-          ...(sentSelectedStrokeIds.length > 0
-            ? { selectedStrokeIds: sentSelectedStrokeIds }
-            : {}),
-          ...(invokedSkills && invokedSkills.length > 0
-            ? { invokedSkills }
-            : {}),
-        });
-      }
+      addMessage(threadId, {
+        id: createId('message'),
+        role: 'user',
+        content: prompt,
+        attachments,
+        ...(sentSelectedNodeIds.length > 0
+          ? { selectedNodeIds: sentSelectedNodeIds }
+          : {}),
+        ...(sentSelectedStrokeIds.length > 0
+          ? { selectedStrokeIds: sentSelectedStrokeIds }
+          : {}),
+        ...(invokedSkills && invokedSkills.length > 0 ? { invokedSkills } : {}),
+      });
 
       setThreadLoading(threadId, true);
 
@@ -1059,7 +1031,6 @@ export function useAgentStream(): UseAgentStreamReturn {
             canvasContext,
             canvasId: requestScope.canvasId || undefined,
             attachments,
-            intentData,
             agentBinding,
             anchorNodeId: requestScope.anchorNodeId,
             invokedSkills,

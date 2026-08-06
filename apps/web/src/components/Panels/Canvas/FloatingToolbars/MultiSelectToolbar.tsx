@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Pin, PinOff, Sparkles, Trash2 } from 'lucide-react';
+import { Pin, PinOff, Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -25,7 +25,6 @@ import {
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
-import { useIntentStore } from '@/store/intentStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
@@ -61,9 +60,6 @@ export const MultiSelectToolbar = () => {
   const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
   const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
   const pinnedSourceNodeIds = useCanvasStore((s) => s.pinnedSourceNodeIds);
-  const requestSketchRecognition = useIntentStore(
-    (s) => s.requestSketchRecognition,
-  );
   const isNotMouse = useIsNotMouse();
 
   const selectedNodes = useMemo(
@@ -143,19 +139,6 @@ export const MultiSelectToolbar = () => {
     );
     return edges.filter((edge) => edgeIds.has(edge.id));
   }, [edges, selectedNodes]);
-
-  // Sketch (annotation) selections expose an `Apply Sketch` action that
-  // hands the selected stroke ids to the vision-LLM recognition pipeline.
-  // Shown only when *every* selected node is a sketch — mixing in regular
-  // nodes would make the gesture's intent ambiguous.
-  const sketchIds = useMemo(
-    () =>
-      selectedNodes.length > 0 &&
-      selectedNodes.every((n) => n.type === 'sketch')
-        ? selectedNodes.map((n) => n.id)
-        : null,
-    [selectedNodes],
-  );
 
   // Determine the common accent among selected nodes (empty string if mixed)
   const commonAccent = useMemo(() => {
@@ -359,18 +342,6 @@ export const MultiSelectToolbar = () => {
             ]);
           }}
         />
-      )}
-
-      {sketchIds && (
-        <>
-          <FloatingToolbar.Divider />
-          <FloatingToolbar.ActionButton
-            title={t('node.applySketchPlural')}
-            onClick={() => requestSketchRecognition(sketchIds)}
-          >
-            <Sparkles />
-          </FloatingToolbar.ActionButton>
-        </>
       )}
 
       {sourcePinState && (

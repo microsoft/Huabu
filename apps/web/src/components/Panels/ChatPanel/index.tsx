@@ -18,7 +18,6 @@ import {
   setAcpSessionMode,
   setAcpSessionModel,
 } from '@/api/acp';
-import { logIntentEpisode } from '@/api/intent';
 import { Button } from '@/components/Common/Button';
 import { Input } from '@/components/Common/Input';
 import { toast } from '@/components/Common/Toast';
@@ -42,9 +41,7 @@ import {
   isHeadlessConversation,
   resolveConversationOwnerSource,
 } from '@/store/conversationOwner';
-import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
-import { usePanelStore } from '@/store/panelStore';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
 
 import {
@@ -58,18 +55,12 @@ import { ChangeReviewCard } from './ChangeReviewCard';
 import { ChatInput } from './ChatInput';
 import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
 import { parseSlashInvocations } from './parseSlashInvocations';
-import { useSketchClusterMessages } from './useSketchClusterMessages';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
 import { SidebarPanel } from '../SidebarPanel';
 
-import type {
-  AgentIcon,
-  AgentMode,
-  IntentCandidate,
-  IntentEpisode,
-} from '@huabu/shared';
+import type { AgentIcon, AgentMode } from '@huabu/shared';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 interface ChatPanelProps {
@@ -206,7 +197,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     [messages],
   );
   const isHistoryLoaded = useChatStore(selectCurrentHistoryLoaded);
-  const updateMessage = useChatStore((state) => state.updateMessage);
   const clearMessages = useChatStore((state) => state.clearMessages);
   const threadId = useChatStore((state) => state.threadId);
   // Wire the composer's onChange to the current thread's draft slot. An
@@ -554,15 +544,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     viewingQuestionThread,
   ]);
 
-  // Sketch cluster inspector mode (mutually exclusive with question
-  // replay). When set, MessageList renders synthesized messages built from
-  // the live cluster state instead of the canvas chat.
-  const viewingSketchCluster = useChatStore((s) => s.viewingSketchCluster);
-  const closeSketchCluster = useChatStore((s) => s.closeSketchCluster);
-  const sketchMessages = useSketchClusterMessages(
-    viewingSketchCluster?.clusterId ?? null,
-  );
-
   useEffect(() => {
     if (!llmConfig && !llmLoading) {
       void llmInit();
@@ -570,7 +551,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   }, [llmConfig, llmLoading, llmInit]);
 
   const panelTitle = useMemo(() => {
-    if (viewingSketchCluster) return t('chat.sketchRecognition');
     if (viewingQuestionThread) {
       // Composing a fresh node: it has no real label yet, so show a
       // neutral title instead of the auto-generated "Question N". A
@@ -594,7 +574,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     isComposingQuestion,
     isViewingUserNamedQuestion,
     viewingQuestionLabel,
-    viewingSketchCluster,
   ]);
 
   const commitQuestionTitle = useCallback(() => {
@@ -619,74 +598,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     viewingQuestionLabel,
     viewingQuestionNodeId,
   ]);
-
-  // Register intent callback — when user selects an intent in the popover,
-  // it's sent here and executed as an agent chat message.
-  useEffect(() => {
-    const handleIntentChosen = async (
-      intent: string,
-      candidates: IntentCandidate[],
-      episode: IntentEpisode,
-    ) => {
-      // Ensure the right panel is visible before running the intent.
-      usePanelStore.getState().requestOpenRightPanel();
-      // Switch mode to operate
-      setLastAction('operate');
-
-      // Run operate turn, then upsert execution outcome on the episode.
-      const writtenCanvasId = useCanvasStore.getState().canvasId || undefined;
-      try {
-        await startStream(intent, 'operate', {
-          candidates,
-          selectedIntent: intent,
-        });
-        if (episode.outcome.type === 'selected') {
-          void logIntentEpisode(
-            {
-              ...episode,
-              outcome: {
-                ...episode.outcome,
-                execution: { status: 'success' },
-              },
-            },
-            writtenCanvasId,
-          );
-        }
-      } catch (err) {
-        if (episode.outcome.type === 'selected') {
-          void logIntentEpisode(
-            {
-              ...episode,
-              outcome: {
-                ...episode.outcome,
-                execution: {
-                  status: 'error',
-                  error: err instanceof Error ? err.message : String(err),
-                },
-              },
-            },
-            writtenCanvasId,
-          );
-        }
-      }
-    };
-    useIntentStore.getState()._setOnIntentChosen(handleIntentChosen);
-    return () => {
-      useIntentStore.getState()._setOnIntentChosen(null);
-    };
-  }, [startStream, setLastAction]);
-
-  const handleIntentReselect = useCallback(
-    (messageId: string, intent: string) => {
-      // Update the intent-select message with the new selection
-      updateMessage(threadId, messageId, (m) =>
-        m.role === 'intent-select' ? { ...m, selectedIntent: intent } : m,
-      );
-      // Re-run with the new intent
-      void startStream(intent, 'operate');
-    },
-    [startStream, updateMessage, threadId],
-  );
 
   const handleSubmit = async (e: React.FormEvent, agentMode: AgentMode) => {
     e.preventDefault();
@@ -725,7 +636,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     await startStream(
       prompt,
       agentMode,
-      undefined,
       invokedSkills.length > 0 ? invokedSkills : undefined,
     );
   };
@@ -754,10 +664,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // place; it never mints a new thread (that is `NewChatMenu`'s job).
   const threadHasUserMessage = messages.some((m) => m.role === 'user');
   const agentSelectorEditable =
-    !headlessConversation &&
-    !viewingSketchCluster &&
-    !threadHasUserMessage &&
-    !isLoading;
+    !headlessConversation && !threadHasUserMessage && !isLoading;
   const handleSelectAgent = useCallback(
     (choice: AgentChoice) => {
       // Agent binding is immutable once a turn starts (1 thread = 1 binding).
@@ -772,7 +679,6 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
 
   const canSave =
     !viewingQuestionThread &&
-    !viewingSketchCluster &&
     !isLoading &&
     messages.some((m) => m.role === 'user' && m.content.trim().length > 0);
   const handleSaveChat = useCallback(() => {
@@ -821,15 +727,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       title={panelTitle}
       tabs={
         <span className="flex min-w-0 flex-1 items-center gap-1">
-          {(viewingSketchCluster || viewingQuestionThread) && (
+          {viewingQuestionThread && (
             <Button
               variant="ghost"
               iconOnly
-              onClick={
-                viewingSketchCluster
-                  ? closeSketchCluster
-                  : handleCloseQuestionThread
-              }
+              onClick={handleCloseQuestionThread}
               title={t('chat.backToChat')}
               tooltipPlacement="bottom"
               className="-ml-1 shrink-0"
@@ -900,7 +802,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       iconExpanded={<ListIndentIncrease size={16} />}
       className="border-edge-default border-l"
       tools={
-        viewingSketchCluster || viewingQuestionThread ? null : (
+        viewingQuestionThread ? null : (
           <NewChatMenu
             currentMode={mode}
             currentBinding={agentBinding}
@@ -917,21 +819,16 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     >
       <div className="flex h-full flex-col gap-2 overflow-visible pt-3">
         <MessageList
-          messages={viewingSketchCluster ? sketchMessages : messages}
-          isLoading={viewingSketchCluster ? false : isLoading}
-          isHistoryLoading={!viewingSketchCluster && !isHistoryLoaded}
-          viewKey={
-            viewingSketchCluster?.clusterId ??
-            `${threadId}:${viewingQuestionThread?.openSequence ?? 0}`
-          }
+          messages={messages}
+          isLoading={isLoading}
+          isHistoryLoading={!isHistoryLoaded}
+          viewKey={`${threadId}:${viewingQuestionThread?.openSequence ?? 0}`}
           isActive={!isCollapsed}
           openPosition={
             pendingPermission
               ? 'bottom'
               : (viewingQuestionThread?.openPosition ?? 'bottom')
           }
-          hideAIActions={!!viewingSketchCluster}
-          onIntentReselect={handleIntentReselect}
           onRetry={() => {
             // Find the last user message and re-send it
             const lastUserMsg = [...messages]
@@ -943,106 +840,103 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           }}
         />
 
-        {/* Input is hidden in sketch inspector mode — it's a read-only view. */}
-        {!viewingSketchCluster && (
-          <div className="px-3 pb-2">
-            {pendingPermission ? (
-              <div className="mb-2">
-                <PermissionTray
-                  threadId={threadId}
-                  messageId={pendingPermission.messageId}
-                  part={pendingPermission.part}
+        <div className="px-3 pb-2">
+          {pendingPermission ? (
+            <div className="mb-2">
+              <PermissionTray
+                threadId={threadId}
+                messageId={pendingPermission.messageId}
+                part={pendingPermission.part}
+              />
+            </div>
+          ) : null}
+          {ownerCanvasId && threadId && !headlessConversation ? (
+            <ChangeReviewCard canvasId={ownerCanvasId} threadId={threadId} />
+          ) : null}
+          {headlessConversation && hasThreadChanges ? (
+            <div className="border-edge-default bg-surface -mb-px flex items-center justify-between gap-3 rounded-t-2xl border border-b-0 px-3 py-2 text-xs">
+              <span className="text-fg-muted">
+                {t('world.sourceChangesAvailable')}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={openOwnerSpaceForReview}
+              >
+                {t('world.openSpaceForReview')}
+              </Button>
+            </div>
+          ) : null}
+          <ChatInput
+            value={input}
+            onChange={setInput}
+            onSubmit={handleSubmit}
+            onStop={stopStream}
+            isStreaming={isLoading}
+            mode={mode}
+            connectedTop={hasThreadChanges}
+            slashCommands={slashCommands}
+            slashLoading={slashLoading}
+            onSlashMenuIntent={refreshSlashCommands}
+            agentSelectorSlot={
+              <AgentSelector
+                currentBinding={agentBinding}
+                currentMode={mode}
+                profiles={acpProfiles}
+                editable={agentSelectorEditable}
+                onSelect={handleSelectAgent}
+                onRefreshProfiles={refreshAcpProfiles}
+                disabled={!isHistoryLoaded}
+                fallbackIcon={viewingQuestionAgentIcon}
+              />
+            }
+            acpSelectorsSlot={
+              agentBinding.kind === 'external' ? (
+                <AcpSessionSelectors
+                  meta={acpSessionMeta}
+                  loading={acpSessionMetaLoading}
+                  onSelectMode={handleAcpSelectMode}
+                  onSelectModel={handleAcpSelectModel}
+                  onSelectConfigOption={handleAcpSelectConfigOption}
                 />
-              </div>
-            ) : null}
-            {ownerCanvasId && threadId && !headlessConversation ? (
-              <ChangeReviewCard canvasId={ownerCanvasId} threadId={threadId} />
-            ) : null}
-            {headlessConversation && hasThreadChanges ? (
-              <div className="border-edge-default bg-surface -mb-px flex items-center justify-between gap-3 rounded-t-2xl border border-b-0 px-3 py-2 text-xs">
-                <span className="text-fg-muted">
-                  {t('world.sourceChangesAvailable')}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={openOwnerSpaceForReview}
-                >
-                  {t('world.openSpaceForReview')}
-                </Button>
-              </div>
-            ) : null}
-            <ChatInput
-              value={input}
-              onChange={setInput}
-              onSubmit={handleSubmit}
-              onStop={stopStream}
-              isStreaming={isLoading}
-              mode={mode}
-              connectedTop={hasThreadChanges}
-              slashCommands={slashCommands}
-              slashLoading={slashLoading}
-              onSlashMenuIntent={refreshSlashCommands}
-              agentSelectorSlot={
-                <AgentSelector
-                  currentBinding={agentBinding}
-                  currentMode={mode}
-                  profiles={acpProfiles}
-                  editable={agentSelectorEditable}
-                  onSelect={handleSelectAgent}
-                  onRefreshProfiles={refreshAcpProfiles}
-                  disabled={!isHistoryLoaded}
-                  fallbackIcon={viewingQuestionAgentIcon}
+              ) : (
+                <BuiltinSessionSelectors
+                  models={builtinThreadSettings.models}
+                  currentModelId={builtinThreadSettings.effectiveModelId}
+                  currentReasoningEffort={
+                    builtinThreadSettings.settings.reasoningEffort
+                  }
+                  loading={builtinThreadSettings.loading}
+                  onSelectModel={builtinThreadSettings.selectModel}
+                  onSelectReasoningEffort={
+                    builtinThreadSettings.selectReasoningEffort
+                  }
                 />
-              }
-              acpSelectorsSlot={
-                agentBinding.kind === 'external' ? (
-                  <AcpSessionSelectors
-                    meta={acpSessionMeta}
-                    loading={acpSessionMetaLoading}
-                    onSelectMode={handleAcpSelectMode}
-                    onSelectModel={handleAcpSelectModel}
-                    onSelectConfigOption={handleAcpSelectConfigOption}
-                  />
-                ) : (
-                  <BuiltinSessionSelectors
-                    models={builtinThreadSettings.models}
-                    currentModelId={builtinThreadSettings.effectiveModelId}
-                    currentReasoningEffort={
-                      builtinThreadSettings.settings.reasoningEffort
-                    }
-                    loading={builtinThreadSettings.loading}
-                    onSelectModel={builtinThreadSettings.selectModel}
-                    onSelectReasoningEffort={
-                      builtinThreadSettings.selectReasoningEffort
-                    }
-                  />
-                )
-              }
-              // For external (ACP) bindings, defer to the agent's own
-              // `session_usage_update`; the internal context-token fetch
-              // would return 0 and the hardcoded 128k window is wrong
-              // for non-GPT-4o models. `undefined` keeps the legacy
-              // built-in path; `null` hides the ring until the agent
-              // pushes its first usage snapshot.
-              contextUsageOverride={
-                agentBinding.kind === 'external'
-                  ? acpSessionMeta.usage
-                  : undefined
-              }
-              // Profile deletion no longer blocks Send: the thread carries
-              // its own binding recipe and continues running off the
-              // snapshot. Transport-health gating is now expressed via the
-              // connection badge above; we keep the input enabled so the
-              // user can retry / trigger a re-ensure on the next send.
-              // Only gate the composer on history load, not on streaming: the
-              // user can keep drafting while the Send button is replaced by
-              // Stop. The Agent selector remains locked by the thread's
-              // 1-thread-1-binding contract; only the draft carries forward.
-              disabled={!isHistoryLoaded}
-            />
-          </div>
-        )}
+              )
+            }
+            // For external (ACP) bindings, defer to the agent's own
+            // `session_usage_update`; the internal context-token fetch
+            // would return 0 and the hardcoded 128k window is wrong
+            // for non-GPT-4o models. `undefined` keeps the legacy
+            // built-in path; `null` hides the ring until the agent
+            // pushes its first usage snapshot.
+            contextUsageOverride={
+              agentBinding.kind === 'external'
+                ? acpSessionMeta.usage
+                : undefined
+            }
+            // Profile deletion no longer blocks Send: the thread carries
+            // its own binding recipe and continues running off the
+            // snapshot. Transport-health gating is now expressed via the
+            // connection badge above; we keep the input enabled so the
+            // user can retry / trigger a re-ensure on the next send.
+            // Only gate the composer on history load, not on streaming: the
+            // user can keep drafting while the Send button is replaced by
+            // Stop. The Agent selector remains locked by the thread's
+            // 1-thread-1-binding contract; only the draft carries forward.
+            disabled={!isHistoryLoaded}
+          />
+        </div>
       </div>
     </SidebarPanel>
   );

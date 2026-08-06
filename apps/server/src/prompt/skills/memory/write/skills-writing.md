@@ -32,7 +32,7 @@ Reusable how-to (decision rules, recipes, patterns) any future agent on an unrel
   ---
   ```
 
-  `appliesTo` ⊆ `ask` / `operate` / `sketch` / `external`. **Include your own surface** or you won't see the skill next turn.
+  `appliesTo` ⊆ `ask` / `operate` / `external`. **Include your own surface** or you won't see the skill next turn.
 
 - Skill body is uncapped — still, keep it tight; every byte enters someone's prompt later.
 

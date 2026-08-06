@@ -505,9 +505,7 @@
     "nodeImage": "Node image",
     "noImageSource": "No Image Source",
     "videoFileMissing": "Video file missing",
-    "noVideoSource": "No Video Source",
-    "applySketch": "Apply Sketch (interpret stroke with AI)",
-    "applySketchPlural": "Apply sketches"
+    "noVideoSource": "No Video Source"
   },
   "layers": {
     "title": "Layers",
@@ -555,7 +553,6 @@
     "closePanel": "Close chat panel",
     "title": "Chat",
     "chatWith": "Chat with {{name}}",
-    "sketchRecognition": "Sketch Recognition",
     "newQuestion": "New question",
     "question": "Question",
     "backToChat": "Back to chat",
@@ -804,7 +801,6 @@
       "selectFiles": "Click to select files",
       "linkDescription": "Paste URLs below (one per line)."
     },
-    "intent": "Intent",
     "size": {
       "switchManual": "Switch to manual size",
       "fitSize": "Fit size to content",
@@ -829,11 +825,6 @@
     "convertToText": "Convert to text",
     "convertToNote": "Convert to note",
     "dragBlockToCanvas": "Drag block to Space"
-  },
-  "intent": {
-    "noSuggestions": "No suggestions",
-    "placeholder": "Describe your own intent…",
-    "analyzingContext": "Analyzing context…"
   },
   "edgeToolbar": {
     "type": "Type",
@@ -913,7 +904,6 @@
       "bringFront": "Bring selected nodes to front",
       "groupFrame": "Group selected nodes into a frame",
       "copyNoteBlock": "Copy a Note block to the Space instead of moving it (the default is move — the source loses the block)",
-      "openIntent": "Open intent recognition",
       "searchCanvas": "Search the Space (or find inside the active preview when focus is in an expanded node)",
       "jumpResult": "Jump to active result / next match",
       "previousMatch": "Previous match (in preview)",

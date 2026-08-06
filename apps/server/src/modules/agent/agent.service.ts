@@ -116,9 +116,7 @@ export interface AgentRunOptions {
   /**
    * `NodeOrigin` stamp forwarded to `canvas_commands` (and ignored by
    * other tools). Defaults inside the handler to `{ type: 'ai-operate' }`;
-   * the sketch pipeline overrides to
-   * `{ type: 'sketch-recognized' }` so user-authored gestures are
-   * not mis-tagged as AI-initiated.
+   * an agent may override it through `runtime.defaultOrigin`.
    */
   origin?: NodeOrigin;
   /** Model role used to resolve the Chat or Utility tier for this workload. */

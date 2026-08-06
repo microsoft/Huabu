@@ -19,7 +19,6 @@
  *     .history/
  *       chat/<threadId>.turns.jsonl finalized turns (append-only)
  *       chat/<threadId>.active.json in-progress turn (partial)
- *       intent.json
  *       events.jsonl
  *       acp-sessions.json           per-thread ACP sessionId map (optional)
  *
@@ -167,10 +166,6 @@ export function chatPromptLogPath(canvasId: string, threadId: string): string {
     chatDir(canvasId),
     `${sanitizeId(threadId, 'threadId')}.prompt.log`,
   );
-}
-
-export function intentPath(canvasId: string): string {
-  return path.join(historyDir(canvasId), 'intent.json');
 }
 
 export function eventsPath(canvasId: string): string {

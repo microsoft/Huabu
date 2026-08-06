@@ -14,7 +14,6 @@
 import type {
   AssistantPart,
   ChatAttachment,
-  IntentCandidate,
   SelectedStrokeSubset,
 } from '@huabu/shared';
 
@@ -83,16 +82,6 @@ export type ChatMessage =
       role: 'status';
       status: 'interrupted' | 'error';
       detail?: string;
-    }
-  | {
-      id: string;
-      role: 'intent-select';
-      /** The intent candidates to choose from. */
-      candidates: IntentCandidate[];
-      /** Currently selected intent label. */
-      selectedIntent: string;
-      /** Custom intent text typed by user. */
-      customIntent?: string;
     };
 
 export type PermissionSegment = Extract<

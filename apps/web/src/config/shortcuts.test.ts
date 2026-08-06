@@ -101,8 +101,6 @@ describe('getKeyboardShortcutSections', () => {
       section.items.map((item) => item.description),
     );
 
-    expect(getCombo('ai.openIntent')).toEqual({ mod: true, key: 'i' });
-    expect(descriptions).not.toContain('shortcuts.items.openIntent');
     expect(getCombo('ai.submitQuestion')).toBeUndefined();
     expect(descriptions).not.toContain('shortcuts.items.submitQuestion');
   });

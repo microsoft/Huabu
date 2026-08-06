@@ -34,7 +34,7 @@ import type {
   DeltaLogEntry,
   NodeContent,
 } from '../../canvas/persistence-types.js';
-import type { IntentEpisode, RecentAction } from '@huabu/shared';
+import type { RecentAction } from '@huabu/shared';
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
 export type StructuredBackendKind = 'disk' | 'sqlite' | 'postgres';
@@ -65,7 +65,6 @@ export interface SpaceHandle {
   readonly events: CanvasEventRepository;
   readonly deltas: CanvasDeltaRepository;
   readonly changes: CanvasChangeRepository;
-  readonly intents: CanvasIntentRepository;
   /** Synchronous transitional surface; replaced in a later phase. */
   readonly nodes: LegacyNodeStore;
 }
@@ -151,12 +150,6 @@ export interface CanvasChangeRepository {
     threadId: string,
     changeId: string,
   ): Promise<CanvasChangeRecord | null>;
-}
-
-/** Intent episodes for one Space. Upserts are linearizable by episode id. */
-export interface CanvasIntentRepository {
-  read(): Promise<IntentEpisode[]>;
-  upsert(episode: IntentEpisode): Promise<void>;
 }
 
 // ─── Node sidecars (transitional) ───────────────────────────────────────────

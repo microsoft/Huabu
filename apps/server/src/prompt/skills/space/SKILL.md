@@ -1,7 +1,7 @@
 ---
 name: space
 description: Space mental model (the infinite work surface), tool boundaries, and command reference. The single entry point for any agent operating on a Huabu Space.
-appliesTo: [ask, operate, sketch, external]
+appliesTo: [ask, operate, external]
 version: 1
 ---
 

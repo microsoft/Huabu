@@ -2,15 +2,17 @@
 // Licensed under the MIT license.
 
 /**
- * StatusBadge — pill-shaped status indicator for the sketch processing
- * overlay. Colocated with its only rendering call site
- * (`SketchProcessingOverlay`); the Layer Panel reuses only `getStatusLabel`.
+ * StatusBadge — pill-shaped status indicator anchored in flow space.
+ *
+ * NOTE: the component itself currently has no rendering call site — its
+ * only consumer is the Layer Panel, which imports `getStatusLabel`. It
+ * was introduced for the sketch processing overlay, which has since been
+ * removed together with sketch gesture recognition.
  *
  * Behavior
  *  - Zoom-invariant: lives in React Flow's flow space but counter-scales
  *    `1 / zoom` so its on-screen size + offset stay constant at every
- *    viewport zoom level. This matches the preferred behavior originally
- *    implemented in `SketchProcessingOverlay`.
+ *    viewport zoom level.
  *  - Status drives icon, label and colors via the canvas semantic tokens
  *    (`--success`, `--warning`, `--info`, `--danger`, `--fg-subtle`).
  *  - Optional `trailing` slot renders adjacent content (e.g. accept /

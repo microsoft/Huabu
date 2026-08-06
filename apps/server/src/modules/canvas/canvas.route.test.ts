@@ -352,17 +352,6 @@ describe('Space export/import persistence', () => {
       deltas: [],
       originator: { source: 'agent' },
     });
-    await history.intents.upsert({
-      id: 'intent-1',
-      timestamp: 3,
-      contextSummary: 'Persist this intent',
-      candidates: [],
-      outcome: {
-        type: 'selected',
-        chosenIndex: 0,
-        chosenLabel: 'Keep it',
-      },
-    });
     const [change] = extractCanvasChanges([
       {
         type: 'INSERT_NODE',
@@ -427,9 +416,6 @@ describe('Space export/import persistence', () => {
           (entry) => entry.version,
         ),
       ).toEqual([1]);
-      expect(
-        (await reopenedHistory.intents.read()).map((episode) => episode.id),
-      ).toEqual(['intent-1']);
       expect(await reopenedHistory.changes.read('thread-export')).toEqual(
         storedChanges,
       );

@@ -36,14 +36,13 @@ export type { ToolDefinition } from './definitions.js';
  *
  * Mirrors `AgentMode` plus internal pipelines that also borrow the
  * canvas tool surface:
- *   - `'sketch'` — freehand-gesture intent recognition.
  *   - `'memory'` — background memory curator.
  *
  * Kept local rather than reusing `SkillScope` from the skill loader
  * because `'external'` agents bring their own tooling and should
  * never go through this builder.
  */
-export type ToolScope = AgentMode | 'sketch' | 'memory';
+export type ToolScope = AgentMode | 'memory';
 
 /** Per-request context closed over by every tool's `execute`. */
 export interface ToolBuildContext {
@@ -52,10 +51,8 @@ export interface ToolBuildContext {
   /**
    * `NodeOrigin` stamp injected onto every node created by the
    * `canvas_commands` tool. Defaults to `{ type: 'ai-operate' }`
-   * inside the handler when unset; the sketch pipeline overrides
-   * it to `{ type: 'sketch-recognized' }` so user-authored
-   * gestures are not mis-tagged as AI-initiated. Other tools ignore
-   * this field.
+   * inside the handler when unset; an agent may override it through
+   * `runtime.defaultOrigin`. Other tools ignore this field.
    */
   origin?: NodeOrigin;
   /** ACP conversation thread to attribute canvas changes to. */

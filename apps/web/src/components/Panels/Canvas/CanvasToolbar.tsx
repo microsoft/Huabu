@@ -614,24 +614,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           >
             <NODE_ICON.question />
           </Button>
-
-          {/* Temporarily disabled because the intent feature is not yet robust enough for production use.
-          <Button
-            variant="ghost"
-            iconOnly
-            title={t('toolbar.intent')}
-            className={clsx(intentOpen && 'text-info bg-bg-default')}
-            onClick={() => {
-              const rect = intentButtonRef.current?.getBoundingClientRect();
-              if (rect) {
-                useIntentStore
-                  .getState()
-                  .triggerIntent(rect.left + rect.width / 2, rect.top);
-              }
-            }}
-          >
-            <Sprout />
-          </Button> */}
         </div>
 
         {/* Non-mouse only: Undo / Redo (Delete lives on the per-context floating toolbars) */}

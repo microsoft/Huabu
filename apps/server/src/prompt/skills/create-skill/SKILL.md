@@ -27,11 +27,11 @@ You were called because the user typed `/create-skill <instructions>` in the cha
 
 Submit the **entire** file via `fs_write`, including the YAML frontmatter fence. The skill id comes from the `<id>` directory segment in the path — it is **not** a frontmatter key. Frontmatter fields:
 
-| field         | value                                                                                               |
-| ------------- | --------------------------------------------------------------------------------------------------- |
-| `name`        | human-readable label (Title Case is fine)                                                           |
-| `description` | one-sentence catalogue blurb — what the skill does, not when (the body covers when)                 |
-| `appliesTo`   | array; default to `["ask", "operate"]` unless the brief obviously narrows the surface (e.g. sketch) |
+| field         | value                                                                                 |
+| ------------- | ------------------------------------------------------------------------------------- |
+| `name`        | human-readable label (Title Case is fine)                                             |
+| `description` | one-sentence catalogue blurb — what the skill does, not when (the body covers when)   |
+| `appliesTo`   | array; default to `["ask", "operate"]` unless the brief obviously narrows the surface |
 
 `triggers` and `version` are optional — omit unless the brief calls for them.
 

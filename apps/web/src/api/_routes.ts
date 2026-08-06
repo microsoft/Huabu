@@ -90,11 +90,6 @@ export const routes = {
   webPage: (canvasId: string, nodeId: string) =>
     `/web/page?canvasId=${enc(canvasId)}&nodeId=${enc(nodeId)}`,
 
-  // ── Intent ────────────────────────────────────────────────────────
-  intentRecognizeStream: '/intent/recognize-stream',
-  intentRecognizeSketch: '/intent/recognize-sketch',
-  intentEpisode: '/intent/episode',
-
   // ── Agent ─────────────────────────────────────────────────────────
   agent: '/agent',
   agentHistory: (threadId: string, canvasId?: string) => {

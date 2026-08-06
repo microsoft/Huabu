@@ -11,7 +11,6 @@ import {
 } from 'react';
 
 import { AIMessage } from './AIMessage';
-import { IntentSelectMessage } from './IntentSelectMessage';
 import { positionMessageListOnOpen } from './messageListScroll';
 import { StatusMessage } from './StatusMessage';
 import { UserMessage } from './UserMessage';
@@ -33,8 +32,6 @@ interface MessageListProps {
   isHistoryLoading?: boolean;
   /** Hide action buttons on AI messages (e.g. in operate mode). */
   hideAIActions?: boolean;
-  /** Called when user re-selects an intent from the intent-select message. */
-  onIntentReselect?: (messageId: string, intent: string) => void;
   /** Called when the user clicks retry on an interrupted status message. */
   onRetry?: () => void;
   /** Stable identity for the conversation currently rendered by the list. */
@@ -50,7 +47,6 @@ export const MessageList = ({
   isLoading,
   isHistoryLoading,
   hideAIActions,
-  onIntentReselect,
   onRetry,
   viewKey,
   isActive = true,
@@ -181,19 +177,6 @@ export const MessageList = ({
                   segments={msg.segments}
                   isStreaming={msg.id === streamingAssistantId}
                   hideActions={hideAIActions}
-                />,
-              );
-              i++;
-              continue;
-            }
-
-            if (msg.role === 'intent-select') {
-              elements.push(
-                <IntentSelectMessage
-                  key={msg.id}
-                  candidates={msg.candidates}
-                  selectedIntent={msg.selectedIntent}
-                  onReselect={(intent) => onIntentReselect?.(msg.id, intent)}
                 />,
               );
               i++;

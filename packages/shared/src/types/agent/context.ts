@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import type { NodeRef } from './node-ref.js';
-import type { WireCanvasNode, WireSelectionNode } from '../api/agent.js';
+import type { WireSelectionNode } from '../api/agent.js';
 
 // ==================== Recent Actions ====================
 
@@ -104,44 +104,6 @@ export interface AgentChatContext {
    * Nodes explicitly selected by the user at the time of the request.
    * Empty array means "no explicit selection; the agent should pull
    * canvas state via tools as needed".
-   */
-  selectedNodes: WireSelectionNode[];
-}
-
-/**
- * Context sent to the intent recogniser (`POST /api/intent/recognize*`).
- *
- * Distinct from {@link AgentChatContext}: intent recognition is a
- * one-shot LLM call that has to classify what the user is *about* to
- * do, so it cannot rely on tool-driven exploration. It needs the full
- * canvas snapshot, the recent action ring buffer, and an optional
- * viewport screenshot — all up-front, all in one payload.
- *
- * Wire shape stays raw — `nodes` are {@link WireCanvasNode} (no
- * `filename`/`preview`/`parentFrame.label`), `edges` are bare id
- * pairs. The server enriches as needed before formatting the prompt.
- */
-export interface IntentContext {
-  /** Snapshot of all current canvas nodes (raw wire shape). */
-  nodes: WireCanvasNode[];
-  /**
-   * Edge endpoints as bare node ids. The server resolves type/label
-   * from `nodes[]` when rendering the prompt.
-   */
-  edges: Array<{ source: string; target: string }>;
-  /**
-   * Ring buffer of the last ~10 user actions (maintained by the
-   * frontend). Ordered from oldest to newest.
-   */
-  recentActions: RecentAction[];
-  /**
-   * Base64-encoded PNG screenshot of the current canvas viewport.
-   * Optional — captured on demand for visual reasoning.
-   */
-  screenshot?: string;
-  /**
-   * Nodes explicitly selected by the user at the time of the request.
-   * Same shape as {@link AgentChatContext.selectedNodes}.
    */
   selectedNodes: WireSelectionNode[];
 }
