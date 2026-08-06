@@ -279,9 +279,15 @@ export class CanvasPersistenceRollbackError extends Error {
  * Run the executor's synchronous persistence section with failure rollback.
  *
  * `resetRecordState` writes the parsed prestate through CanvasStore before the
- * raw before-image is restored. Besides resetting topology, that clears any
- * in-memory node tombstones created by an attempted deletion. It must not
- * append logs or perform unrelated work.
+ * raw before-image is restored. It resets topology only — it must not append
+ * logs, touch tombstones, or perform unrelated work.
+ *
+ * This function does not restore in-memory node tombstones. The enclosing
+ * `withValidatedNodeMutationTransaction` captures a tombstone snapshot before
+ * invoking this transaction and restores it in its own catch, after rollback
+ * completes. That outer restore is the only thing that undoes tombstone
+ * transitions, so do not remove it on the assumption that rollback here
+ * covers them.
  */
 export function runCanvasPersistenceTransaction<T>(input: {
   canvasId: string;
