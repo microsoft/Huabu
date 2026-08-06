@@ -40,6 +40,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/react": "^18.2.15",
     "vitest": "^4.0.18"
   }
 }
