@@ -197,8 +197,6 @@ describe('cross-surface Disk invariants', () => {
       'readChanges',
       'appendChanges',
       'removeChange',
-      'readIntents',
-      'upsertIntent',
       'canvasId',
     ]) {
       expect(nodes).not.toHaveProperty(forbidden);

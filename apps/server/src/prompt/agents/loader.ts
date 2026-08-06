@@ -60,13 +60,11 @@ import type { NodeOrigin } from '@huabu/shared';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 /** Agent identifiers backed by an `AGENT.md` config file. */
-export type AgentId = 'ask' | 'operate' | 'intent' | 'sketch' | 'memory';
+export type AgentId = 'ask' | 'operate' | 'memory';
 
 const VALID_AGENT_IDS: ReadonlySet<AgentId> = new Set<AgentId>([
   'ask',
   'operate',
-  'intent',
-  'sketch',
   'memory',
 ]);
 
@@ -178,7 +176,6 @@ const PROMPT_ROOT = IS_BUNDLED ? BUNDLED_PROMPT_ROOT : path.resolve(HERE, '..');
 const VALID_SKILL_SCOPES: ReadonlySet<SkillScope> = new Set<SkillScope>([
   'ask',
   'operate',
-  'sketch',
   'external',
 ]);
 

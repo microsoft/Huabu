@@ -103,7 +103,6 @@ import {
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { StrokeSelectionToolbar } from './FloatingToolbars/StrokeSelectionToolbar.tsx';
-import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { SelectionOutlines } from './SelectionOutlines.tsx';
 import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
@@ -135,7 +134,6 @@ import {
   CANCEL_SKETCH_GESTURE_EVENT,
   SketchOverlay,
 } from '../../Nodes/sketch/SketchOverlay.tsx';
-import { SketchProcessingOverlay } from '../../Nodes/sketch/SketchProcessingOverlay.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 import {
@@ -1642,7 +1640,6 @@ export const Canvas: React.FC<CanvasProps> = ({
           onSelect={handleConnectedKindPick}
           onDismiss={dismissConnectPicker}
         />
-        <IntentPopover />
         <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
 
         <Controls position="bottom-left" showInteractive={false}>
@@ -1665,9 +1662,6 @@ export const Canvas: React.FC<CanvasProps> = ({
         {pendingNodeType === 'sketch' && (
           <SketchOverlay rfInstance={rfInstanceRef.current} />
         )}
-
-        {/* Sketch intent processing overlay — lives in flow space so it pans/zooms with the canvas */}
-        <SketchProcessingOverlay />
       </ReactFlow>
 
       {isInitialViewportPending && (

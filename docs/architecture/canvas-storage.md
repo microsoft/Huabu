@@ -32,7 +32,6 @@ Runtime Home-folder activation prepares and migrates the selected directory in a
         <threadId>.turns.jsonl    # Tier-2: folded AgentTurn records — the tier history() reads
       threads.json                # Agenetes durable workload records (agenetes-v2 schema)
       chat/<threadId>.changes.json# Canvas-owned change-review sidecar; mutable, cleared on accept/revert
-      intent.json                 # IntentEpisode[]
       events.jsonl                # canvas action log: one { ts, payload: RecentAction } per line
       delta-log.jsonl             # persisted canvas-command delta log
       tasks.json                  # versioned canonical Task and Run records

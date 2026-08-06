@@ -5,21 +5,19 @@
 > Maps to the README principles **Externalize Thinking** / **Share Cognitive Space**.
 
 Core mental model: **chat sends a thin payload (selected nodes only) and the agent
-fetches the rest via tools; intent is a single LLM call, so it ships the full
-snapshot up front.**
+fetches the rest via tools.**
 
 ---
 
-## 1. Two wire shapes
+## 1. The wire shape
 
 Types live in [packages/shared/src/types/agent/context.ts](../../packages/shared/src/types/agent/context.ts).
 
-| Shape              | For               | Carries                                                                              | Entry                                  |
-| ------------------ | ----------------- | ------------------------------------------------------------------------------------ | -------------------------------------- |
-| `AgentChatContext` | chat agent        | only `selectedNodes: WireSelectionNode[]`                                            | `POST /api/agent`                      |
-| `IntentContext`    | intent recogniser | `nodes` / `edges{source,target}` / `recentActions` / `screenshot?` / `selectedNodes` | `POST /api/intent/recognize{,-stream}` |
+| Shape              | For        | Carries                                   | Entry             |
+| ------------------ | ---------- | ----------------------------------------- | ----------------- |
+| `AgentChatContext` | chat agent | only `selectedNodes: WireSelectionNode[]` | `POST /api/agent` |
 
-Chat is deliberately thin: everything else (geometry / edges / content / screenshot) is fetched by the agent via tools. Intent is a one-shot call that can't use tools, so it ships the full snapshot at once. Web assembly: `getAgentChatContext()` / `getIntentContext()` ([canvasStore.ts](../../apps/web/src/store/canvasStore.ts)).
+Chat is deliberately thin: everything else (geometry / edges / content / screenshot) is fetched by the agent via tools. Web assembly: `getAgentChatContext()` ([canvasStore.ts](../../apps/web/src/store/canvasStore.ts)).
 
 ---
 
@@ -62,7 +60,7 @@ Skills are **not tools**; they reach the prompt via two complementary paths:
 | **catalogue (on-demand)** | agent decides | system prompt expands `{{skillCatalogue}}` into a list (id/name/description only); the agent `read("skills/<id>/SKILL.md")` when it wants the body | [catalogue.ts](../../apps/server/src/prompt/skills/catalogue.ts) `getSkillCatalogue(scope)`           |
 | **invoked (explicit)**    | user `/cmd`   | the skill's **entire body** is inlined as an `<invoked_skills>` block (authoritative for this turn)                                                | [prompt/invoked-skills.ts](../../apps/server/src/modules/agent/conversation/prompt/invoked-skills.ts) |
 
-The catalogue is filtered by the agent's frontmatter `skillScope` (ask/operate/sketch/external); a `null` scope injects no catalogue. The difference: catalogue is "a menu you pull from on demand", invoked is "the user named it, full body forced into this turn".
+The catalogue is filtered by the agent's frontmatter `skillScope` (ask/operate/external); a `null` scope injects no catalogue. The difference: catalogue is "a menu you pull from on demand", invoked is "the user named it, full body forced into this turn".
 
 ---
 
@@ -135,31 +133,23 @@ The envelope stores the **data objects** (not pre-rendered strings): the same no
 
 [tools/definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts), assigned by each agent's `tools` frontmatter:
 
-| Tool                            | scope                | Purpose                                                                |
-| ------------------------------- | -------------------- | ---------------------------------------------------------------------- |
-| `get_space_outline`             | ask/operate          | whole-canvas geometry + topology + clusters, optional 120-char preview |
-| `inspect_nodes`                 | ask/operate          | predicate query of node geometry/style                                 |
-| `inspect_edges`                 | ask/operate          | edge direction/style                                                   |
-| `read` / `grep` / `find` / `ls` | ask/operate(/sketch) | read/search canvas files                                               |
-| `snapshot_nodes`                | ask/operate/sketch   | node → PNG vision                                                      |
-| `space_commands`                | operate              | mutate the canvas (server-side execution)                              |
-| `fs_write`                      | operate              | memory/skill writes                                                    |
-| `generate_image`                | operate              | AI image generation                                                    |
-| `web_search`                    | ask/operate          | Tavily                                                                 |
+| Tool                            | scope       | Purpose                                                                |
+| ------------------------------- | ----------- | ---------------------------------------------------------------------- |
+| `get_space_outline`             | ask/operate | whole-canvas geometry + topology + clusters, optional 120-char preview |
+| `inspect_nodes`                 | ask/operate | predicate query of node geometry/style                                 |
+| `inspect_edges`                 | ask/operate | edge direction/style                                                   |
+| `read` / `grep` / `find` / `ls` | ask/operate | read/search canvas files                                               |
+| `snapshot_nodes`                | ask/operate | node → PNG vision                                                      |
+| `space_commands`                | operate     | mutate the canvas (server-side execution)                              |
+| `fs_write`                      | operate     | memory/skill writes                                                    |
+| `generate_image`                | operate     | AI image generation                                                    |
+| `web_search`                    | ask/operate | Tavily                                                                 |
 
 Skills are not tools (injection in §3.2). Spatial geometry primitives are in [canvas-spatial.ts](../../apps/server/src/modules/canvas/canvas-spatial.ts); the neighbourhood pipeline is in [node-neighbourhood.ts](../../apps/server/src/modules/canvas/node-neighbourhood.ts).
 
 ---
 
-## 7. Intent path
-
-Single LLM call, full `IntentContext` shipped ([intent.route.ts](../../apps/server/src/modules/agent/intent.route.ts) → [intent.service.ts](../../apps/server/src/modules/agent/intent.service.ts)): all node skeletons + edge pairs + `recentActions` (~10-item ring buffer, no timestamps) + an optional annotated screenshot + selection. Workspace memory is truncated to ~2000 chars. No tool loop.
-
-`RecentAction` (context.ts, 15 branches) stores only `NodeRef + op/len` — **no node content**.
-
----
-
-## 8. Code entry points
+## 7. Code entry points
 
 | Concern                 | File                                                                                                                                                                                                                                                                                                                   |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -170,7 +160,6 @@ Single LLM call, full `IntentContext` shipped ([intent.route.ts](../../apps/serv
 | History rebuild         | [conversation/transcript/history.ts](../../apps/server/src/modules/agent/conversation/transcript/history.ts)                                                                                                                                                                                                           |
 | Node → context assembly | [node-prompt.ts](../../apps/server/src/modules/canvas/node-prompt.ts) (`describeNode` / `nodeLabel`) · [node-ref.ts](../../apps/server/src/modules/agent/node-ref.ts) (pure ref/preview/outline builders) · [node-element.ts](../../apps/server/src/modules/agent/conversation/prompt/node-element.ts) (`renderNodes`) |
 | Tool defs / executor    | [tools/definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts) · [tools/executor.ts](../../apps/server/src/modules/agent/tools/executor.ts)                                                                                                                                                          |
-| Intent                  | [intent.route.ts](../../apps/server/src/modules/agent/intent.route.ts) · [intent.service.ts](../../apps/server/src/modules/agent/intent.service.ts)                                                                                                                                                                    |
-| System prompts          | [prompt/agents/](../../apps/server/src/prompt/agents) (ask / operate / sketch / intent / memory each an AGENT.md, loaded by loader.ts)                                                                                                                                                                                 |
+| System prompts          | [prompt/agents/](../../apps/server/src/prompt/agents) (ask / operate / memory each an AGENT.md, loaded by loader.ts)                                                                                                                                                                                                   |
 | Skill injection         | [skills/catalogue.ts](../../apps/server/src/prompt/skills/catalogue.ts) (catalogue) · [conversation/prompt/invoked-skills.ts](../../apps/server/src/modules/agent/conversation/prompt/invoked-skills.ts) (invoked)                                                                                                     |
 | Spatial / neighbourhood | [canvas-spatial.ts](../../apps/server/src/modules/canvas/canvas-spatial.ts) · [node-neighbourhood.ts](../../apps/server/src/modules/canvas/node-neighbourhood.ts)                                                                                                                                                      |

@@ -83,7 +83,6 @@ export type {
   CanvasChangeRepository,
   CanvasDeltaRepository,
   CanvasEventRepository,
-  CanvasIntentRepository,
   CanvasTaskRepository,
   LegacyNodeStore,
   NewCanvasEvent,

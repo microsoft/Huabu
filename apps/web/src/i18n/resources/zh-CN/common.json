@@ -506,9 +506,7 @@
     "nodeImage": "节点图片",
     "noImageSource": "无图片来源",
     "videoFileMissing": "视频文件缺失",
-    "noVideoSource": "无视频来源",
-    "applySketch": "应用手绘（用 AI 解释笔画）",
-    "applySketchPlural": "应用手绘"
+    "noVideoSource": "无视频来源"
   },
   "layers": {
     "title": "图层",
@@ -556,7 +554,6 @@
     "closePanel": "关闭聊天面板",
     "title": "聊天",
     "chatWith": "与 {{name}} 聊天",
-    "sketchRecognition": "手绘识别",
     "newQuestion": "新问题",
     "question": "问题",
     "backToChat": "返回聊天",
@@ -805,7 +802,6 @@
       "selectFiles": "点击选择文件",
       "linkDescription": "在下方粘贴 URL（每行一个）。"
     },
-    "intent": "意图识别",
     "size": {
       "switchManual": "切换为手动尺寸",
       "fitSize": "适应内容尺寸",
@@ -830,11 +826,6 @@
     "convertToText": "转换为文本",
     "convertToNote": "转换为笔记",
     "dragBlockToCanvas": "拖动块到 Space"
-  },
-  "intent": {
-    "noSuggestions": "暂无建议",
-    "placeholder": "描述你的自定义意图…",
-    "analyzingContext": "正在分析上下文…"
   },
   "edgeToolbar": {
     "type": "类型",
@@ -914,7 +905,6 @@
       "bringFront": "将选中节点置于顶层",
       "groupFrame": "将选中节点组合到框架中",
       "copyNoteBlock": "将笔记块复制到 Space，而不是移动它（默认是移动，源位置会失去该块）",
-      "openIntent": "打开意图识别",
       "searchCanvas": "搜索 Space（焦点在展开节点预览中时，则在当前预览内查找）",
       "jumpResult": "跳转到当前结果 / 下一个匹配项",
       "previousMatch": "上一个匹配项（预览内）",

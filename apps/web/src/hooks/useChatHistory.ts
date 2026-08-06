@@ -31,6 +31,12 @@ import type { ChatMessage } from '../store/chatTypes';
 import type { AgentStreamEvent } from '@huabu/shared';
 
 /**
+ * Roles the transcript renderer still understands. Anything else in a
+ * persisted transcript belongs to a removed feature and is dropped on load.
+ */
+const KNOWN_HISTORY_ROLES = new Set<string>(['user', 'assistant', 'status']);
+
+/**
  * Hook that loads chat history from the server and handles reconnection
  * to an active agent run after page refresh.
  *
@@ -138,26 +144,25 @@ export function useChatHistory(
           }
         }
 
-        const serverMessages: ChatMessage[] = res.messages.map(
-          (m, i): ChatMessage => {
+        const serverMessages: ChatMessage[] = res.messages.flatMap(
+          (m, i): ChatMessage[] => {
             const id = `history-${i}`;
 
-            if (m.role === 'status') {
-              return {
-                id,
-                role: 'status' as const,
-                status: m.status,
-                detail: m.detail,
-              };
-            }
+            // Transcripts written before the intent recogniser was removed
+            // still contain `intent-select` records. That role no longer has
+            // a renderer, so drop it instead of letting it fall through to
+            // the user branch and rehydrate as an empty bubble.
+            if (!KNOWN_HISTORY_ROLES.has(m.role)) return [];
 
-            if (m.role === 'intent-select') {
-              return {
-                id,
-                role: 'intent-select' as const,
-                candidates: m.candidates,
-                selectedIntent: m.selectedIntent,
-              };
+            if (m.role === 'status') {
+              return [
+                {
+                  id,
+                  role: 'status' as const,
+                  status: m.status,
+                  detail: m.detail,
+                },
+              ];
             }
 
             if (m.role === 'assistant') {
@@ -174,13 +179,15 @@ export function useChatHistory(
                 m.selectedNodeIds && m.selectedNodeIds.length > 0
                   ? { selectedNodeIds: m.selectedNodeIds }
                   : {};
-              return {
-                id,
-                role: 'assistant' as const,
-                segments: m.parts,
-                ...attachmentsField,
-                ...selectedNodesField,
-              };
+              return [
+                {
+                  id,
+                  role: 'assistant' as const,
+                  segments: m.parts,
+                  ...attachmentsField,
+                  ...selectedNodesField,
+                },
+              ];
             }
 
             // role === 'user'
@@ -200,15 +207,17 @@ export function useChatHistory(
               m.invokedSkills && m.invokedSkills.length > 0
                 ? { invokedSkills: m.invokedSkills }
                 : {};
-            return {
-              id,
-              role: 'user' as const,
-              content: m.content || '',
-              ...attachmentsField,
-              ...selectedNodesField,
-              ...selectedStrokesField,
-              ...invokedSkillsField,
-            };
+            return [
+              {
+                id,
+                role: 'user' as const,
+                content: m.content || '',
+                ...attachmentsField,
+                ...selectedNodesField,
+                ...selectedStrokesField,
+                ...invokedSkillsField,
+              },
+            ];
           },
         );
         set(finalTid, serverMessages);
@@ -240,7 +249,7 @@ export function useChatHistory(
     const msgs = selectThreadMessages(useChatStore.getState(), threadId);
     if (msgs.length === 0) return;
     const lastMsg = msgs[msgs.length - 1];
-    if (lastMsg.role !== 'user' && lastMsg.role !== 'intent-select') return;
+    if (lastMsg.role !== 'user') return;
 
     // This client already owns a live consumer for the thread — either the
     // POST stream `startStream` opened for the message just sent, or an
@@ -380,10 +389,7 @@ export function useChatHistory(
         );
         let lastUserIdx = -1;
         for (let i = current.length - 1; i >= 0; i--) {
-          if (
-            current[i].role === 'user' ||
-            current[i].role === 'intent-select'
-          ) {
+          if (current[i].role === 'user') {
             lastUserIdx = i;
             break;
           }

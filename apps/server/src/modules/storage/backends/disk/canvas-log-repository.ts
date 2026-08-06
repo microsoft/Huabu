@@ -22,7 +22,6 @@ import {
   canvasEventInputSchema,
   canvasEventRecordSchema,
   executeOriginatorSchema,
-  type IntentEpisode,
 } from '@huabu/shared';
 import {
   coalesceChanges,
@@ -41,7 +40,6 @@ import {
   changesPath,
   deltaLogPath,
   eventsPath,
-  intentPath,
 } from '../../../workspace/disk/paths.js';
 import { getWorkspacePath } from '../../../workspace.js';
 
@@ -54,7 +52,6 @@ import type {
   CanvasChangeRepository,
   CanvasDeltaRepository,
   CanvasEventRepository,
-  CanvasIntentRepository,
   NewCanvasEvent,
 } from '../../ports/structured.js';
 
@@ -149,7 +146,6 @@ export interface DiskCanvasLogRepositories {
   readonly events: CanvasEventRepository;
   readonly deltas: CanvasDeltaRepository;
   readonly changes: CanvasChangeRepository;
-  readonly intents: CanvasIntentRepository;
 }
 
 class DiskCanvasLogCoordinator {
@@ -282,31 +278,10 @@ class DiskCanvasLogCoordinator {
     atomicWriteJson(filePath, existing);
     return removed ?? null;
   }
-
-  // ── Intent episodes ───────────────────────────────────────────────────────
-
-  async readIntents(): Promise<IntentEpisode[]> {
-    this.assertActiveWorkspace();
-    return readJsonArray<IntentEpisode>(
-      intentPath(this.#store.canvasId),
-      'intent episodes',
-    );
-  }
-
-  async upsertIntent(episode: IntentEpisode): Promise<void> {
-    this.assertActiveWorkspace();
-    this.requireSpace();
-    const filePath = intentPath(this.#store.canvasId);
-    const episodes = readJsonArray<IntentEpisode>(filePath, 'intent episodes');
-    const idx = episodes.findIndex((candidate) => candidate.id === episode.id);
-    if (idx >= 0) episodes[idx] = episode;
-    else episodes.push(episode);
-    atomicWriteJson(filePath, episodes);
-  }
 }
 
 /**
- * Build the four log-family repositories for one Space.
+ * Build the log-family repositories for one Space.
  *
  * Each facade is frozen and contains only its own operations. The shared
  * coordinator — and therefore its legacy store — is closure-private.
@@ -333,10 +308,5 @@ export function createDiskCanvasLogRepositories(
     remove: (threadId: string, changeId: string) =>
       coordinator.removeChange(threadId, changeId),
   });
-  const intents: CanvasIntentRepository = Object.freeze({
-    read: () => coordinator.readIntents(),
-    upsert: (episode: IntentEpisode) => coordinator.upsertIntent(episode),
-  });
-
-  return Object.freeze({ events, deltas, changes, intents });
+  return Object.freeze({ events, deltas, changes });
 }

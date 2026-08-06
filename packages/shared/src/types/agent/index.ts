@@ -5,7 +5,7 @@
  * Agent Conversation Types
  *
  * Shapes that describe an interactive agent session: requests, streaming
- * events, chat history, intent recognition, and tool envelopes.
+ * events, chat history, and tool envelopes.
  */
 
 export * from './acp-tool.js';
@@ -14,6 +14,5 @@ export * from './assistant-parts.js';
 export * from './chat.js';
 export * from './context.js';
 export * from './events.js';
-export * from './intent.js';
 export * from './node-ref.js';
 export * from './tools.js';

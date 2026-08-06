@@ -5,6 +5,8 @@ Last updated: 2026-07-24
 
 The tier configuration, role resolver, Utility settings, and automatic cheapest-eligible selection described here have shipped. Per-role overrides remain deferred. The current runtime contract is documented in [agent-architecture.md](../architecture/agent-architecture.md); this proposal preserves the design history.
 
+> **Historical note.** The intent recogniser referenced below (`intent.service.ts`, the `intent` role) was removed from the product after this proposal was written. Those rows are design history only.
+
 ## Goal
 
 Today Huabu drives every LLM call from a **single** active chat model (`getLLMModel()` → the one `activeConfig` in [`apps/server/src/modules/agent/llm.ts`](../../apps/server/src/modules/agent/llm.ts)). Chat, intent recognition, and every preprocessing enrichment share it.
@@ -28,7 +30,7 @@ A full sweep of the repo (every path that reaches `piComplete` / `piStream` / `g
 | Call site                                                                                                                                                                  | Function                       | Task shape                                                                                            | Role                                |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------- | ----------------------------------- |
 | [`preprocessing/provider-manager.ts`](../../apps/server/src/modules/preprocessing/provider-manager.ts) `generateImageLabel` / `generateFrameLabel` / `generateContentMeta` | `llmComplete`                  | label / summary / keywords / frame theme — short output, single turn, no tools                        | **utility**                         |
-| [`agent/intent.service.ts`](../../apps/server/src/modules/agent/intent.service.ts) `recognizeIntent` / `recognizeIntentStream`                                             | `llmComplete` + `llmStream`    | intent candidates — structured JSON, single turn, no tools (sends a canvas screenshot → needs vision) | **utility**                         |
+| `agent/intent.service.ts` `recognizeIntent` / `recognizeIntentStream` _(module since deleted)_                                                                             | `llmComplete` + `llmStream`    | intent candidates — structured JSON, single turn, no tools (sends a canvas screenshot → needs vision) | **utility**                         |
 | [`agent/agenetes/drivers.ts`](../../apps/server/src/modules/agent/agenetes/drivers.ts) built-in agent (pi-agent-core)                                                      | `getLLMModel` + `ensureApiKey` | main conversation, tool orchestration, long context                                                   | **chat** (frontier)                 |
 | [`agent/agent.route.ts`](../../apps/server/src/modules/agent/agent.route.ts) `getLLMModel().contextWindow`                                                                 | metadata read                  | token-budget the main agent                                                                           | must track **chat**                 |
 | `generate_image` tool                                                                                                                                                      | `getAzureImageConfig`          | image generation                                                                                      | already independent (`imageConfig`) |
@@ -186,7 +188,7 @@ Each phase is independently shippable. The whole thing is **additive and backwar
 - `provider-manager.ts`: the three `llmComplete` calls → `{ role: 'imageLabel' | 'frameLabel' | 'contentMeta' }`, passing `hasImage` for the image path.
 - The Memory curator uses the `memory` role through the built-in pi-driver host adapter.
 - `/create-skill` and `/update-skill` use the `skill` role through a fresh Job, with image-aware fallback to Chat when needed. Ordinary task Skills continue on the Chat Model.
-- **Deferred:** `intent.service.ts` keeps using the chat model for now. The `intent` role still ships in the catalog (data), and the resolver already handles it, so moving intent onto the utility tier later is a one-line call-site change (`{ role: 'intent', hasImage: <screenshot present> }`) with no further plumbing.
+- **Removed:** the intent recogniser (and with it the `intent` role) was deleted from the product; the historical rows below are kept only as design history.
 
 ### Phase 5 — Web UI ([`LLMSettings.tsx`](../../apps/web/src/components/Settings/sections/LLMSettings.tsx) + `api/llm.ts` + `store/llmStore.ts`)
 
@@ -212,4 +214,4 @@ Each phase is independently shippable. The whole thing is **additive and backwar
 
 1. **Role granularity — keep as-is.** The five-role catalog (chat / intent / imageLabel / frameLabel / contentMeta) is sufficient; `contentMeta` stays a single role (no label/summary/keywords split). Finer roles can be added later as pure data.
 2. **Utility auth — reuse the per-provider credential store, with an inline key input for un-authenticated providers (v1.5).** Credentials live in the shared `providers` map keyed by provider id. The utility tier picks a `provider` + `model` and reuses whatever key/OAuth that provider already has stored. The utility provider dropdown lists **all** providers; selecting one that has no stored key reveals an **inline API-key input** that writes straight back into the same `providers` map (no separate/independent auth system). So the user can point utility at either an already-configured provider or a brand-new one without leaving the utility panel. A fully independent auth stack (chat and utility using unrelated credential silos) remains out of scope.
-3. **Scope — preprocessing, Memory, and Skill authoring.** Ordinary task Skills stay on Chat. Intent recognition also stays on the chat model for now; its role ships in the catalog so the later switch is a one-line change (see Phase 4).
+3. **Scope — preprocessing, Memory, and Skill authoring.** Ordinary task Skills stay on Chat. (Intent recognition was later removed from the product entirely.)

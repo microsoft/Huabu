@@ -21,7 +21,6 @@ import {
 import { isSnapSessionActive } from '../../handler/snap/snapSession';
 import useCanvasStore from '../../store/canvasStore';
 import { useGesturePreviewStore } from '../../store/gesturePreviewStore';
-import { useIntentStore } from '../../store/intentStore';
 import {
   parseHuabuClipboard,
   readHuabuClipboardPayload,
@@ -384,15 +383,6 @@ export function useCanvasShortcuts(
             // Clipboard API denied
           }
         }, 150);
-      } else if (lowerKey === 'i') {
-        if (editable) return;
-        e.preventDefault();
-        useIntentStore
-          .getState()
-          .triggerIntent(
-            mousePositionRef.current.x,
-            mousePositionRef.current.y,
-          );
       }
     };
 

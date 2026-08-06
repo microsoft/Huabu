@@ -78,7 +78,6 @@ import { i18n } from '@/i18n';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { measureMissingAutoHeights } from './canvasStore/height/measureMissingAutoHeights';
-import { createIntentActionWindow } from './canvasStore/intentActionWindow';
 import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
 import { shouldBackfillNodeLabel } from './canvasStore/load/shouldBackfillNodeLabel';
@@ -130,11 +129,9 @@ import type {
   CanvasNodeMeasuredHeightUpdate,
   CanvasNodeType,
   CanvasViewport,
-  IntentContext,
   Point,
   PortalNodePinUpdate,
   RecentAction,
-  WireCanvasNode,
   WireSelectionNode,
   ResolvedWorldReference,
 } from '@huabu/shared';
@@ -919,15 +916,6 @@ type RFState = {
    * (`get_canvas_outline`, `inspect_nodes`, `inspect_edges`, `read`).
    */
   getAgentChatContext: () => AgentChatContext;
-  /**
-   * Build the rich context consumed by the intent recogniser.
-   *
-   * Carries the full canvas snapshot (nodes + edges), the recent
-   * action ring buffer, the user selection, and (when available) a
-   * viewport screenshot — the recogniser is a one-shot LLM call and
-   * cannot pull data through tools.
-   */
-  getIntentContext: () => IntentContext;
 
   /**
    * Force-flush any buffered behavioural events to the server.
@@ -1074,23 +1062,6 @@ export function settleNodePreprocess(nodeId: string): void {
   const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
   if (node) preprocessQueue.schedule(node);
 }
-
-// ─── Action-history ring ──────────────────────────────────────────────────
-//
-// The short, in-memory action trail (cap 10, no timestamps) that
-// rides on agent / intent request bodies. Deliberately kept OUTSIDE
-// the Zustand store: no React component subscribes to it, but a
-// store-resident field would force `dispatchUiIntent` to fire a
-// *second* `set({ actionHistory })` right after `executeCommands`
-// already committed nodes/edges. That second commit makes every
-// remaining store subscriber re-run its selector for a value none of
-// them care about — wasted work on every UI click.
-//
-// The full server-bound action log still flows through `canvasEvents`
-// (see above); this window is read exactly once per intent request
-// via `getIntentContext`. See `intentActionWindow.ts` for the
-// memory-pipeline cleanup path that will eventually delete it.
-const intentActionWindow = createIntentActionWindow();
 
 /**
  * Module-scoped resize-preview controller. Owns the rAF handle and
@@ -1833,7 +1804,6 @@ const useCanvasStore = create<RFState>()(
       const isTransientPreview =
         intent.type === 'RESIZE_NODE' && intent.preview === true;
       if (!isTransientPreview && execution.trace.length > 0) {
-        intentActionWindow.pushMany(execution.trace);
         canvasEvents.bufferMany(get().canvasId, execution.trace);
       }
     },
@@ -1921,38 +1891,6 @@ const useCanvasStore = create<RFState>()(
       }
 
       return { selectedNodes };
-    },
-
-    getIntentContext: (): IntentContext => {
-      const { nodes, edges } = get();
-      const buildSelectedDetail = makeBuildSelectedDetail(nodes);
-
-      // Wire shape: raw canvas state only. The server enriches into
-      // `AgentNodeOutline` (with `filename`, `preview`,
-      // `parentFrame.label`) before any prompt rendering.
-      return {
-        nodes: nodes.map((n): WireCanvasNode => {
-          const size = getNodeSize(n);
-          const data = n.data as Record<string, unknown> | undefined;
-          const node: WireCanvasNode = {
-            id: n.id,
-            type: (n.type ?? 'note') as CanvasNodeType,
-            position: { x: n.position.x, y: n.position.y },
-            size: { width: size.width, height: size.height },
-          };
-          const label = data?.label as string | undefined;
-          if (label) node.label = label;
-          const content = data?.content as string | undefined;
-          if (content) node.content = content;
-          const src = data?.src as string | undefined;
-          if (src) node.src = src;
-          if (n.parentId) node.parentId = n.parentId;
-          return node;
-        }),
-        edges: edges.map((e) => ({ source: e.source, target: e.target })),
-        recentActions: intentActionWindow.snapshot(),
-        selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
-      };
     },
 
     loadCanvas: async (canvasId, options) => {
@@ -2168,10 +2106,6 @@ const useCanvasStore = create<RFState>()(
         canvasNotFound: false,
         viewport: null,
       });
-      // The intent action window lives outside the store; clear it
-      // alongside the in-store reset so the new canvas doesn't
-      // inherit the previous canvas's recent-action trail.
-      intentActionWindow.clear();
       useToolStore.getState().resetForCanvasSwitch();
       useGesturePreviewStore.getState().resetCanvasScopedTransients();
       // Load the new canvas
@@ -4012,7 +3946,6 @@ const useCanvasStore = create<RFState>()(
         nodes: snapshot.nodes,
         edges: snapshot.edges,
       });
-      intentActionWindow.push(action);
       canvasEvents.buffer(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(
@@ -4037,7 +3970,6 @@ const useCanvasStore = create<RFState>()(
         nodes: snapshot.nodes,
         edges: snapshot.edges,
       });
-      intentActionWindow.push(action);
       canvasEvents.buffer(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(

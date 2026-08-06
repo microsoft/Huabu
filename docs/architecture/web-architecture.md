@@ -17,7 +17,7 @@ apps/web/src/
 ├── pages/         # Production route-level pages & app shell
 │   └── playground/ # Development-only visual and interaction test routes
 ├── components/    # Reusable UI (no business logic): Common, Nodes, Panels, Messages, Milkdown, CodeMirror, Search
-├── handler/       # Pure processing logic, no React: canvasCommand/, sketch/, snap/, pdfHighlight/
+├── handler/       # Pure processing logic, no React: canvasCommand/, snap/, pdfHighlight/
 ├── hooks/         # Shared React hooks
 ├── store/         # Zustand global state
 ├── api/           # Backend API clients (one file per endpoint group)

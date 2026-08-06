@@ -54,7 +54,6 @@ function resetStore() {
     threadMap: {},
     bindingMap: {},
     viewingQuestionThread: null,
-    viewingSketchCluster: null,
     questionReplayByCanvas: {},
     selectionAttachment: null,
     _savedCanvasThreadId: undefined,
@@ -398,24 +397,6 @@ describe('chatStore question thread lifecycle', () => {
     expect(
       useChatStore.getState().questionReplayByCanvas['canvas-1'],
     ).toBeUndefined();
-  });
-
-  it('opening a sketch cluster closes an active question replay', () => {
-    const s = useChatStore.getState();
-    s.switchToCanvas('canvas-1');
-    const canvasThread = useChatStore.getState().threadId;
-    s.openQuestionThread(
-      questionView('canvas-1', 'node-1', 'thread-q'),
-      INTERNAL,
-      'canvas-1',
-    );
-
-    s.openSketchCluster('cluster-1', 'canvas-1');
-
-    const state = useChatStore.getState();
-    expect(state.viewingQuestionThread).toBeNull();
-    expect(state.viewingSketchCluster).toEqual({ clusterId: 'cluster-1' });
-    expect(state.threadId).toBe(canvasThread);
   });
 });
 

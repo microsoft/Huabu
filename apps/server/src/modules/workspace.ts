@@ -33,7 +33,7 @@
  *       nodes/<nodeId>.md
  *       artifacts/<file>
  *       memory/preferences.md
- *       .history/{chat/<threadId>.json,intent.json,events.jsonl}
+ *       .history/{chat/<threadId>.json,events.jsonl}
  */
 
 import path from 'node:path';

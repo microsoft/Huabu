@@ -285,15 +285,6 @@ export const SHORTCUTS: ShortcutDef[] = [
     section: SECTION.dragDrop,
   },
 
-  // AI
-  {
-    id: 'ai.openIntent',
-    combo: { mod: true, key: 'i' },
-    descriptionKey: 'shortcuts.items.openIntent',
-    section: SECTION.ai,
-    hidden: true,
-  },
-
   // Search
   {
     id: 'search.open',
