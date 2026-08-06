@@ -23,9 +23,9 @@ import useCanvasStore from '../../store/canvasStore';
 import { useGesturePreviewStore } from '../../store/gesturePreviewStore';
 import { useIntentStore } from '../../store/intentStore';
 import {
-  parseSedimentClipboard,
-  readSedimentClipboardPayload,
-  readSedimentClipboardPayloadAsync,
+  parseHuabuClipboard,
+  readHuabuClipboardPayload,
+  readHuabuClipboardPayloadAsync,
 } from '../../utils/io/clipboard';
 import { looksLikeUrl } from '../../utils/io/media';
 
@@ -343,10 +343,10 @@ export function useCanvasShortcuts(
 
           // Native paste didn't fire — use Clipboard API as fallback
           try {
-            const sysPayload = await readSedimentClipboardPayloadAsync();
+            const sysPayload = await readHuabuClipboardPayloadAsync();
 
             // Check for serialized canvas nodes
-            const parsed = parseSedimentClipboard(sysPayload);
+            const parsed = parseHuabuClipboard(sysPayload);
             if (parsed) {
               pasteNodes(
                 getFlowPos(),
@@ -435,7 +435,7 @@ export function useCanvasShortcuts(
       // Check for serialized canvas nodes. Single-image copies carry the
       // payload in `text/html` and keep `text/plain` human-readable, so the
       // payload has to be read through the helper rather than from `text`.
-      const parsed = parseSedimentClipboard(readSedimentClipboardPayload(dt));
+      const parsed = parseHuabuClipboard(readHuabuClipboardPayload(dt));
       if (parsed) {
         e.preventDefault();
         pasteNodes(

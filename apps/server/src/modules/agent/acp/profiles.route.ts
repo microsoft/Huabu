@@ -16,7 +16,7 @@
  * The response shape includes a snapshot of {@link AcpAgentletStatus}
  * on the list endpoint so the UI can render the agentlet health banner
  * without a second request — there is only ever one agentlet per
- * Sediment instance and the two are conceptually coupled (profiles
+ * Huabu instance and the two are conceptually coupled (profiles
  * are useless without a running agentlet).
  *
  * Profiles are templates: once a thread is created against a profile

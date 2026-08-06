@@ -61,7 +61,7 @@
  * from `handleSessionMetaUpdate`. The map is lazy-loaded on first
  * access; corrupt / missing file ⇒ empty map (never throws).
  *
- * Cross-process concurrency is out of scope — Sediment is single
+ * Cross-process concurrency is out of scope — Huabu is single
  * instance per workspace.
  */
 

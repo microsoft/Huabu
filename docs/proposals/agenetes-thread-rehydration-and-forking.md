@@ -10,7 +10,7 @@
 
 The main Huabu built-in chat path now runs as a live pi-driver `Deployment`, not as a per-turn fresh-Job replay loop. That cutover exposed one remaining boundary problem: on cold start or restart, the host route still loads `priorTurns` and rebuilds pi context itself instead of letting Agenetes own recovery.
 
-At the same time, issue [#285](https://github.com/hai-team/Sediment/issues/285) asks for thread forking to become standard behavior across all agents rather than a built-in-only feature, and issue [#295](https://github.com/hai-team/Sediment/issues/295) tracks moving recovery-only replay into Agenetes-managed recovery.
+At the same time, issue [#285](https://github.com/hai-team/Huabu/issues/285) asks for thread forking to become standard behavior across all agents rather than a built-in-only feature, and issue [#295](https://github.com/hai-team/Huabu/issues/295) tracks moving recovery-only replay into Agenetes-managed recovery.
 
 These are not identical product features, but they are the same systems problem family: given durable thread state, how does Agenetes realize a live runtime again, either for the same `threadId` or for a new one?
 
@@ -280,7 +280,7 @@ ACP should continue to prefer native session resume/load when a valid `sessionId
 
 When native recovery is unavailable, ACP requests history-load authorization, creates a fresh session without the stale source `sessionId`, serializes the folded turns, and prepends that recovery material to the first real prompt. Fork follows the same fresh-session + first-real-prompt history load path directly. ACP does not execute a separate bootstrap prompt, avoiding extra model output, tool side effects, and conversation-log pollution.
 
-Safe fallback requires a structured `session_resume_unavailable` reason propagated from agentlet session bootstrap through the spawn RPC into the ACP driver. The driver must never infer fallback eligibility by matching error text. Missing/unsupported native sessions map to this reason; worker, authentication, recipe, transport, and unknown failures remain hard errors. Because this propagation touches `external/agentlet/`, its change must be committed separately from Agenetes/Sediment changes.
+Safe fallback requires a structured `session_resume_unavailable` reason propagated from agentlet session bootstrap through the spawn RPC into the ACP driver. The driver must never infer fallback eligibility by matching error text. Missing/unsupported native sessions map to this reason; worker, authentication, recipe, transport, and unknown failures remain hard errors. Because this propagation touches `external/agentlet/`, its change must be committed separately from Agenetes/Huabu changes.
 
 ### 9.3. Forking
 

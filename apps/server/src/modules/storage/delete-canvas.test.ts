@@ -108,7 +108,7 @@ let blobs: OrderRecordingBlobStore;
 let restoreStorage: () => void;
 
 beforeEach(() => {
-  workspaceState.path = mkdtempSync(path.join(tmpdir(), 'sediment-delete-'));
+  workspaceState.path = mkdtempSync(path.join(tmpdir(), 'huabu-delete-'));
   writeCanvas('.world', 'canvas-world', 'World');
   writeCanvas('Project A', 'canvas-a', 'Project A');
   refreshCanvasDirIndex();

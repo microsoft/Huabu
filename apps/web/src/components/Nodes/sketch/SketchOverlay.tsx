@@ -50,7 +50,7 @@ import type { ReactFlowInstance } from '@xyflow/react';
  * preview vanishes one paint before the committed SketchNode renders.
  */
 const PREVIEW_CLEAR_DELAY_FRAMES = 2;
-export const CANCEL_SKETCH_GESTURE_EVENT = 'sediment:cancel-sketch-gesture';
+export const CANCEL_SKETCH_GESTURE_EVENT = 'huabu:cancel-sketch-gesture';
 
 /**
  * Run `cb` after `frames` animation frames have elapsed. Used to defer

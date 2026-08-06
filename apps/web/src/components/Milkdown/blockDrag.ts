@@ -192,7 +192,7 @@ export interface AttachBlockDragOptions {
  * The bubble-phase dragstart fires AFTER Crepe's BlockService handler
  * (registered on the inner `.milkdown-block-handle` wrapper). Crepe
  * has already populated `dataTransfer` with `text/html` / `text/plain`
- * and set the drag image; we layer the Sediment markdown payload
+ * and set the drag image; we layer the Huabu markdown payload
  * through the user-supplied callback and substitute a unified drag
  * image that mirrors the editor's exact styling for BOTH single- and
  * multi-block drags. The HTML5 spec says the last `setDragImage` call

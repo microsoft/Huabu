@@ -47,7 +47,7 @@ let tmp: string;
 const canvasId = 'cv-fs-write-test';
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-fs-write-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-fs-write-'));
   setWorkspacePath(tmp);
   // `canvasRoot(canvasId)` falls back to `<workspace>/<canvasId>` when the
   // canvas-dir index has no entry for the id (see `canvasDirName` in

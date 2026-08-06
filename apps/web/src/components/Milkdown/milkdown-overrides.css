@@ -44,7 +44,7 @@
   --crepe-font-code:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-  /* Surfaces & text — map onto Sediment design tokens so dark mode
+  /* Surfaces & text — map onto Huabu design tokens so dark mode
      follows the app automatically (the `.dark` class on `<html>`
      re-binds the underlying `--fg-*` / `--bg-*` tokens). */
   --crepe-color-background: transparent;
@@ -121,7 +121,7 @@
   opacity: 0.6;
 }
 
-/* React `MilkdownFloatingToolbar` owns inline math editing in Sediment
+/* React `MilkdownFloatingToolbar` owns inline math editing in Huabu
    mode. Crepe's Vue inline-latex tooltip is visually inconsistent with
    the shared toolbar popovers, so keep the schema/rendering feature but
    suppress its built-in editor chrome. */
@@ -153,7 +153,7 @@
 /* Keep an inline highlight perceptible while its text is selected. The
    translucent selection layer composes with the mark's own background,
    while unhighlighted text retains the browser's native selection style. */
-.milkdown .ProseMirror span[data-sediment-background-color]::selection {
+.milkdown .ProseMirror span[data-huabu-background-color]::selection {
   background-color: color-mix(in srgb, var(--info) 35%, transparent);
 }
 
@@ -320,7 +320,7 @@
    inside our chat cards and the note editor it dominates the page.
 
    This section ships ONE visual treatment shared by both surfaces so
-   the affordance reads the same wherever a Sediment user sees it:
+   the affordance reads the same wherever a Huabu user sees it:
      - `.milkdown-preview-host`   → chat AI messages (drag-only)
      - `.milkdown-note-preview`   → `NotePreview` in `ExpandedNodePanel`
 
@@ -854,10 +854,10 @@
    `<ProvenanceOverlay>` portal mounts a hover-triggered diff popover
    keyed off the same DOM. The colour follows the `--ai` semantic
    token (soft lavender) — same treatment as the pre-Milkdown editor. */
-.milkdown .ProseMirror .sediment-ai-edited-block {
+.milkdown .ProseMirror .huabu-ai-edited-block {
   position: relative;
 }
-.milkdown .ProseMirror .sediment-ai-edited-block::after {
+.milkdown .ProseMirror .huabu-ai-edited-block::after {
   content: '';
   position: absolute;
   top: 4px;
@@ -869,6 +869,6 @@
   pointer-events: none;
   transition: background-color 0.15s ease;
 }
-.milkdown .ProseMirror .sediment-ai-edited-block:hover::after {
+.milkdown .ProseMirror .huabu-ai-edited-block:hover::after {
   background-color: var(--ai);
 }

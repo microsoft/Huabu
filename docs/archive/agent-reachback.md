@@ -3,7 +3,7 @@
 > **⚠️ Historical.** The HRT `.mjs` shortcut tool described below — the
 > `read-node` / `write-node` / `snapshot` node-CRUD verbs, the
 > `/api/reachback/*` routes, and the `AGENTLET_REACHBACK_DIR` push
-> mechanism — **has been removed** from Sediment. External agents now reach
+> mechanism — **has been removed** from Huabu. External agents now reach
 > back into the canvas through the **Remote File System (RFS)**: plain-`curl`
 > `download` / `upload` / `agent` / `skill` endpoints under `$HUABU_RFS_URL`,
 > with **no client tool** shipped into the agent.
@@ -411,7 +411,7 @@ Design notes:
 ### Component: Huabu Reachback Tool (HRT)
 
 The standalone CLI script (`huabu-reachback-tool.mjs`) running in the external
-agent's environment. The source lives in the **Sediment (Huabu) project** since
+agent's environment. The source lives in the **Huabu project** since
 it's a thin client tightly coupled to the server's Reachback API — keeping them
 in the same repo ensures API and client stay in sync. The script is shipped as a
 build artifact that the agentlet daemon bundles during installation.

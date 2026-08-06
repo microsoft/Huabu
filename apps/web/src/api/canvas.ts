@@ -269,7 +269,7 @@ export async function getNodeContent(
 }
 
 /**
- * Download the canvas as a self-contained `.sediment.json` export bundle.
+ * Download the canvas as a self-contained `.huabu.json` export bundle.
  *
  * Performs a lightweight existence check via getCanvas to catch errors early,
  * then triggers a native browser download via a temporary `<a>` link
@@ -294,7 +294,7 @@ export async function exportCanvas(canvasId: string): Promise<void> {
 }
 
 /**
- * Import a canvas from a `.sediment.zip` archive.
+ * Import a canvas from a `.huabu.zip` archive.
  * The server allocates a fresh canvas id, restores artifacts/history,
  * and rewrites embedded artifact URLs to the new id.
  */

@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 /**
- * CodeMirror 6 theme that maps onto Sediment's design tokens
+ * CodeMirror 6 theme that maps onto Huabu's design tokens
  * (`apps/web/src/index.css` `:root`).
  *
  * **Light mode only** for the first iteration. The theme references
@@ -62,7 +62,7 @@ const chrome = EditorView.theme(
     // Strip CodeMirror's default dotted focus outline on the editor
     // shell. Focus state is already implied by the visible caret and
     // the active-line tint; the OS-style dotted border looks
-    // out-of-place inside Sediment's panel chrome.
+    // out-of-place inside Huabu's panel chrome.
     '&.cm-focused': {
       outline: 'none',
     },
@@ -227,7 +227,7 @@ const highlight = HighlightStyle.define([
   { tag: t.punctuation, color: FG_MUTED },
 ]);
 
-export const sedimentLightTheme: Extension = [
+export const huabuLightTheme: Extension = [
   chrome,
   syntaxHighlighting(highlight),
 ];

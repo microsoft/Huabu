@@ -21,14 +21,14 @@ function basicAuthPlugin(user: string, pass: string): Plugin {
   const expected =
     'Basic ' + Buffer.from(`${user}:${pass}`, 'utf8').toString('base64');
   return {
-    name: 'sediment-basic-auth',
+    name: 'huabu-basic-auth',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         // CORS preflight never carries credentials — let it through.
         if (req.method === 'OPTIONS') return next();
         if (req.headers.authorization === expected) return next();
         res.statusCode = 401;
-        res.setHeader('WWW-Authenticate', 'Basic realm="Sediment"');
+        res.setHeader('WWW-Authenticate', 'Basic realm="Huabu"');
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.end('Authentication required');
       });
@@ -63,7 +63,7 @@ export default defineConfig(({ mode }) => {
   const authPass = env.HUABU_BASIC_AUTH_PASS;
   const authEnabled = Boolean(authUser && authPass);
   if (authEnabled) {
-    console.log('[sediment] Vite dev server: Basic Auth enabled');
+    console.log('[huabu] Vite dev server: Basic Auth enabled');
   }
 
   // The desktop app's `package.json` is the single source of truth for

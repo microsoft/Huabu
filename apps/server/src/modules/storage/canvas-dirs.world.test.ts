@@ -54,9 +54,7 @@ function writeCanvas(
 }
 
 beforeEach(() => {
-  workspaceState.path = mkdtempSync(
-    path.join(tmpdir(), 'sediment-world-index-'),
-  );
+  workspaceState.path = mkdtempSync(path.join(tmpdir(), 'huabu-world-index-'));
   writeCanvas(workspaceState.path, '.world', 'canvas-world', 'World');
   writeCanvas(workspaceState.path, 'Project A', 'canvas-a', 'Project A');
   refreshCanvasDirIndex();

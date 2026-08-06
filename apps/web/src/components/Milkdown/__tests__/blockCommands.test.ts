@@ -228,10 +228,10 @@ describe('Milkdown block commands', () => {
 
     instance.__selectAllTextForTest?.();
     const activeLink = instance.getActiveLink();
-    instance.setLink('https://sediment.dev', activeLink?.range);
+    instance.setLink('https://huabu.dev', activeLink?.range);
 
     expect(activeLink?.href).toBe('https://example.com');
-    expect(instance.getMarkdown()).toContain('[hello](https://sediment.dev)');
+    expect(instance.getMarkdown()).toContain('[hello](https://huabu.dev)');
     expect(instance.getMarkdown()).not.toContain('https://example.com');
   });
 
@@ -241,9 +241,9 @@ describe('Milkdown block commands', () => {
     instance.__selectAllTextForTest?.();
     const range = instance.getSelectionRange();
     instance.__selectCurrentBlockForTest?.();
-    instance.setLink('https://sediment.dev', range);
+    instance.setLink('https://huabu.dev', range);
 
-    expect(instance.getMarkdown()).toContain('[hello](https://sediment.dev)');
+    expect(instance.getMarkdown()).toContain('[hello](https://huabu.dev)');
   });
 
   it('inserts the URL as linked text when applying a link without a text selection', async () => {

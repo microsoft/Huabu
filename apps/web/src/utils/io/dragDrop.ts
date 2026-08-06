@@ -5,7 +5,7 @@ import { normalizeOrigin } from '@huabu/shared';
 
 import type { NodeOrigin } from '@huabu/shared';
 
-export const SEDIMENT_DND_MIME = 'application/x-sediment-dnd';
+export const HUABU_DND_MIME = 'application/x-huabu-dnd';
 
 /**
  * Sentinel MIME that is present on the `DataTransfer` _types_ list when
@@ -15,7 +15,7 @@ export const SEDIMENT_DND_MIME = 'application/x-sediment-dnd';
  * is gated until `drop`, so `onDragOver` cannot inspect the JSON
  * payload to decide whether to render the move-or-copy cursor.
  */
-export const SEDIMENT_DND_MOVABLE_MIME = 'application/x-sediment-dnd-movable';
+export const HUABU_DND_MOVABLE_MIME = 'application/x-huabu-dnd-movable';
 
 // TODO: the attribute data should be consistent with NodeData
 export type WebDragPayload = {
@@ -112,7 +112,7 @@ export const setDragPayload = (
     ...payload,
     dragId: createDragId(),
   } as DragPayload;
-  e.dataTransfer.setData(SEDIMENT_DND_MIME, JSON.stringify(enrichedPayload));
+  e.dataTransfer.setData(HUABU_DND_MIME, JSON.stringify(enrichedPayload));
 
   // Expose the "this drag supports MOVE" flag via a separate MIME so
   // `onDragOver` listeners can pick the right `dropEffect` without
@@ -123,7 +123,7 @@ export const setDragPayload = (
     typeof enrichedPayload.data.sourceNodeId === 'string' &&
     typeof enrichedPayload.data.sourceContentAfterMove === 'string'
   ) {
-    e.dataTransfer.setData(SEDIMENT_DND_MOVABLE_MIME, '1');
+    e.dataTransfer.setData(HUABU_DND_MOVABLE_MIME, '1');
   }
 
   const dragImageElement = options.dragImageElement;
@@ -174,18 +174,18 @@ export const setDragPayload = (
   window.setTimeout(cleanup, 0);
 };
 
-export const canReadSedimentPayload = (dt: DataTransfer) =>
-  dt.types.includes(SEDIMENT_DND_MIME);
+export const canReadHuabuPayload = (dt: DataTransfer) =>
+  dt.types.includes(HUABU_DND_MIME);
 
 /**
  * True when the current drag's source declared MOVE support via
- * `SEDIMENT_DND_MOVABLE_MIME`. Safe to call from `onDragOver`.
+ * `HUABU_DND_MOVABLE_MIME`. Safe to call from `onDragOver`.
  */
-export const canMoveSedimentPayload = (dt: DataTransfer) =>
-  dt.types.includes(SEDIMENT_DND_MOVABLE_MIME);
+export const canMoveHuabuPayload = (dt: DataTransfer) =>
+  dt.types.includes(HUABU_DND_MOVABLE_MIME);
 
-export const getSedimentPayload = (dt: DataTransfer): DragPayload | null => {
-  const raw = dt.getData(SEDIMENT_DND_MIME);
+export const getHuabuPayload = (dt: DataTransfer): DragPayload | null => {
+  const raw = dt.getData(HUABU_DND_MIME);
   if (!raw) return null;
 
   try {

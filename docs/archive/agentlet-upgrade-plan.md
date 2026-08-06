@@ -1,6 +1,6 @@
 # Agentlet Protocol Upgrade Plan
 
-> Upgrade Sediment's embedded agentlet from the old `bridge/daemon` protocol
+> Upgrade Huabu's embedded agentlet from the old `bridge/daemon` protocol
 > to the latest `agentlet/hello` + `agent/hello` split protocol.
 >
 > Status: **Superseded** · Last updated: 2026-07-14
@@ -18,7 +18,7 @@ naming, identity model, and data persistence layer have been overhauled.
 
 ### 1.1 Protocol Rename
 
-| Old (current Sediment)        | New (upstream HEAD)                               | Notes                                           |
+| Old (current Huabu)           | New (upstream HEAD)                               | Notes                                           |
 | ----------------------------- | ------------------------------------------------- | ----------------------------------------------- |
 | `bridge/hello`                | `agentlet/hello` + `agent/hello`                  | Split into two handshakes on two WS connections |
 | `bridge/agent_exited`         | `agent/exited`                                    | entity/verb naming                              |
@@ -99,9 +99,9 @@ Old `BridgeMethods` / `BridgeErrorCodes` → New `AgentletMethods` / `AgentMetho
 
 ---
 
-## 2. Impact on Sediment
+## 2. Impact on Huabu
 
-Sediment embeds `@agentlet/server` in-process (no standalone mode) and uses
+Huabu embeds `@agentlet/server` in-process (no standalone mode) and uses
 the **TypeScript API** directly (`AgentletServer`, `AgentConnection`). It
 does **not** use the REST or host-WS endpoints — those are standalone-only.
 
@@ -152,7 +152,7 @@ actual impact is the **embedded library API surface change**: how
 #### Question node / binding model
 
 **No changes needed.** `AgentBinding` (`{ kind: 'external', alias, profileId }`)
-is a Sediment-level concept that maps profiles → agentlet sessions at
+is a Huabu-level concept that maps profiles → agentlet sessions at
 runtime. The binding does not store `agentId` or `sessionId` — those are
 ephemeral and resolved at dispatch time by the spawn orchestrator. This
 abstraction layer insulates the canvas data model from the protocol change.
@@ -237,7 +237,7 @@ Update `packages/shared/src/types/api/acp.ts`:
 - **`AgentBinding`** model — profile-based, doesn't store protocol-level IDs
 - **Question node data model** — `agentBinding` is stable
 - **Chat store bindings** — profile-level, not protocol-level
-- **Host channel / event replay** — Sediment uses embedded mode (in-process API), doesn't need the new `/api/host` WS or JSONL replay. Our own SSE layer (`translator.ts`) handles streaming.
+- **Host channel / event replay** — Huabu uses embedded mode (in-process API), doesn't need the new `/api/host` WS or JSONL replay. Our own SSE layer (`translator.ts`) handles streaming.
 
 ---
 
@@ -265,5 +265,5 @@ Update `packages/shared/src/types/api/acp.ts`:
 | **Total**                                      | **~5–6 hr** |
 
 The migration is primarily a **rename + API alignment** — no architectural
-changes to Sediment's ACP integration. The session lifecycle, preprocessor,
+changes to Huabu's ACP integration. The session lifecycle, preprocessor,
 translator, and capability system are all unaffected.

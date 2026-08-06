@@ -5,7 +5,7 @@
  * Cross-origin write guard for state-changing requests.
  *
  * Threat model: a third-party page the user has open (e.g. `evil.com`)
- * tries to trigger writes against the local Sediment server using the
+ * tries to trigger writes against the local Huabu server using the
  * user's ambient credentials.
  *
  * Defence is layered, from strongest to weakest:
@@ -44,7 +44,7 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 /**
  * Fetch Metadata values that are safe for state-changing requests.
  * `cross-site` is the only value we reject; everything else means
- * either a same-origin call (Sediment's own UI), a same-registrable-
+ * either a same-origin call (Huabu's own UI), a same-registrable-
  * domain call (Vite dev server → API on a different port), or a
  * top-level user action (`none`: bookmark, refresh, address-bar).
  */

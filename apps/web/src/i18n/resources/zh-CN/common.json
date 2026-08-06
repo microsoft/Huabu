@@ -632,7 +632,7 @@
       "profileMissing": "{{alias}} 的配置已不存在。请在设置 → 外部 Agent 中重新创建。",
       "spawnFailed": "无法启动 {{alias}}。请在设置中检查命令路径和工作目录。",
       "connectTimeout": "{{alias}} 已启动但没有响应。它可能需要重新认证（例如 Copilot OAuth），或在启动时崩溃。",
-      "bridgeNotMounted": "Sediment 仍在启动中，请稍后重试。",
+      "bridgeNotMounted": "Huabu 仍在启动中，请稍后重试。",
       "internal": "连接 {{alias}} 时发生意外错误。",
       "fallback": "无法连接到 {{alias}}。请检查设置 → 外部 Agent。"
     },

@@ -5,7 +5,7 @@
  * Server-Sent Events (SSE) parser shared by the agent and intent
  * streaming clients.
  *
- * The protocol used by Sediment endpoints is:
+ * The protocol used by Huabu endpoints is:
  *
  *   event: <type>\n
  *   data: <json>\n

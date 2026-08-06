@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-const SEDIMENT_NODES_KEY = '__sediment_nodes__';
-const SEDIMENT_EDGES_KEY = '__sediment_edges__';
-const SEDIMENT_CANVAS_ID_KEY = '__sediment_canvas_id__';
+const HUABU_NODES_KEY = '__huabu_nodes__';
+const HUABU_EDGES_KEY = '__huabu_edges__';
+const HUABU_CANVAS_ID_KEY = '__huabu_canvas_id__';
 
 /**
  * Attribute carrying the serialized node payload inside the `text/html`
@@ -16,35 +16,35 @@ const SEDIMENT_CANVAS_ID_KEY = '__sediment_canvas_id__';
  * custom formats are Chromium-only on the read side, and Huabu serves plain
  * browsers as well as Electron.
  */
-const SEDIMENT_HTML_ATTR = 'data-sediment-nodes';
+const HUABU_HTML_ATTR = 'data-huabu-nodes';
 
-export interface SedimentClipboard {
+export interface HuabuClipboard {
   nodes: unknown[];
   edges: unknown[];
   /** The canvas the nodes were copied from. May be undefined for legacy payloads. */
   srcCanvasId?: string;
 }
 
-export interface SedimentClipboardImage {
+export interface HuabuClipboardImage {
   src: string;
   label?: string;
 }
 
-/** Parse serialized Sediment canvas nodes from system clipboard text. */
-export function parseSedimentClipboard(
+/** Parse serialized Huabu canvas nodes from system clipboard text. */
+export function parseHuabuClipboard(
   text: string | null | undefined,
-): SedimentClipboard | null {
+): HuabuClipboard | null {
   if (!text) return null;
   try {
     const parsed = JSON.parse(text) as unknown;
     if (!parsed || typeof parsed !== 'object') return null;
 
     const record = parsed as Record<string, unknown>;
-    const nodes = record[SEDIMENT_NODES_KEY];
+    const nodes = record[HUABU_NODES_KEY];
     if (!Array.isArray(nodes) || nodes.length === 0) return null;
 
-    const rawEdges = record[SEDIMENT_EDGES_KEY];
-    const rawCanvasId = record[SEDIMENT_CANVAS_ID_KEY];
+    const rawEdges = record[HUABU_EDGES_KEY];
+    const rawCanvasId = record[HUABU_CANVAS_ID_KEY];
     const edges = Array.isArray(rawEdges) ? rawEdges : [];
     const srcCanvasId =
       typeof rawCanvasId === 'string' ? rawCanvasId : undefined;
@@ -63,13 +63,13 @@ export function parseSedimentClipboard(
  * Parse an internal clipboard payload only when every copied node is an image.
  * This prevents note editors from consuming mixed canvas selections as images.
  */
-export function parseSedimentImageClipboard(
+export function parseHuabuImageClipboard(
   text: string | null | undefined,
-): { images: SedimentClipboardImage[]; srcCanvasId?: string } | null {
-  const clipboard = parseSedimentClipboard(text);
+): { images: HuabuClipboardImage[]; srcCanvasId?: string } | null {
+  const clipboard = parseHuabuClipboard(text);
   if (!clipboard) return null;
 
-  const images: SedimentClipboardImage[] = [];
+  const images: HuabuClipboardImage[] = [];
   for (const node of clipboard.nodes) {
     if (!node || typeof node !== 'object') return null;
     const nodeRecord = node as Record<string, unknown>;
@@ -114,7 +114,7 @@ function decodeBase64Utf8(encoded: string): string {
  * Extract the serialized node payload from a `text/html` clipboard
  * representation. Returns `null` when the HTML carries no Huabu payload.
  */
-export function parseSedimentClipboardHtml(
+export function parseHuabuClipboardHtml(
   html: string | null | undefined,
 ): string | null {
   if (!html) return null;
@@ -124,8 +124,8 @@ export function parseSedimentClipboardHtml(
     // is read back out of it.
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const encoded = doc
-      .querySelector(`[${SEDIMENT_HTML_ATTR}]`)
-      ?.getAttribute(SEDIMENT_HTML_ATTR);
+      .querySelector(`[${HUABU_HTML_ATTR}]`)
+      ?.getAttribute(HUABU_HTML_ATTR);
     if (!encoded) return null;
     return decodeBase64Utf8(encoded);
   } catch {
@@ -141,30 +141,28 @@ export function parseSedimentClipboardHtml(
  * covers copies that never went through the HTML path (multi-node selections
  * still serialize into `text/plain`).
  */
-export function readSedimentClipboardPayload(
+export function readHuabuClipboardPayload(
   data: DataTransfer | null | undefined,
 ): string | null {
   if (!data) return null;
-  const fromHtml = parseSedimentClipboardHtml(data.getData('text/html'));
+  const fromHtml = parseHuabuClipboardHtml(data.getData('text/html'));
   if (fromHtml) return fromHtml;
   return data.getData('text/plain') || null;
 }
 
 /**
- * Async counterpart to {@link readSedimentClipboardPayload}, for the fallback
+ * Async counterpart to {@link readHuabuClipboardPayload}, for the fallback
  * path where no native `paste` event fires and only the Clipboard API is
  * available. Reads `text/html` first so single-image copies are still restored
  * as nodes rather than re-imported as a fresh image.
  */
-export async function readSedimentClipboardPayloadAsync(): Promise<
-  string | null
-> {
+export async function readHuabuClipboardPayloadAsync(): Promise<string | null> {
   try {
     const items = await navigator.clipboard.read();
     for (const item of items) {
       if (!item.types.includes('text/html')) continue;
       const html = await (await item.getType('text/html')).text();
-      const payload = parseSedimentClipboardHtml(html);
+      const payload = parseHuabuClipboardHtml(html);
       if (payload) return payload;
     }
   } catch {
@@ -274,7 +272,7 @@ function buildImageClipboardHtml(
   return (
     `<img src="${escapeHtml(dataUrl)}"` +
     ` alt="${escapeHtml(label)}"` +
-    ` ${SEDIMENT_HTML_ATTR}="${encodeBase64Utf8(payload)}">`
+    ` ${HUABU_HTML_ATTR}="${encodeBase64Utf8(payload)}">`
   );
 }
 
@@ -286,7 +284,7 @@ function buildImageClipboardHtml(
  */
 function buildTextClipboardHtml(payload: string, plainText: string): string {
   return (
-    `<span ${SEDIMENT_HTML_ATTR}="${encodeBase64Utf8(payload)}">` +
+    `<span ${HUABU_HTML_ATTR}="${encodeBase64Utf8(payload)}">` +
     `${escapeHtmlMultiline(plainText)}</span>`
   );
 }

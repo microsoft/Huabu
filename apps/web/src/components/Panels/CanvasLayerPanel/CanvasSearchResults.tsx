@@ -147,7 +147,7 @@ export const CanvasSearchResults = (): JSX.Element => {
     );
   }, [viewingQuestionThread, activeIdx]);
 
-  // Paint the same `::highlight(sediment-search)` ranges over node
+  // Paint the same `::highlight(huabu-search)` ranges over node
   // labels and Milkdown bodies that are visible on the canvas *and*,
   // when an expanded preview is open, over its body, *and* — for
   // conversation matches — over the open question-node chat thread.
@@ -757,7 +757,7 @@ const SnippetLine = ({
   return (
     <div className="text-fg-default truncate text-xs">
       <span className="text-fg-muted">{before}</span>
-      {/* Match the canvas / chat highlight paint (`::highlight(sediment-search)`
+      {/* Match the canvas / chat highlight paint (`::highlight(huabu-search)`
           uses `--pdf-highlight-bg`) so the in-list `<mark>` reads as the
           same yellow rather than the lighter `--warning-bg` cream. */}
       <mark className="text-fg-default bg-(--pdf-highlight-bg)">{hit}</mark>

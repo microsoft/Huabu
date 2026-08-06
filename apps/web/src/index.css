@@ -448,7 +448,7 @@ body,
   filter: drop-shadow(0 0 2px var(--color-info-light));
 }
 
-.sediment-edge-label:empty:not(:focus)::before {
+.huabu-edge-label:empty:not(:focus)::before {
   content: 'Add label';
   color: var(--color-fg-subtle);
 }
@@ -726,7 +726,7 @@ body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
 /* ===================================================================
   Canvas search — CSS Custom Highlight API paint rule.
   The `useTextHighlight` hook registers ranges under the name
-  `sediment-search`; without this selector the browser has nowhere
+  `huabu-search`; without this selector the browser has nowhere
   to draw them. Uses the warning-bg token so it reads as a "found"
   marker without competing with selection (which uses --info).
 
@@ -746,7 +746,7 @@ body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
   paint as opaque fills above the page bitmap, which is the correct
   behavior on note / text bodies but hides PDF text.
   =================================================================== */
-::highlight(sediment-search) {
+::highlight(huabu-search) {
   background-color: var(--pdf-highlight-bg);
 }
 
@@ -756,7 +756,7 @@ body:not(.canvas-resize-active) .react-flow__node-frame:not(.dragging) {
   PDF glyphs than the user's own manual selection. CSS Custom
   Highlight pseudo-elements can be scoped by ancestor selectors per
   the CSS Highlight API spec. */
-.textLayer ::highlight(sediment-search) {
+.textLayer ::highlight(huabu-search) {
   background-color: color-mix(
     in srgb,
     var(--pdf-highlight-bg) 45%,

@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-# Sediment release helper.
+# Huabu release helper.
 #
 # One version per release, held in apps/desktop/package.json (the Electron app —
 # the only artifact we ship). A release bumps that version, makes one
@@ -40,7 +40,7 @@ resolve_repo_root() {
 }
 
 repo_root="$(resolve_repo_root "${script_dir}")" || {
-  printf 'error: unable to locate sediment repo root from %s\n' "${script_dir}" >&2
+  printf 'error: unable to locate huabu repo root from %s\n' "${script_dir}" >&2
   exit 1
 }
 

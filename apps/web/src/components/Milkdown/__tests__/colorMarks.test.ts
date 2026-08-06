@@ -35,25 +35,25 @@ afterEach(async () => {
 describe('Milkdown color marks', () => {
   it('parses persisted text-color spans as styled text instead of source text', async () => {
     const { root } = await mount(
-      '1. <span data-sediment-text-color="orange" style="color: color-mix(in srgb, #D89A5B 60%, var(--fg-default))">字prompt</span>\n',
+      '1. <span data-huabu-text-color="orange" style="color: color-mix(in srgb, #D89A5B 60%, var(--fg-default))">字prompt</span>\n',
     );
 
     expect(root.textContent).toContain('字prompt');
-    expect(root.textContent).not.toContain('data-sediment-text-color');
+    expect(root.textContent).not.toContain('data-huabu-text-color');
     expect(
-      root.querySelector('span[data-sediment-text-color="orange"]'),
+      root.querySelector('span[data-huabu-text-color="orange"]'),
     ).not.toBeNull();
   });
 
   it('parses persisted background-color spans as styled text instead of source text', async () => {
     const { root } = await mount(
-      '1. <span data-sediment-background-color="blue" style="background-color: color-mix(in srgb, #5F8F9B 25%, transparent)">字prompt</span>\n',
+      '1. <span data-huabu-background-color="blue" style="background-color: color-mix(in srgb, #5F8F9B 25%, transparent)">字prompt</span>\n',
     );
 
     expect(root.textContent).toContain('字prompt');
-    expect(root.textContent).not.toContain('data-sediment-background-color');
+    expect(root.textContent).not.toContain('data-huabu-background-color');
     expect(
-      root.querySelector('span[data-sediment-background-color="blue"]'),
+      root.querySelector('span[data-huabu-background-color="blue"]'),
     ).not.toBeNull();
   });
 
@@ -65,18 +65,18 @@ describe('Milkdown color marks', () => {
     instance.setTextColor('orange');
 
     const markdown = instance.getMarkdown();
-    expect(markdown).toContain('data-sediment-text-color="orange"');
+    expect(markdown).toContain('data-huabu-text-color="orange"');
 
     const { root } = await mount(markdown);
     expect(root.querySelector('strong')).not.toBeNull();
     expect(
-      root.querySelector('span[data-sediment-text-color="orange"]'),
+      root.querySelector('span[data-huabu-text-color="orange"]'),
     ).not.toBeNull();
   });
 
   it('keeps indented fragment content out of a code block when inserted', async () => {
     const span =
-      '<span data-sediment-background-color="purple" style="background-color: color-mix(in srgb, #9B8AC4 25%, transparent)">Nan:  </span>';
+      '<span data-huabu-background-color="purple" style="background-color: color-mix(in srgb, #9B8AC4 25%, transparent)">Nan:  </span>';
     const { instance, root } = await mount('intro\n');
 
     // Markdown extracted from a nested list item carries its indentation.
@@ -84,7 +84,7 @@ describe('Milkdown color marks', () => {
 
     expect(root.querySelector('.milkdown-code-block')).toBeNull();
     expect(
-      root.querySelector('span[data-sediment-background-color="purple"]'),
+      root.querySelector('span[data-huabu-background-color="purple"]'),
     ).not.toBeNull();
     expect(instance.getMarkdown()).not.toContain('```');
   });
@@ -102,17 +102,17 @@ describe('Milkdown color marks', () => {
     expect(instance.getFormattingState().backgroundColor).toBe('blue');
 
     const markdown = instance.getMarkdown();
-    expect(markdown).toContain('data-sediment-text-color="orange"');
-    expect(markdown).toContain('data-sediment-background-color="blue"');
+    expect(markdown).toContain('data-huabu-text-color="orange"');
+    expect(markdown).toContain('data-huabu-background-color="blue"');
 
     const { root } = await mount(markdown);
     expect(
-      root.querySelector('span[data-sediment-text-color="orange"]'),
+      root.querySelector('span[data-huabu-text-color="orange"]'),
     ).not.toBeNull();
     expect(
-      root.querySelector('span[data-sediment-background-color="blue"]'),
+      root.querySelector('span[data-huabu-background-color="blue"]'),
     ).not.toBeNull();
     expect(root.textContent).toContain('hello');
-    expect(root.textContent).not.toContain('data-sediment');
+    expect(root.textContent).not.toContain('data-huabu');
   });
 });

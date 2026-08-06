@@ -37,7 +37,7 @@ const IDLE_TIMEOUT_PRESETS = new Set(['0', '300', '600', '1800', '3600']);
 
 /**
  * General application settings. Language changes persist to `localStorage`
- * (`sediment.language`) via i18next's language detector cache, while the
+ * (`huabu.language`) via i18next's language detector cache, while the
  * canvas store persists the minimap preference independently.
  *
  * Renders bare {@link SettingRow} entries; the parent supplies the card

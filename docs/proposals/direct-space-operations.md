@@ -4,7 +4,7 @@ Status: In-Progress
 
 Last updated: 2026-07-22
 
-Tracking issue: [#348](https://github.com/hai-team/Sediment/issues/348)
+Tracking issue: [#348](https://github.com/hai-team/Huabu/issues/348)
 
 ## Context
 

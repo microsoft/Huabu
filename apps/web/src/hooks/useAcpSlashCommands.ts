@@ -70,7 +70,7 @@ const EMPTY_POLL_BACKOFF_MS = [
  * many seconds to instant for any agent the user has used before; the
  * real list silently reconciles once the fresh fetch resolves.
  */
-const CACHE_KEY_PREFIX = 'sediment.acp.slashCommands.';
+const CACHE_KEY_PREFIX = 'huabu.acp.slashCommands.';
 
 /** Read the cached command list for a profile, or `[]` on miss/parse error. */
 function readCachedCommands(profileId: string): AvailableCommand[] {
@@ -150,7 +150,7 @@ export interface UseAcpSlashCommandsResult {
 export interface UseAcpSlashCommandsOptions {
   threadId: string | null | undefined;
   binding: AgentBinding;
-  /** Sediment canvasId; threaded into the ensure-session call. */
+  /** Huabu canvasId; threaded into the ensure-session call. */
   canvasId?: string | null;
   /**
    * Master enable switch. When `false`, the hook behaves as if the

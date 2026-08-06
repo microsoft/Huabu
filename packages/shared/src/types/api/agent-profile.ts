@@ -44,7 +44,7 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 );
 
 /**
- * Caller-owned, opaque bag of JSON data carried on every Profile. Sediment uses
+ * Caller-owned, opaque bag of JSON data carried on every Profile. Huabu uses
  * it for display preferences (see {@link agentIconSchema}); agenetes persists it
  * verbatim and never reads it.
  */

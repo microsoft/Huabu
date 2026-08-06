@@ -41,7 +41,7 @@ function waitForExit(child) {
 test('reaps the child process group when the owner IPC channel closes', async () => {
   const pidFile = path.join(
     tmpdir(),
-    `sediment-dev-child-supervisor-${process.pid}.json`,
+    `huabu-dev-child-supervisor-${process.pid}.json`,
   );
   const childScript = `
     const { spawn } = require('node:child_process');
@@ -93,7 +93,7 @@ test('reaps the child process group when the owner IPC channel closes', async ()
 test('reaps descendants left behind when the direct child exits', async () => {
   const pidFile = path.join(
     tmpdir(),
-    `sediment-dev-child-descendant-${process.pid}.txt`,
+    `huabu-dev-child-descendant-${process.pid}.txt`,
   );
   const childScript = `
     const { spawn } = require('node:child_process');

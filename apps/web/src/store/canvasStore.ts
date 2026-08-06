@@ -200,8 +200,7 @@ function armGestureSnapshot(nodes: Node[], edges: Edge[]): void {
 // version. localStorage keeps one last view per canvas across browser and
 // desktop restarts without touching the server.
 
-const viewportStorageKey = (canvasId: string) =>
-  `sediment.viewport.${canvasId}`;
+const viewportStorageKey = (canvasId: string) => `huabu.viewport.${canvasId}`;
 
 function parseStoredViewport(raw: string | null): CanvasViewport | null {
   if (!raw) return null;
@@ -308,7 +307,7 @@ function writeViewportToStorage(
 // first-time users get the cleaner canvas; once toggled in Settings the choice
 // survives refreshes / restarts.
 
-const MINIMAP_STORAGE_KEY = 'sediment.minimapEnabled';
+const MINIMAP_STORAGE_KEY = 'huabu.minimapEnabled';
 
 function readMinimapEnabledFromStorage(): boolean {
   try {
@@ -3729,9 +3728,9 @@ const useCanvasStore = create<RFState>()(
       // image or readable text instead of JSON. See the clipboard contract in
       // `docs/architecture/web-architecture.md`.
       const payload = JSON.stringify({
-        __sediment_nodes__: cloned,
-        __sediment_edges__: clonedEdges,
-        __sediment_canvas_id__: get().canvasId,
+        __huabu_nodes__: cloned,
+        __huabu_edges__: clonedEdges,
+        __huabu_canvas_id__: get().canvasId,
       });
       const singleImage =
         cloned.length === 1 &&

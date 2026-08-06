@@ -34,7 +34,7 @@ import type { Namespace } from '@agenetes/protocol';
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-migrate-acp-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-migrate-acp-'));
 });
 
 afterEach(() => {

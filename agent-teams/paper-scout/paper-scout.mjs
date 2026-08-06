@@ -106,7 +106,7 @@ async function request(url, accept = 'application/json') {
   const response = await fetch(url, {
     headers: {
       Accept: accept,
-      'User-Agent': `Sediment-Paper-Scout/1.0${process.env.PAPER_SCOUT_EMAIL ? ` (mailto:${process.env.PAPER_SCOUT_EMAIL})` : ''}`,
+      'User-Agent': `Huabu-Paper-Scout/1.0${process.env.PAPER_SCOUT_EMAIL ? ` (mailto:${process.env.PAPER_SCOUT_EMAIL})` : ''}`,
     },
     signal: AbortSignal.timeout(20_000),
   });

@@ -11,7 +11,7 @@
  *
  * Intentionally **uses CodeMirror's default light theme** for the
  * first iteration — we want to evaluate the out-of-the-box look
- * before investing in a Sediment-flavoured theme that maps onto our
+ * before investing in a Huabu-flavoured theme that maps onto our
  * design tokens.
  *
  * API mirrors the textarea it replaces in `NotePreview`:
@@ -37,7 +37,7 @@ import { EditorView, keymap } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
 import { useEffect, useRef } from 'react';
 
-import { sedimentLightTheme } from './sedimentLightTheme';
+import { huabuLightTheme } from './huabuLightTheme';
 
 /**
  * How many spaces the Tab key inserts. Tweak here to switch between
@@ -105,7 +105,7 @@ export default function RawMarkdownEditor({
         basicSetup,
         markdown({ base: markdownLanguage, codeLanguages: [] }),
         EditorView.lineWrapping,
-        sedimentLightTheme,
+        huabuLightTheme,
         tabIndentKeymap,
         readOnlyCompartment.of(EditorState.readOnly.of(readOnly === true)),
         EditorView.updateListener.of((update) => {

@@ -237,14 +237,14 @@ describe('buildHistoryFromTurns', () => {
   it.each([
     {
       toolName: 'web_search',
-      rawInput: { query: 'Sediment' },
+      rawInput: { query: 'Huabu' },
       rawOutput: {
         tool: 'web_search',
         status: 'success',
         data: { results: [{ title: 'Huabu', url: 'https://huabu.dev' }] },
       },
       expectedData: {
-        query: 'Sediment',
+        query: 'Huabu',
         results: [{ title: 'Huabu', url: 'https://huabu.dev' }],
       },
     },

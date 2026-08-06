@@ -24,7 +24,7 @@ import {
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-migrate-agenetes-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-migrate-agenetes-'));
 });
 
 afterEach(() => {

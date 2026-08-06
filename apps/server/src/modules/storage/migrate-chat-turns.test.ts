@@ -33,7 +33,7 @@ import type { PersistedTurn } from '@agenetes/agenetes';
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-migrate-turns-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-migrate-turns-'));
 });
 
 afterEach(() => {

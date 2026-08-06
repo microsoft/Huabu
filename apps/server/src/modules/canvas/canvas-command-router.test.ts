@@ -129,7 +129,7 @@ beforeEach(async () => {
   // server's file watcher, the IDE indexer, or antivirus will happily hold on
   // anything inside the working tree. `mkdtemp` also makes the name unique, so
   // parallel workers cannot collide.
-  workspace = mkdtempSync(path.join(tmpdir(), 'sediment-portal-router-'));
+  workspace = mkdtempSync(path.join(tmpdir(), 'huabu-portal-router-'));
   setWorkspacePath(workspace);
   writeCanvas('.world', 'canvas-world');
   writeCanvas('Project A', 'canvas-a', [

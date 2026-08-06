@@ -29,7 +29,7 @@ import { migrateCanvasToSpace } from './migrate-canvas-to-space.js';
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-migrate-space-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-migrate-space-'));
 });
 
 afterEach(() => {

@@ -48,8 +48,8 @@ import {
   shiftProvenance,
 } from '@/utils/blockProvenance';
 import {
-  canReadSedimentPayload,
-  getSedimentPayload,
+  canReadHuabuPayload,
+  getHuabuPayload,
   setDragPayload,
 } from '@/utils/io/dragDrop';
 import { dragPayloadToMarkdown } from '@/utils/io/payloadToMarkdown';
@@ -66,7 +66,7 @@ import type { MarkdownProvenance, NodeOrigin } from '@huabu/shared';
 
 const PROVENANCE_ENABLED = (import.meta.env.VITE_PROVENANCE ?? 'on') !== 'off';
 
-const AI_BLOCK_CLASSNAME = 'sediment-ai-edited-block';
+const AI_BLOCK_CLASSNAME = 'huabu-ai-edited-block';
 
 // Lazy-load the CodeMirror-based raw editor. Keeps the ~80kb gzipped
 // chunk out of the initial bundle — only users that actually open
@@ -444,7 +444,7 @@ export const NotePreview = ({
     [readOnly, onContentChange, onDataChange, writePatch],
   );
 
-  // ── Drop target: external Sediment payloads (chat messages, image
+  // ── Drop target: external Huabu payloads (chat messages, image
   // / web cards) can be dropped into the editor to insert a new
   // block at the cursor position. Blocks dragged out of THIS note
   // and dropped back into it fall through to Crepe's native
@@ -463,7 +463,7 @@ export const NotePreview = ({
   const handlePreviewDragOverCapture = useCallback(
     (e: React.DragEvent) => {
       if (readOnly || editMode !== 'wysiwyg') return;
-      if (!canReadSedimentPayload(e.dataTransfer)) return;
+      if (!canReadHuabuPayload(e.dataTransfer)) return;
       // We can't tell self-vs-cross-source until drop (dataTransfer
       // JSON is gated). preventDefault here unconditionally so the
       // browser permits the drop; the dropCapture handler does the
@@ -488,8 +488,8 @@ export const NotePreview = ({
   const handlePreviewDropCapture = useCallback(
     (e: React.DragEvent) => {
       if (readOnly || editMode !== 'wysiwyg') return;
-      if (!canReadSedimentPayload(e.dataTransfer)) return;
-      const payload = getSedimentPayload(e.dataTransfer);
+      if (!canReadHuabuPayload(e.dataTransfer)) return;
+      const payload = getHuabuPayload(e.dataTransfer);
       if (!payload) return;
       // Self-source (a block from this same note) → let Crepe's
       // bubble-phase in-editor reorder run. We must NOT
@@ -644,7 +644,7 @@ export const NotePreview = ({
               readOnly={readOnly}
               onChange={handleRawChange}
               ariaLabel={t('node.rawMarkdownSource')}
-              className="sediment-raw-markdown"
+              className="huabu-raw-markdown"
             />
           </Suspense>
         )}

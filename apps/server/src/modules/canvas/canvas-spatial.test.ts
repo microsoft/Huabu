@@ -67,7 +67,7 @@ function byId(result: ReturnType<typeof inspectNodes>): Map<
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-spatial-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-spatial-'));
   setWorkspacePath(tmp);
 });
 

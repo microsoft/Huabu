@@ -9,7 +9,7 @@
 >
 > Status: **Shipped** · Last updated: 2026-07-22
 >
-> Current behavior is documented in [`../architecture/agent-reachback.md`](../architecture/agent-reachback.md). The direct-operation extension is tracked in [`direct-space-operations.md`](./direct-space-operations.md) and [issue #348](https://github.com/hai-team/Sediment/issues/348).
+> Current behavior is documented in [`../architecture/agent-reachback.md`](../architecture/agent-reachback.md). The direct-operation extension is tracked in [`direct-space-operations.md`](./direct-space-operations.md) and [issue #348](https://github.com/hai-team/Huabu/issues/348).
 >
 > Supersedes the shortcut design recorded in
 > [`../archive/agent-reachback.md`](../archive/agent-reachback.md)
@@ -517,7 +517,7 @@ Resolved for phase 1 (kept here as decisions + their guardrails):
 
 Shipped follow-up:
 
-- **`ask-agent` uses a live internal Deployment.** A first `POST /agent` creates an `operate` Deployment and returns its `threadId` at the start of the SSE stream; a later request supplies `X-Huabu-Thread-Id` and submits a new turn directly to the same live handle. The system prompt is loaded only when the Deployment is created. Continuation is live-only in this phase; durable identity recovery is tracked separately in [#316](https://github.com/hai-team/Sediment/issues/316).
+- **`ask-agent` uses a live internal Deployment.** A first `POST /agent` creates an `operate` Deployment and returns its `threadId` at the start of the SSE stream; a later request supplies `X-Huabu-Thread-Id` and submits a new turn directly to the same live handle. The system prompt is loaded only when the Deployment is created. Continuation is live-only in this phase; durable identity recovery is tracked separately in [#316](https://github.com/hai-team/Huabu/issues/316).
 
 Deferred (default chosen, revisit only if needed):
 

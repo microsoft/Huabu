@@ -105,7 +105,7 @@ app.register(compress);
 // `Origin`/loopback fallback; this CORS config keeps the browser from
 // even attempting cross-origin reads of sensitive GET endpoints. Any
 // scheme/port is accepted on an allowed hostname so
-// `http://localhost:5173` (Vite dev) and `https://sediment.example`
+// `http://localhost:5173` (Vite dev) and `https://huabu.example`
 // (reverse proxy) both work without further configuration.
 const allowedHostnames = resolveAllowedHostnames();
 app.register(cors, {
@@ -181,7 +181,7 @@ if (basicAuthUser && basicAuthPass) {
     }
 
     reply
-      .header('WWW-Authenticate', 'Basic realm="Sediment"')
+      .header('WWW-Authenticate', 'Basic realm="Huabu"')
       .status(401)
       .send({ message: 'Authentication required' });
   });

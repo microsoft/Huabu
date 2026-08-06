@@ -16,10 +16,10 @@ import {
 import { getElectronBridge } from '../hooks/useElectron';
 import { i18n } from '../i18n';
 
-const FREE_PATH_KEY = 'sediment:workspace-path';
-const RECENT_PATHS_KEY = 'sediment:recent-workspaces';
+const FREE_PATH_KEY = 'huabu:workspace-path';
+const RECENT_PATHS_KEY = 'huabu:recent-workspaces';
 const MAX_RECENT = 5;
-const WORLD_ENABLED_KEY = 'sediment:world-enabled';
+const WORLD_ENABLED_KEY = 'huabu:world-enabled';
 
 /**
  * Storage backend abstraction. In Electron we delegate to the main

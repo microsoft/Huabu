@@ -4,7 +4,7 @@
 /**
  * L1-owned assembly of the agent reachback environment.
  *
- * When Sediment spawns an external agent it injects a small set of
+ * When Huabu spawns an external agent it injects a small set of
  * `HUABU_*` environment variables so the agent can reach back into the
  * host over the canvas-scoped Remote File System (RFS) and attribute its
  * change-review activity to the right conversation:
@@ -18,7 +18,7 @@
  *                          change-review card.
  *
  * This is a **pure L1 concern**: RFS is canvas-coupled and the `HUABU_*`
- * naming + `/api/rfs/` route are Sediment conventions. The assembled env
+ * naming + `/api/rfs/` route are Huabu conventions. The assembled env
  * is handed to the L2 driver as opaque data (via the `WorkloadSpec` /
  * `ensureAcpSession` options); the driver passes it straight through to
  * the agentlet spawn call without reading the host port or interpreting

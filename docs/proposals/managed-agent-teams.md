@@ -2,7 +2,7 @@
 
 > Redesign Agent Teams as a Huabu-managed experience and unify every non-internal agent behind one Agenetes Agent Profile model.
 >
-> Status: **In-Progress** · Last updated: 2026-07-15 · Tracks: [#253](https://github.com/hai-team/Sediment/issues/253)
+> Status: **In-Progress** · Last updated: 2026-07-15 · Tracks: [#253](https://github.com/hai-team/Huabu/issues/253)
 
 ---
 

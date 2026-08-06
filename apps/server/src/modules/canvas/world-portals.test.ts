@@ -69,7 +69,7 @@ function portals(): Array<{
 
 beforeEach(() => {
   workspaceState.path = mkdtempSync(
-    path.join(tmpdir(), 'sediment-world-portals-'),
+    path.join(tmpdir(), 'huabu-world-portals-'),
   );
   writeCanvas('.world', 'canvas-world', 'World', [
     {

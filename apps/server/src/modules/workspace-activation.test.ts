@@ -23,7 +23,7 @@ describe('workspace activation isolation', () => {
   }
 
   function worker(source: string): string {
-    const dir = tempDir('sediment-workspace-worker-');
+    const dir = tempDir('huabu-workspace-worker-');
     const file = path.join(dir, 'worker.mjs');
     writeFileSync(file, source, 'utf8');
     return file;
@@ -38,7 +38,7 @@ describe('workspace activation isolation', () => {
   it('resolves when the preparation child reports success', async () => {
     const workerPath = worker(`process.send({ ok: true });`);
     await expect(
-      runWorkspacePreparation(tempDir('sediment-workspace-target-'), {
+      runWorkspacePreparation(tempDir('huabu-workspace-target-'), {
         workerPath,
         timeoutMs: 1_000,
       }),
@@ -48,7 +48,7 @@ describe('workspace activation isolation', () => {
   it('terminates and rejects an unresponsive preparation child', async () => {
     const workerPath = worker(`setInterval(() => {}, 1_000);`);
     await expect(
-      runWorkspacePreparation(tempDir('sediment-workspace-target-'), {
+      runWorkspacePreparation(tempDir('huabu-workspace-target-'), {
         workerPath,
         timeoutMs: 30,
       }),
@@ -56,8 +56,8 @@ describe('workspace activation isolation', () => {
   });
 
   it('keeps the previous workspace active after preparation times out', async () => {
-    const previous = tempDir('sediment-workspace-previous-');
-    const next = tempDir('sediment-workspace-next-');
+    const previous = tempDir('huabu-workspace-previous-');
+    const next = tempDir('huabu-workspace-next-');
     const workerPath = worker(`setInterval(() => {}, 1_000);`);
     setWorkspacePath(previous);
 
@@ -69,13 +69,13 @@ describe('workspace activation isolation', () => {
 
   it('rejects a concurrent activation while preparation is running', async () => {
     const workerPath = worker(`setInterval(() => {}, 1_000);`);
-    const first = activateWorkspacePath(tempDir('sediment-workspace-first-'), {
+    const first = activateWorkspacePath(tempDir('huabu-workspace-first-'), {
       workerPath,
       timeoutMs: 50,
     });
 
     await expect(
-      activateWorkspacePath(tempDir('sediment-workspace-second-'), {
+      activateWorkspacePath(tempDir('huabu-workspace-second-'), {
         workerPath,
         timeoutMs: 50,
       }),

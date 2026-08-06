@@ -47,7 +47,7 @@ export function normalizeMarkdown(md: string): string {
 /**
  * Substitute an editor-safe placeholder for empty / whitespace-only input.
  *
- * Milkdown can render an empty document, but several Sediment code paths
+ * Milkdown can render an empty document, but several Huabu code paths
  * (drag preview, AI prompt assembly) assume at least one paragraph exists.
  * Returning a single newline gives downstream code a stable "empty doc"
  * shape without inserting visible text.

@@ -5,7 +5,7 @@ Last updated: 2026-07-07
 
 ## Problem
 
-Sediment currently relies on Crepe's built-in floating selection toolbar for
+Huabu currently relies on Crepe's built-in floating selection toolbar for
 Milkdown editing. The toolbar can be customized internally through
 `featureConfigs[Crepe.Feature.Toolbar].buildToolbar`; `createMilkdown` already
 uses that hook to append a block-type dropdown. That customization is still
@@ -13,7 +13,7 @@ Crepe-owned UI, rendered outside React, styled separately from the canvas node
 toolbar, and not exposed as a public API on `MilkdownEditor` or
 `MilkdownPreview`.
 
-For note editing, the desired direction is a Sediment-owned React toolbar that
+For note editing, the desired direction is a Huabu-owned React toolbar that
 uses the same visual language as the canvas floating toolbars and calls a small
 semantic command API on `MilkdownInstance`.
 
@@ -24,7 +24,7 @@ semantic command API on `MilkdownInstance`.
 2. Keep Milkdown / ProseMirror internals contained inside
    `createMilkdown.ts`; callers should invoke semantic commands rather than
    touching Crepe state directly.
-3. Disable Crepe's built-in toolbar wherever the Sediment toolbar is active so
+3. Disable Crepe's built-in toolbar wherever the Huabu toolbar is active so
    users never see two competing editing surfaces.
 4. Support a focused V1 button set for expanded note editing without expanding
    into a general Milkdown toolbar configuration API.
@@ -81,11 +81,11 @@ React toolbar is owned by expanded note editing and is mounted by
 `NotePreview` next to the editor instance it receives from `onReady`.
 
 ```ts
-type MilkdownToolbarMode = 'none' | 'sediment';
+type MilkdownToolbarMode = 'none' | 'huabu';
 ```
 
 `createMilkdown` keeps an internal `toolbarMode` option so editable notes can
-enable the Sediment toolbar command path while `MilkdownPreview` uses `'none'`.
+enable the Huabu toolbar command path while `MilkdownPreview` uses `'none'`.
 Crepe's built-in toolbar remains disabled in both modes.
 
 ### `MilkdownInstance`
@@ -122,7 +122,7 @@ formatting controls needed by note editing:
 - Block type popup with the supported Milkdown block types grouped as Text,
   List, and Advanced.
 - Inline typographic marks: bold, italic, and strikethrough.
-- Text color and highlight color from Sediment `AccentToken` values.
+- Text color and highlight color from Huabu `AccentToken` values.
 - Link popover with safe URL handling.
 - Inline code and inline math controls.
 
@@ -164,9 +164,9 @@ zoom nodes: text color uses `accentTokens.fg`, and background/highlight color
 uses `accentTokens.highlightBg` instead of `accentTokens.bg` because inline
 highlights need more contrast than full-card node backgrounds. Passing `null` to
 the command clears the corresponding color mark/style. Crepe does not ship a
-public built-in text/background color toolbar command, so Sediment owns these as
-custom Milkdown marks. Persisted markdown uses Sediment-owned
-`<span data-sediment-...>` HTML; on parse, a remark preprocessor folds the
+public built-in text/background color toolbar command, so Huabu owns these as
+custom Milkdown marks. Persisted markdown uses Huabu-owned
+`<span data-huabu-...>` HTML; on parse, a remark preprocessor folds the
 opening HTML node, inline children, and closing HTML node
 back into one color mark so reopening WYSIWYG mode never displays the span source
 as plain text.
@@ -195,7 +195,7 @@ Link editing uses a React popover and routes writes through
 
 ## Implementation Plan
 
-1. Keep the factory-level `toolbarMode?: 'none' | 'sediment'` internal option
+1. Keep the factory-level `toolbarMode?: 'none' | 'huabu'` internal option
    and keep `Crepe.Feature.Toolbar` disabled.
 2. Move the existing block-type command implementation behind
    `MilkdownInstance.setBlockType()` and remove Crepe-specific toolbar DOM code

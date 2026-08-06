@@ -19,7 +19,7 @@
  * Concurrency model: this module is loaded once per server process
  * and writes through `atomicWriteJson`, so two routes inside the same
  * server cannot race. Multiple servers writing to the same workspace
- * is intentionally out of scope — Sediment is single-instance per
+ * is intentionally out of scope — Huabu is single-instance per
  * workspace.
  */
 

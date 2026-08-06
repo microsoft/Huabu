@@ -19,7 +19,7 @@ import { ensureWorldCanvasOnDisk } from './world-canvas.js';
 const roots: string[] = [];
 
 function workspace(): string {
-  const root = mkdtempSync(path.join(tmpdir(), 'sediment-world-canvas-'));
+  const root = mkdtempSync(path.join(tmpdir(), 'huabu-world-canvas-'));
   roots.push(root);
   return root;
 }

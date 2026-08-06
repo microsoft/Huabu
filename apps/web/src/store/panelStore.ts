@@ -103,7 +103,7 @@ export const usePanelStore = create<PanelState>()(
         set((s) => ({ focusChatInputNonce: s.focusChatInputNonce + 1 })),
     }),
     {
-      name: 'sediment-panel',
+      name: 'huabu-panel',
       // Only the chat panel's open state is persisted. `isLeftCollapsed`
       // stays per-session (always collapsed on fresh load — matches the
       // pre-persist default) and `isSearchOpen` is intentionally

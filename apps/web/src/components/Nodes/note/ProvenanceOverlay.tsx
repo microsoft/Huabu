@@ -9,7 +9,7 @@
  * Visual contract (matches the pre-Milkdown experience):
  *
  *  • Edited block: a thin info-coloured accent bar sits in the
- *    editor's right gutter (`::after` on `.sediment-ai-edited-block`,
+ *    editor's right gutter (`::after` on `.huabu-ai-edited-block`,
  *    declared in `milkdown-overrides.css`). Hovering the block (or
  *    the bar) reveals a popover anchored to the block's right edge
  *    that renders a word-level diff between the AI-overwritten
@@ -358,7 +358,7 @@ export function ProvenanceOverlay({
         const id = tombId(slot.anchorKey);
         const active = hovered?.kind === 'tomb' && hovered.key === id;
         const count = slot.entries.length;
-        // Mirror the `.sediment-ai-edited-block::after` accent bar
+        // Mirror the `.huabu-ai-edited-block::after` accent bar
         // (see `milkdown-overrides.css`): 6 px wide vertical bar with
         // 1 px border-radius, sitting in the same gutter column as the
         // modify/insert bars but using the `--danger` token. A wider

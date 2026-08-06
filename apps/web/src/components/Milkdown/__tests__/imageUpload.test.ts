@@ -159,7 +159,7 @@ describe('image src resolution (nodeView)', () => {
     clipboardData.setData(
       'text/plain',
       JSON.stringify({
-        __sediment_nodes__: [
+        __huabu_nodes__: [
           {
             id: 'node-image',
             type: 'image',
@@ -170,8 +170,8 @@ describe('image src resolution (nodeView)', () => {
             },
           },
         ],
-        __sediment_edges__: [],
-        __sediment_canvas_id__: 'canvas-source',
+        __huabu_edges__: [],
+        __huabu_canvas_id__: 'canvas-source',
       }),
     );
 
@@ -188,7 +188,7 @@ describe('image src resolution (nodeView)', () => {
         '![Huabu collaboration banner](artifact-cloned.png)',
       );
     });
-    expect(instance.getMarkdown()).not.toContain('__sediment_nodes__');
+    expect(instance.getMarkdown()).not.toContain('__huabu_nodes__');
     expect(importImage).toHaveBeenCalledWith({
       src: 'artifact-source.png',
       srcCanvasId: 'canvas-source',

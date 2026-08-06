@@ -35,7 +35,7 @@ describe('toolStore input preference', () => {
     expect(state.inputModePreference).toBe('finger');
 
     const stored = JSON.parse(
-      localStorage.getItem('sediment-sketch-tools') ?? '{}',
+      localStorage.getItem('huabu-sketch-tools') ?? '{}',
     ) as { state?: Record<string, unknown> };
     expect(stored.state?.penObserved).toBe(true);
     expect(stored.state?.inputModePreference).toBe('finger');
@@ -107,7 +107,7 @@ describe('toolStore sketch size presets', () => {
     useToolStore.getState().updateSketchSizePreset('eraser', 2, 44);
 
     const stored = JSON.parse(
-      localStorage.getItem('sediment-sketch-tools') ?? '{}',
+      localStorage.getItem('huabu-sketch-tools') ?? '{}',
     ) as { state?: Record<string, unknown> };
 
     expect(stored.state?.eraserSizePresets).toEqual([12, 24, 44]);

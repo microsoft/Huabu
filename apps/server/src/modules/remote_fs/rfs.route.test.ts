@@ -90,7 +90,7 @@ function seedNote(
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-rfs-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-rfs-'));
   setWorkspacePath(tmp);
   agentMocks.runAgent.mockReset();
   agentMocks.record.mockReset();

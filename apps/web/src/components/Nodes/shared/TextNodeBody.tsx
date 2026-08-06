@@ -207,7 +207,7 @@ export const TextNodeBody = forwardRef<HTMLTextAreaElement, TextNodeBodyProps>(
           Read-only text mirror. While not editing the textarea's value
           is unreachable to the document-wide TreeWalker (textarea
           content is not real DOM text), so the canvas search highlight
-          (`::highlight(sediment-search)`) cannot paint over it. We
+          (`::highlight(huabu-search)`) cannot paint over it. We
           render an identically-laid-out, pointer-events-none mirror
           carrying the same text so the highlight layer can target it.
           The textarea's text color is forced transparent while not

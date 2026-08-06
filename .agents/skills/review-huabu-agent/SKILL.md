@@ -1,11 +1,11 @@
 ---
-name: review-sediment-agent
-description: "Review the Sediment operate agent's three steering artifacts at their fixed repo locations — system prompt, tool descriptions, and skills. USE WHEN reviewing, auditing, or polishing the operate (or ask/intent/sketch) agent prompt, the agent tool definitions, or the canvas/memory skills; before shipping changes to AGENT.md, tool definitions.ts, or a skill. Thin Sediment-specific wrapper: it only locates the artifacts; all scoring rules come from review-agent-primitives."
+name: review-huabu-agent
+description: "Review the Huabu operate agent's three steering artifacts at their fixed repo locations — system prompt, tool descriptions, and skills. USE WHEN reviewing, auditing, or polishing the operate (or ask/intent/sketch) agent prompt, the agent tool definitions, or the canvas/memory skills; before shipping changes to AGENT.md, tool definitions.ts, or a skill. Thin Huabu-specific wrapper: it only locates the artifacts; all scoring rules come from review-agent-primitives."
 ---
 
-# Review Sediment Agent
+# Review Huabu Agent
 
-Sediment-specific entry point for reviewing this repo's agent primitives. It adds **only** the artifact locations. Every rubric, the scoring model, the output format, and the placement decision table live in the general skill — do not duplicate them here.
+Huabu-specific entry point for reviewing this repo's agent primitives. It adds **only** the artifact locations. Every rubric, the scoring model, the output format, and the placement decision table live in the general skill — do not duplicate them here.
 
 **Rules & rubric:** [review-agent-primitives](../review-agent-primitives/SKILL.md) plus its references:
 [tool-description](../review-agent-primitives/references/tool-description.md) ·
@@ -27,7 +27,7 @@ Sediment-specific entry point for reviewing this repo's agent primitives. It add
 3. **Score** with the shared foundation + the matching reference rubric; run **Placement mode** whenever content looks misplaced.
 4. **Report** using review-agent-primitives' output format (verdict → findings table → prioritized fixes → optional rewrite).
 
-## Sediment cross-artifact checks
+## Huabu cross-artifact checks
 
 When reviewing more than one artifact together, pay special attention to:
 

@@ -505,7 +505,7 @@ async function startServer(port: number): Promise<void> {
   }
 
   serverProcess = utilityProcess.fork(serverEntry, [], {
-    serviceName: 'sediment-server',
+    serviceName: 'huabu-server',
     env: buildServerEnv(port),
     // Pipe stdout/stderr so we can forward to a log file (prod) or to
     // the parent terminal (dev). Even with no consumer attached, Node

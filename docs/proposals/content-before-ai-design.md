@@ -6,7 +6,7 @@ Last updated: 2026-07-22
 
 ## Background
 
-Sediment tracks which blocks in a note were written or modified by AI using a
+Huabu tracks which blocks in a note were written or modified by AI using a
 block-level provenance system. Visual indicators (purple color bars) and inline
 word-level diffs let users see _what_ the AI changed and accept or reject
 individual changes.

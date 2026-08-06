@@ -159,7 +159,7 @@ export function LabelledEdge(props: EdgeProps) {
  * click an edge directly without first single-clicking to reveal the
  * placeholder pill.
  */
-export const EDIT_EDGE_LABEL_EVENT = 'sediment:edit-edge-label';
+export const EDIT_EDGE_LABEL_EVENT = 'huabu:edit-edge-label';
 
 export interface EditEdgeLabelDetail {
   edgeId: string;
@@ -433,7 +433,7 @@ function EdgeLabelEditor({
   // complete relationship without permanently covering nearby nodes.
   const clampLabel = hasLabel && !useInfoColors && !hovered;
   const pillClasses = [
-    'sediment-edge-label',
+    'huabu-edge-label',
     'max-w-[120px] cursor-text rounded-md border-solid py-0.5 transition-shadow',
     'text-[10px] font-medium leading-snug break-words',
     'outline-none',
@@ -484,7 +484,7 @@ function EdgeLabelEditor({
       {/*
        * Editable pill — never render React children inside (see effect
        * above). When the field is empty and not focused, an "Add
-       * label" hint is painted via the `.sediment-edge-label:empty::
+       * label" hint is painted via the `.huabu-edge-label:empty::
        * before` rule in `index.css`; that pseudo guarantees the hint
        * and editing states share the exact same DOM box (no sibling
        * overlay to drift).

@@ -18,7 +18,7 @@ describe('external-agent runtime config', () => {
   const originalDataDir = process.env.HUABU_DATA_DIR;
 
   beforeEach(() => {
-    dataDir = mkdtempSync(join(tmpdir(), 'sediment-external-agent-config-'));
+    dataDir = mkdtempSync(join(tmpdir(), 'huabu-external-agent-config-'));
     process.env.HUABU_DATA_DIR = dataDir;
   });
 

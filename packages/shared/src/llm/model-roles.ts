@@ -4,7 +4,7 @@
 /**
  * Model Role Routing — role catalog.
  *
- * Single source of truth for every LLM call site ("role") in Sediment and
+ * Single source of truth for every LLM call site ("role") in Huabu and
  * which capability tier it belongs to. The server's `resolveModelForRole`
  * maps a role → a concrete model via the two-layer binding config
  * (per-role override → tier config → chat fallback); this file only

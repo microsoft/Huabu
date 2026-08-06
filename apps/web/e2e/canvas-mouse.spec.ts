@@ -27,7 +27,7 @@ import {
 /** Force effective Mouse mode regardless of the emulated touch capability. */
 async function useMouseMode(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const key = 'sediment-sketch-tools';
+    const key = 'huabu-sketch-tools';
     const persisted = JSON.parse(localStorage.getItem(key) ?? '{}') as {
       state?: Record<string, unknown>;
       version?: number;

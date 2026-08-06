@@ -33,7 +33,7 @@ import type { NormalizeResult } from '../types.js';
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-persist-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-persist-'));
   setWorkspacePath(tmp);
 });
 

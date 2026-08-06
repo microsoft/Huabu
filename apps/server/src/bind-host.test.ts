@@ -4,7 +4,7 @@
 /**
  * Regression guard for the server's default bind interface.
  *
- * Sediment ships as a desktop app over loopback by default; the
+ * Huabu ships as a desktop app over loopback by default; the
  * Electron main process explicitly sets `HUABU_BIND_HOST=127.0.0.1`
  * but if anyone ever lifts that env injection (or a future contributor
  * "helpfully" flips the default to `0.0.0.0` to make standalone server

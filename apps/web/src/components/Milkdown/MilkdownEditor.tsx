@@ -88,9 +88,9 @@ export interface MilkdownEditorProps {
   /**
    * Fires when the user drags a block (or a multi-block selection) out
    * of the editor — typically used by note nodes to construct the
-   * canvas drop payload. The Sediment markdown payload is exposed via
+   * canvas drop payload. The Huabu markdown payload is exposed via
    * `event.markdown`; consumers are responsible for calling
-   * `setData(SEDIMENT_DND_MIME, …)` on `event.nativeEvent.dataTransfer`
+   * `setData(HUABU_DND_MIME, …)` on `event.nativeEvent.dataTransfer`
    * (the helper already manages the drag image).
    */
   onBlockDragStart?: (event: MilkdownBlockDragEvent) => void;
@@ -156,7 +156,7 @@ export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
         initialMarkdown: lastSyncedRef.current,
         editable,
         placeholder,
-        toolbarMode: 'sediment',
+        toolbarMode: 'huabu',
         resolveImageSrc: (src) => {
           const id = canvasIdRef.current;
           return id ? resolveArtifactUrl(src, id) : src;

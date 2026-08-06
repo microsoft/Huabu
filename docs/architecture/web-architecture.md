@@ -83,10 +83,10 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 
 Canvas copy carries Huabu's serialized node payload so that pasting back into Huabu preserves node identity and artifact ownership. The payload always rides in `text/html`; the other representations exist for applications outside Huabu:
 
-| Selection              | `text/plain`                       | `text/html`                                                     | `image/png` |
-| ---------------------- | ---------------------------------- | --------------------------------------------------------------- | ----------- |
-| Exactly one image node | —                                  | `<img src="data:…" data-sediment-nodes="<base64 payload>">`     | the image   |
-| Anything else          | readable text (omitted when empty) | `<span data-sediment-nodes="<base64 payload>">same text</span>` | —           |
+| Selection              | `text/plain`                       | `text/html`                                                  | `image/png` |
+| ---------------------- | ---------------------------------- | ------------------------------------------------------------ | ----------- |
+| Exactly one image node | —                                  | `<img src="data:…" data-huabu-nodes="<base64 payload>">`     | the image   |
+| Anything else          | readable text (omitted when empty) | `<span data-huabu-nodes="<base64 payload>">same text</span>` | —           |
 
 The payload moved out of `text/plain` because plain-text targets outside Huabu would otherwise receive raw JSON. `text/html` was chosen over a `web ` custom format because custom formats are Chromium-only on the read side, while `DataTransfer.getData('text/html')` works synchronously in every browser — which matters because all paste entry points are synchronous `paste` handlers. The image is inlined as a `data:` URL rather than linked by artifact URL because rich-text targets often prefer `text/html` over `image/png` and cannot reach Huabu's local API origin. A single image node writes no `text/plain` at all, so pasting it outside Huabu produces an image and nothing else.
 
@@ -94,7 +94,7 @@ The readable text is produced by [`nodesToPlainText`](../../apps/web/src/utils/i
 
 All representations are written through a single `ClipboardItem` by `copyCanvasClipboard`. One copy gesture only authorizes one clipboard write, so writing `text/plain` first as a safety net makes the real write fail with `NotAllowedError` and silently drops the image.
 
-Read paths must go through `readSedimentClipboardPayload` (or `readSedimentClipboardPayloadAsync` on the Clipboard-API fallback path), which prefers `text/html` and falls back to `text/plain`. The fallback keeps clipboard contents written by older builds working. Unsupported Clipboard APIs, inaccessible sources, and image conversion failures all fall back to writing the serialized node payload to `text/plain`, which degrades external pastes to JSON but keeps Huabu-to-Huabu paste working.
+Read paths must go through `readHuabuClipboardPayload` (or `readHuabuClipboardPayloadAsync` on the Clipboard-API fallback path), which prefers `text/html` and falls back to `text/plain`. The fallback keeps clipboard contents written by older builds working. Unsupported Clipboard APIs, inaccessible sources, and image conversion failures all fall back to writing the serialized node payload to `text/plain`, which degrades external pastes to JSON but keeps Huabu-to-Huabu paste working.
 
 ### Cross-canvas paste and artifact ownership
 
@@ -213,7 +213,7 @@ The web application does not contain handbook pages, assets, or a `/docs/*` rout
 
 Production requires `VITE_HANDBOOK_URL`; the checked-in [`apps/web/.env.production`](../../apps/web/.env.production) supplies the Microsoft Huabu Pages URL, and deployment environments may override it. `pnpm dev` and `pnpm dev:desktop` use that public handbook by default and honor a `VITE_HANDBOOK_URL` override, such as a separately running Huabu repository handbook on localhost. Other development entry points resolve `/docs/` against the current page origin when the variable is unset. Production accepts HTTPS only, while development also accepts HTTP on loopback hosts. Electron continues to deny renderer child windows and sends HTTP(S) targets to the operating system through its existing `setWindowOpenHandler` in [`apps/desktop/src/main.ts`](../../apps/desktop/src/main.ts).
 
-The handbook is owned, built, and deployed from the public [microsoft/Huabu repository](https://github.com/microsoft/Huabu/tree/main/apps/docs); Sediment does not carry a second user-handbook application.
+The handbook is owned, built, and deployed from the public [microsoft/Huabu repository](https://github.com/microsoft/Huabu/tree/main/apps/docs); Huabu does not carry a second user-handbook application.
 
 `pnpm start:web` serves the compiled SPA and API from one production-style Fastify process. Before importing the Server bundle, its launcher selects the first available port at or above `SERVER_PORT`/`PORT` (default 3001) and writes the resolved value to `SERVER_PORT`; the shared port probe also protects `dev` and `dev:desktop` from loopback-versus-wildcard binding conflicts.
 

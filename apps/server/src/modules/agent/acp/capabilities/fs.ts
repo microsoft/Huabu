@@ -9,7 +9,7 @@
  *
  * ─── Virtual filesystem namespace ──────────────────────────────────────
  *
- * The ACP spec requires `path` on the wire to be absolute. Sediment's
+ * The ACP spec requires `path` on the wire to be absolute. Huabu's
  * sandbox is purely server-side, so we expose a synthetic absolute
  * namespace rooted at `/space/` — the agent has no view of Huabu's
  * real disk layout, and the canvasId is never sent on the wire.

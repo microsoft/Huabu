@@ -33,7 +33,7 @@ void i18n
     detection: {
       order: ['localStorage', 'navigator', 'htmlTag'],
       caches: ['localStorage'],
-      lookupLocalStorage: 'sediment.language',
+      lookupLocalStorage: 'huabu.language',
       convertDetectedLanguage: (lng) =>
         lng.toLowerCase().startsWith('zh') ? 'zh-CN' : lng,
     },

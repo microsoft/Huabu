@@ -1536,7 +1536,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // --- Export Canvas (zip) ---
 
   /**
-   * Stream the entire `<canvasId>/` directory as a `.sediment.zip` archive.
+   * Stream the entire `<canvasId>/` directory as a `.huabu.zip` archive.
    *
    * The zip mirrors the complete Space layout, with a root manifest identifying
    * the export version and source canvas id.
@@ -1605,7 +1605,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       title: canvas.title,
     };
 
-    const rawName = `${canvas.title ?? canvasId}.sediment.zip`;
+    const rawName = `${canvas.title ?? canvasId}.huabu.zip`;
     const asciiFallback = rawName
       .replace(/[^\x20-\x7E]/g, '_')
       .replace(/[;'"\\]/g, '_');

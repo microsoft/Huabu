@@ -247,7 +247,7 @@ interface ImageConfigPersisted {
    * Model family this deployment belongs to (see
    * `@huabu/shared/llm/image-capabilities`). When absent on a
    * legacy entry we default to `gpt-image-2` at read time — that
-   * matches the only image model Sediment shipped before this field
+   * matches the only image model Huabu shipped before this field
    * was introduced.
    */
   modelFamily?: ImageModelFamily;

@@ -68,7 +68,7 @@ export interface AcpSessionPersistedMeta {
   metaUpdatedAt?: number;
 }
 
-/** One persisted session entry per Sediment thread on a canvas. */
+/** One persisted session entry per Huabu thread on a canvas. */
 export interface AcpSessionRecord {
   sessionId: string;
   profileId: string;

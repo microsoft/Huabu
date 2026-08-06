@@ -2,7 +2,7 @@
 
 > Explore a workspace-level semantic canvas above project Spaces without dissolving their storage and execution boundaries.
 >
-> Status: **Shipped** · Last updated: 2026-07-26 · Tracks: [#346](https://github.com/hai-team/Sediment/issues/346)
+> Status: **Shipped** · Last updated: 2026-07-26 · Tracks: [#346](https://github.com/hai-team/Huabu/issues/346)
 
 ---
 

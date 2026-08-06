@@ -41,8 +41,8 @@ const browserChannel = process.env.E2E_BROWSER_CHANNEL;
 // the module but do not reliably run global teardown. The backend creates the
 // directories when the actual test run starts.
 const runId = `${process.pid}-${randomUUID()}`;
-const e2eWorkspace = join(tmpdir(), `sediment-e2e-workspace-${runId}`);
-const e2eDataDir = join(tmpdir(), `sediment-e2e-data-${runId}`);
+const e2eWorkspace = join(tmpdir(), `huabu-e2e-workspace-${runId}`);
+const e2eDataDir = join(tmpdir(), `huabu-e2e-data-${runId}`);
 
 // Expose the temp dirs to `global-teardown.ts` (same runner process) so it can
 // delete them after the run and keep repeated e2e runs from piling up.

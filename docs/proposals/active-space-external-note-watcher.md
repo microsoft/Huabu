@@ -1,6 +1,6 @@
 # Active-Space External-Note Watcher
 
-Status: Accepted — implemented on PR [#392](https://github.com/hai-team/Sediment/pull/392); set to `Shipped` when that PR merges.
+Status: Accepted — implemented on PR [#392](https://github.com/hai-team/Huabu/pull/392); set to `Shipped` when that PR merges.
 Last updated: 2026-07-30
 
 > **Superseded in part.** A follow-up on the same PR removed the depth-zero Workspace watcher entirely and moved the suspension bracket out of this module, so sections [9](#9-workspace-lifecycle) and [10](#10-server-owned-rename-and-delete) no longer describe shipped code. The `canvasId -> directory` index is now invalidated lazily by its read paths, and `space-dir-handles.ts` owns a neutral, `canvasId`-scoped `withSpaceDirHandlesReleased` primitive that active sessions register with. [canvas-storage.md](../architecture/canvas-storage.md) is authoritative.

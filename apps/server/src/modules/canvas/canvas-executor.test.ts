@@ -28,7 +28,7 @@ import type { CanvasCommand, ExecuteOriginator } from '@huabu/shared';
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-cas-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-cas-'));
   setWorkspacePath(tmp);
 });
 

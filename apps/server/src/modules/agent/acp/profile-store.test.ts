@@ -53,7 +53,7 @@ function makeProfile(
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-acp-profiles-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-acp-profiles-'));
   // The store resolves its file via getDataDir(), which reads
   // HUABU_DATA_DIR. Override it per-test so writes don't pollute the
   // repo's apps/server/data/ directory and tests don't leak state.

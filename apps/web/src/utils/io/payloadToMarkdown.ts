@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 /**
- * Convert a Sediment drag payload to a Markdown snippet that can be
+ * Convert a Huabu drag payload to a Markdown snippet that can be
  * inserted into a Note.
  *
  * Used by the note-side drop handlers (`NotePreview` for precise

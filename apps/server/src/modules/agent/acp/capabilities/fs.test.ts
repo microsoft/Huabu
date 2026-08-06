@@ -44,7 +44,7 @@ let canvasRoot: string;
 
 beforeAll(() => {
   // Use a fresh temp workspace per test run so we never touch the user's
-  // real sediment-data. The workspace module exposes setWorkspacePath
+  // real huabu-data. The workspace module exposes setWorkspacePath
   // and stores the path in module-level state — fine for a single test
   // file driven by vitest's per-file isolation.
   //
@@ -52,7 +52,7 @@ beforeAll(() => {
   // would rewrite our fixture files (adding `id:` frontmatter, renaming
   // canvas directories to match titles, etc.). Point it at the empty
   // temp dir FIRST so migration is a no-op, then lay down the fixtures.
-  workspace = mkdtempSync(path.join(tmpdir(), 'sediment-fs-cap-'));
+  workspace = mkdtempSync(path.join(tmpdir(), 'huabu-fs-cap-'));
   setWorkspacePath(workspace);
 
   canvasRoot = path.join(workspace, CANVAS_ID);

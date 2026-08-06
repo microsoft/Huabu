@@ -5,7 +5,7 @@
 >
 > Status: **Backlog** · Last reviewed: 2026-07-22
 >
-> **Non-authoritative exploration.** This document predates the native RFS HTTP direction in [issue #348](https://github.com/hai-team/Sediment/issues/348). Its CLI-first API boundary, separate CLI contract, and `huabu mcp` assumptions are not approved architecture. Any future CLI should be reconsidered as an optional adapter over the canonical `SpaceQuery` / `CanvasCommand` HTTP facade.
+> **Non-authoritative exploration.** This document predates the native RFS HTTP direction in [issue #348](https://github.com/hai-team/Huabu/issues/348). Its CLI-first API boundary, separate CLI contract, and `huabu mcp` assumptions are not approved architecture. Any future CLI should be reconsidered as an optional adapter over the canonical `SpaceQuery` / `CanvasCommand` HTTP facade.
 
 ---
 
@@ -171,13 +171,13 @@ cat node-ids.txt | xargs -I{} huabu node update {} --add-tag important
 └──────────────────────────────────────────────────────────────┘
                            │
                   ┌────────▼────────┐
-                  │ sediment-data/  │
+                  │ huabu-data/  │
                   │   huabu/        │
                   │     <canvas>/   │
                   └─────────────────┘
 ```
 
-**关键约束**：CLI **永远不直接读写 `sediment-data/`**。所有数据访问都走 server HTTP。
+**关键约束**：CLI **永远不直接读写 `huabu-data/`**。所有数据访问都走 server HTTP。
 这是为了：
 
 1. server 已经有 storage 模块、文件锁、缓存、name index——重复实现等于埋雷；
@@ -189,7 +189,7 @@ cat node-ids.txt | xargs -I{} huabu node update {} --add-tag important
 CLI 启动时检测：
 
 ```
-1. 是否有 SEDIMENT_SERVER_URL 指向已运行 server？  → 用它
+1. 是否有 HUABU_SERVER_URL 指向已运行 server？  → 用它
 2. 默认 localhost:PORT 是否 ping 通？              → 用它
 3. 本机有 huabu serve 后台进程吗？                  → 用它
 4. 都没有 → huabu 自己 spawn 一个 huabu serve 后台进程，等就绪
@@ -210,7 +210,7 @@ CLI 加第三种：
 - **CLI mode**：`HUABU_WORKSPACE=/path` 或 `huabu --workspace /path`；如果未指定，按下面顺序探：
   1. 当前目录及其父级有 `.huabu/` 标记 → 用它（git 风格）；
   2. `$XDG_CONFIG_HOME/huabu/config.toml` 里的 `default_workspace`；
-  3. `$HOME/sediment-data/` 这种约定路径；
+  3. `$HOME/huabu-data/` 这种约定路径；
   4. 报错，让用户 `huabu workspace set <path>`。
 
 `huabu serve` 启动 server 时把 workspace 透传给 server（`HUABU_WORKSPACE` env），不污染 web app 的"用户在 UI 里选"流程。
@@ -409,11 +409,11 @@ CLI 子命令一一对应现有的 agent tool，**复用同一份业务逻辑**�
 
 ### 8.1 三种发行渠道
 
-| 渠道                  | 形态                                                 | 优先级  |
-| --------------------- | ---------------------------------------------------- | ------- |
+| 渠道                  | 形态                                              | 优先级  |
+| --------------------- | ------------------------------------------------- | ------- |
 | **npm**               | `npm i -g @huabu/huabu-cli`（或直接 `npx huabu`） | v1 必做 |
-| **Homebrew tap**      | `brew install sediment/huabu`                        | v1.1    |
-| **standalone binary** | GitHub Releases，每平台一个 `.tar.gz` / `.zip`       | v1.2    |
+| **Homebrew tap**      | `brew install huabu/huabu`                        | v1.1    |
+| **standalone binary** | GitHub Releases，每平台一个 `.tar.gz` / `.zip`    | v1.2    |
 
 npm 路径最容易上手；standalone 给"完全不想装 Node"的用户。
 
@@ -435,13 +435,13 @@ server 仍然支持 Node fallback（[fs-search.ts](../../apps/server/src/modules
 ```ts
 // CLI 启动 server 前
 const rgPath = require('@vscode/ripgrep').rgPath;
-spawn(serverEntry, [...], { env: { ...env, SEDIMENT_RG_BIN: rgPath } });
+spawn(serverEntry, [...], { env: { ...env, HUABU_RG_BIN: rgPath } });
 ```
 
 server 端 [fs-search.ts](../../apps/server/src/modules/agent/tools/handlers/fs-search.ts) 改造：
 
 ```ts
-const rgBin = process.env.SEDIMENT_RG_BIN ?? detectSystemRipgrep();
+const rgBin = process.env.HUABU_RG_BIN ?? detectSystemRipgrep();
 if (rgBin) useRipgrep(rgBin);
 else useNodeFallback();
 ```
@@ -629,11 +629,11 @@ Bun build --compile 把 native binary 打进去，跨平台 matrix 验证麻烦�
 - 写操作即使开了，CLI 也加一层"危险操作日志"：所有 write 写到 `~/.huabu/audit.log`，可回溯；
 - v2 考虑 "soft delete + undo"——`huabu undo` 撤销最近 N 次 write。
 
-### Q1：CLI 名字到底叫 `huabu` 还是 `sediment`？
+### Q1：CLI 名字到底叫 `huabu` 还是 `huabu`？
 
 - `huabu` 跟数据目录、产品昵称一致，更贴近用户；
-- `sediment` 跟 npm scope `@huabu/` 一致，更"官方"。
-- **推荐 `huabu`**，更短、更易输入、避免跟"sediment 这个组织"混淆。
+- `huabu` 跟 npm scope `@huabu/` 一致，更"官方"。
+- **推荐 `huabu`**，更短、更易输入、避免跟"huabu 这个组织"混淆。
 
 ### Q2：CLI 跟 server 是同一个仓库吗？
 

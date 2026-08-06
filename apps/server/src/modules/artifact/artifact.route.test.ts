@@ -47,7 +47,7 @@ function multipartBody(
   contentType: string,
   body: Buffer,
 ): { payload: Buffer; headers: Record<string, string> } {
-  const boundary = '----sedimenttestboundary';
+  const boundary = '----huabutestboundary';
   const head = Buffer.from(
     `--${boundary}\r\n` +
       `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
@@ -63,7 +63,7 @@ function multipartBody(
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-artifact-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-artifact-'));
   setWorkspacePath(tmp);
   resetStorageCache();
 });

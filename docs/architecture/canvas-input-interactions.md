@@ -206,9 +206,9 @@ Touch-first canvas products broadly follow two established models:
 | Whiteboard / diagram      | Figma, FigJam, Excalidraw, Miro           | Draws rather than selects          | Switch to Select                     |
 | Pen-first notes / drawing | Goodnotes, Notability, Procreate, OneNote | Pen draws; finger selects or moves | Pen and finger are separate channels |
 
-Sediment chooses between those models by input ambiguity rather than adopting either one everywhere. Pen mode follows the pen-first model: the pen draws or directly manipulates while a finger selects, moves already-selected nodes, and navigates. Finger mode follows the whiteboard model: the same finger cannot unambiguously draw and select, so Sketch draws and Select selects. Mouse mode preserves the desktop model.
+Huabu chooses between those models by input ambiguity rather than adopting either one everywhere. Pen mode follows the pen-first model: the pen draws or directly manipulates while a finger selects, moves already-selected nodes, and navigates. Finger mode follows the whiteboard model: the same finger cannot unambiguously draw and select, so Sketch draws and Select selects. Mouse mode preserves the desktop model.
 
-| Dimension                          | Sediment behaviour                                                                       | Closest model                                 |
+| Dimension                          | Huabu behaviour                                                                          | Closest model                                 |
 | ---------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------- |
 | Touch default                      | Select is the safe default; a new empty canvas carries a one-shot Sketch creation intent | Whiteboard, with a creation shortcut          |
 | Sketch persistence                 | Sketch and eraser remain active until explicitly replaced                                | Both                                          |

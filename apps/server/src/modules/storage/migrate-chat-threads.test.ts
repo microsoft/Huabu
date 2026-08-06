@@ -37,7 +37,7 @@ import type { Context } from '@earendil-works/pi-ai';
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-migrate-chat-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-migrate-chat-'));
 });
 
 afterEach(() => {

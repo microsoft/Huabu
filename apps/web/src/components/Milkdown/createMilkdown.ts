@@ -52,8 +52,8 @@ import { toast } from '@/components/Common/Toast';
 import { getAccentTokens } from '@/components/Nodes/accentTokens';
 import { fingerprintBlocks, type BlockSnapshot } from '@/utils/blockProvenance';
 import {
-  parseSedimentImageClipboard,
-  readSedimentClipboardPayload,
+  parseHuabuImageClipboard,
+  readHuabuClipboardPayload,
 } from '@/utils/io/clipboard';
 import { isMac } from '@/utils/platform';
 
@@ -172,8 +172,8 @@ export interface MilkdownFactoryOptions {
   editable?: boolean;
   /** Optional placeholder text shown when the doc is empty. */
   placeholder?: string;
-  /** Which selection toolbar surface should be active. Default `sediment`. */
-  toolbarMode?: 'none' | 'sediment';
+  /** Which selection toolbar surface should be active. Default `huabu`. */
+  toolbarMode?: 'none' | 'huabu';
   /**
    * Resolve an image node's stored `src` (a bare artifact key such as
    * `art_abc.png`, or a legacy full URL) into a fetchable URL for the
@@ -489,13 +489,13 @@ export interface MilkdownInstance {
  * `task_list`).
  */
 const LIST_NODE_NAMES = new Set(['bullet_list', 'ordered_list']);
-const TEXT_COLOR_MARK_NAME = 'sediment_text_color';
-const BACKGROUND_COLOR_MARK_NAME = 'sediment_background_color';
-const SEDIMENT_COLOR_MARKDOWN_NODE_TYPE = 'sedimentColorSpan';
+const TEXT_COLOR_MARK_NAME = 'huabu_text_color';
+const BACKGROUND_COLOR_MARK_NAME = 'huabu_background_color';
+const HUABU_COLOR_MARKDOWN_NODE_TYPE = 'huabuColorSpan';
 
-type SedimentColorDataAttr =
-  | 'data-sediment-text-color'
-  | 'data-sediment-background-color';
+type HuabuColorDataAttr =
+  | 'data-huabu-text-color'
+  | 'data-huabu-background-color';
 
 interface MarkdownNodeLike {
   type: string;
@@ -504,9 +504,9 @@ interface MarkdownNodeLike {
   [key: string]: unknown;
 }
 
-interface SedimentColorMarkdownNode extends MarkdownNodeLike {
-  type: typeof SEDIMENT_COLOR_MARKDOWN_NODE_TYPE;
-  dataAttr: SedimentColorDataAttr;
+interface HuabuColorMarkdownNode extends MarkdownNodeLike {
+  type: typeof HUABU_COLOR_MARKDOWN_NODE_TYPE;
+  dataAttr: HuabuColorDataAttr;
   token: AccentToken;
   children: MarkdownNodeLike[];
 }
@@ -549,18 +549,18 @@ function normalizeSafeLinkHref(href: string | null | undefined): string | null {
 }
 
 function parseOpeningColorSpanHtml(value: unknown): Array<{
-  dataAttr: SedimentColorDataAttr;
+  dataAttr: HuabuColorDataAttr;
   token: AccentToken;
 }> {
   if (typeof value !== 'string') return [];
   const match = value.match(/^<span\b([^>]*)>$/i);
   if (!match) return [];
   const attrs = match[1] ?? '';
-  const parsed: Array<{ dataAttr: SedimentColorDataAttr; token: AccentToken }> =
+  const parsed: Array<{ dataAttr: HuabuColorDataAttr; token: AccentToken }> =
     [];
   for (const dataAttr of [
-    'data-sediment-text-color',
-    'data-sediment-background-color',
+    'data-huabu-text-color',
+    'data-huabu-background-color',
   ] as const) {
     const tokenMatch = attrs.match(
       new RegExp(`${dataAttr}=["']([^"']+)["']`, 'i'),
@@ -575,10 +575,10 @@ function isClosingSpanHtml(node: MarkdownNodeLike | undefined): boolean {
   return node?.type === 'html' && /^<\/span>$/i.test(String(node.value ?? ''));
 }
 
-function collapseSedimentColorSpanNodes(node: MarkdownNodeLike): void {
+function collapseHuabuColorSpanNodes(node: MarkdownNodeLike): void {
   if (!Array.isArray(node.children)) return;
 
-  for (const child of node.children) collapseSedimentColorSpanNodes(child);
+  for (const child of node.children) collapseHuabuColorSpanNodes(child);
 
   const nextChildren: MarkdownNodeLike[] = [];
   for (let index = 0; index < node.children.length; index++) {
@@ -607,11 +607,11 @@ function collapseSedimentColorSpanNodes(node: MarkdownNodeLike): void {
     for (const color of parsed.slice().reverse()) {
       children = [
         {
-          type: SEDIMENT_COLOR_MARKDOWN_NODE_TYPE,
+          type: HUABU_COLOR_MARKDOWN_NODE_TYPE,
           dataAttr: color.dataAttr,
           token: color.token,
           children,
-        } satisfies SedimentColorMarkdownNode,
+        } satisfies HuabuColorMarkdownNode,
       ];
     }
     nextChildren.push(...children);
@@ -620,10 +620,10 @@ function collapseSedimentColorSpanNodes(node: MarkdownNodeLike): void {
   node.children = nextChildren;
 }
 
-const sedimentColorSpanRemarkPlugin = $remark(
-  'sedimentColorSpan',
+const huabuColorSpanRemarkPlugin = $remark(
+  'huabuColorSpan',
   () => () => (tree) => {
-    collapseSedimentColorSpanNodes(tree as MarkdownNodeLike);
+    collapseHuabuColorSpanNodes(tree as MarkdownNodeLike);
   },
 );
 
@@ -648,12 +648,12 @@ function parseColorSpanHtml(
   };
 }
 
-function isSedimentColorMarkdownNode(
+function isHuabuColorMarkdownNode(
   node: MarkdownNodeLike,
-  dataAttr: SedimentColorDataAttr,
-): node is SedimentColorMarkdownNode {
+  dataAttr: HuabuColorDataAttr,
+): node is HuabuColorMarkdownNode {
   return (
-    node.type === SEDIMENT_COLOR_MARKDOWN_NODE_TYPE &&
+    node.type === HUABU_COLOR_MARKDOWN_NODE_TYPE &&
     node.dataAttr === dataAttr &&
     isAccentToken(node.token) &&
     Array.isArray(node.children)
@@ -679,7 +679,7 @@ function colorMarkForNode(
 
 function createAccentColorMarkSchema(
   name: typeof TEXT_COLOR_MARK_NAME | typeof BACKGROUND_COLOR_MARK_NAME,
-  dataAttr: 'data-sediment-text-color' | 'data-sediment-background-color',
+  dataAttr: 'data-huabu-text-color' | 'data-huabu-background-color',
   cssProp: 'color' | 'background-color',
   kind: 'text' | 'background',
 ) {
@@ -713,11 +713,11 @@ function createAccentColorMarkSchema(
     },
     parseMarkdown: {
       match: (node) =>
-        isSedimentColorMarkdownNode(node as MarkdownNodeLike, dataAttr) ||
+        isHuabuColorMarkdownNode(node as MarkdownNodeLike, dataAttr) ||
         parseColorSpanHtml(node.value, dataAttr, kind) !== null,
       runner: (state, node, markType) => {
-        if (isSedimentColorMarkdownNode(node as MarkdownNodeLike, dataAttr)) {
-          const colorNode = node as SedimentColorMarkdownNode;
+        if (isHuabuColorMarkdownNode(node as MarkdownNodeLike, dataAttr)) {
+          const colorNode = node as HuabuColorMarkdownNode;
           state.openMark(markType, {
             token: colorNode.token,
             color: colorCssForAccent(colorNode.token, kind),
@@ -759,11 +759,9 @@ function createAccentColorMarkSchema(
           );
         }
         const attrs = [
-          textToken
-            ? `data-sediment-text-color="${escapeHtml(textToken)}"`
-            : null,
+          textToken ? `data-huabu-text-color="${escapeHtml(textToken)}"` : null,
           backgroundToken
-            ? `data-sediment-background-color="${escapeHtml(backgroundToken)}"`
+            ? `data-huabu-background-color="${escapeHtml(backgroundToken)}"`
             : null,
           styleParts.length > 0
             ? `style="${escapeHtml(styleParts.join('; '))}"`
@@ -783,14 +781,14 @@ function createAccentColorMarkSchema(
 
 const textColorMarkSchema = createAccentColorMarkSchema(
   TEXT_COLOR_MARK_NAME,
-  'data-sediment-text-color',
+  'data-huabu-text-color',
   'color',
   'text',
 );
 
 const backgroundColorMarkSchema = createAccentColorMarkSchema(
   BACKGROUND_COLOR_MARK_NAME,
-  'data-sediment-background-color',
+  'data-huabu-background-color',
   'background-color',
   'background',
 );
@@ -1726,7 +1724,7 @@ function outdentSelection(listItemType: NodeType): Command {
 /**
  * Build and start a Crepe-backed editor.
  *
- * The feature set is hand-picked to match what we ship in Sediment:
+ * The feature set is hand-picked to match what we ship in Huabu:
  *  - `ImageBlock` is disabled because it pulls Vue into the bundle.
  *  - `AI` and `TopBar` are disabled because we render our own chrome.
  *  - `Toolbar` and `LinkTooltip` are disabled because React owns
@@ -1746,13 +1744,13 @@ export async function createMilkdown(
     initialMarkdown,
     editable = true,
     placeholder,
-    toolbarMode = 'sediment',
+    toolbarMode = 'huabu',
     previewMode = false,
     uploadImage,
     importImage,
   } = options;
   const resolveImageSrc = options.resolveImageSrc ?? ((src: string) => src);
-  const useReactToolbar = !previewMode && toolbarMode === 'sediment';
+  const useReactToolbar = !previewMode && toolbarMode === 'huabu';
 
   // Normalize LaTeX-style math delimiters (`\[…\]`, `\(…\)`)
   // emitted by AI assistants into the `$$…$$` / `$…$` form that
@@ -1821,7 +1819,7 @@ export async function createMilkdown(
     (state: MilkdownFormattingState) => void
   >();
   crepe.editor
-    .use(sedimentColorSpanRemarkPlugin)
+    .use(huabuColorSpanRemarkPlugin)
     .use(textColorMarkSchema)
     .use(backgroundColorMarkSchema);
   crepe.editor.use(
@@ -1930,8 +1928,8 @@ export async function createMilkdown(
   const decorationPluginKey = new PluginKey<{
     specs: ReadonlyArray<{ key: string; className: string }>;
     set: DecorationSet;
-  }>('sediment-block-provenance');
-  const META_KEY = 'sediment/setBlockDecorations';
+  }>('huabu-block-provenance');
+  const META_KEY = 'huabu/setBlockDecorations';
 
   function buildDecorationSet(
     doc: ProseNode,
@@ -2061,9 +2059,7 @@ export async function createMilkdown(
   // Only image-only selections are claimed (see the strict parser), while
   // ordinary text and mixed node selections retain the default paste path.
   if (importImage) {
-    const importKey = new PluginKey<DecorationSet>(
-      'sediment-canvas-image-import',
-    );
+    const importKey = new PluginKey<DecorationSet>('huabu-canvas-image-import');
 
     crepe.editor.use(
       $prose(
@@ -2096,8 +2092,8 @@ export async function createMilkdown(
               handleDOMEvents: {
                 paste: (view, event) => {
                   const clipboardEvent = event as ClipboardEvent;
-                  const clipboard = parseSedimentImageClipboard(
-                    readSedimentClipboardPayload(clipboardEvent.clipboardData),
+                  const clipboard = parseHuabuImageClipboard(
+                    readHuabuClipboardPayload(clipboardEvent.clipboardData),
                   );
                   if (!clipboard) return false;
 
@@ -2174,7 +2170,7 @@ export async function createMilkdown(
   // is tracked through concurrent edits by mapping the decoration set.
   if (uploadImage) {
     const doUpload = uploadImage;
-    const uploadKey = new PluginKey<DecorationSet>('sediment-image-upload');
+    const uploadKey = new PluginKey<DecorationSet>('huabu-image-upload');
 
     const findPlaceholderPos = (
       state: EditorState,
@@ -2967,7 +2963,7 @@ export async function createMilkdown(
         // A `list_item` can't be a direct child of `doc` (schema-
         // invalid), so `doc > list_item` serializes to an empty
         // string — `getDragPayload` then returns `null` and the whole
-        // drag silently carries no Sediment payload (bullet items
+        // drag silently carries no Huabu payload (bullet items
         // become un-droppable everywhere). Wrap the item in a copy of
         // its parent list (`bullet_list` / `ordered_list`) so the
         // serializer sees a well-formed `<list> > <list_item>`.

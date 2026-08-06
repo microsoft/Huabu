@@ -15,7 +15,7 @@
  *   1. {@link useTextHighlight} on the preview DOM — paints inline
  *      `::highlight()` ranges over all visible matches without
  *      mutating Milkdown / pdf.js text nodes. The paint rule lives
- *      in `index.css` (`::highlight(sediment-search)`).
+ *      in `index.css` (`::highlight(huabu-search)`).
  *   2. A server-side `nodeId`-restricted search query, driven via
  *      `searchStore.setQuery` whenever the find-bar input changes
  *      (the store routes node-scope queries to the same NDJSON

@@ -12,7 +12,7 @@
  * Behaviour:
  *  • POSIX (macOS / Linux / WSL / Git Bash on Windows):
  *      - Detect the user's shell via $SHELL.
- *      - Append a `# Added by Sediment — agentlet CLI` block to the
+ *      - Append a `# Added by Huabu — agentlet CLI` block to the
  *        appropriate rc file (`~/.zshrc`, `~/.bashrc`, fish config).
  *      - Idempotent: skip if the sentinel comment already exists OR
  *        if `bin/agentlet`'s absolute path is already mentioned.
@@ -39,7 +39,7 @@ import { homedir, platform } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SENTINEL = '# Added by Sediment — agentlet CLI';
+const SENTINEL = '# Added by Huabu — agentlet CLI';
 
 const __filename = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(__filename), '..');
@@ -118,11 +118,11 @@ function installWindows() {
     `$current = [Environment]::GetEnvironmentVariable('Path', 'User')`,
     `if ($null -eq $current) { $current = '' }`,
     `if ($current.Split(';') -contains $bin) {`,
-    `  Write-Output 'SEDIMENT_PATH_RESULT=ALREADY_PRESENT'`,
+    `  Write-Output 'HUABU_PATH_RESULT=ALREADY_PRESENT'`,
     `} else {`,
     `  $next = if ($current -ne '') { "$bin;$current" } else { $bin }`,
     `  [Environment]::SetEnvironmentVariable('Path', $next, 'User')`,
-    `  Write-Output 'SEDIMENT_PATH_RESULT=UPDATED'`,
+    `  Write-Output 'HUABU_PATH_RESULT=UPDATED'`,
     `}`,
   ].join('; ');
 
@@ -137,7 +137,7 @@ function installWindows() {
     );
   }
   const stdout = result.stdout || '';
-  if (stdout.includes('SEDIMENT_PATH_RESULT=ALREADY_PRESENT')) {
+  if (stdout.includes('HUABU_PATH_RESULT=ALREADY_PRESENT')) {
     return { skipped: true, reason: 'already in User PATH' };
   }
   return { skipped: false, rcPath: 'User PATH (Windows registry)' };

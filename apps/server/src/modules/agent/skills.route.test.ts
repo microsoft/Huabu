@@ -73,7 +73,7 @@ async function buildApp() {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-skills-route-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-skills-route-'));
   setWorkspacePath(tmp);
   invalidateSkillCache();
 });

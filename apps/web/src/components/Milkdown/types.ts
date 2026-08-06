@@ -10,7 +10,7 @@
 
 import type { AccentToken } from '@huabu/shared';
 
-export type MilkdownToolbarMode = 'none' | 'sediment';
+export type MilkdownToolbarMode = 'none' | 'huabu';
 
 export type MilkdownInlineMark = 'bold' | 'italic' | 'strike' | 'inlineCode';
 

@@ -16,9 +16,9 @@ import { useNodeLOD } from '@/hooks/useNodeLOD';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
 import {
-  canMoveSedimentPayload,
-  canReadSedimentPayload,
-  getSedimentPayload,
+  canMoveHuabuPayload,
+  canReadHuabuPayload,
+  getHuabuPayload,
 } from '@/utils/io/dragDrop';
 import { dragPayloadToMarkdown } from '@/utils/io/payloadToMarkdown';
 import { isMac } from '@/utils/platform';
@@ -267,7 +267,7 @@ export const NoteNode = memo(
     // keep `bg-surface` so the no-accent note still reads as paper.
     const hasAccent = !!data.style?.accent;
 
-    // ── Drop target: accept Sediment payloads (note blocks from
+    // ── Drop target: accept Huabu payloads (note blocks from
     // chat / other notes, image cards, web cards) and append the
     // payload's Markdown to this note's content. Locked notes opt
     // out so the gesture falls through to canvas's "create new
@@ -280,7 +280,7 @@ export const NoteNode = memo(
     const handleNoteDragEnter = useCallback(
       (e: React.DragEvent) => {
         if (isLocked) return;
-        if (!canReadSedimentPayload(e.dataTransfer)) return;
+        if (!canReadHuabuPayload(e.dataTransfer)) return;
         dragCounterRef.current += 1;
         if (dragCounterRef.current === 1) setIsDropTarget(true);
       },
@@ -289,7 +289,7 @@ export const NoteNode = memo(
     const handleNoteDragOver = useCallback(
       (e: React.DragEvent) => {
         if (isLocked) return;
-        if (!canReadSedimentPayload(e.dataTransfer)) return;
+        if (!canReadHuabuPayload(e.dataTransfer)) return;
         e.preventDefault();
         // Prevent the canvas-level `onDragOver` from also marking this
         // event as a "create new node" candidate — we are claiming
@@ -302,7 +302,7 @@ export const NoteNode = memo(
         // conflict with the NSDragOperation and cause `drop` to never
         // fire (the gesture silently aborts).
         const isCopyModifier = isMac ? e.altKey : e.ctrlKey;
-        const canMove = canMoveSedimentPayload(e.dataTransfer);
+        const canMove = canMoveHuabuPayload(e.dataTransfer);
         e.dataTransfer.dropEffect =
           canMove && !isCopyModifier ? 'move' : 'copy';
       },
@@ -311,7 +311,7 @@ export const NoteNode = memo(
     const handleNoteDragLeave = useCallback(
       (e: React.DragEvent) => {
         if (isLocked) return;
-        if (!canReadSedimentPayload(e.dataTransfer)) return;
+        if (!canReadHuabuPayload(e.dataTransfer)) return;
         dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
         if (dragCounterRef.current === 0) setIsDropTarget(false);
       },
@@ -324,8 +324,8 @@ export const NoteNode = memo(
     const handleNoteDrop = useCallback(
       (e: React.DragEvent) => {
         if (isLocked) return;
-        if (!canReadSedimentPayload(e.dataTransfer)) return;
-        const payload = getSedimentPayload(e.dataTransfer);
+        if (!canReadHuabuPayload(e.dataTransfer)) return;
+        const payload = getHuabuPayload(e.dataTransfer);
         if (!payload) {
           resetDragState();
           return;

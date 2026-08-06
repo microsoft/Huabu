@@ -203,7 +203,7 @@ export const useToolStore = create<ToolState>()(
       resetForCanvasSwitch: () => set({ pendingNodeType: null }),
     }),
     {
-      name: 'sediment-sketch-tools',
+      name: 'huabu-sketch-tools',
       version: 3,
       migrate: (persistedState, version) => {
         if (!persistedState) return persistedState as ToolState;

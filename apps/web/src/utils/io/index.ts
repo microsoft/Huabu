@@ -4,18 +4,18 @@
 export {
   copyToClipboard,
   copyCanvasClipboard,
-  parseSedimentClipboard,
-  parseSedimentImageClipboard,
+  parseHuabuClipboard,
+  parseHuabuImageClipboard,
   type CanvasClipboardCopy,
-  type SedimentClipboard,
-  type SedimentClipboardImage,
+  type HuabuClipboard,
+  type HuabuClipboardImage,
 } from './clipboard';
 
 export { nodesToPlainText, type PlainTextNode } from './nodeToPlainText';
 
 export {
-  SEDIMENT_DND_MIME,
-  SEDIMENT_DND_MOVABLE_MIME,
+  HUABU_DND_MIME,
+  HUABU_DND_MOVABLE_MIME,
   type WebDragPayload,
   type NoteDragPayload,
   type ImageDragPayload,
@@ -24,9 +24,9 @@ export {
   type SetDragPayloadOptions,
   createDragId,
   setDragPayload,
-  canReadSedimentPayload,
-  canMoveSedimentPayload,
-  getSedimentPayload,
+  canReadHuabuPayload,
+  canMoveHuabuPayload,
+  getHuabuPayload,
 } from './dragDrop';
 
 export {

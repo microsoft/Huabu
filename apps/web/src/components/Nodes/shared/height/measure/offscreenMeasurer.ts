@@ -103,7 +103,7 @@ async function buildHost(): Promise<Host> {
   container.style.visibility = 'hidden';
   container.style.pointerEvents = 'none';
   container.setAttribute('aria-hidden', 'true');
-  container.dataset.sedimentHeightMeasurer = 'true';
+  container.dataset.huabuHeightMeasurer = 'true';
 
   const content = document.createElement('div');
   content.className = NOTE_CONTENT_HOST_CLASS;

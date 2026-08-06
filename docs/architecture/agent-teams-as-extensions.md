@@ -57,14 +57,14 @@ The generic `agentlet.yaml` package contract and daemon execution operations are
 - Member Configs are shared by manifest-backed Profiles of the same package; secrets remain in the host SecretStore and are redacted from read APIs.
 - Each Profile keeps the same user-selected `workingDirPath` model as a command-backed ACP Profile. Setup prepares that writable directory, and runtime uses it as the agent process `cwd`; the bundled package directory is never used as the writable workspace.
 - Every non-internal agent uses one Agenetes Agent Profile. Manifest Profiles carry immutable placement, manifest, harness, and working-directory fields plus authoritative durable preparation state; command Profiles carry immutable placement, command, and working directory. Setup diagnostics are stored separately from the Profile CRD.
-- Every Profile also carries an optional `customData` bag — an opaque, JSON-valued map that Agenetes persists verbatim and never interprets. Hosts use it to attach their own per-Profile data without changing the Agenetes package; Sediment stores the agent avatar (shape + color) under its `icon` key, validated only on the Sediment side.
+- Every Profile also carries an optional `customData` bag — an opaque, JSON-valued map that Agenetes persists verbatim and never interprets. Hosts use it to attach their own per-Profile data without changing the Agenetes package; Huabu stores the agent avatar (shape + color) under its `icon` key, validated only on the Huabu side.
 - Declarative setup launches package-manager commands through cross-platform executable resolution, so Windows `.cmd` shims such as `npm` and `npx` work without opting into shell command construction.
 - Manifest Profiles use explicit Setup, Retry, and Cancel actions. A Profile is selectable only when its member is active, required Configs are complete, and preparation is ready; command Profiles are selectable immediately.
 - The Space and Huabu Reachback remain the shared workspace and read/write bridge available to running agents.
 
 ### Prerequisites
 
-The locally supervised agentlet daemon scans and runs the bundled Agent Team packages through the Huabu server's Agenetes Gateway. In the Sediment monorepo, `pnpm install` provides the agentlet binaries used by development environments. Production Server builds bundle the daemon and its isolated Agent Team setup worker as sibling JavaScript entry points so setup does not require a runtime `node_modules` tree.
+The locally supervised agentlet daemon scans and runs the bundled Agent Team packages through the Huabu server's Agenetes Gateway. In the Huabu monorepo, `pnpm install` provides the agentlet binaries used by development environments. Production Server builds bundle the daemon and its isolated Agent Team setup worker as sibling JavaScript entry points so setup does not require a runtime `node_modules` tree.
 
 ```bash
 pnpm install

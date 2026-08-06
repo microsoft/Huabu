@@ -7,7 +7,7 @@ The tier configuration, role resolver, Utility settings, and automatic cheapest-
 
 ## Goal
 
-Today Sediment drives every LLM call from a **single** active chat model (`getLLMModel()` → the one `activeConfig` in [`apps/server/src/modules/agent/llm.ts`](../../apps/server/src/modules/agent/llm.ts)). Chat, intent recognition, and every preprocessing enrichment share it.
+Today Huabu drives every LLM call from a **single** active chat model (`getLLMModel()` → the one `activeConfig` in [`apps/server/src/modules/agent/llm.ts`](../../apps/server/src/modules/agent/llm.ts)). Chat, intent recognition, and every preprocessing enrichment share it.
 
 But these tasks have very different capability needs. The main chat agent needs a frontier model (tool orchestration, long context, reasoning). Preprocessing — image/frame labeling, summary, keywords, title extraction — and intent suggestions are short, single-shot, no-tool tasks that a small/fast/cheap model handles fine. Running them on the frontier model wastes money, adds latency to high-frequency background work, and burns the frontier model's rate limit and context budget.
 

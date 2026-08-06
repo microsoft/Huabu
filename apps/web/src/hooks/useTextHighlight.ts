@@ -17,7 +17,7 @@
  * selection, and accessibility are completely untouched.
  *
  * Supported in all evergreen browsers since 2023 (Chrome 105+, Safari
- * 17.2+, Firefox 140+). Sediment ships inside Electron 30+, which
+ * 17.2+, Firefox 140+). Huabu ships inside Electron 30+, which
  * embeds Chromium ≥ 124, so support is guaranteed there.
  *
  * For environments that somehow lack the API (jsdom in tests), the
@@ -27,8 +27,8 @@
 
 import { useEffect, useState } from 'react';
 
-/** Global registered highlight name. CSS selector: `::highlight(sediment-search)`. */
-const HIGHLIGHT_NAME = 'sediment-search';
+/** Global registered highlight name. CSS selector: `::highlight(huabu-search)`. */
+const HIGHLIGHT_NAME = 'huabu-search';
 
 interface UseTextHighlightOptions {
   /**

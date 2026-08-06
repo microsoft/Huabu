@@ -2,7 +2,7 @@
 
 > Record the deferred managed-harness direction and define the nearer-term Profile lifecycle that compiles a scanned Agent Team manifest into a durable external-agent `WorkloadSpec`.
 >
-> Status: **Draft** · Last updated: 2026-07-20 · Tracks: [#321](https://github.com/hai-team/Sediment/issues/321) · Follows: [#253](https://github.com/hai-team/Sediment/issues/253), [#334](https://github.com/hai-team/Sediment/issues/334)
+> Status: **Draft** · Last updated: 2026-07-20 · Tracks: [#321](https://github.com/hai-team/Huabu/issues/321) · Follows: [#253](https://github.com/hai-team/Huabu/issues/253), [#334](https://github.com/hai-team/Huabu/issues/334)
 
 ---
 

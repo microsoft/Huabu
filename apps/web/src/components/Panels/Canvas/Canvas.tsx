@@ -118,9 +118,9 @@ import { usePreviewStore } from '../../../store/previewStore.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
 import { useWorkspaceStore } from '../../../store/workspaceStore.ts';
 import {
-  canMoveSedimentPayload,
-  canReadSedimentPayload,
-  getSedimentPayload,
+  canMoveHuabuPayload,
+  canReadHuabuPayload,
+  getHuabuPayload,
 } from '../../../utils/io/dragDrop.ts';
 import { looksLikeUrl } from '../../../utils/io/media.ts';
 import { FrameNode } from '../../Nodes/frame/FrameNode.tsx';
@@ -1300,12 +1300,12 @@ export const Canvas: React.FC<CanvasProps> = ({
         event.preventDefault();
       }}
       onDragOver={(e) => {
-        // Accept both internal Sediment payloads and native file/URL drops
-        const isSediment = canReadSedimentPayload(e.dataTransfer);
+        // Accept both internal Huabu payloads and native file/URL drops
+        const isHuabu = canReadHuabuPayload(e.dataTransfer);
         const hasFiles = e.dataTransfer.types.includes('Files');
         const hasUri = e.dataTransfer.types.includes('text/uri-list');
         const hasText = e.dataTransfer.types.includes('text/plain');
-        if (!isSediment && !hasFiles && !hasUri && !hasText) return;
+        if (!isHuabu && !hasFiles && !hasUri && !hasText) return;
         e.preventDefault();
         e.stopPropagation();
         // Default drag of an internal note that knows how to MOVE
@@ -1319,7 +1319,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         // it here would conflict with the OS-supplied operation and
         // cause `drop` to never fire.
         const isCopyModifier = isMac ? e.altKey : e.ctrlKey;
-        const canMove = isSediment && canMoveSedimentPayload(e.dataTransfer);
+        const canMove = isHuabu && canMoveHuabuPayload(e.dataTransfer);
         e.dataTransfer.dropEffect =
           canMove && !isCopyModifier ? 'move' : 'copy';
       }}
@@ -1335,9 +1335,9 @@ export const Canvas: React.FC<CanvasProps> = ({
           y: e.clientY,
         });
 
-        // ============ 1. Internal Sediment drag payloads ============
-        if (canReadSedimentPayload(e.dataTransfer)) {
-          const payload = getSedimentPayload(e.dataTransfer);
+        // ============ 1. Internal Huabu drag payloads ============
+        if (canReadHuabuPayload(e.dataTransfer)) {
+          const payload = getHuabuPayload(e.dataTransfer);
           if (!payload) return;
 
           // Deduplicate repeated drop events
@@ -1591,7 +1591,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         // visible. Disabling this also stops a selected covered node
         // from popping above the node covering it, which previously felt
         // like the click silently reordered the layers.
-        // Manual z-order: Sediment derives every node's `zIndex` from
+        // Manual z-order: Huabu derives every node's `zIndex` from
         // forest order (`assignNodeZIndices`) so the Layers-panel / array
         // order is the SOLE stacking authority. `auto` would instead force
         // framed subtrees above unframed siblings and lift framed frames by

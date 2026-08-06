@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 /**
- * Network security primitives for the Sediment HTTP server.
+ * Network security primitives for the Huabu HTTP server.
  *
  * Two layered defences against drive-by attacks when the server is
  * reachable from outside `localhost`:
@@ -22,7 +22,7 @@
  *
  * Both default to the loopback-only profile and opt into broader hosts
  * via the `HUABU_ALLOWED_HOSTS` environment variable (comma-separated
- * hostnames, no port; e.g. `192.168.1.50,sediment.team-a.example`).
+ * hostnames, no port; e.g. `192.168.1.50,huabu.team-a.example`).
  *
  * The CORS allowlist is derived from the same set — see `app.ts`.
  */

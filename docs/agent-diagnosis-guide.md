@@ -6,7 +6,7 @@ Status: Living document
 > Huabu Space, and how to turn that into fix-ready material. Covers both:
 >
 > - **Built-in Huabu agents** — `operate` / `ask` / `sketch` / memory, run
->   in-process by Sediment.
+>   in-process by Huabu.
 > - **External ACP agents** — agentlet-spawned harnesses (e.g. `deepv`, GitHub
 >   Copilot CLI) that connect over ACP and can reach back into the canvas.
 >
@@ -52,7 +52,7 @@ dispatch / spawn / permission prompts are logged in
   Select-String "ACP dispatch|session/prompt dispatch|agent_team_resolved" apps\server\data\logs\server.log
   ```
 
-- Pull one ACP round: grep its Sediment `thread-<id>` — permission prompts show
+- Pull one ACP round: grep its Huabu `thread-<id>` — permission prompts show
   as `session/request_permission`, each user grant as `resolved by user`.
 
 **4. When an ACP agent drives the canvas (reachback) — `ask-huabu`.** When an
@@ -83,6 +83,6 @@ discussion live.
   slice) so someone else can pick it up.
 
 Example:
-[hai-team/Sediment#268](https://github.com/hai-team/Sediment/issues/268) bundles
+[hai-team/Huabu#268](https://github.com/hai-team/Huabu/issues/268) bundles
 three operate/reachback problems from a single run, with the trace and fix
 directions.

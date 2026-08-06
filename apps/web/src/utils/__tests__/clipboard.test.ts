@@ -5,10 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   copyCanvasClipboard,
-  parseSedimentClipboard,
-  parseSedimentClipboardHtml,
-  parseSedimentImageClipboard,
-  readSedimentClipboardPayload,
+  parseHuabuClipboard,
+  parseHuabuClipboardHtml,
+  parseHuabuImageClipboard,
+  readHuabuClipboardPayload,
 } from '../io/clipboard';
 
 const imageNode = {
@@ -34,15 +34,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('Sediment clipboard parsing', () => {
+describe('Huabu clipboard parsing', () => {
   it('parses canvas nodes, edges, and source canvas id', () => {
     const payload = JSON.stringify({
-      __sediment_nodes__: [imageNode],
-      __sediment_edges__: [{ id: 'edge-1' }],
-      __sediment_canvas_id__: 'canvas-source',
+      __huabu_nodes__: [imageNode],
+      __huabu_edges__: [{ id: 'edge-1' }],
+      __huabu_canvas_id__: 'canvas-source',
     });
 
-    expect(parseSedimentClipboard(payload)).toEqual({
+    expect(parseHuabuClipboard(payload)).toEqual({
       nodes: [imageNode],
       edges: [{ id: 'edge-1' }],
       srcCanvasId: 'canvas-source',
@@ -51,12 +51,12 @@ describe('Sediment clipboard parsing', () => {
 
   it('extracts image metadata from an image-only selection', () => {
     const payload = JSON.stringify({
-      __sediment_nodes__: [imageNode],
-      __sediment_edges__: [],
-      __sediment_canvas_id__: 'canvas-source',
+      __huabu_nodes__: [imageNode],
+      __huabu_edges__: [],
+      __huabu_canvas_id__: 'canvas-source',
     });
 
-    expect(parseSedimentImageClipboard(payload)).toEqual({
+    expect(parseHuabuImageClipboard(payload)).toEqual({
       images: [{ src: 'artifact-image.png', label: 'Diagram' }],
       srcCanvasId: 'canvas-source',
     });
@@ -64,24 +64,24 @@ describe('Sediment clipboard parsing', () => {
 
   it('does not treat mixed node selections as pasted images', () => {
     const payload = JSON.stringify({
-      __sediment_nodes__: [
+      __huabu_nodes__: [
         imageNode,
         { id: 'node-note', type: 'note', data: { content: 'Text' } },
       ],
     });
 
-    expect(parseSedimentImageClipboard(payload)).toBeNull();
+    expect(parseHuabuImageClipboard(payload)).toBeNull();
   });
 
   it('rejects malformed and empty payloads', () => {
-    expect(parseSedimentClipboard('not json')).toBeNull();
+    expect(parseHuabuClipboard('not json')).toBeNull();
     expect(
-      parseSedimentClipboard(JSON.stringify({ __sediment_nodes__: [] })),
+      parseHuabuClipboard(JSON.stringify({ __huabu_nodes__: [] })),
     ).toBeNull();
     expect(
-      parseSedimentImageClipboard(
+      parseHuabuImageClipboard(
         JSON.stringify({
-          __sediment_nodes__: [{ id: 'node-image', type: 'image', data: {} }],
+          __huabu_nodes__: [{ id: 'node-image', type: 'image', data: {} }],
         }),
       ),
     ).toBeNull();
@@ -102,7 +102,7 @@ describe('Sediment clipboard parsing', () => {
       writeText,
     } as unknown as Clipboard);
 
-    const payload = JSON.stringify({ __sediment_nodes__: [imageNode] });
+    const payload = JSON.stringify({ __huabu_nodes__: [imageNode] });
     await copyCanvasClipboard({
       payload,
       image: { src: '/image.png', label: 'Diagram' },
@@ -123,7 +123,7 @@ describe('Sediment clipboard parsing', () => {
 
     // The payload rides along in text/html and survives a round trip.
     const html = await new Response(await item.values['text/html']).text();
-    expect(parseSedimentClipboardHtml(html)).toBe(payload);
+    expect(parseHuabuClipboardHtml(html)).toBe(payload);
   });
 
   it('copies non-image nodes as readable text plus the html payload', async () => {
@@ -135,7 +135,7 @@ describe('Sediment clipboard parsing', () => {
       writeText,
     } as unknown as Clipboard);
 
-    const payload = JSON.stringify({ __sediment_nodes__: [] });
+    const payload = JSON.stringify({ __huabu_nodes__: [] });
     await copyCanvasClipboard({ payload, plainText: 'Hello <world>' });
 
     expect(writeText).not.toHaveBeenCalled();
@@ -148,7 +148,7 @@ describe('Sediment clipboard parsing', () => {
     // Huabu must still recover the payload from it.
     const html = await new Response(await item.values['text/html']).text();
     expect(html).toContain('Hello &lt;world&gt;');
-    expect(parseSedimentClipboardHtml(html)).toBe(payload);
+    expect(parseHuabuClipboardHtml(html)).toBe(payload);
   });
 
   it('keeps the line structure of multi-line text in text/html', async () => {
@@ -281,10 +281,10 @@ describe('Sediment clipboard parsing', () => {
   });
 });
 
-describe('Sediment clipboard payload reading', () => {
+describe('Huabu clipboard payload reading', () => {
   const payload = JSON.stringify({
-    __sediment_nodes__: [imageNode],
-    __sediment_canvas_id__: 'canvas-source',
+    __huabu_nodes__: [imageNode],
+    __huabu_canvas_id__: 'canvas-source',
   });
 
   const makeDataTransfer = (values: Record<string, string>) =>
@@ -297,40 +297,40 @@ describe('Sediment clipboard payload reading', () => {
       String.fromCharCode(...new TextEncoder().encode(payload)),
     );
     const data = makeDataTransfer({
-      'text/html': `<img src="data:image/png;base64,AAAA" data-sediment-nodes="${encoded}">`,
+      'text/html': `<img src="data:image/png;base64,AAAA" data-huabu-nodes="${encoded}">`,
       'text/plain': 'Diagram',
     });
 
-    expect(readSedimentClipboardPayload(data)).toBe(payload);
-    expect(
-      parseSedimentClipboard(readSedimentClipboardPayload(data)),
-    ).toMatchObject({ srcCanvasId: 'canvas-source' });
+    expect(readHuabuClipboardPayload(data)).toBe(payload);
+    expect(parseHuabuClipboard(readHuabuClipboardPayload(data))).toMatchObject({
+      srcCanvasId: 'canvas-source',
+    });
   });
 
   it('falls back to text/plain for payloads written by older builds', () => {
     const data = makeDataTransfer({ 'text/plain': payload });
 
-    expect(readSedimentClipboardPayload(data)).toBe(payload);
+    expect(readHuabuClipboardPayload(data)).toBe(payload);
   });
 
   it('ignores html that carries no Huabu payload', () => {
-    expect(parseSedimentClipboardHtml('<p>hello</p>')).toBeNull();
-    expect(parseSedimentClipboardHtml('')).toBeNull();
+    expect(parseHuabuClipboardHtml('<p>hello</p>')).toBeNull();
+    expect(parseHuabuClipboardHtml('')).toBeNull();
     expect(
-      parseSedimentClipboardHtml('<img data-sediment-nodes="not base64!!">'),
+      parseHuabuClipboardHtml('<img data-huabu-nodes="not base64!!">'),
     ).toBeNull();
   });
 
   it('round-trips payloads containing non-Latin1 characters', () => {
     const unicodePayload = JSON.stringify({
-      __sediment_nodes__: [{ ...imageNode, data: { label: '认知负荷理论' } }],
+      __huabu_nodes__: [{ ...imageNode, data: { label: '认知负荷理论' } }],
     });
     const encoded = btoa(
       String.fromCharCode(...new TextEncoder().encode(unicodePayload)),
     );
 
-    expect(
-      parseSedimentClipboardHtml(`<img data-sediment-nodes="${encoded}">`),
-    ).toBe(unicodePayload);
+    expect(parseHuabuClipboardHtml(`<img data-huabu-nodes="${encoded}">`)).toBe(
+      unicodePayload,
+    );
   });
 });

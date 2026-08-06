@@ -1,6 +1,6 @@
-# Sediment / Huabu — Docs
+# Huabu / Huabu — Docs
 
-Authoritative design notes and proposals for the Sediment / Huabu codebase.
+Authoritative design notes and proposals for the Huabu / Huabu codebase.
 For what the product is and how to run it, see the [root README](../README.md).
 For agent and contributor rules, see
 [`.github/copilot-instructions.md`](../.github/copilot-instructions.md).
@@ -86,7 +86,7 @@ docs/
 | [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                 | Partly shipped | Server-side headless canvas executor and structure/content sync.           |
 | [managed-acp-harness.md](./proposals/managed-acp-harness.md)                                       | Draft          | Resource-first Agent Team Profile compilation.                             |
 | [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.          |
-| [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Sediment-owned Milkdown toolbar and semantic editor commands.              |
+| [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Huabu-owned Milkdown toolbar and semantic editor commands.                 |
 | [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                           |
 | [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                   | Proposed       | Structured/Blob backend split; agent filesystem integration remains open.  |
 | [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)             | Proposed       | Revision-aware offscreen Note measurement and stable auto-height geometry. |

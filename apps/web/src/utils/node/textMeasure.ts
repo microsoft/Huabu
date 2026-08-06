@@ -39,7 +39,7 @@ function sanitizeFontFamilyForCanvas(family: string): string {
 }
 
 /** Font shorthand no engine can confuse with a real one, used as a probe. */
-const FONT_PROBE_SENTINEL = '13.7px "__sediment_font_probe__"';
+const FONT_PROBE_SENTINEL = '13.7px "__huabu_font_probe__"';
 
 /** Size used for the probe — acceptance depends on the family, not the size. */
 const FONT_PROBE_SIZE = 16;

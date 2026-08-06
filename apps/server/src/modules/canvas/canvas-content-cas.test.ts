@@ -77,7 +77,7 @@ function putContent(
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-cas-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-cas-'));
   setWorkspacePath(tmp);
 });
 

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
  * Resolve the absolute path to the agentlet daemon entry script.
  *
  * This is L1 (host) deployment-layout knowledge: the generic
- * `@agenetes/agentlet-host` package must not embed Sediment's bundle
+ * `@agenetes/agentlet-host` package must not embed Huabu's bundle
  * layout, so the host resolves the entry here and passes the absolute
  * path down via `mountAgenetes({ daemonEntryPath })`.
  *

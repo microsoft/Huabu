@@ -4,12 +4,12 @@
 /**
  * ACP (External-agent) API wire types.
  *
- * Sediment connects to external agent CLIs (Copilot / Claude / Gemini /
+ * Huabu connects to external agent CLIs (Copilot / Claude / Gemini /
  * custom) via agentlet's **daemon mode**. The server forks an in-process
  * agentlet daemon at boot; users configure long-lived **agent profiles**
  * (cli + cwd + flags) and the daemon spawns agent processes on demand.
  *
- * There is one daemon per Sediment instance and the user never has to
+ * There is one daemon per Huabu instance and the user never has to
  * pair it manually — it is invisible infrastructure surfaced only when
  * something has gone wrong (see `AcpAgentletStatus.lastError`).
  *
@@ -95,7 +95,7 @@ export interface AcpAgentProfile {
   updatedAt: number;
 }
 
-// ─── Agentlet status (one agentlet per Sediment) ──────────────────────
+// ─── Agentlet status (one agentlet per Huabu) ──────────────────────
 //
 // The server forks an idle agentlet as a child process at boot and
 // supervises it with exponential-backoff restart. Status is exposed
@@ -103,11 +103,11 @@ export interface AcpAgentProfile {
 // the supervisor gives up; on the happy path the user never sees it.
 
 /**
- * Status of the single agentlet known to this Sediment instance.
+ * Status of the single agentlet known to this Huabu instance.
  *
  * Canonically defined as `AgentletStatus` in `@agenetes/protocol`
  * (the L2 control-plane wire contract); re-exported here under the
- * historical Sediment name so existing L1 / browser consumers are
+ * historical Huabu name so existing L1 / browser consumers are
  * unaffected. Browser-safe (the definition is zod-only in protocol).
  */
 export type AcpAgentletStatus = AgentletStatus;
@@ -208,7 +208,7 @@ export interface AcpAgentCliListResponse {
 // agent OR a user-configured external profile.
 
 /**
- * Internal binding — chat thread talks to Sediment's built-in agent.
+ * Internal binding — chat thread talks to Huabu's built-in agent.
  * Default for every newly-created thread.
  */
 export interface AgentBindingInternal {
@@ -250,7 +250,7 @@ export type AgentBinding = AgentBindingInternal | AgentBindingExternal;
 //
 // Slash commands themselves are NOT a separate RPC — the agent
 // recognises `/<name> <args>` inline inside a normal `session/prompt`
-// text body. Hence Sediment forwards the typed slash text verbatim
+// text body. Hence Huabu forwards the typed slash text verbatim
 // (the preprocessor short-circuits to avoid LLM rewriting).
 
 /**
@@ -278,7 +278,7 @@ export interface AvailableCommand {
  * one on the daemon if needed) before opening the session.
  */
 export interface EnsureAcpSessionRequest {
-  /** Sediment canvasId scoping the session sandbox. Optional only for the no-canvas edge case. */
+  /** Huabu canvasId scoping the session sandbox. Optional only for the no-canvas edge case. */
   canvasId?: string;
   /** The user-configured profile this thread is bound to. */
   profileId: string;

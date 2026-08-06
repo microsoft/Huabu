@@ -23,7 +23,7 @@ import type { CanvasCommand } from '@huabu/shared';
 let tmp: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(path.join(tmpdir(), 'sediment-import-node-src-'));
+  tmp = mkdtempSync(path.join(tmpdir(), 'huabu-import-node-src-'));
   setWorkspacePath(tmp);
 });
 

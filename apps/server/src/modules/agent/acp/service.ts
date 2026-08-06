@@ -6,10 +6,10 @@
  *
  * Drives a single user prompt against an ACP-connected external agent
  * (Copilot / Claude Code / Codex / \u2026) and yields the resulting stream
- * as Sediment\u2019s standard `AgentStreamEvent`s, so the route handler can
+ * as Huabu\u2019s standard `AgentStreamEvent`s, so the route handler can
  * treat external and internal dispatches uniformly.
  *
- * Persistence model: one ACP session per Sediment thread, kept alive for
+ * Persistence model: one ACP session per Huabu thread, kept alive for
  * the thread’s lifetime via {@link acpSessionRegistry}. Successive
  * prompts on the same thread reuse the sessionId so the external agent
  * retains conversation memory.
@@ -55,10 +55,10 @@ export interface RunAcpAgentOptions {
    * `prepared_prompt` events.
    */
   binding: { alias: string; profileId: string };
-  /** Sediment thread id \u2014 used as the registry key. */
+  /** Huabu thread id \u2014 used as the registry key. */
   threadId: string;
   /**
-   * Sediment canvasId for the active thread — plumbed into the
+   * Huabu canvasId for the active thread — plumbed into the
    * AcpAgentClient so capability handlers (fs sandbox, permission gate)
    * can scope checks to the correct canvas. Stored on the session entry
    * too: if a thread’s canvas changes (rebind), the stale session is

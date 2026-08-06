@@ -41,7 +41,7 @@ const OPPOSITE_POSITION: Record<Side, Position> = {
 };
 
 /** Only one pending edge exists at a time, so a fixed marker id is safe. */
-const PENDING_ARROW_ID = 'sediment-pending-connection-arrow';
+const PENDING_ARROW_ID = 'huabu-pending-connection-arrow';
 
 /**
  * The edge the user just drew, held on screen while they pick a node type.

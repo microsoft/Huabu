@@ -991,7 +991,7 @@ export const useChatStore = create<ChatState>()(
         }),
     }),
     {
-      name: 'sediment-chat',
+      name: 'huabu-chat',
       version: 2,
       migrate: (persisted) => {
         const state = persisted as Partial<ChatState> & {

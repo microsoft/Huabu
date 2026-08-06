@@ -632,7 +632,7 @@
       "profileMissing": "Profile for {{alias}} no longer exists. Re-create it in Settings → External Agents.",
       "spawnFailed": "Could not start {{alias}}. Check the command path and working directory in Settings.",
       "connectTimeout": "{{alias}} started but never responded. It may need to re-authenticate (e.g. Copilot OAuth) or crashed on startup.",
-      "bridgeNotMounted": "Sediment is still starting up. Try again in a moment.",
+      "bridgeNotMounted": "Huabu is still starting up. Try again in a moment.",
       "internal": "An unexpected error occurred while connecting to {{alias}}.",
       "fallback": "Could not connect to {{alias}}. Check Settings → External Agents."
     },

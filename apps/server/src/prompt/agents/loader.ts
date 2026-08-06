@@ -439,7 +439,7 @@ export function renderAgentTemplate(
  * of `agents/` and `skills/`) and read from disk, then rendered with
  * the same Mustache-flavoured engine as the agent prompts — so it
  * supports `{{include:<rel>}}`, `{{#key}}…{{/key}}` conditional blocks
- * and `{{key}}` substitution. Use this for context that Sediment
+ * and `{{key}}` substitution. Use this for context that Huabu
  * assembles deterministically in code (e.g. the external-agent prompt)
  * where the surrounding prose should live next to the prompt tree
  * rather than being string-concatenated in a service file.

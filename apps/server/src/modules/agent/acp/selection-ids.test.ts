@@ -4,7 +4,7 @@
 /**
  * The reserved `selections` keys are declared twice, on either side of a
  * boundary that cannot be crossed: `@agenetes/acp-driver` is a subtree
- * pushed to its own upstream and must not depend on Sediment, so
+ * pushed to its own upstream and must not depend on Huabu, so
  * `@huabu/shared` carries its own copy for the browser-safe selector
  * normalisation the toolbar renders from.
  *

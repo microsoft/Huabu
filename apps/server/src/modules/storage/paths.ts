@@ -202,7 +202,7 @@ export function deltaLogPath(canvasId: string): string {
 }
 
 /**
- * ACP session persistence — maps each Sediment thread on this canvas
+ * ACP session persistence — maps each Huabu thread on this canvas
  * to the live ACP `sessionId` returned by `session/new`, so we can
  * call `session/load` after a server restart instead of opening a
  * fresh session (which would lose the external agent's memory).
@@ -218,7 +218,7 @@ export function acpSessionsPath(canvasId: string): string {
 
 /**
  * The Agenetes {@link Namespace} (L2 storage/metadata scope) for a
- * canvas's ACP session store. `canvasId` is Sediment's de-facto namespace
+ * canvas's ACP session store. `canvasId` is Huabu's de-facto namespace
  * key; `storage.root` is the canvas history dir, so the driver's store
  * persists `<storage.root>/acp-sessions.json` — byte-for-byte the same file
  * {@link acpSessionsPath} names today. Empty `canvasId` yields a name-less

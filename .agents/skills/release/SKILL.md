@@ -1,11 +1,11 @@
 ---
 name: release
-description: Use ONLY when the user explicitly asks to cut/publish a Sediment (Huabu desktop) release or tag a version. Performs an outward action — bumps the version in apps/desktop/package.json, commits + annotated-tags vX.Y.Z, and pushes the branch + tag. That tag push auto-builds the macOS/Windows installers and publishes a GitHub Release. Provides `status`, `bump`, `tag-push`, and a one-command `run` (bump → tag-push).
+description: Use ONLY when the user explicitly asks to cut/publish a Huabu desktop release or tag a version. Performs an outward action — bumps the version in apps/desktop/package.json, commits + annotated-tags vX.Y.Z, and pushes the branch + tag. That tag push auto-builds the macOS/Windows installers and publishes a GitHub Release. Provides `status`, `bump`, `tag-push`, and a one-command `run` (bump → tag-push).
 ---
 
 # Release
 
-Sediment ships exactly one artifact: the Huabu desktop (Electron) app. So there is one version per release, held in **`apps/desktop/package.json`**. A release bumps that version, makes one `Release vX.Y.Z` commit + annotated tag, and pushes the branch + tag.
+Huabu ships exactly one artifact: the Huabu desktop (Electron) app. So there is one version per release, held in **`apps/desktop/package.json`**. A release bumps that version, makes one `Release vX.Y.Z` commit + annotated tag, and pushes the branch + tag.
 
 Everything past the push is automatic and lives in GitHub Actions: pushing a `vX.Y.Z` tag fires **`.github/workflows/release.yml`**, which builds the macOS + Windows installers and publishes them as a GitHub Release (with auto-generated notes) attached to that tag. The skill does **not** await that build — follow it in the Actions tab (workflow **"Release"**).
 

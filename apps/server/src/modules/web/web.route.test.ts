@@ -22,7 +22,7 @@ async function buildApp() {
 }
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'sediment-web-route-'));
+  tmp = mkdtempSync(join(tmpdir(), 'huabu-web-route-'));
   setWorkspacePath(tmp);
 });
 

@@ -60,7 +60,7 @@ test.describe('canvas touch navigation', () => {
     const center = await paneCenter(page);
 
     await page.evaluate(() => {
-      const key = 'sediment-sketch-tools';
+      const key = 'huabu-sketch-tools';
       const persisted = JSON.parse(localStorage.getItem(key) ?? '{}') as {
         state?: Record<string, unknown>;
         version?: number;
