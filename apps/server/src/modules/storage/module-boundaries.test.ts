@@ -40,11 +40,18 @@ function read(relative: string): string {
   return readFileSync(path.join(SRC_DIR, relative), 'utf8');
 }
 
-/** Module specifiers imported or re-exported by a source file. */
+/**
+ * Module specifiers imported or re-exported by a source file.
+ *
+ * `vi.mock`/`vi.doMock` targets count as references: mocking a module reaches
+ * into it just as much as importing it does, and a test that mocks a
+ * deprecated shim is exactly the new call site the shims exist to stop.
+ */
 function specifiersOf(relative: string): string[] {
   const source = read(relative);
   const out: string[] = [];
-  const re = /(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g;
+  const re =
+    /(?:from|import|vi\s*\.\s*(?:mock|doMock|unmock|doUnmock))\s*\(?\s*['"]([^'"]+)['"]/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(source)) !== null) out.push(match[1]);
   return out;
