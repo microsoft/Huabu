@@ -75,8 +75,7 @@ import type { NodeOrigin } from '@huabu/shared';
  *   exposed.
  * - `origin` is forwarded to `canvas_commands` only; other handlers
  *   ignore it. It controls the `NodeOrigin` stamp on AI-generated
- *   nodes (defaults to `'ai-operate'` when unset; an agent may
- *   override it through `runtime.defaultOrigin`).
+ *   nodes (defaults to `'ai-operate'` when unset).
  */
 export interface ExecuteContext {
   canvasId?: string;

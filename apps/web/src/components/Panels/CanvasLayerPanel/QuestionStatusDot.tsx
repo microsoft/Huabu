@@ -7,7 +7,7 @@
  *
  * Visibility rules (intentionally minimal so the panel stays scannable):
  *  - `idle`              → not rendered (matches `QuestionNode` itself,
- *                          which only mounts its StatusBadge for
+ *                          which only shows its agent badge for
  *                          `status !== 'idle'`).
  *  - `done` + `viewed`   → not rendered (the answer was read; no need
  *                          to keep nagging).
