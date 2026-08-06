@@ -2,8 +2,7 @@
 // Licensed under the MIT license.
 
 /**
- * Server-Sent Events (SSE) parser shared by the agent and intent
- * streaming clients.
+ * Server-Sent Events (SSE) parser used by the agent streaming client.
  *
  * The protocol used by Huabu endpoints is:
  *

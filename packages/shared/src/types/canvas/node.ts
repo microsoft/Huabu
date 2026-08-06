@@ -70,7 +70,11 @@ export type NodeOrigin =
   | { type: 'user-from-library' }
   | { type: 'user-from-chat'; threadId?: string }
   | { type: 'user-excerpt'; excerptFromNodeId?: string }
-  // Sketch recognition
+  /**
+   * Legacy only — stamped by the sketch gesture recogniser, which was
+   * removed. Kept so nodes saved before that removal still deserialize;
+   * nothing produces it today.
+   */
   | { type: 'sketch-recognized' };
 
 /** All possible values of `NodeOrigin['type']`. */

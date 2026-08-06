@@ -241,11 +241,11 @@ export function useChatHistory(
     if (!isHistoryLoaded || !threadId || !ownerCanvasId) return;
 
     // Only attempt reconnect if history suggests an incomplete run:
-    // the last message is from the user (or intent-select) without a
-    // following assistant response, meaning the server may still be
-    // streaming. If history is empty or ends with an assistant message,
-    // there's nothing to reconnect to — skip the request entirely to
-    // avoid a 404 in the browser console.
+    // the last message is from the user without a following assistant
+    // response, meaning the server may still be streaming. If history is
+    // empty or ends with an assistant message, there's nothing to
+    // reconnect to — skip the request entirely to avoid a 404 in the
+    // browser console.
     const msgs = selectThreadMessages(useChatStore.getState(), threadId);
     if (msgs.length === 0) return;
     const lastMsg = msgs[msgs.length - 1];

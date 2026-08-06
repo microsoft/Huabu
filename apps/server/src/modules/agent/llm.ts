@@ -20,7 +20,6 @@ import { dirname, join } from 'node:path';
 
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import {
-  stream as piStream,
   complete as piComplete,
   getEnvApiKey,
   getModel,
@@ -1666,23 +1665,6 @@ async function ensureApiKeyFor(cfg: PersistedConfig): Promise<string> {
 export interface LLMCallOptions extends ProviderStreamOptions {
   role?: ModelRole;
   hasImage?: boolean;
-}
-
-/**
- * Stream LLM responses with the model for the requested role.
- */
-export async function llmStream(context: Context, options?: LLMCallOptions) {
-  const { role = 'chat', hasImage, ...streamOptions } = options ?? {};
-  const { cfg, model } = await resolveForRoleAsync(role, { hasImage });
-  const [resolvedModel, apiKey] = await Promise.all([
-    applyCopilotAuthToModel(cfg, model),
-    ensureApiKeyFor(cfg),
-  ]);
-  return piStream(resolvedModel, context, {
-    apiKey,
-    ...getProviderSpecificOptions(cfg),
-    ...streamOptions,
-  });
 }
 
 /**

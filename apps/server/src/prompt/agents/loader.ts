@@ -55,7 +55,6 @@ import { getSkillCatalogue } from '../skills/catalogue.js';
 
 import type { SkillScope } from '../skills/loader.js';
 import type { ToolExecutionMode } from '@earendil-works/pi-agent-core';
-import type { NodeOrigin } from '@huabu/shared';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -78,12 +77,6 @@ export interface AgentRuntimeConfig {
    * default) lets independent tool calls overlap.
    */
   toolExecution?: ToolExecutionMode;
-  /**
-   * `NodeOrigin` stamp injected onto every node created by
-   * `space_commands`. Used by the sketch pipeline to mark nodes
-   * as user-authored rather than AI-initiated.
-   */
-  defaultOrigin?: NodeOrigin;
 }
 
 /** Parsed AGENT.md frontmatter. */
@@ -91,7 +84,7 @@ export interface AgentFrontmatter {
   id: AgentId;
   name: string;
   description: string;
-  /** Tool names resolved by `buildAgentToolsByNames`. Empty for tool-less agents (e.g. intent). */
+  /** Tool names resolved by `buildAgentToolsByNames`. */
   tools: string[];
   /**
    * Skill surface filter for `getSkillCatalogue`. When omitted or
@@ -182,19 +175,6 @@ const VALID_SKILL_SCOPES: ReadonlySet<SkillScope> = new Set<SkillScope>([
 const VALID_TOOL_EXECUTION: ReadonlySet<ToolExecutionMode> =
   new Set<ToolExecutionMode>(['parallel', 'sequential']);
 
-const VALID_ORIGIN_TYPES: ReadonlySet<NodeOrigin['type']> = new Set<
-  NodeOrigin['type']
->([
-  'ai-operate',
-  'user-created',
-  'user-uploaded',
-  'user-pasted',
-  'user-from-library',
-  'user-from-chat',
-  'user-excerpt',
-  'sketch-recognized',
-]);
-
 function validateRuntime(raw: unknown, sourcePath: string): AgentRuntimeConfig {
   if (raw === undefined || raw === null) return {};
   if (typeof raw !== 'object' || Array.isArray(raw)) {
@@ -220,29 +200,6 @@ function validateRuntime(raw: unknown, sourcePath: string): AgentRuntimeConfig {
       );
     }
     out.toolExecution = v;
-  }
-
-  if (r.defaultOrigin !== undefined) {
-    const o = r.defaultOrigin;
-    if (
-      typeof o !== 'object' ||
-      o === null ||
-      typeof (o as { type?: unknown }).type !== 'string'
-    ) {
-      throw new Error(
-        `[agent-loader] ${sourcePath}: runtime.defaultOrigin must be an object with a string "type"`,
-      );
-    }
-    const t = (o as { type: string }).type as NodeOrigin['type'];
-    if (!VALID_ORIGIN_TYPES.has(t)) {
-      throw new Error(
-        `[agent-loader] ${sourcePath}: runtime.defaultOrigin.type "${t}" is not a known NodeOrigin type`,
-      );
-    }
-    // Trust the rest of the shape — the discriminated union allows a
-    // few optional fields per branch and validating each here would
-    // drift from the source of truth in `@huabu/shared`.
-    out.defaultOrigin = o as NodeOrigin;
   }
 
   return out;
@@ -574,8 +531,8 @@ export function invalidateAgentCache(): void {
  *
  * Pass `opts.canvasId` (the request's active canvas) so the memory
  * catalogue can include the per-canvas canvas-memory line; omit it
- * for agents that aren't bound to a canvas (intent / sketch /
- * memory curator) and only the workspace-memory line will render.
+ * for agents that aren't bound to a canvas (the memory curator) and
+ * only the workspace-memory line will render.
  */
 export function loadAgent(
   id: AgentId,

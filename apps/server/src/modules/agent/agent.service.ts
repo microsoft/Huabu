@@ -101,7 +101,7 @@ export interface AgentRunOptions {
    * stays the single source of truth on reload.
    *
    * Optional for the internal, envelope-less callers (memory analyzer,
-   * sketch recognition, reachback operate) that assemble
+   * reachback operate) that assemble
    * `context.messages` directly: with no envelope, `runAgent` runs over
    * `context.messages` as-is and syncs the full final transcript back
    * (the legacy behaviour).
@@ -243,7 +243,7 @@ export async function* runAgent(
   // compiles the loaded profile into tool refs + runtime knobs while the
   // standard pi-driver owns harness execution and durable-history recovery.
   //
-  // Envelope-less / stateless callers (memory / sketch / reachback) have no
+  // Envelope-less / stateless callers (memory / reachback) have no
   // conversation thread. `threadId: ''` keeps the instance record key inert
   // and makes the factory resolve an ephemeral read-set + leave canvas
   // writes unattributed (every downstream consumer truthy-guards the thread

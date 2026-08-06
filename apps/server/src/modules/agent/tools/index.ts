@@ -163,8 +163,7 @@ export function buildToolsForScope(
   scope: ToolScope,
   ctx: ToolBuildContext,
 ): AgentTool[] {
-  // ToolScope ⊂ AgentId (intent has no tools and never reaches here),
-  // so the cast is sound.
+  // Every ToolScope is also an AgentId, so the cast is sound.
   const cfg = loadAgent(scope as AgentId);
   return buildAgentToolsByNames(cfg.toolNames, ctx);
 }
