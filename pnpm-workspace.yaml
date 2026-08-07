@@ -1,3 +1,33 @@
 packages:
   - apps/*
   - packages/*
+  - external/agentlet/packages/protocol
+  - external/agentlet/packages/local
+  - external/agentlet/packages/agent-team
+  - external/agenetes/packages/protocol
+  - external/agenetes/packages/runtime
+  - external/agenetes/packages/agent-team
+  - external/agenetes/packages/agentlet-gateway
+  - external/agenetes/packages/agentlet-host
+  - external/agenetes/packages/acp-driver
+  - external/agenetes/packages/pi-driver
+  - external/agenetes/packages/agenetes
+
+ignoredBuiltDependencies:
+  - electron-winstaller
+
+onlyBuiltDependencies:
+  - electron
+
+# apps/web is on React 18 and apps/docs is on React 19, so the workspace
+# resolves two @types/react versions. react-router's own declarations import
+# from 'react' without declaring a types peer, so TypeScript resolves them
+# against whichever @types/react pnpm happened to hoist. Declaring the peer
+# makes pnpm inject the version each consumer actually depends on.
+packageExtensions:
+  react-router:
+    peerDependencies:
+      '@types/react': '*'
+  react-router-dom:
+    peerDependencies:
+      '@types/react': '*'

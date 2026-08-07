@@ -1,0 +1,246 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
+/**
+ * Sketch Recognition Service
+ *
+ * Converts a freehand sketch cluster (screenshot + minimal context
+ * payload) into the canvas commands that realise the user's gesture.
+ * Runs the unified `runAgent` loop with the `'sketch'` tool scope
+ * and the `'sketch-recognized'` origin stamp, then drains the
+ * SSE-shaped event stream to assemble the JSON response the route
+ * returns.
+ *
+ * The tool set, system prompt, and `NodeOrigin` stamp differ from the
+ * chat / operate agent (sketch is user-authored, not AI-authored),
+ * but everything else — model selection, abort wiring, turn cap,
+ * `canvas_commands` server-side execution — is shared with `runAgent`.
+ */
+
+import { createId } from '@huabu/shared';
+
+import { runAgent } from './agent.service.js';
+import { loadAgent, renderAgentTemplate } from '../../prompt/index.js';
+import { getLogger } from '../../utils/logger.js';
+import { describeNode } from '../canvas/node-prompt.js';
+import { getCanvasStore } from '../storage/index.js';
+
+import type { CanvasStore } from '../storage/canvas-store.js';
+import type { Context } from '@earendil-works/pi-ai';
+import type {
+  SketchClusterContext,
+  SketchCommandResponse,
+  WireNodeRef,
+} from '@huabu/shared';
+
+const log = getLogger('sketch');
+
+// ---------------------------------------------------------------------------
+// Cluster context serialization
+// ---------------------------------------------------------------------------
+
+type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string };
+
+/**
+ * Render the cluster payload as a short text block for the user message.
+ *
+ * Each wire ref is assembled via the shared {@link describeNode} (`'preview'`
+ * level) so it carries the sidecar-sourced `label`, the `nodes/<safeLabel>.md`
+ * path the model can `read`, AND a `rev` freshness token — the same shape
+ * every other node-context path emits. Edges stay as bare ids — they have no
+ * label, and the model uses `inspect_edges` for direction / style.
+ */
+function serializeClusterContext(
+  ctx: SketchClusterContext,
+  store: CanvasStore | null,
+): string {
+  const lines: string[] = [];
+  lines.push(
+    `Sketch bbox: (${ctx.bbox.x}, ${ctx.bbox.y}) ${ctx.bbox.width}x${ctx.bbox.height}px`,
+  );
+  lines.push(`Stroke count: ${ctx.strokeCount}`);
+
+  const renderRef = (r: WireNodeRef): string => {
+    const node = describeNode(
+      store,
+      { id: r.id, type: r.type, ...(r.label ? { label: r.label } : {}) },
+      'preview',
+    );
+    const labelPart = node.label ? ` "${node.label}"` : '';
+    const revPart = node.rev ? ` rev=${node.rev}` : '';
+    return `  - ${node.id}${labelPart} (${node.type})${revPart} → ${node.filename}`;
+  };
+
+  if (ctx.enclosedNodes.length > 0) {
+    lines.push(`Enclosed nodes (${ctx.enclosedNodes.length}):`);
+    for (const ref of ctx.enclosedNodes) lines.push(renderRef(ref));
+  } else {
+    lines.push('Enclosed nodes: (none)');
+  }
+
+  if (ctx.nearbyNodes.length > 0) {
+    lines.push(`Nearby nodes (${ctx.nearbyNodes.length}, by proximity):`);
+    for (const ref of ctx.nearbyNodes) lines.push(renderRef(ref));
+  } else {
+    lines.push('Nearby nodes: (none)');
+  }
+
+  if (ctx.nearbyEdgeIds.length > 0) {
+    lines.push(
+      `Nearby edge IDs (${ctx.nearbyEdgeIds.length}): ${ctx.nearbyEdgeIds.join(', ')}`,
+    );
+  } else {
+    lines.push('Nearby edge IDs: (none)');
+  }
+
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Recognize sketch intent and return executable canvas commands.
+ *
+ * Runs the unified `runAgent` loop with the sketch tool scope and
+ * the `'sketch-recognized'` origin stamp. The model issues read /
+ * inspect calls as needed and then invokes `canvas_commands` for
+ * real — `handleCanvasCommands` runs server-side and injects origin /
+ * provenance / labelSource onto every CREATE / MERGE entry. We drain
+ * the SSE-shaped event stream, pick out the `canvas_commands`
+ * tool_result payload and the final assistant text, and hand both to
+ * the client.
+ *
+ * Returns an empty `commands` array when the model finishes without
+ * invoking `canvas_commands` (e.g. it judged the gesture ambiguous);
+ * `reasoning` still carries any explanation the model wrote.
+ */
+export async function recognizeSketchCommands(
+  screenshot: string,
+  clusterContext: SketchClusterContext,
+  canvasId?: string,
+): Promise<SketchCommandResponse> {
+  const agentCfg = loadAgent('sketch');
+  const base64 = screenshot.startsWith('data:')
+    ? screenshot.replace(/^data:[^;]+;base64,/, '')
+    : screenshot;
+
+  const contextText = serializeClusterContext(
+    clusterContext,
+    canvasId ? getCanvasStore(canvasId) : null,
+  );
+
+  const userContent: ContentPart[] = [
+    { type: 'image', data: base64, mimeType: 'image/png' },
+    {
+      type: 'text',
+      text: renderAgentTemplate(agentCfg, 'sketchClusterPreamble', {
+        contextText,
+      }),
+    },
+  ];
+
+  const piContext: Context = {
+    systemPrompt: agentCfg.systemPrompt,
+    messages: [{ role: 'user', content: userContent, timestamp: Date.now() }],
+  };
+
+  const reasoningParts: string[] = [];
+
+  // Attribute this recognition's canvas mutations to a synthetic thread so
+  // executeOnServer computes revertible change records (broadcast to the
+  // client) — the sketch overlay drives Keep / Revert / Preview off them,
+  // the same machinery the chat ChangeReviewCard uses.
+  const threadId = createId('sketch');
+
+  // ── Diagnostics ────────────────────────────────────────────────────
+  // Track which tool calls the LLM issued so we can spot the "LLM never
+  // called canvas_commands" failure mode (JSON written into assistant
+  // prose instead of a real tool call).
+  const toolStartCounts = new Map<string, number>();
+  const toolResultCounts = new Map<string, number>();
+  // Recover the machine tool name on `tool_call_update` (which carries
+  // only `toolCallId`) by indexing the name from the originating
+  // `tool_call` event.
+  const toolNameById = new Map<string, string>();
+
+  const stream = runAgent({
+    scope: 'sketch',
+    threadId,
+    canvasId,
+    origin: agentCfg.runtime.defaultOrigin ?? { type: 'sketch-recognized' },
+    context: piContext,
+    maxIterations: agentCfg.runtime.maxIterations,
+  });
+
+  for await (const event of stream) {
+    if (event.type === 'tool_call') {
+      const toolName = event.data.internalToolName ?? event.data.title;
+      toolNameById.set(event.data.toolCallId, toolName);
+      const n = (toolStartCounts.get(toolName) ?? 0) + 1;
+      toolStartCounts.set(toolName, n);
+      const argsStr = JSON.stringify(event.data.rawInput ?? {});
+      log.debug(
+        {
+          n,
+          tool: toolName,
+          args:
+            argsStr.length > 800
+              ? `${argsStr.slice(0, 800)}…(${argsStr.length} chars total)`
+              : argsStr,
+        },
+        'tool_call',
+      );
+    } else if (
+      event.type === 'tool_call_update' &&
+      (event.data.status === 'completed' || event.data.status === 'failed')
+    ) {
+      const toolName = toolNameById.get(event.data.toolCallId) ?? 'unknown';
+      const n = (toolResultCounts.get(toolName) ?? 0) + 1;
+      toolResultCounts.set(toolName, n);
+      const result =
+        typeof event.data.rawOutput === 'string' ? event.data.rawOutput : '';
+      log.debug(
+        {
+          n,
+          tool: toolName,
+          chars: result.length,
+          preview: result.length > 800 ? `${result.slice(0, 800)}…` : result,
+        },
+        'tool_call_update',
+      );
+    } else if (event.type === 'done' && event.data.message) {
+      reasoningParts.push(event.data.message);
+    } else if (event.type === 'text_delta' && event.data.content) {
+      // text_delta arrives before `done` and may carry the model's
+      // pre-tool-call reasoning sentence even when the loop hits the
+      // turn cap (no `done` event in that branch).
+      reasoningParts.push(event.data.content);
+    } else if (event.type === 'error') {
+      log.warn({ error: event.data.error }, 'error event');
+    }
+  }
+
+  const reasoningText = reasoningParts.join('').trim();
+  log.info(
+    {
+      toolStarts: Object.fromEntries(toolStartCounts),
+      toolResults: Object.fromEntries(toolResultCounts),
+      canvasCommandsCalled: (toolStartCounts.get('space_commands') ?? 0) > 0,
+      reasoningPreview: reasoningText.slice(0, 200),
+      suspectedFailureMode:
+        (toolStartCounts.get('space_commands') ?? 0) === 0
+          ? 'LLM_NEVER_INVOKED_TOOL (JSON likely written into assistant text)'
+          : 'OK',
+    },
+    'run summary',
+  );
+
+  return {
+    reasoning: reasoningText,
+    threadId,
+  };
+}

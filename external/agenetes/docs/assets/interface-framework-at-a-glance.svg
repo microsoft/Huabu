@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 560" width="1280" height="560" role="img" aria-labelledby="title desc">
+<title id="title">Agenetes interface and framework at a glance</title>
+<desc id="desc">A side-by-side flow comparing Kubernetes and Agenetes: Kubernetes schedules a Pod spec to a container runtime and Pod handle, while Agenetes dispatches a WorkloadSpec to an Agent Driver, Agent Process, and Agent Handle.</desc>
+<style>
+text { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+.title { font-size: 24px; font-weight: 700; fill: #111827; }
+.subtitle { font-size: 13px; fill: #6b7280; }
+.lane-label { font-size: 15px; font-weight: 700; fill: #111827; }
+.node-title { font-size: 14px; font-weight: 700; }
+.node-sub { font-size: 12px; font-weight: 400; }
+.note-title { font-size: 13px; font-weight: 700; fill: #92400e; }
+.note { font-size: 12px; fill: #78350f; }
+</style>
+<defs>
+<marker id="arrow-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/></marker>
+<marker id="arrow-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/></marker>
+</defs>
+<rect width="1280" height="560" fill="#ffffff"/>
+<text x="640" y="42" text-anchor="middle" class="title">Agenetes interface and framework at a glance</text>
+<text x="640" y="66" text-anchor="middle" class="subtitle">Same outer shape: declarative spec -> runtime -> execution instance -> live handle</text>
+<rect x="36" y="104" width="1208" height="130" rx="16" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.5"/>
+<rect x="36" y="284" width="1208" height="130" rx="16" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.5"/>
+<text x="58" y="130" class="lane-label">Kubernetes</text>
+<text x="58" y="310" class="lane-label">Agenetes</text>
+<rect x="346" y="96" width="168" height="326" rx="14" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="7 5"/>
+<rect x="362" y="432" width="136" height="72" rx="10" fill="#fff7ed" stroke="#fed7aa" stroke-width="1.5"/>
+<text x="430" y="456" text-anchor="middle" class="note-title">Key contrast</text>
+<text x="430" y="475" text-anchor="middle" class="note">schedule placement</text>
+<text x="430" y="492" text-anchor="middle" class="note">vs dispatch by kind</text>
+<line x1="159" y1="170" x2="181" y2="170" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+<line x1="319" y1="170" x2="361" y2="170" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+<line x1="499" y1="170" x2="541" y2="170" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+<line x1="679" y1="170" x2="721" y2="170" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+<line x1="859" y1="170" x2="901" y2="170" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+<line x1="1039" y1="170" x2="1061" y2="170" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-blue)"/>
+<line x1="159" y1="350" x2="181" y2="350" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-green)"/>
+<line x1="319" y1="350" x2="361" y2="350" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-green)"/>
+<line x1="499" y1="350" x2="541" y2="350" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-green)"/>
+<line x1="679" y1="350" x2="721" y2="350" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-green)"/>
+<line x1="859" y1="350" x2="901" y2="350" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-green)"/>
+<line x1="1039" y1="350" x2="1061" y2="350" stroke="#16a34a" stroke-width="2" marker-end="url(#arrow-green)"/>
+<rect x="21" y="133" width="138" height="74" rx="10" ry="10" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.5"/>
+<text x="90" y="167" text-anchor="middle" class="node-title" fill="#111827">user</text>
+<text x="90" y="188" text-anchor="middle" class="node-sub" fill="#6b7280">kubectl</text>
+<rect x="181" y="133" width="138" height="74" rx="10" ry="10" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.5"/>
+<text x="250" y="167" text-anchor="middle" class="node-title" fill="#111827">Pod spec</text>
+<text x="250" y="188" text-anchor="middle" class="node-sub" fill="#6b7280">declaration</text>
+<rect x="361" y="133" width="138" height="74" rx="10" ry="10" fill="#fff7ed" stroke="#fed7aa" stroke-width="1.5"/>
+<text x="430" y="167" text-anchor="middle" class="node-title" fill="#111827">scheduler</text>
+<text x="430" y="188" text-anchor="middle" class="node-sub" fill="#6b7280">chooses node</text>
+<rect x="541" y="133" width="138" height="74" rx="10" ry="10" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.5"/>
+<text x="610" y="167" text-anchor="middle" class="node-title" fill="#111827">container</text>
+<text x="610" y="188" text-anchor="middle" class="node-sub" fill="#6b7280">runtime</text>
+<rect x="721" y="133" width="138" height="74" rx="10" ry="10" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.5"/>
+<text x="790" y="167" text-anchor="middle" class="node-title" fill="#111827">Pod</text>
+<text x="790" y="188" text-anchor="middle" class="node-sub" fill="#6b7280">running instance</text>
+<rect x="901" y="133" width="138" height="74" rx="10" ry="10" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.5"/>
+<text x="970" y="167" text-anchor="middle" class="node-title" fill="#111827">Pod handle</text>
+<text x="970" y="188" text-anchor="middle" class="node-sub" fill="#6b7280">subresources</text>
+<rect x="1061" y="133" width="138" height="74" rx="10" ry="10" fill="#ffffff" stroke="#bfdbfe" stroke-width="1.5"/>
+<text x="1130" y="167" text-anchor="middle" class="node-title" fill="#111827">user</text>
+<text x="1130" y="188" text-anchor="middle" class="node-sub" fill="#6b7280">continues</text>
+<rect x="21" y="313" width="138" height="74" rx="10" ry="10" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+<text x="90" y="347" text-anchor="middle" class="node-title" fill="#111827">host app</text>
+<text x="90" y="368" text-anchor="middle" class="node-sub" fill="#6b7280">L1</text>
+<rect x="181" y="313" width="138" height="74" rx="10" ry="10" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+<text x="250" y="347" text-anchor="middle" class="node-title" fill="#111827">WorkloadSpec</text>
+<text x="250" y="368" text-anchor="middle" class="node-sub" fill="#6b7280">declaration</text>
+<rect x="361" y="313" width="138" height="74" rx="10" ry="10" fill="#fff7ed" stroke="#fed7aa" stroke-width="1.5"/>
+<text x="430" y="347" text-anchor="middle" class="node-title" fill="#111827">dispatcher</text>
+<text x="430" y="368" text-anchor="middle" class="node-sub" fill="#6b7280">resolves kind</text>
+<rect x="541" y="313" width="138" height="74" rx="10" ry="10" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+<text x="610" y="347" text-anchor="middle" class="node-title" fill="#111827">Agent Driver</text>
+<text x="610" y="368" text-anchor="middle" class="node-sub" fill="#6b7280">pluggable runtime</text>
+<rect x="721" y="313" width="138" height="74" rx="10" ry="10" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+<text x="790" y="347" text-anchor="middle" class="node-title" fill="#111827">Agent Process</text>
+<text x="790" y="368" text-anchor="middle" class="node-sub" fill="#6b7280">current/local/remote</text>
+<rect x="901" y="313" width="138" height="74" rx="10" ry="10" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+<text x="970" y="347" text-anchor="middle" class="node-title" fill="#111827">Agent Handle</text>
+<text x="970" y="368" text-anchor="middle" class="node-sub" fill="#6b7280">live surface</text>
+<rect x="1061" y="313" width="138" height="74" rx="10" ry="10" fill="#ffffff" stroke="#bbf7d0" stroke-width="1.5"/>
+<text x="1130" y="347" text-anchor="middle" class="node-title" fill="#111827">host app</text>
+<text x="1130" y="368" text-anchor="middle" class="node-sub" fill="#6b7280">drives handle</text>
+<text x="640" y="528" text-anchor="middle" class="subtitle">Agenetes does not place workloads: placement is declared in WorkloadSpec; dispatch only selects the Agent Driver.</text>
+</svg>

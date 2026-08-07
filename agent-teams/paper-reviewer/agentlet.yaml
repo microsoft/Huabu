@@ -1,0 +1,13 @@
+schema: agentlet-agent-schema-v1
+name: paper-reviewer
+description: >
+  Assists in reviewing academic papers. Reads paper content via Huabu,
+  engages in discussion with the user about the paper, and helps draft review-style
+  responses.
+command:
+  claude: claude-agent-acp
+  copilot: copilot --acp --allow-all
+
+require:
+  prompts:
+    - system_prompt.md

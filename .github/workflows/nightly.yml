@@ -1,0 +1,199 @@
+name: Nightly
+
+# Manual-only. The daily schedule was removed to conserve GitHub Actions
+# minutes: each run builds on macOS (billed at 10x) and Windows (2x), so
+# an unattended nightly was the single largest consumer of the quota.
+# Run it from the Actions tab whenever a nightly build is actually
+# needed; the `cleanup` job below runs with it and expires old builds.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write # create and expire nightly releases and tags
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Compute the nightly version AND create the draft prerelease once, so
+  # the parallel platform build jobs can upload straight into it via
+  # `gh release upload` instead of round-tripping through the Actions
+  # artifact store (whose storage quota is exhausted and was failing the
+  # nightly). The git tag is only created when the draft is published.
+  prepare:
+    name: Prepare nightly version and draft release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Generate version
+        id: version
+        shell: bash
+        run: |
+          BASE_VERSION="$(node -p "require('./apps/desktop/package.json').version.split(/[+-]/)[0]")"
+          if [[ ! "$BASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Desktop version must use X.Y.Z format: $BASE_VERSION" >&2
+            exit 1
+          fi
+
+          DATE="$(TZ=Asia/Shanghai date +%Y%m%d)"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          VERSION="${BASE_VERSION}-nightly.${DATE}.g${SHORT_SHA}"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Nightly version: v$VERSION"
+
+      - name: Create draft prerelease
+        shell: bash
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if gh release view "$TAG" --json isDraft >/dev/null 2>&1; then
+            echo "Release $TAG already exists — reusing it."
+          else
+            gh release create "$TAG" --draft --prerelease --title "$TAG" \
+              --target "$GITHUB_SHA" --notes "$(cat <<'NOTES'
+          Automated nightly build.
+
+          Prereleases older than 7 days, and their tags, are removed by the
+          cleanup job of a later nightly run.
+          NOTES
+          )"
+          fi
+
+  # Runs on every manual trigger, independently of the build jobs.
+  cleanup:
+    name: Remove expired nightlies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete nightly releases and tags older than 7 days
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CUTOFF="$(date -u -d '7 days ago' +%s)"
+
+          gh api --paginate \
+            -H 'Accept: application/vnd.github+json' \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-nightly\\.")) | [.id, .tag_name, .created_at] | @tsv' |
+          while IFS=$'\t' read -r RELEASE_ID TAG CREATED_AT; do
+            [[ -z "$RELEASE_ID" ]] && continue
+            CREATED_EPOCH="$(date -u -d "$CREATED_AT" +%s)"
+            if (( CREATED_EPOCH <= CUTOFF )); then
+              echo "Deleting expired nightly $TAG (created $CREATED_AT)"
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}"
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" || true
+            fi
+          done
+
+  build:
+    name: Build (${{ matrix.os }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: build:desktop:mac
+          - os: windows-latest
+            script: build:desktop:win
+    runs-on: ${{ matrix.os }}
+    env:
+      NIGHTLY_VERSION: ${{ needs.prepare.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set nightly app version
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = 'apps/desktop/package.json';
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          pkg.version = process.env.NIGHTLY_VERSION;
+          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+          NODE
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build agentlet workspace packages
+        run: pnpm run build:agentlet
+
+      - name: Build desktop installer
+        run: pnpm run ${{ matrix.script }}
+
+      # Upload straight into the draft prerelease instead of via the
+      # Actions artifact store (see the prepare job). electron-builder
+      # writes outside the repo (../huabu-electron-out/); each runner only
+      # produces its own platform's files, so a combined glob with
+      # nullglob is safe. --clobber keeps re-runs idempotent.
+      - name: Upload nightly assets to the release
+        shell: bash
+        run: |
+          shopt -s nullglob
+          require_assets() {
+            local label="$1"
+            shift
+            if (( $# == 0 )); then
+              echo "Missing required nightly asset: $label" >&2
+              return 1
+            fi
+          }
+
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            installers=(../huabu-electron-out/*.dmg)
+            archives=(../huabu-electron-out/*.zip)
+            blockmaps=(../huabu-electron-out/*.blockmap)
+            metadata=(../huabu-electron-out/latest-mac.yml)
+            require_assets "macOS dmg" "${installers[@]}"
+            require_assets "macOS zip" "${archives[@]}"
+            require_assets "macOS blockmap" "${blockmaps[@]}"
+            require_assets "latest-mac.yml" "${metadata[@]}"
+            files=("${installers[@]}" "${archives[@]}" "${blockmaps[@]}" "${metadata[@]}")
+          else
+            installers=(../huabu-electron-out/*.exe)
+            blockmaps=(../huabu-electron-out/*.exe.blockmap)
+            metadata=(../huabu-electron-out/latest.yml)
+            require_assets "Windows exe" "${installers[@]}"
+            require_assets "Windows exe.blockmap" "${blockmaps[@]}"
+            require_assets "latest.yml" "${metadata[@]}"
+            files=("${installers[@]}" "${blockmaps[@]}" "${metadata[@]}")
+          fi
+
+          ls -lh "${files[@]}"
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+
+  # Flip the draft public once both platform builds have uploaded. This
+  # is also what creates the git tag (at the prepare job's --target
+  # commit). Kept a prerelease and never marked "latest".
+  publish:
+    name: Publish nightly release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - name: Publish prerelease
+        run: gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false

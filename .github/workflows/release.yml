@@ -1,0 +1,260 @@
+name: Release
+
+# Build, sign, and publish the Huabu desktop app on every `v*.*.*` tag
+# push, uploading the macOS + Windows installers AND their auto-update
+# metadata straight to a GitHub Release attached to that tag.
+#
+# Trigger:
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Or run manually from the Actions tab via `workflow_dispatch`,
+# supplying a tag like `v0.1.0-rc.1`. The build derives the app version
+# from that tag, and manual runs stay a *draft* release so you can
+# sanity-check the correctly-versioned assets before making them public.
+#
+# ── Why every asset is uploaded with `gh release upload` ──────────────
+# NEVER via actions/upload-artifact: workflow artifacts count against the
+# org's shared Actions storage quota, which is exhausted and has blocked
+# releases with "Artifact storage quota has been hit". Release assets
+# live on the release itself and are exempt. This is also why Windows is
+# built directly on its own runner and uploads its own assets here,
+# rather than handing the exe back through the artifact store.
+#
+# ── Auto-update assets ────────────────────────────────────────────────
+# electron-updater needs the metadata files next to the installers:
+#   macOS   → *.dmg, *.zip, *.blockmap, latest-mac.yml
+#   Windows → *.exe, *.exe.blockmap, latest.yml
+# The `*.zip` is what Squirrel.Mac actually applies; `latest*.yml` is the
+# feed the running app polls. Builds and releases both live here, so the
+# feed's owner/repo are set directly in apps/desktop/electron-builder.yml.
+#
+# ── Signing ───────────────────────────────────────────────────────────
+# macOS: Developer ID certificate from the CSC_LINK / CSC_KEY_PASSWORD
+# repo secrets; notarization via APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
+# APPLE_TEAM_ID (electron-builder `notarize: true`). Notarization adds
+# ~5–15 min (Apple's queue).
+# Windows: currently unsigned (no WIN_CSC_LINK certificate yet). Auto-
+# update integrity is still enforced via the sha512 + blockmap in
+# latest.yml; add WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD to also get
+# publisher-signature verification.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name (e.g. v0.1.0-rc.1) — used as the app version and published as a draft release'
+        required: true
+
+permissions:
+  contents: write # to create the release + upload assets
+
+jobs:
+  # ── Create (or reuse) the draft release once ─────────────────────────
+  # A single job owns draft creation so the parallel build jobs never
+  # race to `gh release create` the same tag (which would make one of
+  # them fail). Both build jobs then upload into this draft by tag name;
+  # for workflow_dispatch the git tag itself is only created when the
+  # draft is finally published.
+  prepare:
+    name: Prepare draft release
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Create draft release
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists — reusing it."
+          else
+            gh release create "$RELEASE_TAG" --draft --title "$RELEASE_TAG" \
+              --generate-notes --target "$GITHUB_SHA"
+          fi
+
+  build-mac:
+    name: Build and upload (macOS)
+    needs: prepare
+    runs-on: macos-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Version is inferred from `packageManager` in package.json
+      # (pnpm@10.28.2+sha512…) — passing it again here would conflict
+      # with the sha-pinned value and fail with ERR_PNPM_BAD_PM_VERSION.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Keep the packaged app, installer filenames, update metadata, and
+      # GitHub Release on one version. For tag pushes this is normally a
+      # no-op relative to the release commit; workflow_dispatch builds need
+      # the temporary rewrite because they do not create a version commit.
+      - name: Set app version from release tag
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = 'apps/desktop/package.json';
+          const tag = process.env.RELEASE_TAG ?? '';
+          const version = tag.startsWith('v') ? tag.slice(1) : '';
+          const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+          if (!semver.test(version)) {
+            console.error(`Release tag must be valid semver prefixed with v: ${tag}`);
+            process.exit(1);
+          }
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          pkg.version = version;
+          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+          console.log(`Desktop version: ${version}`);
+          NODE
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The server and Gateway import @agentlet/protocol, whose dist/ output
+      # does not exist on a fresh checkout. Build the retained Agentlet
+      # workspace packages before the desktop build consumes them.
+      - name: Build agentlet workspace packages
+        run: pnpm run build:agentlet
+
+      - name: Build desktop installer (signed + notarized)
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm run build:desktop:mac
+
+      # electron-builder writes outside the repo (../huabu-electron-out/
+      # per apps/desktop/electron-builder.yml, to dodge a Windows file-lock
+      # issue with VS Code). --clobber keeps re-runs idempotent.
+      #   *.dmg           — human-facing first install
+      #   *.zip           — what Squirrel.Mac applies on auto-update
+      #   *.blockmap      — differential-download deltas
+      #   latest-mac.yml  — the feed the running app polls
+      - name: Upload macOS assets to the release
+        shell: bash
+        run: |
+          shopt -s nullglob
+          require_assets() {
+            local label="$1"
+            shift
+            if (( $# == 0 )); then
+              echo "Missing required release asset: $label" >&2
+              return 1
+            fi
+          }
+          installers=(../huabu-electron-out/*.dmg)
+          archives=(../huabu-electron-out/*.zip)
+          blockmaps=(../huabu-electron-out/*.blockmap)
+          metadata=(../huabu-electron-out/latest-mac.yml)
+          require_assets "macOS dmg" "${installers[@]}"
+          require_assets "macOS zip" "${archives[@]}"
+          require_assets "macOS blockmap" "${blockmaps[@]}"
+          require_assets "latest-mac.yml" "${metadata[@]}"
+          files=("${installers[@]}" "${archives[@]}" "${blockmaps[@]}" "${metadata[@]}")
+          ls -lh "${files[@]}"
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+
+  build-win:
+    name: Build and upload (Windows)
+    needs: prepare
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set app version from release tag
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = 'apps/desktop/package.json';
+          const tag = process.env.RELEASE_TAG ?? '';
+          const version = tag.startsWith('v') ? tag.slice(1) : '';
+          const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+          if (!semver.test(version)) {
+            console.error(`Release tag must be valid semver prefixed with v: ${tag}`);
+            process.exit(1);
+          }
+          const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          pkg.version = version;
+          fs.writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`);
+          console.log(`Desktop version: ${version}`);
+          NODE
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build agentlet workspace packages
+        run: pnpm run build:agentlet
+
+      - name: Build desktop installer
+        run: pnpm run build:desktop:win
+
+      # Same direct-to-release upload as macOS (bash is available on the
+      # windows-latest runner and keeps the glob logic identical).
+      #   *.exe           — NSIS installer
+      #   *.exe.blockmap  — differential-download deltas
+      #   latest.yml      — the feed the running app polls
+      - name: Upload Windows assets to the release
+        shell: bash
+        run: |
+          shopt -s nullglob
+          require_assets() {
+            local label="$1"
+            shift
+            if (( $# == 0 )); then
+              echo "Missing required release asset: $label" >&2
+              return 1
+            fi
+          }
+          installers=(../huabu-electron-out/*.exe)
+          blockmaps=(../huabu-electron-out/*.exe.blockmap)
+          metadata=(../huabu-electron-out/latest.yml)
+          require_assets "Windows exe" "${installers[@]}"
+          require_assets "Windows exe.blockmap" "${blockmaps[@]}"
+          require_assets "latest.yml" "${metadata[@]}"
+          files=("${installers[@]}" "${blockmaps[@]}" "${metadata[@]}")
+          ls -lh "${files[@]}"
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+
+  # Manual (workflow_dispatch) runs stay drafts so you can vet the
+  # installers before flipping them public; tag-pushes publish once both
+  # platform builds have uploaded. Publishing the draft is also what
+  # creates the git tag for workflow_dispatch releases (at the --target
+  # commit recorded by the prepare job).
+  publish:
+    name: Publish release (tag pushes only)
+    needs: [build-mac, build-win]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Publish release
+        run: gh release edit "$RELEASE_TAG" --draft=false

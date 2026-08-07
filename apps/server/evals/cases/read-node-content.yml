@@ -1,0 +1,49 @@
+id: read-node-content
+description: Agent reads a specific node's markdown when asked about its contents.
+mode: ask
+fixture: read-node-content
+canvasId: default-canvas
+seeds: 3
+maxIterations: 6
+
+# A deliberately leading prompt that mentions the node's label so the agent
+# can map it 1:1 to "nodes/Dolphin Migration.md" via the safe-filename
+# rule documented in the system prompt. This stays a black-box test of
+# "did the agent (a) reach for the right tool, (b) hit the right path,
+# and (c) ground its reply in the file's content".
+prompt: |
+  There is a note in this Space labeled "Dolphin Migration".
+  Read its contents and tell me, in one sentence, the average annual
+  round-trip distance the females travel.
+
+assertions:
+  # 1. The agent must call read at least once with the expected path.
+  #    Any extra read of skills/space/SKILL.md is fine — we only pin
+  #    the node-markdown path.
+  - kind: tool_called
+    name: read
+    pathContains: Dolphin Migration.md
+
+  # 2. That read must succeed (no isError).
+  - kind: tool_succeeded
+    name: read
+
+  # 3. The final answer must reference the distinctive fact from the
+  #    fixture body. We list a few synonyms so the assertion does not
+  #    hinge on any single phrasing the LLM happens to pick.
+  - kind: response_contains
+    anyOf:
+      - '3047'
+      - '3,047'
+
+  # 4. The whole loop should stay tight — reading one file should not
+  #    blow past 5 turns. Today many seeds hit exactly 5 because the
+  #    LLM first tries `nodes/Dolphin_Migration.md` (replacing the space
+  #    with `_`), then falls back to find/grep before retrying. A
+  #    successful prompt tweak that nudges the agent toward the correct
+  #    path on the first read should bring this down to 2-3.
+  - kind: max_turns
+    max: 5
+
+  # 5. No top-level error; the run must produce a `done` event.
+  - kind: no_error

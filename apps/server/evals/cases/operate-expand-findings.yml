@@ -1,0 +1,56 @@
+id: operate-expand-findings
+description: >-
+  Operate agent expands one source note into four linked child notes in a
+  single mutation — the real reachback shape from issue #268 (CREATE ×4 +
+  CONNECT back to the source). Exercises whether the agent wastes turns
+  reading static command docs (#1) and whether it self-references freshly
+  created nodes without fabricating placeholder ids (#3).
+mode: operate
+fixture: operate-expand-findings
+canvasId: default-canvas
+seeds: 3
+maxIterations: 12
+
+# Mirrors req-3d: the agent is dropped into a research Space with one rich
+# source note and asked to break it into per-finding child notes wired back
+# to the source. Almost every operate run ends in exactly this kind of
+# CREATE + CONNECT batch, so it is representative rather than a toy read.
+prompt: |
+  The note labeled "Reservoir Sedimentation — Field Survey" bundles four
+  separate findings. Split it up: create one short note per finding (keep
+  each finding's headline number in the body) and connect every new note
+  back to the survey note so the provenance is clear. Do it in one go.
+
+assertions:
+  # (a) It must actually read the source before splitting it — grounding.
+  - kind: tool_called
+    name: read
+    pathContains: Reservoir Sedimentation
+
+  # (b) The run must end in a real mutation.
+  - kind: tool_called
+    name: space_commands
+  - kind: tool_succeeded
+    name: space_commands
+
+  # (c) The four findings must survive into the agent's summary. We pin the
+  #     distinctive numbers rather than any phrasing so the assertion is
+  #     robust to wording. (response_contains passes on ANY match; run a
+  #     seed diff to see how many findings actually landed.)
+  - kind: response_contains
+    anyOf:
+      - '310'
+      - '7.4'
+      - 'backwater'
+      - 'turbidity'
+
+  # (d) Turn budget. This is the #1 signal: on the pre-fix prompt the agent
+  #     typically burns extra turns on read(skills/space/SKILL.md) before
+  #     its first space_commands. With
+  #     the command cheat-sheet inlined, this whole task should fit well
+  #     under the budget. Tighten `max` toward 3–4 once the fix lands and
+  #     re-baseline; keep it here to catch regressions.
+  - kind: max_turns
+    max: 6
+
+  - kind: no_error

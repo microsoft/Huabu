@@ -1,0 +1,32 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
+/* The shape body rotates while the face and avatar container remain still. */
+.agent-icon-working-body {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: agent-icon-working-windmill 3s linear infinite;
+}
+
+.agent-icon-working-avatar {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes agent-icon-working-windmill {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-icon-working-body,
+  .agent-icon-working-avatar {
+    animation: none;
+  }
+}

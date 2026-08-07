@@ -1,0 +1,27 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
+.missing-file-banner__compact {
+  display: none;
+}
+
+.missing-file-banner__full {
+  display: flex;
+}
+
+.react-flow__node-sketch .missing-file-banner,
+.react-flow__node-sketch .missing-file-banner * {
+  pointer-events: auto !important;
+}
+
+@container (max-height: 119px) {
+  .missing-file-banner__compact {
+    display: flex;
+  }
+
+  .missing-file-banner__full {
+    display: none;
+  }
+}

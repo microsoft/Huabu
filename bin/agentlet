@@ -1,0 +1,33 @@
+#!/usr/bin/env sh
+# Thin global entry point for the vendored agentlet CLI.
+#
+# Forwards every argument straight to the compiled CLI, so both roles
+# work exactly as documented in external/agentlet/README.md:
+#   agentlet daemon --server <url> --token <code> [--agent "<cmd>"]
+#   agentlet agent-team setup|validate|doctor [dir] [--harness <name>]
+#
+# No argument injection happens here. If you want the zero-config daemon
+# launcher that autofills --server/--allow-insecure from the repo's .env,
+# use `start-agentlet-daemon` instead.
+#
+# We auto-build the CLI on first run (or after a clean) so users never
+# have to remember `pnpm run build:agentlet`. We only build when the
+# compiled entry is missing — a stale build is the user's to refresh.
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo=$(CDPATH= cd -- "$here/.." && pwd)
+cli="$repo/external/agentlet/packages/local/dist/index.js"
+
+if [ ! -f "$cli" ]; then
+  echo "agentlet: $cli not found — building..." >&2
+  if ! (cd "$repo" && pnpm run build:agentlet >&2); then
+    echo "agentlet: build failed. Run \`pnpm run build:agentlet\` in $repo manually." >&2
+    exit 1
+  fi
+  if [ ! -f "$cli" ]; then
+    echo "agentlet: build completed but $cli still missing." >&2
+    exit 1
+  fi
+fi
+
+exec node "$cli" "$@"

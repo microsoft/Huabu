@@ -1,0 +1,1974 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
+import { spawn } from 'node:child_process';
+import { createWriteStream, existsSync, mkdirSync, renameSync } from 'node:fs';
+import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import archiver from 'archiver';
+import yauzl from 'yauzl';
+
+import {
+  createCanvasBodySchema,
+  canvasSearchRequestSchema,
+  createId,
+  exportCanvasQuerySchema,
+  getCanvasEventsQuerySchema,
+  postCanvasEventsBodySchema,
+  postCanvasExecuteBodySchema,
+  preprocessNodeBodySchema,
+  putCanvasBodySchema,
+  putNodeContentBodySchema,
+  setPortalNodePinsCommandSchema,
+} from '@huabu/shared';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+
+import {
+  CanvasCommandRoutingError,
+  executeCanvasCommandsOnHost,
+  MissingWorldPortalError,
+} from './canvas-command-router.js';
+import { CanvasNotFoundError, applyDeltasOnServer } from './canvas-executor.js';
+import { searchCanvas } from './canvas-search.js';
+import { publishCanvasUpdate } from './canvas-sync.js';
+import {
+  assertWorldPortalTopologyAllowed,
+  WorldPortalMutationError,
+} from './world-portal-policy.js';
+import { reconcileWorldPortals } from './world-portals.js';
+import {
+  resolveWorldReferences,
+  WorldReferenceResolutionError,
+} from './world-reference-resolver.js';
+import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
+import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
+import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
+import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
+import {
+  isWorldCanvasId,
+  refreshCanvasDirIndex,
+  registerCanvasDir,
+  suggestCanvasDir,
+} from '../storage/canvas-dirs.js';
+import {
+  canvasBlobs,
+  createCanvas,
+  deleteCanvas,
+  getCanvasStore,
+  getStructuredStore,
+  listCanvases,
+  listCanvasSummaries,
+  updateNode,
+  type CanvasFile,
+  type UpdateNodeOutcome,
+} from '../storage/index.js';
+import { canvasRoot, nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
+import { toSafeFilename } from '../workspace/disk/naming.js';
+import { withSpaceDirHandlesReleased } from '../workspace/disk/space-dir-handles.js';
+import { getWorkspacePath } from '../workspace.js';
+
+import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
+import type { CanvasNodeType } from '@huabu/shared';
+import type {
+  ApiResult,
+  CanvasCommand,
+  CanvasConflictResponse,
+  CanvasSearchEvent,
+  CreateCanvasRequest,
+  CreateCanvasResponse,
+  DeleteCanvasResponse,
+  DeleteNodeResponse,
+  DeleteThreadChangeResponse,
+  ExportCanvasQuery,
+  GetCanvasEventsQuery,
+  GetCanvasEventsResponse,
+  GetCanvasResponse,
+  GetNodeContentResponse,
+  GetWorldReferencesResponse,
+  GetThreadChangesResponse,
+  ImportCanvasResponse,
+  ListCanvasesResponse,
+  PostCanvasEventsRequest,
+  PostCanvasEventsResponse,
+  PostCanvasExecuteRequest,
+  PostCanvasExecuteResponse,
+  PreprocessNodeBody,
+  PreprocessNodeRequest,
+  PreprocessNodeResponse,
+  PutCanvasRequest,
+  PutCanvasResponse,
+  PutNodeContentRequest,
+  PutNodeContentResponse,
+  RevealNodesFolderResponse,
+} from '@huabu/shared';
+import type { FastifyPluginAsync } from 'fastify';
+
+/**
+ * Loose node type for processing unknown/untyped node structures.
+ * Used when iterating over canvas state before validation.
+ */
+interface NodeLike {
+  id?: string;
+  type?: string;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+function nowMs(): number {
+  return Date.now();
+}
+
+/**
+ * Generate a default canvas title that doesn't collide with existing ones.
+ * Returns "Untitled", "Untitled (1)", "Untitled (2)", etc.
+ */
+function generateDefaultTitle(existingCanvases: CanvasFile[]): string {
+  const base = 'Untitled';
+  const existingNames = new Set(existingCanvases.map((c) => c.title));
+  if (!existingNames.has(base)) return base;
+  let i = 1;
+  while (existingNames.has(`${base} (${i})`)) i++;
+  return `${base} (${i})`;
+}
+
+function toMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Best-effort: open a directory in the host OS file manager. Detached +
+ * unref'd so the server never waits on (or is killed with) the spawned
+ * process, and we deliberately ignore the exit code — Windows `explorer`
+ * returns 1 even on success.
+ *
+ * Fire-and-forget by design: `spawn` reports a missing binary
+ * asynchronously via the `'error'` event rather than throwing, so the
+ * caller can't synchronously tell whether the open succeeded. Both that
+ * async failure and the rare synchronous spawn throw (EMFILE / ENOMEM)
+ * are swallowed — the user simply sees nothing open. The route already
+ * guarded the path with existsSync, so there is no state to roll back.
+ * Never throws.
+ */
+function openInFileManager(targetPath: string): void {
+  const cmd =
+    process.platform === 'win32'
+      ? 'explorer'
+      : process.platform === 'darwin'
+        ? 'open'
+        : 'xdg-open';
+  try {
+    const child = spawn(cmd, [targetPath], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', () => {
+      // Swallow async spawn errors (e.g. missing xdg-open on a headless
+      // box). Best-effort — nothing to roll back.
+    });
+    child.unref();
+  } catch {
+    // Rare synchronous spawn throw (EMFILE / ENOMEM). Best-effort.
+  }
+}
+
+/**
+ * Node types that have a sibling `nodes/<safe(label)>.md`. The body is
+ * markdown content for note/text/web/pdf and empty for
+ * image/video/frame/question/sketch (which only carry frontmatter).
+ *
+ * `question` is included so its auto-generated label / labelSource
+ * (written by the preprocess pipeline via `patchNodeSilent` on the
+ * client) survives canvas reloads — the structure PUT strips those
+ * fields, so the sidecar is the only persistence path.
+ *
+ * `sketch` is included for the same reason: the canvas engine
+ * auto-stamps a `Sketch N` label on `CREATE_NODES` and the user can
+ * rename it from the layer panel. Stroke geometry stays in structural
+ * state; only the label / labelSource live in the sidecar's
+ * frontmatter.
+ */
+const MD_BACKED_NODE_TYPES = new Set([
+  'note',
+  'text',
+  'web',
+  'pdf',
+  'office',
+  'image',
+  'video',
+  'audio',
+  'frame',
+  'question',
+  'sketch',
+]);
+
+/** Subset that carries a textual body in the markdown. */
+const TEXT_BEARING_NODE_TYPES = new Set([
+  'note',
+  'text',
+  'web',
+  'pdf',
+  'office',
+  'question',
+]);
+
+/**
+ * Subset of {@link TEXT_BEARING_NODE_TYPES} whose `data.content` is
+ * actually consumed by the web renderer (preview body, AI block
+ * provenance, …) — and therefore worth inlining into the batched
+ * `GET /:canvasId` response so first paint can render without a
+ * follow-up per-node fetch.
+ *
+ * `pdf` is intentionally excluded: the canvas card and the expanded
+ * preview both render directly from `data.src` via pdf.js, and the
+ * in-page text selection layer re-extracts text on demand with
+ * `page.getTextContent()`. Shipping the server-side extracted body
+ * here would add hundreds of KB to every canvas load for zero
+ * rendering benefit. Server-side agent / context paths still read the
+ * sidecar directly via `store.readNode()`, and the per-node
+ * `GET /:canvasId/nodes/:nodeId/content` endpoint still returns the
+ * full body (falling back to `existing.content` when this hydrate
+ * skips it) so search / AI features can fetch on demand.
+ *
+ * `question` IS inlined: the prompt is short, the QuestionNode reads
+ * `data.content` to render the textarea, and skipping the inline copy
+ * would leave every question node blank on first paint (its
+ * `data.content` is stripped by `stripNodesForCanvas` on the PUT, so
+ * the sidecar body is the only surviving copy).
+ */
+const WIRE_INLINE_CONTENT_TYPES = new Set([
+  'note',
+  'text',
+  'web',
+  'office',
+  'question',
+]);
+
+/**
+ * Per-node `data` keys whose values live exclusively in the markdown
+ * sidecar (`nodes/<safe(label)>.md`). The structure PUT strips these
+ * before persisting structural state so the two stores cannot drift;
+ * `hydrateNodeContent` re-attaches them from the `.md` on read.
+ *
+ * Must stay in sync with `NODE_CONTENT_KEYS` on the web (see
+ * `apps/web/src/store/canvasStore.ts`).
+ */
+const NODE_CONTENT_KEYS = new Set([
+  'content',
+  'label',
+  'labelSource',
+  'src',
+  'summary',
+  'keywords',
+  'provenance',
+]);
+
+/**
+ * Strip every per-node content / label / source / summary / keyword
+ * field from each node's `data` before persisting structural state. The
+ * structure PUT no longer carries those fields — they are persisted via
+ * the dedicated `PUT /:canvasId/nodes/:nodeId/content` endpoint and
+ * re-attached on read by {@link hydrateNodeContent}.
+ *
+ * Pure: takes a node list, returns a new list with the same `id` /
+ * `type` / geometry / parenthood and a copy of `data` containing only
+ * non-content keys. The original node objects are not mutated.
+ *
+ * Legacy clients that still send content in the structure body have it
+ * silently dropped here; their per-node content PUTs (issued in
+ * parallel) are the actual write path now.
+ */
+function stripNodesForCanvas(nodes: NodeLike[]): NodeLike[] {
+  return nodes.map((node) => {
+    const data = node.data;
+    if (!data) return { ...node };
+    const cleanData: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data)) {
+      if (NODE_CONTENT_KEYS.has(k)) continue;
+      cleanData[k] = v;
+    }
+    return { ...node, data: cleanData };
+  });
+}
+
+/**
+ * Node types that reference an artifact file via `data.src`. When the
+ * referenced file is gone from disk we surface an `artifactMissing` flag
+ * so the client can show a placeholder + Remove button.
+ */
+const ARTIFACT_BACKED_NODE_TYPES = new Set([
+  'pdf',
+  'office',
+  'image',
+  'video',
+  'audio',
+]);
+
+/**
+ * Extract an artifact storage key from a `data.src` / `data.coverUrl`
+ * value. Accepts both the canonical bare key (`<id><ext>`, the form the
+ * frontend now persists) and a legacy full URL of shape
+ * `/api/canvas/<canvasId>/artifact/<key>`. Returns `null` for empty
+ * strings, data URLs, or remote URLs (which point at external hosts).
+ */
+function extractArtifactKey(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  if (value.startsWith('data:')) return null;
+  const match = value.match(ARTIFACT_URL_REGEX);
+  if (match && match[2]) return path.basename(match[2]);
+  // Anything containing a slash beyond what `path.basename` strips is a
+  // remote URL or a directory path — reject it so we don't try to
+  // resolve `https://example.com/file.png` as a local artifact key.
+  if (/^https?:/i.test(value)) return null;
+  if (value.includes('/')) return null;
+  return value;
+}
+
+/**
+ * Inspect a node's `data.src` and report whether the underlying artifact
+ * file still exists on disk. Returns `false` (not missing) for nodes
+ * without a canvas-scoped artifact key — remote URLs and data URLs are
+ * out of scope for this check.
+ */
+function isArtifactMissing(
+  artifactExists: (key: string) => boolean,
+  data: Record<string, unknown>,
+): boolean {
+  const key = extractArtifactKey(data['src']);
+  if (!key) return false;
+  return !artifactExists(key);
+}
+
+/**
+ * Presence predicate covering a single node's artifact.
+ *
+ * Batch callers build theirs from one `hasMany()`; a single-node endpoint
+ * submits a one-key batch for the only key that can matter.
+ */
+async function singleArtifactProbe(
+  canvasId: string,
+  src: unknown,
+): Promise<(key: string) => boolean> {
+  const key = extractArtifactKey(src);
+  if (!key) return () => false;
+  const exists = (await canvasBlobs(canvasId).hasMany([key])).has(key);
+  return (candidate) => candidate === key && exists;
+}
+
+/**
+ * Hydrate a single persisted node with side-channel content from its
+ * markdown sidecar (`nodes/<safe(label)>.md`). Pure per-node body of
+ * {@link hydrateNodeContent}; also used by the per-node GET endpoint so
+ * batch and single-node hydration stay in lock-step.
+ *
+ * `preloaded` lets the batch path inject content from a one-pass
+ * directory scan (see {@link CanvasStore.readAllNodes}) so we don't
+ * re-read every `.md` file per node. Pass `undefined` to fall back to
+ * the targeted single-node `store.readNode(nodeId)` lookup; pass
+ * `null` to indicate the batch scan ran but found no sidecar.
+ *
+ * Returns the original `node` reference when nothing was mutated so
+ * callers can rely on identity-based diffing.
+ */
+function hydrateOneNode(
+  store: CanvasStore,
+  node: NodeLike,
+  artifactExists: (key: string) => boolean,
+  preloaded?: NodeContent | null,
+): NodeLike {
+  const nodeId = typeof node.id === 'string' ? node.id : '';
+  if (!nodeId) return node;
+
+  const nodeType = typeof node.type === 'string' ? node.type : '';
+  const data: Record<string, unknown> = { ...(node.data ?? {}) };
+
+  // ----- Read markdown side-file first -----
+  // The structure PUT strips every per-node content key (src,
+  // provenance, label, summary, keywords, …) before persisting structural
+  // state via {@link stripNodesForCanvas}. The markdown sidecar
+  // is the only source of truth for those fields, so we read it before
+  // any check that depends on them (notably the artifact-missing probe,
+  // which needs the hydrated `src`).
+  let nodeContent: NodeContent | null;
+  if (preloaded !== undefined) {
+    nodeContent = preloaded;
+  } else {
+    try {
+      nodeContent = store.readNode(nodeId);
+    } catch {
+      nodeContent = null;
+    }
+  }
+
+  if (!nodeContent) {
+    if (MD_BACKED_NODE_TYPES.has(nodeType)) {
+      data['contentMissing'] = true;
+    }
+    // Without a sidecar we can't recover `src`, so the
+    // artifact-missing probe below would be meaningless — skip it.
+    // Return early only when we actually mutated something; otherwise
+    // preserve the original node reference to keep diffs minimal.
+    return data === node.data ? node : { ...node, data };
+  }
+
+  if ('contentMissing' in data) {
+    delete data['contentMissing'];
+  }
+  // Surface a non-blocking hint when more than one `.md` sidecar on disk
+  // claims this nodeId. Unlike a write (which hard-fails), a read stays
+  // best-effort — the index keeps the last-scanned file so the node still
+  // renders — but the client can flag it so the user resolves the
+  // duplicate. The duplicate set was already populated by the
+  // `readAllNodes()` scan that produced `preloaded`, so this is a cheap
+  // in-memory lookup with no extra disk I/O.
+  if (store.isDuplicateNode(nodeId)) {
+    data['contentDuplicate'] = true;
+    data['duplicateFiles'] = store.duplicateNodeFiles(nodeId);
+  } else {
+    if ('contentDuplicate' in data) {
+      delete data['contentDuplicate'];
+    }
+    if ('duplicateFiles' in data) {
+      delete data['duplicateFiles'];
+    }
+  }
+  // Only restore body for types whose preview actually renders
+  // `data.content`. `pdf` is text-bearing on disk (the .md sidecar
+  // holds the extracted body for AI context) but the web renderer
+  // works straight off `data.src` via pdf.js, so we deliberately
+  // skip the inline copy here — see `WIRE_INLINE_CONTENT_TYPES`.
+  // image/video/audio/frame markdown is metadata-only and the canvas
+  // state does not carry a content field for them.
+  if (WIRE_INLINE_CONTENT_TYPES.has(nodeType)) {
+    let body = nodeContent.content;
+    if (nodeType === 'office' && typeof body === 'string') {
+      body = stripOfficeparserPreamble(body);
+    }
+    data['content'] = body;
+  }
+
+  // Rehydrate the source URL for artifact-backed (image/pdf/video) and
+  // remote (web) nodes. Without this step the structure PUT permanently
+  // wipes `data.src` from the canvas state on the next reload because
+  // `stripNodesForCanvas` removed it before persistence.
+  if (typeof nodeContent.src === 'string' && nodeContent.src.length > 0) {
+    data['src'] = nodeContent.src;
+  }
+
+  // Rehydrate AI-edit block provenance. Same rationale as `src`: the
+  // structure PUT strips it, so reloading any note that had AI edits
+  // would lose its provenance markers without this step.
+  const persistedProvenance = nodeContent['provenance'];
+  if (persistedProvenance !== undefined) {
+    data['provenance'] = persistedProvenance;
+  }
+
+  // Surface preprocessed AI summary / keywords from the per-node
+  // markdown frontmatter so the client can render them without a
+  // separate fetch.
+  const summary = nodeContent['summary'];
+  if (typeof summary === 'string' && summary.trim()) {
+    data['summary'] = summary.trim();
+  }
+  const keywords = nodeContent['keywords'];
+  if (Array.isArray(keywords) && keywords.every((k) => typeof k === 'string')) {
+    data['keywords'] = keywords;
+  }
+
+  // The markdown sidecar is the canonical source for both `label` and
+  // `labelSource` now. We unconditionally rehydrate both fields so the
+  // canvas always reflects what was last persisted via the per-node
+  // content endpoint. Nodes without an `.md` fall through the early
+  // return above and keep whatever transient label the client placed
+  // in structural state.
+  data['label'] = nodeContent.label;
+  const persistedLabelSource = nodeContent['labelSource'];
+  data['labelSource'] =
+    persistedLabelSource === 'user' ||
+    persistedLabelSource === 'agent' ||
+    persistedLabelSource === 'auto'
+      ? persistedLabelSource
+      : 'auto';
+
+  // ----- Artifact-backed nodes: flag missing src file -----
+  // Must run AFTER `src` is rehydrated above — otherwise `data.src`
+  // would still be the post-strip empty string and `isArtifactMissing`
+  // would unconditionally return `false`, silently masking deleted
+  // artifacts.
+  if (ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) {
+    if (isArtifactMissing(artifactExists, data)) {
+      data['artifactMissing'] = true;
+    } else if ('artifactMissing' in data) {
+      delete data['artifactMissing'];
+    }
+  }
+
+  return { ...node, data };
+}
+
+/**
+ * Hydrate persisted nodes with side-channel content. Reads each node's
+ * markdown file and re-attaches `content` / `label` (when auto-derived)
+ * onto each node so callers see fresh data. Also sets `contentMissing` /
+ * `artifactMissing` hints when the underlying file has been deleted or
+ * renamed outside the app, so the client can render a non-blocking
+ * placeholder instead of silently rendering an empty / broken node.
+ *
+ * Performance: uses a one-pass `readAllNodes()` scan so the total
+ * filesystem cost is `1 × readdirSync + N × readText` regardless of
+ * node count. The previous per-node `readNode()` path triggered an
+ * extra full-directory scan (via `nodeIndex()`) plus a second
+ * `readText` on every file, making large canvases noticeably slow to
+ * load on cold cache.
+ */
+async function hydrateNodeContent(
+  store: CanvasStore,
+  nodes: NodeLike[],
+): Promise<NodeLike[]> {
+  // Read sidecars first because they are the source of truth for `src`.
+  // Probe only the keys referenced by artifact-backed nodes; enumerating the
+  // entire scope would make hydration cost grow with unrelated blob count.
+  const contentByNodeId = await store.readAllNodes();
+  const referenced = new Set<string>();
+  for (const node of nodes) {
+    const nodeType = typeof node.type === 'string' ? node.type : '';
+    if (!ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) continue;
+    const nodeId = typeof node.id === 'string' ? node.id : '';
+    const key = extractArtifactKey(contentByNodeId.get(nodeId)?.src);
+    if (key) referenced.add(key);
+  }
+
+  const present =
+    referenced.size === 0
+      ? new Set<string>()
+      : await canvasBlobs(store.canvasId).hasMany([...referenced]);
+  const artifactExists = (key: string): boolean => present.has(key);
+
+  return nodes.map((node) => {
+    const nodeId = typeof node.id === 'string' ? node.id : '';
+    return hydrateOneNode(
+      store,
+      node,
+      artifactExists,
+      contentByNodeId.get(nodeId) ?? null,
+    );
+  });
+}
+
+const canvasRoutes: FastifyPluginAsync = async (fastify) => {
+  // --- List all canvases ---
+
+  fastify.get<{ Reply: ApiResult<ListCanvasesResponse> }>(
+    '/',
+    async function (_request, reply) {
+      // Built from the canvas-dir index rather than re-reading every Space.
+      const summaries = listCanvasSummaries();
+
+      // Sort by most recently updated first
+      summaries.sort((a, b) => b.updatedAt - a.updatedAt);
+
+      return reply.send({ canvases: summaries });
+    },
+  );
+
+  // --- Create a new canvas ---
+
+  fastify.post<{
+    Body: CreateCanvasRequest;
+    Reply: ApiResult<CreateCanvasResponse>;
+  }>('/', async function (request, reply) {
+    const parsed = createCanvasBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: 'Invalid request body' });
+    }
+
+    const canvasId = createId('canvas');
+    const existingCanvases = listCanvases();
+    const title = parsed.data.title ?? generateDefaultTitle(existingCanvases);
+    const canvas = createCanvas(canvasId, title);
+
+    if (!canvas) {
+      return reply
+        .code(409)
+        .send({ message: 'Canvas with this ID already exists' });
+    }
+
+    return reply
+      .code(201)
+      .send({ canvasId: canvas.canvasId, title: canvas.title });
+  });
+
+  // --- Delete a canvas ---
+
+  fastify.delete<{
+    Params: { canvasId: string };
+    Reply: ApiResult<DeleteCanvasResponse>;
+  }>('/:canvasId', async function (request, reply) {
+    const { canvasId } = request.params;
+    if (isWorldCanvasId(canvasId)) {
+      return reply
+        .code(403)
+        .send({ message: 'World canvas cannot be deleted' });
+    }
+    // Release any handle held inside this Space's directory across the
+    // delete: on Windows a live `fs.watch` handle makes `rmSync` fail with
+    // EPERM (same root cause as the rename path). A no-op unless the Space
+    // currently has an open external-note stream.
+    const deleted = await withSpaceDirHandlesReleased(canvasId, () =>
+      deleteCanvas(canvasId),
+    );
+
+    if (!deleted) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+
+    return reply.send({ success: true });
+  });
+
+  // Delete a node — removes its markdown sidecar.
+  //
+  // This endpoint deliberately does not mutate structural state.
+  // The client owns the canvas state (nodes / edges) and will persist
+  // the updated state via the autosave PUT on `/:canvasId`. Doing so here
+  // would race with that PUT and surface as a
+  // spurious 409 (CANVAS_VERSION_MISMATCH) on the very next autosave.
+  //
+  // What only the server can do — and therefore what this route
+  // exists for — is unlink the per-node markdown sidecar in
+  // `<canvasId>/nodes/<nodeId>.md`, since that file is invisible to
+  // the client's `state` payload.
+  fastify.delete<{
+    Params: { canvasId: string; nodeId: string };
+    Reply: ApiResult<DeleteNodeResponse>;
+  }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
+    const { canvasId, nodeId } = request.params;
+    const store = getCanvasStore(canvasId);
+    const canvas = store.read();
+    if (!canvas) {
+      return reply.code(404).send({
+        code: 'CANVAS_NOT_FOUND',
+        message: 'Canvas not found',
+      });
+    }
+
+    try {
+      store.deleteNode(nodeId);
+    } catch (error) {
+      // CanvasStoreIOError (unlink rejected by the OS, e.g. EPERM /
+      // EACCES). Surface the failure so the client can revert its
+      // optimistic delete (or at least toast). Silently returning
+      // success here would leave structural state with no reference to
+      // the node but its `.md` orphaned on disk forever.
+      //
+      // `code` is the stable contract — the client maps it to a
+      // localised toast. `message` is the English fallback used for
+      // server logs and unknown-code situations.
+      request.log.error(
+        { canvasId, nodeId, err: toMessage(error) },
+        'Failed to delete node sidecar',
+      );
+      return reply.code(500).send({
+        code: 'NODE_FILE_DELETE_FAILED',
+        message: `Failed to delete node file for "${nodeId}"`,
+      });
+    }
+
+    return reply.send({ success: true });
+  });
+
+  // --- Per-node content endpoints --------------------------------------
+  //
+  // These let the web client persist a single node's markdown sidecar
+  // (`nodes/<safe(label)>.md`) without going through the full canvas
+  // PUT, so editor edits no longer collide with the canvas-level
+  // optimistic-concurrency `version` counter. The structure PUT in
+  // `PUT /:canvasId` strips every per-node content field via
+  // {@link stripNodesForCanvas} — these endpoints are the only write
+  // path for `.md` sidecars. See `docs/node-content-api-split.md`.
+
+  fastify.put<{
+    Params: { canvasId: string; nodeId: string };
+    Body: PutNodeContentRequest;
+    Reply: ApiResult<PutNodeContentResponse> | CanvasConflictResponse;
+  }>('/:canvasId/nodes/:nodeId/content', async function (request, reply) {
+    const { canvasId, nodeId } = request.params;
+    const parsed = putNodeContentBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+      });
+    }
+
+    const store = getCanvasStore(canvasId);
+    const canvas = store.read();
+    if (!canvas) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+
+    const {
+      nodeType,
+      content: incomingContent,
+      label: incomingLabel,
+      labelSource,
+      src: incomingSrc,
+      summary,
+      keywords,
+      provenance,
+      expectRev,
+    } = parsed.data;
+
+    if (!MD_BACKED_NODE_TYPES.has(nodeType)) {
+      return reply.code(400).send({
+        message: `Node type "${nodeType}" does not have a markdown sidecar`,
+      });
+    }
+
+    // Build the record to persist. Field-ownership policy lives HERE (the
+    // caller): body resolution, the empty-body clobber guard, and label
+    // resolution. The serialized read → rev-CAS → write is owned by
+    // `updateNode` (storage layer), which reads the current on-disk record
+    // inside the shared canvas lock and hands it to this `apply` — so the
+    // resolution below is atomic with the write and can't race another
+    // writer (another tab / device / agent / preprocess). See
+    // `canvas/write-coordinator.ts`.
+    let persisted: NodeContent | undefined;
+    const apply = (existing: NodeContent | null): NodeContent => {
+      // Body resolution:
+      //   - text-bearing nodes (including `question`): prefer the caller's
+      //     content; fall back to the existing on-disk body so a label-only
+      //     update doesn't wipe it.
+      //   - frontmatter-only nodes (image/video/frame): always empty.
+      const acceptsBody = TEXT_BEARING_NODE_TYPES.has(nodeType);
+      const body = acceptsBody
+        ? (incomingContent ?? existing?.content ?? '')
+        : '';
+      // Guard against accidental content wipes (autosave race vs. editor
+      // flush): an explicit `content: ""` over a non-empty body keeps the
+      // existing body but still refreshes the frontmatter.
+      const wouldClobber =
+        acceptsBody &&
+        incomingContent === '' &&
+        typeof existing?.content === 'string' &&
+        existing.content.length > 0;
+      const safeBody = wouldClobber ? existing!.content : body;
+      // Label resolution: explicit `null` clears; absent leaves it untouched.
+      const resolvedLabel =
+        incomingLabel === undefined
+          ? (existing?.label ?? null)
+          : (incomingLabel ?? null);
+
+      const nodeContent: NodeContent = {
+        ...(existing ?? {}),
+        nodeId,
+        type: nodeType,
+        label: resolvedLabel,
+        // Only include `src` when the caller or existing record had one, so
+        // pure note/text/frame frontmatter never gets a `src: undefined`.
+        ...(incomingSrc !== undefined
+          ? { src: incomingSrc }
+          : existing?.src !== undefined
+            ? { src: existing.src }
+            : {}),
+        content: safeBody,
+      };
+      if (labelSource !== undefined) nodeContent['labelSource'] = labelSource;
+      if (summary !== undefined) nodeContent['summary'] = summary;
+      if (keywords !== undefined) nodeContent['keywords'] = keywords;
+      if (provenance !== undefined) nodeContent['provenance'] = provenance;
+      persisted = nodeContent;
+      return nodeContent;
+    };
+
+    // Strict rename only for user-typed labels: the `tryRename` flow awaits
+    // the 409 to revert the optimistic label. Agent / auto labels lazy-dedupe
+    // with `(N)` suffixes because batched agent runs cannot react to a 409.
+    //
+    // rev-CAS gating lives HERE, keyed off the node's `bodyOwnership` in the
+    // preprocessing profiles — the single source of truth for who is
+    // CAS-guarded. Only `authored` bodies (note / text / question) are
+    // optimistic-concurrency-checked: their in-app body is the resource a
+    // stale writer could clobber. `derived` bodies (extracted / bodyless) are
+    // last-write-wins — their sole concurrent writer is preprocess `persist`,
+    // which writes without CAS, so honoring `expectRev` for them would buy no
+    // safety and only risk a false `NODE_CONTENT_CONFLICT` (e.g. a brand-new
+    // image whose `expectRev` races its own `persist_source` write). The web
+    // sends `expectRev` uniformly and need not know the classification; the
+    // server drops it for non-authored types.
+    const isAuthored =
+      getProfile(nodeType as CanvasNodeType)?.bodyOwnership === 'authored';
+    let outcome: UpdateNodeOutcome;
+    try {
+      outcome = await updateNode(store, nodeId, {
+        expectRev: isAuthored ? expectRev : undefined,
+        apply,
+        strictRename: labelSource === 'user',
+      });
+    } catch (error) {
+      // CanvasStoreIOError (ENOSPC, EACCES, EROFS, …) / any unexpected throw
+      // — environmental, not client-actionable. Surface as 500 (web toasts).
+      request.log.error(
+        { canvasId, nodeId, err: toMessage(error) },
+        'Failed to write node markdown',
+      );
+      return reply.code(500).send({ message: 'Failed to write node content' });
+    }
+
+    // rev-CAS conflict: a concurrent write (another tab / device / agent, or
+    // a Google-Drive-synced copy) moved the on-disk body past the client's
+    // baseline — surface instead of silently overwriting it.
+    if (outcome.status === 'rev-conflict') {
+      return reply.code(409).send({
+        code: 'NODE_CONTENT_CONFLICT',
+        message:
+          `Node "${nodeId}" changed since you last loaded it ` +
+          '(another tab, device, or agent wrote it). Refresh to get the ' +
+          'latest content before editing.',
+        nodeId,
+        currentRev: outcome.currentRev,
+        expectedRev: expectRev,
+      } satisfies CanvasConflictResponse);
+    }
+    if (outcome.status === 'rejected') {
+      const result = outcome.result;
+      if (result.reason === 'conflict') {
+        return reply.code(409).send({
+          code: 'NODE_LABEL_CONFLICT',
+          message: `Another node already uses the label "${persisted?.label ?? ''}"`,
+          nodeId,
+          conflictWith: result.conflictWith.filename,
+        } satisfies CanvasConflictResponse);
+      }
+      if (result.reason === 'duplicate') {
+        // Two `.md` sidecars claim this nodeId (a failed rename or an external
+        // copy). Refuse rather than compound it; surface a 409 to resolve.
+        request.log.warn(
+          { canvasId, nodeId, files: result.files },
+          'Refusing node write: duplicate sidecars on disk',
+        );
+        return reply.code(409).send({
+          code: 'NODE_DUPLICATE_FILES',
+          message:
+            `Node "${nodeId}" has multiple markdown files on disk ` +
+            `(${result.files.join(', ')}); ` +
+            'resolve the duplicate before editing.',
+          nodeId,
+          duplicateFiles: result.files,
+        } satisfies CanvasConflictResponse);
+      }
+      // `not-found` should not happen here — we just constructed the record.
+      request.log.error({ canvasId, nodeId, result }, 'Node write failed');
+      return reply.code(500).send({ message: 'Failed to write node content' });
+    }
+    if (outcome.status !== 'ok') {
+      // `skipped-deleted`: the node was deleted while this write was in
+      // flight (an editor content PUT or a slow preprocessing run that
+      // finished after the DELETE). Dropping the write prevents a
+      // resurrected "ghost" sidecar the file watcher would surface as an
+      // external note. Respond benignly — the client has already removed
+      // the node — so no error toast fires. ('noop' is otherwise
+      // unreachable: `apply` always returns a record.)
+      if (outcome.status === 'skipped-deleted') {
+        // Empty-content revision (not `''`) so the response still honours the
+        // invariant that `rev` is always a valid node revision hash.
+        return reply.send({ nodeId, label: null, rev: nodeRevisionOf({}) });
+      }
+      return reply.code(500).send({ message: 'Failed to write node content' });
+    }
+
+    const response: PutNodeContentResponse = {
+      nodeId,
+      label: outcome.label,
+      // Authoritative rev of the content actually persisted (reflects the
+      // refused-empty-clobber case), co-delivered with the write it confirms
+      // as the client's new CAS baseline.
+      rev: outcome.rev,
+    };
+    // `artifactMissing` is only meaningful for src-backed types and is
+    // surfaced so the client can render the same placeholder UI it gets
+    // back on a hydrate-time miss.
+    if (ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) {
+      const srcForCheck =
+        typeof persisted?.src === 'string' ? persisted.src : '';
+      if (srcForCheck) {
+        const probe = await singleArtifactProbe(store.canvasId, srcForCheck);
+        if (isArtifactMissing(probe, { src: srcForCheck })) {
+          response.artifactMissing = true;
+        }
+      }
+    }
+    return reply.send(response);
+  });
+
+  fastify.get<{
+    Params: { canvasId: string; nodeId: string };
+    Reply: ApiResult<GetNodeContentResponse>;
+  }>('/:canvasId/nodes/:nodeId/content', async function (request, reply) {
+    const { canvasId, nodeId } = request.params;
+
+    const store = getCanvasStore(canvasId);
+    const canvas = store.read();
+    if (!canvas) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+
+    // Reconcile the cached node index against disk before this read.
+    // Only re-scans when warranted: a node already flagged duplicate
+    // always re-reads (so a hand-resolved duplicate is detected — the
+    // cheap count probe alone can't see that case), otherwise it falls
+    // back to the names-only staleness probe. Keeps the common healthy
+    // read off the full content rescan.
+    store.revalidateNodeForRead(nodeId);
+
+    // Find this node in the persisted canvas state so we know its type
+    // (without it we can't apply the artifact-missing branch). For
+    // nodes that exist in `.md` but not in canvas state we fall back
+    // to the type recorded in the markdown frontmatter.
+    const stateNodes = (canvas.state.nodes ?? []) as NodeLike[];
+    const stateNode = stateNodes.find((n) => n.id === nodeId);
+    let nodeType =
+      stateNode && typeof stateNode.type === 'string' ? stateNode.type : '';
+
+    let existing: NodeContent | null = null;
+    try {
+      existing = store.readNode(nodeId);
+    } catch {
+      existing = null;
+    }
+    if (!nodeType && existing) {
+      nodeType = existing.type;
+    }
+
+    if (!existing) {
+      // Markdown sidecar absent — surface a placeholder shape so the
+      // client can render the same "missing content" UI it gets from
+      // the batched hydrate path.
+      return reply.send({
+        nodeId,
+        type: nodeType,
+        label: null,
+        content: '',
+        // Empty-content revision so the client seeds a baseline that only
+        // matches a first write while no file exists yet (create-race safe).
+        rev: nodeRevisionOf({}),
+        contentMissing: true,
+      } satisfies GetNodeContentResponse);
+    }
+
+    // Reuse the batched hydration helper so single-node and whole-
+    // canvas reads stay in lock-step.
+    const hydrated = hydrateOneNode(
+      store,
+      {
+        id: nodeId,
+        type: nodeType,
+        data: { ...(stateNode?.data ?? {}) },
+      },
+      await singleArtifactProbe(store.canvasId, existing.src),
+    );
+    const data = (hydrated.data ?? {}) as Record<string, unknown>;
+
+    const resolvedContent =
+      typeof data['content'] === 'string'
+        ? (data['content'] as string)
+        : (existing.content ?? '');
+    const response: GetNodeContentResponse = {
+      nodeId,
+      type: nodeType,
+      label: existing.label,
+      content: resolvedContent,
+      // Baseline revision co-delivered with the content, so a single-node
+      // refresh re-seeds the client's CAS baseline atomically.
+      rev: nodeRevisionOf({
+        content: resolvedContent,
+        ...(typeof existing.src === 'string' ? { src: existing.src } : {}),
+      }),
+    };
+    const ls = existing['labelSource'];
+    if (ls === 'user' || ls === 'auto' || ls === 'agent') {
+      response.labelSource = ls;
+    }
+    if (typeof existing.src === 'string') {
+      response.src = existing.src;
+    }
+    const sum = existing['summary'];
+    if (typeof sum === 'string' && sum.trim()) {
+      response.summary = sum.trim();
+    }
+    const kws = existing['keywords'];
+    if (Array.isArray(kws) && kws.every((k) => typeof k === 'string')) {
+      response.keywords = kws as string[];
+    }
+    if (data['artifactMissing'] === true) {
+      response.artifactMissing = true;
+    }
+    // Forward the duplicate-sidecar hints so a single-node refresh can
+    // clear (or re-confirm) the editor overlay without a full canvas
+    // reload. `hydrateOneNode` already computed these onto `data`.
+    if (data['contentDuplicate'] === true) {
+      response.contentDuplicate = true;
+      if (Array.isArray(data['duplicateFiles'])) {
+        response.duplicateFiles = data['duplicateFiles'] as string[];
+      }
+    }
+    return reply.send(response);
+  });
+
+  // --- Unified preprocessing endpoint ---
+  // Single route that handles all node types (note/text/web/pdf/image/frame/video).
+  // Replaces the split between PUT /:canvasId/nodes/:nodeId and POST /resolve-label.
+
+  fastify.post<{
+    Params: { canvasId: string; nodeId: string };
+    Body: PreprocessNodeBody;
+    Reply: ApiResult<PreprocessNodeResponse>;
+  }>('/:canvasId/nodes/:nodeId/preprocess', async function (request, reply) {
+    const { canvasId, nodeId } = request.params;
+    const parsed = preprocessNodeBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+      });
+    }
+
+    const { nodeType, trigger, snapshot, previousSnapshot, options } =
+      parsed.data;
+    const dispatcher = getPreprocessDispatcher();
+    const store = getCanvasStore(canvasId);
+
+    if (MD_BACKED_NODE_TYPES.has(nodeType) && !store.readNode(nodeId)) {
+      return reply.send({
+        nodeId,
+        success: false,
+        error: 'Node sidecar is missing',
+      });
+    }
+
+    try {
+      const ppRequest: PreprocessNodeRequest = {
+        canvasId,
+        nodeId,
+        nodeType,
+        trigger: trigger ?? 'node_updated',
+        snapshot,
+        previousSnapshot,
+        options: {
+          allowLLM: options?.allowLLM ?? true,
+          allowPersistence: options?.allowPersistence ?? true,
+          force: options?.force ?? false,
+          mode: options?.mode,
+        },
+      };
+
+      const result = await dispatcher.preprocess(ppRequest);
+
+      const response: PreprocessNodeResponse = {
+        nodeId,
+        success: result.success,
+        suggestedLabel:
+          typeof result.patch.label === 'string'
+            ? result.patch.label
+            : undefined,
+        // Surface the post-Persist canonical `src` only when the
+        // Project stage decided it diverged from the snapshot — see
+        // the `patch.src` branch in `stages/project.ts`. Reading from
+        // the patch (rather than `result.persistence`) means we
+        // automatically inherit the same "only when changed" gate so
+        // the client never receives a redundant src write.
+        src:
+          typeof result.patch.src === 'string' ? result.patch.src : undefined,
+        // For office nodes the in-canvas preview reads `data.content`
+        // directly, so ship the freshly-extracted body back so the
+        // client doesn't need a full canvas reload (or a follow-up
+        // GET /content) before the preview can render. The OfficeLoader
+        // already strips officeparser's auto-prepended YAML frontmatter
+        // and stray horizontal rule, so this value is preview-ready.
+        // Other text-bearing types (pdf / web / note) deliberately do
+        // NOT echo `content` here — their previews never read it and
+        // the extracted text can be hundreds of KB.
+        content:
+          nodeType === 'office' && typeof result.extracted?.content === 'string'
+            ? result.extracted.content
+            : undefined,
+        summary: result.enriched?.summary,
+        keywords: result.enriched?.keywords,
+        error:
+          result.diagnostics
+            .filter((d) => d.level === 'error')
+            .map((d) => `${d.code}: ${d.message}`)
+            .join('; ') || undefined,
+      };
+      return reply.send(response);
+    } catch (error) {
+      const message = toMessage(error);
+      request.log.error(
+        { nodeId, nodeType, error },
+        'Failed to preprocess node',
+      );
+      return reply.code(500).send({
+        message: 'Failed to preprocess node',
+        details: message,
+      });
+    }
+  });
+
+  // --- GET Canvas ---
+
+  fastify.get<{
+    Params: { canvasId: string };
+    Reply: ApiResult<GetCanvasResponse>;
+  }>('/:canvasId', async function (request, reply) {
+    const { canvasId } = request.params;
+    if (isWorldCanvasId(canvasId)) {
+      await reconcileWorldPortals();
+    }
+    const store = getCanvasStore(canvasId);
+    const canvas = store.read();
+
+    if (!canvas) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+
+    // Hydrate node content from the per-canvas store so clients always
+    // receive fresh markdown bodies.
+    const nodes = canvas.state.nodes as NodeLike[];
+    const hydratedNodes = await hydrateNodeContent(store, nodes);
+
+    return reply.send({
+      canvasId: canvas.canvasId,
+      title: canvas.title,
+      version: canvas.version,
+      state: {
+        ...canvas.state,
+        nodes: hydratedNodes,
+      },
+    });
+  });
+
+  fastify.get<{
+    Params: { canvasId: string };
+    Reply: ApiResult<GetWorldReferencesResponse>;
+  }>('/:canvasId/references', async function (request, reply) {
+    try {
+      return reply.send(await resolveWorldReferences(request.params.canvasId));
+    } catch (error) {
+      if (error instanceof WorldReferenceResolutionError) {
+        return reply.code(400).send({ message: error.message });
+      }
+      throw error;
+    }
+  });
+
+  // --- PUT Canvas ---
+
+  fastify.put<{
+    Params: { canvasId: string };
+    Body: PutCanvasRequest;
+    Reply: ApiResult<PutCanvasResponse> | CanvasConflictResponse;
+  }>('/:canvasId', async function (request, reply) {
+    const { canvasId } = request.params;
+    const parsed = putCanvasBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ message: 'Invalid request body' });
+    }
+
+    const { version: clientVersion, state, title } = parsed.data;
+    const incomingState = state as {
+      nodes?: NodeLike[];
+      edges?: unknown[];
+      [key: string]: unknown;
+    };
+
+    const store = getCanvasStore(canvasId);
+    const existing = store.read();
+    const serverVersion = existing?.version ?? 0;
+    if (clientVersion !== serverVersion) {
+      return reply.code(409).send({
+        code: 'CANVAS_VERSION_CONFLICT',
+        message: 'Canvas version mismatch',
+        serverVersion,
+      } satisfies CanvasConflictResponse);
+    }
+
+    try {
+      assertWorldPortalTopologyAllowed(
+        canvasId,
+        (existing?.state.nodes ?? []) as NodeLike[],
+        incomingState.nodes ?? [],
+      );
+    } catch (error) {
+      if (error instanceof WorldPortalMutationError) {
+        return reply.code(409).send({ message: error.message });
+      }
+      throw error;
+    }
+
+    // Title rename (and the directory rename it implies) happens
+    // before any node persistence so a 409 doesn't half-apply changes.
+    const previousTitle = existing?.title ?? null;
+    const nextTitle = title ?? previousTitle;
+    if (typeof title === 'string' && title !== previousTitle) {
+      // Release any handle held inside this Space's directory across the
+      // rename: on Windows a live `fs.watch` handle makes `renameSync` fail
+      // with EPERM (see `withSpaceDirHandlesReleased`).
+      const renameResult = await withSpaceDirHandlesReleased(canvasId, () =>
+        store.renameSelf(title),
+      );
+      if (!renameResult.ok && renameResult.reason === 'conflict') {
+        return reply.code(409).send({
+          code: 'CANVAS_TITLE_CONFLICT',
+          message: `Another canvas already uses the directory name "${renameResult.conflictWith}"`,
+          conflictWith: renameResult.conflictWith,
+        } satisfies CanvasConflictResponse);
+      }
+      if (!renameResult.ok && renameResult.reason === 'forbidden') {
+        return reply
+          .code(403)
+          .send({ message: 'World canvas cannot be renamed' });
+      }
+      if (!renameResult.ok && renameResult.reason === 'fs-error') {
+        request.log.error(
+          { canvasId, err: renameResult.message },
+          'Failed to rename canvas directory',
+        );
+        return reply.code(500).send({ message: 'Failed to rename canvas' });
+      }
+    }
+
+    const timestamp = nowMs();
+    const nextVersion = serverVersion + 1;
+
+    const rawState = incomingState;
+
+    const slimNodes = stripNodesForCanvas(
+      (rawState?.nodes ?? []) as NodeLike[],
+    );
+
+    const canvasFile: CanvasFile = {
+      canvasId,
+      title: nextTitle,
+      version: nextVersion,
+      state: {
+        ...rawState,
+        nodes: slimNodes,
+        edges: rawState?.edges ?? [],
+      },
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+    };
+
+    // A title rename may have yielded while an async Space deletion or a
+    // competing PUT completed. Recheck immediately before the synchronous
+    // write so a stale request that initially observed a real Space cannot
+    // recreate it after deletion (or overwrite a newer version). The legacy
+    // implicit-create path remains only for requests whose initial read was
+    // genuinely absent.
+    if (existing) {
+      const current = store.read();
+      if (!current) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      if (current.version !== existing.version) {
+        return reply.code(409).send({
+          code: 'CANVAS_VERSION_CONFLICT',
+          message: 'Canvas version mismatch',
+          serverVersion: current.version,
+        } satisfies CanvasConflictResponse);
+      }
+    }
+    store.write(canvasFile);
+
+    return reply.send({
+      canvasId,
+      version: nextVersion,
+    });
+  });
+
+  // --- POST /:canvasId/execute (headless executor, M2) -----------------
+  //
+  // Runs a batch of `CanvasCommand`s server-side: hydrates sidecar content,
+  // drives the shared engine, persists topology and content,
+  // appends one row to the delta log, and returns the structural delta
+  // the client can apply locally without re-issuing a full snapshot.
+  //
+  // Atomic per-canvas (the executor owns a mutex keyed by canvasId).
+  // Idempotent no-op batches do not bump the version.
+
+  fastify.post<{
+    Params: { canvasId: string };
+    Body: PostCanvasExecuteRequest;
+    Reply: ApiResult<PostCanvasExecuteResponse>;
+  }>('/:canvasId/execute', async function (request, reply) {
+    const { canvasId } = request.params;
+    const parsed = postCanvasExecuteBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+      });
+    }
+    if (parsed.data.originator.source === 'system') {
+      return reply.code(403).send({
+        message: 'System command origin is reserved for internal callers',
+      });
+    }
+    const { commands, originator, runId } = parsed.data;
+    const validatedCommands: CanvasCommand[] = [];
+    for (const command of commands) {
+      if (
+        typeof command === 'object' &&
+        command !== null &&
+        'type' in command &&
+        command.type === 'SET_PORTAL_NODE_PINS'
+      ) {
+        const parsedCommand = setPortalNodePinsCommandSchema.safeParse(command);
+        if (!parsedCommand.success) {
+          return reply.code(400).send({
+            message:
+              parsedCommand.error.issues[0]?.message ??
+              'Invalid Portal Pin command',
+          });
+        }
+        validatedCommands.push(parsedCommand.data as CanvasCommand);
+      } else {
+        validatedCommands.push(command as CanvasCommand);
+      }
+    }
+
+    try {
+      const out = await executeCanvasCommandsOnHost({
+        canvasId,
+        commands: validatedCommands,
+        originator,
+        ...(runId ? { runId } : {}),
+        // Derive review records only for thread-attributed (ACP) batches —
+        // they feed that conversation's change card. Other callers skip it.
+        computeChanges: !!originator.threadId,
+      });
+      const response: PostCanvasExecuteResponse = {
+        canvasId: out.canvasId,
+        fromVersion: out.fromVersion,
+        toVersion: out.toVersion,
+        deltas: out.deltas,
+        results: out.results,
+        commands: out.commands,
+        pendingEffects: {
+          mutatedNodes: out.pendingEffects.mutatedNodes,
+          deletedNodeIds: out.pendingEffects.deletedNodeIds,
+          contentEditedNodeIds: out.pendingEffects.contentEditedNodeIds,
+          deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,
+        },
+        ...(runId ? { runId } : {}),
+      };
+
+      return reply.send(response);
+    } catch (err) {
+      if (err instanceof CanvasNotFoundError) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      if (err instanceof WorldPortalMutationError) {
+        return reply.code(409).send({ message: err.message });
+      }
+      if (err instanceof MissingWorldPortalError) {
+        return reply
+          .code(409)
+          .send({ code: 'WORLD_PORTAL_MISSING', message: err.message });
+      }
+      if (err instanceof CanvasCommandRoutingError) {
+        return reply.code(409).send({ message: err.message });
+      }
+      request.log.error({ canvasId, err }, 'Failed to execute canvas commands');
+      return reply.code(500).send({
+        message: 'Failed to execute canvas commands',
+      });
+    }
+  });
+
+  // --- Change-review records (ACP change card) --------------------------
+  //
+  // `GET /:canvasId/threads/:threadId/changes` returns the pending review
+  // records for a conversation; `DELETE …/changes/:changeId` removes one
+  // (accept or post-revert). Revert of canvas content itself happens on
+  // the client via the inverse deltas carried in each record.
+
+  fastify.get<{
+    Params: { canvasId: string; threadId: string };
+    Reply: ApiResult<GetThreadChangesResponse>;
+  }>('/:canvasId/threads/:threadId/changes', async function (request, reply) {
+    const { canvasId, threadId } = request.params;
+    const store = getCanvasStore(canvasId);
+    if (!store.read()) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+    return reply.send({ changes: store.readChanges(threadId) });
+  });
+
+  fastify.delete<{
+    Params: { canvasId: string; threadId: string; changeId: string };
+    Reply: ApiResult<DeleteThreadChangeResponse>;
+  }>(
+    '/:canvasId/threads/:threadId/changes/:changeId',
+    async function (request, reply) {
+      const { canvasId, threadId, changeId } = request.params;
+      const store = getCanvasStore(canvasId);
+      if (!store.read()) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      const removed = store.removeChange(threadId, changeId);
+      return reply.send({ removed: !!removed });
+    },
+  );
+
+  // Revert one change: apply its inverse deltas server-side (persists +
+  // broadcasts to all live tabs), then drop the record.
+  fastify.post<{
+    Params: { canvasId: string; threadId: string; changeId: string };
+    Reply: ApiResult<DeleteThreadChangeResponse>;
+  }>(
+    '/:canvasId/threads/:threadId/changes/:changeId/revert',
+    async function (request, reply) {
+      const { canvasId, threadId, changeId } = request.params;
+      const store = getCanvasStore(canvasId);
+      if (!store.read()) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      const records = store.readChanges(threadId);
+      const record = records.find((r) => r.id === changeId);
+      if (!record) {
+        return reply.send({ removed: false });
+      }
+      try {
+        const out = await applyDeltasOnServer({
+          canvasId,
+          deltas: record.revertDeltas,
+          originator: { source: 'ui' },
+        });
+        if (out.toVersion > out.fromVersion) {
+          publishCanvasUpdate(canvasId, {
+            type: 'update',
+            data: {
+              fromVersion: out.fromVersion,
+              toVersion: out.toVersion,
+              deltas: out.deltas,
+              pendingEffects: out.pendingEffects,
+            },
+          });
+        }
+      } catch (err) {
+        if (err instanceof CanvasNotFoundError) {
+          return reply.code(404).send({ message: 'Canvas not found' });
+        }
+        request.log.error(
+          { canvasId, changeId, err },
+          'Failed to revert change',
+        );
+        return reply.code(500).send({ message: 'Failed to revert change' });
+      }
+      store.removeChange(threadId, changeId);
+      return reply.send({ removed: true });
+    },
+  );
+
+  // --- Canvas events: append-only behavioural log -----------------------
+  //
+  // The frontend buffers `RecentAction` records and POSTs them in
+  // batches (autosave piggy-back, pre-agent flush, beforeunload). Each
+  // request is capped to 200 events / 64 KB body; oversize uploads
+  // should be split client-side.
+
+  const EVENTS_BODY_LIMIT_BYTES = 64 * 1024;
+  const DEFAULT_EVENTS_LIMIT = 100;
+
+  fastify.post<{
+    Params: { canvasId: string };
+    Body: PostCanvasEventsRequest;
+    Reply: ApiResult<PostCanvasEventsResponse>;
+  }>(
+    '/:canvasId/events',
+    { bodyLimit: EVENTS_BODY_LIMIT_BYTES },
+    async function (request, reply) {
+      const { canvasId } = request.params;
+      const parsed = postCanvasEventsBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        request.log.warn(
+          { canvasId, issues: parsed.error.issues },
+          'Invalid canvas events request body',
+        );
+        return reply.code(400).send({
+          message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+        });
+      }
+
+      const store = getCanvasStore(canvasId);
+      if (!store.read()) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+
+      try {
+        store.appendEvents(parsed.data.events);
+      } catch (error) {
+        request.log.error(
+          { canvasId, error },
+          'Failed to append canvas events',
+        );
+        return reply.code(500).send({
+          message: 'Failed to append canvas events',
+          details: toMessage(error),
+        });
+      }
+
+      // Op-counter bookkeeping is centralised in the global Fastify
+      // hook — see `modules/agent/memory/op-counter-hook.ts`. It picks
+      // this endpoint up automatically and weights the bump by
+      // `parsed.data.events.length` so node-level granularity is
+      // preserved.
+
+      return reply.send({ appended: parsed.data.events.length });
+    },
+  );
+
+  fastify.get<{
+    Params: { canvasId: string };
+    Querystring: GetCanvasEventsQuery;
+    Reply: ApiResult<GetCanvasEventsResponse>;
+  }>('/:canvasId/events', async function (request, reply) {
+    const { canvasId } = request.params;
+    const parsedQuery = getCanvasEventsQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+      });
+    }
+
+    const handle = getStructuredStore().space(canvasId);
+    if (!(await handle.record.read())) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+
+    const limit = parsedQuery.data.limit ?? DEFAULT_EVENTS_LIMIT;
+    const since = parsedQuery.data.since;
+    // The Phase-2 consumer slice: this read goes through the structured port
+    // rather than the compatibility facade, so the repository contract has a
+    // real caller before it is frozen. See
+    // docs/proposals/multi-backend-storage.md §12.2.8.
+    //
+    // Resolve existence and events through one handle so malformed or
+    // unreadable durable state cannot be collapsed into a false 404 by the
+    // compatibility facade's intentionally lenient legacy reader.
+    const events = await handle.events.read(limit);
+    const filtered =
+      since != null ? events.filter((e) => e.ts >= since) : events;
+    const trimmed = filtered.length > limit ? filtered.slice(-limit) : filtered;
+
+    return reply.send({ events: trimmed });
+  });
+
+  // --- Export Canvas (zip) ---
+
+  /**
+   * Stream the entire `<canvasId>/` directory as a `.huabu.zip` archive.
+   *
+   * The zip mirrors the complete Space layout, with a root manifest identifying
+   * the export version and source canvas id.
+   */
+  /**
+   * Open the canvas's `nodes/` folder in the host file manager so the
+   * user can resolve a duplicate-markdown collision by hand (keep one
+   * file, delete the rest). Desktop-first: the server runs on the same
+   * machine as the UI, so it owns the only reliable filesystem path.
+   * The folder is sandboxed to the workspace via {@link nodesDir}.
+   */
+  fastify.post<{
+    Params: { canvasId: string };
+    Reply: ApiResult<RevealNodesFolderResponse>;
+  }>('/:canvasId/reveal-nodes', async function (request, reply) {
+    const { canvasId } = request.params;
+    const store = getCanvasStore(canvasId);
+    if (!store.read()) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+    const dir = nodesDir(canvasId);
+    if (!existsSync(dir)) {
+      return reply.code(404).send({ message: 'Nodes folder not found' });
+    }
+    // Fire-and-forget: `openInFileManager` is best-effort and never
+    // throws (spawn surfaces a missing binary asynchronously, which it
+    // swallows). There's no reliable synchronous success signal to gate
+    // a 500 on, so we always report success once the spawn is issued.
+    openInFileManager(dir);
+    return reply.send({ success: true });
+  });
+
+  fastify.get<{
+    Params: { canvasId: string };
+    Querystring: ExportCanvasQuery;
+    // Success path streams a zip archive (Readable). Failure path is the
+    // canonical ApiErrorBody — declared here so the 400/404 branches
+    // type-check via the same `reply.send(...)` machinery the JSON
+    // routes use.
+    Reply: ApiResult<NodeJS.ReadableStream>;
+  }>('/:canvasId/export', async function (request, reply) {
+    const { canvasId } = request.params;
+    const parsedQuery = exportCanvasQuerySchema.safeParse(request.query);
+    if (!parsedQuery.success) {
+      return reply.code(400).send({
+        message: parsedQuery.error.issues[0]?.message ?? 'Invalid query',
+      });
+    }
+    const includeHistory = parsedQuery.data.includeHistory !== 'false';
+
+    const store = getCanvasStore(canvasId);
+    const canvas = store.read();
+    if (!canvas) {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+
+    const canvasDir = canvasRoot(canvasId);
+    if (!existsSync(canvasDir)) {
+      return reply.code(404).send({ message: 'Canvas directory not found' });
+    }
+
+    const manifest = {
+      version: '2',
+      exportedAt: new Date().toISOString(),
+      sourceCanvasId: canvasId,
+      title: canvas.title,
+    };
+
+    const rawName = `${canvas.title ?? canvasId}.huabu.zip`;
+    const asciiFallback = rawName
+      .replace(/[^\x20-\x7E]/g, '_')
+      .replace(/[;'"\\]/g, '_');
+    const encodedName = encodeURIComponent(rawName);
+
+    reply
+      .header(
+        'Content-Disposition',
+        `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodedName}`,
+      )
+      .header('Content-Type', 'application/zip');
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('warning', (err) => {
+      request.log.warn({ err }, 'archiver warning during export');
+    });
+    archive.on('error', (err) => {
+      request.log.error({ err }, 'archiver error during export');
+    });
+
+    archive.append(JSON.stringify(manifest, null, 2), {
+      name: 'manifest.json',
+    });
+    // dot:true so the hidden `.artifacts/` directory is always included;
+    // `.history/` is opted out unless the caller explicitly requests it.
+    archive.glob('**/*', {
+      cwd: canvasDir,
+      dot: true,
+      ignore: includeHistory ? [] : ['.history/**'],
+    });
+
+    void archive.finalize();
+    return reply.send(archive);
+  });
+
+  // --- Import Canvas (zip) ---
+
+  fastify.post<{ Reply: ApiResult<ImportCanvasResponse> }>(
+    '/import',
+    async function (request, reply) {
+      const file = await request.file();
+      if (!file) {
+        return reply.code(400).send({ message: 'No file provided' });
+      }
+
+      // Stream the upload to a temp zip file
+      const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
+      const targetCanvasId = createId('canvas');
+      // Extract into a hidden staging dir so `scanWorkspace()` ignores it
+      // (it skips dot-prefixed entries) and the as-yet-unrenamed dir cannot
+      // be picked up by `read()`'s self-heal as a canvas titled `<canvasId>`.
+      const stagingDir = path.join(
+        getWorkspacePath(),
+        `.import-${targetCanvasId}`,
+      );
+      let stagingCleanedUp = false;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const ws = createWriteStream(tmpZip);
+          file.file.pipe(ws);
+          ws.on('finish', () => resolve());
+          ws.on('error', reject);
+          file.file.on('error', reject);
+        });
+
+        // `@fastify/multipart` silently *truncates* the file stream once it
+        // exceeds the configured `fileSize` limit rather than throwing. A
+        // truncated bundle is a corrupt zip, which surfaces downstream as a
+        // cryptic "End of central directory record" yauzl error. Detect it
+        // here and return an actionable 413 instead.
+        if (file.file.truncated) {
+          await unlink(tmpZip).catch(() => {});
+          return reply.code(413).send({
+            message: `Bundle exceeds the maximum upload size of ${Math.floor(
+              MAX_UPLOAD_BYTES / (1024 * 1024),
+            )}MB`,
+          });
+        }
+
+        mkdirSync(stagingDir, { recursive: true });
+
+        type ImportManifest = {
+          version?: string;
+          sourceCanvasId?: string;
+          title?: string | null;
+        };
+        let manifest: ImportManifest | null = null;
+
+        await extractZip(tmpZip, async (entryPath, readEntry) => {
+          if (entryPath === 'manifest.json') {
+            const buf = await readEntry();
+            try {
+              manifest = JSON.parse(buf.toString('utf-8')) as ImportManifest;
+            } catch {
+              manifest = null;
+            }
+            return;
+          }
+          // Path traversal guard: resolve to absolute paths, then use
+          // path.relative to detect any escape from the staging dir
+          // (a `..` segment or absolute entry would surface as a
+          // relative path that starts with `..` or is itself absolute).
+          // This is more robust than a `startsWith(prefix)` check, which
+          // can be fooled by paths that share a directory-name prefix
+          // (e.g. `/ws/import-foo` vs `/ws/import-foo-bar`).
+          const resolvedRoot = path.resolve(stagingDir);
+          const dest = path.resolve(resolvedRoot, entryPath);
+          const rel = path.relative(resolvedRoot, dest);
+          if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+            request.log.warn(
+              { entryPath },
+              'Refusing zip entry with traversal',
+            );
+            return;
+          }
+          await mkdir(path.dirname(dest), { recursive: true });
+          const buf = await readEntry();
+          await writeFile(dest, new Uint8Array(buf));
+        });
+
+        // Rewrite the topology file so canvasId matches the new directory.
+        // New bundles carry `space.json`; still accept legacy `canvas.json`
+        // exports and normalise them to the new name on the way in.
+        const stagedJsonPath = path.join(stagingDir, SPACE_JSON_FILENAME);
+        const legacyJsonPath = path.join(stagingDir, 'canvas.json');
+        const sourceJsonPath = existsSync(stagedJsonPath)
+          ? stagedJsonPath
+          : existsSync(legacyJsonPath)
+            ? legacyJsonPath
+            : null;
+        if (!sourceJsonPath) {
+          await rm(stagingDir, { recursive: true, force: true });
+          stagingCleanedUp = true;
+          return reply.code(400).send({
+            message: 'Invalid bundle: missing space.json',
+          });
+        }
+        const raw = await readFile(sourceJsonPath, 'utf-8');
+        const parsed = JSON.parse(raw) as CanvasFile;
+        const sourceCanvasId = parsed.canvasId;
+        const importedManifest = manifest as ImportManifest | null;
+        const targetTitle =
+          importedManifest?.title ?? parsed.title ?? 'Imported canvas';
+        const finalDirName = suggestCanvasDir(targetTitle, targetCanvasId);
+        const safeFromTitle = toSafeFilename(targetTitle, targetCanvasId);
+        const dedupeSuffix =
+          finalDirName === safeFromTitle
+            ? ''
+            : finalDirName.slice(safeFromTitle.length);
+        const resolvedTitle =
+          dedupeSuffix === '' ? targetTitle : targetTitle + dedupeSuffix;
+
+        const remapped: CanvasFile = {
+          ...parsed,
+          canvasId: targetCanvasId,
+          title: resolvedTitle,
+          state: rewriteCanvasArtifactUrls(
+            parsed.state,
+            sourceCanvasId,
+            targetCanvasId,
+          ),
+        };
+        // Always persist under the new name so the storage layer (which
+        // addresses `space.json`) can find it; drop a legacy source file.
+        await writeFile(stagedJsonPath, JSON.stringify(remapped));
+        if (sourceJsonPath !== stagedJsonPath) {
+          await rm(sourceJsonPath, { force: true });
+        }
+
+        // Move the staged dir into its final, title-derived location so
+        // the on-disk basename matches the title and `read()` will not
+        // self-heal-overwrite the title with the staging dir basename on
+        // the next access.
+        const finalDir = path.join(getWorkspacePath(), finalDirName);
+        renameSync(stagingDir, finalDir);
+        stagingCleanedUp = true;
+        registerCanvasDir(targetCanvasId, finalDirName, resolvedTitle);
+        refreshCanvasDirIndex();
+
+        const response: ImportCanvasResponse = {
+          canvasId: targetCanvasId,
+        };
+        return reply.send(response);
+      } catch (err) {
+        request.log.error({ err }, 'Failed to import canvas zip');
+        return reply.code(500).send({ message: 'Failed to import canvas' });
+      } finally {
+        void unlink(tmpZip).catch(() => {});
+        if (!stagingCleanedUp && existsSync(stagingDir)) {
+          await rm(stagingDir, { recursive: true, force: true }).catch(
+            () => {},
+          );
+        }
+      }
+    },
+  );
+
+  // --- Search canvas (NDJSON stream) ---
+  //
+  // Streams matches across the canvas as `application/x-ndjson` — one
+  // JSON `CanvasSearchEvent` per line. Metadata-tier hits (label /
+  // summary / keywords) ship first, then body-content hits, so the UI
+  // can populate immediately while the heavier scan finishes. The
+  // client cancels a superseded query by closing the socket
+  // (`AbortController.abort()`); we mirror that into the scanner via
+  // an `AbortController` so it short-circuits between nodes.
+  fastify.post<{ Params: { canvasId: string } }>(
+    '/:canvasId/search',
+    async function (request, reply) {
+      const { canvasId } = request.params;
+      const parsed = canvasSearchRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+        });
+      }
+
+      const store = getCanvasStore(canvasId);
+      const canvas = store.read();
+      if (!canvas) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+
+      reply.hijack();
+      reply.raw.writeHead(200, {
+        'Content-Type': 'application/x-ndjson',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      reply.raw.flushHeaders?.();
+
+      const abort = new AbortController();
+      let closed = false;
+      const writeEvent = (event: CanvasSearchEvent): void => {
+        if (closed) return;
+        try {
+          reply.raw.write(JSON.stringify(event) + '\n');
+        } catch {
+          // Socket already closed / errored. Mark closed AND abort
+          // the scanner so it stops doing disk/CPU work right away —
+          // otherwise we'd wait for `request.raw`'s `'close'` event,
+          // which may not have fired yet (or at all, for a half-open
+          // TCP connection) and would let `searchCanvas()` keep
+          // streaming sidecars into a dead pipe.
+          closed = true;
+          abort.abort();
+        }
+      };
+
+      const onClose = (): void => {
+        closed = true;
+        abort.abort();
+      };
+      request.raw.on('close', onClose);
+
+      try {
+        await searchCanvas(store, parsed.data, writeEvent, abort.signal);
+      } catch (err) {
+        request.log.error({ err, canvasId }, 'Canvas search failed');
+        writeEvent({
+          type: 'error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        request.raw.off('close', onClose);
+        if (!closed) {
+          try {
+            reply.raw.end();
+          } catch {
+            /* already closed */
+          }
+        }
+      }
+    },
+  );
+};
+
+/**
+ * Rewrite `/api/canvas/<old>/artifact/<file>` URLs inside canvas state to
+ * point at the freshly-allocated canvas id. Mutates and returns the input.
+ */
+function rewriteCanvasArtifactUrls<T>(
+  state: T,
+  fromCanvasId: string,
+  toCanvasId: string,
+): T {
+  const fromPrefix = `/api/canvas/${fromCanvasId}/artifact/`;
+  const toPrefix = `/api/canvas/${toCanvasId}/artifact/`;
+  const json = JSON.stringify(state).split(fromPrefix).join(toPrefix);
+  return JSON.parse(json) as T;
+}
+
+/**
+ * Iterate over zip entries via `yauzl`, calling `onEntry(path, read)` for
+ * each file. `read()` returns a buffer of the entry's full content.
+ */
+async function extractZip(
+  zipPath: string,
+  onEntry: (entryPath: string, read: () => Promise<Buffer>) => Promise<void>,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+      if (err || !zipfile)
+        return reject(err ?? new Error('Failed to open zip'));
+      zipfile.on('entry', (entry) => {
+        if (/\/$/.test(entry.fileName)) {
+          // Directory entry — skip.
+          zipfile.readEntry();
+          return;
+        }
+        zipfile.openReadStream(entry, (err2, stream) => {
+          if (err2 || !stream) {
+            zipfile.close();
+            return reject(err2 ?? new Error('Failed to open entry'));
+          }
+          const chunks: Buffer[] = [];
+          stream.on('data', (c: Buffer) => chunks.push(c));
+          stream.on('end', () => {
+            void onEntry(entry.fileName, async () => Buffer.concat(chunks))
+              .then(() => zipfile.readEntry())
+              .catch((e) => {
+                zipfile.close();
+                reject(e);
+              });
+          });
+          stream.on('error', reject);
+        });
+      });
+      zipfile.on('end', () => resolve());
+      zipfile.on('error', reject);
+      zipfile.readEntry();
+    });
+  });
+}
+
+export default canvasRoutes;

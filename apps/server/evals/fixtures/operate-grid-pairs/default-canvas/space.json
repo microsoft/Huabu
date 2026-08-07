@@ -1,0 +1,52 @@
+{
+  "canvasId": "default-canvas",
+  "title": "Operate-Grid-Pairs Eval",
+  "version": 1,
+  "state": {
+    "nodes": [
+      {
+        "id": "node-q-sediment",
+        "type": "note",
+        "position": { "x": 0, "y": 0 },
+        "data": { "type": "note", "label": "Q1 Sediment load" },
+        "style": { "width": 320, "height": 160 },
+        "measured": { "width": 320, "height": 160 }
+      },
+      {
+        "id": "node-a-sediment",
+        "type": "note",
+        "position": { "x": 900, "y": 320 },
+        "data": { "type": "note", "label": "A1 Sediment load" },
+        "style": { "width": 320, "height": 160 },
+        "measured": { "width": 320, "height": 160 }
+      },
+      {
+        "id": "node-q-spillway",
+        "type": "note",
+        "position": { "x": 460, "y": 640 },
+        "data": { "type": "note", "label": "Q2 Spillway capacity" },
+        "style": { "width": 320, "height": 160 },
+        "measured": { "width": 320, "height": 160 }
+      },
+      {
+        "id": "node-q-dredging",
+        "type": "note",
+        "position": { "x": 120, "y": 980 },
+        "data": { "type": "note", "label": "Q3 Dredging cadence" },
+        "style": { "width": 320, "height": 160 },
+        "measured": { "width": 320, "height": 160 }
+      },
+      {
+        "id": "node-a-dredging",
+        "type": "note",
+        "position": { "x": 820, "y": 1240 },
+        "data": { "type": "note", "label": "A3 Dredging cadence" },
+        "style": { "width": 320, "height": 160 },
+        "measured": { "width": 320, "height": 160 }
+      }
+    ],
+    "edges": []
+  },
+  "createdAt": 1714000000000,
+  "updatedAt": 1714000000000
+}

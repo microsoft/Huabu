@@ -1,0 +1,28 @@
+{
+  "name": "@agenetes/runtime",
+  "version": "0.1.0",
+  "description": "Host-agnostic L2 agent-runtime framework: the AgentHandle execution seam plus the driver register/injection seam. Depends only on @agenetes/protocol.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agenetes/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

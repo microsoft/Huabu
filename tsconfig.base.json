@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@huabu/shared": ["./packages/shared/src/index.ts"],
+      "@huabu/shared/canvas-engine": [
+        "./packages/shared/src/canvas-engine/index.ts"
+      ]
+    }
+  }
+}

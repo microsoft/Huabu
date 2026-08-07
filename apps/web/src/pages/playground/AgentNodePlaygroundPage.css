@@ -1,0 +1,421 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
+.built-in-avatar-bean {
+  border-radius: 58% 42% 52% 48% / 44% 55% 45% 56%;
+  transform: rotate(-6deg);
+}
+
+.built-in-avatar-bean > svg {
+  transform: rotate(6deg);
+}
+
+.question-attention-candidate {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--success) 25%, transparent),
+    0 2px 9px color-mix(in srgb, var(--success) 32%, transparent);
+}
+
+.question-attention-candidate-nudge {
+  animation: playground-question-attention-nudge 4s ease-in-out infinite;
+}
+
+@keyframes playground-question-attention-nudge {
+  0%,
+  12%,
+  100% {
+    transform: translateX(0) rotate(0deg);
+  }
+  3% {
+    transform: translateX(-1px) rotate(-1.5deg);
+  }
+  6% {
+    transform: translateX(1px) rotate(1.5deg);
+  }
+  9% {
+    transform: translateX(-0.5px) rotate(-0.75deg);
+  }
+}
+
+.question-attention-candidate-slide {
+  animation: question-attention-slide 4s ease-in-out infinite;
+}
+
+@keyframes question-attention-slide {
+  0%,
+  16%,
+  100% {
+    transform: translateX(0);
+  }
+  4% {
+    transform: translateX(-2px);
+  }
+  8% {
+    transform: translateX(2px);
+  }
+  12% {
+    transform: translateX(-1px);
+  }
+}
+
+.question-attention-candidate-lift {
+  animation: question-attention-lift 4s ease-in-out infinite;
+}
+
+@keyframes question-attention-lift {
+  0%,
+  16%,
+  100% {
+    transform: translateY(0);
+  }
+  5% {
+    transform: translateY(-3px);
+  }
+  10% {
+    transform: translateY(1px);
+  }
+  13% {
+    transform: translateY(-1px);
+  }
+}
+
+.question-attention-candidate-pulse {
+  animation: question-attention-pulse 4s ease-in-out infinite;
+}
+
+@keyframes question-attention-pulse {
+  0%,
+  16%,
+  100% {
+    transform: scale(1);
+  }
+  7% {
+    transform: scale(1.06);
+  }
+}
+
+.question-attention-candidate-halo {
+  animation: question-attention-halo 4s ease-out infinite;
+}
+
+@keyframes question-attention-halo {
+  0%,
+  18%,
+  100% {
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--success) 25%, transparent),
+      0 2px 9px color-mix(in srgb, var(--success) 32%, transparent);
+  }
+  8% {
+    box-shadow:
+      0 0 0 7px color-mix(in srgb, var(--success) 0%, transparent),
+      0 2px 9px color-mix(in srgb, var(--success) 32%, transparent);
+  }
+}
+
+.question-attention-candidate-echo {
+  animation: question-attention-echo 4s ease-out infinite;
+}
+
+@keyframes question-attention-echo {
+  0%,
+  20%,
+  100% {
+    outline: 0 solid color-mix(in srgb, var(--success) 35%, transparent);
+    outline-offset: 0;
+  }
+  8% {
+    outline: 2px solid color-mix(in srgb, var(--success) 20%, transparent);
+    outline-offset: 5px;
+  }
+  16% {
+    outline: 2px solid color-mix(in srgb, var(--success) 0%, transparent);
+    outline-offset: 8px;
+  }
+}
+
+.status-ring-candidate {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: 3.5rem;
+  height: 3.5rem;
+  place-items: center;
+  border-radius: 9999px;
+}
+
+.status-ring-candidate::before,
+.status-ring-candidate::after {
+  position: absolute;
+  border-radius: inherit;
+  content: '';
+  pointer-events: none;
+}
+
+.status-ring-candidate-core {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  width: 3.125rem;
+  height: 3.125rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: inherit;
+  background: var(--bg-surface);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--fg-default) 10%, transparent);
+}
+
+.question-agent-ring-approval::before {
+  position: absolute;
+  inset: -3px;
+  z-index: 0;
+  padding: 3px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from -32deg,
+    var(--warning) 0deg 292deg,
+    color-mix(in srgb, var(--warning) 18%, transparent) 292deg 360deg
+  );
+  content: '';
+  pointer-events: none;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+.question-agent-ring-approval::after {
+  position: absolute;
+  inset: -7px;
+  z-index: -1;
+  border: 3px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  border-radius: inherit;
+  content: '';
+  pointer-events: none;
+  animation: playground-approval-halo 2.4s ease-out infinite;
+}
+
+@keyframes playground-approval-halo {
+  0%,
+  35% {
+    opacity: 0.9;
+    transform: scale(0.88);
+  }
+  75%,
+  100% {
+    opacity: 0;
+    transform: scale(1.18);
+  }
+}
+
+.status-ring-candidate-running-sweep::before {
+  inset: 0;
+  background: conic-gradient(
+    from 0deg,
+    color-mix(in srgb, var(--info) 16%, transparent) 0deg,
+    color-mix(in srgb, var(--info) 16%, transparent) 70deg,
+    var(--info) 150deg,
+    var(--info) 210deg,
+    color-mix(in srgb, var(--info) 16%, transparent) 290deg,
+    color-mix(in srgb, var(--info) 16%, transparent) 360deg
+  );
+  animation: playground-status-ring-rotate 3.2s linear infinite;
+}
+
+.status-ring-candidate-running-sweep .status-ring-candidate-core {
+  box-shadow: none;
+}
+
+.status-ring-candidate-running-orbit::before {
+  inset: 0;
+  background: repeating-conic-gradient(
+    var(--info) 0deg 18deg,
+    color-mix(in srgb, var(--info) 10%, transparent) 18deg 45deg
+  );
+  animation: playground-status-ring-rotate 4.8s linear infinite;
+}
+
+.status-ring-candidate-running-twin::before,
+.status-ring-candidate-running-twin::after {
+  inset: 0;
+  border: 3px solid transparent;
+  border-top-color: var(--info);
+  border-bottom-color: color-mix(in srgb, var(--info) 48%, transparent);
+}
+
+.status-ring-candidate-running-twin::before {
+  animation: playground-status-ring-rotate 3.8s linear infinite;
+}
+
+.status-ring-candidate-running-twin::after {
+  transform: rotate(90deg) scale(0.88);
+  animation: playground-status-ring-counter-rotate 5.4s linear infinite;
+}
+
+.status-ring-candidate-error-break::before {
+  inset: 0;
+  background: conic-gradient(
+    from -28deg,
+    transparent 0deg 42deg,
+    var(--danger) 42deg 310deg,
+    transparent 310deg 360deg
+  );
+}
+
+.status-ring-candidate-error-brackets::before {
+  inset: 0;
+  border: 3px solid transparent;
+  border-top-color: var(--danger);
+  border-bottom-color: var(--danger);
+  transform: rotate(-18deg);
+}
+
+.status-ring-candidate-error-brackets::after {
+  inset: 3px;
+  border: 2px solid transparent;
+  border-right-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  border-left-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  transform: rotate(18deg);
+}
+
+.status-ring-candidate-error-segments::before {
+  inset: 0;
+  background: repeating-conic-gradient(
+    var(--danger) 0deg 24deg,
+    transparent 24deg 42deg
+  );
+}
+
+.status-ring-candidate-conflict-split::before {
+  inset: 0;
+  background: conic-gradient(
+    from -42deg,
+    var(--warning) 0deg 150deg,
+    transparent 150deg 180deg,
+    color-mix(in srgb, var(--warning) 48%, var(--fg-default)) 180deg 330deg,
+    transparent 330deg 360deg
+  );
+}
+
+.status-ring-candidate-conflict-double::before,
+.status-ring-candidate-conflict-double::after {
+  width: 3.4rem;
+  height: 3.4rem;
+  border: 2px solid var(--warning);
+}
+
+.status-ring-candidate-conflict-double::before {
+  transform: translate(-3px, -1px);
+}
+
+.status-ring-candidate-conflict-double::after {
+  z-index: 1;
+  border-color: color-mix(in srgb, var(--warning) 48%, var(--fg-default));
+  transform: translate(3px, 1px);
+}
+
+.status-ring-candidate-conflict-crossed::before,
+.status-ring-candidate-conflict-crossed::after {
+  inset: 0;
+  border: 3px solid transparent;
+}
+
+.status-ring-candidate-conflict-crossed::before {
+  border-top-color: var(--warning);
+  border-bottom-color: var(--warning);
+  transform: rotate(42deg);
+}
+
+.status-ring-candidate-conflict-crossed::after {
+  border-top-color: color-mix(in srgb, var(--warning) 48%, var(--fg-default));
+  border-bottom-color: color-mix(
+    in srgb,
+    var(--warning) 48%,
+    var(--fg-default)
+  );
+  transform: rotate(-42deg) scale(0.9);
+}
+
+@keyframes playground-status-ring-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes playground-status-ring-counter-rotate {
+  from {
+    transform: rotate(90deg) scale(0.88);
+  }
+  to {
+    transform: rotate(-270deg) scale(0.88);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .question-attention-candidate-nudge,
+  .question-attention-candidate-slide,
+  .question-attention-candidate-lift,
+  .question-attention-candidate-pulse,
+  .question-attention-candidate-halo,
+  .question-attention-candidate-echo,
+  .status-ring-candidate-running-sweep::before,
+  .status-ring-candidate-running-orbit::before,
+  .status-ring-candidate-running-twin::before,
+  .status-ring-candidate-running-twin::after,
+  .question-agent-ring-approval::after {
+    animation: none;
+  }
+}
+
+/* Retained alternatives from earlier Question node experiments. */
+@keyframes question-agent-status-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+.agent-icon-unread {
+  transform-origin: center;
+  animation: question-done-pill-wobble 2.4s ease-in-out infinite;
+}
+
+.question-node-done-unviewed .question-done-pill {
+  transform-origin: 50% 50%;
+  animation: question-done-pill-wobble 2.4s ease-in-out infinite;
+}
+
+@keyframes question-done-pill-wobble {
+  0%,
+  55%,
+  100% {
+    transform: rotate(0deg);
+  }
+  10% {
+    transform: rotate(-6deg);
+  }
+  20% {
+    transform: rotate(5deg);
+  }
+  30% {
+    transform: rotate(-4deg);
+  }
+  40% {
+    transform: rotate(3deg);
+  }
+  50% {
+    transform: rotate(0deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-icon-unread,
+  .question-node-done-unviewed .question-done-pill {
+    animation: none;
+  }
+}

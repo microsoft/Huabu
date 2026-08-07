@@ -1,0 +1,167 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
+@keyframes question-agent-attention-nudge {
+  0%,
+  12%,
+  100% {
+    transform: translateX(0) rotate(0deg);
+  }
+  3% {
+    transform: translateX(-1px) rotate(-1.5deg);
+  }
+  6% {
+    transform: translateX(1px) rotate(1.5deg);
+  }
+  9% {
+    transform: translateX(-0.5px) rotate(-0.75deg);
+  }
+}
+
+.question-agent-badge {
+  /* Single knob for the whole badge. The open bubble is 1.1×/1.2× and the
+     avatar is 0.8× of this. Keeps the playground's 40px proportions, scaled
+     down to 36px so it feels less bulky on the note. */
+  --question-agent-badge-size: 2.25rem;
+  --question-agent-special-ring-inset: 2px;
+  --question-agent-special-ring-width: 3px;
+  --question-agent-quiet-ring: color-mix(
+    in srgb,
+    var(--fg-subtle) 38%,
+    var(--bg-surface)
+  );
+  width: var(--question-agent-badge-size) !important;
+  height: var(--question-agent-badge-size) !important;
+  /* Cross-fade the state visuals (background, ring border, attention halo)
+     so switching status — e.g. open → running — eases instead of snapping. */
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+.question-agent-badge-icon {
+  width: calc(var(--question-agent-badge-size) * 0.8) !important;
+  height: calc(var(--question-agent-badge-size) * 0.8) !important;
+  flex: none;
+}
+
+/* The `open` speech bubble fades in when a node's conversation opens, so it
+   eases in around the avatar instead of popping. Sizing and position are owned
+   by the caller (the takeover mark sizes it inline from its live size), so this
+   rule carries the appearance animation only. */
+.question-agent-badge-bubble {
+  animation: question-agent-fade-in 220ms ease;
+}
+
+/* Click target for opening the conversation. Inert by default so a stray
+   canvas click near the node's corner never opens the panel; only live while
+   the owning question node is hovered or selected (the badge overlaps the
+   node's top edge, so moving from body to badge keeps the hover contiguous). */
+.question-agent-badge-hit {
+  pointer-events: none;
+}
+
+.react-flow__node:hover .question-agent-badge-hit,
+.react-flow__node.selected .question-agent-badge-hit {
+  pointer-events: auto;
+}
+
+.question-agent-ring-running::before,
+.question-agent-ring-approval::before,
+.question-agent-ring-error::before {
+  position: absolute;
+  inset: calc(-1 * var(--question-agent-special-ring-inset));
+  z-index: 0;
+  padding: var(--question-agent-special-ring-width);
+  border-radius: inherit;
+  content: '';
+  pointer-events: none;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+.question-agent-ring-approval::before {
+  background: conic-gradient(
+    from -32deg,
+    var(--warning) 0deg 292deg,
+    color-mix(in srgb, var(--warning) 18%, transparent) 292deg 360deg
+  );
+}
+
+.question-agent-ring-running::before {
+  /* `--question-agent-running-ring` lets a surface preview an alternative
+     running colour; the shipped badge falls back to the techy `--info` blue. */
+  background: conic-gradient(
+    from 0deg,
+    color-mix(
+        in srgb,
+        var(--question-agent-running-ring, var(--info)) 16%,
+        transparent
+      )
+      0deg,
+    color-mix(
+        in srgb,
+        var(--question-agent-running-ring, var(--info)) 16%,
+        transparent
+      )
+      70deg,
+    var(--question-agent-running-ring, var(--info)) 150deg,
+    var(--question-agent-running-ring, var(--info)) 210deg,
+    color-mix(
+        in srgb,
+        var(--question-agent-running-ring, var(--info)) 16%,
+        transparent
+      )
+      290deg,
+    color-mix(
+        in srgb,
+        var(--question-agent-running-ring, var(--info)) 16%,
+        transparent
+      )
+      360deg
+  );
+  animation:
+    question-agent-ring-rotate 3s linear infinite,
+    question-agent-fade-in 220ms ease;
+}
+
+.question-agent-ring-error::before {
+  background: repeating-conic-gradient(
+    var(--danger) 0deg 24deg,
+    transparent 24deg 42deg
+  );
+  animation: question-agent-fade-in 220ms ease;
+}
+
+.question-agent-attention {
+  animation: question-agent-attention-nudge 4s ease-in-out infinite;
+}
+
+@keyframes question-agent-ring-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes question-agent-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .question-agent-ring-running::before,
+  .question-agent-ring-error::before,
+  .question-agent-badge-bubble,
+  .question-agent-attention {
+    animation: none;
+  }
+}

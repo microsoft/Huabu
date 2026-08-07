@@ -1,0 +1,151 @@
+#!/usr/bin/env sh
+# Convenience launcher for the agentlet daemon (self-spawn role).
+#
+# This is sugar over `agentlet daemon …` for the manual scenario where a
+# user wants to self-spawn an agent from a terminal and connect it to a
+# locally running Huabu server, without having to know the server URL,
+# the compiled CLI path, the build step, or the --allow-insecure flag.
+# (The in-app flow does NOT use this — the server spawns agents via its
+# own embedded agentlet daemon. See apps/server …/daemon-supervisor.ts.)
+#
+# It takes care of: auto-building the CLI on first run, deriving the
+# server URL + insecure flag from the repo's .env, and pre-flighting the
+# agent binary on PATH. For the raw CLI (including `agent-team`), use the
+# thin `agentlet` wrapper instead.
+#
+# Usage:
+#   start-agentlet-daemon --token CODE-1234 --agent "copilot --acp --allow-all"
+#
+# The bridge token is *not* read from disk — pairing codes are ephemeral
+# (60-second pending window, then bound to the agentlet's agentId). Pass
+# --token (or set AGENTLET_TOKEN) explicitly with the code generated from
+# Huabu's Settings UI.
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo=$(CDPATH= cd -- "$here/.." && pwd)
+cli="$repo/external/agentlet/packages/local/dist/index.js"
+
+# Auto-build on first run (or after a clean) so users never have to
+# remember `pnpm run build:agentlet` separately. We only build if the
+# compiled entry is missing — if it exists but is stale, the user is
+# expected to rebuild (or `pnpm dev` will, via its `predev` hook).
+if [ ! -f "$cli" ]; then
+  echo "start-agentlet-daemon: $cli not found — building..." >&2
+  if ! (cd "$repo" && pnpm run build:agentlet >&2); then
+    echo "start-agentlet-daemon: build failed. Run \`pnpm run build:agentlet\` in $repo manually." >&2
+    exit 1
+  fi
+  if [ ! -f "$cli" ]; then
+    echo "start-agentlet-daemon: build completed but $cli still missing." >&2
+    exit 1
+  fi
+fi
+
+# Auto-load <repo>/.env so SERVER_PORT and ACP_URL (still legitimate
+# `.env` settings, read by the Fastify server too) are visible here.
+# We strip CR before sourcing because the file may have CRLF line
+# endings (some editors do that), which POSIX `.` interprets as part
+# of the value and trips with `: not found` errors. `set -a` makes
+# every assignment in .env exported, not just shell-local.
+if [ -f "$repo/.env" ]; then
+  envtmp=$(mktemp 2>/dev/null || echo "/tmp/agentlet-env.$$")
+  trap 'rm -f "$envtmp"' EXIT INT TERM
+  tr -d '\r' < "$repo/.env" > "$envtmp"
+  set -a
+  # shellcheck disable=SC1090
+  . "$envtmp"
+  set +a
+  rm -f "$envtmp"
+  trap - EXIT INT TERM
+fi
+
+# Pairing code must come from --token / AGENTLET_TOKEN — we no longer
+# read any disk-resident state. We only need to look at our own argv
+# to know whether the underlying CLI will fail; the CLI itself does
+# the actual --token / $AGENTLET_TOKEN resolution.
+have_token_flag=0
+for arg in "$@"; do
+  case "$arg" in
+    --token|--token=*) have_token_flag=1; break ;;
+  esac
+done
+
+if [ "$have_token_flag" -eq 0 ] && [ -z "$AGENTLET_TOKEN" ]; then
+  echo "start-agentlet-daemon: no pairing code provided." >&2
+  echo "  1. In Huabu, open Settings (top-right gear) → External Agents" >&2
+  echo "     and click \"Generate code\". The code is valid for 60 seconds." >&2
+  echo "  2. Re-run with --token <CODE>, e.g.:" >&2
+  echo "     $0 --token XXXX-XXXX --agent \"copilot --acp --allow-all\"" >&2
+  echo "     (or export AGENTLET_TOKEN=XXXX-XXXX before launching)" >&2
+  exit 1
+fi
+
+# Server URL.
+#   - Default = ws://localhost:${SERVER_PORT:-3001}/api/acp/agent, i.e. the
+#     embedded mount that `pnpm dev` exposes on the same port as the rest of
+#     Huabu's API. SERVER_PORT already lives in .env (see .env.example)
+#     and the server reads it from there too — single source of truth.
+#   - For non-local setups (different host, wss://, custom path) set
+#     ACP_URL to the full URL — it wins outright.
+if [ -n "$ACP_URL" ]; then
+  url="$ACP_URL"
+else
+  url="ws://localhost:${SERVER_PORT:-3001}/api/acp/agent"
+fi
+
+# `--allow-insecure` is required by agentlet for ws:// (non-TLS) URLs but
+# disallowed for wss://. Auto-pick based on the URL scheme so users never
+# have to think about it.
+insecure_flag=
+case "$url" in
+  ws://*) insecure_flag=--allow-insecure ;;
+esac
+
+# Pre-flight: if the user told us which agent CLI to launch (e.g.
+# `--agent "copilot --acp --allow-all"`), make sure that CLI is actually
+# on PATH. Otherwise the failure mode is a confusing ACP handshake error
+# rather than "the binary doesn't exist", which sends people down the
+# wrong debugging path. We only check, never auto-install.
+agent_cmd=
+prev=
+for arg in "$@"; do
+  case "$prev" in
+    --agent) agent_cmd="$arg"; break ;;
+  esac
+  case "$arg" in
+    --agent=*) agent_cmd="${arg#--agent=}"; break ;;
+  esac
+  prev="$arg"
+done
+
+if [ -n "$agent_cmd" ]; then
+  # First whitespace-separated token of the --agent value is the
+  # executable; everything after it is forwarded as flags to that CLI.
+  # POSIX word-splitting via positional params, in a subshell so we
+  # don't clobber the outer "$@".
+  agent_bin=$(set -f; set -- $agent_cmd; printf '%s\n' "$1")
+  # Skip the check if the user supplied an explicit path — `command -v`
+  # would still work, but a path-based agent is an unusual case and we'd
+  # rather not second-guess it.
+  case "$agent_bin" in
+    */*|'') ;;
+    *)
+      if ! command -v "$agent_bin" >/dev/null 2>&1; then
+        echo "start-agentlet-daemon: \"$agent_bin\" was not found on PATH." >&2
+        echo "  Install the CLI first, e.g.:" >&2
+        case "$agent_bin" in
+          copilot) echo "    npm install -g @github/copilot" >&2 ;;
+          claude-agent-acp)
+                   echo "    npm install -g @agentclientprotocol/claude-agent-acp" >&2 ;;
+          gemini)  echo "    npm install -g @google/gemini-cli" >&2 ;;
+          codex-acp)
+                   echo "    npm install -g @agentclientprotocol/codex-acp" >&2 ;;
+          *)       echo "    (see the agent's own install instructions)" >&2 ;;
+        esac
+        exit 127
+      fi
+      ;;
+  esac
+fi
+
+exec node "$cli" daemon --server "$url" $insecure_flag "$@"

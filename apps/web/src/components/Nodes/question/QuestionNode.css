@@ -1,0 +1,28 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
+.question-sticky {
+  --depth-offset: 8px;
+  position: relative;
+  overflow: visible !important;
+}
+
+.question-sticky::before {
+  content: '';
+  position: absolute;
+  inset: var(--depth-offset) calc(var(--depth-offset) * -1)
+    calc(var(--depth-offset) * -1) var(--depth-offset);
+  z-index: -1;
+  border-radius: 0.5rem;
+  background: var(--question-border);
+  opacity: 1;
+  transition: opacity 0ms linear 200ms;
+  pointer-events: none;
+}
+
+.question-sticky[data-lod-body='hidden']::before {
+  opacity: 0;
+  transition-delay: 0ms;
+}

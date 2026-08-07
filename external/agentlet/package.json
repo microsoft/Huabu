@@ -1,0 +1,17 @@
+{
+  "name": "agentlet-monorepo",
+  "private": true,
+  "description": "A network adapter that makes any local ACP agent remotely accessible over WebSocket",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "vitest run",
+    "lint": "pnpm -r run lint",
+    "clean": "pnpm -r run clean"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.7"
+  }
+}

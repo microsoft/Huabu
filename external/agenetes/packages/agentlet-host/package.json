@@ -1,0 +1,39 @@
+{
+  "name": "@agenetes/agentlet-host",
+  "version": "0.1.0",
+  "description": "L2 composition host: mounts the Agentlet Gateway and Agent Team control plane into Fastify and supervises the local agentlet daemon.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit",
+    "test": "vitest run src"
+  },
+  "dependencies": {
+    "@agenetes/agent-team": "workspace:*",
+    "@agenetes/agentlet-gateway": "workspace:*",
+    "@agenetes/protocol": "workspace:*",
+    "@agentlet/protocol": "workspace:*"
+  },
+  "peerDependencies": {
+    "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.0",
+    "fastify": "^5.2.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.18",
+    "ws": "^8.18.0"
+  }
+}
