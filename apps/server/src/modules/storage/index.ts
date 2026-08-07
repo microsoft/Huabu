@@ -90,6 +90,7 @@ export type {
   NewCanvasEvent,
   NodeWriteResult,
   SpaceHandle,
+  SpaceCatalogRepository,
   SpaceRepository,
   SpaceWriteResult,
   StructuredBackendKind,

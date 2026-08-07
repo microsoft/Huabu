@@ -36,6 +36,7 @@ import type {
   NodeContent,
 } from '../../canvas/persistence-types.js';
 import type {
+  CanvasSummary,
   IntentEpisode,
   RecentAction,
   TaskRecord,
@@ -53,6 +54,15 @@ export interface StructuredStore {
   health(): Promise<StorageHealth>;
   close(): Promise<void>;
   /**
+   * Return a repository for the currently-bound Space catalogue.
+   *
+   * Catalogue handles are scoped to the backend namespace that was active
+   * when they were created. A caller that changes Workspace must resolve a
+   * fresh handle; retained Disk handles reject instead of reading the newly
+   * active Workspace.
+   */
+  catalog(): SpaceCatalogRepository;
+  /**
    * Return the handle for one validated Space id.
    *
    * Handles for the same id denote the same Space; handles for different ids
@@ -63,6 +73,23 @@ export interface StructuredStore {
    * durable state and belongs in a repository, not on a handle.
    */
   space(canvasId: string): SpaceHandle;
+}
+
+/** Read-only membership and World identity for one backend namespace. */
+export interface SpaceCatalogRepository {
+  /**
+   * List ordinary, user-visible Spaces. World is never included.
+   *
+   * Ordering is deliberately unspecified. Environmental and integrity
+   * failures reject rather than returning a partial catalogue.
+   */
+  list(): Promise<CanvasSummary[]>;
+  /**
+   * Return the stable id of the hidden World Space.
+   *
+   * A missing or malformed World is an integrity failure and rejects.
+   */
+  worldId(): Promise<string>;
 }
 
 /** Structured records for one Space. */
