@@ -791,12 +791,16 @@ export function useAgentStream(session: ChatSession): UseAgentStreamReturn {
       const mergedAttachments = [...allPending];
       const attachments =
         mergedAttachments.length > 0 ? mergedAttachments : undefined;
-      // Only this thread's own staged attachments are consumed. The selection
-      // excerpt is shared presentation context, so sending snapshots it into
-      // this request and leaves it standing for every other visible Chat; it
-      // is cleared by whoever owns the selection when it changes or dies.
+      // Both are consumed by the send, and they are cleared separately
+      // because they are owned differently: staged attachments belong to this
+      // thread, while the excerpt is the one shared selection. Spending it
+      // here retires the hint from every Chat showing it, which is correct —
+      // there is only ever one selection and this send just used it.
       if (pendingAttachments.length > 0) {
         clearPendingAttachments(threadId);
+      }
+      if (selectionAttachment) {
+        useChatStore.getState().setSelectionAttachment(null);
       }
 
       addMessage(threadId, {

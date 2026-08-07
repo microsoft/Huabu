@@ -243,8 +243,9 @@ describe('two mounted Chat renderers', () => {
       }),
     );
 
-    // Shared on purpose: the excerpt is presentation context, so both Chats
-    // offer it and whichever one sends snapshots it into that request.
+    // Shared on purpose, and the one case here that is *not* isolation:
+    // there is a single browser selection, so both Chats offer it and
+    // whichever one sends spends it for both.
     expect(read(THREAD_A, 'selection')).toBe('excerpt');
     expect(read(THREAD_B, 'selection')).toBe('excerpt');
   });

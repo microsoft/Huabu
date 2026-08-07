@@ -127,9 +127,10 @@ export interface ChatState {
   _savedCanvasLastAction?: AgentMode;
 
   /**
-   * A text-selection excerpt shared by every visible Chat. This is
-   * presentation context, not thread state: several Chats may show the same
-   * hint, and only the one that sends snapshots it into its request.
+   * The one text-selection excerpt, shared by every visible Chat. This is
+   * presentation context, not thread state: there is a single browser
+   * selection, so several Chats may offer the same hint. Whichever one sends
+   * spends it, and the hint retires everywhere.
    */
   selectionAttachment: ChatAttachment | null;
 
