@@ -197,11 +197,11 @@ describe('root forwarding shims', () => {
 
   it.each(SHIMS)('%s contains no logic', (shim) => {
     const body = read(shim)
-      // Strip the block comment header and blank lines.
+      // Strip the license header, the block comment header, and blank lines.
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .split('\n')
       .map((line) => line.trim())
-      .filter(Boolean);
+      .filter((line) => line && !line.startsWith('//'));
 
     // A forwarder is exactly one re-export and nothing else. Anything with a
     // declaration or a statement has stopped being a forwarder.
