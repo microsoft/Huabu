@@ -41,17 +41,9 @@ The shared `error` listener therefore defers one macrotask (so the operation's p
 
 `installOpActive` latches on the first install request and gates only that middle case; it is never cleared by a coincident check/download error, because attribution — not the flag — is what keeps those from being mistaken for the install's own (possibly late) failure.
 
-## The update feed is configuration, not code
+## The update feed
 
-electron-updater reads the GitHub owner/repo from `app-update.yml`, which electron-builder bakes into the app at build time from the `publish` block in [electron-builder.yml](../../apps/desktop/electron-builder.yml). Those values are **not hardcoded** — they come from the `HUABU_UPDATE_OWNER` / `HUABU_UPDATE_REPO` env vars, set from GitHub Actions repository **Variables** in [release.yml](../../.github/workflows/release.yml) and [nightly.yml](../../.github/workflows/nightly.yml). Both variables are required for every distributable build; the workflows fail before packaging when either is empty.
-
-Local `pnpm dist` runs must provide both variables as well. electron-builder treats a missing `${env.*}` macro as an invalid configuration rather than producing an inert updater.
-
-## Private build, public distribution
-
-The source repository builds each platform and stages the complete asset set on its private GitHub Release. A workflow in the public distribution repository then mirrors those assets to a release with the same version and tag. The packaged app points at that public repository through `HUABU_UPDATE_OWNER` / `HUABU_UPDATE_REPO`; it never needs access to the private source release.
-
-The relay must preserve every asset filename and upload the complete platform set before publishing the public release. In particular, `latest*.yml` refers to installers by filename, so renaming an installer during the relay breaks the feed. The source workflows validate each required asset category before uploading, but the public relay must enforce the same all-or-nothing publication rule.
+electron-updater reads the GitHub owner/repo from `app-update.yml`, which electron-builder bakes into the app at build time from the `publish` block in [electron-builder.yml](../../apps/desktop/electron-builder.yml). Builds and releases both live in this repository, so that block names it directly and no build-time configuration is involved.
 
 ## Release artifacts electron-updater requires
 

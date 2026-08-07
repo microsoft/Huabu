@@ -14,9 +14,9 @@
  *
  * The update feed (GitHub owner/repo) is NOT configured here. It is
  * baked into the packaged app's `app-update.yml` at build time from the
- * HUABU_UPDATE_OWNER / HUABU_UPDATE_REPO env vars (see electron-builder.yml).
- * electron-updater reads that file itself — this module only drives the
- * check/download/install lifecycle and mirrors it to the renderer.
+ * `publish` block in electron-builder.yml. electron-updater reads that
+ * file itself — this module only drives the check/download/install
+ * lifecycle and mirrors it to the renderer.
  *
  * All lifecycle transitions are pushed to the focused window over the
  * `update:status` channel, and the latest snapshot is cached so a

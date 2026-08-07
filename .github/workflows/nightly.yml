@@ -140,16 +140,7 @@ jobs:
         run: pnpm run build:agentlet
 
       - name: Build desktop installer
-        shell: bash
-        env:
-          HUABU_UPDATE_OWNER: ${{ vars.HUABU_UPDATE_OWNER }}
-          HUABU_UPDATE_REPO: ${{ vars.HUABU_UPDATE_REPO }}
-        run: |
-          if [[ -z "$HUABU_UPDATE_OWNER" || -z "$HUABU_UPDATE_REPO" ]]; then
-            echo "HUABU_UPDATE_OWNER and HUABU_UPDATE_REPO repository variables are required" >&2
-            exit 1
-          fi
-          pnpm run ${{ matrix.script }}
+        run: pnpm run ${{ matrix.script }}
 
       # Upload straight into the draft prerelease instead of via the
       # Actions artifact store (see the prepare job). electron-builder

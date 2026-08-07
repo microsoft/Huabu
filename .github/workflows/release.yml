@@ -25,11 +25,8 @@ name: Release
 #   macOS   → *.dmg, *.zip, *.blockmap, latest-mac.yml
 #   Windows → *.exe, *.exe.blockmap, latest.yml
 # The `*.zip` is what Squirrel.Mac actually applies; `latest*.yml` is the
-# feed the running app polls. The update feed's owner/repo are injected
-# at build time from the HUABU_UPDATE_OWNER / HUABU_UPDATE_REPO
-# repository *Variables* (Settings → Secrets and variables → Actions →
-# Variables) — never hardcoded — so the feed can point at the public
-# distribution repository independently of this build-source repo.
+# feed the running app polls. Builds and releases both live here, so the
+# feed's owner/repo are set directly in apps/desktop/electron-builder.yml.
 #
 # ── Signing ───────────────────────────────────────────────────────────
 # macOS: Developer ID certificate from the CSC_LINK / CSC_KEY_PASSWORD
@@ -132,22 +129,13 @@ jobs:
         run: pnpm run build:agentlet
 
       - name: Build desktop installer (signed + notarized)
-        shell: bash
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          # Update feed baked into app-update.yml (see electron-builder.yml).
-          HUABU_UPDATE_OWNER: ${{ vars.HUABU_UPDATE_OWNER }}
-          HUABU_UPDATE_REPO: ${{ vars.HUABU_UPDATE_REPO }}
-        run: |
-          if [[ -z "$HUABU_UPDATE_OWNER" || -z "$HUABU_UPDATE_REPO" ]]; then
-            echo "HUABU_UPDATE_OWNER and HUABU_UPDATE_REPO repository variables are required" >&2
-            exit 1
-          fi
-          pnpm run build:desktop:mac
+        run: pnpm run build:desktop:mac
 
       # electron-builder writes outside the repo (../huabu-electron-out/
       # per apps/desktop/electron-builder.yml, to dodge a Windows file-lock
@@ -224,17 +212,7 @@ jobs:
         run: pnpm run build:agentlet
 
       - name: Build desktop installer
-        shell: bash
-        env:
-          # Update feed baked into app-update.yml (see electron-builder.yml).
-          HUABU_UPDATE_OWNER: ${{ vars.HUABU_UPDATE_OWNER }}
-          HUABU_UPDATE_REPO: ${{ vars.HUABU_UPDATE_REPO }}
-        run: |
-          if [[ -z "$HUABU_UPDATE_OWNER" || -z "$HUABU_UPDATE_REPO" ]]; then
-            echo "HUABU_UPDATE_OWNER and HUABU_UPDATE_REPO repository variables are required" >&2
-            exit 1
-          fi
-          pnpm run build:desktop:win
+        run: pnpm run build:desktop:win
 
       # Same direct-to-release upload as macOS (bash is available on the
       # windows-latest runner and keeps the glob logic identical).
