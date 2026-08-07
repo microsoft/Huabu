@@ -19,15 +19,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
+      # Version comes from `packageManager` in package.json; naming it here
+      # too makes the action refuse to install.
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.34.3
+        uses: pnpm/action-setup@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
