@@ -82,10 +82,14 @@ export function _waitForIdle(): Promise<void> {
 
 async function runOnce(canvasId: string, logger?: MemoryLogger): Promise<void> {
   try {
-    const { results, latestChatTs, latestIntentTs } = await runAnalysisPass(
-      canvasId,
-      logger,
-    );
+    const outcome = await runAnalysisPass(canvasId, logger);
+    if (outcome.status === 'skipped') {
+      logger?.info(
+        `[memory] pass for canvas ${canvasId} skipped — Space not found`,
+      );
+      return;
+    }
+    const { results, latestChatTs, latestIntentTs } = outcome;
     // markAnalyzed is intentionally always called when the pass finished
     // without throwing — even if individual writers rejected (e.g. a
     // create-rationale violation). The bookkeeping records "we tried",
