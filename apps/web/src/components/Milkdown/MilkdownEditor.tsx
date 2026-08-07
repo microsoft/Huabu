@@ -96,7 +96,7 @@ export interface MilkdownEditorProps {
   onBlockDragStart?: (event: MilkdownBlockDragEvent) => void;
 }
 
-export function MilkdownEditor(props: MilkdownEditorProps): JSX.Element {
+export function MilkdownEditor(props: MilkdownEditorProps): React.JSX.Element {
   const {
     markdown,
     onChange,

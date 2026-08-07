@@ -203,7 +203,7 @@ export function MilkdownFloatingToolbar({
   surfaceRef,
   disabled = false,
   className,
-}: MilkdownFloatingToolbarProps): JSX.Element | null {
+}: MilkdownFloatingToolbarProps): React.JSX.Element | null {
   const { t } = useTranslation();
   const [formatting, setFormatting] = useState(() =>
     readFormattingState(instance),

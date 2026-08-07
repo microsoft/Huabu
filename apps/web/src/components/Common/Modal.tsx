@@ -26,7 +26,7 @@ export type ModalProps = {
    * When provided, focus is moved here on open.
    * Useful for defaulting focus to the primary action.
    */
-  initialFocusRef?: RefObject<HTMLElement>;
+  initialFocusRef?: RefObject<HTMLElement | null>;
 
   /** Whether clicking the backdrop closes the modal. Defaults to `true`. */
   closeOnBackdropClick?: boolean;

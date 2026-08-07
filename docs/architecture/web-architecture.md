@@ -3,7 +3,7 @@
 > Structure, dependency rules, and conventions for the frontend. The point of
 > this doc is the **layering rules** below — not an exhaustive file listing
 > (those rot fast; `ls` the dir for the current files).
-> Last updated: 2026-07-29
+> Last updated: 2026-08-07
 
 ---
 
@@ -29,6 +29,8 @@ apps/web/src/
 ---
 
 ## 2. Dependency rules (the important part)
+
+The web app, docs app, and shared package use the same React 19 runtime and type versions. Keep `react`, `react-dom`, `@types/react`, and `@types/react-dom` aligned across those workspaces because the web TypeScript project compiles shared package source directly.
 
 ```
 pages → components, handler, hooks, store, api, config, utils

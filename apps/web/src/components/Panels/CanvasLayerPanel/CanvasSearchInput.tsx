@@ -63,7 +63,7 @@ export function ensureCanvasSearchScope(canvasId: string | null): void {
 
 export const CanvasSearchInput = ({
   inputRef: externalRef,
-}: CanvasSearchInputProps): JSX.Element => {
+}: CanvasSearchInputProps): React.JSX.Element => {
   const { t } = useTranslation();
   const localRef = useRef<HTMLInputElement>(null);
   const inputRef = externalRef ?? localRef;

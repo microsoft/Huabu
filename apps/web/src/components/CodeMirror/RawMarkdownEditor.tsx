@@ -81,7 +81,7 @@ export default function RawMarkdownEditor({
   readOnly,
   className,
   ariaLabel,
-}: RawMarkdownEditorProps): JSX.Element {
+}: RawMarkdownEditorProps): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const lastSyncedRef = useRef<string>(value);
