@@ -53,7 +53,7 @@ docs/
 | [canvas-command-architecture.md](./architecture/canvas-command-architecture.md) | `CanvasUiIntent` / `CanvasCommand` / `CanvasExecution` three-layer model.                                |
 | [canvas-input-interactions.md](./architecture/canvas-input-interactions.md)     | Mouse, touch, and pen preference resolution, gesture ownership, and multi-touch arbitration.             |
 | [canvas-zoom-rendering.md](./architecture/canvas-zoom-rendering.md)             | Node LOD, Frame/edge label readability, and interaction chrome across canvas zoom.                       |
-| [canvas-storage.md](./architecture/canvas-storage.md)                           | On-disk layout of a canvas (`space.json`, `nodes/`, `.artifacts/`, `memory/`).                           |
+| [canvas-storage.md](./architecture/canvas-storage.md)                           | Disk layout plus Blob/structured ports, catalogue, compatibility, and `.memory/`.                        |
 | [canvas-action-log.md](./architecture/canvas-action-log.md)                     | Persistent `events.jsonl` user-action trail; consumed by the memory curator.                             |
 | [canvas-realtime-sync.md](./architecture/canvas-realtime-sync.md)               | Multi-agent real-time sync: SSE broadcast, dirty-node conflict model, per-thread change-review card.     |
 | [credential-storage.md](./architecture/credential-storage.md)                   | Electron OS-protected credentials, utility-process bridge, migration, and standalone fallback.           |
@@ -89,7 +89,7 @@ docs/
 | [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.          |
 | [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Huabu-owned Milkdown toolbar and semantic editor commands.                 |
 | [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                           |
-| [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                   | Partly shipped | Structured/Blob backend split; agent filesystem integration remains open.  |
+| [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                   | Partly shipped | Phases 1–3: Blob, structured repositories, catalogue, and bounded reads.   |
 | [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)             | Proposed       | Revision-aware offscreen Note measurement and stable auto-height geometry. |
 
 ### Shipped
