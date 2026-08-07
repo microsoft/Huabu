@@ -18,5 +18,8 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     include: ['src/**/*.test.ts', 'evals/**/*.test.ts'],
+    // Many suites drive real filesystem work through temp workspaces, which
+    // overruns the 5s default once the whole repo runs in parallel.
+    testTimeout: 20_000,
   },
 });
