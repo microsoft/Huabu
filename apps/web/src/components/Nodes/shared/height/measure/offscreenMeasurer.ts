@@ -89,7 +89,13 @@ async function measureNow(
 }
 
 async function ensureHost(): Promise<Host> {
-  hostPromise ??= buildHost();
+  hostPromise ??= buildHost().catch((error: unknown) => {
+    // A rejected singleton would otherwise poison every later measurement
+    // in this app session. Clear it so the prewarm queue's retry can build a
+    // fresh editor after a transient chunk-load or Milkdown mount failure.
+    hostPromise = null;
+    throw error;
+  });
   return hostPromise;
 }
 

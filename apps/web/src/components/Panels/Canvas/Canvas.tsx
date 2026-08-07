@@ -52,6 +52,7 @@ import { NoteNode } from '@/components/Nodes/note/NoteNode';
 import { OfficeNode } from '@/components/Nodes/office/OfficeNode';
 import { PDFNode } from '@/components/Nodes/pdf/PDFNode';
 import {
+  cancelHeightCommitSuspensions,
   resumeHeightCommits,
   suspendHeightCommits,
 } from '@/components/Nodes/shared/height/commitSuspension';
@@ -1250,7 +1251,18 @@ export const Canvas: React.FC<CanvasProps> = ({
   }, [rightPanelAnchorNodeId, clearRightPanelAnchor]);
 
   useEffect(() => {
+    const cancelHeightCommits = () => cancelHeightCommitSuspensions();
+    const cancelWhenHidden = () => {
+      if (document.visibilityState === 'hidden') cancelHeightCommits();
+    };
+    window.addEventListener('blur', cancelHeightCommits);
+    window.addEventListener('pointercancel', cancelHeightCommits, true);
+    document.addEventListener('visibilitychange', cancelWhenHidden);
     return () => {
+      window.removeEventListener('blur', cancelHeightCommits);
+      window.removeEventListener('pointercancel', cancelHeightCommits, true);
+      document.removeEventListener('visibilitychange', cancelWhenHidden);
+      cancelHeightCommits();
       rfInstanceRef.current = null;
       setRfInstance(null);
       // If the canvas is torn down mid-drag (route change, canvas
@@ -1515,10 +1527,10 @@ export const Canvas: React.FC<CanvasProps> = ({
           // Pan and zoom both arrive here. A height correction committed
           // mid-gesture would resize a node the user is moving past, so
           // corrections queue up and land once the viewport settles.
-          suspendHeightCommits();
+          suspendHeightCommits('viewport');
         }}
         onMoveEnd={(_event, viewport) => {
-          resumeHeightCommits();
+          resumeHeightCommits('viewport');
           // Mirror pan/zoom into localStorage (per canvas) so browser and
           // desktop restarts restore the same view. Does NOT participate in
           // the structure autosave.

@@ -2432,7 +2432,7 @@ const useCanvasStore = create<RFState>()(
       get().beginGesture('SET_NODE_GEOMETRY');
       // A height correction landing mid-drag would move geometry under
       // the user's hand. Hold them until the gesture settles.
-      suspendHeightCommits();
+      suspendHeightCommits('node-drag');
 
       // Record the pre-drag positions of the dragged nodes so
       // `onNodeDragStop` can tell whether the gesture actually moved
@@ -2459,7 +2459,7 @@ const useCanvasStore = create<RFState>()(
 
     onNodeResizeStart: () => {
       get().beginGesture('SET_NODE_GEOMETRY');
-      suspendHeightCommits();
+      suspendHeightCommits('node-resize');
     },
 
     onNodeDrag: (_event, draggedNode, draggedNodes) => {
@@ -2909,7 +2909,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     onNodeDragStop: (_event, _node, draggedNodes) => {
-      resumeHeightCommits();
+      resumeHeightCommits('node-drag');
       // Cancel any pending preview computation — the drag is over.
       if (_dragPreviewRafId !== null) {
         cancelAnimationFrame(_dragPreviewRafId);
