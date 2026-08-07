@@ -57,6 +57,50 @@ async function pasteNote(page: Page, markdown: string): Promise<void> {
 }
 
 /**
+ * Create a note through the same headless endpoint used by agents.
+ * The open tab receives the server-authored insertion through canvas sync;
+ * no UI creation path runs locally before the note is measured.
+ */
+async function executeAgentCommands(
+  page: Page,
+  commands: unknown[],
+): Promise<Record<string, unknown>> {
+  const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
+  if (!canvasId) throw new Error('canvas id not found in URL');
+
+  const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
+    data: {
+      commands,
+      originator: { source: 'agent', threadId: 'e2e-auto-height' },
+    },
+  });
+
+  expect(response.ok(), await response.text()).toBe(true);
+  return (await response.json()) as Record<string, unknown>;
+}
+
+async function createAgentNote(
+  page: Page,
+  markdown: string,
+  parentId?: string,
+): Promise<void> {
+  await executeAgentCommands(page, [
+    {
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          nodeType: 'note',
+          data: { label: 'Agent long note', content: markdown },
+          position: { x: 100, y: 100 },
+          size: { width: 560, height: 'auto' },
+          ...(parentId ? { parentId } : {}),
+        },
+      ],
+    },
+  ]);
+}
+
+/**
  * For every mounted note, how many pixels its content overflows the box
  * it was given. The reader mirrors `readNoteIntrinsicHeight`: measure
  * `.ProseMirror` (not the host, whose `scrollHeight` Crepe's absolutely
@@ -116,6 +160,129 @@ async function pasteAllFixtures(page: Page): Promise<string[]> {
 }
 
 test.describe('note auto height', () => {
+  test('an agent-created long note replaces its initial height hint', async ({
+    page,
+  }) => {
+    await openNewCanvas(page);
+    const markdown = Array.from(
+      { length: 12 },
+      (_, index) =>
+        `## Section ${index + 1}\n\nThis paragraph is long enough to wrap at the note width and must contribute to the measured height.`,
+    ).join('\n\n');
+
+    await createAgentNote(page, markdown);
+
+    const note = page.locator('.react-flow__node').filter({
+      has: page.locator('[data-note-content-host]'),
+    });
+    await expect(note).toHaveCount(1);
+    await expect(note.locator('.ProseMirror')).toHaveCount(1);
+
+    await expect
+      .poll(async () => {
+        const height = await note.evaluate((element) =>
+          parseFloat((element as HTMLElement).style.height),
+        );
+        return height;
+      })
+      .toBeGreaterThan(200);
+
+    const [overflow] = await measureOverflows(page);
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
+  test('an agent-created long note grows inside a structured frame', async ({
+    page,
+  }) => {
+    await openNewCanvas(page);
+    const frameResponse = await executeAgentCommands(page, [
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            nodeType: 'frame',
+            data: { label: 'Agent frame' },
+            position: { x: 50, y: 50 },
+          },
+        ],
+      },
+    ]);
+    const results = frameResponse.results as Array<{
+      nodes?: Array<{ nodeId: string }>;
+    }>;
+    const frameId = results[0]?.nodes?.[0]?.nodeId;
+    expect(frameId).toBeTruthy();
+
+    await executeAgentCommands(page, [
+      {
+        type: 'SET_FRAME_LAYOUT',
+        frameId,
+        mode: 'column',
+        gridCount: 1,
+        sizing: 'hug',
+      },
+    ]);
+
+    const markdown = Array.from(
+      { length: 12 },
+      (_, index) =>
+        `## Framed section ${index + 1}\n\nThis paragraph must expand both the auto-height note and its structured parent frame.`,
+    ).join('\n\n');
+    await createAgentNote(page, markdown, frameId);
+
+    const note = page.locator('.react-flow__node-note');
+    await expect(note.locator('.ProseMirror')).toHaveCount(1);
+    await expect
+      .poll(() =>
+        note.evaluate((element) =>
+          parseFloat((element as HTMLElement).style.height),
+        ),
+      )
+      .toBeGreaterThan(200);
+
+    const [overflow] = await measureOverflows(page);
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
+  test('a manually pasted note grows after mounted editing', async ({
+    page,
+  }) => {
+    await openNewCanvas(page);
+    const centre = await paneCenter(page);
+    await page.mouse.move(centre.x, centre.y);
+    await pasteNote(page, 'Short note\n\nInitial body.');
+
+    const note = page.locator('.react-flow__node-note');
+    await expect(note.locator('.ProseMirror')).toHaveCount(1);
+    const initialHeight = await note.evaluate((element) =>
+      parseFloat((element as HTMLElement).style.height),
+    );
+
+    const editor = page.locator(
+      '[data-search-scope="node"] .ProseMirror[contenteditable="true"]',
+    );
+    await expect(editor).toHaveCount(1);
+
+    const longContent = Array.from(
+      { length: 12 },
+      (_, index) =>
+        `Section ${index + 1}. This manually edited paragraph is long enough to wrap and must expand the mounted note.`,
+    ).join('\n\n');
+    await editor.fill(longContent);
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+
+    await expect
+      .poll(() =>
+        note.evaluate((element) =>
+          parseFloat((element as HTMLElement).style.height),
+        ),
+      )
+      .toBeGreaterThan(initialHeight + 100);
+
+    const [overflow] = await measureOverflows(page);
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
   test('every auto note fits the content it was measured from', async ({
     page,
   }) => {

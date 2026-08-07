@@ -532,7 +532,7 @@ export const NodeWrapper = memo(
         // Paired with the `suspendHeightCommits` in `onNodeResizeStart`.
         // Released after the geometry commit so a queued correction is
         // evaluated against the node's final width.
-        resumeHeightCommits();
+        resumeHeightCommits('node-resize');
       },
       [
         endResizePreview,
