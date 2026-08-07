@@ -1,0 +1,17 @@
+# Commits that only moved text around, so `git blame` skips them and keeps
+# pointing at whoever last changed the code itself.
+#
+# GitHub applies this file automatically. For local git, run once:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# refactor: rename the @sediment scope to @huabu
+0a318194c735bc45bdd353773a60f78214b488ed
+
+# style: reflow imports shortened by the scope rename
+06bece9c8afc7df0f9321a28952232c281df80c7
+
+# chore: add the Microsoft license header to first-party sources
+3701d78d2c68eae585a98dd33a069e6d3eabb96a
+
+# refactor: rename Sediment to Huabu
+48b805fc21595f5495077e6e799fcd1728d1e511
