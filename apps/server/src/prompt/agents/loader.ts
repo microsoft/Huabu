@@ -47,7 +47,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseFrontmatter } from '../../modules/storage/frontmatter.js';
+import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
 import { getSkillCatalogue } from '../skills/catalogue.js';
 
 import type { SkillScope } from '../skills/loader.js';

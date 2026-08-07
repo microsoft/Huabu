@@ -31,8 +31,8 @@ import { existsSync, readFileSync } from 'node:fs';
 
 import { MemorySandboxError } from './sandbox.js';
 import { invalidateUserSkill } from '../../../prompt/index.js';
+import { atomicWriteText, mkdirp } from '../../../utils/fs.js';
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
-import { atomicWriteText, mkdirp } from '../../storage/io.js';
 
 import type { MemoryLogger } from './index.js';
 

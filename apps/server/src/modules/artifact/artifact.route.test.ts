@@ -20,6 +20,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import artifactRoute from './artifact.route.js';
 import {
   canvasBlobs,
+  createCanvas,
+  deleteCanvas,
   getStorage,
   resetStorageCache,
   setStorageForTesting,
@@ -59,10 +61,68 @@ function multipartBody(
   };
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function installDeleteBlock(canvasId: string): {
+  deleteStarted: Promise<void>;
+  releaseDelete: () => void;
+  putCalls: () => number;
+  restore: () => void;
+} {
+  const current = getStorage();
+  const started = deferred();
+  const release = deferred();
+  let putCalls = 0;
+  const blobs: BlobStore = {
+    kind: current.blobs.kind,
+    init: () => current.blobs.init(),
+    health: () => current.blobs.health(),
+    close: () => current.blobs.close(),
+    scope(ref) {
+      const delegate = current.blobs.scope(ref);
+      return {
+        put(name, body) {
+          putCalls += 1;
+          return delegate.put(name, body);
+        },
+        head: (name) => delegate.head(name),
+        open: (name, range) => delegate.open(name, range),
+        read: (name) => delegate.read(name),
+        hasMany: (names) => delegate.hasMany(names),
+        list: () => delegate.list(),
+        materialize: (name) => delegate.materialize(name),
+        async deleteAll() {
+          if (ref.canvasId === canvasId) {
+            started.resolve();
+            await release.promise;
+          }
+          await delegate.deleteAll();
+        },
+      };
+    },
+  };
+  const restore = setStorageForTesting({ ...current, blobs });
+  return {
+    deleteStarted: started.promise,
+    releaseDelete: release.resolve,
+    putCalls: () => putCalls,
+    restore,
+  };
+}
+
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'sediment-artifact-'));
   setWorkspacePath(tmp);
   resetStorageCache();
+  for (const canvasId of ['c1', 'src-canvas', 'dst-canvas']) {
+    createCanvas(canvasId);
+  }
 });
 
 afterEach(() => {
@@ -118,6 +178,66 @@ describe('artifact route', () => {
 
     expect((upload.json() as { uri: string }).uri).toMatch(/\.webm$/);
     await app.close();
+  });
+
+  it('rejects and drains a multipart upload for a missing Space', async () => {
+    const app = await buildApp();
+    const { payload, headers } = multipartBody('orphan.png', 'image/png', png);
+
+    const upload = await app.inject({
+      method: 'POST',
+      url: '/canvas/missing/artifact/image',
+      payload,
+      headers,
+    });
+
+    expect(upload.statusCode).toBe(500);
+    expect(await canvasBlobs('missing').list()).toEqual([]);
+    await app.close();
+  });
+
+  it('drains a multipart upload queued behind Space deletion without recreating blobs', async () => {
+    const blocker = installDeleteBlock('c1');
+    const app = await buildApp();
+    try {
+      const deleting = deleteCanvas('c1');
+      await blocker.deleteStarted;
+
+      const { payload, headers } = multipartBody(
+        'too-late.png',
+        'image/png',
+        png,
+      );
+      let uploadSettled = false;
+      const uploading = app
+        .inject({
+          method: 'POST',
+          url: '/canvas/c1/artifact/image',
+          payload,
+          headers,
+        })
+        .finally(() => {
+          uploadSettled = true;
+        });
+
+      // The upload is held at lifecycle admission while deletion owns the
+      // Space. Its body must later be drained when the post-delete record
+      // recheck rejects before the BlobStore sees the stream.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(uploadSettled).toBe(false);
+      expect(blocker.putCalls()).toBe(0);
+
+      blocker.releaseDelete();
+      await expect(deleting).resolves.toBe(true);
+      const upload = await uploading;
+      expect(upload.statusCode).toBe(500);
+      expect(blocker.putCalls()).toBe(0);
+      expect(await canvasBlobs('c1').list()).toEqual([]);
+    } finally {
+      blocker.releaseDelete();
+      blocker.restore();
+      await app.close();
+    }
   });
 
   it('serves a byte range so media nodes can seek', async () => {

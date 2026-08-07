@@ -44,6 +44,30 @@ const ENV_KEY = 'HUABU_WORKSPACE';
 
 let _workspacePath: string | null = null;
 let _managed = false;
+let _leasedWorkspacePath: string | null = null;
+let _workspaceOperationLeaseCount = 0;
+
+/**
+ * A short-lived claim that keeps an async operation on one workspace.
+ *
+ * The release callback is deliberately synchronous and idempotent so callers
+ * can always put it in a `finally` block without masking the operation's
+ * original result.
+ */
+export interface WorkspaceOperationLease {
+  readonly workspacePath: string;
+  release(): void;
+}
+
+/** Raised when a workspace switch would strand an in-flight operation. */
+export class WorkspaceOperationInProgressError extends Error {
+  constructor() {
+    super(
+      'Cannot change workspace while an operation is still using the active workspace',
+    );
+    this.name = 'WorkspaceOperationInProgressError';
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────
 // Mode + lifecycle
@@ -104,6 +128,40 @@ export function getWorkspacePath(): string {
 }
 
 /**
+ * Keep the currently-active workspace stable for an async operation.
+ *
+ * Multiple operations may hold leases concurrently. Switching to another
+ * workspace is rejected until every lease has been released; recommitting the
+ * same path remains allowed.
+ */
+export function acquireWorkspaceOperationLease(): WorkspaceOperationLease {
+  const workspacePath = getWorkspacePath();
+
+  if (
+    _workspaceOperationLeaseCount > 0 &&
+    _leasedWorkspacePath !== workspacePath
+  ) {
+    throw new Error('Workspace operation lease invariant violated');
+  }
+
+  _leasedWorkspacePath = workspacePath;
+  _workspaceOperationLeaseCount += 1;
+
+  let released = false;
+  return Object.freeze({
+    workspacePath,
+    release(): void {
+      if (released) return;
+      released = true;
+      _workspaceOperationLeaseCount -= 1;
+      if (_workspaceOperationLeaseCount === 0) {
+        _leasedWorkspacePath = null;
+      }
+    },
+  });
+}
+
+/**
  * Display label for the currently-active workspace. In managed mode this
  * is the basename of the locked path; in free mode it's also the basename
  * of the user-picked path. Returns `null` if nothing is active yet.
@@ -131,6 +189,7 @@ export function setWorkspacePath(newPath: string): void {
     );
   }
   const resolvedPath = resolveWorkspacePath(newPath);
+  assertWorkspacePathChangeAllowed(resolvedPath);
   prepareWorkspaceOnDisk(resolvedPath);
   commitWorkspacePath(resolvedPath);
 }
@@ -148,6 +207,7 @@ export function resolveWorkspacePath(newPath: string): string {
  * it only after the isolated preparation process has completed successfully.
  */
 export function commitWorkspacePath(resolvedPath: string): void {
+  assertWorkspacePathChangeAllowed(resolvedPath);
   _workspacePath = resolvedPath;
   // Drop the cached canvas-dir index so subsequent lookups (used by
   // migrations and route handlers) reflect the new workspace.
@@ -181,5 +241,15 @@ function validateAbsolutePath(p: string): void {
     throw new Error(
       'Windows-style path not allowed on this server (looks like data was set from a different OS)',
     );
+  }
+}
+
+function assertWorkspacePathChangeAllowed(resolvedPath: string): void {
+  if (
+    _workspaceOperationLeaseCount > 0 &&
+    _leasedWorkspacePath !== null &&
+    _leasedWorkspacePath !== resolvedPath
+  ) {
+    throw new WorkspaceOperationInProgressError();
   }
 }

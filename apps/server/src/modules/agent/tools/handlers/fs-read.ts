@@ -35,8 +35,8 @@ import { nodeRevisionOf } from '@sediment/shared/canvas-engine';
 
 import { normalizeRel, safeResolve } from './fs-sandbox.js';
 import { readSkillFile, resolveSkillPath } from '../../../../prompt/index.js';
+import { parseFrontmatter } from '../../../../utils/markdown-frontmatter.js';
 import { IMAGE_MIME_MAP, isVisionImageMime } from '../../../../utils/mime.js';
-import { parseFrontmatter } from '../../../storage/frontmatter.js';
 import { getCanvasStore } from '../../../storage/index.js';
 import { readCanvasMemory, readWorkspaceMemory } from '../../memory/index.js';
 

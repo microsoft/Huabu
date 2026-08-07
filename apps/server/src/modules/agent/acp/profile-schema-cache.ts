@@ -65,7 +65,7 @@
 import path from 'node:path';
 
 import { getDataDir } from '../../../data-dir.js';
-import { atomicWriteJson, readJson } from '../../storage/io.js';
+import { atomicWriteJson, readJson } from '../../../utils/fs.js';
 
 import type { AgentMetadata } from '@agenetes/protocol';
 import type {

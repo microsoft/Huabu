@@ -47,7 +47,7 @@ vi.mock('../agent/agenetes/drivers.js', () => ({
 import rfsRoutes from './rfs.route.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { getCanvasStore, resetStorageCache } from '../storage/index.js';
-import { toSafeFilename } from '../storage/naming.js';
+import { toSafeFilename } from '../workspace/disk/naming.js';
 import { setWorkspacePath } from '../workspace.js';
 
 let tmp: string;

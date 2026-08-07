@@ -5,7 +5,7 @@
  * from the outputs of all previous stages.
  */
 
-import { normalizeForCompare } from '../../storage/naming.js';
+import { normalizeForCompare } from '../../workspace/disk/naming.js';
 import { isLabelProtected } from '../label-policy.js';
 
 import type {

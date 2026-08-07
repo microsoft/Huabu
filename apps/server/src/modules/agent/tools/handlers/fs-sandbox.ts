@@ -26,7 +26,7 @@
 import { readFileSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 
-import { parseFrontmatter } from '../../../storage/frontmatter.js';
+import { parseFrontmatter } from '../../../../utils/markdown-frontmatter.js';
 import { getCanvasStore } from '../../../storage/index.js';
 import { canvasRoot } from '../../../storage/paths.js';
 

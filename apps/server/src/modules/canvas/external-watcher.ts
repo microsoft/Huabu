@@ -23,11 +23,11 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { getLogger } from '../../utils/logger.js';
+import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
 import { listAllCanvasDirEntries } from '../storage/canvas-dirs.js';
-import { parseFrontmatter } from '../storage/frontmatter.js';
 import { getCanvasStore } from '../storage/index.js';
 import { SPACE_JSON_FILENAME } from '../storage/paths.js';
-import { registerSpaceDirHandleOwner } from '../storage/space-dir-handles.js';
+import { registerSpaceDirHandleOwner } from '../workspace/disk/space-dir-handles.js';
 import { getWorkspacePath, isWorkspaceConfigured } from '../workspace.js';
 
 import type { CanvasFile } from '../storage/index.js';

@@ -8,15 +8,15 @@
 
 import { mkdirSync } from 'node:fs';
 
-import { migrateLegacyAcpSessions } from './storage/migrate-acp-sessions.js';
+import { ensureWorldCanvasOnDisk } from './workspace/disk/world-canvas.js';
+import { migrateLegacyAcpSessions } from './workspace/migrations/migrate-acp-sessions.js';
 import {
   migrateLegacyAgenetesThreads,
   repairExternalAgentPreambles,
-} from './storage/migrate-agenetes-threads.js';
-import { migrateCanvasToSpace } from './storage/migrate-canvas-to-space.js';
-import { migrateLegacyChatThreads } from './storage/migrate-chat-threads.js';
-import { migrateLegacyChatTurns } from './storage/migrate-chat-turns.js';
-import { ensureWorldCanvasOnDisk } from './storage/world-canvas.js';
+} from './workspace/migrations/migrate-agenetes-threads.js';
+import { migrateCanvasToSpace } from './workspace/migrations/migrate-canvas-to-space.js';
+import { migrateLegacyChatThreads } from './workspace/migrations/migrate-chat-threads.js';
+import { migrateLegacyChatTurns } from './workspace/migrations/migrate-chat-turns.js';
 import { renderExternalAgentSystemPreamble } from '../prompt/external-agent/system-preamble.js';
 
 /**

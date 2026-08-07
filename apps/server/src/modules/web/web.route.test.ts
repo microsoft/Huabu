@@ -6,7 +6,7 @@ import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import webRoutes from './web.route.js';
-import { getCanvasStore } from '../storage/index.js';
+import { createCanvas, getCanvasStore } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 let tmp: string;
@@ -31,6 +31,7 @@ describe('GET /api/web/page', () => {
   it('marks direct .mhtml artifact keys as static snapshots', async () => {
     const canvasId = 'c1';
     const nodeId = 'n1';
+    createCanvas(canvasId);
     getCanvasStore(canvasId).writeNode(nodeId, {
       nodeId,
       type: 'web',

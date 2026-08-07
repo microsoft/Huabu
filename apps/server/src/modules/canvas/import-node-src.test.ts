@@ -11,7 +11,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { importForeignNodeSources } from './import-node-src.js';
-import { canvasBlobs, getCanvasStore } from '../storage/index.js';
+import { canvasBlobs, createCanvas, getCanvasStore } from '../storage/index.js';
 import { canvasRoot } from '../storage/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
@@ -22,6 +22,17 @@ let tmp: string;
 beforeEach(() => {
   tmp = mkdtempSync(path.join(tmpdir(), 'sediment-import-node-src-'));
   setWorkspacePath(tmp);
+  for (const canvasId of [
+    'c-web-local',
+    'c-web-invalid-local',
+    'c-web-remote',
+    'c-web-data',
+    'c-web-merge-local',
+    'c-web-merge-remote',
+    'c-image-local',
+  ]) {
+    createCanvas(canvasId);
+  }
 });
 
 afterEach(() => {

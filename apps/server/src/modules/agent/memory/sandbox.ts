@@ -98,7 +98,7 @@ export function resolveUserSkillPath(id: string): string {
 /**
  * Resolve the absolute Space memory file path. Throws if the resolved path
  * escapes the canvas's `.memory/` root (a defensive check — the path
- * computation in `storage/paths.ts` already constrains the result,
+ * computation in `workspace/disk/paths.ts` already constrains the result,
  * but going through `ensureUnderRoot` keeps the invariant explicit).
  */
 export function resolveWorkingMemoryPath(canvasId: string): string {

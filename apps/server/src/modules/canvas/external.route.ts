@@ -13,7 +13,7 @@ import {
   openExternalNoteSession,
   takeExternalNote,
 } from './external-watcher.js';
-import { parseFrontmatter } from '../storage/frontmatter.js';
+import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
 import { canvasRoot } from '../storage/paths.js';
 
 import type { FastifyPluginAsync } from 'fastify';

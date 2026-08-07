@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { externalAgentRuntimeConfigSchema } from '@sediment/shared';
 
 import { getDataDir } from '../../../data-dir.js';
+import { atomicWriteJson } from '../../../utils/fs.js';
 import { getLogger } from '../../../utils/logger.js';
-import { atomicWriteJson } from '../../storage/io.js';
 
 import type { ExternalAgentRuntimeConfig } from '@sediment/shared';
 
