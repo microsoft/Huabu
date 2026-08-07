@@ -13,7 +13,7 @@
  */
 
 import { getLogger } from '../../../utils/logger.js';
-import { updateNode } from '../../storage/write-coordinator.js';
+import { updateNode } from '../../canvas/write-coordinator.js';
 
 import type { CanvasStore, NodeContent } from '../../storage/canvas-store.js';
 import type {

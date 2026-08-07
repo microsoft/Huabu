@@ -25,8 +25,8 @@
 
 import { existsSync } from 'node:fs';
 
+import { atomicWriteJson, mkdirp, readJson } from '../../../utils/fs.js';
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
-import { atomicWriteJson, mkdirp, readJson } from '../../storage/io.js';
 import {
   memoryStatePath,
   canvasMemoryDir,
