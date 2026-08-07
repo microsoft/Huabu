@@ -85,31 +85,7 @@ Skip a single run with `--no-verify`, or disable the hooks again with
 the authoritative gate is CI (`.github/workflows/ci.yml`), which runs lint,
 format, and typecheck on every pull request regardless of local setup.
 
-### Configuring an LLM
-
-Huabu needs an LLM to drive chat, intent suggestions, and other in-Space AI features. Open the Settings button → **LLM Provider**.
-
-1. Pick a **Provider** (OpenAI, Anthropic, Google Gemini, OpenRouter,
-   GitHub Copilot, and more).
-2. Pick a **Model**. If the provider doesn't expose a model list,
-   type one in (e.g. `gpt-4o`) and click **Save**.
-3. Authenticate:
-   - **API key** providers — click **Set key**, paste, save.
-   - **GitHub Copilot** (OAuth) — click **Login**, then enter the shown user code at the opened GitHub page.
-
-The config is persisted on the server side, so you only need to do this once per machine. Source development uses the `HUABU_SECRET_KEY` configured during setup; packaged Electron releases use OS-protected storage instead.
-
-> Coding agents you connect through **External Agents** (below) bring
-> their own auth and don't use this provider setting.
-
-### Connecting external coding agents
-
-Huabu can talk to AI coding agents running on your machine — **GitHub Copilot**, **Claude Agent**, **Gemini**, **Codex**, **Qwen Code**, **Kimi Code CLI**, **OpenCode**, **Cursor**, **Hermes Agent**, and others that speak the [Agent Client Protocol](https://agentclientprotocol.com).
-
-First install the agent CLI(s) you want and complete their sign-in flow.
-Then open **Settings → External Agents**, create a profile for the agent
-and the project folder it should work in, and activate it. The agent
-appears in the chat panel and can read and modify files under that folder.
+Configuring a model provider and connecting external coding agents work the same way as in a packaged build, so they are covered in the handbook: [Models and capabilities](https://microsoft.github.io/Huabu/docs/ai/models-and-capabilities) and [External agents](https://microsoft.github.io/Huabu/docs/ai/external-agents). A source build reads its encryption key from `HUABU_SECRET_KEY`, whereas packaged releases use operating-system-protected storage.
 
 ## Data, Credentials, and Connected Services
 
