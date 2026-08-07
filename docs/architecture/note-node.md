@@ -23,6 +23,8 @@ interface NoteNodeData extends BaseNodeData {
 
 On disk the node is one file, `nodes/<safe(label)>.md`: front-matter carries `id` / `type` / `label` / `src`, and the body is `content` verbatim. Layout and rules live in [canvas-storage.md](./canvas-storage.md). The body's ownership is `authored`, so the preprocessing pipeline never rewrites it — see [node-preprocessing.md](./node-preprocessing.md).
 
+Inline text and background colors persist as HTML spans with `data-huabu-text-color` and `data-huabu-background-color`. The parser also accepts the pre-rename `data-sediment-*` attributes for existing notes and serializes them back to the canonical `data-huabu-*` form on the next edit.
+
 ## 3. Lifecycle
 
 **Creation** — notes have no creation path of their own. They go through the generic `ADD_NODES` UI intent, which resolves to a `CREATE_NODES` command; paste, canvas drop and agent-issued creation all funnel through it. See [canvas-command-architecture.md](./canvas-command-architecture.md).
