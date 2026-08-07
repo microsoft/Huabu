@@ -206,7 +206,10 @@ function confirmCommit(candidate: PrewarmCandidate): void {
       failureCounts.delete(key);
       return;
     }
-    if (autoHeightKey(node) !== candidate.measuredFor) return;
+    if (autoHeightKey(node) !== candidate.measuredFor) {
+      failureCounts.delete(key);
+      return;
+    }
     scheduleRetry(candidate, new Error('measured height was not committed'));
   }, COMMIT_CONFIRM_MS);
   commitCheckHandles.set(key, handle);

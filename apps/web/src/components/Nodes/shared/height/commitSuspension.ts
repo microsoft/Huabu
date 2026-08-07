@@ -68,7 +68,7 @@ function notifySettled(): void {
   for (const listener of listeners) listener();
 }
 
-/** Test seam: forget all holds and listeners. */
+/** Test seam: forget all holds. */
 export function __resetHeightCommitSuspension(): void {
   anonymousDepth = 0;
   namedHolds.clear();
