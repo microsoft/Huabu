@@ -68,7 +68,7 @@ const ROW_HEIGHT = 52;
  */
 const hasNodePreview = (nodeType: string): boolean => nodeType in NodePreviews;
 
-export const CanvasSearchResults = (): JSX.Element => {
+export const CanvasSearchResults = (): React.JSX.Element => {
   const query = useSearchStore((s) => s.query);
   const results = useSearchStore((s) => s.results);
   const isStreaming = useSearchStore((s) => s.isStreaming);
@@ -649,7 +649,7 @@ const NodeHeaderItem = ({
   collapsed,
   active,
   onClick,
-}: NodeHeaderItemProps): JSX.Element => {
+}: NodeHeaderItemProps): React.JSX.Element => {
   // Edge groups: render the connection glyph; node groups: per-type icon.
   // `getNodeIcon` falls back to the frame icon for unknown types, which
   // would mis-represent an edge as a frame in the list — short-circuit.
@@ -699,7 +699,7 @@ const NodeMatchItem = ({
   row,
   active,
   onClick,
-}: NodeMatchItemProps): JSX.Element => (
+}: NodeMatchItemProps): React.JSX.Element => (
   <button
     type="button"
     tabIndex={-1}
@@ -743,7 +743,7 @@ const SnippetLine = ({
   text: string;
   matchStart: number;
   matchLength: number;
-}): JSX.Element => {
+}): React.JSX.Element => {
   let before = text.slice(0, matchStart);
   const hit = text.slice(matchStart, matchStart + matchLength);
   const after = text.slice(matchStart + matchLength);

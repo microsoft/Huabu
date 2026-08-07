@@ -46,7 +46,7 @@ interface InPreviewSearchBarProps {
 
 export const InPreviewSearchBar = ({
   scopeEl,
-}: InPreviewSearchBarProps): JSX.Element | null => {
+}: InPreviewSearchBarProps): React.JSX.Element | null => {
   const { t } = useTranslation();
   const scope = useSearchStore((s) => s.scope);
   const query = useSearchStore((s) => s.query);

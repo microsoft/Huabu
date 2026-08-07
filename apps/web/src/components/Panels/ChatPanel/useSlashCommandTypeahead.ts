@@ -70,7 +70,7 @@ export interface UseSlashCommandTypeaheadResult {
    */
   slashState: { filter: string; loading: boolean } | null;
   /** Ref to attach to `<SlashCommandMenu>`. */
-  slashMenuRef: RefObject<SlashCommandMenuRef>;
+  slashMenuRef: RefObject<SlashCommandMenuRef | null>;
   /** Pass to `<SlashCommandMenu onSelect>`. */
   acceptSlashCommand: (command: AvailableCommand) => void;
   /**

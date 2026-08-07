@@ -85,7 +85,9 @@ function shouldSwallowKey(e: React.KeyboardEvent): boolean {
   return true;
 }
 
-export function MilkdownPreview(props: MilkdownPreviewProps): JSX.Element {
+export function MilkdownPreview(
+  props: MilkdownPreviewProps,
+): React.JSX.Element {
   const {
     markdown,
     className,

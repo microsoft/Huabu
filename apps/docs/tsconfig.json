@@ -9,9 +9,6 @@
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-    // apps/web is on React 18 while this app is on React 19, so the
-    // workspace resolves two @types/react versions and dependency
-    // declarations can pick up the other one.
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,

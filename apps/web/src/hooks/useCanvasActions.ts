@@ -22,7 +22,7 @@ export interface UseCanvasActionsResult {
   openImportDialog: () => void;
   isImporting: boolean;
   /** Ref to attach to the hidden `<input type="file">`. */
-  fileInputRef: React.RefObject<HTMLInputElement>;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
   /** `onChange` handler for the hidden file input. */
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
 }

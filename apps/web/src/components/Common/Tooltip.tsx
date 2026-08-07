@@ -124,14 +124,17 @@ export const Tooltip = ({
   // Mirror the previous a11y wiring: attach `aria-describedby` to the
   // actual interactive child rather than the wrapper span, so screen
   // readers announce the tooltip text alongside the button label.
-  const existingDescribedBy = children.props['aria-describedby'];
+  const childWithAriaProps = children as ReactElement<{
+    'aria-describedby'?: string;
+  }>;
+  const existingDescribedBy = childWithAriaProps.props['aria-describedby'];
   const childDescribedBy = isOpen
     ? typeof existingDescribedBy === 'string'
       ? `${existingDescribedBy} ${tooltipId}`
       : tooltipId
     : existingDescribedBy;
 
-  const wrappedChild = cloneElement(children, {
+  const wrappedChild = cloneElement(childWithAriaProps, {
     'aria-describedby': childDescribedBy,
   });
 

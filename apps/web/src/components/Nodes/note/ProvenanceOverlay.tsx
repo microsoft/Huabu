@@ -40,7 +40,7 @@ export interface ProvenanceOverlayProps {
   blocks: ReadonlyArray<BlockProvenance>;
   tombstones: ReadonlyArray<DeletedBlockInfo>;
   editor: MilkdownInstance | null;
-  containerRef: React.RefObject<HTMLDivElement>;
+  containerRef: React.RefObject<HTMLDivElement | null>;
   onAcceptBlock: (key: string) => void;
   onRejectBlock: (key: string) => void;
   /**
@@ -113,7 +113,7 @@ export function ProvenanceOverlay({
   onInsertBelow,
   onRestoreTombstone,
   onDismissTombstone,
-}: ProvenanceOverlayProps): JSX.Element | null {
+}: ProvenanceOverlayProps): React.JSX.Element | null {
   const [slots, setSlots] = useState<Slot[]>([]);
   // Tomb groups are identified by their shared anchorKey (`__head__`
   // for the null-anchor doc-head group). Block hover keeps using the
