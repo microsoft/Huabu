@@ -39,7 +39,9 @@ export function enterQuestionCompose(
   usePanelStore
     .getState()
     .requestOpenRightPanel(view.presentationAnchor.nodeId);
-  usePanelStore.getState().requestFocusChatInput();
+  usePanelStore
+    .getState()
+    .requestFocusChatInput(view.conversationOwner.threadId);
 }
 
 /**

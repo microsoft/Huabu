@@ -133,12 +133,14 @@ export const ChatInput = ({
   );
   const [isDragOver, setIsDragOver] = useState(false);
 
-  // Focus the textarea whenever a surface requests it (e.g. opening a
-  // question node into compose mode). Keyed on a monotonic nonce so
-  // repeated requests re-fire even without an intervening blur.
-  const focusChatInputNonce = usePanelStore((s) => s.focusChatInputNonce);
+  // Focus the textarea when a surface asks for *this* thread's composer.
+  // Keyed on a nonce so repeated requests re-fire even without an
+  // intervening blur.
+  const focusRequest = usePanelStore((s) => s.focusChatInputRequest);
+  const focusNonce =
+    focusRequest?.threadId === threadId ? focusRequest.nonce : null;
   useEffect(() => {
-    if (focusChatInputNonce === 0) return;
+    if (focusNonce === null) return;
     // Defer to the next frame so the panel has finished expanding and the
     // textarea is mounted + interactive before we move focus to it.
     const raf = requestAnimationFrame(() => {
@@ -150,7 +152,7 @@ export const ChatInput = ({
       ta.selectionEnd = len;
     });
     return () => cancelAnimationFrame(raf);
-  }, [focusChatInputNonce]);
+  }, [focusNonce]);
 
   // ── Slash-command typeahead ──────────────────────────────────────
   //
