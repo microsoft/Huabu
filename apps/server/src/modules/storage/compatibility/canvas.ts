@@ -6,11 +6,10 @@
  *
  * This layer exists so Phase 2 can make the port/adapter side correct
  * without an `await` cascade through every consumer. It owns the surface the
- * application uses today: the `CanvasStore` factory and its cache, the Space
- * catalogue (list / summaries), synchronous Space creation, and async Space
- * deletion. Those are
- * aggregate lifecycle and catalogue concerns that have no portable contract
- * yet; see docs/proposals/multi-backend-storage.md §12.2.3.
+ * application uses today: the `CanvasStore` factory and its cache, synchronous
+ * Space listing/creation, and async Space deletion. Those remaining lifecycle
+ * writers have no portable contract yet; see
+ * docs/proposals/multi-backend-storage.md §12.2.3.
  *
  * It delegates to the Disk legacy implementation directly rather than going
  * through `StructuredStore`, and both views resolve the *same* cached legacy
@@ -51,7 +50,6 @@ import {
 import { canvasBlobs, withCanvasDeletionAdmission } from '../storage.js';
 
 import type { CanvasFile } from '../../canvas/persistence-types.js';
-import type { CanvasSummary } from '@huabu/shared';
 
 export { CanvasStore } from '../backends/disk/legacy/canvas-store.js';
 export {
@@ -84,44 +82,6 @@ export function listCanvases(): CanvasFile[] {
     if (canvas) out.push(canvas);
   }
   return out;
-}
-
-/**
- * Lightweight list of canvas summaries for the list endpoint.
- *
- * Unlike {@link listCanvases}, this builds each row straight from the
- * in-memory canvas-dir index — whose entries already carry the summary
- * fields (`nodeCount` / `createdAt` / `updatedAt`) captured when
- * `scanWorkspace()` parsed each topology file. That avoids re-reading
- * and re-parsing every canvas file a second time just to render the
- * list.
- *
- * The displayed `title` mirrors `CanvasStore.read`'s Finder-rename
- * self-heal (adopt the on-disk directory name when it diverges from the
- * sanitised title) but WITHOUT the write-back — a read path must not
- * mutate disk. Persisted topology is reconciled lazily the next
- * time the canvas is opened via `read()`.
- */
-export function listCanvasSummaries(): CanvasSummary[] {
-  const ws = getWorkspacePath();
-  if (!existsSync(ws)) return [];
-  // Re-scan so external file changes are reflected, matching listCanvases.
-  refreshCanvasDirIndex();
-
-  return listCanvasDirEntries().map((entry) => {
-    const expectedDir = toSafeFilename(entry.title, entry.id);
-    const title =
-      entry.filename && entry.filename !== expectedDir
-        ? entry.filename
-        : entry.title;
-    return {
-      canvasId: entry.id,
-      title,
-      nodeCount: entry.nodeCount ?? 0,
-      createdAt: entry.createdAt ?? 0,
-      updatedAt: entry.updatedAt ?? 0,
-    };
-  });
 }
 
 /**

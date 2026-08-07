@@ -1,15 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/**
- * Route tests for the Canvas behavioural event log.
- *
- * Written for the Phase-2 consumer slice (docs/proposals/multi-backend-storage.md
- * §12.2.8): `GET /:canvasId/events` is the one read migrated from the
- * compatibility facade onto `events.read`. The handler had no test, so
- * these assert the payload it produces rather than the data source it uses —
- * which is what makes them meaningful on both sides of the swap.
- */
+/** Route coverage for repository-backed storage consumers and lifecycle. */
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,6 +38,7 @@ import {
   getStructuredStore,
   resetStorageCache,
 } from '../storage/index.js';
+import { changesPath } from '../workspace/disk/paths.js';
 import { withSpaceDirHandlesReleased } from '../workspace/disk/space-dir-handles.js';
 import { setWorkspacePath } from '../workspace.js';
 
@@ -88,6 +81,21 @@ function action(nodeId: string): RecentAction {
     action: 'node_selected',
     node: { id: nodeId, type: 'note', label: nodeId },
   };
+}
+
+function change(nodeId: string) {
+  const [record] = extractCanvasChanges([
+    {
+      type: 'INSERT_NODE' as const,
+      node: {
+        id: nodeId,
+        type: 'note' as const,
+        position: { x: 0, y: 0 },
+        data: { label: nodeId, content: `body-${nodeId}` },
+      },
+    },
+  ]);
+  return record;
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -157,6 +165,48 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
       expect(getCanvasStore('c1').read()).toBeNull();
     } finally {
       release.resolve();
+      await app.close();
+    }
+  });
+});
+
+describe('GET /api/canvas', () => {
+  it('lists through the catalogue and sorts a copy by updatedAt', async () => {
+    const source = [
+      {
+        canvasId: 'older',
+        title: 'Older',
+        nodeCount: 1,
+        createdAt: 1,
+        updatedAt: 10,
+      },
+      {
+        canvasId: 'newer',
+        title: 'Newer',
+        nodeCount: 2,
+        createdAt: 2,
+        updatedAt: 20,
+      },
+    ];
+    const list = vi.fn().mockResolvedValue(source);
+    const catalog = vi.fn(() => ({
+      list,
+      worldId: vi.fn(),
+    }));
+    vi.mocked(getStructuredStore).mockImplementationOnce(
+      () => ({ catalog }) as unknown as ReturnType<typeof getStructuredStore>,
+    );
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({ method: 'GET', url: '/canvas' });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ canvases: [source[1], source[0]] });
+      expect(source.map((row) => row.canvasId)).toEqual(['older', 'newer']);
+      expect(catalog).toHaveBeenCalledTimes(1);
+      expect(list).toHaveBeenCalledTimes(1);
+    } finally {
       await app.close();
     }
   });
@@ -305,6 +355,109 @@ describe('GET /api/canvas/:canvasId/events', () => {
       });
 
       expect(res.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
+  it('reads change records through one structured Space handle', async () => {
+    const expected = [change('n1')];
+    const readRecord = vi.fn().mockResolvedValue({ canvasId: 'c1' });
+    const readChanges = vi.fn().mockResolvedValue(expected);
+    const space = vi.fn(() => ({
+      record: { read: readRecord },
+      changes: { read: readChanges },
+    }));
+    vi.mocked(getStructuredStore).mockImplementationOnce(
+      () => ({ space }) as unknown as ReturnType<typeof getStructuredStore>,
+    );
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/threads/thread-1/changes',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ changes: expected });
+      expect(getStructuredStore).toHaveBeenCalledTimes(1);
+      expect(space).toHaveBeenCalledTimes(1);
+      expect(space).toHaveBeenCalledWith('c1');
+      expect(readRecord).toHaveBeenCalledTimes(1);
+      expect(readChanges).toHaveBeenCalledWith('thread-1');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns an empty list when the thread has no changes', async () => {
+    createCanvas('c1', 'Canvas One');
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/threads/thread-1/changes',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ changes: [] });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('404s for a Space that does not exist', async () => {
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/canvas/missing/threads/thread-1/changes',
+      });
+
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toEqual({ message: 'Canvas not found' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not report a corrupt Space record as missing', async () => {
+    createCanvas('c1', 'Canvas One');
+    writeFileSync(join(tmp, 'Canvas One', 'space.json'), '{broken', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/threads/thread-1/changes',
+      });
+
+      expect(res.statusCode).toBe(500);
+      expect(res.json()).not.toEqual({ message: 'Canvas not found' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects a corrupt change-record array', async () => {
+    createCanvas('c1', 'Canvas One');
+    await getStructuredStore()
+      .space('c1')
+      .changes.append('thread-1', [change('n1')]);
+    writeFileSync(changesPath('c1', 'thread-1'), '{}', 'utf8');
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/threads/thread-1/changes',
+      });
+
+      expect(res.statusCode).toBe(500);
     } finally {
       await app.close();
     }

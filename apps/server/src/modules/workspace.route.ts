@@ -9,7 +9,7 @@ import path from 'node:path';
 import { validatePathSchema, workspacePathSchema } from '@huabu/shared';
 
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
-import { requireWorldCanvasId, resetStorageCache } from './storage/index.js';
+import { getStructuredStore, resetStorageCache } from './storage/index.js';
 import {
   activateWorkspacePath,
   WorkspaceActivationInProgressError,
@@ -153,7 +153,7 @@ function sendError(
 }
 
 /** Build the canonical success payload describing the current workspace. */
-function buildWorkspaceState(): WorkspaceInfo {
+async function buildWorkspaceState(): Promise<WorkspaceInfo> {
   const managed = isManagedMode();
   const configured = isWorkspaceConfigured();
   return {
@@ -163,7 +163,9 @@ function buildWorkspaceState(): WorkspaceInfo {
     path: configured && !managed ? getWorkspacePath() : null,
     // Display label (basename). Safe to send in either mode.
     name: configured ? getWorkspaceName() : null,
-    worldCanvasId: configured ? requireWorldCanvasId() : null,
+    worldCanvasId: configured
+      ? await getStructuredStore().catalog().worldId()
+      : null,
     capabilities: {
       canChangeWorkspace: !managed,
       nativePicker: !managed && canShowNativePicker(),
@@ -263,7 +265,7 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
       // Reset singletons that cache filesystem handles for the old workspace.
       resetStorageCache();
       resetPreprocessDispatcher();
-      return buildWorkspaceState();
+      return await buildWorkspaceState();
     } catch (e) {
       if (e instanceof WorkspaceActivationTimeoutError) {
         return sendError(

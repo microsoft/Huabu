@@ -59,7 +59,6 @@ import {
   getCanvasStore,
   getStructuredStore,
   listCanvases,
-  listCanvasSummaries,
   updateNode,
   type CanvasFile,
   type UpdateNodeOutcome,
@@ -562,11 +561,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get<{ Reply: ApiResult<ListCanvasesResponse> }>(
     '/',
     async function (_request, reply) {
-      // Built from the canvas-dir index rather than re-reading every Space.
-      const summaries = listCanvasSummaries();
-
-      // Sort by most recently updated first
-      summaries.sort((a, b) => b.updatedAt - a.updatedAt);
+      const summaries = [...(await getStructuredStore().catalog().list())].sort(
+        (a, b) => b.updatedAt - a.updatedAt,
+      );
 
       return reply.send({ canvases: summaries });
     },
@@ -1395,11 +1392,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<GetThreadChangesResponse>;
   }>('/:canvasId/threads/:threadId/changes', async function (request, reply) {
     const { canvasId, threadId } = request.params;
-    const store = getCanvasStore(canvasId);
-    if (!store.read()) {
+    const handle = getStructuredStore().space(canvasId);
+    if (!(await handle.record.read())) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
-    return reply.send({ changes: store.readChanges(threadId) });
+    return reply.send({ changes: await handle.changes.read(threadId) });
   });
 
   fastify.delete<{
