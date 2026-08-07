@@ -241,8 +241,8 @@ importers:
         specifier: ^6.44.0
         version: 6.44.0(ws@8.21.0)(zod@4.4.3)
       perfect-freehand:
-        specifier: ^1.2.3
-        version: 1.2.3
+        specifier: 0.3.5
+        version: 0.3.5
       pino:
         specifier: ^10.3.1
         version: 10.3.1
@@ -392,8 +392,8 @@ importers:
         specifier: 5.4.296
         version: 5.4.296
       perfect-freehand:
-        specifier: ^1.2.3
-        version: 1.2.3
+        specifier: 0.3.5
+        version: 0.3.5
       react:
         specifier: ^18.2.0
         version: 18.3.1
@@ -5299,8 +5299,9 @@ packages:
   pend@1.2.0:
     resolution: {integrity: sha1-elfrVQpng/kRUzH89GY9XI4AelA=, tarball: https://ms-feed-17.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/pend/-/pend-1.2.0.tgz}
 
-  perfect-freehand@1.2.3:
-    resolution: {integrity: sha512-bHZSfqDHGNlPpgH2yxXgPHlQSPpEbo+qg7li0M78J9vNAi2yjwLeA4x79BEQhX44lEWpCLSFCeRZwpw0niiXPA==}
+  perfect-freehand@0.3.5:
+    resolution: {integrity: sha1-QgS0RT3/wFftyQhplmkMjWPOnJk=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/perfect-freehand/-/perfect-freehand-0.3.5.tgz}
+    engines: {node: '>=10'}
 
   picocolors@1.1.1:
     resolution: {integrity: sha1-PTIa8+q5ObCDyPkpodEs2oHCa2s=, tarball: https://ms-feed-12.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/picocolors/-/picocolors-1.1.1.tgz}
@@ -12163,7 +12164,7 @@ snapshots:
 
   pend@1.2.0: {}
 
-  perfect-freehand@1.2.3: {}
+  perfect-freehand@0.3.5: {}
 
   picocolors@1.1.1: {}
 

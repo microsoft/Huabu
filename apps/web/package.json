@@ -47,7 +47,7 @@
     "lottie-react": "^2.4.1",
     "lucide-react": "^0.577.0",
     "pdfjs-dist": "5.4.296",
-    "perfect-freehand": "^1.2.3",
+    "perfect-freehand": "0.3.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-i18next": "^17.0.8",

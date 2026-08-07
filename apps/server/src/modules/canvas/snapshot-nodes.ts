@@ -56,7 +56,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
-import { getStroke } from 'perfect-freehand';
+import getStrokeImport from 'perfect-freehand';
 
 import {
   SPACE_SNAPSHOT_DEFAULT_PIXELS,
@@ -76,6 +76,14 @@ import type {
   SpatialNode,
 } from '@huabu/shared';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
+
+type GetStroke = typeof import('perfect-freehand')['default'];
+
+const getStroke = (
+  typeof getStrokeImport === 'function'
+    ? getStrokeImport
+    : (getStrokeImport as { default: GetStroke }).default
+) as GetStroke;
 
 export type SnapshotNodesArgs = SnapshotNodesQueryParams & {
   canvasId: string;
