@@ -25,7 +25,7 @@ Huabu gives you an infinite work surface where you and your agents think togethe
 
 ## Download and Install
 
-This initial release distributes packaged desktop applications through [GitHub Releases](https://github.com/microsoft/Huabu/releases/latest).
+Packaged desktop applications are published through [GitHub Releases](https://github.com/microsoft/Huabu/releases/latest). You can also [build from source](#building-from-source).
 
 1. Download the latest package for your platform from the Releases page.
 2. On macOS, open the `.dmg`; on Windows, run the `.exe` installer.
