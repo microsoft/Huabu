@@ -43,7 +43,7 @@ import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
 import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { AcpBindingRecipe, AcpTurnOverlay } from '@agenetes/acp-driver';
 import type { AgentProfileSnapshot } from '@agenetes/agent-team';
-import type { AgentStreamEvent } from '@huabu/shared';
+import type { AgentLaunchOverrides, AgentStreamEvent } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 export interface RunAcpAgentOptions {
@@ -97,6 +97,8 @@ export interface RunAcpAgentOptions {
    * stranded at the filesystem root).
    */
   cwd?: string;
+  /** Per-node spawn overrides applied when the workload is first created. */
+  launchOverrides?: AgentLaunchOverrides;
   /** Cancellation signal \u2014 wired through to `session/cancel`. */
   signal?: AbortSignal;
   logger: FastifyBaseLogger;
@@ -166,29 +168,37 @@ export function resolveProfileSnapshot(
   };
 }
 
-export async function* runAcpAgent(
-  opts: RunAcpAgentOptions,
-): AsyncGenerator<AgentStreamEvent, void> {
-  const { binding, threadId, overlay, signal, logger } = opts;
-  const canvasId = opts.canvasId ?? '';
-  const rendered = await renderExternalAgentInputs({
-    envelope: opts.envelope,
-    agentAlias: binding.alias,
-    canvasId: canvasId || null,
-    logger,
-  });
-  const submission = createChatSubmission(opts.envelope, rendered);
+function applyWorkingDirectoryOverride(
+  recipe: AcpBindingRecipe | null,
+  workingDirPath: string | undefined,
+): AcpBindingRecipe | null {
+  if (!recipe || !workingDirPath) return recipe;
+  return {
+    ...recipe,
+    cwd: workingDirPath,
+    ...(recipe.agentTeam && 'workingDirPath' in recipe.agentTeam
+      ? {
+          agentTeam: {
+            ...recipe.agentTeam,
+            workingDirPath,
+          },
+        }
+      : {}),
+  };
+}
 
-  // Bake this thread's WorkloadSpec (I9.6). The ACP handle self-resolves
-  // (opens or reuses) its live session per turn from these fields — L1 no
-  // longer opens the session out-of-band. We deliberately do NOT set `cwd`
-  // when the caller omitted it, so the handle derives it from the bound
-  // profile's recipe.
+export function buildAcpWorkloadSpec(
+  opts: Pick<
+    RunAcpAgentOptions,
+    'binding' | 'threadId' | 'canvasId' | 'cwd' | 'launchOverrides'
+  >,
+): AcpWorkloadSpec {
+  const { binding, threadId } = opts;
+  const canvasId = opts.canvasId ?? '';
   const profile = resolveProfileSnapshot(binding.profileId);
   let agentletId: string;
   let cwd: string | undefined;
   let recipe: AcpBindingRecipe | null;
-  const env = buildReachbackEnv(threadId, canvasId);
   if (profile) {
     agentletId = profile.agentletId;
     cwd = profile.workingDirPath;
@@ -216,20 +226,50 @@ export async function* runAcpAgent(
     recipe = resolveBindingRecipe(binding.profileId);
   }
 
-  const spec: AcpWorkloadSpec = {
+  const workingDirPath = opts.launchOverrides?.workingDirPath;
+  cwd = workingDirPath ?? cwd;
+  recipe = applyWorkingDirectoryOverride(recipe, workingDirPath);
+
+  return {
     threadId,
     kind: EXTERNAL_DRIVER_KIND,
     workloadType: 'Deployment' as const,
     namespace: canvasAcpNamespace(canvasId),
     spec: {
-      initialPreamble: [renderExternalAgentSystemPreamble()],
+      initialPreamble: [
+        renderExternalAgentSystemPreamble(),
+        ...(opts.launchOverrides?.additionalInitialPreamble
+          ? [opts.launchOverrides.additionalInitialPreamble]
+          : []),
+      ],
       binding,
       agentletId,
       ...(cwd !== undefined && { cwd }),
       recipe,
-      env,
+      env: buildReachbackEnv(threadId, canvasId),
     },
   };
+}
+
+export async function* runAcpAgent(
+  opts: RunAcpAgentOptions,
+): AsyncGenerator<AgentStreamEvent, void> {
+  const { binding, threadId, overlay, signal, logger } = opts;
+  const canvasId = opts.canvasId ?? '';
+  const rendered = await renderExternalAgentInputs({
+    envelope: opts.envelope,
+    agentAlias: binding.alias,
+    canvasId: canvasId || null,
+    logger,
+  });
+  const submission = createChatSubmission(opts.envelope, rendered);
+
+  // Bake this thread's WorkloadSpec (I9.6). The ACP handle self-resolves
+  // (opens or reuses) its live session per turn from these fields — L1 no
+  // longer opens the session out-of-band. Agenetes keeps an existing
+  // persisted spec authoritative when recovering a previously created
+  // workload.
+  const spec = buildAcpWorkloadSpec(opts);
 
   // Optional developer aid: dump the exact text payload handed to ACP
   // `session/prompt` (the serialized prompt, NOT pi-ai messages — the

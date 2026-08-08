@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import path from 'node:path';
-
 import { getAgentTeamRegistry } from '@agenetes/agentlet-host';
 
 import {
@@ -15,13 +13,14 @@ import {
   type Point,
 } from '@huabu/shared';
 
+import {
+  InvalidAgentLaunchOverridesError,
+  parseAgentLaunchOverrides,
+} from './agent-launch-overrides.js';
 import { executeCanvasCommandsOnHost } from '../canvas/canvas-command-router.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type { ExecuteOnServerOutput } from '../canvas/canvas-executor.js';
-
-const MAX_WORKING_DIR_PATH_LENGTH = 4096;
-const MAX_ADDITIONAL_PREAMBLE_LENGTH = 16 * 1024;
 
 type AgentNodeAnchor =
   | { kind: 'task-root'; taskNoteNodeId: CanvasNodeId }
@@ -102,48 +101,11 @@ const DEFAULT_DEPENDENCIES: AgentNodeServiceDependencies = {
   execute: executeCanvasCommandsOnHost,
 };
 
-function isAbsolutePath(value: string): boolean {
-  return (
-    path.isAbsolute(value) ||
-    /^[A-Za-z]:[\\/]/.test(value) ||
-    value.startsWith('\\\\')
-  );
-}
-
 function validatePosition(position: Point): void {
   if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) {
     throw new AgentNodeCreationError(
       'invalid_position',
       'Agent Node position must contain finite coordinates',
-    );
-  }
-}
-
-function validateLaunchOverrides(
-  overrides: AgentLaunchOverrides | undefined,
-): void {
-  if (!overrides) return;
-  const { workingDirPath, additionalInitialPreamble } = overrides;
-  if (
-    workingDirPath !== undefined &&
-    (workingDirPath.length === 0 ||
-      workingDirPath.trim() !== workingDirPath ||
-      workingDirPath.length > MAX_WORKING_DIR_PATH_LENGTH ||
-      !isAbsolutePath(workingDirPath))
-  ) {
-    throw new AgentNodeCreationError(
-      'invalid_launch_overrides',
-      `workingDirPath must be an absolute path no longer than ${MAX_WORKING_DIR_PATH_LENGTH} characters`,
-    );
-  }
-  if (
-    additionalInitialPreamble !== undefined &&
-    (additionalInitialPreamble.trim().length === 0 ||
-      additionalInitialPreamble.length > MAX_ADDITIONAL_PREAMBLE_LENGTH)
-  ) {
-    throw new AgentNodeCreationError(
-      'invalid_launch_overrides',
-      `additionalInitialPreamble must be non-empty and no longer than ${MAX_ADDITIONAL_PREAMBLE_LENGTH} characters`,
     );
   }
 }
@@ -192,7 +154,18 @@ export class AgentNodeService {
 
   async create(input: CreateAgentNodeInput): Promise<CreateAgentNodeResult> {
     validatePosition(input.position);
-    validateLaunchOverrides(input.launchOverrides);
+    let launchOverrides: AgentLaunchOverrides | undefined;
+    try {
+      launchOverrides = parseAgentLaunchOverrides(input.launchOverrides);
+    } catch (error) {
+      if (error instanceof InvalidAgentLaunchOverridesError) {
+        throw new AgentNodeCreationError(
+          'invalid_launch_overrides',
+          error.message,
+        );
+      }
+      throw error;
+    }
 
     const nodes = this.dependencies.readCanvasNodes(input.canvasId);
     if (!nodes) {
@@ -222,9 +195,6 @@ export class AgentNodeService {
     const nodeId = createId('node') as CanvasNodeId;
     const threadId = createId('thread');
     const edgeId = createId('edge');
-    const hasLaunchOverrides =
-      input.launchOverrides?.workingDirPath !== undefined ||
-      input.launchOverrides?.additionalInitialPreamble !== undefined;
     const output = await this.dependencies.execute({
       canvasId: input.canvasId,
       commands: [
@@ -245,8 +215,8 @@ export class AgentNodeService {
                 },
                 agentBindingPolicy: 'fixed',
                 agentIcon: readAgentIcon(profile),
-                ...(hasLaunchOverrides
-                  ? { agentLaunchOverrides: input.launchOverrides }
+                ...(launchOverrides
+                  ? { agentLaunchOverrides: launchOverrides }
                   : {}),
                 origin: { type: 'ai-operate' },
               },

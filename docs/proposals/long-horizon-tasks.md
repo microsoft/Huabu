@@ -399,7 +399,7 @@ Add `AgentLaunchOverrides` to Question Node data, implement `AgentNodeService.cr
 
 ### 14.2 Canonical Agent thread invocation
 
-Implement `AgentThreadService.invoke()` over the existing Question Node binding and Agenetes path, move the existing UI `/api/agent` execution behind it, and make first-content persistence, turn lease, history, disconnect behavior, and lifecycle updates server-owned. Support lazy first realization with Profile overrides without refactoring Profile lowering.
+Implement `AgentThreadService.invoke()` over the existing Question Node binding and Agenetes path, move the existing UI `/api/agent` execution behind it, and make first-content persistence, turn lease, history, disconnect behavior, and lifecycle updates server-owned. Support lazy first realization with Profile overrides without refactoring Profile lowering. The first implementation step is a thin `canvasId + threadId` resolver whose Canvas scan is intentionally isolated for replacement by the Workspace-global DB index tracked in #60, plus a serialized Canvas lifecycle writer and override-aware WorkloadSpec builder; these foundations do not become a second invocation path before the route migration lands.
 
 ### 14.3 Recursive Agent RFS
 
