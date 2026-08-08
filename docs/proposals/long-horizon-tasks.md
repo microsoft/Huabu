@@ -403,7 +403,7 @@ Implement `AgentThreadService.invoke()` over the existing Question Node binding 
 
 ### 14.3 Recursive Agent RFS
 
-Add `POST /api/rfs/:canvasId/agent/create`, reuse the host-thread correlation header, and route existing RFS `POST /agent` through `AgentThreadService`. At the end of this slice, any Agent can recursively create and invoke another visible Agent Node without the Task model.
+Add `POST /api/rfs/:canvasId/agent/create`, reuse the host-thread correlation header, and route fixed-thread RFS `POST /agent` calls through `AgentThreadService` while preserving the existing internal live-thread branch. This slice now lets any Agent recursively create and invoke another visible fixed Agent Node without the Task model; disconnect stops delivery rather than the turn, and the shared explicit stop path can still abort it.
 
 ### 14.4 Canvas-scoped Task launch
 

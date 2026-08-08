@@ -227,4 +227,14 @@ describe('AgentThreadService', () => {
     );
     expect(harness.release).toHaveBeenCalledOnce();
   });
+
+  it('exposes explicit stop for any invocation path', async () => {
+    const harness = createHarness();
+    const invocation = await harness.service.invoke(invocationOptions());
+
+    expect(harness.service.stop('thread-a')).toBe(true);
+    expect(invocation.signal.aborted).toBe(true);
+    expect(harness.service.stop('thread-a')).toBe(false);
+    await invocation.dispose();
+  });
 });

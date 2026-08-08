@@ -48,10 +48,15 @@ vi.mock('../agent/agenetes/drivers.js', () => ({
 }));
 
 import rfsRoutes from './rfs.route.js';
+import { agentNodeService } from '../agent/agent-node.service.js';
+import { agentThreadService } from '../agent/agent-thread.service.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { getCanvasStore, resetStorageCache } from '../storage/index.js';
 import { toSafeFilename } from '../workspace/disk/naming.js';
 import { setWorkspacePath } from '../workspace.js';
+
+import type { FixedAgentNodeTarget } from '../agent/agent-thread-resolver.js';
+import type { CanvasNodeId } from '@huabu/shared';
 
 let tmp: string;
 
@@ -103,6 +108,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -958,6 +964,156 @@ describe('node download revision (ETag / conditional GET)', () => {
 });
 
 describe('POST /api/rfs/:canvasId/agent', () => {
+  it('creates a delegated fixed Agent Node without invoking it', async () => {
+    const parent: FixedAgentNodeTarget = {
+      canvasId: 'c1',
+      nodeId: 'node-parent' as CanvasNodeId,
+      threadId: 'thread-parent',
+      agentBinding: {
+        kind: 'external',
+        profileId: 'profile-parent',
+        alias: 'Parent',
+      },
+      status: 'running',
+      content: 'Parent task',
+    };
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(parent);
+    const create = vi.spyOn(agentNodeService, 'create').mockResolvedValue({
+      canvasId: 'c1',
+      nodeId: 'node-child' as CanvasNodeId,
+      threadId: 'thread-child',
+    });
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/agent/create',
+        headers: {
+          'content-type': 'application/json',
+          'x-huabu-host-thread-id': 'thread-parent',
+        },
+        payload: JSON.stringify({
+          profileId: 'profile-child',
+          position: { x: 1200, y: 480 },
+          workingDirPath: '/work/child',
+          additionalInitialPreamble: 'Review the implementation.',
+        }),
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toEqual({
+        nodeId: 'node-child',
+        threadId: 'thread-child',
+      });
+      expect(create).toHaveBeenCalledWith({
+        canvasId: 'c1',
+        profileId: 'profile-child',
+        position: { x: 1200, y: 480 },
+        anchor: {
+          kind: 'delegated',
+          parentAgentNodeId: 'node-parent',
+        },
+        launchOverrides: {
+          workingDirPath: '/work/child',
+          additionalInitialPreamble: 'Review the implementation.',
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('lazily invokes a fixed Agent Node through AgentThreadService', async () => {
+    const target: FixedAgentNodeTarget = {
+      canvasId: 'c1',
+      nodeId: 'node-fixed' as CanvasNodeId,
+      threadId: 'thread-fixed',
+      agentBinding: {
+        kind: 'external',
+        profileId: 'profile-fixed',
+        alias: 'Fixed Agent',
+      },
+      status: 'idle',
+      content: '',
+    };
+    const store = getCanvasStore('c1');
+    store.write({
+      canvasId: 'c1',
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          {
+            id: 'node-fixed',
+            type: 'question',
+            position: { x: 0, y: 0 },
+            data: {
+              threadId: 'thread-fixed',
+              agentBindingPolicy: 'fixed',
+              agentBinding: target.agentBinding,
+            },
+          },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    store.writeNode('node-fixed', {
+      nodeId: 'node-fixed',
+      type: 'question',
+      label: null,
+      content: '',
+    });
+
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(target);
+    const dispose = vi.fn().mockResolvedValue(undefined);
+    const invoke = vi
+      .spyOn(agentThreadService, 'invoke')
+      .mockImplementation(async (options) => ({
+        binding: target.agentBinding,
+        fixedTarget: target,
+        signal: options.signal ?? new AbortController().signal,
+        dispose,
+        events: (async function* () {
+          yield {
+            type: 'done' as const,
+            data: { message: 'delegated answer' },
+          };
+        })(),
+      }));
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/agent',
+        headers: {
+          'content-type': 'text/plain',
+          'x-huabu-thread-id': 'thread-fixed',
+        },
+        payload: 'continue delegated work',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain('data: delegated answer');
+      expect(invoke).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: 'thread-fixed',
+          canvasId: 'c1',
+          content: 'continue delegated work',
+          mode: 'operate',
+          fixedTarget: target,
+        }),
+      );
+      expect(agentMocks.get).not.toHaveBeenCalled();
+      expect(dispose).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
   it('creates a Deployment and returns its thread id before the final text', async () => {
     const app = await buildApp();
     try {

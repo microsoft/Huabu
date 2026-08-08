@@ -73,7 +73,7 @@ export interface AgentThreadInvocationOptions {
   fixedTarget?: FixedAgentNodeTarget | null;
   modelId?: string;
   reasoningEffort?: ReasoningEffort;
-  signal: AbortSignal;
+  signal?: AbortSignal;
   logger: FastifyBaseLogger;
   debugPrompt?: {
     turnNumber: number;
@@ -83,9 +83,15 @@ export interface AgentThreadInvocationOptions {
   };
 }
 
+type EffectiveAgentThreadInvocationOptions = Omit<
+  AgentThreadInvocationOptions,
+  'signal'
+> & { signal: AbortSignal };
+
 export interface AgentThreadInvocation {
   binding: AgentBinding;
   fixedTarget: FixedAgentNodeTarget | null;
+  signal: AbortSignal;
   events: AsyncGenerator<AgentStreamEvent, void>;
   dispose: (error?: unknown) => Promise<void>;
 }
@@ -106,6 +112,8 @@ function errorMessage(error: unknown): string {
 }
 
 export class AgentThreadService {
+  private readonly abortControllers = new Map<string, AbortController>();
+
   constructor(
     private readonly dependencies: AgentThreadServiceDependencies = DEFAULT_DEPENDENCIES,
   ) {}
@@ -142,6 +150,16 @@ export class AgentThreadService {
       throw error;
     }
 
+    const abortController = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, abortController.signal])
+      : abortController.signal;
+    const effectiveOptions: EffectiveAgentThreadInvocationOptions = {
+      ...options,
+      signal,
+    };
+    this.abortControllers.set(options.threadId, abortController);
+
     let settled = false;
     const settle = async (
       terminal: 'done' | 'error',
@@ -161,6 +179,9 @@ export class AgentThreadService {
           }
         }
       } finally {
+        if (this.abortControllers.get(options.threadId) === abortController) {
+          this.abortControllers.delete(options.threadId);
+        }
         releaseTurn();
       }
     };
@@ -168,7 +189,13 @@ export class AgentThreadService {
     return {
       binding,
       fixedTarget,
-      events: this.runInvocation(options, binding, fixedTarget, settle),
+      signal,
+      events: this.runInvocation(
+        effectiveOptions,
+        binding,
+        fixedTarget,
+        settle,
+      ),
       dispose: (error) =>
         settle(
           error === undefined ? 'done' : 'error',
@@ -177,8 +204,15 @@ export class AgentThreadService {
     };
   }
 
+  stop(threadId: string): boolean {
+    const controller = this.abortControllers.get(threadId);
+    if (!controller || controller.signal.aborted) return false;
+    controller.abort();
+    return true;
+  }
+
   private async *runInvocation(
-    options: AgentThreadInvocationOptions,
+    options: EffectiveAgentThreadInvocationOptions,
     binding: AgentBinding,
     fixedTarget: FixedAgentNodeTarget | null,
     settle: (terminal: 'done' | 'error', message?: string) => Promise<void>,
@@ -215,7 +249,7 @@ export class AgentThreadService {
   }
 
   private createDispatchStream(
-    options: AgentThreadInvocationOptions,
+    options: EffectiveAgentThreadInvocationOptions,
     binding: AgentBinding,
     fixedTarget: FixedAgentNodeTarget | null,
   ): AsyncGenerator<AgentStreamEvent, unknown> {

@@ -69,10 +69,9 @@ function writeSSE(
 /**
  * State for an active agent run. Reconnecting clients now replay from
  * L2's Tier-1 event log (`agenetes.tail`), so the host keeps only the
- * abort handle + a completion flag needed by `/stop` and `/stream`.
+ * completion flag needed by `/stream`; AgentThreadService owns stop handles.
  */
 interface ActiveRun {
-  abortController: AbortController;
   /** Whether the run has finished (success, error, or abort). */
   completed: boolean;
 }
@@ -257,9 +256,7 @@ const agentRoutes: FastifyPluginAsync = async (
     Reply: ApiResult<StopThreadResponse>;
   }>('/stop/:threadId', async function (request, reply) {
     const { threadId } = request.params;
-    const run = activeRuns.get(threadId);
-    if (run && !run.abortController.signal.aborted) {
-      run.abortController.abort();
+    if (agentThreadService.stop(threadId)) {
       return reply.send({ stopped: true });
     }
     return reply.send({ stopped: false });
@@ -658,7 +655,6 @@ const agentRoutes: FastifyPluginAsync = async (
     }
 
     const run: ActiveRun = {
-      abortController,
       completed: false,
     };
     try {
@@ -720,15 +716,15 @@ const agentRoutes: FastifyPluginAsync = async (
       while (true) {
         const { value, done } = await iterator.next();
         if (done) break;
-        if (abortController.signal.aborted) continue;
+        if (invocation.signal.aborted) continue;
         emit(value);
       }
 
-      if (!abortController.signal.aborted) {
+      if (!invocation.signal.aborted) {
         emit({ type: AGENT_SSE_EVENTS.End, data: {} });
       }
     } catch (error) {
-      if (!abortController.signal.aborted) {
+      if (!invocation.signal.aborted) {
         request.log.error(error);
         const errorMsg =
           error instanceof Error ? error.message : 'Internal Error';

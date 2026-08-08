@@ -239,16 +239,31 @@ For a `MERGE_NODE_DATA` patch that changes `content`, first download the node an
 
 The response includes version transition, projected commands, command results, generated IDs, affected IDs, and new revisions. It intentionally excludes Web UI deltas and internal change-review records.
 
-## 8. Optional internal agent
+## 8. Agent invocation and delegation
 
-`POST agent` is optional. Direct `query` (including `SNAPSHOT_NODES`), `download`, `upload`, and `execute` work without an internal model provider. Use the internal agent only for an intentionally open-ended task where model interpretation is valuable.
+`POST agent` is optional. Direct `query` (including `SNAPSHOT_NODES`), `download`, `upload`, and `execute` work without an internal model provider. Omit `X-Huabu-Thread-Id` to start an internal `operate` conversation; return the emitted thread ID to continue it while its handle remains live.
 
-The response is an SSE stream. Omit `X-Huabu-Thread-Id` to start a live conversation; return the emitted thread ID to continue it. Continuation does not survive a closed handle or Huabu restart.
+The response is an SSE stream. When `X-Huabu-Thread-Id` names a fixed Agent Node, Huabu invokes that node's persisted external Agent binding through the same durable thread used by the UI. Closing the HTTP connection stops delivery but does not abort that fixed Agent turn.
 
 ```bash
 curl -N -H "$AUTH" -H "Content-Type: text/plain" \
   --data-binary @./prompt.txt "$HUABU_RFS_URL/agent"
 ```
+
+Create a delegated fixed Agent Node without starting it by posting its external Profile, absolute Canvas position, and optional launch overrides. `X-Huabu-Host-Thread-Id` must name the fixed parent Agent Node. Save the returned `threadId`, then invoke it through `POST agent`.
+
+```bash
+curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  -H "X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID" \
+  --data-binary '{
+    "profileId": "profile-id",
+    "position": { "x": 1200, "y": 480 },
+    "workingDirPath": "/optional/absolute/path",
+    "additionalInitialPreamble": "Optional durable role instructions."
+  }' "$HUABU_RFS_URL/agent/create"
+```
+
+Creation returns `{ "nodeId": "...", "threadId": "..." }`, creates the parent-to-child Canvas edge, and leaves the child idle. It does not launch the external process or submit a prompt.
 
 ## Error handling
 

@@ -16,9 +16,10 @@
  * - `POST query` with `type: "SNAPSHOT_NODES"` — render image, sketch, or frame
  *   nodes into downloadable PNG artifacts without invoking the
  *   canvas-internal agent.
- * - `POST agent` — talk to the canvas-internal agent for open-ended semantic
- *   work. Response is **always** `text/event-stream` (see
- *   {@link RfsAgentRequest}).
+ * - `POST agent` — start an internal conversation or invoke a fixed Agent Node.
+ *   Response is **always** `text/event-stream` (see {@link RfsAgentRequest}).
+ * - `POST agent/create` — create one delegated fixed Agent Node without
+ *   invoking it.
  * - `GET  skill` — pull the full RFS usage guide (per-canvas `skill.md` override
  *   or the bundled default).
  *
@@ -216,7 +217,7 @@ export type RfsExecuteHeaders = z.infer<typeof rfsExecuteHeadersSchema>;
  * the final answer with `sed -n 's/^data: //p'`.
  */
 export const rfsAgentRequestSchema = z.object({
-  /** Natural-language instruction for the canvas-internal agent. */
+  /** Natural-language instruction for a new internal or addressed fixed Agent. */
   prompt: z.string().min(1),
   /**
    * When true (the default, applied server-side), the agent streams a single
@@ -240,3 +241,24 @@ export const rfsAgentRequestSchema = z.object({
 });
 
 export type RfsAgentRequest = z.infer<typeof rfsAgentRequestSchema>;
+
+/** Body for `POST /api/rfs/:canvasId/agent/create`. */
+export const rfsAgentCreateRequestSchema = z.object({
+  profileId: z.string().trim().min(1),
+  position: z.object({
+    x: z.number().finite(),
+    y: z.number().finite(),
+  }),
+  workingDirPath: z.string().optional(),
+  additionalInitialPreamble: z.string().optional(),
+});
+export type RfsAgentCreateRequest = z.infer<typeof rfsAgentCreateRequestSchema>;
+
+/** Response from delegated Agent Node creation. */
+export const rfsAgentCreateResponseSchema = z.object({
+  nodeId: z.string().min(1),
+  threadId: z.string().min(1),
+});
+export type RfsAgentCreateResponse = z.infer<
+  typeof rfsAgentCreateResponseSchema
+>;
