@@ -4,7 +4,7 @@
 
 ## 1. Overview
 
-Every Space remains fully self-contained on Disk by default, but storage no longer presents one all-purpose `CanvasStore` as its backend contract. `apps/server/src/modules/storage/` now separates backend-neutral blob and structured ports, Disk adapters, process-wide composition, and a Disk compatibility facade. Opaque artifact bytes flow through `BlobStore`; `StructuredStore.space(canvasId)` exposes async Space-record, Canvas-log, and Task repositories plus a transitional node surface whose single-node read, write, and delete primitives remain synchronous for the write-coordinator invariant. Most structured-storage application consumers still use the compatibility facade. The canvas events handler and Task service are the application consumers migrated directly to repositories; cross-store composition also reads `SpaceRepository` to guard blob puts.
+Every Space remains fully self-contained on Disk by default, but storage no longer presents one all-purpose `CanvasStore` as its backend contract. `apps/server/src/modules/storage/` now separates backend-neutral blob and structured ports, Disk adapters, process-wide composition, and a Disk compatibility facade. Opaque artifact bytes flow through `BlobStore`; `StructuredStore.space(canvasId)` exposes async Space-record, Canvas-log, and Task repositories plus a transitional node surface whose single-node read, write, and delete primitives remain synchronous for the write-coordinator invariant. Most structured-storage application consumers still use the compatibility facade. The canvas events handler and Task services are the application consumers migrated directly to repositories; cross-store composition also reads `SpaceRepository` to guard blob puts.
 
 Runtime Home-folder activation prepares and migrates the selected directory in a disposable child process before committing it as the active workspace. This isolation is required because synchronous filesystem calls against cloud, network, or virtual drives can block indefinitely; a stuck preparation is terminated after 70 seconds with `WORKSPACE_ACTIVATION_TIMEOUT`, while the Server event loop and previously active workspace remain available. Concurrent activation attempts return `WORKSPACE_ACTIVATION_IN_PROGRESS`. Managed-mode startup still prepares synchronously before the Server accepts requests.
 
@@ -91,6 +91,14 @@ The `chat_v2/` two-tier log and `threads.json` remain owned by Agenetes L2 (`Fil
 `TaskService.create()` validates its shared request contract, target Canvas, and selectable default root Profile before mutation. It then creates a static ordinary Task Note through the authoritative Canvas executor and persists the canonical Task record through `CanvasTaskRepository`.
 
 The Task Note and Task record deliberately remain separate persistence domains rather than introducing a cross-store transaction. If Note creation is rejected, no Task record is written; if Task persistence fails after the Note is committed, `TaskCreationError` reports the created anchor node id so the visible orphan is explicit and recoverable.
+
+### 3.2 Task Run launch sequence
+
+`RunLauncher.start()` validates the shared request, resolves the Canvas-scoped Task, and verifies the effective selectable root Profile before mutation. It persists a `pending` Run snapshot first, then derives a root-level Agent position to the right of the Task Note with a stable vertical offset for each Run of that Task.
+
+The launcher creates the fixed root Agent Node through `AgentNodeService`, records its node and thread ids, and prepares the first turn through `AgentThreadService`. Because the invocation stream is lazy, the launcher persists `running` and `startedAt` before it begins background draining; a failure to persist that transition disposes the prepared invocation so Agent execution does not start.
+
+Phase 1 deliberately has no compensation transaction or terminal Run state. A launch failure leaves the Run `pending`, while any root node or thread ids already created are retained in the Run record when available and returned on `RunLaunchError` for explicit recovery.
 
 ## 4. Write coordinator — one chokepoint for durable node writes
 

@@ -58,6 +58,7 @@ export class AgentNodeCreationError extends Error {
     public readonly code: AgentNodeCreationErrorCode,
     message: string,
     public readonly createdNodeId?: CanvasNodeId,
+    public readonly createdThreadId?: string,
   ) {
     super(message);
     this.name = 'AgentNodeCreationError';
@@ -240,6 +241,7 @@ export class AgentNodeService {
         'lineage_edge_failed',
         `Agent Node ${nodeId} was created but its lineage edge was rejected`,
         nodeId,
+        threadId,
       );
     }
 

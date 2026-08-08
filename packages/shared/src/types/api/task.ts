@@ -53,3 +53,15 @@ export const createTaskResponseSchema = z.object({
   task: taskRecordSchema,
 });
 export type CreateTaskResponse = z.infer<typeof createTaskResponseSchema>;
+
+export const startTaskRunRequestSchema = z.object({
+  rootProfileId: z.string().trim().min(1).optional(),
+  workingDirPath: z.string().optional(),
+  additionalInitialPreamble: z.string().optional(),
+});
+export type StartTaskRunRequest = z.infer<typeof startTaskRunRequestSchema>;
+
+export const startTaskRunResponseSchema = z.object({
+  run: taskRunRecordSchema,
+});
+export type StartTaskRunResponse = z.infer<typeof startTaskRunResponseSchema>;
