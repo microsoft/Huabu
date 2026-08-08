@@ -25,6 +25,7 @@ import { useChatStore } from '@/store/chatStore';
 import {
   conversationRequestScope,
   ConversationIntegrityError,
+  filterClientOwnedQuestionPatch,
   isHeadlessConversation,
   patchConversationOwnerNode,
   refreshConversationPresentation,
@@ -848,14 +849,9 @@ export function useAgentStream(): UseAgentStreamReturn {
 
       // ── Question-node follow-up bookkeeping ─────────────────────────
       //
-      // When the chat panel is currently rendering a question node's
-      // thread (`viewingQuestionThread` is set), every message the user
-      // sends is a follow-up turn against that node. The question node
-      // owns a `status` field (`idle | pending | running | done | error`)
-      // that the canvas badge reads. The dedicated `useQuestionRunner`
-      // hook only manages the *initial* auto-run; follow-ups travel
-      // through this hook, so we are the only place that can keep that
-      // badge honest across multi-turn conversations.
+      // Selectable Question Nodes retain the client-authored lifecycle.
+      // Fixed Agent Nodes route content/status/error through the server;
+      // this hook writes only their client presentation state (`viewed`).
       //
       // We also track whether a successful `done` event was observed so
       // a late cap-out `error` event (`Agent loop exceeded maximum
@@ -864,6 +860,7 @@ export function useAgentStream(): UseAgentStreamReturn {
       // agent run should not poison the final status).
       const questionNodeId = conversationView?.conversationOwner.nodeId ?? null;
       let sawDone = false;
+      let serverOwnsQuestionLifecycle = false;
 
       if (questionNodeId && conversationView) {
         // First send of a freshly-composed question node ⇔ the node is still
@@ -880,7 +877,9 @@ export function useAgentStream(): UseAgentStreamReturn {
           conversationView,
         );
         const isCompose = shouldComposeConversationOwner(ownerSource, headless);
-        if (isCompose && !headless) {
+        serverOwnsQuestionLifecycle =
+          ownerSource?.agentBindingPolicy === 'fixed';
+        if (isCompose && !headless && !serverOwnsQuestionLifecycle) {
           // Author content through the intent pipeline so it gets a
           // markdown sidecar save + server-side label preprocessing —
           // matching how the inline editor used to commit the prompt.
@@ -902,7 +901,7 @@ export function useAgentStream(): UseAgentStreamReturn {
             ? { ...selectedBinding, alias: selectedProfile.alias }
             : selectedBinding;
         const composeBinding =
-          isCompose && !headless
+          isCompose && !headless && !serverOwnsQuestionLifecycle
             ? {
                 agentBinding: snapshotBinding,
                 agentIcon: snapshotAgentIcon(
@@ -913,19 +912,20 @@ export function useAgentStream(): UseAgentStreamReturn {
               }
             : {};
         // Reset `viewed` so the layer-panel dot + on-canvas "done · unread"
-        // glow re-appear when the follow-up answer lands (mirrors
-        // `useQuestionRunner`'s initial-run behaviour). `onComplete`
-        // marks it viewed again if the user is still in the thread.
-        const startPatch = {
+        // glow re-appear when the follow-up answer lands. Completion marks it
+        // viewed again if the user is still in the thread.
+        const startPatch = filterClientOwnedQuestionPatch(ownerSource, {
           ...(isCompose && headless ? { content: prompt } : {}),
           status: 'running',
           errorMessage: undefined,
           viewed: false,
           ...composeBinding,
-        };
+        });
         try {
-          await patchConversationOwnerNode(conversationView, startPatch);
-          await refreshConversationPresentation(conversationView);
+          if (startPatch) {
+            await patchConversationOwnerNode(conversationView, startPatch);
+            await refreshConversationPresentation(conversationView);
+          }
         } catch (error) {
           const message =
             error instanceof Error ? error.message : 'Unknown error';
@@ -947,10 +947,9 @@ export function useAgentStream(): UseAgentStreamReturn {
       // network blip to block the agent call.
       await useCanvasStore.getState().flushCanvasEvents();
 
-      // Snapshot the current thread → agent binding at send time. The
-      // server is stateless about bindings; we pass it per-request so
-      // the server-side dispatch sees exactly which agent the user
-      // picked for this thread.
+      // Snapshot the current picker binding at send time. The server uses it
+      // for selectable threads but replaces it with the persisted binding
+      // when the thread resolves to a fixed Agent Node.
       const agentBinding = useChatStore.getState().agentBinding;
 
       // Build the canvas context, dropping the anchored question node
@@ -993,12 +992,21 @@ export function useAgentStream(): UseAgentStreamReturn {
                 const stillViewing = isActivelyViewingQuestion({
                   nodeId: questionNodeId,
                 });
-                if (conversationView) {
-                  void patchConversationOwnerNode(conversationView, {
+                const terminalPatch = filterClientOwnedQuestionPatch(
+                  serverOwnsQuestionLifecycle
+                    ? { agentBindingPolicy: 'fixed' }
+                    : undefined,
+                  {
                     status: sawDone ? 'done' : 'error',
                     errorMessage: sawDone ? undefined : err.message,
                     ...(stillViewing ? { viewed: true } : {}),
-                  })
+                  },
+                );
+                if (conversationView && terminalPatch) {
+                  void patchConversationOwnerNode(
+                    conversationView,
+                    terminalPatch,
+                  )
                     .then(refreshAfterLifecycle)
                     .catch((error) =>
                       console.error(
@@ -1010,6 +1018,9 @@ export function useAgentStream(): UseAgentStreamReturn {
                       setThreadLoading(threadId, false);
                       releaseAbort();
                     });
+                } else {
+                  setThreadLoading(threadId, false);
+                  releaseAbort();
                 }
               } else {
                 setThreadLoading(threadId, false);
@@ -1031,12 +1042,21 @@ export function useAgentStream(): UseAgentStreamReturn {
                 const stillViewing = isActivelyViewingQuestion({
                   nodeId: questionNodeId,
                 });
-                if (conversationView) {
-                  void patchConversationOwnerNode(conversationView, {
+                const terminalPatch = filterClientOwnedQuestionPatch(
+                  serverOwnsQuestionLifecycle
+                    ? { agentBindingPolicy: 'fixed' }
+                    : undefined,
+                  {
                     status: 'done',
                     errorMessage: undefined,
                     ...(stillViewing ? { viewed: true } : {}),
-                  })
+                  },
+                );
+                if (conversationView && terminalPatch) {
+                  void patchConversationOwnerNode(
+                    conversationView,
+                    terminalPatch,
+                  )
                     .then(refreshAfterLifecycle)
                     .catch((error) =>
                       console.error(
@@ -1048,6 +1068,9 @@ export function useAgentStream(): UseAgentStreamReturn {
                       setThreadLoading(threadId, false);
                       releaseAbort();
                     });
+                } else {
+                  setThreadLoading(threadId, false);
+                  releaseAbort();
                 }
               } else {
                 setThreadLoading(threadId, false);
@@ -1092,12 +1115,23 @@ export function useAgentStream(): UseAgentStreamReturn {
               nodeId: questionNodeId,
             });
             if (conversationView) {
-              await patchConversationOwnerNode(conversationView, {
-                status: 'done',
-                errorMessage: undefined,
-                ...(stillViewing ? { viewed: true } : {}),
-              });
-              await refreshAfterLifecycle();
+              const terminalPatch = filterClientOwnedQuestionPatch(
+                serverOwnsQuestionLifecycle
+                  ? { agentBindingPolicy: 'fixed' }
+                  : undefined,
+                {
+                  status: 'done',
+                  errorMessage: undefined,
+                  ...(stillViewing ? { viewed: true } : {}),
+                },
+              );
+              if (terminalPatch) {
+                await patchConversationOwnerNode(
+                  conversationView,
+                  terminalPatch,
+                );
+                await refreshAfterLifecycle();
+              }
             }
           }
           return;
@@ -1114,12 +1148,20 @@ export function useAgentStream(): UseAgentStreamReturn {
             nodeId: questionNodeId,
           });
           if (conversationView) {
-            await patchConversationOwnerNode(conversationView, {
-              status: sawDone ? 'done' : 'error',
-              errorMessage: sawDone ? undefined : message,
-              ...(stillViewing ? { viewed: true } : {}),
-            });
-            await refreshAfterLifecycle();
+            const terminalPatch = filterClientOwnedQuestionPatch(
+              serverOwnsQuestionLifecycle
+                ? { agentBindingPolicy: 'fixed' }
+                : undefined,
+              {
+                status: sawDone ? 'done' : 'error',
+                errorMessage: sawDone ? undefined : message,
+                ...(stillViewing ? { viewed: true } : {}),
+              },
+            );
+            if (terminalPatch) {
+              await patchConversationOwnerNode(conversationView, terminalPatch);
+              await refreshAfterLifecycle();
+            }
           }
         }
         setThreadLoading(threadId, false);

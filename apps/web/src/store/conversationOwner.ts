@@ -100,6 +100,15 @@ export function shouldComposeConversationOwner(
   );
 }
 
+/** Keep client writes to fixed Agent Nodes limited to presentation state. */
+export function filterClientOwnedQuestionPatch(
+  source: ConversationOwnerSource | undefined,
+  patch: Record<string, unknown>,
+): Record<string, unknown> | null {
+  if (source?.agentBindingPolicy !== 'fixed') return patch;
+  return typeof patch.viewed === 'boolean' ? { viewed: patch.viewed } : null;
+}
+
 export async function validateConversationView(
   view: AgentConversationView,
 ): Promise<void> {

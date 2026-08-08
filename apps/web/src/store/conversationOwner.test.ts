@@ -18,6 +18,7 @@ import {
   ConversationIntegrityError,
   conversationRequestScope,
   conversationViewFromWorldReference,
+  filterClientOwnedQuestionPatch,
   patchConversationOwnerNode,
   shouldComposeConversationOwner,
   validateConversationView,
@@ -85,6 +86,32 @@ beforeEach(() => {
 });
 
 describe('conversation owner routing', () => {
+  it('limits fixed Agent Node client patches to viewed state', () => {
+    expect(
+      filterClientOwnedQuestionPatch(
+        { agentBindingPolicy: 'fixed' },
+        {
+          content: 'Prompt',
+          status: 'running',
+          errorMessage: undefined,
+          viewed: false,
+        },
+      ),
+    ).toEqual({ viewed: false });
+    expect(
+      filterClientOwnedQuestionPatch(
+        { agentBindingPolicy: 'fixed' },
+        { status: 'done' },
+      ),
+    ).toBeNull();
+    expect(
+      filterClientOwnedQuestionPatch(
+        { agentBindingPolicy: 'selectable' },
+        { status: 'done' },
+      ),
+    ).toEqual({ status: 'done' });
+  });
+
   it('routes headless requests to the source owner without World selection', () => {
     expect(conversationRequestScope(worldView, 'canvas-world')).toEqual({
       canvasId: 'canvas-source',
