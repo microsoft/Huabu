@@ -497,6 +497,11 @@ type HuabuColorDataAttr =
   | 'data-huabu-text-color'
   | 'data-huabu-background-color';
 
+const LEGACY_COLOR_DATA_ATTRS: Record<HuabuColorDataAttr, string> = {
+  'data-huabu-text-color': 'data-sediment-text-color',
+  'data-huabu-background-color': 'data-sediment-background-color',
+};
+
 interface MarkdownNodeLike {
   type: string;
   value?: unknown;
@@ -562,8 +567,9 @@ function parseOpeningColorSpanHtml(value: unknown): Array<{
     'data-huabu-text-color',
     'data-huabu-background-color',
   ] as const) {
+    const acceptedAttrs = [dataAttr, LEGACY_COLOR_DATA_ATTRS[dataAttr]];
     const tokenMatch = attrs.match(
-      new RegExp(`${dataAttr}=["']([^"']+)["']`, 'i'),
+      new RegExp(`(?:${acceptedAttrs.join('|')})=["']([^"']+)["']`, 'i'),
     );
     const token = tokenMatch?.[1];
     if (isAccentToken(token)) parsed.push({ dataAttr, token });
@@ -629,15 +635,16 @@ const huabuColorSpanRemarkPlugin = $remark(
 
 function parseColorSpanHtml(
   value: unknown,
-  dataAttr: string,
+  dataAttr: HuabuColorDataAttr,
   kind: 'text' | 'background',
 ): { token: AccentToken; color: string; text: string } | null {
   if (typeof value !== 'string') return null;
   const match = value.match(/^<span\b([^>]*)>([\s\S]*)<\/span>$/i);
   if (!match) return null;
   const [, attrs = '', rawText = ''] = match;
+  const acceptedAttrs = [dataAttr, LEGACY_COLOR_DATA_ATTRS[dataAttr]];
   const tokenMatch = attrs.match(
-    new RegExp(`${dataAttr}=["']([^"']+)["']`, 'i'),
+    new RegExp(`(?:${acceptedAttrs.join('|')})=["']([^"']+)["']`, 'i'),
   );
   const token = tokenMatch?.[1];
   if (!isAccentToken(token)) return null;
