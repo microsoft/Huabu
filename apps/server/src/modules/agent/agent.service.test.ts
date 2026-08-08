@@ -13,7 +13,7 @@
  * mutated. The rendered user message is kept OUT of the returned delta (it
  * is re-derived from the envelope on reload).
  *
- * The envelope-less callers (memory analyzer / sketch / reachback) submit
+ * The envelope-less callers (memory analyzer / reachback) submit
  * a null request; the handle runs over `context.messages` as-is via
  * `agent.continue()` and likewise receives the delta via the return value.
  *

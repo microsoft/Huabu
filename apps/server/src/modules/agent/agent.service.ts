@@ -10,12 +10,12 @@
  * the Huabu composition layer that compiles the serializable workload
  * spec, renders the durable canonical submission, and bridges yielded
  * events into the `AsyncGenerator<StreamEvent>` shape every consumer
- * (chat / operate SSE route, sketch pipeline) consumes.
+ * (the chat / operate SSE route) consumes.
  *
  * Public surface:
  *  - {@link runAgent} — yields SSE-shaped events. Callers that need
- *    structured output (e.g. sketch) drain the generator
- *    themselves and pull the relevant `tool_result` payload.
+ *    structured output drain the generator themselves and pull the
+ *    relevant `tool_result` payload.
  */
 
 import { loadAgent, type AgentId } from '../../prompt/index.js';
@@ -146,7 +146,7 @@ export interface AgentRunOptions {
    * Lifecycle axis for the underlying driver.
    *
    * Main chat can now use a long-lived Deployment handle; envelope-less
-   * internal callers (memory/sketch/reachback) stay Job-shaped.
+   * internal callers (memory/reachback) stay Job-shaped.
    */
   workloadType?: WorkloadType;
   /** Structured logger for request-scoped diagnostics */

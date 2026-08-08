@@ -73,7 +73,7 @@ const SKIPPED_PREFIXES = [
  *   - `/api/canvas/<canvasId>/...` — the canvas id is the third path
  *     segment. Covers every endpoint registered under canvas /
  *     artifact / preprocessing.
- *   - `POST /api/agent` — chat / operate / sketch all funnel through
+ *   - `POST /api/agent` — chat and operate both funnel through
  *     this endpoint; the canvas id rides in the JSON body. Routed
  *     via the preHandler tap (the SSE handler hijacks the reply, so
  *     `onResponse` would never see it).

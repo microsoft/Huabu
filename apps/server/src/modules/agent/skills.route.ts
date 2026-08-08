@@ -46,7 +46,7 @@ export function isUserInvokableSkill(skill: LoadedSkill): boolean {
 }
 
 const skillsRoutes: FastifyPluginAsync = async (app) => {
-  // GET /api/skills?scope=ask|operate|sketch|external
+  // GET /api/skills?scope=ask|operate|external
   app.get<{
     Querystring: { scope?: string };
     Reply: SkillsListResponse | { message: string };

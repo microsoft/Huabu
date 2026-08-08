@@ -4,8 +4,8 @@
 /**
  * Tool Definitions for the Unified Agent
  *
- * All tools the AI can call across ask, operate, and sketch
- * scopes. Each tool is a pi-ai Tool with a JSON Schema for validation.
+ * All tools the AI can call across the ask and operate scopes. Each
+ * tool is a pi-ai Tool with a JSON Schema for validation.
  *
  * Definitions here are pure schema + description pairs. The runnable
  * `AgentTool` form (with `execute` closures bound to a request-scoped
@@ -463,10 +463,10 @@ export const generateImageTool: ToolDefinition = {
  * Name → definition lookup used by `buildAgentToolsByNames` to resolve
  * the `tools:` list declared in each agent's `AGENT.md` frontmatter.
  *
- * Per-agent tool selection (which tools `ask` / `operate` /
- * `sketch` get) lives in `prompt/agents/<id>/AGENT.md` and is no
- * longer hard-coded here. Adding a tool: append it below + reference
- * its `name` from any AGENT.md that should expose it.
+ * Per-agent tool selection (which tools `ask` / `operate` get) lives
+ * in `prompt/agents/<id>/AGENT.md` and is no longer hard-coded here.
+ * Adding a tool: append it below + reference its `name` from any
+ * AGENT.md that should expose it.
  */
 export const TOOL_REGISTRY: Readonly<Record<string, ToolDefinition>> =
   Object.freeze(
