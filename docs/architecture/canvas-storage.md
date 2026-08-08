@@ -1,10 +1,10 @@
 # Canvas Storage Architecture
 
-> Last updated: 2026-08-05
+> Last updated: 2026-08-08
 
 ## 1. Overview
 
-Every Space remains fully self-contained on Disk by default, but storage no longer presents one all-purpose `CanvasStore` as its backend contract. `apps/server/src/modules/storage/` now separates backend-neutral blob and structured ports, Disk adapters, process-wide composition, and a Disk compatibility facade. Opaque artifact bytes flow through `BlobStore`; `StructuredStore.space(canvasId)` exposes async Space-record and Canvas-log repositories plus a transitional node surface whose single-node read, write, and delete primitives remain synchronous for the write-coordinator invariant. Most structured-storage application consumers still use the compatibility facade. The canvas events handler is the only application route migrated directly to repositories; cross-store composition also reads `SpaceRepository` to guard blob puts.
+Every Space remains fully self-contained on Disk by default, but storage no longer presents one all-purpose `CanvasStore` as its backend contract. `apps/server/src/modules/storage/` now separates backend-neutral blob and structured ports, Disk adapters, process-wide composition, and a Disk compatibility facade. Opaque artifact bytes flow through `BlobStore`; `StructuredStore.space(canvasId)` exposes async Space-record, Canvas-log, and Task repositories plus a transitional node surface whose single-node read, write, and delete primitives remain synchronous for the write-coordinator invariant. Most structured-storage application consumers still use the compatibility facade. The canvas events handler and Task service are the application consumers migrated directly to repositories; cross-store composition also reads `SpaceRepository` to guard blob puts.
 
 Runtime Home-folder activation prepares and migrates the selected directory in a disposable child process before committing it as the active workspace. This isolation is required because synchronous filesystem calls against cloud, network, or virtual drives can block indefinitely; a stuck preparation is terminated after 70 seconds with `WORKSPACE_ACTIVATION_TIMEOUT`, while the Server event loop and previously active workspace remain available. Concurrent activation attempts return `WORKSPACE_ACTIVATION_IN_PROGRESS`. Managed-mode startup still prepares synchronously before the Server accepts requests.
 
@@ -35,6 +35,7 @@ Runtime Home-folder activation prepares and migrates the selected directory in a
       intent.json                 # IntentEpisode[]
       events.jsonl                # canvas action log: one { ts, payload: RecentAction } per line
       delta-log.jsonl             # persisted canvas-command delta log
+      tasks.json                  # versioned canonical Task and Run records
       acp-sessions.json           # per-thread ACP sessionId map (optional)
 ```
 
@@ -56,25 +57,26 @@ Key points:
 - Events are append-only JSONL (`events.jsonl`); each line is `{ ts: number, payload: RecentAction }`.
 - **Chat history is Chat-V2, owned by Agenetes L2 — not `CanvasStore`.** The canonical per-thread conversation is a two-tier append-only log under `chat_v2/`: Tier-1 `<threadId>.events.jsonl` (`AgentStreamEvent` deltas a running turn appends, written by `FileEventLogStore`) and Tier-2 `<threadId>.turns.jsonl` (folded `AgentTurn`s, written by `FileTurnStore` — the only tier `history()` reads back). These files sit under the canvas `.history/` only because it is the Agenetes namespace `storage.root` (`canvasAcpNamespace(canvasId)`); `CanvasStore` never touches them. Do **not** confuse `chat_v2/<threadId>.events.jsonl` (agent stream events) with the sibling `events.jsonl` (canvas action log) — same suffix, unrelated content.
 - Durable Agenetes workload records live in `.history/threads.json` (`agenetes-v2` schema, one record per thread; written by `FileThreadStore`). The host-local `namespace.storage.root` is never persisted: reads bind each record to the current Space namespace, so a Home synchronized across computers cannot redirect storage back to another machine's absolute path.
+- Canonical Task and Run records live in `.history/tasks.json`, owned by Huabu Server through the async `CanvasTaskRepository`. The Disk adapter validates the versioned snapshot and referential integrity on every read, rejects duplicate identifiers and Runs whose Task is absent, serializes read-modify-write operations with an independent per-Canvas process-local mutex, and atomically replaces the file. This mutex is intentionally separate from the Canvas topology write coordinator, so Task metadata does not participate in `space.json` version CAS.
 - Legacy chat files are one-way migrated into `chat_v2/` at workspace activation and retired to `.bak`: the oldest pi-ai `Context` `chat/<threadId>.json` via `migrate-chat-threads.ts` (hop 1), then the M5.6 `chat/<threadId>.turns.jsonl` / `.active.json` via `migrate-chat-turns.ts` (hop 2). The obsolete `CanvasStore` chat methods and `chatPath()` helper were removed in Phase 2; `chatDir()` remains because change-review and agent-owned files still use that directory.
 
 ## 3. Storage composition and ownership
 
 `apps/server/src/modules/storage/` has three layers plus its composition root:
 
-| Path                                            | Responsibility                                                                                                                                               |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ports/blob.ts`                                 | Backend-neutral `BlobStore` connection/scope contract for opaque bytes and bounded materialization leases.                                                   |
-| `ports/structured.ts`                           | Backend-neutral `StructuredStore`, composite `SpaceHandle`, version-CAS record repository, four log-family repositories, and transitional `LegacyNodeStore`. |
-| `ports/contracts/`                              | Reusable adapter contract suites; their concurrency guarantees apply to repository calls, not to legacy facade writes.                                       |
-| `backends/disk/`                                | Disk implementations for blobs, structured handles, Space records, Canvas logs, and recovery/validation rules.                                               |
-| `backends/disk/legacy/`                         | The legacy `CanvasStore` and its synchronous mutation primitives, bounded Workspace-qualified cache, node tombstones, and process-local lifecycle admission. |
-| `compatibility/canvas.ts`                       | Legacy application-facing API for Space list/summary/create/delete and `getCanvasStore()`; deletion is async because blob cleanup may yield.                 |
-| `profile.ts` and `storage.ts`                   | Two-axis backend selection, validation, adapter construction, process-wide lifecycle, blob scopes, and cross-store deletion admission.                       |
-| `index.ts`                                      | Public exports only; application code imports here rather than reaching into an adapter.                                                                     |
-| `canvas-store.ts`, `paths.ts`, `canvas-dirs.ts` | Deprecated forwarding shims with no logic, retained only for high-fanout compatibility imports.                                                              |
+| Path                                            | Responsibility                                                                                                                                                                |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ports/blob.ts`                                 | Backend-neutral `BlobStore` connection/scope contract for opaque bytes and bounded materialization leases.                                                                    |
+| `ports/structured.ts`                           | Backend-neutral `StructuredStore`, composite `SpaceHandle`, version-CAS record repository, four log-family repositories, Task repository, and transitional `LegacyNodeStore`. |
+| `ports/contracts/`                              | Reusable adapter contract suites; their concurrency guarantees apply to repository calls, not to legacy facade writes.                                                        |
+| `backends/disk/`                                | Disk implementations for blobs, structured handles, Space records, Canvas logs, and recovery/validation rules.                                                                |
+| `backends/disk/legacy/`                         | The legacy `CanvasStore` and its synchronous mutation primitives, bounded Workspace-qualified cache, node tombstones, and process-local lifecycle admission.                  |
+| `compatibility/canvas.ts`                       | Legacy application-facing API for Space list/summary/create/delete and `getCanvasStore()`; deletion is async because blob cleanup may yield.                                  |
+| `profile.ts` and `storage.ts`                   | Two-axis backend selection, validation, adapter construction, process-wide lifecycle, blob scopes, and cross-store deletion admission.                                        |
+| `index.ts`                                      | Public exports only; application code imports here rather than reaching into an adapter.                                                                                      |
+| `canvas-store.ts`, `paths.ts`, `canvas-dirs.ts` | Deprecated forwarding shims with no logic, retained only for high-fanout compatibility imports.                                                                               |
 
-The Disk structured adapter and compatibility facade resolve the same cached legacy object, so they do not create two in-memory authorities. Repository CAS and append guarantees are adapter-local while the compatibility facade remains a second write entry point. `SpaceRepository` and the event/delta/change/intent repositories are async; `LegacyNodeStore.readAllNodes()` and `streamAllNodes()` are also async, while its single-node read/write/delete primitives stay synchronous until the write-coordinator invariant is redesigned for async node storage. Catalogue, World, title, create, and delete semantics remain on the compatibility path.
+The Disk structured adapter and compatibility facade resolve the same cached legacy object, so they do not create two in-memory authorities. Repository CAS, append, and Task mutation guarantees are adapter-local while the compatibility facade remains a second write entry point. `SpaceRepository`, the event/delta/change/intent repositories, and `CanvasTaskRepository` are async; `LegacyNodeStore.readAllNodes()` and `streamAllNodes()` are also async, while its single-node read/write/delete primitives stay synchronous until the write-coordinator invariant is redesigned for async node storage. Catalogue, World, title, create, and delete semantics remain on the compatibility path.
 
 Canvas persistence DTOs and the write coordinator live under `modules/canvas/`; physical Workspace paths, name indexes, directory-handle arbitration, and boot migrations live under `modules/workspace/`; generic filesystem and Markdown codecs live under `utils/`. `module-boundaries.test.ts` enforces the storage dependency direction and prevents new consumers of the forwarding shims.
 
@@ -83,6 +85,12 @@ Space deletion is serialized against blob puts by a process-local, writer-prefer
 Retained Disk repository handles, blob scopes, and legacy `CanvasStore` instances reject use after the active Workspace changes. The Workspace-qualified LRU is cleared and rebuilt on the next lookup after a switch. All lifecycle admission, cache invalidation, and retained-handle checks are process-local Disk guarantees, not a portable multi-process transaction contract.
 
 The `chat_v2/` two-tier log and `threads.json` remain owned by Agenetes L2 (`FileEventLogStore`, `FileTurnStore`, and `FileThreadStore`), wired in [agenetes/drivers.ts](../../apps/server/src/modules/agent/agenetes/drivers.ts); see [agent-architecture.md](./agent-architecture.md) §5. Workspace activation is coordinated by `apps/server/src/modules/workspace-activation.ts`; the isolated child entry is `workspace-prepare.worker.ts`, and the ordered migration sequence is centralized in `workspace-prepare.ts` with migration implementations under `modules/workspace/migrations/`.
+
+### 3.1 Task creation across persistence domains
+
+`TaskService.create()` validates its shared request contract, target Canvas, and selectable default root Profile before mutation. It then creates a static ordinary Task Note through the authoritative Canvas executor and persists the canonical Task record through `CanvasTaskRepository`.
+
+The Task Note and Task record deliberately remain separate persistence domains rather than introducing a cross-store transaction. If Note creation is rejected, no Task record is written; if Task persistence fails after the Note is committed, `TaskCreationError` reports the created anchor node id so the visible orphan is explicit and recoverable.
 
 ## 4. Write coordinator — one chokepoint for durable node writes
 

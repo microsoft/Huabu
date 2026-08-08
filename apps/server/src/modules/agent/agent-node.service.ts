@@ -1,15 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { getAgentTeamRegistry } from '@agenetes/agentlet-host';
-
 import {
   createId,
   readAgentIcon,
   type AgentLaunchOverrides,
   type CanvasCommand,
   type CanvasNodeId,
-  type CustomData,
   type Point,
 } from '@huabu/shared';
 
@@ -17,6 +14,11 @@ import {
   InvalidAgentLaunchOverridesError,
   parseAgentLaunchOverrides,
 } from './agent-launch-overrides.js';
+import {
+  requireSelectableAgentProfile,
+  SelectableAgentProfileError,
+  type SelectableAgentProfile,
+} from './selectable-agent-profile.js';
 import { executeCanvasCommandsOnHost } from '../canvas/canvas-command-router.js';
 import { getCanvasStore } from '../storage/index.js';
 
@@ -62,14 +64,8 @@ export class AgentNodeCreationError extends Error {
   }
 }
 
-interface AgentProfileRecord {
-  id: string;
-  alias: string;
-  customData?: CustomData;
-}
-
 interface AgentProfileRegistryPort {
-  getProfile(profileId: string): AgentProfileRecord | null | undefined;
+  getProfile(profileId: string): SelectableAgentProfile | null | undefined;
   listSelectableProfileIds(): string[];
 }
 
@@ -96,7 +92,7 @@ function defaultReadCanvasNodes(canvasId: string): StoredNode[] | null {
 }
 
 const DEFAULT_DEPENDENCIES: AgentNodeServiceDependencies = {
-  getProfileRegistry: () => getAgentTeamRegistry(),
+  getProfileRegistry: () => null,
   readCanvasNodes: defaultReadCanvasNodes,
   execute: executeCanvasCommandsOnHost,
 };
@@ -176,20 +172,22 @@ export class AgentNodeService {
     }
     const sourceNodeId = requireValidAnchor(nodes, input.anchor);
 
-    const registry = this.dependencies.getProfileRegistry();
-    if (!registry) {
-      throw new AgentNodeCreationError(
-        'profile_registry_unavailable',
-        'Agent Profile registry is not ready',
-      );
-    }
-    const selectableIds = new Set(registry.listSelectableProfileIds());
-    const profile = registry.getProfile(input.profileId);
-    if (!profile || !selectableIds.has(profile.id)) {
-      throw new AgentNodeCreationError(
-        'profile_not_selectable',
-        `Agent Profile ${input.profileId} is not selectable`,
-      );
+    let profile: SelectableAgentProfile;
+    try {
+      const registry = this.dependencies.getProfileRegistry();
+      profile = registry
+        ? requireSelectableAgentProfile(input.profileId, registry)
+        : requireSelectableAgentProfile(input.profileId);
+    } catch (error) {
+      if (error instanceof SelectableAgentProfileError) {
+        throw new AgentNodeCreationError(
+          error.code === 'registry_unavailable'
+            ? 'profile_registry_unavailable'
+            : 'profile_not_selectable',
+          error.message,
+        );
+      }
+      throw error;
     }
 
     const nodeId = createId('node') as CanvasNodeId;

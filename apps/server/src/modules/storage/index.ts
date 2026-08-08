@@ -85,6 +85,7 @@ export type {
   CanvasDeltaRepository,
   CanvasEventRepository,
   CanvasIntentRepository,
+  CanvasTaskRepository,
   LegacyNodeStore,
   NewCanvasEvent,
   NodeWriteResult,
@@ -93,4 +94,5 @@ export type {
   SpaceWriteResult,
   StructuredBackendKind,
   StructuredStore,
+  TaskRunUpdate,
 } from './ports/structured.js';

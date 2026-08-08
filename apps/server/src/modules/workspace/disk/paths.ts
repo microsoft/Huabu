@@ -173,6 +173,10 @@ export function intentPath(canvasId: string): string {
   return path.join(historyDir(canvasId), 'intent.json');
 }
 
+export function tasksPath(canvasId: string): string {
+  return path.join(historyDir(canvasId), 'tasks.json');
+}
+
 export function eventsPath(canvasId: string): string {
   return path.join(historyDir(canvasId), 'events.jsonl');
 }

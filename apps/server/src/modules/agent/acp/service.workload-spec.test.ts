@@ -41,7 +41,7 @@ vi.mock('./reachback-env.js', () => ({
   buildReachbackEnv: () => ({ REACHBACK: '1' }),
 }));
 
-vi.mock('../../storage/paths.js', () => ({
+vi.mock('../../workspace/disk/paths.js', () => ({
   canvasAcpNamespace: (canvasId: string) => `/canvases/${canvasId}/acp`,
 }));
 
