@@ -77,8 +77,7 @@ tools/
   handlers/        ← individual tool implementations
 ```
 
-12 tools, assigned via each agent frontmatter's `tools` array (**not** a
-hardcoded list in code):
+14 tools, assigned via each agent frontmatter's `tools` array (**not** a hardcoded list in code):
 
 | Tool                                                    | Handler                                                                                       | Scope                                         |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------- |
@@ -90,6 +89,8 @@ hardcoded list in code):
 | `fs_write`                                              | [fs-write.ts](../../apps/server/src/modules/agent/tools/handlers/fs-write.ts)                 | operate/memory                                |
 | `snapshot_nodes`                                        | [snapshot-node.ts](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts)       | operate (+ auto snapshot on the sketch route) |
 | `generate_image`                                        | [image-generation.ts](../../apps/server/src/modules/agent/tools/handlers/image-generation.ts) | operate                                       |
+| `create_task`                                           | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate                                       |
+| `start_task_run`                                        | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate                                       |
 
 Design principles:
 

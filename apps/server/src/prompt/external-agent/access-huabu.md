@@ -239,7 +239,35 @@ For a `MERGE_NODE_DATA` patch that changes `content`, first download the node an
 
 The response includes version transition, projected commands, command results, generated IDs, affected IDs, and new revisions. It intentionally excludes Web UI deltas and internal change-review records.
 
-## 8. Agent invocation and delegation
+## 8. Task creation and Run launch
+
+Create a durable Canvas-scoped Task and its static Task Note with `POST task/create`. The Profile must be a currently selectable external Agent Profile; `position` is the root-level location for the Task Note.
+
+```bash
+curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  --data-binary '{
+    "goal": "Investigate and fix the issue",
+    "defaultRootProfileId": "profile-id",
+    "position": { "x": 800, "y": 360 }
+  }' "$HUABU_RFS_URL/task/create"
+```
+
+Creation returns `{ "task": { "taskId", "canvasId", "goal", "defaultRootProfileId", "anchorNodeId", "createdAt" } }` and does not start execution. Save `taskId`.
+
+Start a new Run with `POST task/<taskId>/run/create`. An empty object uses the Task's default Profile. Optional `rootProfileId`, `workingDirPath`, and `additionalInitialPreamble` override this Run's new root Agent only.
+
+```bash
+TASK_ID="task-..."
+curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  --data-binary '{
+    "workingDirPath": "/optional/absolute/path",
+    "additionalInitialPreamble": "Optional durable root-Agent instructions."
+  }' "$HUABU_RFS_URL/task/$TASK_ID/run/create"
+```
+
+Run creation returns `{ "run": { ... } }` after the visible root Agent Node is created and its first turn begins. A Task may have multiple Runs. Phase 1 Run status is only `pending` or `running`; failures may intentionally leave an inspectable `pending` record and return its Run, root node, or root thread IDs in the error message.
+
+## 9. Agent invocation and delegation
 
 `POST agent` is optional. Direct `query` (including `SNAPSHOT_NODES`), `download`, `upload`, and `execute` work without an internal model provider. Omit `X-Huabu-Thread-Id` to start an internal `operate` conversation; return the emitted thread ID to continue it while its handle remains live.
 

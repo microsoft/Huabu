@@ -25,6 +25,8 @@ import {
   inspectEdgesQueryParamsSchema,
   inspectNodesQueryParamsSchema,
   snapshotNodesQueryParamsSchema,
+  startTaskRunToolParamsSchema,
+  createTaskRequestSchema,
 } from '@huabu/shared';
 
 import { zodToToolSchema } from './zod-tool-schema.js';
@@ -193,6 +195,32 @@ For worked multi-command recipes (group into frame, brainstorm-and-connect, merg
   // any mixed [read, space_commands] batch also runs serial; in
   // practice the agent reads first and writes in a later turn, so the
   // read+write mix is rare and the cost is small.
+  executionMode: 'sequential',
+};
+
+// ==================== Task Tools ====================
+
+export const createTaskParamsSchema = zodToToolSchema(createTaskRequestSchema);
+
+export const createTaskTool: ToolDefinition = {
+  name: 'create_task',
+  label: 'Create Task',
+  description:
+    'Create one durable Task in the current Space and one static Task Note containing its goal. Use this only when the user explicitly wants durable long-horizon work or delegation; ordinary discussion and Space edits do not need a Task. `defaultRootProfileId` must be an exact selectable external Agent Profile id supplied by the user or current context; ask the user if it is unavailable rather than guessing. Returns `{ task: { taskId, canvasId, goal, defaultRootProfileId, anchorNodeId, createdAt } }`. Creation does not start a Run; use `start_task_run` with the returned taskId when execution should begin.',
+  parameters: createTaskParamsSchema,
+  executionMode: 'sequential',
+};
+
+export const startTaskRunParamsSchema = zodToToolSchema(
+  startTaskRunToolParamsSchema,
+);
+
+export const startTaskRunTool: ToolDefinition = {
+  name: 'start_task_run',
+  label: 'Start Task Run',
+  description:
+    'Start a new Run for an existing Task in the current Space when execution is explicitly requested. Creates a visible fixed root Agent Node and submits the snapshotted Task goal as its first turn. Omit `rootProfileId` to use the Task default; otherwise provide an exact selectable Profile id. `workingDirPath` must be absolute, and launch overrides apply only when the new external Agent thread is first realized. Returns `{ run: { runId, taskId, canvasIdSnapshot, goalSnapshot, rootProfileIdSnapshot, status, rootNodeId, rootThreadId, createdAt, startedAt } }`. A Task may have multiple Runs.',
+  parameters: startTaskRunParamsSchema,
   executionMode: 'sequential',
 };
 
@@ -477,6 +505,8 @@ export const TOOL_REGISTRY: Readonly<Record<string, ToolDefinition>> =
         inspectNodesTool,
         inspectEdgesTool,
         canvasCommandsTool,
+        createTaskTool,
+        startTaskRunTool,
         readTool,
         grepTool,
         findTool,

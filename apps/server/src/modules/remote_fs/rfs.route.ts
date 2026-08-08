@@ -17,6 +17,8 @@
  * - `POST   agent`           — start an internal conversation or invoke a
  *   fixed Agent Node; always streams `text/event-stream`.
  * - `POST   agent/create`    — create a delegated fixed Agent Node.
+ * - `POST   task/create`     — create a durable Task and static Task Note.
+ * - `POST   task/:taskId/run/create` — create and start one Task Run.
  * - `GET    skill`           — pull the canvas-access guide (per-canvas
  *   override → bundled default).
  * - `GET    capabilities*`   — discover direct query/command contracts.
@@ -37,16 +39,20 @@ import {
   RFS_HEARTBEAT_MAX_SEC,
   RFS_HEARTBEAT_MIN_SEC,
   createId,
+  createTaskRequestSchema,
   rfsAgentCreateRequestSchema,
   rfsAgentHeadersSchema,
   rfsAgentRequestSchema,
   rfsExecuteHeadersSchema,
   rfsExecuteRequestSchema,
   spaceQuerySchema,
+  startTaskRunRequestSchema,
+  type CreateTaskResponse,
   type RfsAgentEventMode,
   type RfsAgentCreateResponse,
   type RfsUploadResponse,
   type AgentStreamEvent,
+  type StartTaskRunResponse,
 } from '@huabu/shared';
 
 import { mimeForPath } from './mime.js';
@@ -88,6 +94,8 @@ import { MissingWorldPortalError } from '../canvas/canvas-command-router.js';
 import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
 import { canvasAcpNamespace } from '../storage/paths.js';
+import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
+import { TaskCreationError, taskService } from '../task/task.service.js';
 
 import type { ChatEnvelope } from '../agent/conversation/envelope.js';
 import type { Context } from '@earendil-works/pi-ai';
@@ -551,6 +559,128 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       }
       await rm(absPath, { force: true });
       return reply.code(204).send();
+    },
+  );
+
+  // ── Task creation and Run launch ──
+  app.post<{ Params: { canvasId: string } }>(
+    '/:canvasId/task/create',
+    async (request, reply) => {
+      const body = Buffer.isBuffer(request.body)
+        ? request.body.toString('utf8')
+        : '';
+      let json: unknown;
+      try {
+        json = JSON.parse(body || '{}');
+      } catch {
+        return reply
+          .code(400)
+          .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
+      }
+      const parsed = createTaskRequestSchema.safeParse(json);
+      if (!parsed.success) {
+        return reply
+          .code(400)
+          .send(
+            rfsError(
+              parsed.error.issues[0]?.message ?? 'Invalid Task request.',
+              'validation_failed',
+            ),
+          );
+      }
+
+      try {
+        const task = await taskService.create(
+          request.params.canvasId,
+          parsed.data,
+        );
+        const response: CreateTaskResponse = { task };
+        return reply.code(201).send(response);
+      } catch (error) {
+        if (error instanceof TaskCreationError) {
+          const status =
+            error.code === 'invalid_input'
+              ? 400
+              : error.code === 'profile_registry_unavailable'
+                ? 503
+                : ['canvas_not_found', 'profile_not_selectable'].includes(
+                      error.code,
+                    )
+                  ? 404
+                  : 500;
+          const reason = error.createdAnchorNodeId
+            ? `${error.message} Created Task Note: ${error.createdAnchorNodeId}.`
+            : error.message;
+          return reply.code(status).send(rfsError(reason, error.code));
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{ Params: { canvasId: string; taskId: string } }>(
+    '/:canvasId/task/:taskId/run/create',
+    async (request, reply) => {
+      const body = Buffer.isBuffer(request.body)
+        ? request.body.toString('utf8')
+        : '';
+      let json: unknown;
+      try {
+        json = JSON.parse(body || '{}');
+      } catch {
+        return reply
+          .code(400)
+          .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
+      }
+      const parsed = startTaskRunRequestSchema.safeParse(json);
+      if (!parsed.success) {
+        return reply
+          .code(400)
+          .send(
+            rfsError(
+              parsed.error.issues[0]?.message ?? 'Invalid Run request.',
+              'validation_failed',
+            ),
+          );
+      }
+
+      try {
+        const run = await runLauncher.start(
+          request.params.canvasId,
+          request.params.taskId,
+          parsed.data,
+          { logger: request.log },
+        );
+        const response: StartTaskRunResponse = { run };
+        return reply.code(201).send(response);
+      } catch (error) {
+        if (error instanceof RunLaunchError) {
+          const status =
+            error.code === 'invalid_input'
+              ? 400
+              : error.code === 'profile_registry_unavailable'
+                ? 503
+                : ['task_not_found', 'profile_not_selectable'].includes(
+                      error.code,
+                    )
+                  ? 404
+                  : error.code === 'root_position_failed'
+                    ? 409
+                    : 500;
+          const partial = [
+            error.runId ? `Run: ${error.runId}.` : '',
+            error.rootNodeId ? `Root node: ${error.rootNodeId}.` : '',
+            error.rootThreadId ? `Root thread: ${error.rootThreadId}.` : '',
+          ]
+            .filter(Boolean)
+            .join(' ');
+          const reason = partial
+            ? `${error.message} ${partial}`
+            : error.message;
+          return reply.code(status).send(rfsError(reason, error.code));
+        }
+        throw error;
+      }
     },
   );
 

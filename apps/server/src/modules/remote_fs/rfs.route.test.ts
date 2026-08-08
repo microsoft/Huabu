@@ -52,6 +52,8 @@ import { agentNodeService } from '../agent/agent-node.service.js';
 import { agentThreadService } from '../agent/agent-thread.service.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { getCanvasStore, resetStorageCache } from '../storage/index.js';
+import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
+import { taskService } from '../task/task.service.js';
 import { toSafeFilename } from '../workspace/disk/naming.js';
 import { setWorkspacePath } from '../workspace.js';
 
@@ -128,6 +130,7 @@ describe('GET /api/rfs/:canvasId/skill', () => {
         );
       }
       expect(res.body).toContain('/capabilities/commands/$COMMAND');
+      expect(res.body).toContain('$HUABU_RFS_URL/task/create');
       expect(res.body).toContain('**parent-local**');
       expect(res.body).toContain('read-only `absolutePosition`');
       expect(res.body).toContain(
@@ -136,6 +139,145 @@ describe('GET /api/rfs/:canvasId/skill', () => {
       expect(res.body).toContain(
         `${getNodeDefaultSize('note').height}px nominal layout height`,
       );
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('Task RFS adapters', () => {
+  it('creates a Task through TaskService', async () => {
+    const task = {
+      taskId: 'task-a',
+      canvasId: 'c1',
+      goal: 'Investigate',
+      defaultRootProfileId: 'profile-a',
+      anchorNodeId: 'node-task',
+      createdAt: 1,
+    };
+    const create = vi.spyOn(taskService, 'create').mockResolvedValue(task);
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/task/create',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          goal: 'Investigate',
+          defaultRootProfileId: 'profile-a',
+          position: { x: 100, y: 200 },
+        }),
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toEqual({ task });
+      expect(create).toHaveBeenCalledWith('c1', {
+        goal: 'Investigate',
+        defaultRootProfileId: 'profile-a',
+        position: { x: 100, y: 200 },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('starts a Task Run through RunLauncher', async () => {
+    const run = {
+      runId: 'run-a',
+      taskId: 'task-a',
+      canvasIdSnapshot: 'c1',
+      goalSnapshot: 'Investigate',
+      rootProfileIdSnapshot: 'profile-b',
+      status: 'running' as const,
+      rootNodeId: 'node-root',
+      rootThreadId: 'thread-root',
+      createdAt: 1,
+      startedAt: 2,
+    };
+    const start = vi.spyOn(runLauncher, 'start').mockResolvedValue(run);
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/task/task-a/run/create',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          rootProfileId: 'profile-b',
+          workingDirPath: '/work/task',
+        }),
+      });
+
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toEqual({ run });
+      expect(start).toHaveBeenCalledWith(
+        'c1',
+        'task-a',
+        {
+          rootProfileId: 'profile-b',
+          workingDirPath: '/work/task',
+        },
+        { logger: expect.anything() },
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects invalid Task and Run bodies before calling services', async () => {
+    const create = vi.spyOn(taskService, 'create');
+    const start = vi.spyOn(runLauncher, 'start');
+    const app = await buildApp();
+    try {
+      const taskResponse = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/task/create',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          goal: '',
+          defaultRootProfileId: 'profile-a',
+          position: { x: 0, y: 0 },
+        }),
+      });
+      const runResponse = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/task/task-a/run/create',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({ rootProfileId: '' }),
+      });
+
+      expect(taskResponse.statusCode).toBe(400);
+      expect(runResponse.statusCode).toBe(400);
+      expect(create).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('reports retained Run and root Agent identities on launch failure', async () => {
+    vi.spyOn(runLauncher, 'start').mockRejectedValue(
+      new RunLaunchError(
+        'invocation_failed',
+        'Root invocation failed',
+        'run-partial',
+        'node-root' as CanvasNodeId,
+        'thread-root',
+      ),
+    );
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/task/task-a/run/create',
+        headers: { 'content-type': 'application/json' },
+        payload: '{}',
+      });
+
+      expect(res.statusCode).toBe(500);
+      expect(res.json()).toMatchObject({ code: 'invocation_failed' });
+      expect(res.json().message).toContain('Run: run-partial.');
+      expect(res.json().message).toContain('Root node: node-root.');
+      expect(res.json().message).toContain('Root thread: thread-root.');
     } finally {
       await app.close();
     }
