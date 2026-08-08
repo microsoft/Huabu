@@ -217,8 +217,9 @@ export const QuestionNode = memo(
           conversationOwner: { canvasId, nodeId: id, threadId },
         },
         canvasId,
+        data.agentBinding,
       );
-    }, [id, data.threadId, canvasId, patchNodeSilent]);
+    }, [id, data.threadId, data.agentBinding, canvasId, patchNodeSilent]);
 
     // ------------------------------------------------------------------
     // Double-click:

@@ -11,50 +11,23 @@
  * build the `customData` patch used to save a new choice.
  */
 
+import { getDefaultAgentIcon, readAgentIcon } from '@huabu/shared';
+
 import {
   AGENT_ICON_COLORS,
   AGENT_ICON_SELECTABLE_SHAPES,
-  AGENT_ICON_SHAPES,
-  type AgentIconColor,
-  type AgentIconShape,
   type AgentIconValue,
 } from '@/components/Common/AgentIcon';
 
 import type { AgentBinding, CustomData } from '@huabu/shared';
+
+export { getDefaultAgentIcon, readAgentIcon };
 
 /**
  * Reserved `customData` key holding the avatar. Kept as a local literal (rather
  * than imported from `@huabu/shared`) so the web bundle stays zod-free.
  */
 const ICON_KEY = 'icon';
-
-function isShape(value: unknown): value is AgentIconShape {
-  return (AGENT_ICON_SHAPES as readonly string[]).includes(value as string);
-}
-
-function isColor(value: unknown): value is AgentIconColor {
-  return (AGENT_ICON_COLORS as readonly string[]).includes(value as string);
-}
-
-/** Small deterministic string hash (FNV-1a) for stable default icons. */
-function hash(value: string): number {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < value.length; i += 1) {
-    h ^= value.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
-  }
-  return h >>> 0;
-}
-
-/** Stable, distinct-looking default derived from the profile id. */
-export function getDefaultAgentIcon(profileId: string): AgentIconValue {
-  const h = hash(profileId);
-  return {
-    shape:
-      AGENT_ICON_SELECTABLE_SHAPES[h % AGENT_ICON_SELECTABLE_SHAPES.length],
-    color: AGENT_ICON_COLORS[(h >>> 8) % AGENT_ICON_COLORS.length],
-  };
-}
 
 /**
  * A random icon, used to seed the create form so each new agent starts with a
@@ -68,19 +41,6 @@ export function randomAgentIcon(): AgentIconValue {
     shape: pick(AGENT_ICON_SELECTABLE_SHAPES),
     color: pick(AGENT_ICON_COLORS),
   };
-}
-
-/** Resolve the effective icon for a Profile (saved value, else default). */
-export function readAgentIcon(profile: {
-  id: string;
-  customData?: CustomData;
-}): AgentIconValue {
-  const raw = profile.customData?.[ICON_KEY];
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    const { shape, color } = raw as Record<string, unknown>;
-    if (isShape(shape) && isColor(color)) return { shape, color };
-  }
-  return getDefaultAgentIcon(profile.id);
 }
 
 /** Snapshot the effective external-agent icon when binding a conversation. */

@@ -22,6 +22,7 @@ export type ConversationOwnerSource = {
   viewed?: boolean;
   agentMode?: 'ask' | 'operate';
   agentBinding?: AgentBinding;
+  agentBindingPolicy?: 'selectable' | 'fixed';
   hasAuthoredContent?: boolean;
 };
 
