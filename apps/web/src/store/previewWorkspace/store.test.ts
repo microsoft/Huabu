@@ -1,0 +1,300 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
+/**
+ * Store-level tests. The topology rules are already covered against the pure
+ * reducers in `model.test.ts`, so these assert only what the binding adds:
+ * which Canvas is loaded, when the record is written, and that each action
+ * reaches its reducer.
+ */
+
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createEmptyWorkspace, openTarget, type PreviewTarget } from './model';
+import { readWorkspace, writeWorkspace } from './persistence';
+import {
+  MAX_TABS_PER_GROUP,
+  selectActiveNodeId,
+  selectActiveTab,
+  selectGroupOfTab,
+  usePreviewWorkspaceStore,
+} from './store';
+
+const testStorage = vi.hoisted(() => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+    clear: () => values.clear(),
+    key: (index: number) => [...values.keys()][index] ?? null,
+    get length() {
+      return values.size;
+    },
+  };
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: storage,
+  });
+  return { storage };
+});
+
+const CANVAS = 'canvas-1';
+const OTHER = 'canvas-2';
+
+function node(nodeId: string, canvasId = CANVAS): PreviewTarget {
+  return { kind: 'node', canvasId, nodeId };
+}
+
+function chat(threadId: string, canvasId = CANVAS): PreviewTarget {
+  return { kind: 'chat', canvasId, threadId };
+}
+
+const store = () => usePreviewWorkspaceStore.getState();
+
+beforeEach(() => {
+  testStorage.storage.clear();
+  usePreviewWorkspaceStore.setState({
+    canvasId: '',
+    workspace: createEmptyWorkspace(),
+  });
+});
+
+describe('loading a Canvas', () => {
+  it('restores a persisted layout', () => {
+    const persisted = openTarget(
+      createEmptyWorkspace('g1'),
+      node('a'),
+      {},
+      { tabId: 't1' },
+    ).workspace;
+    writeWorkspace(CANVAS, persisted);
+
+    store().loadForCanvas(CANVAS);
+
+    expect(store().canvasId).toBe(CANVAS);
+    expect(store().workspace).toEqual(persisted);
+  });
+
+  it('seeds from pre-workspace Chat state when nothing is persisted', () => {
+    store().loadForCanvas(CANVAS, { chatThreadId: 'thread-1' });
+
+    const tabs = Object.values(store().workspace.tabs);
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].target).toEqual(chat('thread-1'));
+  });
+
+  it('prefers the persisted layout over the legacy seed', () => {
+    const persisted = openTarget(
+      createEmptyWorkspace('g1'),
+      node('a'),
+      {},
+      { tabId: 't1' },
+    ).workspace;
+    writeWorkspace(CANVAS, persisted);
+
+    store().loadForCanvas(CANVAS, { chatThreadId: 'thread-1' });
+
+    expect(store().workspace).toEqual(persisted);
+  });
+
+  it('falls back to an empty workspace', () => {
+    store().loadForCanvas(CANVAS);
+
+    expect(store().workspace.tabs).toEqual({});
+    expect(store().workspace.groups).toHaveLength(1);
+  });
+
+  it('reloading the same Canvas keeps the in-memory layout', () => {
+    store().loadForCanvas(CANVAS);
+    store().openPreviewTarget(node('a'));
+    const afterOpen = store().workspace;
+
+    store().loadForCanvas(CANVAS);
+
+    expect(store().workspace).toBe(afterOpen);
+  });
+
+  it('flushes the outgoing Canvas before switching', () => {
+    store().loadForCanvas(CANVAS);
+    store().openPreviewTarget(node('a'));
+
+    store().loadForCanvas(OTHER);
+
+    expect(store().canvasId).toBe(OTHER);
+    const restored = readWorkspace(CANVAS);
+    expect(Object.values(restored?.tabs ?? {}).map((t) => t.target)).toEqual([
+      node('a'),
+    ]);
+  });
+});
+
+describe('flushing', () => {
+  it('writes the loaded Canvas', () => {
+    store().loadForCanvas(CANVAS);
+    store().openPreviewTarget(node('a'));
+
+    store().flush();
+
+    expect(readWorkspace(CANVAS)).toEqual(store().workspace);
+  });
+
+  it('writes nothing before a Canvas is loaded', () => {
+    store().flush();
+
+    expect(readWorkspace('')).toBeNull();
+  });
+});
+
+describe('actions delegate to the model', () => {
+  beforeEach(() => {
+    store().loadForCanvas(CANVAS);
+  });
+
+  it('opens a target and returns its tab id', () => {
+    const tabId = store().openPreviewTarget(node('a'));
+
+    expect(tabId).toBeTruthy();
+    expect(store().workspace.tabs[tabId].target).toEqual(node('a'));
+  });
+
+  it('reveals an already-open target instead of duplicating it', () => {
+    const first = store().openPreviewTarget(node('a'));
+    const second = store().openPreviewTarget(node('a'));
+
+    expect(second).toBe(first);
+    expect(Object.keys(store().workspace.tabs)).toHaveLength(1);
+  });
+
+  it('closes a tab', () => {
+    const tabId = store().openPreviewTarget(node('a'));
+
+    store().closeTab(tabId);
+
+    expect(store().workspace.tabs[tabId]).toBeUndefined();
+  });
+
+  it('activates a tab', () => {
+    const first = store().openPreviewTarget(node('a'));
+    store().openPreviewTarget(node('b'));
+
+    store().activateTab(first);
+
+    expect(selectActiveTab(store())?.id).toBe(first);
+  });
+
+  it('promotes a transient tab', () => {
+    const tabId = store().openPreviewTarget(node('a'), { transient: true });
+    expect(store().workspace.tabs[tabId].transient).toBe(true);
+
+    store().promoteTab(tabId);
+
+    expect(store().workspace.tabs[tabId].transient).toBe(false);
+  });
+
+  it('moves a tab to the other group', () => {
+    const tabId = store().openPreviewTarget(node('a'));
+    store().openPreviewTarget(node('b'), { openToSide: true });
+    const sideGroupId = store().workspace.groups[1].id;
+
+    store().moveTab(tabId, { groupId: sideGroupId });
+
+    expect(selectGroupOfTab(store(), tabId)).toBe(sideGroupId);
+  });
+
+  it('replaces a tab target in place', () => {
+    const tabId = store().openPreviewTarget(chat('thread-1'));
+
+    store().replaceTabTarget(tabId, node('question-1'));
+
+    expect(store().workspace.tabs[tabId].target).toEqual(node('question-1'));
+  });
+
+  it('merges groups', () => {
+    store().openPreviewTarget(node('a'));
+    store().openPreviewTarget(node('b'), { openToSide: true });
+    expect(store().workspace.groups).toHaveLength(2);
+
+    store().mergeGroups();
+
+    expect(store().workspace.groups).toHaveLength(1);
+    expect(store().workspace.groups[0].tabIds).toHaveLength(2);
+  });
+
+  it('sets the active group', () => {
+    store().openPreviewTarget(node('a'));
+    const firstGroupId = store().workspace.groups[0].id;
+    store().openPreviewTarget(node('b'), { openToSide: true });
+
+    store().setActiveGroup(firstGroupId);
+
+    expect(store().workspace.activeGroupId).toBe(firstGroupId);
+  });
+
+  it('clamps the split ratio', () => {
+    store().setSplitRatio(0.95);
+
+    expect(store().workspace.splitRatio).toBeLessThan(0.95);
+  });
+
+  it('drops tabs whose node is gone', () => {
+    store().openPreviewTarget(node('a'));
+    const kept = store().openPreviewTarget(node('b'));
+
+    store().validate(new Set(['b']));
+
+    expect(Object.keys(store().workspace.tabs)).toEqual([kept]);
+  });
+
+  it('validates nothing before a Canvas is loaded', () => {
+    usePreviewWorkspaceStore.setState({
+      canvasId: '',
+      workspace: createEmptyWorkspace(),
+    });
+
+    expect(() => store().validate(new Set())).not.toThrow();
+  });
+});
+
+describe('tab cap', () => {
+  it('evicts the least recently active tab past the cap', () => {
+    store().loadForCanvas(CANVAS);
+    const opened = Array.from({ length: MAX_TABS_PER_GROUP + 1 }, (_, i) =>
+      store().openPreviewTarget(node(`n${i}`)),
+    );
+
+    expect(store().workspace.groups[0].tabIds).toHaveLength(MAX_TABS_PER_GROUP);
+    // The first tab opened is the least recently active, so it goes first.
+    expect(store().workspace.tabs[opened[0]]).toBeUndefined();
+    // The tab just opened is its group's active tab and is therefore exempt.
+    expect(store().workspace.tabs[opened.at(-1) as string]).toBeDefined();
+  });
+});
+
+describe('selectors', () => {
+  beforeEach(() => {
+    store().loadForCanvas(CANVAS);
+  });
+
+  it('reports the focused group active node', () => {
+    store().openPreviewTarget(node('a'));
+
+    expect(selectActiveNodeId(store())).toBe('a');
+  });
+
+  it('reports no node while a Chat tab is active', () => {
+    store().openPreviewTarget(chat('thread-1'));
+
+    expect(selectActiveNodeId(store())).toBeNull();
+    expect(selectActiveTab(store())?.target.kind).toBe('chat');
+  });
+
+  it('reports no active tab on an empty workspace', () => {
+    expect(selectActiveTab(store())).toBeNull();
+    expect(selectActiveNodeId(store())).toBeNull();
+  });
+
+  it('reports no group for a tab that is not open', () => {
+    expect(selectGroupOfTab(store(), 'missing')).toBeNull();
+  });
+});
