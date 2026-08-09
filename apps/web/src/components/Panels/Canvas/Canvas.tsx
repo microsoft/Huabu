@@ -114,6 +114,10 @@ import useCanvasStore from '../../../store/canvasStore.ts';
 import { useConnectPortStore } from '../../../store/connectPortStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
 import { usePanelStore } from '../../../store/panelStore.ts';
+import {
+  selectActiveNodeId,
+  usePreviewWorkspaceStore,
+} from '../../../store/previewWorkspace/store.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
 import { useWorkspaceStore } from '../../../store/workspaceStore.ts';
 import {
@@ -400,7 +404,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   // action refs, which dominated initial commit work on canvas open.
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
-  const expandedNodeId = useCanvasStore((state) => state.expandedNodeId);
+  const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
   const expandMode = useCanvasStore((state) => state.expandMode);
   const canvasId = useCanvasStore((state) => state.canvasId);
   const minimapEnabled = useCanvasStore((state) => state.minimapEnabled);

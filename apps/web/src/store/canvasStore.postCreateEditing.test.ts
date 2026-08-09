@@ -4,6 +4,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import useCanvasStore from './canvasStore';
+import { createEmptyWorkspace } from './previewWorkspace/model';
+import {
+  selectActiveNodeId,
+  usePreviewWorkspaceStore,
+} from './previewWorkspace/store';
+
+/** The node the workspace is showing; presentation moved off `canvasStore`. */
+const expandedNodeId = () =>
+  selectActiveNodeId(usePreviewWorkspaceStore.getState());
 
 function resetStore() {
   useCanvasStore.getState()._setStateNoAutosave({
@@ -11,9 +20,12 @@ function resetStore() {
     edges: [],
     canvasId: 'test-canvas',
     isLoading: true,
-    expandedNodeId: null,
     expandedNodeFocusTick: 0,
     pendingInlineEditNodeId: null,
+  });
+  usePreviewWorkspaceStore.setState({
+    canvasId: 'test-canvas',
+    workspace: createEmptyWorkspace(),
   });
 }
 
@@ -35,7 +47,7 @@ describe('post-create editing', () => {
     });
 
     const state = useCanvasStore.getState();
-    expect(state.expandedNodeId).toBe('node-note');
+    expect(expandedNodeId()).toBe('node-note');
     expect(state.expandedNodeFocusTick).toBe(1);
     expect(state.pendingInlineEditNodeId).toBeNull();
   });
@@ -47,7 +59,7 @@ describe('post-create editing', () => {
     });
 
     const state = useCanvasStore.getState();
-    expect(state.expandedNodeId).toBeNull();
+    expect(expandedNodeId()).toBeNull();
     expect(state.pendingInlineEditNodeId).toBe('node-text');
   });
 
@@ -69,7 +81,7 @@ describe('post-create editing', () => {
     );
 
     const state = useCanvasStore.getState();
-    expect(state.expandedNodeId).toBeNull();
+    expect(expandedNodeId()).toBeNull();
     expect(state.pendingInlineEditNodeId).toBeNull();
   });
 
@@ -91,7 +103,7 @@ describe('post-create editing', () => {
     });
 
     const state = useCanvasStore.getState();
-    expect(state.expandedNodeId).toBeNull();
+    expect(expandedNodeId()).toBeNull();
     expect(state.pendingInlineEditNodeId).toBeNull();
   });
 });

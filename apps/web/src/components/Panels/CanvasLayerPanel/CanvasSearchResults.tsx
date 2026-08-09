@@ -325,7 +325,8 @@ export const CanvasSearchResults = (): React.JSX.Element => {
       // is left looking at the focused node on the canvas instead of
       // an unrelated panel.
       if (hasNodePreview(nodeType)) {
-        openExpanded(nodeId);
+        // Browsing results reuses the group's inspection slot (§9.2).
+        openExpanded(nodeId, { transient: true });
       } else {
         closeExpanded();
       }
@@ -359,7 +360,7 @@ export const CanvasSearchResults = (): React.JSX.Element => {
       closeExpanded();
       openConversationForNode(v.group.nodeId);
     } else if (hasNodePreview(v.group.nodeType)) {
-      openExpanded(v.group.nodeId);
+      openExpanded(v.group.nodeId, { transient: true });
     } else {
       closeExpanded();
     }

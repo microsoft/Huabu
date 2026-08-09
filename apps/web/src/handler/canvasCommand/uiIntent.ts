@@ -264,7 +264,7 @@ export type CanvasUiIntent =
       nodeId: string;
       reorderTarget?: { nodeId: string; position: 'before' | 'after' };
     }
-  | { type: 'EXPAND_NODE'; nodeId: string }
+  | { type: 'EXPAND_NODE'; nodeId: string; transient?: boolean }
   | {
       /**
        * Stroke-level split / cross-region move (Stage 4B). Pulls the
@@ -303,14 +303,13 @@ export interface UiIntentResolution {
    */
   editNodeId?: string;
   /**
-   * UI-only state mutation that bypasses the command pipeline.
+   * UI-only presentation request that bypasses the command pipeline.
    *
-   * Used for view-state toggles (currently only the expand-overlay) that
-   * are not part of the canvas graph but still flow through the intent
-   * system for trace-uniformity. The store's `dispatchUiIntent` applies
-   * this directly via `set({ expandedNodeId })`.
+   * Flows through the intent system for trace uniformity even though it is
+   * not part of the canvas graph. `dispatchUiIntent` hands this to the
+   * preview workspace rather than setting panel state directly.
    */
-  expandedNodeId?: string | null;
+  openPreviewNode?: { nodeId: string; transient: boolean };
 }
 
 // ---------------------------------------------------------------------------
@@ -416,7 +415,10 @@ export function resolveUiIntent(
       const node = ui.nodes.find((n) => n.id === intent.nodeId);
       return {
         commands: [],
-        expandedNodeId: intent.nodeId,
+        openPreviewNode: {
+          nodeId: intent.nodeId,
+          transient: intent.transient ?? false,
+        },
         trace: node
           ? [{ action: 'node_expanded', node: extractNodeRef(node) }]
           : [],

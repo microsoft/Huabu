@@ -7,6 +7,10 @@ import { useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import useCanvasStore from '@/store/canvasStore';
+import {
+  selectActiveNodeId,
+  usePreviewWorkspaceStore,
+} from '@/store/previewWorkspace/store';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
 import { NODE_ICON } from '../../config/nodeIcons';
@@ -63,7 +67,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
 
   // Detect fullscreen (replace) mode — canvas not visible, so drag is useless.
   // In this case the buttons become click-to-add with auto-placement.
-  const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
+  const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
   const canvasExpandMode = useCanvasStore((s) => s.expandMode);
   const addNode = useCanvasStore((s) => s.addNode);
 

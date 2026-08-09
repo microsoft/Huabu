@@ -33,6 +33,10 @@ import { PreviewSearchAdapterProvider } from './PreviewSearchAdapterContext';
 import { useSwipeNavigation } from './swipeNavigation';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useChatStore } from '../../../store/chatStore.ts';
+import {
+  selectActiveNodeId,
+  usePreviewWorkspaceStore,
+} from '../../../store/previewWorkspace/store.ts';
 import { Button } from '../../Common/Button.tsx';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu.tsx';
 import { Input } from '../../Common/Input.tsx';
@@ -222,7 +226,7 @@ export const ExpandedNodePanel = ({
 }: ExpandedNodePanelProps) => {
   const { t } = useTranslation();
   // Canvas Store State
-  const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
+  const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
   const canvasExpandMode = useCanvasStore((s) => s.expandMode);
   const closeExpandedCanvas = useCanvasStore((s) => s.closeExpanded);
   const setCanvasExpandMode = useCanvasStore((s) => s.setExpandMode);
@@ -300,7 +304,9 @@ export const ExpandedNodePanel = ({
   const selectNeighbor = useCallback(
     (nodeId: string) => {
       setOpenNeighborDirection(null);
-      openExpandedCanvas(nodeId);
+      // Connected-node navigation browses, so it reuses the group's
+      // inspection slot rather than appending a tab (§9.2).
+      openExpandedCanvas(nodeId, { transient: true });
       selectCanvasNodes([nodeId]);
       panelRef.current?.focus({ preventScroll: true });
     },

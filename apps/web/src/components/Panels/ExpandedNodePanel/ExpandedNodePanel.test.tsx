@@ -6,6 +6,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import useCanvasStore from '@/store/canvasStore';
+import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
+import {
+  selectActiveNodeId,
+  usePreviewWorkspaceStore,
+} from '@/store/previewWorkspace/store';
 
 import { ExpandedNodePanel } from './ExpandedNodePanel';
 
@@ -15,6 +20,12 @@ import type { Edge, Node } from '@xyflow/react';
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
+
+const CANVAS_ID = 'test-canvas';
+
+/** The node the workspace is showing; presentation moved off `canvasStore`. */
+const expandedNodeId = () =>
+  selectActiveNodeId(usePreviewWorkspaceStore.getState());
 
 const testStorage = vi.hoisted(() => {
   const values = new Map<string, string>();
@@ -75,9 +86,16 @@ function renderPanel(nodes: Node[], edges: Edge[], mode: 'replace' | 'split') {
   useCanvasStore.setState({
     nodes,
     edges,
-    expandedNodeId: 'a',
+    canvasId: CANVAS_ID,
     expandMode: mode,
   });
+  usePreviewWorkspaceStore.setState({
+    canvasId: CANVAS_ID,
+    workspace: createEmptyWorkspace(),
+  });
+  usePreviewWorkspaceStore
+    .getState()
+    .openPreviewTarget({ kind: 'node', canvasId: CANVAS_ID, nodeId: 'a' });
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -141,8 +159,11 @@ afterEach(() => {
   useCanvasStore.setState({
     nodes: [],
     edges: [],
-    expandedNodeId: null,
     expandMode: 'split',
+  });
+  usePreviewWorkspaceStore.setState({
+    canvasId: '',
+    workspace: createEmptyWorkspace(),
   });
   root = null;
   container = null;
@@ -188,7 +209,7 @@ describe('ExpandedNodePanel edge navigation', () => {
       document.querySelector<HTMLButtonElement>('[role="menuitem"]');
     act(() => connectedItem?.click());
 
-    expect(useCanvasStore.getState().expandedNodeId).toBe('b');
+    expect(expandedNodeId()).toBe('b');
   });
 
   it('opens a sole downstream neighbor and preserves replace mode', () => {
@@ -200,7 +221,7 @@ describe('ExpandedNodePanel edge navigation', () => {
 
     dispatchArrow(window, 'ArrowRight');
 
-    expect(useCanvasStore.getState().expandedNodeId).toBe('b');
+    expect(expandedNodeId()).toBe('b');
     expect(useCanvasStore.getState().expandMode).toBe('replace');
     expect(
       useCanvasStore
@@ -229,11 +250,11 @@ describe('ExpandedNodePanel edge navigation', () => {
       document.querySelector<HTMLButtonElement>('[role="menuitem"]');
     act(() => downstreamItem?.click());
 
-    expect(useCanvasStore.getState().expandedNodeId).toBe('b');
+    expect(expandedNodeId()).toBe('b');
     expect(document.activeElement).not.toBe(navigationButton);
 
     dispatchArrow(document.body, 'ArrowLeft');
-    expect(useCanvasStore.getState().expandedNodeId).toBe('a');
+    expect(expandedNodeId()).toBe('a');
   });
 
   it('opens a stable chooser for multiple neighbors and selects one', () => {
@@ -263,7 +284,7 @@ describe('ExpandedNodePanel edge navigation', () => {
     expect(document.activeElement).toBe(items[1]);
 
     act(() => (document.activeElement as HTMLButtonElement).click());
-    expect(useCanvasStore.getState().expandedNodeId).toBe('b');
+    expect(expandedNodeId()).toBe('b');
     expect(useCanvasStore.getState().expandMode).toBe('split');
     expect(
       useCanvasStore
@@ -314,7 +335,7 @@ describe('ExpandedNodePanel edge navigation', () => {
 
     dispatchArrow(input, 'ArrowLeft');
 
-    expect(useCanvasStore.getState().expandedNodeId).toBe('a');
+    expect(expandedNodeId()).toBe('a');
     input.remove();
   });
 });
@@ -329,7 +350,7 @@ describe('ExpandedNodePanel swipe navigation', () => {
 
     swipe(240, 40);
 
-    expect(useCanvasStore.getState().expandedNodeId).toBe('b');
+    expect(expandedNodeId()).toBe('b');
     expect(useCanvasStore.getState().expandMode).toBe('replace');
   });
 
@@ -342,7 +363,7 @@ describe('ExpandedNodePanel swipe navigation', () => {
 
     swipe(40, 240);
 
-    expect(useCanvasStore.getState().expandedNodeId).toBe('b');
+    expect(expandedNodeId()).toBe('b');
   });
 
   it('offers a chooser when several neighbors share a direction', () => {
@@ -384,7 +405,7 @@ describe('ExpandedNodePanel swipe navigation', () => {
       );
     });
 
-    expect(useCanvasStore.getState().expandedNodeId).toBe('a');
+    expect(expandedNodeId()).toBe('a');
   });
 
   it('keeps working while the note editor holds focus', () => {
@@ -404,7 +425,7 @@ describe('ExpandedNodePanel swipe navigation', () => {
 
     swipe(240, 40, 0, paragraph);
 
-    expect(useCanvasStore.getState().expandedNodeId).toBe('b');
+    expect(expandedNodeId()).toBe('b');
   });
 
   it('yields to controls that own a horizontal drag', () => {
@@ -419,7 +440,7 @@ describe('ExpandedNodePanel swipe navigation', () => {
 
     swipe(240, 40, 0, slider);
 
-    expect(useCanvasStore.getState().expandedNodeId).toBe('a');
+    expect(expandedNodeId()).toBe('a');
   });
 
   it('hands a vertical drag back to native scrolling', () => {
@@ -432,7 +453,7 @@ describe('ExpandedNodePanel swipe navigation', () => {
     // Starts downwards, so the axis locks to vertical before drifting sideways.
     swipe(240, 40, 400);
 
-    expect(useCanvasStore.getState().expandedNodeId).toBe('a');
+    expect(expandedNodeId()).toBe('a');
   });
 
   it('abandons the swipe once a second finger joins', () => {
@@ -455,7 +476,7 @@ describe('ExpandedNodePanel swipe navigation', () => {
       body.dispatchEvent(touchEvent('touchend', [], [{ id: 1, x: 40 }]));
     });
 
-    expect(useCanvasStore.getState().expandedNodeId).toBe('a');
+    expect(expandedNodeId()).toBe('a');
   });
 
   it('ignores a swipe that never leaves the starting area', () => {
@@ -467,6 +488,6 @@ describe('ExpandedNodePanel swipe navigation', () => {
 
     swipe(240, 220);
 
-    expect(useCanvasStore.getState().expandedNodeId).toBe('a');
+    expect(expandedNodeId()).toBe('a');
   });
 });

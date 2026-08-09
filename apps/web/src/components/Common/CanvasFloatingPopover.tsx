@@ -20,6 +20,10 @@ import { createPortal } from 'react-dom';
 import { useCanvasAttentionStore } from '@/store/canvasAttentionStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
+import {
+  selectActiveNodeId,
+  usePreviewWorkspaceStore,
+} from '@/store/previewWorkspace/store';
 
 import { FLOATING_CHROME_PROPS } from './floatingChrome';
 
@@ -94,9 +98,10 @@ export function CanvasFloatingPopover({
   // ('replace' mode). The canvas itself is kept mounted at 0% width in that
   // state, so anchor rectangles still resolve to on-screen coordinates and
   // the portal'd toolbar would otherwise leak through on top of the panel.
-  const hiddenByExpandedPanel = useCanvasStore(
-    (s) => s.expandedNodeId !== null && s.expandMode === 'replace',
-  );
+  const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
+  const expandMode = useCanvasStore((s) => s.expandMode);
+  const hiddenByExpandedPanel =
+    expandedNodeId !== null && expandMode === 'replace';
 
   // Hide whenever an app-wide modal (Settings / Keyboard Shortcuts) is
   // open. Those modals render their own dimmed backdrop over the whole

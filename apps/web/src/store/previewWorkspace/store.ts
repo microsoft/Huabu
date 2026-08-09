@@ -22,6 +22,7 @@ import {
   closeTab,
   createEmptyWorkspace,
   enforceTabLimit,
+  findTabByTarget,
   groupOfTab,
   mergeGroups,
   moveTab,
@@ -182,4 +183,23 @@ export function selectGroupOfTab(
   tabId: string,
 ): string | null {
   return groupOfTab(state.workspace, tabId)?.id ?? null;
+}
+
+/**
+ * Whether a node of the loaded Canvas has a tab anywhere in the workspace.
+ * Broader than "is being shown": a tab in the inactive group still owns
+ * editor state its node must not be mutated behind.
+ */
+export function selectIsNodeOpen(
+  state: PreviewWorkspaceState,
+  nodeId: string,
+): boolean {
+  if (!state.canvasId) return false;
+  return (
+    findTabByTarget(state.workspace, {
+      kind: 'node',
+      canvasId: state.canvasId,
+      nodeId,
+    }) !== null
+  );
 }

@@ -14,6 +14,10 @@ import { ExpandedNodePanel } from '../../components/Panels/ExpandedNodePanel/Exp
 import { openUserHandbook } from '../../config/handbook';
 import { isElectron } from '../../hooks/useElectron';
 import useCanvasStore from '../../store/canvasStore';
+import {
+  selectActiveNodeId,
+  usePreviewWorkspaceStore,
+} from '../../store/previewWorkspace/store';
 
 const SPLIT_MIN_PX = 200;
 const SPLIT_DEFAULT_RATIO = 0.5;
@@ -40,7 +44,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
   onToggleChat,
 }) => {
   const { t } = useTranslation();
-  const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
+  const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
   const canvasExpandMode = useCanvasStore((s) => s.expandMode);
 
   // The custom Electron title bar already exposes Handbook + Settings
