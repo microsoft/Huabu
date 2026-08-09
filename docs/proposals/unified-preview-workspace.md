@@ -279,15 +279,15 @@ The workspace's outer maximum width must allow two useful groups while preservin
 
 `canvasStore` owns the document and its command pipeline. The workspace owns what is on screen. Today those two concerns are mixed, so the migration has to say for each field whether it moves, dies, or stays.
 
-| Current state                                   | Fate                                                                                                  |
-| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `expandedNodeId`                                | Moves. Becomes a workspace tab target.                                                                |
-| `expandMode`, `setExpandMode`                   | Dies with the retired replace / split mode.                                                           |
-| `expandedNodeFocusTick`                         | Moves. Becomes a per-tab focus signal addressed to one tab rather than to the single expanded node.   |
-| `openExpanded`, `closeExpanded`                 | Move. Become `openPreviewTarget` and tab close, which still invoke the settle boundary.               |
-| `settleNodePreprocess`                          | Stays. Preprocessing is document work; the workspace calls into it at the settle boundary.            |
-| `nodes`, `edges`, `updateNodeData`, `tryRename` | Stay. A renderer reading node data from `canvasStore` is reading the document, not presentation.      |
-| `UiIntentResult.expandedNodeId`                 | Moves. The intent carries a preview target instead of bypassing the pipeline with a direct state set. |
+| Current state                                   | Fate                                                                                                                                        |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `expandedNodeId`                                | **Done.** Moved. Deleted from `canvasStore`; readers derive the shown node from the workspace's active tab.                                 |
+| `expandMode`, `setExpandMode`                   | **Done.** Died with the retired replace / split mode.                                                                                       |
+| `expandedNodeFocusTick`                         | Moves. Becomes a per-tab focus signal addressed to one tab rather than to the single expanded node.                                         |
+| `openExpanded`, `closeExpanded`                 | Move. Become `openPreviewTarget` and tab close, which still invoke the settle boundary.                                                     |
+| `settleNodePreprocess`                          | Stays. Preprocessing is document work; the workspace calls into it at the settle boundary.                                                  |
+| `nodes`, `edges`, `updateNodeData`, `tryRename` | Stay. A renderer reading node data from `canvasStore` is reading the document, not presentation.                                            |
+| `UiIntentResult.expandedNodeId`                 | **Done.** Moved. Renamed `openPreviewNode`; the intent carries a preview request instead of bypassing the pipeline with a direct state set. |
 
 Retiring `expandMode` removes the "the Canvas is not visible" condition entirely, because the workspace's maximum width always preserves a minimum Canvas width. Four call sites lose their guard rather than gaining a new one:
 
@@ -381,7 +381,8 @@ The acceptance criterion splits the same way. [`chatSessionIsolation.test.tsx`](
 
 ### Stage 3: Workspace UI
 
-- Bind the Stage 1 model into a zustand store and add the compatibility adapters for the existing single-panel actions. The adapters are one-directional: the workspace store is authoritative and the legacy actions delegate to it. Nothing writes back into `canvasStore.expandedNodeId` from the workspace, so there is never a second source of truth.
+- **Done.** Bind the Stage 1 model into a zustand store and add the compatibility adapters for the existing single-panel actions. The adapters are one-directional: the workspace store is authoritative and the legacy actions delegate to it. Nothing writes back into `canvasStore`, so there is never a second source of truth.
+- **Done.** Retire `expandMode` and the four guards that depended on it, per §11.1.
 - Build the tab strip, group, renderer dispatch, split handle, drag-and-drop, empty state, transient-tab affordance, and accessibility behavior.
 - Resolve L10 of §10.1 by scoping window-level keyboard and selection handlers to the focused group.
 - Resolve L1, L4 and the `lastAction` remainder of L2, deferred from Stage 2. Once a tab supplies the session, nothing resolves "the current thread", and the `_savedCanvas*` restore stack has nothing left to restore. Unskip the two-`ChatPanel` case in [`chatSessionIsolation.test.tsx`](../../apps/web/src/hooks/chatSessionIsolation.test.tsx) as the proof.
@@ -389,16 +390,18 @@ The acceptance criterion splits the same way. [`chatSessionIsolation.test.tsx`](
 - Extract `ChatPreview` and `NodePreviewPane` while preserving their existing feature behavior.
 - Mount the workspace in `MainLayout` and simplify `CenterArea` to the Canvas surface.
 
+**Correction, found while implementing.** `canvasStore.expandedNodeId` did not survive to Stage 5 as planned. Keeping it while the workspace also tracked the shown node would have been exactly the second source of truth the first item forbids, so it was deleted as part of the adapter change and every reader now derives the node from the workspace's active tab. The `UiIntentResolution.expandedNodeId` retarget listed under Stage 4 moved with it, for the same reason and at no extra cost: the field had one producer and one consumer.
+
+Opening also classifies transient versus permanent per §9.2 already, rather than in Stage 4. The `openExpanded` call sites were all being touched anyway, and labelling them uniformly would only have had to be undone.
+
 ### Stage 4: Entry-point migration
 
-- Route ordinary node double-click, Question compose/replay, Canvas search, World references, conflict recovery, connected-node navigation, post-create editing, and New Chat through `openPreviewTarget`, choosing transient or permanent opening per §9.2.
-- Retarget `UiIntentResult.expandedNodeId` so command execution requests a preview target instead of setting expanded-node state directly.
+- Route ordinary node double-click, Question compose/replay, Canvas search, World references, conflict recovery, connected-node navigation, post-create editing, and New Chat through `openPreviewTarget` directly, rather than through the `openExpanded` adapter.
 - Generalize Canvas resize anchoring and floating-control attention from Chat/Expanded-specific state to workspace state.
 - Implement Save Chat as Question as an in-place target conversion.
 
 ### Stage 5: Legacy removal
 
-- Remove `canvasStore.expandedNodeId` and the old Expanded Node layout mode after all callers migrate, following the ownership boundary in §11.1.
 - Remove globally current Chat presentation state that is superseded by scoped sessions.
 - Remove Chat-specific right-panel naming and persisted replay pointers after migration coverage passes.
 - Fold the shipped behavior into `web-architecture.md` and `question-node.md`, then mark this proposal Shipped.
