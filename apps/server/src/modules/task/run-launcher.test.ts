@@ -89,6 +89,8 @@ function createHarness(options?: {
           canvasId: 'canvas-a',
           nodeId: 'node-root' as const,
           threadId: 'thread-root',
+          profileId: 'profile-a',
+          parentConnection: 'connected' as const,
         };
       });
   const invokeAgent = options?.invokeError
@@ -203,7 +205,7 @@ describe('RunLauncher', () => {
     });
     await expect(
       unavailable.service.start('canvas-a', 'task-a', {}),
-    ).rejects.toMatchObject({ code: 'profile_not_selectable' });
+    ).rejects.toMatchObject({ code: 'profile_not_found' });
     expect(unavailable.repository.insertRun).not.toHaveBeenCalled();
   });
 

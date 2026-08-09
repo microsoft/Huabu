@@ -235,39 +235,37 @@ For a `MERGE_NODE_DATA` patch that changes `content`, first download the node an
 
 The response includes version transition, projected commands, command results, generated IDs, affected IDs, and new revisions. It intentionally excludes Web UI deltas and internal change-review records.
 
-## 8. Delegate work through an Agent
+## 8. Create or continue an Agent
 
-Use `POST agent` when you want a Huabu or external Agent to interpret and complete an open-ended piece of work. Prefer direct `query`, `download`, `upload`, and `execute` for deterministic operations that do not need Agent interpretation; these direct operations work without an internal model provider.
+Use an Agent when open-ended work benefits from interpretation or a durable visible conversation. Prefer direct `query`, `download`, `upload`, and `execute` for deterministic operations; they work without an internal model provider.
 
-### 8.1 Start a Huabu Agent conversation
+### 8.1 Create and start a Huabu Agent
 
-Omit `X-Huabu-Thread-Id` to create a new internal `operate` thread and submit its first request:
+Plain text creates a visible Agent with the default `huabu` Profile and immediately submits its first prompt:
 
 ```bash
 SSE="$(curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
   --data-binary @./prompt.txt "$HUABU_RFS_URL/agent")"
 THREAD_ID="$(printf '%s\n' "$SSE" | sed -n 's/^: threadId //p' | head -n 1)"
-printf '%s\n' "$SSE" | sed -n 's/^data: //p'
+printf '%s\n' "$SSE" | sed -n 's/^data: //p' | tail -n +2
 ```
 
-The response is an SSE stream. It starts with `: threadId <threadId>` and returns the final answer in `data:` lines. Save `THREAD_ID` to continue the conversation. Internal threads can be continued only while their Agent handle remains live.
+The SSE `created` event reports the new Node, thread, effective Profile, and optional parent-connection result. Save `THREAD_ID`.
 
-### 8.2 Continue a target thread
+### 8.2 Continue the Agent
 
-Pass the saved or supplied target thread ID in `X-Huabu-Thread-Id`. Huabu submits the request to that existing thread instead of creating another one; the response uses the same SSE format.
+Address the existing thread in the URL. This submits another turn without creating an Agent:
 
 ```bash
 SSE="$(curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
-  -H "X-Huabu-Thread-Id: $THREAD_ID" \
-  --data-binary @./follow-up.txt "$HUABU_RFS_URL/agent")"
+  --data-binary @./follow-up.txt \
+  "$HUABU_RFS_URL/agent/$THREAD_ID/prompt")"
 printf '%s\n' "$SSE" | sed -n 's/^data: //p'
 ```
 
-When the target belongs to a fixed Agent Node, Huabu invokes that node's persisted external Agent binding through the same durable thread used by the UI. Closing the HTTP connection stops SSE delivery but does not abort that fixed Agent turn.
+### 8.3 Choose Profiles or create without starting
 
-### 8.3 Use Profile-backed Agents
-
-For workflows that discover an Agent Profile, create a visible fixed Agent thread, continue it across multiple turns, or recursively delegate work, load the authenticated advanced guide:
+For available Profile discovery, launch configuration, create-only requests, optional parent connections, or recursive delegation, load:
 
 ```bash
 curl -fsS -H "$AUTH" "$HUABU_RFS_URL/skill/agents"

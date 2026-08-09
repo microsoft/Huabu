@@ -99,12 +99,16 @@ export interface AgentThreadInvocation {
 function buildAgentSystemPrompt(params: {
   canvasId: string | undefined;
   mode: Parameters<typeof loadAgent>[0];
+  additionalInitialPreamble?: string;
 }): string {
   const agentCfg = loadAgent(params.mode, { canvasId: params.canvasId });
   const workspaceMemory = readWorkspaceMemory();
-  return workspaceMemory
+  const base = workspaceMemory
     ? `${agentCfg.systemPrompt}\n\n<workspace_memory>\n${workspaceMemory}\n</workspace_memory>`
     : agentCfg.systemPrompt;
+  return params.additionalInitialPreamble
+    ? `${base}\n\n${params.additionalInitialPreamble}`
+    : base;
 }
 
 function errorMessage(error: unknown): string {
@@ -288,6 +292,8 @@ export class AgentThreadService {
         systemPrompt: buildAgentSystemPrompt({
           canvasId: options.canvasId,
           mode: options.mode,
+          additionalInitialPreamble:
+            fixedTarget?.launchOverrides?.additionalInitialPreamble,
         }),
         messages: [],
         tools: [],

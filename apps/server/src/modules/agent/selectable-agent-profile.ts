@@ -3,6 +3,8 @@
 
 import { getAgentTeamRegistry } from '@agenetes/agentlet-host';
 
+import { HUABU_AGENT_PROFILE_ID } from '@huabu/shared';
+
 import type { CustomData } from '@huabu/shared';
 
 export interface SelectableAgentProfile {
@@ -16,9 +18,10 @@ interface AgentProfileRegistryPort {
   listSelectableProfileIds(): string[];
 }
 
-export interface SelectableAgentProfileSummary {
+export interface AvailableAgentProfileSummary {
   id: string;
   alias: string;
+  default?: boolean;
 }
 
 export class SelectableAgentProfileError extends Error {
@@ -41,6 +44,7 @@ export function requireSelectableAgentProfile(
       'Agent Profile registry is not ready',
     );
   }
+
   const profile = registry.getProfile(profileId);
   if (
     !profile ||
@@ -54,22 +58,35 @@ export function requireSelectableAgentProfile(
   return profile;
 }
 
-export function listSelectableAgentProfiles(
+export function requireAvailableAgentProfile(
+  profileId: string,
   registry: AgentProfileRegistryPort | null = getAgentTeamRegistry(),
-): SelectableAgentProfileSummary[] {
+): void {
+  if (profileId === HUABU_AGENT_PROFILE_ID) return;
+  requireSelectableAgentProfile(profileId, registry);
+}
+
+export function listAvailableAgentProfiles(
+  registry: AgentProfileRegistryPort | null = getAgentTeamRegistry(),
+): AvailableAgentProfileSummary[] {
+  const huabu = {
+    id: HUABU_AGENT_PROFILE_ID,
+    alias: 'Huabu',
+    default: true,
+  } as const;
   if (!registry) {
-    throw new SelectableAgentProfileError(
-      'registry_unavailable',
-      'Agent Profile registry is not ready',
-    );
+    return [huabu];
   }
-  return registry.listSelectableProfileIds().map((profileId) => {
-    const profile = registry.getProfile(profileId);
-    if (!profile) {
-      throw new Error(
-        `Selectable Agent Profile ${profileId} is missing from the registry`,
-      );
-    }
-    return { id: profile.id, alias: profile.alias };
-  });
+  return [
+    huabu,
+    ...registry.listSelectableProfileIds().map((profileId) => {
+      const profile = registry.getProfile(profileId);
+      if (!profile) {
+        throw new Error(
+          `Selectable Agent Profile ${profileId} is missing from the registry`,
+        );
+      }
+      return { id: profile.id, alias: profile.alias };
+    }),
+  ];
 }

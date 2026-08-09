@@ -4,12 +4,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  listSelectableAgentProfiles,
-  SelectableAgentProfileError,
+  listAvailableAgentProfiles,
+  requireAvailableAgentProfile,
 } from './selectable-agent-profile.js';
 
-describe('listSelectableAgentProfiles', () => {
-  it('projects only selectable Profile identity fields in registry order', () => {
+describe('listAvailableAgentProfiles', () => {
+  it('prepends Huabu and projects available Profile identities', () => {
     const profiles = new Map([
       [
         'profile-a',
@@ -24,19 +24,24 @@ describe('listSelectableAgentProfiles', () => {
     ]);
 
     expect(
-      listSelectableAgentProfiles({
-        getProfile: (id) => profiles.get(id),
+      listAvailableAgentProfiles({
+        getProfile: (id: string) => profiles.get(id),
         listSelectableProfileIds: () => ['profile-a', 'profile-b'],
       }),
     ).toEqual([
+      { id: 'huabu', alias: 'Huabu', default: true },
       { id: 'profile-a', alias: 'Researcher' },
       { id: 'profile-b', alias: 'Builder' },
     ]);
   });
 
-  it('fails explicitly while the registry is unavailable', () => {
-    expect(() => listSelectableAgentProfiles(null)).toThrow(
-      SelectableAgentProfileError,
-    );
+  it('keeps the Huabu Profile available while the registry is unavailable', () => {
+    expect(listAvailableAgentProfiles(null)).toEqual([
+      { id: 'huabu', alias: 'Huabu', default: true },
+    ]);
+  });
+
+  it('accepts the Huabu Profile without an external registry', () => {
+    expect(() => requireAvailableAgentProfile('huabu', null)).not.toThrow();
   });
 });

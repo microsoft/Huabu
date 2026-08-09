@@ -4,7 +4,7 @@
 import {
   agentBindingSchema,
   getQuestionNodeStatus,
-  type AgentBindingExternal,
+  type AgentBinding,
   type AgentLaunchOverrides,
   type CanvasNodeId,
   type QuestionNodeStatus,
@@ -31,7 +31,7 @@ export interface FixedAgentNodeTarget {
   canvasId: string;
   nodeId: CanvasNodeId;
   threadId: string;
-  agentBinding: AgentBindingExternal;
+  agentBinding: AgentBinding;
   launchOverrides?: AgentLaunchOverrides;
   status: QuestionNodeStatus;
   content: string;
@@ -74,6 +74,25 @@ export class AgentThreadResolver {
     private readonly dependencies: ResolverDependencies = DEFAULT_DEPENDENCIES,
   ) {}
 
+  resolveAgentNodeId(canvasId: string, threadId: string): CanvasNodeId | null {
+    const nodes = this.dependencies.readCanvasNodes(canvasId);
+    if (!nodes) {
+      throw new AgentThreadResolutionError(
+        'canvas_not_found',
+        `Canvas ${canvasId} does not exist`,
+      );
+    }
+    const matches = nodes.filter((node) => node.data?.threadId === threadId);
+    if (matches.length > 1) {
+      throw new AgentThreadResolutionError(
+        'duplicate_thread',
+        `Thread ${threadId} is bound to multiple Canvas nodes`,
+      );
+    }
+    const node = matches[0];
+    return node?.type === 'question' ? (node.id as CanvasNodeId) : null;
+  }
+
   resolveFixedAgentNode(
     canvasId: string,
     threadId: string,
@@ -104,7 +123,7 @@ export class AgentThreadResolver {
     }
 
     const parsedBinding = agentBindingSchema.safeParse(node.data.agentBinding);
-    if (!parsedBinding.success || parsedBinding.data.kind !== 'external') {
+    if (!parsedBinding.success) {
       throw new AgentThreadResolutionError(
         'invalid_binding',
         `Fixed Agent Node ${node.id} has no valid external binding`,

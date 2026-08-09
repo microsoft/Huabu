@@ -3,7 +3,10 @@
 
 import {
   createId,
+  getDefaultAgentIcon,
+  HUABU_AGENT_PROFILE_ID,
   readAgentIcon,
+  type AgentBinding,
   type AgentLaunchOverrides,
   type CanvasCommand,
   type CanvasNodeId,
@@ -19,10 +22,14 @@ import {
   SelectableAgentProfileError,
   type SelectableAgentProfile,
 } from './selectable-agent-profile.js';
+import { getLogger } from '../../utils/logger.js';
 import { executeCanvasCommandsOnHost } from '../canvas/canvas-command-router.js';
+import { buildSpatialBundle } from '../canvas/canvas-spatial.js';
 import { getCanvasStore } from '../storage/index.js';
 
 import type { ExecuteOnServerOutput } from '../canvas/canvas-executor.js';
+
+const logger = getLogger('agent-node-service');
 
 type AgentNodeAnchor =
   | { kind: 'task-root'; taskNoteNodeId: CanvasNodeId }
@@ -30,9 +37,9 @@ type AgentNodeAnchor =
 
 export interface CreateAgentNodeInput {
   canvasId: string;
-  profileId: string;
+  profileId?: string;
   position: Point;
-  anchor: AgentNodeAnchor;
+  anchor?: AgentNodeAnchor;
   launchOverrides?: AgentLaunchOverrides;
 }
 
@@ -40,6 +47,8 @@ export interface CreateAgentNodeResult {
   canvasId: string;
   nodeId: CanvasNodeId;
   threadId: string;
+  profileId: string;
+  parentConnection: 'not_requested' | 'connected' | 'failed';
 }
 
 export type AgentNodeCreationErrorCode =
@@ -113,13 +122,15 @@ function anchorNodeId(anchor: AgentNodeAnchor): CanvasNodeId {
     : anchor.parentAgentNodeId;
 }
 
-function requireValidAnchor(
+function resolveAnchor(
   nodes: readonly StoredNode[],
-  anchor: AgentNodeAnchor,
-): CanvasNodeId {
+  anchor: AgentNodeAnchor | undefined,
+): CanvasNodeId | undefined {
+  if (!anchor) return undefined;
   const nodeId = anchorNodeId(anchor);
   const node = nodes.find((candidate) => candidate.id === nodeId);
   if (!node) {
+    if (anchor.kind === 'delegated') return undefined;
     throw new AgentNodeCreationError(
       'anchor_not_found',
       `Agent Node anchor ${nodeId} does not exist`,
@@ -127,6 +138,7 @@ function requireValidAnchor(
   }
   const expectedType = anchor.kind === 'task-root' ? 'note' : 'question';
   if (node.type !== expectedType) {
+    if (anchor.kind === 'delegated') return undefined;
     throw new AgentNodeCreationError(
       'invalid_anchor',
       `${anchor.kind} Agent Node anchor must be a ${expectedType} node`,
@@ -136,12 +148,37 @@ function requireValidAnchor(
     anchor.kind === 'delegated' &&
     (typeof node.data?.threadId !== 'string' || node.data.threadId.length === 0)
   ) {
-    throw new AgentNodeCreationError(
-      'invalid_anchor',
-      'Delegated Agent Node anchor must own a thread',
-    );
+    return undefined;
   }
   return nodeId;
+}
+
+export function resolveAgentNodePosition(
+  canvasId: string,
+  parentNodeId?: CanvasNodeId,
+): Point {
+  const canvas = getCanvasStore(canvasId).read();
+  if (!canvas) {
+    throw new AgentNodeCreationError(
+      'canvas_not_found',
+      `Canvas ${canvasId} does not exist`,
+    );
+  }
+  const bundle = buildSpatialBundle(canvas);
+  if (parentNodeId) {
+    const parent = bundle.spatialById.get(parentNodeId);
+    if (parent) {
+      return {
+        x: parent.rect.x + parent.rect.width + 120,
+        y: parent.rect.y,
+      };
+    }
+  }
+  let right = -120;
+  for (const node of bundle.spatialById.values()) {
+    right = Math.max(right, node.rect.x + node.rect.width);
+  }
+  return { x: right + 120, y: 0 };
 }
 
 export class AgentNodeService {
@@ -171,29 +208,48 @@ export class AgentNodeService {
         `Canvas ${input.canvasId} does not exist`,
       );
     }
-    const sourceNodeId = requireValidAnchor(nodes, input.anchor);
+    const sourceNodeId = resolveAnchor(nodes, input.anchor);
 
-    let profile: SelectableAgentProfile;
-    try {
-      const registry = this.dependencies.getProfileRegistry();
-      profile = registry
-        ? requireSelectableAgentProfile(input.profileId, registry)
-        : requireSelectableAgentProfile(input.profileId);
-    } catch (error) {
-      if (error instanceof SelectableAgentProfileError) {
+    const profileId = input.profileId ?? HUABU_AGENT_PROFILE_ID;
+    let binding: AgentBinding;
+    let agentIcon;
+    if (profileId === HUABU_AGENT_PROFILE_ID) {
+      if (launchOverrides?.workingDirPath) {
         throw new AgentNodeCreationError(
-          error.code === 'registry_unavailable'
-            ? 'profile_registry_unavailable'
-            : 'profile_not_selectable',
-          error.message,
+          'invalid_launch_overrides',
+          'workingDirPath is not supported by the Huabu Agent Profile',
         );
       }
-      throw error;
+      binding = { kind: 'internal' };
+      agentIcon = getDefaultAgentIcon(profileId);
+    } else {
+      let profile: SelectableAgentProfile;
+      try {
+        const registry = this.dependencies.getProfileRegistry();
+        profile = registry
+          ? requireSelectableAgentProfile(profileId, registry)
+          : requireSelectableAgentProfile(profileId);
+      } catch (error) {
+        if (error instanceof SelectableAgentProfileError) {
+          throw new AgentNodeCreationError(
+            error.code === 'registry_unavailable'
+              ? 'profile_registry_unavailable'
+              : 'profile_not_selectable',
+            error.message,
+          );
+        }
+        throw error;
+      }
+      binding = {
+        kind: 'external',
+        profileId: profile.id,
+        alias: profile.alias,
+      };
+      agentIcon = readAgentIcon(profile);
     }
 
     const nodeId = createId('node') as CanvasNodeId;
     const threadId = createId('thread');
-    const edgeId = createId('edge');
     const output = await this.dependencies.execute({
       canvasId: input.canvasId,
       commands: [
@@ -207,13 +263,9 @@ export class AgentNodeService {
               data: {
                 content: '',
                 threadId,
-                agentBinding: {
-                  kind: 'external',
-                  profileId: profile.id,
-                  alias: profile.alias,
-                },
+                agentBinding: binding,
                 agentBindingPolicy: 'fixed',
-                agentIcon: readAgentIcon(profile),
+                agentIcon,
                 ...(launchOverrides
                   ? { agentLaunchOverrides: launchOverrides }
                   : {}),
@@ -221,10 +273,6 @@ export class AgentNodeService {
               },
             },
           ],
-        },
-        {
-          type: 'CONNECT_NODES',
-          edges: [{ id: edgeId, source: sourceNodeId, target: nodeId }],
         },
       ],
       originator: { source: 'system' },
@@ -236,16 +284,60 @@ export class AgentNodeService {
         'Canvas rejected Agent Node creation',
       );
     }
-    if (output.results[1]?.applied !== true) {
-      throw new AgentNodeCreationError(
-        'lineage_edge_failed',
-        `Agent Node ${nodeId} was created but its lineage edge was rejected`,
-        nodeId,
-        threadId,
-      );
+    let parentConnection: CreateAgentNodeResult['parentConnection'] =
+      input.anchor ? 'failed' : 'not_requested';
+    if (sourceNodeId) {
+      try {
+        const edgeOutput = await this.dependencies.execute({
+          canvasId: input.canvasId,
+          commands: [
+            {
+              type: 'CONNECT_NODES',
+              edges: [
+                {
+                  id: createId('edge'),
+                  source: sourceNodeId,
+                  target: nodeId,
+                },
+              ],
+            },
+          ],
+          originator: { source: 'system' },
+        });
+        if (edgeOutput.results[0]?.applied === true) {
+          parentConnection = 'connected';
+        } else if (input.anchor?.kind === 'task-root') {
+          throw new AgentNodeCreationError(
+            'lineage_edge_failed',
+            `Agent Node ${nodeId} was created but its Task lineage edge was rejected`,
+            nodeId,
+            threadId,
+          );
+        }
+      } catch (error) {
+        if (input.anchor?.kind === 'task-root') {
+          if (error instanceof AgentNodeCreationError) throw error;
+          throw new AgentNodeCreationError(
+            'lineage_edge_failed',
+            `Agent Node ${nodeId} was created but its Task lineage edge failed`,
+            nodeId,
+            threadId,
+          );
+        }
+        logger.warn(
+          { error, canvasId: input.canvasId, sourceNodeId, nodeId },
+          'Agent parent connection failed after node creation',
+        );
+      }
     }
 
-    return { canvasId: input.canvasId, nodeId, threadId };
+    return {
+      canvasId: input.canvasId,
+      nodeId,
+      threadId,
+      profileId,
+      parentConnection,
+    };
   }
 }
 

@@ -2,7 +2,7 @@
 
 > Define the minimum platform capability for a Canvas-scoped task to start one visible Agent thread, let that Agent recursively create and invoke more visible Agent threads, and exchange durable information through conversations and Space nodes.
 >
-> Status: **Proposed** · Last updated: 2026-08-08
+> Status: **Partly shipped** · Last updated: 2026-08-09
 
 ---
 
@@ -71,7 +71,7 @@ Removing the legacy Namespace parameter from Agenetes thread APIs is the non-blo
 | **Agent Node**           | The visible one-to-one Canvas anchor for one durable Agent thread. Phase 1 uses the existing persisted `question` node type.                                                                                                             |
 | **Root Agent**           | The first Agent Node and thread created for one Run. It is the Run's initial execution entry point.                                                                                                                                      |
 | **Delegated Agent**      | An Agent Node and thread created by another Agent. It may work directly or recursively create more Agents.                                                                                                                               |
-| **Agent Profile**        | An existing selectable external Profile selected by `profileId` and compiled into an external WorkloadSpec. The built-in Huabu `operate` Agent is not converted into a Profile by this proposal.                                         |
+| **Agent Profile**        | An available Agent configuration selected by `profileId`. The public `huabu` Profile is the default; other Profiles compile into external WorkloadSpecs.                                                                                 |
 | **Agent invocation**     | A synchronous RFS call that submits input to an existing thread and streams its `AgentStreamEvent`s to the caller.                                                                                                                       |
 | **Conversation handoff** | Information returned through the Agent event stream and durably preserved in the target Agent Node's thread history.                                                                                                                     |
 | **Space handoff**        | A reusable work product materialized as an ordinary node or artifact and optionally connected to its inputs.                                                                                                                             |
@@ -87,11 +87,11 @@ Phase 1 makes the following decisions:
 - Any Agent thread may recursively create another Agent Node and thread.
 - Every created thread has exactly one Agent Node; root and delegated threads use the same node type and service.
 - Agent Node creation and Agent invocation are separate operations.
-- New Agent Nodes are created from any currently selectable external Agent Profile; the existing no-target RFS `POST /agent` path may continue creating its built-in `operate` conversation outside this creation capability.
+- New Agent Nodes use the default `huabu` Profile or another available Agent Profile.
 - Creation may apply bounded `workingDirPath` and `additionalInitialPreamble` overrides to the Profile-derived WorkloadSpec.
 - Overrides replace the corresponding compiled external WorkloadSpec values for both `acp-command` and `agent-team-manifest` Profile launch kinds; they do not introduce a separate Profile setup or installation lifecycle.
-- Every free-form Agent Node creation supplies an explicit Canvas-root `position`.
-- Delegated Agent creation automatically creates a visible parent-to-child delegation edge.
+- Free-form Agent Node creation may supply an explicit Canvas-root `position`; otherwise the Server chooses one.
+- A requested parent-to-child edge is best effort and never blocks or rolls back Agent Node creation.
 - Conversation streams are always durable handoffs; ordinary Space nodes and artifacts are optional structured handoffs chosen by the Agent workflow.
 - Agent turns continue after the invoking HTTP connection closes. Explicit stop remains the only Phase 1 abort path.
 - The Task Note is a static ordinary Note anchor, not a continuously refreshed status projection.
@@ -126,53 +126,56 @@ The Run Launcher starts the first root turn through `AgentThreadService.invoke()
 
 The Run Launcher does not interpret the Agent's plan, repeatedly choose actions, or decide when the Run is complete.
 
-### 5.3 Create a delegated Agent
+### 5.3 Create an Agent
 
-An Agent that needs a new thread calls:
+An Agent that needs a new visible conversation calls:
 
 ```http
-POST /api/rfs/:canvasId/agent/create
+POST /api/rfs/:canvasId/agent
 Authorization: Bearer $AGENTLET_TOKEN
-X-Huabu-Host-Thread-Id: <parentThreadId>
+X-Huabu-Agent-Start: false
 Content-Type: application/json
 ```
 
 ```json
 {
   "profileId": "profile-id",
+  "parentThreadId": "optional-parent-thread-id",
   "position": { "x": 1200, "y": 480 },
   "workingDirPath": "/optional/absolute/path",
   "additionalInitialPreamble": "Optional durable role instructions."
 }
 ```
 
-The parent-thread header reuses the existing RFS host-thread correlation mechanism. It identifies the parent relationship for node lookup and edge creation; it is not a separate permission model.
+`parentThreadId` may be omitted or supplied through `X-Huabu-Host-Thread-Id`. It is a lineage hint, not a permission model.
 
-The Server validates the Canvas, parent Agent Node, external Profile, absolute position, and bounded overrides. It creates a new `question` node and returns the RFS wire response:
+The Server validates the Canvas, Profile, optional position, and bounded overrides, then creates a new `question` node. Parent lookup and edge creation run afterward as best effort. The response reports creation and lineage separately:
 
 ```json
 {
   "nodeId": "node-id",
-  "threadId": "thread-id"
+  "threadId": "thread-id",
+  "profileId": "profile-id",
+  "parentConnection": "connected",
+  "warnings": []
 }
 ```
 
-Creation does not submit a prompt, start an ACP session, or run the Agent.
+With `X-Huabu-Agent-Start: false`, creation does not submit a prompt or run the Agent. Otherwise the request includes `prompt`, returns SSE beginning with the same creation metadata, and starts the first turn.
 
-### 5.4 Invoke the delegated Agent
+### 5.4 Prompt an existing Agent
 
-The parent invokes the returned thread through the existing RFS Agent surface:
+The caller submits later turns through the thread-addressed RFS surface:
 
 ```http
-POST /api/rfs/:canvasId/agent
+POST /api/rfs/:canvasId/agent/<targetThreadId>/prompt
 Authorization: Bearer $AGENTLET_TOKEN
-X-Huabu-Thread-Id: <targetThreadId>
 X-Huabu-Event-Mode: all
 ```
 
 The call remains synchronous and streams the child turn's `AgentStreamEvent`s. The existing per-thread turn lease continues to reject overlapping calls with `thread_busy`.
 
-The RFS route delegates to the shared `AgentThreadService.invoke()` rather than calling a live handle directly. This extension replaces the current internal-kind, live-handle-only continuation restriction for Agent Nodes created by this capability: the service resolves the target Agent Node, lazily realizes its external Agenetes Deployment on first invocation, or reuses/cold-recovers the persisted WorkloadSpec on later invocations.
+The RFS route delegates to the shared `AgentThreadService.invoke()` rather than calling a live handle directly. The service resolves the Agent Node, realizes its Huabu or external workload on first invocation, and reuses or recovers the persisted workload on later turns.
 
 On the first successful invocation, `AgentThreadService` persists the submitted user text as the Question Node's `content`, changes its status to `running`, and retains the creation-time Agent binding. Terminal turn events update the node to `done` or `error` through the same server-owned lifecycle path used by UI invocation.
 
@@ -190,15 +193,15 @@ Before its first invocation, the Agent Node uses the existing `idle` state and c
 
 The rows below are capabilities rather than endpoints. Phase 1 adds no Task-specific UI HTTP API: the existing Chat UI reaches Task capabilities through its selected Agent. Built-in Agent tools and external-Agent RFS endpoints are parallel adapters over the same shared contracts and internal methods, following the existing `space_commands` tool plus RFS `/execute` pattern.
 
-| Capability                      | UI-facing HTTP                                                | Agent-facing adapter                                                                                    | Internal calling method                                                                                                | Responsibility                                                                                                                                                             |
-| ------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Create Task                     | Existing Chat UI; no Task-specific UI HTTP API                | Built-in `create_task` tool **(new)** or `POST /api/rfs/:canvasId/task/create` **(new)**                | `TaskService.create(canvasId, input)` **(new)**                                                                        | Persist one Canvas-scoped Task and its static Task Note; `startImmediately` may compose the Run-start capability.                                                          |
-| Start Run                       | Existing Chat UI; no Task-specific UI HTTP API                | Built-in `start_task_run` tool **(new)** or `POST /api/rfs/:canvasId/task/:taskId/run/create` **(new)** | `RunLauncher.start(taskId, input)` **(new)**                                                                           | Create a `pending` Run, create its root Agent Node, invoke the first root turn, and record `running` once the turn starts.                                                 |
-| Create Agent Node and thread    | Indirect through Start Run for the root Agent                 | `POST /api/rfs/:canvasId/agent/create` **(new)**                                                        | `AgentNodeService.create(input)` **(new)**                                                                             | Create the visible `question` node, globally unique `threadId`, Profile binding, launch overrides, explicit position, and root/delegation edge without invoking the Agent. |
-| Invoke or continue Agent thread | `POST /api/agent` **(existing, refactored to shared method)** | `POST /api/rfs/:canvasId/agent` **(extended)**                                                          | `AgentThreadService.invoke(threadId, submission, context)` **(new)** → `Agenetes.create(spec).run(...)` **(existing)** | Lazily realize or cold-recover the Profile-backed Deployment, enforce the shared turn lease, stream events, persist history, and update Question Node lifecycle state.     |
-| Replay Agent conversation       | `GET /api/agent/history/:threadId` **(existing)**             | Invocation returns the live child stream; no separate Agent-facing history API                          | `Agenetes.history(namespace, threadId)` **(existing compatibility API)**                                               | Replay the same persisted turns in the existing Question Node UI; follow-up [#58](https://github.com/microsoft/Huabu/issues/58) removes the legacy Namespace argument.     |
-| Read Space inputs               | Existing Canvas read surfaces                                 | `POST /api/rfs/:canvasId/query` and `GET /api/rfs/:canvasId/download/<path>` **(existing)**             | Existing Space query and file-projection services                                                                      | Read topology, metadata, node content, search results, snapshots, artifacts, and staged uploads.                                                                           |
-| Write Space handoffs            | Existing Canvas command surfaces                              | `POST /api/rfs/:canvasId/execute` and `POST /api/rfs/:canvasId/upload/<name>` **(existing)**            | Existing Canvas command executor and upload staging service                                                            | Create or update ordinary handoff nodes and edges and stage artifact payloads through the canonical Canvas paths.                                                          |
+| Capability                      | UI-facing HTTP                                                | Agent-facing adapter                                                                                    | Internal calling method                                                                                                | Responsibility                                                                                                                                                            |
+| ------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create Task                     | Existing Chat UI; no Task-specific UI HTTP API                | Built-in `create_task` tool **(new)** or `POST /api/rfs/:canvasId/task/create` **(new)**                | `TaskService.create(canvasId, input)` **(new)**                                                                        | Persist one Canvas-scoped Task and its static Task Note; `startImmediately` may compose the Run-start capability.                                                         |
+| Start Run                       | Existing Chat UI; no Task-specific UI HTTP API                | Built-in `start_task_run` tool **(new)** or `POST /api/rfs/:canvasId/task/:taskId/run/create` **(new)** | `RunLauncher.start(taskId, input)` **(new)**                                                                           | Create a `pending` Run, create its root Agent Node, invoke the first root turn, and record `running` once the turn starts.                                                |
+| Create Agent Node and thread    | Indirect through Start Run for the root Agent                 | `POST /api/rfs/:canvasId/agent`                                                                         | `AgentNodeService.create(input)`                                                                                       | Create the visible `question` node, globally unique `threadId`, Profile binding, launch overrides, and optional best-effort parent edge; optionally start the first turn. |
+| Invoke or continue Agent thread | `POST /api/agent` **(existing, refactored to shared method)** | `POST /api/rfs/:canvasId/agent` **(extended)**                                                          | `AgentThreadService.invoke(threadId, submission, context)` **(new)** → `Agenetes.create(spec).run(...)` **(existing)** | Lazily realize or cold-recover the Profile-backed Deployment, enforce the shared turn lease, stream events, persist history, and update Question Node lifecycle state.    |
+| Replay Agent conversation       | `GET /api/agent/history/:threadId` **(existing)**             | Invocation returns the live child stream; no separate Agent-facing history API                          | `Agenetes.history(namespace, threadId)` **(existing compatibility API)**                                               | Replay the same persisted turns in the existing Question Node UI; follow-up [#58](https://github.com/microsoft/Huabu/issues/58) removes the legacy Namespace argument.    |
+| Read Space inputs               | Existing Canvas read surfaces                                 | `POST /api/rfs/:canvasId/query` and `GET /api/rfs/:canvasId/download/<path>` **(existing)**             | Existing Space query and file-projection services                                                                      | Read topology, metadata, node content, search results, snapshots, artifacts, and staged uploads.                                                                          |
+| Write Space handoffs            | Existing Canvas command surfaces                              | `POST /api/rfs/:canvasId/execute` and `POST /api/rfs/:canvasId/upload/<name>` **(existing)**            | Existing Canvas command executor and upload staging service                                                            | Create or update ordinary handoff nodes and edges and stage artifact payloads through the canonical Canvas paths.                                                         |
 
 `TaskService.create()`, `RunLauncher.start()`, `AgentNodeService.create()`, and `AgentThreadService.invoke()` are the canonical application methods. Built-in tools and RFS routes adapt the same shared contracts to these methods rather than implementing separate Task or Agent paths.
 
@@ -206,7 +209,7 @@ The rows below are capabilities rather than endpoints. Phase 1 adds no Task-spec
 
 ### 7.1 Shared service
 
-`AgentNodeService.create()` is a Huabu application service above the Canvas engine and Profile registry. It is used internally by the Run Launcher and through the RFS `/agent/create` adapter.
+`AgentNodeService.create()` is a Huabu application service above the Canvas engine and Profile registry. It is used internally by the Run Launcher and through the RFS `/agent` adapter.
 
 The internal service accepts either the Task Note anchor for a root Agent or the parent Agent Node for a delegated Agent. The RFS adapter derives the latter from `X-Huabu-Host-Thread-Id`; the Run Launcher supplies the former directly.
 
@@ -224,7 +227,7 @@ The service does not invoke the Agent.
 
 ### 7.2 Lazy realization
 
-`/agent/create` persists the Agent Node, `threadId`, binding, and launch overrides, but does not create an Agent process or ACP session.
+`POST /agent` persists the Agent Node, `threadId`, binding, and launch overrides before any optional first turn begins.
 
 On first invocation, `AgentThreadService` resolves `profileId`, compiles the external Profile into its WorkloadSpec, applies the persisted overrides, and calls Agenetes. Agenetes then persists the thread record and conversation events through the normal Deployment path.
 
@@ -306,7 +309,7 @@ When a result will be reused independently, inspected spatially, or consumed by 
 1. A user creates a Canvas-scoped Task and starts a Run.
 2. A static Task Note and root Agent Node appear with an edge between them.
 3. The root thread starts headlessly and the Run becomes `running`.
-4. The root Agent creates a delegated Agent through `POST /agent/create`.
+4. The root Agent creates another Agent through `POST /agent`.
 5. The delegated Agent Node appears at the requested position with an automatic edge from the root.
 6. The root invokes the delegated thread through the existing RFS `POST /agent` SSE surface.
 7. The child conversation is replayable from its Agent Node.
@@ -342,8 +345,8 @@ The earlier issue-fixer and runtime-bootstrap discussions live in the previous r
 6. The Run Launcher starts the root turn without a rendered Canvas or browser connection and records `pending → running`.
 7. Every thread created by this capability has exactly one persisted `question` node.
 8. Root and delegated Agents use the same `AgentNodeService` and `AgentThreadService`.
-9. Any Agent may recursively create another Agent through `POST /api/rfs/:canvasId/agent/create`.
-10. Agent creation requires a selectable `profileId`, explicit root-level Canvas position, and the existing host-thread correlation header.
+9. Any Agent may recursively create another Agent through `POST /api/rfs/:canvasId/agent`.
+10. Agent creation defaults to the `huabu` Profile; position and parent-thread lineage are optional.
 11. Agent creation accepts bounded cwd and initial-preamble overrides for both external Profile launch kinds.
 12. Agent creation returns `{ nodeId, threadId }` without starting a turn.
 13. A created but uninvoked Agent Node is `idle`, displays its persisted Agent identity, and opens compose with its binding locked.
@@ -353,7 +356,7 @@ The earlier issue-fixer and runtime-bootstrap discussions live in the previous r
 17. The same per-thread turn lease prevents overlapping UI and RFS turns.
 18. Headless and UI invocation write the same Agenetes history and use the same server-owned Question Node lifecycle.
 19. A headlessly created Agent Node can be opened, replayed, and continued through the existing Question Node UI.
-20. Delegated Agent creation automatically creates an ordinary parent-to-child Canvas edge.
+20. Agent creation attempts an ordinary parent-to-child Canvas edge when a parent thread is supplied, without failing creation if lineage cannot be established.
 21. Agents can continue using existing RFS query, execution, download, upload, snapshot, and artifact operations.
 22. Conversation-only results remain durable, while Agent workflows may additionally materialize reusable node/artifact handoffs.
 23. Agent-facing APIs use `threadId` as the thread address and do not expose the legacy Agenetes Namespace object.
@@ -403,7 +406,7 @@ Implement `AgentThreadService.invoke()` over the existing Question Node binding 
 
 ### 14.3 Recursive Agent RFS
 
-Add `POST /api/rfs/:canvasId/agent/create`, reuse the host-thread correlation header, and route fixed-thread RFS `POST /agent` calls through `AgentThreadService` while preserving the existing internal live-thread branch. This slice now lets any Agent recursively create and invoke another visible fixed Agent Node without the Task model; disconnect stops delivery rather than the turn, and the shared explicit stop path can still abort it.
+Add `POST /api/rfs/:canvasId/agent` for visible Agent creation and `POST /api/rfs/:canvasId/agent/:threadId/prompt` for subsequent turns. The host-thread correlation header remains an optional lineage hint; disconnect stops delivery rather than the turn, and the shared explicit stop path can still abort it.
 
 ### 14.4 Canvas-scoped Task launch
 

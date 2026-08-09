@@ -3,6 +3,10 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('./memory/index.js', () => ({
+  readWorkspaceMemory: () => '',
+}));
+
 import {
   AgentThreadBusyError,
   AgentThreadService,
@@ -176,6 +180,35 @@ describe('AgentThreadService', () => {
     );
     expect(harness.finishLifecycle).not.toHaveBeenCalled();
     expect(harness.release).toHaveBeenCalledOnce();
+  });
+
+  it('applies persisted initial instructions to a Huabu Agent', async () => {
+    const target: FixedAgentNodeTarget = {
+      ...TARGET,
+      agentBinding: { kind: 'internal' },
+      launchOverrides: {
+        additionalInitialPreamble: 'Review before making changes.',
+      },
+    };
+    const harness = createHarness({ target });
+    const invocation = await harness.service.invoke({
+      ...invocationOptions(),
+      fixedTarget: target,
+    });
+
+    for await (const _event of invocation.events) {
+      // Drain the canonical invocation stream.
+    }
+
+    expect(harness.runInternal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          systemPrompt: expect.stringContaining(
+            'Review before making changes.',
+          ),
+        }),
+      }),
+    );
   });
 
   it('does not dispatch when the start lifecycle patch fails', async () => {

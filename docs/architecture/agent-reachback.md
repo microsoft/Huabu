@@ -25,13 +25,13 @@ All endpoints are mounted under `/api/rfs/:canvasId`; `HUABU_RFS_URL` already co
 | Endpoint                           | Responsibility                                                                              |
 | ---------------------------------- | ------------------------------------------------------------------------------------------- |
 | `GET /skill`                       | Return the public bundled root guide, or an authenticated canvas-specific root override.    |
-| `GET /skill/:skillId`              | Return a fixed authenticated advanced guide: `layout`, `tasks`, or `agents`.                |
+| `GET /skill/:skillId`              | Return an authenticated advanced guide: `layout`, `tasks`, or `agents`.                     |
 | `GET /download/<path>`             | Stream a known node, artifact, or staged-upload file.                                       |
 | `POST /upload/<name>`              | Stage bytes in the canvas `.upload/` directory without creating a node.                     |
 | `DELETE /upload/<name>`            | Remove one exact staged upload.                                                             |
-| `POST /agent`                      | Run or continue a canvas-internal agent turn over SSE.                                      |
-| `POST /agent/create`               | Create an idle delegated Agent Node owned by the current fixed parent Agent.                |
-| `GET /agent/profiles`              | Return selectable external Agent Profile IDs and aliases for Task launch or delegation.     |
+| `POST /agent`                      | Create a visible Agent Node and optionally start its first turn.                            |
+| `POST /agent/:threadId/prompt`     | Submit a turn to an existing Agent conversation over SSE.                                   |
+| `GET /agent/profiles`              | Return available Agent Profile IDs and aliases, including the default `huabu` Profile.      |
 | `POST /task/create`                | Create a durable Task and its static Task Note.                                             |
 | `POST /task/:taskId/run/create`    | Create a Run, its visible root Agent Node, and start the first turn.                        |
 | `GET /capabilities`                | Report the direct-operation protocol, limits, semantics, and supported operation types.     |
@@ -78,13 +78,15 @@ Node downloads return raw bytes plus allow-listed `X-Huabu-*` metadata headers. 
 
 Uploads are inert payloads stored under `.upload/`. Names must be explicit and collision-free; the server returns `409` instead of overwriting an existing payload.
 
-## Internal-agent control plane
+## Agent control plane
 
-`POST /agent` accepts a plain-text prompt or the legacy validated JSON request and always responds as `text/event-stream`. Comment heartbeats keep the connection alive, `: threadId` identifies the live conversation, and final text is carried in `data:` frames.
+`POST /agent` always creates a visible Agent Node. A plain-text body is shorthand for the default `huabu` Profile plus an immediate first prompt; the full JSON form selects another available Profile, position, launch options, optional parent thread, and optional prompt. `X-Huabu-Agent-Start: false` creates an idle Agent from JSON without submitting a turn.
 
-Without `X-Huabu-Thread-Id`, the internal agent owns current graph discovery and mutation. It resolves spatial intent, consumes staged uploads, and executes mutations through the shared server-side `CanvasCommand` engine; this live handle is not durable across Huabu restarts. When the header identifies a fixed Agent Node, the route invokes that node's persisted external Agent binding and durable conversation instead.
+Parent lineage is best effort. The route resolves `parentThreadId` or `X-Huabu-Host-Thread-Id` to any Question Node in the current Space and attempts an ordinary Canvas edge after creating the Agent Node. A missing parent or rejected edge is returned as non-blocking creation metadata and never rolls back or rejects the new Agent.
 
-The Task and delegated-Agent endpoints share the selectable Agent Profile catalogue returned by `GET /agent/profiles`. The projection deliberately exposes only `id` and `alias`; commands, working directories, manifests, setup details, and non-selectable Profiles remain private. `POST /agent/create` requires the current fixed parent's `HUABU_THREAD_ID`, creates a visible idle child, and records the parent-child edge; the caller starts it separately through `POST /agent`.
+`POST /agent/:threadId/prompt` addresses one existing Agent conversation directly and never creates a Node or changes its Profile. Both immediate creation and later prompts use SSE; creation streams begin with a `created` event carrying `nodeId`, `threadId`, effective `profileId`, parent-connection state, and warnings.
+
+`GET /agent/profiles` exposes the public available Profile catalogue. It includes `huabu` as the default and projects other Profiles to stable `id` and `alias` fields without exposing commands, working directories, manifests, setup details, or registry eligibility state.
 
 ## External-agent bootstrap
 
@@ -92,7 +94,7 @@ Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent envir
 
 Skills explain when and how to compose workflows, but they do not duplicate the wire protocol. `GET /capabilities` and its per-operation endpoints remain the canonical, schema-derived source for current query and command fields, limits, and semantics.
 
-The guide is direct-first: an external agent can discover, query, download, snapshot, upload, execute, and verify without invoking `POST /agent` or configuring an internal model provider. `POST /agent` remains an optional high-level interpretation path.
+The guide is direct-first: an external agent can discover, query, download, snapshot, upload, execute, and verify without creating another Agent. `POST /agent` remains an optional high-level interpretation and delegation path.
 
 RFS errors use the normal API error body and include a runnable `/skill` recovery command so a caller can reload the current usage contract after a malformed request.
 
@@ -117,7 +119,7 @@ An external agent runs as an untrusted third-party CLI. It must receive its Huab
 | [`apps/server/src/modules/canvas/agent-command-preparation.ts`](../../apps/server/src/modules/canvas/agent-command-preparation.ts)             | Shared server-owned authorship and built-in read-set annotation.                                          |
 | [`apps/server/src/modules/canvas/snapshot-nodes.ts`](../../apps/server/src/modules/canvas/snapshot-nodes.ts)                                   | Shared node-to-artifact snapshot query implementation.                                                    |
 | [`apps/server/src/modules/remote_fs/node-meta.ts`](../../apps/server/src/modules/remote_fs/node-meta.ts)                                       | Safe path projection and node metadata headers.                                                           |
-| [`apps/server/src/modules/remote_fs/skill.ts`](../../apps/server/src/modules/remote_fs/skill.ts)                                               | Resolve the public bundled root, authenticated canvas override, and fixed advanced guides.                |
+| [`apps/server/src/modules/remote_fs/skill.ts`](../../apps/server/src/modules/remote_fs/skill.ts)                                               | Resolve the public bundled root, authenticated canvas override, and advanced guides.                      |
 | [`apps/server/src/prompt/external-agent/access-huabu.md`](../../apps/server/src/prompt/external-agent/access-huabu.md)                         | Agent-facing RFS procedure served by `GET /skill`.                                                        |
 | [`apps/server/src/prompt/external-agent/layout.md`](../../apps/server/src/prompt/external-agent/layout.md)                                     | Advanced RFS adapter over the shared Space layout recipes.                                                |
 | [`apps/server/src/prompt/external-agent/tasks.md`](../../apps/server/src/prompt/external-agent/tasks.md)                                       | Durable Task and Run workflow served by `GET /skill/tasks`.                                               |

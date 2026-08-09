@@ -84,6 +84,30 @@ describe('AgentThreadResolver', () => {
     ).toBeNull();
   });
 
+  it('resolves any Question Node as a possible parent', () => {
+    const selectable = {
+      ...FIXED_NODE,
+      data: { ...FIXED_NODE.data, agentBindingPolicy: 'selectable' },
+    };
+    expect(
+      createResolver([selectable]).resolveAgentNodeId('canvas-a', 'thread-a'),
+    ).toBe('node-agent');
+  });
+
+  it('resolves a Huabu Agent binding for invocation', () => {
+    const internal = {
+      ...FIXED_NODE,
+      data: {
+        ...FIXED_NODE.data,
+        agentBinding: { kind: 'internal' },
+      },
+    };
+    expect(
+      createResolver([internal]).resolveFixedAgentNode('canvas-a', 'thread-a')
+        ?.agentBinding,
+    ).toEqual({ kind: 'internal' });
+  });
+
   it('rejects duplicate threads and corrupt fixed-node metadata', () => {
     const duplicateResolver = createResolver([
       FIXED_NODE,

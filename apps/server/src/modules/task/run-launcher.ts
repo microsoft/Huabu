@@ -29,7 +29,7 @@ import {
   agentThreadService,
 } from '../agent/agent-thread.service.js';
 import {
-  requireSelectableAgentProfile,
+  requireAvailableAgentProfile,
   SelectableAgentProfileError,
 } from '../agent/selectable-agent-profile.js';
 import { buildSpatialBundle } from '../canvas/canvas-spatial.js';
@@ -106,7 +106,7 @@ interface RunLauncherDependencies {
 const DEFAULT_DEPENDENCIES: RunLauncherDependencies = {
   repository: (canvasId) => getStructuredStore().space(canvasId).tasks,
   requireProfile: (profileId) => {
-    requireSelectableAgentProfile(profileId);
+    requireAvailableAgentProfile(profileId);
   },
   resolveRootPosition: resolveRootAgentPosition,
   createAgentNode: (input) => agentNodeService.create(input),
@@ -120,7 +120,7 @@ export type RunLaunchErrorCode =
   | 'invalid_input'
   | 'task_not_found'
   | 'profile_registry_unavailable'
-  | 'profile_not_selectable'
+  | 'profile_not_found'
   | 'run_persistence_failed'
   | 'root_position_failed'
   | 'root_node_creation_failed'
@@ -312,8 +312,10 @@ export class RunLauncher {
         throw new RunLaunchError(
           error.code === 'registry_unavailable'
             ? 'profile_registry_unavailable'
-            : 'profile_not_selectable',
-          error.message,
+            : 'profile_not_found',
+          error.code === 'profile_not_selectable'
+            ? `Agent Profile ${profileId} is unavailable`
+            : error.message,
         );
       }
       throw error;

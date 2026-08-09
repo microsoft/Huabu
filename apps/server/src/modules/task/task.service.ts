@@ -11,7 +11,7 @@ import {
 } from '@huabu/shared';
 
 import {
-  requireSelectableAgentProfile,
+  requireAvailableAgentProfile,
   SelectableAgentProfileError,
 } from '../agent/selectable-agent-profile.js';
 import { executeCanvasCommandsOnHost } from '../canvas/canvas-command-router.js';
@@ -36,7 +36,7 @@ const DEFAULT_DEPENDENCIES: TaskServiceDependencies = {
   canvasExists: async (canvasId) =>
     (await getStructuredStore().space(canvasId).record.read()) !== null,
   requireProfile: (profileId) => {
-    requireSelectableAgentProfile(profileId);
+    requireAvailableAgentProfile(profileId);
   },
   repository: (canvasId) => getStructuredStore().space(canvasId).tasks,
   execute: executeCanvasCommandsOnHost,
@@ -47,7 +47,7 @@ export type TaskCreationErrorCode =
   | 'invalid_input'
   | 'canvas_not_found'
   | 'profile_registry_unavailable'
-  | 'profile_not_selectable'
+  | 'profile_not_found'
   | 'note_creation_failed'
   | 'task_persistence_failed';
 
@@ -91,8 +91,10 @@ export class TaskService {
         throw new TaskCreationError(
           error.code === 'registry_unavailable'
             ? 'profile_registry_unavailable'
-            : 'profile_not_selectable',
-          error.message,
+            : 'profile_not_found',
+          error.code === 'profile_not_selectable'
+            ? `Agent Profile ${parsed.data.defaultRootProfileId} is unavailable`
+            : error.message,
         );
       }
       throw error;

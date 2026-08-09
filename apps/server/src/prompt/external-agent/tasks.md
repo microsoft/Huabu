@@ -4,9 +4,9 @@ Load this guide only when the user explicitly wants durable long-horizon work. O
 
 Every Task belongs to the current Space, stores one durable goal, and creates one static Task Note. A Task may have multiple Runs. Each Run snapshots the Task goal and creates a fresh visible root Agent Node and thread.
 
-## 1. Discover selectable Profiles
+## 1. Discover available Profiles
 
-Task creation requires an exact selectable external Agent Profile ID. Never guess one.
+Task creation requires an exact available Agent Profile ID. Never guess one.
 
 ```bash
 curl -fsS -H "$AUTH" "$HUABU_RFS_URL/agent/profiles"

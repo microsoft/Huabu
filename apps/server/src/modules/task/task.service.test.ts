@@ -113,7 +113,7 @@ describe('TaskService', () => {
     });
     await expect(
       unavailable.service.create('canvas-a', INPUT),
-    ).rejects.toMatchObject({ code: 'profile_not_selectable' });
+    ).rejects.toMatchObject({ code: 'profile_not_found' });
     expect(unavailable.execute).not.toHaveBeenCalled();
   });
 

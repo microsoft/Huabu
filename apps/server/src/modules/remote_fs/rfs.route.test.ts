@@ -49,9 +49,12 @@ vi.mock('../agent/agenetes/drivers.js', () => ({
 
 import rfsRoutes from './rfs.route.js';
 import { agentNodeService } from '../agent/agent-node.service.js';
-import { agentThreadService } from '../agent/agent-thread.service.js';
+import { agentThreadResolver } from '../agent/agent-thread-resolver.js';
+import {
+  AgentThreadBusyError,
+  agentThreadService,
+} from '../agent/agent-thread.service.js';
 import * as selectableProfiles from '../agent/selectable-agent-profile.js';
-import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { getCanvasStore, resetStorageCache } from '../storage/index.js';
 import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
 import { taskService } from '../task/task.service.js';
@@ -173,7 +176,7 @@ describe('GET /api/rfs/:canvasId/skill', () => {
     }
   });
 
-  it('serves only fixed advanced skills', async () => {
+  it('serves only known advanced skills', async () => {
     const app = await buildApp();
     try {
       const layout = await app.inject({
@@ -200,7 +203,7 @@ describe('GET /api/rfs/:canvasId/skill', () => {
       expect(layout.statusCode).toBe(200);
       expect(layout.body).toContain('# Layout Recipes');
       expect(tasks.body).toContain('# Durable Tasks and Runs');
-      expect(agents.body).toContain('# Delegated and Recursive Agents');
+      expect(agents.body).toContain('# Creating and Prompting Agents');
       expect(unknown.statusCode).toBe(404);
       expect(unknown.json()).toMatchObject({ code: 'skill_not_found' });
       expect(traversal.statusCode).toBe(404);
@@ -211,13 +214,11 @@ describe('GET /api/rfs/:canvasId/skill', () => {
 });
 
 describe('GET /api/rfs/:canvasId/agent/profiles', () => {
-  it('returns the selectable Profile catalogue', async () => {
-    vi.spyOn(selectableProfiles, 'listSelectableAgentProfiles').mockReturnValue(
-      [
-        { id: 'profile-a', alias: 'Researcher' },
-        { id: 'profile-b', alias: 'Builder' },
-      ],
-    );
+  it('returns the available Profile catalogue', async () => {
+    vi.spyOn(selectableProfiles, 'listAvailableAgentProfiles').mockReturnValue([
+      { id: 'profile-a', alias: 'Researcher' },
+      { id: 'profile-b', alias: 'Builder' },
+    ]);
     const app = await buildApp();
     try {
       const res = await app.inject({
@@ -1199,33 +1200,26 @@ describe('node download revision (ETag / conditional GET)', () => {
 });
 
 describe('POST /api/rfs/:canvasId/agent', () => {
-  it('creates a delegated fixed Agent Node without invoking it', async () => {
-    const parent: FixedAgentNodeTarget = {
-      canvasId: 'c1',
-      nodeId: 'node-parent' as CanvasNodeId,
-      threadId: 'thread-parent',
-      agentBinding: {
-        kind: 'external',
-        profileId: 'profile-parent',
-        alias: 'Parent',
-      },
-      status: 'running',
-      content: 'Parent task',
-    };
-    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(parent);
+  it('creates an idle Agent and connects its parent when available', async () => {
+    vi.spyOn(agentThreadResolver, 'resolveAgentNodeId').mockReturnValue(
+      'node-parent' as CanvasNodeId,
+    );
     const create = vi.spyOn(agentNodeService, 'create').mockResolvedValue({
       canvasId: 'c1',
       nodeId: 'node-child' as CanvasNodeId,
       threadId: 'thread-child',
+      profileId: 'profile-child',
+      parentConnection: 'connected',
     });
 
     const app = await buildApp();
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/rfs/c1/agent/create',
+        url: '/rfs/c1/agent',
         headers: {
           'content-type': 'application/json',
+          'x-huabu-agent-start': 'false',
           'x-huabu-host-thread-id': 'thread-parent',
         },
         payload: JSON.stringify({
@@ -1240,6 +1234,9 @@ describe('POST /api/rfs/:canvasId/agent', () => {
       expect(res.json()).toEqual({
         nodeId: 'node-child',
         threadId: 'thread-child',
+        profileId: 'profile-child',
+        parentConnection: 'connected',
+        warnings: [],
       });
       expect(create).toHaveBeenCalledWith({
         canvasId: 'c1',
@@ -1259,7 +1256,7 @@ describe('POST /api/rfs/:canvasId/agent', () => {
     }
   });
 
-  it('lazily invokes a fixed Agent Node through AgentThreadService', async () => {
+  it('submits a prompt to an existing Agent through AgentThreadService', async () => {
     const target: FixedAgentNodeTarget = {
       canvasId: 'c1',
       nodeId: 'node-fixed' as CanvasNodeId,
@@ -1323,10 +1320,9 @@ describe('POST /api/rfs/:canvasId/agent', () => {
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/rfs/c1/agent',
+        url: '/rfs/c1/agent/thread-fixed/prompt',
         headers: {
           'content-type': 'text/plain',
-          'x-huabu-thread-id': 'thread-fixed',
         },
         payload: 'continue delegated work',
       });
@@ -1349,7 +1345,35 @@ describe('POST /api/rfs/:canvasId/agent', () => {
     }
   });
 
-  it('creates a Deployment and returns its thread id before the final text', async () => {
+  it('uses text/plain to create and immediately start a Huabu Agent', async () => {
+    seedNote('c1', 'node-anchor', 'Anchor', 'content');
+    const target: FixedAgentNodeTarget = {
+      canvasId: 'c1',
+      nodeId: 'node-huabu' as CanvasNodeId,
+      threadId: 'thread-huabu',
+      agentBinding: { kind: 'internal' },
+      status: 'idle',
+      content: '',
+    };
+    vi.spyOn(agentNodeService, 'create').mockResolvedValue({
+      canvasId: 'c1',
+      nodeId: target.nodeId,
+      threadId: target.threadId,
+      profileId: 'huabu',
+      parentConnection: 'not_requested',
+    });
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(target);
+    vi.spyOn(agentThreadService, 'invoke').mockImplementation(
+      async (options) => ({
+        binding: target.agentBinding,
+        fixedTarget: target,
+        signal: options.signal ?? new AbortController().signal,
+        dispose: vi.fn().mockResolvedValue(undefined),
+        events: (async function* () {
+          yield { type: 'done' as const, data: { message: 'first answer' } };
+        })(),
+      }),
+    );
     const app = await buildApp();
     try {
       const res = await app.inject({
@@ -1359,21 +1383,16 @@ describe('POST /api/rfs/:canvasId/agent', () => {
         payload: 'hello',
       });
 
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(201);
       expect(res.headers['content-type']).toMatch(/text\/event-stream/);
-      expect(res.body).toMatch(
-        /^: ok\n\n: threadId reachback-[^\n]+\n\ndata: first answer\n\n$/,
-      );
-      expect(agentMocks.runAgent).toHaveBeenCalledWith(
+      expect(res.body).toContain(': threadId thread-huabu');
+      expect(res.body).toContain('event: created');
+      expect(res.body).toContain('"profileId":"huabu"');
+      expect(res.body).toContain('data: first answer');
+      expect(agentNodeService.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          scope: 'operate',
-          workloadType: 'Deployment',
-          threadId: expect.stringMatching(/^reachback-/),
           canvasId: 'c1',
-          envelope: expect.objectContaining({
-            user: expect.objectContaining({ text: 'hello' }),
-          }),
-          context: expect.objectContaining({ messages: [] }),
+          profileId: 'huabu',
         }),
       );
     } finally {
@@ -1381,94 +1400,123 @@ describe('POST /api/rfs/:canvasId/agent', () => {
     }
   });
 
-  it('continues an existing live internal Deployment directly through its handle', async () => {
-    agentMocks.record.mockReturnValue({
-      spec: { kind: 'internal', workloadType: 'Deployment' },
-      state: {},
+  it('reports created identity when the first turn cannot start', async () => {
+    seedNote('c1', 'node-anchor', 'Anchor', 'content');
+    vi.spyOn(agentNodeService, 'create').mockResolvedValue({
+      canvasId: 'c1',
+      nodeId: 'node-created' as CanvasNodeId,
+      threadId: 'thread-created',
+      profileId: 'huabu',
+      parentConnection: 'not_requested',
     });
-    agentMocks.handleRun.mockImplementation(async function* () {
-      yield { type: 'done', data: { message: 'continued answer' } };
-      return [];
-    });
-    agentMocks.get.mockReturnValue({ run: agentMocks.handleRun });
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(null);
 
     const app = await buildApp();
     try {
       const res = await app.inject({
         method: 'POST',
         url: '/rfs/c1/agent',
-        headers: {
-          'content-type': 'text/plain',
-          'x-huabu-thread-id': 'reachback-existing',
-        },
+        headers: { 'content-type': 'text/plain' },
+        payload: 'hello',
+      });
+
+      expect(res.statusCode).toBe(500);
+      expect(res.json<{ message: string; code: string }>()).toMatchObject({
+        code: 'agent_resolution_failed',
+        message: expect.stringContaining(
+          'Agent node-created was created with thread thread-created',
+        ),
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('continues an existing Huabu Agent through the prompt endpoint', async () => {
+    const target: FixedAgentNodeTarget = {
+      canvasId: 'c1',
+      nodeId: 'node-huabu' as CanvasNodeId,
+      threadId: 'thread-huabu',
+      agentBinding: { kind: 'internal' },
+      status: 'done',
+      content: 'Earlier request',
+    };
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(target);
+    const invoke = vi
+      .spyOn(agentThreadService, 'invoke')
+      .mockImplementation(async (options) => ({
+        binding: target.agentBinding,
+        fixedTarget: target,
+        signal: options.signal ?? new AbortController().signal,
+        dispose: vi.fn().mockResolvedValue(undefined),
+        events: (async function* () {
+          yield {
+            type: 'done' as const,
+            data: { message: 'continued answer' },
+          };
+        })(),
+      }));
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/agent/thread-huabu/prompt',
+        headers: { 'content-type': 'text/plain' },
         payload: 'continue',
       });
 
       expect(res.statusCode).toBe(200);
-      expect(res.body).toContain(': threadId reachback-existing');
+      expect(res.body).toContain(': threadId thread-huabu');
       expect(res.body).toContain('data: continued answer');
-      expect(agentMocks.runAgent).not.toHaveBeenCalled();
-      expect(agentMocks.record).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'c1' }),
-        'reachback-existing',
-      );
-      expect(agentMocks.handleRun).toHaveBeenCalledWith(
+      expect(invoke).toHaveBeenCalledWith(
         expect.objectContaining({
-          type: 'huabu.chat',
-          content: expect.objectContaining({
-            user: expect.objectContaining({ text: 'continue' }),
-          }),
-          rendered: [{ type: 'text', text: 'continue' }],
+          threadId: 'thread-huabu',
+          content: 'continue',
         }),
-        expect.objectContaining({ maxIterations: 20 }),
       );
 
       const next = await app.inject({
         method: 'POST',
-        url: '/rfs/c1/agent',
-        headers: {
-          'content-type': 'text/plain',
-          'x-huabu-thread-id': 'reachback-existing',
-        },
+        url: '/rfs/c1/agent/thread-huabu/prompt',
+        headers: { 'content-type': 'text/plain' },
         payload: 'continue again',
       });
       expect(next.statusCode).toBe(200);
-      expect(agentMocks.handleRun).toHaveBeenCalledTimes(2);
+      expect(invoke).toHaveBeenCalledTimes(2);
     } finally {
       await app.close();
     }
   });
 
-  it('returns thread_not_live before opening SSE', async () => {
-    agentMocks.record.mockReturnValue({
-      spec: { kind: 'internal', workloadType: 'Deployment' },
-      state: {},
-    });
-    agentMocks.get.mockReturnValue(undefined);
+  it('returns thread_not_found before opening SSE', async () => {
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(null);
 
     const app = await buildApp();
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/rfs/c1/agent',
-        headers: {
-          'content-type': 'text/plain',
-          'x-huabu-thread-id': 'reachback-cold',
-        },
+        url: '/rfs/c1/agent/missing-thread/prompt',
+        headers: { 'content-type': 'text/plain' },
         payload: 'continue',
       });
 
-      expect(res.statusCode).toBe(409);
-      expect(res.json<{ code: string }>().code).toBe('thread_not_live');
+      expect(res.statusCode).toBe(404);
+      expect(res.json<{ code: string }>().code).toBe('thread_not_found');
     } finally {
       await app.close();
     }
   });
 
-  it('rejects a non-internal Deployment', async () => {
-    agentMocks.record.mockReturnValue({
-      spec: { kind: 'external', workloadType: 'Deployment' },
-      state: {},
+  it('creates the Agent when its requested parent cannot be found', async () => {
+    seedNote('c1', 'node-anchor', 'Anchor', 'content');
+    vi.spyOn(agentThreadResolver, 'resolveAgentNodeId').mockReturnValue(null);
+    vi.spyOn(agentNodeService, 'create').mockResolvedValue({
+      canvasId: 'c1',
+      nodeId: 'node-independent' as CanvasNodeId,
+      threadId: 'thread-independent',
+      profileId: 'profile-a',
+      parentConnection: 'not_requested',
     });
 
     const app = await buildApp();
@@ -1477,59 +1525,86 @@ describe('POST /api/rfs/:canvasId/agent', () => {
         method: 'POST',
         url: '/rfs/c1/agent',
         headers: {
-          'content-type': 'text/plain',
-          'x-huabu-thread-id': 'external-thread',
+          'content-type': 'application/json',
+          'x-huabu-agent-start': 'false',
         },
-        payload: 'continue',
+        payload: JSON.stringify({
+          profileId: 'profile-a',
+          parentThreadId: 'missing-parent',
+        }),
       });
 
-      expect(res.statusCode).toBe(409);
-      expect(res.json<{ code: string }>().code).toBe('unsupported_thread_kind');
-      expect(agentMocks.get).not.toHaveBeenCalled();
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toMatchObject({
+        nodeId: 'node-independent',
+        parentConnection: 'not_found',
+        warnings: [{ code: 'parent_not_found' }],
+      });
+      expect(agentNodeService.create).toHaveBeenCalledWith(
+        expect.not.objectContaining({ anchor: expect.anything() }),
+      );
     } finally {
       await app.close();
     }
   });
 
   it('returns thread_busy before opening SSE', async () => {
-    agentMocks.record.mockReturnValue({
-      spec: { kind: 'internal', workloadType: 'Deployment' },
-      state: {},
-    });
-    agentMocks.get.mockReturnValue({ run: agentMocks.handleRun });
-    const release = acquireAgentTurn('reachback-busy');
+    const target: FixedAgentNodeTarget = {
+      canvasId: 'c1',
+      nodeId: 'node-busy' as CanvasNodeId,
+      threadId: 'thread-busy',
+      agentBinding: { kind: 'internal' },
+      status: 'running',
+      content: 'Working',
+    };
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(target);
+    vi.spyOn(agentThreadService, 'invoke').mockRejectedValue(
+      new AgentThreadBusyError('thread-busy'),
+    );
 
     const app = await buildApp();
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/rfs/c1/agent',
-        headers: {
-          'content-type': 'text/plain',
-          'x-huabu-thread-id': 'reachback-busy',
-        },
+        url: '/rfs/c1/agent/thread-busy/prompt',
+        headers: { 'content-type': 'text/plain' },
         payload: 'continue',
       });
 
       expect(res.statusCode).toBe(409);
       expect(res.json<{ code: string }>().code).toBe('thread_busy');
     } finally {
-      release?.();
       await app.close();
     }
   });
 
   it('keeps terminal errors visible in final mode', async () => {
-    agentMocks.runAgent.mockImplementation(async function* () {
-      yield { type: 'error', data: { error: 'model failed' } };
-      return [];
-    });
+    const target: FixedAgentNodeTarget = {
+      canvasId: 'c1',
+      nodeId: 'node-error' as CanvasNodeId,
+      threadId: 'thread-error',
+      agentBinding: { kind: 'internal' },
+      status: 'idle',
+      content: '',
+    };
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(target);
+    vi.spyOn(agentThreadService, 'invoke').mockImplementation(
+      async (options) => ({
+        binding: target.agentBinding,
+        fixedTarget: target,
+        signal: options.signal ?? new AbortController().signal,
+        dispose: vi.fn().mockResolvedValue(undefined),
+        events: (async function* () {
+          yield { type: 'error' as const, data: { error: 'model failed' } };
+        })(),
+      }),
+    );
 
     const app = await buildApp();
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/rfs/c1/agent',
+        url: '/rfs/c1/agent/thread-error/prompt',
         headers: { 'content-type': 'text/plain' },
         payload: 'hello',
       });
@@ -1542,17 +1617,37 @@ describe('POST /api/rfs/:canvasId/agent', () => {
     }
   });
 
-  it('lets event-mode headers override legacy JSON options', async () => {
+  it('lets event-mode headers override JSON prompt options', async () => {
+    const target: FixedAgentNodeTarget = {
+      canvasId: 'c1',
+      nodeId: 'node-all' as CanvasNodeId,
+      threadId: 'thread-all',
+      agentBinding: { kind: 'internal' },
+      status: 'idle',
+      content: '',
+    };
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(target);
+    vi.spyOn(agentThreadService, 'invoke').mockImplementation(
+      async (options) => ({
+        binding: target.agentBinding,
+        fixedTarget: target,
+        signal: options.signal ?? new AbortController().signal,
+        dispose: vi.fn().mockResolvedValue(undefined),
+        events: (async function* () {
+          yield { type: 'done' as const, data: { message: 'complete' } };
+        })(),
+      }),
+    );
     const app = await buildApp();
     try {
       const res = await app.inject({
         method: 'POST',
-        url: '/rfs/c1/agent',
+        url: '/rfs/c1/agent/thread-all/prompt',
         headers: {
           'content-type': 'application/json',
           'x-huabu-event-mode': 'all',
         },
-        payload: JSON.stringify({ prompt: 'hello', doneTextOnly: true }),
+        payload: JSON.stringify({ prompt: 'hello', eventMode: 'final' }),
       });
 
       expect(res.statusCode).toBe(200);

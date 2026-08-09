@@ -1,43 +1,68 @@
-# Delegated and Recursive Agents
+# Creating and Prompting Agents
 
-Load this guide when the current fixed Agent thread needs to delegate part of its work to another visible Agent. Creating a delegated Agent is not the same as creating a new Task: it remains part of the current working graph.
+Load this guide when work should be handled by a visible Agent conversation instead of direct Space operations. An Agent may use Huabu's default Profile or another available Profile.
 
-## 1. Discover selectable Profiles
+## 1. Discover available Profiles
 
 ```bash
 curl -fsS -H "$AUTH" "$HUABU_RFS_URL/agent/profiles"
 ```
 
-Choose an exact returned Profile ID. Never guess an ID.
+The `huabu` Profile is the default. Use another returned Profile ID only when its specialization is useful.
 
-## 2. Create a delegated Agent
+The `huabu` Profile uses Huabu's configured model provider. Other Profiles use their own configured runtimes and do not depend on that provider.
 
-`X-Huabu-Host-Thread-Id` must name the current fixed parent Agent thread. Supply an explicit root-level Canvas position and optional bounded launch overrides.
+## 2. Create and start an Agent
+
+For a Huabu Agent, send the first prompt directly. This creates a visible Agent Node and immediately starts its first turn.
 
 ```bash
-curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+curl -N -H "$AUTH" -H "Content-Type: text/plain" \
+  --data-binary @./prompt.txt "$HUABU_RFS_URL/agent"
+```
+
+The response is SSE. Its `created` event contains the new `nodeId`, `threadId`, effective `profileId`, and parent-connection result. Save the `threadId`.
+
+Use JSON to choose a Profile, position, working directory, stable initial instructions, or optional parent conversation:
+
+```bash
+curl -N -H "$AUTH" -H "Content-Type: application/json" \
   -H "X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID" \
   --data-binary '{
     "profileId": "profile-id",
+    "prompt": "Complete this bounded piece of work.",
     "position": { "x": 1200, "y": 480 },
     "workingDirPath": "/optional/absolute/path",
-    "additionalInitialPreamble": "Optional durable role instructions."
-  }' "$HUABU_RFS_URL/agent/create"
+    "additionalInitialPreamble": "Optional stable role instructions."
+  }' "$HUABU_RFS_URL/agent"
 ```
 
-Creation returns `{ "nodeId", "threadId" }`, creates the parent-to-child Canvas edge, and leaves the child idle. It does not launch a process or submit a prompt.
+The parent thread is only a best-effort lineage hint. Missing parents or rejected edges produce a warning in the successful creation response; they never prevent Agent Node creation.
 
-## 3. Invoke the child
+## 3. Create without starting
 
-Send the changing work request as the first submission, not as initial preamble.
+Use JSON without `prompt` and set `X-Huabu-Agent-Start: false`:
 
 ```bash
-CHILD_THREAD_ID="thread-..."
-curl -N -H "$AUTH" -H "Content-Type: text/plain" \
-  -H "X-Huabu-Thread-Id: $CHILD_THREAD_ID" \
-  --data-binary @./child-prompt.txt "$HUABU_RFS_URL/agent"
+curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  -H "X-Huabu-Agent-Start: false" \
+  --data-binary '{
+    "profileId": "profile-id",
+    "position": { "x": 1200, "y": 480 }
+  }' "$HUABU_RFS_URL/agent"
 ```
 
-The response is an SSE stream and the child conversation is durable. Closing the HTTP connection stops delivery but does not abort the fixed Agent turn; explicit stop remains the abort path.
+The JSON response contains the same creation metadata. The Agent remains idle until prompted.
 
-The child may repeat the same create-and-invoke sequence using its own `HUABU_THREAD_ID`, so delegation can recurse. Prefer direct work when delegation adds no clear specialization, isolation, or parallel value.
+## 4. Continue an Agent conversation
+
+```bash
+THREAD_ID="thread-..."
+curl -N -H "$AUTH" -H "Content-Type: text/plain" \
+  --data-binary @./follow-up.txt \
+  "$HUABU_RFS_URL/agent/$THREAD_ID/prompt"
+```
+
+This endpoint never creates another Agent or changes its Profile. The response is SSE, and closing the connection stops delivery without aborting the durable turn.
+
+An Agent can repeat the same create-and-prompt workflow to delegate recursively. Prefer direct work when another Agent adds no useful specialization, isolation, or parallelism.
