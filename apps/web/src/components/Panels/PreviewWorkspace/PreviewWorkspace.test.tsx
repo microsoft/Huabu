@@ -333,6 +333,31 @@ describe('split', () => {
     expect(store().workspace.splitRatio).toBeLessThan(before);
   });
 
+  it('keeps moving the split while the key repeats', () => {
+    openNode('a');
+    openNode('b');
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    act(() => {
+      store().openPreviewTarget(
+        { kind: 'node', canvasId: CANVAS_ID, nodeId: 'b' },
+        { openToSide: true },
+      );
+    });
+
+    // A held key fires many times before React re-renders, so a handler
+    // reading the render-time ratio would stop after the first press.
+    act(() => {
+      const separator = container?.querySelector('[role="separator"]');
+      for (let i = 0; i < 20; i += 1) {
+        separator?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }),
+        );
+      }
+    });
+
+    expect(store().workspace.splitRatio).toBeCloseTo(0.2, 5);
+  });
+
   it('collapses back to one group when the side group empties', () => {
     openNode('a');
     openNode('b');

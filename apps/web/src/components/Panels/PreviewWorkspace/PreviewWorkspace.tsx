@@ -76,7 +76,12 @@ export function PreviewWorkspace() {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
     const delta = e.key === 'ArrowLeft' ? -RATIO_STEP : RATIO_STEP;
-    setSplitRatio(workspace.splitRatio + delta);
+    // Read through the store rather than the render-time value: a held or
+    // rapidly repeated key fires several times before React re-renders, and
+    // a closed-over ratio would make every one of them a no-op after the
+    // first.
+    const current = usePreviewWorkspaceStore.getState().workspace.splitRatio;
+    setSplitRatio(current + delta);
   };
 
   if (workspace.groups.every((g) => g.tabIds.length === 0)) {

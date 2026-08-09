@@ -384,7 +384,7 @@
     "tabStrip": "已打开的预览",
     "group": "预览分组",
     "chatTab": "对话",
-    "closeTab": "关闭{{title}}",
+    "closeTab": "关闭“{{title}}”",
     "resizeGroups": "调整预览分组宽度",
     "openToSide": "在旁边打开",
     "emptyGroup": "此分组没有打开的预览",
