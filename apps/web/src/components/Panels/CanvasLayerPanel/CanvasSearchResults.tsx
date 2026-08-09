@@ -51,6 +51,7 @@ import {
 import { cn } from '../../Common/cn';
 import { toast } from '../../Common/Toast';
 import { NodePreviews } from '../../Nodes/previews';
+import { schedulePreviewSearchNavigation } from '../ExpandedNodePanel/previewSearchNavigation';
 
 import type { AgentBinding } from '@huabu/shared';
 
@@ -407,6 +408,15 @@ export const CanvasSearchResults = (): React.JSX.Element => {
     // (handled by the dedicated chat-thread effect below).
     if (v.row.match.field === 'conversation') return;
     const nth = v.row.match.occurrenceIndex;
+    if (v.group.nodeType === 'pdf') {
+      return schedulePreviewSearchNavigation(v.group.nodeId, query, nth, {
+        onTimeout: () =>
+          toast('Could not locate the match in the PDF preview.', {
+            tone: 'info',
+            duration: 4000,
+          }),
+      });
+    }
     const cancel = scheduleScrollToMatch(
       () => document.querySelector<HTMLElement>('[data-search-scope="node"]'),
       query,

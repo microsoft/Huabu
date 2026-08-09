@@ -33,6 +33,7 @@ import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { usePreviewSearchAdapter } from './PreviewSearchAdapterContext';
 import { formatShortcutById } from '../../../config/shortcuts';
 import { findNthRange, scrollRangeIntoView } from '../../../hooks/searchDom';
 import { useTextHighlight } from '../../../hooks/useTextHighlight';
@@ -54,6 +55,7 @@ export const InPreviewSearchBar = ({
   const close = useSearchStore((s) => s.close);
   const inputRef = useRef<HTMLInputElement>(null);
   const [activeMatchIdx, setActiveMatchIdx] = useState(0);
+  const searchAdapter = usePreviewSearchAdapter();
 
   const isNodeScope = scope?.kind === 'node';
 
@@ -82,10 +84,11 @@ export const InPreviewSearchBar = ({
   // body itself as a paint target; if we also painted here on canvas
   // scope, the two registrations would race and the canvas overlay's
   // multi-container set would get clobbered.
-  const { matchCount } = useTextHighlight({
+  const { matchCount: domMatchCount } = useTextHighlight({
     container: isNodeScope ? scopeEl : null,
     query,
   });
+  const matchCount = searchAdapter?.matchCount ?? domMatchCount;
 
   // Reset cursor whenever the query changes so Next/Prev starts from top.
   useEffect(() => {
@@ -94,10 +97,20 @@ export const InPreviewSearchBar = ({
   }, [query]);
 
   const jumpToMatch = (idx: number): void => {
-    if (!scopeEl || !query || matchCount === 0) return;
+    if (
+      !scopeEl ||
+      !query ||
+      matchCount === 0 ||
+      (searchAdapter && !searchAdapter.canNavigate)
+    )
+      return;
     const normalised = ((idx % matchCount) + matchCount) % matchCount;
     setActiveMatchIdx(normalised);
     setHasNavigated(true);
+    if (searchAdapter) {
+      searchAdapter.navigateToMatch(normalised);
+      return;
+    }
     const range = findNthRange(scopeEl, query, normalised);
     if (range) scrollRangeIntoView(range);
   };
@@ -139,8 +152,10 @@ export const InPreviewSearchBar = ({
       <span className="text-fg-subtle shrink-0 px-1 text-[11px] tabular-nums">
         {query.length > 0
           ? matchCount > 0
-            ? `${activeMatchIdx + 1}/${matchCount}`
-            : '0/0'
+            ? `${activeMatchIdx + 1}/${matchCount}${searchAdapter?.isSearching ? '+' : ''}`
+            : searchAdapter?.isSearching
+              ? '…'
+              : '0/0'
           : ''}
       </span>
       <Button
@@ -148,7 +163,9 @@ export const InPreviewSearchBar = ({
         iconOnly
         size="sm"
         title={`${t('search.previousMatch')} (${formatShortcutById('search.previousMatch')})`}
-        disabled={matchCount === 0}
+        disabled={
+          matchCount === 0 || (!!searchAdapter && !searchAdapter.canNavigate)
+        }
         onClick={() => jumpToMatch(activeMatchIdx - 1)}
       >
         <ChevronUp />
@@ -158,7 +175,9 @@ export const InPreviewSearchBar = ({
         iconOnly
         size="sm"
         title={`${t('search.nextMatch')} (${formatShortcutById('search.jumpResult')})`}
-        disabled={matchCount === 0}
+        disabled={
+          matchCount === 0 || (!!searchAdapter && !searchAdapter.canNavigate)
+        }
         onClick={() => jumpToMatch(activeMatchIdx + 1)}
       >
         <ChevronDown />
