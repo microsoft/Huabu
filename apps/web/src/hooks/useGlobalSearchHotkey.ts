@@ -8,7 +8,7 @@
  * state so the gesture matches user intuition:
  *
  *   - Focus inside an open preview (`data-search-scope="node"`)
- *     → open the in-preview find bar (node scope, content-only).
+ *     → open preview-local find without changing canvas search.
  *   - Focus inside the canvas (`data-search-scope="canvas"`) or
  *     anywhere else → make sure the canvas-wide search input in
  *     the left layer panel is focused, the panel is expanded, and
@@ -31,7 +31,7 @@ import { ensureCanvasSearchScope } from '../components/Panels/CanvasLayerPanel/C
 import { matchesShortcut } from '../config/shortcuts';
 import useCanvasStore from '../store/canvasStore';
 import { usePanelStore } from '../store/panelStore';
-import { useSearchStore } from '../store/searchStore';
+import { usePreviewSearchStore } from '../store/previewSearchStore';
 
 type SearchScopeAttr = 'canvas' | 'node';
 
@@ -133,9 +133,7 @@ export function useGlobalSearchHotkey(): void {
         : (findMountedNodeScope() ?? { scope: 'canvas' as const });
 
       if (resolved.scope === 'node' && resolved.nodeId) {
-        useSearchStore
-          .getState()
-          .open({ kind: 'node', canvasId, nodeId: resolved.nodeId });
+        usePreviewSearchStore.getState().open(resolved.nodeId);
         return;
       }
 

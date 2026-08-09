@@ -8,17 +8,8 @@
  * string, the streamed result list, and the in-flight `AbortController`
  * so a follow-up keystroke cleanly cancels the previous request.
  *
- * Scope:
- *   - `'canvas'` — the global search overlay (Cmd+F outside a preview).
- *     Results span every node on the active canvas.
- *   - `'node'` — the in-preview search bar (Cmd+F while focus is inside
- *     `ExpandedNodePanel`). Results are restricted to one node id and
- *     `field === 'content'` so the highlight layer can paint matches
- *     inline.
- *
- * One store handles both modes because (a) only one is ever active at
- * a time (Cmd+F dispatches by focus), and (b) sharing the cancellation
- * + debounce plumbing across modes keeps the implementation small.
+ * Scope is canvas-wide. In-preview find has its own store so its query,
+ * lifecycle, and PDF text index cannot open or mutate the Layers panel.
  */
 
 import { create } from 'zustand';
@@ -33,9 +24,7 @@ import type {
 } from '@huabu/shared';
 
 /** Where the overlay is mounted. `null` = nothing open. */
-export type SearchScope =
-  | { kind: 'canvas'; canvasId: string }
-  | { kind: 'node'; canvasId: string; nodeId: string };
+export type SearchScope = { kind: 'canvas'; canvasId: string };
 
 export interface SearchResultRow {
   /** Stable key (`${nodeId}:${field}:${occurrenceIndex}:${tier}`) for React lists. */
@@ -228,7 +217,7 @@ async function runSearch(
 
   try {
     await streamCanvasSearch(scope.canvasId, {
-      request: buildRequest(scope, query, get().nodeTypes),
+      request: buildRequest(query, get().nodeTypes),
       signal: controller.signal,
       onEvent: (event) => {
         // Drop events from a superseded request — controller swapped
@@ -254,13 +243,9 @@ async function runSearch(
 }
 
 function buildRequest(
-  scope: SearchScope,
   query: string,
   nodeTypes: readonly CanvasNodeType[],
 ): CanvasSearchRequest {
-  if (scope.kind === 'node') {
-    return { query, nodeId: scope.nodeId, fields: ['content'], limit: 1000 };
-  }
   // Spread to a mutable array because the wire schema asks for
   // a plain `CanvasNodeType[]`. Omit the field entirely when the
   // whitelist is empty so the server's "no constraint" branch

@@ -18,7 +18,6 @@ import { Document } from 'react-pdf';
 import { resolveArtifactUrl, uploadImage } from '@/api/artifact';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
 import { useRegisterPreviewSearchAdapter } from '@/components/Panels/ExpandedNodePanel/PreviewSearchAdapterContext';
-import { registerPreviewSearchNavigator } from '@/components/Panels/ExpandedNodePanel/previewSearchNavigation';
 import {
   computeHighlightUpdate,
   mergeLineRects,
@@ -26,7 +25,7 @@ import {
 import { scheduleScrollToMatch } from '@/hooks/searchDom';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
-import { useSearchStore } from '@/store/searchStore';
+import { usePreviewSearchStore } from '@/store/previewSearchStore';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
 import {
@@ -76,8 +75,9 @@ export const PDFPreview = ({
   const canvasId = useCanvasStore((s) => s.canvasId);
   const resolvedSrc = resolveArtifactUrl(src, canvasId);
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
-  const searchScope = useSearchStore((s) => s.scope);
-  const searchQuery = useSearchStore((s) => s.query);
+  const previewSearchNodeId = usePreviewSearchStore((s) => s.nodeId);
+  const searchQuery = usePreviewSearchStore((s) => s.query);
+  const isPreviewSearchOpen = usePreviewSearchStore((s) => s.isOpen);
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pdfDocument, setPdfDocument] = useState<PdfIndexDocument | null>(null);
   const [docLoaded, setDocLoaded] = useState(false);
@@ -370,8 +370,8 @@ export const PDFPreview = ({
   );
 
   const isPdfSearchActive =
-    !!searchScope &&
-    (searchScope.kind === 'canvas' || searchScope.nodeId === id) &&
+    isPreviewSearchOpen &&
+    previewSearchNodeId === id &&
     searchQuery.trim().length > 0;
   const textIndex = usePdfTextIndex({
     document: pdfDocument,
@@ -430,21 +430,6 @@ export const PDFPreview = ({
     ],
   );
   useRegisterPreviewSearchAdapter(searchAdapter);
-
-  useEffect(() => {
-    if (!id || !isPdfSearchActive) return;
-    return registerPreviewSearchNavigator(id, {
-      query: searchQuery,
-      canNavigate: !textIndex.isIndexing,
-      navigateToMatch: navigateToSearchMatch,
-    });
-  }, [
-    id,
-    isPdfSearchActive,
-    navigateToSearchMatch,
-    searchQuery,
-    textIndex.isIndexing,
-  ]);
 
   // ---------------------------------------------------------------------------
   // Area-capture handler

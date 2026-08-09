@@ -736,7 +736,7 @@ export const ExpandedNodePanel = ({
               is `'node'`. Wires the highlight walk to the body element
               (via state-as-ref) so only the visible preview gets
               `::highlight()` ranges. */}
-          <InPreviewSearchBar scopeEl={previewBodyEl} />
+          <InPreviewSearchBar scopeEl={previewBodyEl} nodeId={expandedNodeId} />
           <PreviewHeaderSlotContext.Provider value={headerSlotValue}>
             <NodePreviewContent
               key={expandedNodeId ?? previewType}

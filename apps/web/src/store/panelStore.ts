@@ -27,7 +27,9 @@ interface PanelState {
    * because the toggle is driven from multiple, non-adjacent
    * surfaces (toolbar button, hotkey, future API), and the
    * `CanvasSearchInput` component is mounted only while this is
-   * `true` so its auto-focus / cleanup run on every reveal.
+   * `true` so its auto-focus / cleanup run on every reveal. Opening
+   * search expands the panel once; later manual collapse is respected
+   * without closing or clearing the search session.
    */
   isSearchOpen: boolean;
   setSearchOpen: (open: boolean) => void;
@@ -76,8 +78,16 @@ export const usePanelStore = create<PanelState>()(
         set((s) => ({ isLeftCollapsed: !s.isLeftCollapsed })),
 
       isSearchOpen: false,
-      setSearchOpen: (open) => set({ isSearchOpen: open }),
-      toggleSearchOpen: () => set((s) => ({ isSearchOpen: !s.isSearchOpen })),
+      setSearchOpen: (open) =>
+        set({
+          isSearchOpen: open,
+          ...(open ? { isLeftCollapsed: false } : {}),
+        }),
+      toggleSearchOpen: () =>
+        set((s) => ({
+          isSearchOpen: !s.isSearchOpen,
+          ...(!s.isSearchOpen ? { isLeftCollapsed: false } : {}),
+        })),
 
       isRightCollapsed: true,
       rightPanelAnchorNodeId: null,

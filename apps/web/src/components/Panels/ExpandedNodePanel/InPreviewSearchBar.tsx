@@ -16,14 +16,9 @@
  *      `::highlight()` ranges over all visible matches without
  *      mutating Milkdown / pdf.js text nodes. The paint rule lives
  *      in `index.css` (`::highlight(huabu-search)`).
- *   2. A server-side `nodeId`-restricted search query, driven via
- *      `searchStore.setQuery` whenever the find-bar input changes
- *      (the store routes node-scope queries to the same NDJSON
- *      endpoint with `nodeId` + `fields: ['content']` set). This
- *      backs server-aware counts and "Next / Prev" navigation for
- *      matches outside the visible viewport (e.g. inside a
- *      collapsed Milkdown block) without needing the inline DOM
- *      walk to scan offscreen content.
+ *   2. A preview-local query consumed by adapters such as the PDF
+ *      text index. It is deliberately independent from canvas-wide
+ *      search state and never opens or updates the Layers panel.
  *
  * Esc closes the bar (the parent panel's existing Esc handler still
  * closes the panel itself when the bar is gone).
@@ -37,34 +32,36 @@ import { usePreviewSearchAdapter } from './PreviewSearchAdapterContext';
 import { formatShortcutById } from '../../../config/shortcuts';
 import { findNthRange, scrollRangeIntoView } from '../../../hooks/searchDom';
 import { useTextHighlight } from '../../../hooks/useTextHighlight';
-import { useSearchStore } from '../../../store/searchStore';
+import { usePreviewSearchStore } from '../../../store/previewSearchStore';
 import { Button } from '../../Common/Button';
 
 interface InPreviewSearchBarProps {
   /** Root of the preview content. Highlights paint over its descendants. */
   scopeEl: HTMLElement | null;
+  nodeId: string | null;
 }
 
 export const InPreviewSearchBar = ({
   scopeEl,
+  nodeId,
 }: InPreviewSearchBarProps): React.JSX.Element | null => {
   const { t } = useTranslation();
-  const scope = useSearchStore((s) => s.scope);
-  const query = useSearchStore((s) => s.query);
-  const setQuery = useSearchStore((s) => s.setQuery);
-  const close = useSearchStore((s) => s.close);
+  const isOpen = usePreviewSearchStore((s) => s.isOpen);
+  const ownerNodeId = usePreviewSearchStore((s) => s.nodeId);
+  const query = usePreviewSearchStore((s) => s.query);
+  const setQuery = usePreviewSearchStore((s) => s.setQuery);
+  const close = usePreviewSearchStore((s) => s.close);
   const inputRef = useRef<HTMLInputElement>(null);
   const [activeMatchIdx, setActiveMatchIdx] = useState(0);
   const searchAdapter = usePreviewSearchAdapter();
-
-  const isNodeScope = scope?.kind === 'node';
+  const isActive = isOpen && ownerNodeId === nodeId;
 
   useEffect(() => {
-    if (isNodeScope) {
+    if (isActive) {
       inputRef.current?.focus();
       inputRef.current?.select();
     }
-  }, [isNodeScope]);
+  }, [isActive]);
 
   // Track whether the user has already navigated at least once. The
   // inline highlight visually implies the first match is "current", so
@@ -79,13 +76,11 @@ export const InPreviewSearchBar = ({
   // readout below stays accurate as pdf.js / Milkdown mount text
   // asynchronously.
   //
-  // Only paint when *this* find bar owns the search scope. Canvas-wide
-  // search uses the same `HIGHLIGHT_NAME` and includes the preview
-  // body itself as a paint target; if we also painted here on canvas
-  // scope, the two registrations would race and the canvas overlay's
-  // multi-container set would get clobbered.
+  // Only paint when this node owns preview search. Canvas-wide search
+  // deliberately excludes the preview body, so the two surfaces never
+  // compete for query or highlight ownership.
   const { matchCount: domMatchCount } = useTextHighlight({
-    container: isNodeScope ? scopeEl : null,
+    container: isActive ? scopeEl : null,
     query,
   });
   const matchCount = searchAdapter?.matchCount ?? domMatchCount;
@@ -115,7 +110,7 @@ export const InPreviewSearchBar = ({
     if (range) scrollRangeIntoView(range);
   };
 
-  if (!isNodeScope) return null;
+  if (!isActive) return null;
 
   return (
     <div
