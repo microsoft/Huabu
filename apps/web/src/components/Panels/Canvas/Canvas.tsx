@@ -405,7 +405,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
   const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
-  const expandMode = useCanvasStore((state) => state.expandMode);
   const canvasId = useCanvasStore((state) => state.canvasId);
   const minimapEnabled = useCanvasStore((state) => state.minimapEnabled);
   const pendingNodeType = useToolStore((state) => state.pendingNodeType);
@@ -474,10 +473,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const clearRightPanelAnchor = usePanelStore(
     (state) => state.clearRightPanelAnchor,
   );
-  const layoutAnchorNodeId =
-    expandedNodeId && expandMode === 'split'
-      ? expandedNodeId
-      : rightPanelAnchorNodeId;
+  const layoutAnchorNodeId = expandedNodeId ?? rightPanelAnchorNodeId;
   const layoutAnchorNodeIdRef = useRef(layoutAnchorNodeId);
   layoutAnchorNodeIdRef.current = layoutAnchorNodeId;
 

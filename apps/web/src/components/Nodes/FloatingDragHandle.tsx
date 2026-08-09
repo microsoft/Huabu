@@ -6,7 +6,6 @@ import { MessageSquare, Plus, Star } from 'lucide-react';
 import { useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import useCanvasStore from '@/store/canvasStore';
 import {
   selectActiveNodeId,
   usePreviewWorkspaceStore,
@@ -65,13 +64,9 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
   const hasText = text.trim().length > 0;
   const isImageReady = !!imageUrl && !capturing;
 
-  // Detect fullscreen (replace) mode — canvas not visible, so drag is useless.
-  // In this case the buttons become click-to-add with auto-placement.
+  // Carried on excerpt attachments so Chat can trace them back to their
+  // source node.
   const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
-  const canvasExpandMode = useCanvasStore((s) => s.expandMode);
-  const addNode = useCanvasStore((s) => s.addNode);
-
-  const isFullscreen = !!expandedNodeId && canvasExpandMode === 'replace';
 
   // Track whether a drag is in progress so we can suppress Popover's
   // outside-click dismiss until the drop completes.
@@ -101,30 +96,6 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     draggingRef.current = false;
     onDismiss();
   }, [onDismiss]);
-
-  // Click-to-add handlers for fullscreen mode
-  const handleAddNote = useCallback(() => {
-    addNode({
-      nodeType: 'note',
-      data: {
-        content: text,
-        origin: { type: 'user-excerpt', excerptFromNodeId },
-      },
-    });
-    onDismiss();
-  }, [text, excerptFromNodeId, addNode, onDismiss]);
-
-  const handleAddImage = useCallback(() => {
-    if (!imageUrl) return;
-    addNode({
-      nodeType: 'image',
-      data: {
-        src: imageUrl,
-        origin: { type: 'user-excerpt', excerptFromNodeId },
-      },
-    });
-    onDismiss();
-  }, [imageUrl, excerptFromNodeId, addNode, onDismiss]);
 
   // Guard dismiss: ignore outside-click while a drag is active
   const guardedDismiss = useCallback(() => {
@@ -156,7 +127,7 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
     'flex shrink-0 items-center justify-center gap-1 px-2.5 py-1.5',
     'text-xs text-fg-default',
     'hover:bg-info-bg',
-    !isFullscreen && 'cursor-grab active:cursor-grabbing',
+    'cursor-grab active:cursor-grabbing',
   );
 
   return (
@@ -165,30 +136,18 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
       onDismiss={guardedDismiss}
       className="grid auto-rows-auto"
     >
-      {/* ── Text button: drag (split) or click-to-add (fullscreen) ── */}
-      {hasText &&
-        (isFullscreen ? (
-          <Button
-            variant="ghost"
-            iconOnly
-            className={clsx(dragBtnClass, '[&_svg]:h-auto [&_svg]:w-auto')}
-            title={t('node.addSelectedTextAsNote')}
-            onClick={handleAddNote}
-          >
-            <Plus size={10} className="shrink-0" />
-            <NODE_ICON.note size={14} className="shrink-0" />
-          </Button>
-        ) : (
-          <DragToCanvasHandleButton
-            iconSize={10}
-            onDragStart={handleTextDragStart}
-            onDragEnd={handleDragEnd}
-            className={dragBtnClass}
-            title={t('node.dragSelectedTextAsNote')}
-          >
-            <NODE_ICON.note size={14} className="shrink-0" />
-          </DragToCanvasHandleButton>
-        ))}
+      {/* ── Text button: drag to canvas ── */}
+      {hasText && (
+        <DragToCanvasHandleButton
+          iconSize={10}
+          onDragStart={handleTextDragStart}
+          onDragEnd={handleDragEnd}
+          className={dragBtnClass}
+          title={t('node.dragSelectedTextAsNote')}
+        >
+          <NODE_ICON.note size={14} className="shrink-0" />
+        </DragToCanvasHandleButton>
+      )}
 
       {/* ── Image button (or status) ── */}
       {capturing && (
@@ -196,29 +155,17 @@ export const FloatingDragHandle: FC<FloatingDragHandleProps> = ({
           <Loading layout="inline" size="xs" />
         </div>
       )}
-      {isImageReady &&
-        (isFullscreen ? (
-          <Button
-            variant="ghost"
-            iconOnly
-            className={clsx(dragBtnClass, '[&_svg]:h-auto [&_svg]:w-auto')}
-            title={t('node.addCapturedAreaAsImage')}
-            onClick={handleAddImage}
-          >
-            <Plus size={10} className="shrink-0" />
-            <NODE_ICON.image size={14} className="shrink-0" />
-          </Button>
-        ) : (
-          <DragToCanvasHandleButton
-            iconSize={10}
-            onDragStart={handleImageDragStart}
-            onDragEnd={handleDragEnd}
-            className={dragBtnClass}
-            title={t('node.dragCapturedAreaAsImage')}
-          >
-            <NODE_ICON.image size={14} className="shrink-0" />
-          </DragToCanvasHandleButton>
-        ))}
+      {isImageReady && (
+        <DragToCanvasHandleButton
+          iconSize={10}
+          onDragStart={handleImageDragStart}
+          onDragEnd={handleDragEnd}
+          className={dragBtnClass}
+          title={t('node.dragCapturedAreaAsImage')}
+        >
+          <NODE_ICON.image size={14} className="shrink-0" />
+        </DragToCanvasHandleButton>
+      )}
 
       {/* ── Send to Chat button ── */}
       {isImageReady && onSendToChat && imageUrl && (

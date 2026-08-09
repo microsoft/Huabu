@@ -484,7 +484,6 @@ type RFState = {
    */
   pendingForkThreadIds: Record<string, true>;
 
-  expandMode: 'replace' | 'split';
   /**
    * Monotonic counter bumped on every `openExpanded` call —
    * including when the user re-triggers expansion on the
@@ -503,7 +502,6 @@ type RFState = {
    */
   openExpanded: (nodeId: string, options?: { transient?: boolean }) => void;
   closeExpanded: () => void;
-  setExpandMode: (mode: 'replace' | 'split') => void;
 
   pendingInlineEditNodeId: string | null;
   consumeInlineEditRequest: (nodeId: string) => void;
@@ -1392,7 +1390,6 @@ const useCanvasStore = create<RFState>()(
 
     pendingForkThreadIds: {},
 
-    expandMode: 'split',
     expandedNodeFocusTick: 0,
     openExpanded: (nodeId, options) => {
       // Switching straight from one expanded node to another does not fire
@@ -1437,7 +1434,6 @@ const useCanvasStore = create<RFState>()(
       }
       workspace.closeTab(activeTab.id);
     },
-    setExpandMode: (mode) => set({ expandMode: mode }),
 
     pendingInlineEditNodeId: null,
     consumeInlineEditRequest: (nodeId) => {

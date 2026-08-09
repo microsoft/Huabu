@@ -82,12 +82,11 @@ function edge(
   };
 }
 
-function renderPanel(nodes: Node[], edges: Edge[], mode: 'replace' | 'split') {
+function renderPanel(nodes: Node[], edges: Edge[]) {
   useCanvasStore.setState({
     nodes,
     edges,
     canvasId: CANVAS_ID,
-    expandMode: mode,
   });
   usePreviewWorkspaceStore.setState({
     canvasId: CANVAS_ID,
@@ -159,7 +158,6 @@ afterEach(() => {
   useCanvasStore.setState({
     nodes: [],
     edges: [],
-    expandMode: 'split',
   });
   usePreviewWorkspaceStore.setState({
     canvasId: '',
@@ -174,7 +172,6 @@ describe('ExpandedNodePanel edge navigation', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('a-b', 'a', 'b')],
-      'split',
     );
 
     const navigationButton = container?.querySelector<HTMLButtonElement>(
@@ -196,7 +193,6 @@ describe('ExpandedNodePanel edge navigation', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('a-b', 'a', 'b', 'none')],
-      'split',
     );
 
     const navigationButton = container?.querySelector<HTMLButtonElement>(
@@ -212,17 +208,15 @@ describe('ExpandedNodePanel edge navigation', () => {
     expect(expandedNodeId()).toBe('b');
   });
 
-  it('opens a sole downstream neighbor and preserves replace mode', () => {
+  it('opens a sole downstream neighbor', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('a-b', 'a', 'b')],
-      'replace',
     );
 
     dispatchArrow(window, 'ArrowRight');
 
     expect(expandedNodeId()).toBe('b');
-    expect(useCanvasStore.getState().expandMode).toBe('replace');
     expect(
       useCanvasStore
         .getState()
@@ -235,7 +229,6 @@ describe('ExpandedNodePanel edge navigation', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('a-b', 'a', 'b')],
-      'split',
     );
     const navigationButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Connected node navigation"]',
@@ -265,7 +258,6 @@ describe('ExpandedNodePanel edge navigation', () => {
         canvasNode('b', 'Beta'),
       ],
       [edge('a-b', 'a', 'b'), edge('a-c', 'a', 'c')],
-      'split',
     );
 
     dispatchArrow(window, 'ArrowRight');
@@ -285,7 +277,6 @@ describe('ExpandedNodePanel edge navigation', () => {
 
     act(() => (document.activeElement as HTMLButtonElement).click());
     expect(expandedNodeId()).toBe('b');
-    expect(useCanvasStore.getState().expandMode).toBe('split');
     expect(
       useCanvasStore
         .getState()
@@ -305,7 +296,6 @@ describe('ExpandedNodePanel edge navigation', () => {
         canvasNode('c', 'Gamma'),
       ],
       [edge('a-b', 'a', 'b'), edge('a-c', 'a', 'c')],
-      'split',
     );
     const navigationButton = container?.querySelector<HTMLButtonElement>(
       '[aria-label="Connected node navigation"]',
@@ -328,7 +318,6 @@ describe('ExpandedNodePanel edge navigation', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('b-a', 'b', 'a')],
-      'split',
     );
     const input = document.createElement('input');
     document.body.appendChild(input);
@@ -345,20 +334,17 @@ describe('ExpandedNodePanel swipe navigation', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('a-b', 'a', 'b')],
-      'replace',
     );
 
     swipe(240, 40);
 
     expect(expandedNodeId()).toBe('b');
-    expect(useCanvasStore.getState().expandMode).toBe('replace');
   });
 
   it('opens the upstream neighbor on a rightward touch swipe', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('b-a', 'b', 'a')],
-      'split',
     );
 
     swipe(40, 240);
@@ -374,7 +360,6 @@ describe('ExpandedNodePanel swipe navigation', () => {
         canvasNode('b', 'Beta'),
       ],
       [edge('a-b', 'a', 'b'), edge('a-c', 'a', 'c')],
-      'split',
     );
 
     swipe(240, 40);
@@ -389,7 +374,6 @@ describe('ExpandedNodePanel swipe navigation', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('a-b', 'a', 'b')],
-      'split',
     );
     const body = previewBody();
 
@@ -412,7 +396,6 @@ describe('ExpandedNodePanel swipe navigation', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('a-b', 'a', 'b')],
-      'split',
     );
     const editor = document.createElement('div');
     editor.setAttribute('contenteditable', 'true');
@@ -432,7 +415,6 @@ describe('ExpandedNodePanel swipe navigation', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('a-b', 'a', 'b')],
-      'split',
     );
     const slider = document.createElement('div');
     slider.setAttribute('role', 'slider');
@@ -447,7 +429,6 @@ describe('ExpandedNodePanel swipe navigation', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('a-b', 'a', 'b')],
-      'split',
     );
 
     // Starts downwards, so the axis locks to vertical before drifting sideways.
@@ -460,7 +441,6 @@ describe('ExpandedNodePanel swipe navigation', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('a-b', 'a', 'b')],
-      'split',
     );
     const body = previewBody();
 
@@ -483,7 +463,6 @@ describe('ExpandedNodePanel swipe navigation', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
       [edge('a-b', 'a', 'b')],
-      'split',
     );
 
     swipe(240, 220);

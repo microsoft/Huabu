@@ -2,14 +2,7 @@
 // Licensed under the MIT license.
 
 import clsx from 'clsx';
-import {
-  ArrowLeft,
-  ArrowRight,
-  Bot,
-  Columns2,
-  TableOfContents,
-  X,
-} from 'lucide-react';
+import { ArrowLeft, ArrowRight, TableOfContents, X } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -46,14 +39,8 @@ import { PreviewHeaderSlotContext } from '../../Nodes/PreviewHeaderSlot.tsx';
 import type { Node } from '@xyflow/react';
 
 /* ------------------------------------------------------------------ */
-/*  ExpandedNodePanel – inline panel that replaces or sits beside     */
-/*  the canvas.                                 */
+/*  ExpandedNodePanel – inline panel that sits beside the canvas.      */
 /* ------------------------------------------------------------------ */
-
-type ExpandedNodePanelProps = {
-  isChatCollapsed?: boolean;
-  onToggleChat?: () => void;
-};
 
 type ConnectedNodeMenuProps = {
   groups: Array<{
@@ -220,16 +207,11 @@ const ConnectedNodeMenu = ({
   );
 };
 
-export const ExpandedNodePanel = ({
-  isChatCollapsed,
-  onToggleChat,
-}: ExpandedNodePanelProps) => {
+export const ExpandedNodePanel = () => {
   const { t } = useTranslation();
   // Canvas Store State
   const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
-  const canvasExpandMode = useCanvasStore((s) => s.expandMode);
   const closeExpandedCanvas = useCanvasStore((s) => s.closeExpanded);
-  const setCanvasExpandMode = useCanvasStore((s) => s.setExpandMode);
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const openExpandedCanvas = useCanvasStore((s) => s.openExpanded);
@@ -339,17 +321,9 @@ export const ExpandedNodePanel = ({
     return {
       type: node.type || 'text',
       data: node.data as Record<string, unknown>,
-      expandMode: canvasExpandMode,
       close: closeExpandedCanvas,
-      setMode: setCanvasExpandMode,
     };
-  }, [
-    expandedNodeId,
-    node,
-    canvasExpandMode,
-    closeExpandedCanvas,
-    setCanvasExpandMode,
-  ]);
+  }, [expandedNodeId, node, closeExpandedCanvas]);
 
   // If the node was removed while expanded, close the panel.
   useEffect(() => {
@@ -499,8 +473,6 @@ export const ExpandedNodePanel = ({
 
   if (!activeItem) return null;
 
-  const isReplace = activeItem.expandMode === 'replace';
-
   const canEditTitle = !!expandedNodeId;
   const commitTitle = () => {
     if (!canEditTitle || !expandedNodeId) {
@@ -624,40 +596,6 @@ export const ExpandedNodePanel = ({
             aria-hidden="true"
             className="bg-edge-default mx-1 h-5 w-px peer-empty:hidden"
           />
-
-          {isReplace && onToggleChat && (
-            <Button
-              variant="ghost"
-              iconOnly
-              size="md"
-              className={
-                !isChatCollapsed
-                  ? 'text-info bg-info-bg enabled:hover:bg-info-bg-hover'
-                  : ''
-              }
-              title={isChatCollapsed ? t('chat.open') : t('chat.close')}
-              tooltipPlacement="bottom"
-              aria-label={
-                isChatCollapsed ? t('chat.openPanel') : t('chat.closePanel')
-              }
-              aria-pressed={!isChatCollapsed}
-              onClick={onToggleChat}
-            >
-              <Bot />
-            </Button>
-          )}
-
-          <Button
-            variant="ghost"
-            iconOnly
-            size="sm"
-            className={!isReplace ? 'text-fg-default bg-bg-default' : ''}
-            title={isReplace ? t('node.splitView') : t('node.fullView')}
-            tooltipPlacement="bottom"
-            onClick={() => activeItem.setMode(isReplace ? 'split' : 'replace')}
-          >
-            <Columns2 />
-          </Button>
 
           <Button
             variant="ghost"

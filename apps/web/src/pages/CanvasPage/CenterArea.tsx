@@ -13,7 +13,6 @@ import { Canvas } from '../../components/Panels/Canvas/Canvas';
 import { ExpandedNodePanel } from '../../components/Panels/ExpandedNodePanel/ExpandedNodePanel';
 import { openUserHandbook } from '../../config/handbook';
 import { isElectron } from '../../hooks/useElectron';
-import useCanvasStore from '../../store/canvasStore';
 import {
   selectActiveNodeId,
   usePreviewWorkspaceStore,
@@ -45,7 +44,6 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
 }) => {
   const { t } = useTranslation();
   const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
-  const canvasExpandMode = useCanvasStore((s) => s.expandMode);
 
   // The custom Electron title bar already exposes Handbook + Settings
   // globally — suppress the duplicate floating versions on the canvas
@@ -59,7 +57,6 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
   const [isResizing, setIsResizing] = React.useState(false);
 
   const hasExpanded = !!expandedNodeId;
-  const isReplace = hasExpanded && canvasExpandMode === 'replace';
 
   /* ---- Drag handle for split mode ---- */
   const onHandlePointerDown = useCallback(
@@ -107,12 +104,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
   // cause a visible "resize" whenever a node is expanded or a preview opens).
   const leftPercent = splitRatio * 100;
 
-  // In replace mode the canvas is hidden but kept mounted.
-  const canvasWidth = isReplace
-    ? '0%'
-    : hasExpanded
-      ? `${leftPercent}%`
-      : '100%';
+  const canvasWidth = hasExpanded ? `${leftPercent}%` : '100%';
 
   return (
     <div
@@ -187,8 +179,8 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
         </div>
       </div>
 
-      {/* Resize handle – visible only in split mode */}
-      {hasExpanded && !isReplace && (
+      {/* Resize handle */}
+      {hasExpanded && (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -199,22 +191,10 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
         </div>
       )}
 
-      {/* Expanded panel – rendered only when needed. In replace mode we
-          pin it above the canvas's floating popovers (which portal to
-          body at z-index 1000) so canvas toolbars from the still-mounted
-          underlying canvas can never leak through on top of the panel. */}
+      {/* Expanded panel – rendered only when needed. */}
       {hasExpanded && (
-        <div
-          className={
-            isReplace
-              ? 'relative z-[1100] h-full w-full'
-              : 'h-full min-w-0 flex-1'
-          }
-        >
-          <ExpandedNodePanel
-            isChatCollapsed={isChatCollapsed}
-            onToggleChat={onToggleChat}
-          />
+        <div className="h-full min-w-0 flex-1">
+          <ExpandedNodePanel />
         </div>
       )}
     </div>
