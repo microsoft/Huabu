@@ -6,7 +6,8 @@
  *
  * The curl-native reachback surface for external agents (replaces the v1
  * node-CRUD `.mjs` reachback tool). Endpoints are all Bearer-gated by the
- * global auth hook in `app.ts`:
+ * global auth hook in `app.ts`, except the bundled root `GET skill`
+ * bootstrap:
  *
  * - `GET    download/<path>` — fetch a canvas file as raw bytes. Node files
  *   also carry their metadata (id/type/label/src/locked + parent/child edges)
@@ -19,8 +20,10 @@
  * - `POST   agent/create`    — create a delegated fixed Agent Node.
  * - `POST   task/create`     — create a durable Task and static Task Note.
  * - `POST   task/:taskId/run/create` — create and start one Task Run.
+ * - `GET    agent/profiles`  — list selectable external Agent Profiles.
  * - `GET    skill`           — pull the canvas-access guide (per-canvas
  *   override → bundled default).
+ * - `GET    skill/:skillId`  — pull one fixed advanced RFS guide.
  * - `GET    capabilities*`   — discover direct query/command contracts.
  * - `POST   query`           — run one bounded canonical SpaceQuery.
  * - `POST   execute`         — execute validated agent Space commands.
@@ -50,6 +53,7 @@ import {
   type CreateTaskResponse,
   type RfsAgentEventMode,
   type RfsAgentCreateResponse,
+  type RfsAgentProfilesResponse,
   type RfsUploadResponse,
   type AgentStreamEvent,
   type StartTaskRunResponse,
@@ -61,7 +65,11 @@ import {
   resolveReadable,
   rfsMetaHeaders,
 } from './node-meta.js';
-import { resolveCanvasSkill } from './skill.js';
+import {
+  resolveBundledRootSkill,
+  resolveCanvasSkill,
+  resolveFocusedSkill,
+} from './skill.js';
 import {
   getCommandCapability,
   getQueryCapability,
@@ -88,6 +96,10 @@ import {
 import { runAgent } from '../agent/agent.service.js';
 import { buildChatEnvelope } from '../agent/conversation/envelope.js';
 import { isPromptDebugEnabled } from '../agent/conversation/prompt/debug-prompt.js';
+import {
+  listSelectableAgentProfiles,
+  SelectableAgentProfileError,
+} from '../agent/selectable-agent-profile.js';
 import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { MissingWorldPortalError } from '../canvas/canvas-command-router.js';
@@ -114,9 +126,7 @@ function rfsError(
   code?: string,
 ): { message: string; code?: string } {
   return {
-    message:
-      `${reason} To see how to use this Space, run: ` +
-      `curl -sH "Authorization: Bearer $AGENTLET_TOKEN" "$HUABU_RFS_URL/skill"`,
+    message: `${reason} To see how to use this Space, run: curl -fsS "$HUABU_RFS_URL/skill"`,
     ...(code ? { code } : {}),
   };
 }
@@ -262,7 +272,9 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const { canvasId } = request.params;
       try {
-        const guide = resolveCanvasSkill(canvasId);
+        const guide = request.headers.authorization
+          ? resolveCanvasSkill(canvasId)
+          : resolveBundledRootSkill();
         return reply
           .header('Content-Type', 'text/markdown; charset=utf-8')
           .send(guide);
@@ -272,6 +284,26 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           .code(500)
           .send(rfsError('Failed to load the canvas access guide.'));
       }
+    },
+  );
+
+  app.get<{ Params: { canvasId: string; skillId: string } }>(
+    '/:canvasId/skill/:skillId',
+    async (request, reply) => {
+      const guide = resolveFocusedSkill(request.params.skillId);
+      if (!guide) {
+        return reply
+          .code(404)
+          .send(
+            rfsError(
+              `Unknown advanced skill "${request.params.skillId}".`,
+              'skill_not_found',
+            ),
+          );
+      }
+      return reply
+        .header('Content-Type', 'text/markdown; charset=utf-8')
+        .send(guide);
     },
   );
 
@@ -563,6 +595,26 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ── Task creation and Run launch ──
+  app.get<{ Params: { canvasId: string } }>(
+    '/:canvasId/agent/profiles',
+    async (_request, reply) => {
+      try {
+        const response: RfsAgentProfilesResponse = {
+          profiles: listSelectableAgentProfiles(),
+        };
+        return reply.send(response);
+      } catch (error) {
+        if (
+          error instanceof SelectableAgentProfileError &&
+          error.code === 'registry_unavailable'
+        ) {
+          return reply.code(503).send(rfsError(error.message, error.code));
+        }
+        throw error;
+      }
+    },
+  );
+
   app.post<{ Params: { canvasId: string } }>(
     '/:canvasId/task/create',
     async (request, reply) => {

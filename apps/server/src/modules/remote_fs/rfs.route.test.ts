@@ -50,11 +50,13 @@ vi.mock('../agent/agenetes/drivers.js', () => ({
 import rfsRoutes from './rfs.route.js';
 import { agentNodeService } from '../agent/agent-node.service.js';
 import { agentThreadService } from '../agent/agent-thread.service.js';
+import * as selectableProfiles from '../agent/selectable-agent-profile.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { getCanvasStore, resetStorageCache } from '../storage/index.js';
 import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
 import { taskService } from '../task/task.service.js';
 import { toSafeFilename } from '../workspace/disk/naming.js';
+import { canvasRoot } from '../workspace/disk/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { FixedAgentNodeTarget } from '../agent/agent-thread-resolver.js';
@@ -130,7 +132,7 @@ describe('GET /api/rfs/:canvasId/skill', () => {
         );
       }
       expect(res.body).toContain('/capabilities/commands/$COMMAND');
-      expect(res.body).toContain('$HUABU_RFS_URL/task/create');
+      expect(res.body).toContain('$HUABU_RFS_URL/skill/tasks');
       expect(res.body).toContain('**parent-local**');
       expect(res.body).toContain('read-only `absolutePosition`');
       expect(res.body).toContain(
@@ -139,6 +141,97 @@ describe('GET /api/rfs/:canvasId/skill', () => {
       expect(res.body).toContain(
         `${getNodeDefaultSize('note').height}px nominal layout height`,
       );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns only the bundled root guide without authorization', async () => {
+    seedNote('c1', 'node-1', 'Anchor', 'content');
+    writeFileSync(
+      join(canvasRoot('c1'), 'skill.md'),
+      '# Private Space Override',
+      'utf8',
+    );
+    const app = await buildApp();
+    try {
+      const anonymous = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill',
+      });
+      const authenticated = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill',
+        headers: { authorization: 'Bearer test-token' },
+      });
+
+      expect(anonymous.body).toMatch(/Accessing this Huabu Space/);
+      expect(anonymous.body).not.toContain('Private Space Override');
+      expect(authenticated.body).toContain('Private Space Override');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('serves only fixed advanced skills', async () => {
+    const app = await buildApp();
+    try {
+      const layout = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill/layout',
+      });
+      const tasks = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill/tasks',
+      });
+      const agents = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill/agents',
+      });
+      const unknown = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill/not-a-skill',
+      });
+      const traversal = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill/%2e%2e%2faccess-huabu',
+      });
+
+      expect(layout.statusCode).toBe(200);
+      expect(layout.body).toContain('# Layout Recipes');
+      expect(tasks.body).toContain('# Durable Tasks and Runs');
+      expect(agents.body).toContain('# Delegated and Recursive Agents');
+      expect(unknown.statusCode).toBe(404);
+      expect(unknown.json()).toMatchObject({ code: 'skill_not_found' });
+      expect(traversal.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('GET /api/rfs/:canvasId/agent/profiles', () => {
+  it('returns the selectable Profile catalogue', async () => {
+    vi.spyOn(selectableProfiles, 'listSelectableAgentProfiles').mockReturnValue(
+      [
+        { id: 'profile-a', alias: 'Researcher' },
+        { id: 'profile-b', alias: 'Builder' },
+      ],
+    );
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/agent/profiles',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        profiles: [
+          { id: 'profile-a', alias: 'Researcher' },
+          { id: 'profile-b', alias: 'Builder' },
+        ],
+      });
     } finally {
       await app.close();
     }

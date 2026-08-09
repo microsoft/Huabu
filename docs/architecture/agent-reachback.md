@@ -8,6 +8,7 @@ The surface separates byte transfer from semantic canvas work:
 
 ```text
 External agent
+  ├─ skill ──────────────> bundled root guide + authenticated advanced guides
   ├─ download / upload ──> canvas file projection
   ├─ query ──────────────> canonical SpaceQuery dispatcher
   ├─ query SNAPSHOT_NODES ──> shared snapshot renderer ──> PNG artifact
@@ -23,11 +24,16 @@ All endpoints are mounted under `/api/rfs/:canvasId`; `HUABU_RFS_URL` already co
 
 | Endpoint                           | Responsibility                                                                              |
 | ---------------------------------- | ------------------------------------------------------------------------------------------- |
-| `GET /skill`                       | Return the bundled access guide or a canvas-specific override.                              |
+| `GET /skill`                       | Return the public bundled root guide, or an authenticated canvas-specific root override.    |
+| `GET /skill/:skillId`              | Return a fixed authenticated advanced guide: `layout`, `tasks`, or `agents`.                |
 | `GET /download/<path>`             | Stream a known node, artifact, or staged-upload file.                                       |
 | `POST /upload/<name>`              | Stage bytes in the canvas `.upload/` directory without creating a node.                     |
 | `DELETE /upload/<name>`            | Remove one exact staged upload.                                                             |
 | `POST /agent`                      | Run or continue a canvas-internal agent turn over SSE.                                      |
+| `POST /agent/create`               | Create an idle delegated Agent Node owned by the current fixed parent Agent.                |
+| `GET /agent/profiles`              | Return selectable external Agent Profile IDs and aliases for Task launch or delegation.     |
+| `POST /task/create`                | Create a durable Task and its static Task Note.                                             |
+| `POST /task/:taskId/run/create`    | Create a Run, its visible root Agent Node, and start the first turn.                        |
 | `GET /capabilities`                | Report the direct-operation protocol, limits, semantics, and supported operation types.     |
 | `GET /capabilities/queries/:type`  | Return one query's generated JSON Schema, constraints, result description, and examples.    |
 | `GET /capabilities/commands/:type` | Return one command's generated JSON Schema, constraints, result description, and examples.  |
@@ -58,7 +64,9 @@ The query response returns each artifact's bare `src`, public `downloadPath`, PN
 
 ## Authentication and scoping
 
-Every RFS request requires `Authorization: Bearer <AGENTLET_TOKEN>`. The global server auth hook compares the bearer value with the active Agentlet connection token, and the canvas ID embedded in `HUABU_RFS_URL` scopes route resolution to one Space.
+Every operational RFS request and every focused `GET /skill/:skillId` request requires `Authorization: Bearer <AGENTLET_TOKEN>`. The global server auth hook compares the bearer value with the active Agentlet connection token, and the canvas ID embedded in `HUABU_RFS_URL` scopes route resolution to one Space.
+
+The only anonymous exception is `GET /skill` with no Authorization header. It returns the bundled root guide without resolving the Canvas, revealing whether it exists, or reading its `skill.md` override. An authenticated root request may resolve that override; a supplied invalid credential returns `401` rather than falling back to public documentation.
 
 The shipped token grants access to the complete RFS surface, including direct reads and writes, and `/capabilities` reports both permissions as enabled. The canvas ID scopes route resolution but is not an independent credential or security boundary.
 
@@ -74,11 +82,15 @@ Uploads are inert payloads stored under `.upload/`. Names must be explicit and c
 
 `POST /agent` accepts a plain-text prompt or the legacy validated JSON request and always responds as `text/event-stream`. Comment heartbeats keep the connection alive, `: threadId` identifies the live conversation, and final text is carried in `data:` frames.
 
-The internal agent owns current graph discovery and mutation. It resolves spatial intent, consumes staged uploads, and executes mutations through the shared server-side `CanvasCommand` engine. The request can continue a live turn through `X-Huabu-Thread-Id`; handles are not durable across Huabu restarts.
+Without `X-Huabu-Thread-Id`, the internal agent owns current graph discovery and mutation. It resolves spatial intent, consumes staged uploads, and executes mutations through the shared server-side `CanvasCommand` engine; this live handle is not durable across Huabu restarts. When the header identifies a fixed Agent Node, the route invokes that node's persisted external Agent binding and durable conversation instead.
+
+The Task and delegated-Agent endpoints share the selectable Agent Profile catalogue returned by `GET /agent/profiles`. The projection deliberately exposes only `id` and `alias`; commands, working directories, manifests, setup details, and non-selectable Profiles remain private. `POST /agent/create` requires the current fixed parent's `HUABU_THREAD_ID`, creates a visible idle child, and records the parent-child edge; the caller starts it separately through `POST /agent`.
 
 ## External-agent bootstrap
 
-Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent environment. Every external-agent Deployment persists the bootstrap as its initial preamble, including Deployments first created by mode, model, or configuration control requests; startup repair backfills older undelivered records that omitted it. The detailed procedural guide is loaded on demand from `GET /skill`.
+Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent environment. Every external-agent Deployment persists the bootstrap as its initial preamble, including Deployments first created by mode, model, or configuration control requests; startup repair backfills older undelivered records that omitted it. The preamble owns the authentication contract and curl header setup because every external Agent needs them before loading any Skill. The complete basic guide is loaded without credentials from `GET /skill`; advanced layout, Task, and recursive-Agent procedures are loaded on demand from authenticated `GET /skill/layout`, `/skill/tasks`, and `/skill/agents`.
+
+Skills explain when and how to compose workflows, but they do not duplicate the wire protocol. `GET /capabilities` and its per-operation endpoints remain the canonical, schema-derived source for current query and command fields, limits, and semantics.
 
 The guide is direct-first: an external agent can discover, query, download, snapshot, upload, execute, and verify without invoking `POST /agent` or configuring an internal model provider. `POST /agent` remains an optional high-level interpretation path.
 
@@ -105,8 +117,11 @@ An external agent runs as an untrusted third-party CLI. It must receive its Huab
 | [`apps/server/src/modules/canvas/agent-command-preparation.ts`](../../apps/server/src/modules/canvas/agent-command-preparation.ts)             | Shared server-owned authorship and built-in read-set annotation.                                          |
 | [`apps/server/src/modules/canvas/snapshot-nodes.ts`](../../apps/server/src/modules/canvas/snapshot-nodes.ts)                                   | Shared node-to-artifact snapshot query implementation.                                                    |
 | [`apps/server/src/modules/remote_fs/node-meta.ts`](../../apps/server/src/modules/remote_fs/node-meta.ts)                                       | Safe path projection and node metadata headers.                                                           |
-| [`apps/server/src/modules/remote_fs/skill.ts`](../../apps/server/src/modules/remote_fs/skill.ts)                                               | Resolve the bundled or canvas-specific access guide.                                                      |
+| [`apps/server/src/modules/remote_fs/skill.ts`](../../apps/server/src/modules/remote_fs/skill.ts)                                               | Resolve the public bundled root, authenticated canvas override, and fixed advanced guides.                |
 | [`apps/server/src/prompt/external-agent/access-huabu.md`](../../apps/server/src/prompt/external-agent/access-huabu.md)                         | Agent-facing RFS procedure served by `GET /skill`.                                                        |
+| [`apps/server/src/prompt/external-agent/layout.md`](../../apps/server/src/prompt/external-agent/layout.md)                                     | Advanced RFS adapter over the shared Space layout recipes.                                                |
+| [`apps/server/src/prompt/external-agent/tasks.md`](../../apps/server/src/prompt/external-agent/tasks.md)                                       | Durable Task and Run workflow served by `GET /skill/tasks`.                                               |
+| [`apps/server/src/prompt/external-agent/agents.md`](../../apps/server/src/prompt/external-agent/agents.md)                                     | Delegated and recursive Agent workflow served by `GET /skill/agents`.                                     |
 | [`apps/server/src/prompt/external-agent/system-preamble.ts`](../../apps/server/src/prompt/external-agent/system-preamble.ts)                   | Render the canonical external-agent bootstrap preamble.                                                   |
 | [`apps/server/src/modules/agent/acp/reachback-env.ts`](../../apps/server/src/modules/agent/acp/reachback-env.ts)                               | Inject the canvas-scoped RFS environment into external sessions.                                          |
 | [`apps/server/src/modules/storage/migrate-agenetes-threads.ts`](../../apps/server/src/modules/storage/migrate-agenetes-threads.ts)             | Repair persisted undelivered external Deployments that omitted the bootstrap preamble.                    |

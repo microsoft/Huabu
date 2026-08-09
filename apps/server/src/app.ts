@@ -47,6 +47,7 @@ import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js'
 import externalNoteRoutes from './modules/canvas/external.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
 import integrationsRoutes from './modules/integrations/integrations.route.js';
+import { isPublicRfsSkillBootstrapRequest } from './modules/remote_fs/public-skill.js';
 import rfsRoutes from './modules/remote_fs/rfs.route.js';
 import {
   hostGuardPlugin,
@@ -170,6 +171,15 @@ if (basicAuthUser && basicAuthPass) {
   app.addHook('onRequest', async (request, reply) => {
     if (request.method === 'OPTIONS') return;
     const authHeader = request.headers.authorization || '';
+    if (
+      isPublicRfsSkillBootstrapRequest({
+        method: request.method,
+        url: request.url,
+        authorization: authHeader || undefined,
+      })
+    ) {
+      return;
+    }
 
     // Basic Auth (browser / Vite proxy)
     if (authHeader === expectedBasic) return;
@@ -190,12 +200,21 @@ if (basicAuthUser && basicAuthPass) {
   // No Basic Auth configured — still gate Bearer-only RFS routes
   app.addHook('onRequest', async (request, reply) => {
     if (request.method === 'OPTIONS') return;
+    const authHeader = request.headers.authorization || '';
+    if (
+      isPublicRfsSkillBootstrapRequest({
+        method: request.method,
+        url: request.url,
+        authorization: authHeader || undefined,
+      })
+    ) {
+      return;
+    }
     // Without Basic Auth, all routes are open EXCEPT the Bearer-only
     // RFS routes, which always require a valid Bearer token.
     if (!request.url.startsWith('/api/rfs/')) {
       return;
     }
-    const authHeader = request.headers.authorization || '';
     if (authHeader.startsWith('Bearer ')) {
       const daemonToken = getConnectionToken();
       if (daemonToken && authHeader.slice(7) === daemonToken) return;
@@ -217,9 +236,15 @@ app.register(staticPlugin, {
 // The workspace routes themselves are always allowed so the client can set the path.
 app.addHook('preHandler', async (request, reply) => {
   const url = request.url;
+  const publicSkillBootstrap = isPublicRfsSkillBootstrapRequest({
+    method: request.method,
+    url,
+    authorization: request.headers.authorization,
+  });
   if (
     !isWorkspaceConfigured() &&
     url.startsWith('/api') &&
+    !publicSkillBootstrap &&
     !url.startsWith('/api/workspace') &&
     !url.startsWith('/api/llm') &&
     !url.startsWith('/api/integrations')

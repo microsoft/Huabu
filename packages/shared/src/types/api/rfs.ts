@@ -262,3 +262,19 @@ export const rfsAgentCreateResponseSchema = z.object({
 export type RfsAgentCreateResponse = z.infer<
   typeof rfsAgentCreateResponseSchema
 >;
+
+/** One selectable external Agent Profile exposed to an RFS caller. */
+export const rfsSelectableAgentProfileSchema = z.object({
+  id: z.string().min(1),
+  alias: z.string().min(1),
+});
+export type RfsSelectableAgentProfile = z.infer<
+  typeof rfsSelectableAgentProfileSchema
+>;
+
+export const rfsAgentProfilesResponseSchema = z.object({
+  profiles: z.array(rfsSelectableAgentProfileSchema),
+});
+export type RfsAgentProfilesResponse = z.infer<
+  typeof rfsAgentProfilesResponseSchema
+>;

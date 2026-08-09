@@ -5,12 +5,8 @@ You are working with a **Huabu** Space, an infinite visual surface of notes, ima
 These environment variables are already set:
 
 - `HUABU_RFS_URL` — the base URL for this Space, with no trailing slash.
-- `AGENTLET_TOKEN` — the bearer token for every request.
+- `AGENTLET_TOKEN` — the RFS bearer credential.
 - `HUABU_THREAD_ID` — your conversation ID. Pass it on `execute` (see §6) to attribute your edits.
-
-```bash
-AUTH="Authorization: Bearer $AGENTLET_TOKEN"
-```
 
 Prefer deterministic direct operations:
 
@@ -239,63 +235,57 @@ For a `MERGE_NODE_DATA` patch that changes `content`, first download the node an
 
 The response includes version transition, projected commands, command results, generated IDs, affected IDs, and new revisions. It intentionally excludes Web UI deltas and internal change-review records.
 
-## 8. Task creation and Run launch
+## 8. Delegate work through an Agent
 
-Create a durable Canvas-scoped Task and its static Task Note with `POST task/create`. The Profile must be a currently selectable external Agent Profile; `position` is the root-level location for the Task Note.
+Use `POST agent` when you want a Huabu or external Agent to interpret and complete an open-ended piece of work. Prefer direct `query`, `download`, `upload`, and `execute` for deterministic operations that do not need Agent interpretation; these direct operations work without an internal model provider.
 
-```bash
-curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
-  --data-binary '{
-    "goal": "Investigate and fix the issue",
-    "defaultRootProfileId": "profile-id",
-    "position": { "x": 800, "y": 360 }
-  }' "$HUABU_RFS_URL/task/create"
-```
+### 8.1 Start a Huabu Agent conversation
 
-Creation returns `{ "task": { "taskId", "canvasId", "goal", "defaultRootProfileId", "anchorNodeId", "createdAt" } }` and does not start execution. Save `taskId`.
-
-Start a new Run with `POST task/<taskId>/run/create`. An empty object uses the Task's default Profile. Optional `rootProfileId`, `workingDirPath`, and `additionalInitialPreamble` override this Run's new root Agent only.
+Omit `X-Huabu-Thread-Id` to create a new internal `operate` thread and submit its first request:
 
 ```bash
-TASK_ID="task-..."
-curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
-  --data-binary '{
-    "workingDirPath": "/optional/absolute/path",
-    "additionalInitialPreamble": "Optional durable root-Agent instructions."
-  }' "$HUABU_RFS_URL/task/$TASK_ID/run/create"
+SSE="$(curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
+  --data-binary @./prompt.txt "$HUABU_RFS_URL/agent")"
+THREAD_ID="$(printf '%s\n' "$SSE" | sed -n 's/^: threadId //p' | head -n 1)"
+printf '%s\n' "$SSE" | sed -n 's/^data: //p'
 ```
 
-Run creation returns `{ "run": { ... } }` after the visible root Agent Node is created and its first turn begins. A Task may have multiple Runs. Phase 1 Run status is only `pending` or `running`; failures may intentionally leave an inspectable `pending` record and return its Run, root node, or root thread IDs in the error message.
+The response is an SSE stream. It starts with `: threadId <threadId>` and returns the final answer in `data:` lines. Save `THREAD_ID` to continue the conversation. Internal threads can be continued only while their Agent handle remains live.
 
-## 9. Agent invocation and delegation
+### 8.2 Continue a target thread
 
-`POST agent` is optional. Direct `query` (including `SNAPSHOT_NODES`), `download`, `upload`, and `execute` work without an internal model provider. Omit `X-Huabu-Thread-Id` to start an internal `operate` conversation; return the emitted thread ID to continue it while its handle remains live.
-
-The response is an SSE stream. When `X-Huabu-Thread-Id` names a fixed Agent Node, Huabu invokes that node's persisted external Agent binding through the same durable thread used by the UI. Closing the HTTP connection stops delivery but does not abort that fixed Agent turn.
+Pass the saved or supplied target thread ID in `X-Huabu-Thread-Id`. Huabu submits the request to that existing thread instead of creating another one; the response uses the same SSE format.
 
 ```bash
-curl -N -H "$AUTH" -H "Content-Type: text/plain" \
-  --data-binary @./prompt.txt "$HUABU_RFS_URL/agent"
+SSE="$(curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
+  -H "X-Huabu-Thread-Id: $THREAD_ID" \
+  --data-binary @./follow-up.txt "$HUABU_RFS_URL/agent")"
+printf '%s\n' "$SSE" | sed -n 's/^data: //p'
 ```
 
-Create a delegated fixed Agent Node without starting it by posting its external Profile, absolute Canvas position, and optional launch overrides. `X-Huabu-Host-Thread-Id` must name the fixed parent Agent Node. Save the returned `threadId`, then invoke it through `POST agent`.
+When the target belongs to a fixed Agent Node, Huabu invokes that node's persisted external Agent binding through the same durable thread used by the UI. Closing the HTTP connection stops SSE delivery but does not abort that fixed Agent turn.
+
+### 8.3 Use Profile-backed Agents
+
+For workflows that discover an Agent Profile, create a visible fixed Agent thread, continue it across multiple turns, or recursively delegate work, load the authenticated advanced guide:
 
 ```bash
-curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
-  -H "X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID" \
-  --data-binary '{
-    "profileId": "profile-id",
-    "position": { "x": 1200, "y": 480 },
-    "workingDirPath": "/optional/absolute/path",
-    "additionalInitialPreamble": "Optional durable role instructions."
-  }' "$HUABU_RFS_URL/agent/create"
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/skill/agents"
 ```
 
-Creation returns `{ "nodeId": "...", "threadId": "..." }`, creates the parent-to-child Canvas edge, and leaves the child idle. It does not launch the external process or submit a prompt.
+## Advanced workflows
+
+Load these authenticated guides only when the request needs them:
+
+- `GET skill/layout` — structured diagrams, grids, flowcharts, roadmaps, and advanced Frame layout.
+- `GET skill/tasks` — durable long-horizon Tasks and Runs.
+
+```bash
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/skill/tasks"
+```
 
 ## Error handling
 
-- Authenticate every request; missing or invalid bearer credentials return `401`.
 - Validation and transport errors use `{ "message": ..., "code"?: ... }`.
 - HTTP 200 execution responses may still contain rejected commands or content conflicts.
 - Error messages include a command that reloads this guide.
