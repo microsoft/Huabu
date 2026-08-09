@@ -642,7 +642,10 @@ export const ChatInput = ({
                   size="sm"
                   type="button"
                   title={t('chat.stopGenerating')}
-                  onClick={onStop}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onStop();
+                  }}
                   aria-label={t('chat.stop')}
                 >
                   <Square />
