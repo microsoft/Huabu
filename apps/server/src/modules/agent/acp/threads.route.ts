@@ -41,6 +41,11 @@ import {
 
 import { ensureProfileCacheSubscription } from './profile-cache-port.js';
 import { getProfileSchemaCache } from './profile-schema-cache.js';
+import {
+  getProfileSessionPreferences,
+  rememberProfileConfigPreference,
+  rememberProfileSessionPreference,
+} from './profile-session-preferences.js';
 import { buildReachbackEnv } from './reachback-env.js';
 import { getExternalAgentRuntimeConfig } from './runtime-config.js';
 import { resolveBindingRecipe } from './service.js';
@@ -165,6 +170,7 @@ async function resolveSetRpcEntry(
     namespace: canvasAcpNamespace(ctx.canvasId ?? ''),
     spec: {
       initialPreamble: [renderExternalAgentSystemPreamble()],
+      initialPreferences: getProfileSessionPreferences(ctx.profileId),
       agentletId,
       binding: { alias: ctx.profileId, profileId: ctx.profileId },
       env: buildReachbackEnv(threadId, ctx.canvasId ?? ''),
@@ -183,6 +189,7 @@ async function resolveSetRpcEntry(
       env: spec.spec.env,
       ...(spec.spec.cwd !== undefined && { cwd: spec.spec.cwd }),
       recipe: spec.spec.recipe,
+      initialPreferences: spec.spec.initialPreferences,
       idleTimeoutSecs: getExternalAgentRuntimeConfig().idleTimeoutSecs,
       logger,
     });
@@ -256,10 +263,11 @@ function snapshotMetaFromPersisted(
 
 /**
  * Project the per-profile schema cache entry into the wire snapshot.
- * Used by `/cached-meta` when no per-thread record exists — schema
- * fields (catalogues) and last-known defaults (`current*`) are
- * preserved; per-session fields (`sessionInfo`, `usage`) default to
- * neutral values because they're not profile-scoped.
+ * Used by `/cached-meta` when no per-thread record exists. Schema fields and
+ * last-known observations (`current*`) are preserved, but the response is
+ * marked `source: 'profile'`; clients must open a real session before
+ * presenting those observations as active values. Per-session fields
+ * (`sessionInfo`, `usage`) default to neutral values.
  *
  * `selections` stays empty for the same reason: a user choice belongs to
  * one thread and must never leak across threads of the same profile.
@@ -332,6 +340,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         env: buildReachbackEnv(threadId, parsed.data.canvasId ?? ''),
         cwd: parsed.data.cwd,
         recipe: resolveBindingRecipe(parsed.data.profileId),
+        initialPreferences: getProfileSessionPreferences(parsed.data.profileId),
         idleTimeoutSecs: getExternalAgentRuntimeConfig().idleTimeoutSecs,
         logger: request.log,
       });
@@ -413,21 +422,17 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
    *      and per-session `sessionInfo` / `usage`).
    *   3. Per-profile schema cache (`profile-schema-cache`) → schema
    *      (model / mode / config option catalogues) shared across all
-   *      threads of the same profile, plus the last-known
-   *      `current*` defaults from any session of this profile.
-   *      Used when opening a BRAND-NEW thread bound to a profile the
-   *      user has used before — toolbar populates instantly, no spawn.
+   *      threads of the same profile, marked `source: 'profile'` because
+   *      its `current*` values belong to another thread.
    *   4. Cache miss (truly first use of this profile on this server)
    *      → empty snapshot with `updatedAt === 0`. UI treats as
    *      "neutral / no data yet", NOT a failure.
    *
    * Designed for the web's `useAcpSessionMeta` hydrate-on-mount path:
-   * opening a thread populates dropdowns from cache (so the user can
-   * pre-select before sending) without paying the agentlet cold-start
-   * tax. Real ensure-session still happens on `/` menu open, first
-   * message send, or any set-RPC — all of which write the freshest
-   * snapshot back to disk via `schedulePersistEntryMeta` AND mirror
-   * to the per-profile cache via the injected `AcpProfileCachePort`.
+   * opening an existing thread can populate dropdowns from its own cache
+   * without paying the agentlet cold-start tax. A profile-only hit is not
+   * presented as current state: command Profiles ensure immediately, while
+   * manifest Profiles wait for their first unified turn.
    *
    * Always responds 200 — absence of cache is a normal state.
    */
@@ -440,21 +445,29 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     const { canvasId, profileId } = request.query;
     const agentletId = resolveThreadAgentletId(threadId, canvasId);
     const live = acpSessionRegistry.get(agentletId, threadId);
-    if (live) return { sessionMeta: snapshotSessionMeta(live) };
+    if (live) {
+      return { source: 'thread', sessionMeta: snapshotSessionMeta(live) };
+    }
     if (canvasId) {
       const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
       const persistedMeta = record?.state?.metadata;
       if (persistedMeta) {
-        return { sessionMeta: snapshotMetaFromPersisted(persistedMeta) };
+        return {
+          source: 'thread',
+          sessionMeta: snapshotMetaFromPersisted(persistedMeta),
+        };
       }
     }
     if (profileId) {
       const profileCache = getProfileSchemaCache(profileId);
       if (profileCache && (profileCache.metaUpdatedAt ?? 0) > 0) {
-        return { sessionMeta: snapshotMetaFromProfileCache(profileCache) };
+        return {
+          source: 'profile',
+          sessionMeta: snapshotMetaFromProfileCache(profileCache),
+        };
       }
     }
-    return { sessionMeta: emptySessionMetaSnapshot() };
+    return { source: 'none', sessionMeta: emptySessionMetaSnapshot() };
   });
 
   /**
@@ -621,6 +634,11 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: controlFailureCode('set_model', ack.code),
       });
     }
+    rememberProfileSessionPreference(
+      resolved.entry.profileId,
+      'model',
+      parsed.data.modelId,
+    );
     return { ok: true as const, modelId: parsed.data.modelId };
   });
 
@@ -677,6 +695,12 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: controlFailureCode('set_config_option', ack.code),
       });
     }
+    rememberProfileConfigPreference(
+      resolved.entry.profileId,
+      resolved.entry.configOptions,
+      parsed.data.configOptionId,
+      parsed.data.value,
+    );
     return {
       ok: true as const,
       configOptionId: parsed.data.configOptionId,

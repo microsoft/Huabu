@@ -13,13 +13,12 @@
  *   has cached. Lookup priority on the server:
  *     1. live registry entry (this lifetime),
  *     2. per-thread disk record (`session-store`),
- *     3. **per-profile schema cache** — schema (modes / models /
- *        config option catalogue) shared across all threads of the
- *        same profile, with `current*` defaulting to the last-known
- *        values from any session of that profile.
+ *     3. **per-profile schema cache** — a warm catalogue shared across
+ *        threads. Its `current*` values are not accepted as this thread's
+ *        state; command Profiles ensure a real session before rendering.
  *
- *   Any of (1)–(3) hitting means the toolbar populates immediately
- *   and the badge stays `connected` — **no spawn, no polling**.
+ *   A hit from (1) or (2) populates immediately with no spawn. A hit from
+ *   (3) proves only that the profile is known, not which values are active.
  *
  * - **Cache miss → optional one-shot auto-ensure** — command Profiles
  *   chain into `refresh()` to fire a real `ensureAcpSession`. Manifest
@@ -426,8 +425,8 @@ export function useAcpSessionMeta({
   //   3. per-profile schema cache (shared across all threads of the
   //      same profile) — passing `profileId` enables this tier.
   //
-  // If ANY tier hits we commit the snapshot and stop: 0 spawn, badge
-  // stays optimistic-green, and the toolbar populates instantly.
+  // Thread-owned hits are committed directly. Profile-owned hits contain
+  // another thread's current values, so they follow the ensure path.
   //
   // **Total miss → optional one-shot auto-ensure**: command Profiles
   // chain into `refresh()`. Manifest Profiles wait for their first real
@@ -459,17 +458,18 @@ export function useAcpSessionMeta({
     )
       .then((res) => {
         if (!isCurrent()) return;
-        if (res.sessionMeta.updatedAt > 0) {
-          // Cache hit (any tier) — commit and stop. Toolbar populated,
-          // badge stays optimistic-green, no spawn.
+        if (res.source === 'thread') {
+          // Only a live or persisted snapshot belongs to this thread. A
+          // profile cache carries another thread's last-known currentValue;
+          // presenting it as active can claim auto-approve is enabled while
+          // a fresh agent session is still using its safer default.
           setMeta(res.sessionMeta);
           lastFetchedAtRef.current = Date.now();
           return;
         }
-        // Total miss — fire a real ensure so the toolbar fills in
-        // and the badge transitions through `connecting`. This now
-        // only triggers on the very first thread of a profile (and
-        // after a data-dir wipe).
+        // A profile-only catalogue is useful for schema warm-up but cannot
+        // establish active values. Open a real command session just as for a
+        // total miss; manifest Profiles wait for their first unified turn.
         if (autoEnsureOnCacheMiss) void refreshRef.current();
       })
       .catch(() => {

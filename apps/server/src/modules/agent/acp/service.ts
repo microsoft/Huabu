@@ -27,6 +27,7 @@ import {
 
 import { renderExternalAgentInputs } from './preprocessor.js';
 import { ensureProfileCacheSubscription } from './profile-cache-port.js';
+import { getProfileSessionPreferences } from './profile-session-preferences.js';
 import { getProfile as getLegacyProfile } from './profile-store.js';
 import { buildReachbackEnv } from './reachback-env.js';
 import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
@@ -242,6 +243,7 @@ export function buildAcpWorkloadSpec(
           ? [opts.launchOverrides.additionalInitialPreamble]
           : []),
       ],
+      initialPreferences: getProfileSessionPreferences(binding.profileId),
       binding,
       agentletId,
       ...(cwd !== undefined && { cwd }),
