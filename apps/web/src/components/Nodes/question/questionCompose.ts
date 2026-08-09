@@ -17,7 +17,11 @@ import { useChatStore } from '@/store/chatStore.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent.ts';
-import type { AgentConversationView, CanvasNodeId } from '@huabu/shared';
+import type {
+  AgentBinding,
+  AgentConversationView,
+  CanvasNodeId,
+} from '@huabu/shared';
 
 /**
  * Open the chat panel in compose mode for a question node's thread and
@@ -26,8 +30,12 @@ import type { AgentConversationView, CanvasNodeId } from '@huabu/shared';
 export function enterQuestionCompose(
   view: AgentConversationView,
   canvasId: string | null,
+  binding?: AgentBinding,
 ): void {
-  useChatStore.getState().openQuestionCompose(view, canvasId || undefined);
+  useChatStore.getState().openQuestionCompose(view, {
+    ...(canvasId ? { canvasId } : {}),
+    ...(binding ? { binding } : {}),
+  });
   usePanelStore
     .getState()
     .requestOpenRightPanel(view.presentationAnchor.nodeId);

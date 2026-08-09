@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 /**
- * Skill / prompt delivery for the RFS (`GET /api/rfs/:canvasId/skill`).
+ * Skill / prompt delivery for the RFS (`GET /api/rfs/:canvasId/skill*`).
  *
  * Resolver: return the **per-canvas `skill.md`** at the canvas root when
  * present (future per-canvas customization), else the **bundled default**
@@ -20,6 +20,19 @@ import { canvasRoot } from '../storage/paths.js';
 /** PROMPT-ROOT-relative path of the bundled access guide. */
 const ACCESS_GUIDE_TEMPLATE = 'external-agent/access-huabu.md';
 
+const FOCUSED_SKILL_TEMPLATES = {
+  layout: 'external-agent/layout.md',
+  tasks: 'external-agent/tasks.md',
+  agents: 'external-agent/agents.md',
+} as const;
+
+export type RfsFocusedSkillId = keyof typeof FOCUSED_SKILL_TEMPLATES;
+
+/** Resolve the public root guide without consulting Canvas storage. */
+export function resolveBundledRootSkill(): string {
+  return renderPromptFile(ACCESS_GUIDE_TEMPLATE);
+}
+
 /**
  * Resolve the canvas-access guide for `canvasId`: a canvas-root `skill.md`
  * override when it exists, otherwise the bundled default. Returned as raw
@@ -30,5 +43,15 @@ export function resolveCanvasSkill(canvasId: string): string {
   if (existsSync(override)) {
     return readFileSync(override, 'utf8');
   }
-  return renderPromptFile(ACCESS_GUIDE_TEMPLATE);
+  return resolveBundledRootSkill();
+}
+
+/** Resolve one fixed, authenticated advanced guide. */
+export function resolveFocusedSkill(skillId: string): string | null {
+  if (!Object.prototype.hasOwnProperty.call(FOCUSED_SKILL_TEMPLATES, skillId)) {
+    return null;
+  }
+  return renderPromptFile(
+    FOCUSED_SKILL_TEMPLATES[skillId as RfsFocusedSkillId],
+  );
 }

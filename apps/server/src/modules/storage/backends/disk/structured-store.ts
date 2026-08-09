@@ -25,6 +25,7 @@ import { createDiskCanvasLogRepositories } from './canvas-log-repository.js';
 import { getCanvasStore } from './legacy/canvas-store-cache.js';
 import { DiskLegacyNodeStore } from './legacy-node-store.js';
 import { DiskSpaceRepository } from './space-repository.js';
+import { DiskCanvasTaskRepository } from './task-repository.js';
 
 import type { StorageHealth } from '../../ports/common.js';
 import type { SpaceHandle, StructuredStore } from '../../ports/structured.js';
@@ -51,6 +52,7 @@ export class DiskStructuredStore implements StructuredStore {
       canvasId: store.canvasId,
       record: new DiskSpaceRepository(store),
       ...logRepositories,
+      tasks: new DiskCanvasTaskRepository(store),
       nodes: new DiskLegacyNodeStore(store),
     };
   }

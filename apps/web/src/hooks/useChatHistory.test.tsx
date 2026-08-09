@@ -42,8 +42,12 @@ vi.mock('./useAgentStream', () => ({ handleStreamEvent: vi.fn() }));
 
 vi.mock('@/store/conversationOwner', () => ({
   ConversationIntegrityError: class ConversationIntegrityError extends Error {},
+  filterClientOwnedQuestionPatch: vi.fn(
+    (_source: unknown, patch: Record<string, unknown>) => patch,
+  ),
   patchConversationOwnerNode: vi.fn(),
   refreshConversationPresentation: vi.fn(),
+  resolveConversationOwnerSource: vi.fn(() => undefined),
   validateConversationView: vi.fn(async () => {}),
 }));
 
@@ -96,6 +100,13 @@ async function renderHarness(): Promise<void> {
 }
 
 beforeEach(() => {
+  useChatStore.persist.setOptions({
+    storage: {
+      getItem: () => null,
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    },
+  });
   apiMocks.fetchHistory.mockReset();
   apiMocks.reconnectStream.mockReset();
   apiMocks.reconnectStream.mockResolvedValue(false);

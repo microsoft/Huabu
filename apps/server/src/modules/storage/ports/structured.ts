@@ -7,7 +7,8 @@
  * The connection ({@link StructuredStore}) owns backend identity and
  * lifecycle, and vends a {@link SpaceHandle} per Space. The handle is a
  * composite of narrow, asynchronous repositories: the versioned Space record
- * ({@link SpaceRepository}) and four Canvas-owned log-family repositories.
+ * ({@link SpaceRepository}), four Canvas-owned log-family repositories, and
+ * the canonical Task/Run repository.
  *
  * Scope note: node sidecars are still reached through
  * {@link LegacyNodeStore}, a deliberately narrow *synchronous* transitional
@@ -34,7 +35,13 @@ import type {
   DeltaLogEntry,
   NodeContent,
 } from '../../canvas/persistence-types.js';
-import type { IntentEpisode, RecentAction } from '@huabu/shared';
+import type {
+  IntentEpisode,
+  RecentAction,
+  TaskRecord,
+  TaskRunRecord,
+  TaskStoreSnapshot,
+} from '@huabu/shared';
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
 export type StructuredBackendKind = 'disk' | 'sqlite' | 'postgres';
@@ -66,6 +73,7 @@ export interface SpaceHandle {
   readonly deltas: CanvasDeltaRepository;
   readonly changes: CanvasChangeRepository;
   readonly intents: CanvasIntentRepository;
+  readonly tasks: CanvasTaskRepository;
   /** Synchronous transitional surface; replaced in a later phase. */
   readonly nodes: LegacyNodeStore;
 }
@@ -157,6 +165,18 @@ export interface CanvasChangeRepository {
 export interface CanvasIntentRepository {
   read(): Promise<IntentEpisode[]>;
   upsert(episode: IntentEpisode): Promise<void>;
+}
+
+export type TaskRunUpdate = Partial<
+  Pick<TaskRunRecord, 'rootNodeId' | 'rootThreadId' | 'status' | 'startedAt'>
+>;
+
+/** Canonical Task and Run records for one Space. */
+export interface CanvasTaskRepository {
+  read(): Promise<TaskStoreSnapshot>;
+  insertTask(task: TaskRecord): Promise<void>;
+  insertRun(run: TaskRunRecord): Promise<void>;
+  updateRun(runId: string, update: TaskRunUpdate): Promise<TaskRunRecord>;
 }
 
 // ─── Node sidecars (transitional) ───────────────────────────────────────────

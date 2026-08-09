@@ -179,7 +179,7 @@ To attach a canvas change to the right conversation's card, the initiating
   [`space-execute.ts`](../../apps/server/src/modules/remote_fs/space-execute.ts))
   reads it and sets `originator.threadId` + `computeChanges`. This is
   **best-effort**: a missing/malformed header applies the write unattributed. The
-  header is distinct from `/agent`'s `X-Huabu-Thread-Id` (which continues an
+  header is distinct from the thread ID in `/agent/:threadId/prompt` (which continues an
   internal built-in-agent turn — a different thread space).
 
 `executeOnServer` computes review records only when `computeChanges` is set

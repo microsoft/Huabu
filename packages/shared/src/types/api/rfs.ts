@@ -16,9 +16,8 @@
  * - `POST query` with `type: "SNAPSHOT_NODES"` — render image, sketch, or frame
  *   nodes into downloadable PNG artifacts without invoking the
  *   canvas-internal agent.
- * - `POST agent` — talk to the canvas-internal agent for open-ended semantic
- *   work. Response is **always** `text/event-stream` (see
- *   {@link RfsAgentRequest}).
+ * - `POST agent` — create one visible Agent Node and optionally start it.
+ * - `POST agent/:threadId/prompt` — submit a turn to an existing Agent.
  * - `GET  skill` — pull the full RFS usage guide (per-canvas `skill.md` override
  *   or the bundled default).
  *
@@ -129,16 +128,18 @@ export interface RfsUploadResponse {
 
 // ==================== ask-agent ====================
 
-/** Lower clamp for {@link RfsAgentRequest.heartbeatSec}. */
+/** Lower clamp for RFS Agent SSE heartbeat configuration. */
 export const RFS_HEARTBEAT_MIN_SEC = 5;
-/** Upper clamp for {@link RfsAgentRequest.heartbeatSec}. */
+/** Upper clamp for RFS Agent SSE heartbeat configuration. */
 export const RFS_HEARTBEAT_MAX_SEC = 30;
 /** Default heartbeat cadence when the caller omits `heartbeatSec`. */
 export const RFS_HEARTBEAT_DEFAULT_SEC = 15;
 
-/** Canonical request headers for `POST /api/rfs/:canvasId/agent`. */
+export const HUABU_AGENT_PROFILE_ID = 'huabu';
+
+/** Canonical request headers for RFS Agent creation and prompting. */
 export const RFS_AGENT_HEADERS = {
-  threadId: 'X-Huabu-Thread-Id',
+  start: 'X-Huabu-Agent-Start',
   eventMode: 'X-Huabu-Event-Mode',
   heartbeatSec: 'X-Huabu-Heartbeat-Sec',
 } as const;
@@ -147,20 +148,13 @@ export const rfsAgentEventModeSchema = z.enum(['final', 'all']);
 export type RfsAgentEventMode = z.infer<typeof rfsAgentEventModeSchema>;
 
 /**
- * Validated control headers for `POST /api/rfs/:canvasId/agent`.
+ * Validated streaming headers shared by Agent creation and prompting.
  *
  * Fastify normalizes incoming header names to lowercase. Unknown standard
  * headers are retained by `.passthrough()` and ignored by the route.
  */
 export const rfsAgentHeadersSchema = z
   .object({
-    'x-huabu-thread-id': z
-      .string()
-      .trim()
-      .min(1)
-      .max(256)
-      .regex(/^[^\r\n]+$/)
-      .optional(),
     'x-huabu-event-mode': rfsAgentEventModeSchema.optional(),
     'x-huabu-heartbeat-sec': z.coerce
       .number()
@@ -173,6 +167,21 @@ export const rfsAgentHeadersSchema = z
 
 export type RfsAgentHeaders = z.infer<typeof rfsAgentHeadersSchema>;
 
+export const rfsAgentCreateHeadersSchema = rfsAgentHeadersSchema.extend({
+  'x-huabu-agent-start': z
+    .enum(['true', 'false'])
+    .transform((value) => value === 'true')
+    .optional(),
+  'x-huabu-host-thread-id': z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .regex(/^[a-zA-Z0-9_-]+$/)
+    .optional(),
+});
+export type RfsAgentCreateHeaders = z.infer<typeof rfsAgentCreateHeadersSchema>;
+
 /** Canonical request headers for `POST /api/rfs/:canvasId/execute`. */
 export const RFS_EXECUTE_HEADERS = {
   /**
@@ -180,8 +189,7 @@ export const RFS_EXECUTE_HEADERS = {
    * external agent serves, injected as `HUABU_THREAD_ID`). When present,
    * the executor attributes the batch's change-review records to this
    * thread so they surface in that conversation's change card. Distinct
-   * from {@link RFS_AGENT_HEADERS.threadId}, which continues an internal
-   * built-in agent turn on `POST /agent` — a different thread space.
+   *     from the target thread in `POST /agent/:threadId/prompt`.
    */
   hostThreadId: 'X-Huabu-Host-Thread-Id',
 } as const;
@@ -206,25 +214,10 @@ export const rfsExecuteHeadersSchema = z
 
 export type RfsExecuteHeaders = z.infer<typeof rfsExecuteHeadersSchema>;
 
-/**
- * Request body for `POST /api/rfs/:canvasId/agent`.
- *
- * The response is **always** `text/event-stream`: the SSE framing is the
- * envelope (comment `:` heartbeats keep proxies/timeouts at bay; a terminal
- * `event: error` frame reports failures), while the payload inside `data:`
- * frames is plain text when {@link doneTextOnly} is set. A caller can recover
- * the final answer with `sed -n 's/^data: //p'`.
- */
-export const rfsAgentRequestSchema = z.object({
-  /** Natural-language instruction for the canvas-internal agent. */
+/** JSON body for one turn submitted to an existing Agent. */
+export const rfsAgentPromptRequestSchema = z.object({
   prompt: z.string().min(1),
-  /**
-   * When true (the default, applied server-side), the agent streams a single
-   * final plain-text answer in `data:` frames instead of structured
-   * intermediate events — the simplest thing to consume from a shell. Set false
-   * to receive the full structured agent event stream.
-   */
-  doneTextOnly: z.boolean().optional(),
+  eventMode: rfsAgentEventModeSchema.optional(),
   /**
    * Heartbeat cadence in seconds, clamped to
    * [{@link RFS_HEARTBEAT_MIN_SEC}, {@link RFS_HEARTBEAT_MAX_SEC}]. Comment
@@ -238,5 +231,70 @@ export const rfsAgentRequestSchema = z.object({
     .max(RFS_HEARTBEAT_MAX_SEC)
     .optional(),
 });
+export type RfsAgentPromptRequest = z.infer<typeof rfsAgentPromptRequestSchema>;
 
-export type RfsAgentRequest = z.infer<typeof rfsAgentRequestSchema>;
+/** Full JSON body for `POST /api/rfs/:canvasId/agent`. */
+export const rfsAgentCreateRequestSchema = z.object({
+  profileId: z.string().trim().min(1).default(HUABU_AGENT_PROFILE_ID),
+  prompt: z.string().trim().min(1).optional(),
+  position: z
+    .object({
+      x: z.number().finite(),
+      y: z.number().finite(),
+    })
+    .optional(),
+  parentThreadId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .regex(/^[a-zA-Z0-9_-]+$/)
+    .optional(),
+  workingDirPath: z.string().optional(),
+  additionalInitialPreamble: z.string().optional(),
+});
+export type RfsAgentCreateRequest = z.infer<typeof rfsAgentCreateRequestSchema>;
+
+export const rfsAgentParentConnectionSchema = z.enum([
+  'not_requested',
+  'connected',
+  'not_found',
+  'failed',
+]);
+export type RfsAgentParentConnection = z.infer<
+  typeof rfsAgentParentConnectionSchema
+>;
+
+export const rfsAgentCreationWarningSchema = z.object({
+  code: z.enum(['parent_not_found', 'parent_connection_failed']),
+  message: z.string().min(1),
+});
+
+/** Response metadata emitted whenever an Agent Node is created. */
+export const rfsAgentCreateResponseSchema = z.object({
+  nodeId: z.string().min(1),
+  threadId: z.string().min(1),
+  profileId: z.string().min(1),
+  parentConnection: rfsAgentParentConnectionSchema,
+  warnings: z.array(rfsAgentCreationWarningSchema),
+});
+export type RfsAgentCreateResponse = z.infer<
+  typeof rfsAgentCreateResponseSchema
+>;
+
+/** One available Agent Profile exposed to an RFS caller. */
+export const rfsAvailableAgentProfileSchema = z.object({
+  id: z.string().min(1),
+  alias: z.string().min(1),
+  default: z.boolean().optional(),
+});
+export type RfsAvailableAgentProfile = z.infer<
+  typeof rfsAvailableAgentProfileSchema
+>;
+
+export const rfsAgentProfilesResponseSchema = z.object({
+  profiles: z.array(rfsAvailableAgentProfileSchema),
+});
+export type RfsAgentProfilesResponse = z.infer<
+  typeof rfsAgentProfilesResponseSchema
+>;

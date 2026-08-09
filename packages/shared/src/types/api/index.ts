@@ -28,3 +28,4 @@ export * from './rfs.js';
 export * from './space-operations.js';
 export * from './agent-team.js';
 export * from './agent-profile.js';
+export * from './task.js';
