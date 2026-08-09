@@ -155,6 +155,11 @@ function serializeDurableTurn(turn: AgentTurn): string {
 export interface AcpSpec {
   /** Portable host-authored instructions realized by this driver. */
   readonly initialPreamble?: readonly string[];
+  /** Host-owned preferences applied only when this thread has no prior state. */
+  readonly initialPreferences?: {
+    readonly model?: string;
+    readonly thoughtLevel?: string;
+  };
   /** External binding (alias + profileId) for the thread. */
   readonly binding: { readonly alias: string; readonly profileId: string };
   /**
@@ -399,6 +404,9 @@ export class AcpAgentHandle<
       ...(recipe !== undefined && { recipe }),
       ...(env !== undefined && { env }),
       ...(priorState !== undefined && { priorState }),
+      ...(this.spec.spec.initialPreferences !== undefined && {
+        initialPreferences: this.spec.spec.initialPreferences,
+      }),
       repairFromClosedEntry,
       idleTimeoutSecs: this.runtimePolicy.getIdleTimeoutSecs(),
       logger,

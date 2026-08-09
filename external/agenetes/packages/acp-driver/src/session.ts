@@ -212,6 +212,11 @@ export interface EnsureAcpSessionOptions {
    * thread (no durable record yet).
    */
   priorState?: AgentStateSnapshot<AcpDurableState>;
+  /** Host-owned preferences used only for a fresh thread. */
+  initialPreferences?: {
+    model?: string;
+    thoughtLevel?: string;
+  };
   /**
    * Whether a matching closed live entry may override `priorState` during
    * Handle self-repair. Disabled only for the history fallback after native
@@ -355,6 +360,65 @@ function hydrateSelectionsFromPersistedMeta(
 
 /** @internal Exported for tests. */
 export { hydrateSelectionsFromPersistedMeta };
+
+function seedInitialPreferences(
+  entry: AcpSessionEntry,
+  preferences: EnsureAcpSessionOptions['initialPreferences'],
+): void {
+  if (!preferences) return;
+
+  const selectors = entry.configOptions.map((option) => ({
+    id: String((option as { id?: unknown }).id ?? ''),
+    category: normalizeSelectionKey(
+      (option as { category?: unknown }).category,
+    ),
+    currentValue: (option as { currentValue?: string | boolean }).currentValue,
+    options: (option as { options?: unknown }).options,
+  }));
+  const offeredValues = (raw: unknown): Set<string> => {
+    if (!Array.isArray(raw)) return new Set();
+    const values = new Set<string>();
+    for (const item of raw) {
+      if (!item || typeof item !== 'object') continue;
+      const record = item as { value?: unknown; options?: unknown };
+      if (typeof record.value === 'string') values.add(record.value);
+      for (const nested of offeredValues(record.options)) values.add(nested);
+    }
+    return values;
+  };
+  const seedConfigPreference = (
+    category: 'model' | 'thought_level',
+    value: string | undefined,
+  ): boolean => {
+    if (!value) return false;
+    const selector = selectors.find(
+      (candidate) => candidate.category === category,
+    );
+    if (!selector || !offeredValues(selector.options).has(value)) return false;
+    entry.selections[selector.id] = value;
+    return true;
+  };
+
+  const modelSeeded = seedConfigPreference('model', preferences.model);
+  if (
+    !modelSeeded &&
+    preferences.model &&
+    entry.availableModels.some(
+      (model) =>
+        String((model as { modelId?: unknown }).modelId ?? '') ===
+        preferences.model,
+    )
+  ) {
+    entry.selections[MODEL_SELECTION_ID] = preferences.model;
+  }
+  seedConfigPreference('thought_level', preferences.thoughtLevel);
+  if (Object.keys(entry.selections).length > 0) {
+    entry.selectionsUpdatedAt = Date.now();
+  }
+}
+
+/** @internal Exported for tests. */
+export { seedInitialPreferences };
 
 /** The value the agent currently reports for one selectable knob. */
 function agentReportedValue(
@@ -965,6 +1029,9 @@ async function ensureAcpSessionInner(
   // would otherwise close the `metaUpdatedAt === 0` gate below and strand
   // the user's remembered choices.
   hydrateSelectionsFromPersistedMeta(created, priorState?.metadata);
+  if (!priorState?.metadata) {
+    seedInitialPreferences(created, opts.initialPreferences);
+  }
 
   // Installing the listener synchronously drains Gateway pre-attach messages
   // that AcpAgentClient retained as orphan updates during construction.
