@@ -1,7 +1,7 @@
 # Agent Architecture
 
 > Runtime architecture of the server-side agent: runtime, entry points, tools, skills, external agents, persistence.
-> Last updated: 2026-07-18
+> Last updated: 2026-08-09
 
 Module root: [apps/server/src/modules/agent](../../apps/server/src/modules/agent) · prompt root: [apps/server/src/prompt](../../apps/server/src/prompt)
 
@@ -105,6 +105,7 @@ Design principles:
 4. **Truncation contract**: read tools return `count + truncated`, and add
    `total` only when the full set is cheap to obtain.
 5. **World target reads**: read-only built-in tools remain implicitly scoped by default. A World-owned conversation may pass `targetCanvasId` from a `canvasRef` returned by the World outline; the executor accepts it only when exactly one canonical Portal addresses that Canvas. Ordinary Space conversations cannot opt into another Canvas, and write or artifact-materializing tools never consume this field. `snapshot_nodes` remains owner-scoped; source images can be viewed inline through targeted `read`.
+6. **Node read projection**: `read("nodes/*.md")` returns canonical sidecar metadata once as structured `frontmatter`, the authored Markdown body only as `content`, and the current content `rev`; line offsets and truncation are body-relative. Non-node text files retain file-level semantics, including raw frontmatter fences.
 
 `space_commands` covers 14 commands ([space-operations.ts](../../packages/shared/src/types/api/space-operations.ts)): CREATE_NODES, DELETE_NODES, MERGE_NODE_DATA, SET_NODE_PARENT, DISSOLVE_FRAME, SET_NODE_GEOMETRY, REORDER_NODES, CONNECT_NODES, DISCONNECT_EDGES, SET_EDGE_STYLE, ALIGN_NODES, DISTRIBUTE_NODES, SET_FRAME_LAYOUT, SET_PORTAL_NODE_PINS — the agent subset of [`CanvasCommand`](../../packages/shared/src/types/canvas/command.ts) (excluding the UI-only `SET_NODE_LOCKED / SET_NODE_SELECTION / CHANGE_NODE_TYPE`). Portal Pin commands route to the workspace World and never mutate their source Space. The canonical Zod contracts are converted to the JSON Schema shape expected by pi-ai in [zod-tool-schema.ts](../../apps/server/src/modules/agent/tools/zod-tool-schema.ts). Commands execute server-side, persist to disk, and return deltas; see [canvas-command-architecture.md](./canvas-command-architecture.md).
 

@@ -19,11 +19,10 @@
  * as `isError: true` tool results (see its `AgentTool.execute`
  * contract). Successful calls return the JSON envelope as a string.
  *
- * Frontmatter convenience: if the file starts with a YAML frontmatter
- * block ("---" fences), the parsed object is attached as `frontmatter`
- * so the LLM doesn't have to parse YAML itself (which it does badly).
- * The raw `content` field is unchanged — the file is reproduced
- * verbatim, including the fences. `frontmatter` is purely additive.
+ * Node sidecars return the parsed YAML as `frontmatter` and the authored
+ * Markdown body as `content`; pagination is relative to that body. Other
+ * frontmatter-bearing text files remain byte-for-byte file reads with the
+ * parsed object attached as an additive convenience.
  *
  * Note vs `inspect_nodes`: read owns everything that lives in the
  * node markdown frontmatter (label, type, src, summary, keywords, ...).
@@ -73,37 +72,38 @@ const MAX_READ_FILE_BYTES = 10 * 1024 * 1024;
 const NODE_FILE_RE = /^nodes\/[^/]+\.md$/;
 
 /**
- * When the agent reads a node's markdown, record its current
- * authored-content rev into the run's read-set (keyed by node id from
- * frontmatter). `canvas_commands` later auto-injects this as `expectRev`
- * so a subsequent content write carries the rev the agent actually saw.
- * Computed via the SAME `readNode` + `nodeRevisionOf` path the executor's
- * CAS uses, so the tokens are guaranteed to match. Best-effort — any
- * failure just leaves the node out of the read-set (a later write then
- * needs the context seed or is rejected as never-read).
+ * Project a canonical node sidecar into structured metadata, body-only
+ * content, and the same revision used by executor CAS. When supplied, the
+ * turn read-set receives that revision for guarded follow-up writes.
  */
-function recordNodeRev(
+function projectNodeRead(
   rel: string,
   canvasId: string,
   fileText: string,
-  readSet: Map<string, string>,
-): void {
-  if (!NODE_FILE_RE.test(rel)) return;
-  const rawId = parseFrontmatter(fileText).meta?.['id'];
+  readSet?: Map<string, string>,
+):
+  | {
+      content: string;
+      frontmatter: Record<string, unknown>;
+      rev: string;
+    }
+  | undefined {
+  if (!NODE_FILE_RE.test(rel)) return undefined;
+  const parsed = parseFrontmatter(fileText);
+  const rawId = parsed.meta['id'];
   const nodeId = typeof rawId === 'string' && rawId ? rawId : undefined;
-  if (!nodeId) return;
+  if (!nodeId) return undefined;
   try {
     const nc = getCanvasStore(canvasId).readNode(nodeId);
-    if (!nc) return;
-    readSet.set(
-      nodeId,
-      nodeRevisionOf({
-        content: nc.content,
-        src: typeof nc.src === 'string' ? nc.src : undefined,
-      }),
-    );
+    if (!nc) return undefined;
+    const rev = nodeRevisionOf({
+      content: nc.content,
+      src: typeof nc.src === 'string' ? nc.src : undefined,
+    });
+    readSet?.set(nodeId, rev);
+    return { content: nc.content, frontmatter: parsed.meta, rev };
   } catch {
-    /* best-effort: skip on any read/parse failure */
+    return undefined;
   }
 }
 
@@ -260,7 +260,13 @@ export async function handleRead(
   }
 
   const text = buf.toString('utf8');
-  if (readSet) recordNodeRev(rel, args.canvasId, text, readSet);
+  const nodeRead = projectNodeRead(rel, args.canvasId, text, readSet);
+  if (nodeRead) {
+    return renderTextResponse(rel, nodeRead.content, offset, limit, {
+      frontmatter: nodeRead.frontmatter,
+      rev: nodeRead.rev,
+    });
+  }
   return renderTextResponse(rel, text, offset, limit);
 }
 
@@ -279,15 +285,17 @@ function renderTextResponse(
   text: string,
   offset: number | undefined,
   limit: number | undefined,
+  metadata?: {
+    frontmatter?: Record<string, unknown>;
+    rev?: string;
+  },
 ): string {
-  // Parse frontmatter from the whole file (not the slice) so the structured
-  // metadata is surfaced even when the agent pages through the body. The
-  // raw fence block is still present in `content` when the slice covers
-  // the file head — we don't strip it, so the file remains reproduced
-  // verbatim. Empty `meta` (no fences, or unparseable YAML) means "not a
-  // frontmatter file" and we omit the field entirely.
-  let frontmatter: Record<string, unknown> | undefined;
-  if (text.startsWith('---')) {
+  // Node callers provide body-only text plus pre-parsed metadata. For other
+  // files, parse frontmatter from the whole file so it remains visible while
+  // paging, but keep the raw fence block in `content`. Empty `meta` means the
+  // file has no valid frontmatter and the field is omitted.
+  let frontmatter = metadata?.frontmatter;
+  if (!frontmatter && text.startsWith('---')) {
     const parsed = parseFrontmatter(text);
     if (parsed.meta && Object.keys(parsed.meta).length > 0) {
       frontmatter = parsed.meta;
@@ -355,6 +363,7 @@ function renderTextResponse(
     truncated,
     ...(nextOffset !== undefined ? { nextOffset } : {}),
     ...(frontmatter !== undefined ? { frontmatter } : {}),
+    ...(metadata?.rev !== undefined ? { rev: metadata.rev } : {}),
     content,
   });
 }

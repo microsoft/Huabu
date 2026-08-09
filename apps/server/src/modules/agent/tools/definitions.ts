@@ -258,11 +258,11 @@ export const readParamsSchema = Type.Object({
 export const readTool: ToolDefinition = {
   name: 'read',
   label: 'Read',
-  description: `Read the contents of a **single** file under the current Space folder — no globs (use find to enumerate, then read each match). In a World conversation, targetCanvasId may select a source Space exposed by a canonical Portal. Text files return JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }, truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging.
+  description: `Read the contents of a **single** file under the current Space folder — no globs (use find to enumerate, then read each match). In a World conversation, targetCanvasId may select a source Space exposed by a canonical Portal. Text files return JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter?, rev? }, truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging.
 
 Raster image artifacts (png / jpg / gif / webp, stored under \`.artifacts/\`) are returned **inline as vision content you can actually see** — so to view an inline \`![](<key>)\` image referenced in a note body, call \`read(".artifacts/<key>")\` (the file also shows up as \`.artifacts/<key>\` in find / grep / ls output). Other binary files (pdf / video / archives) are rejected with an error; use the node's \`src\` URL or the Space UI for those.
 
-When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself.
+For a canonical \`nodes/*.md\` sidecar, \`content\` is the authored Markdown body only, \`frontmatter\` contains the parsed node metadata, \`rev\` is the content revision used by guarded writes, and line offsets refer to the body. Other text files preserve their full file content; when one begins with YAML frontmatter, the parsed object is attached without removing the raw fence block.
 
 See 'skills/space/SKILL.md' for the Space folder layout, frontmatter fields per file type, the node filename ↔ label derivation rule, and the read vs inspect_nodes boundary.`,
   parameters: readParamsSchema,
