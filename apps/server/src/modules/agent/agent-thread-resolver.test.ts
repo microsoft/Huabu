@@ -3,9 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  AgentThreadResolver,
-} from './agent-thread-resolver.js';
+import { AgentThreadResolver } from './agent-thread-resolver.js';
 
 import type { AgentThreadResolutionError } from './agent-thread-resolver.js';
 
