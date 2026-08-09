@@ -220,6 +220,12 @@ export interface ExtractResult {
    * discarded — it is never persisted to the node sidecar.
    */
   rawHtml?: string;
+  /**
+   * Original bytes from a freshly fetched remote PDF. Consumed by the
+   * pipeline to create a canvas-local artifact, then discarded before
+   * Normalize so binary data never reaches node frontmatter.
+   */
+  rawPdf?: Buffer;
   /** True when extraction was skipped (e.g. image, empty note). */
   skipped?: boolean;
 }

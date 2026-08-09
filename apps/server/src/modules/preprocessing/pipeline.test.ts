@@ -27,14 +27,16 @@ function deps(release: () => Promise<void>) {
     path: '/tmp/materialized-document.pdf',
     release,
   });
+  const put = vi.fn().mockResolvedValue({ name: 'artifact_test.pdf' });
   return {
     materialize,
+    put,
     value: {
       store: {
         canvasId: request.canvasId,
         readNode: () => null,
       } as unknown as CanvasStore,
-      blobs: { materialize } as unknown as BlobScope,
+      blobs: { materialize, put } as unknown as BlobScope,
       provider: {} as ProviderManager,
     },
   };
@@ -85,5 +87,55 @@ describe('runPipeline artifact lease lifecycle', () => {
       ]),
     );
     expect(release).toHaveBeenCalledOnce();
+  });
+});
+
+describe('runPipeline remote PDF snapshot', () => {
+  const remoteRequest: PreprocessNodeRequest = {
+    ...request,
+    snapshot: { src: 'https://arxiv.org/pdf/2505.10831' },
+  };
+
+  it('stores freshly fetched PDF bytes as a canvas-local artifact', async () => {
+    const harness = deps(vi.fn().mockResolvedValue(undefined));
+    const rawPdf = Buffer.from('%PDF-test');
+    extractMock.mockResolvedValue({ content: 'paper text', rawPdf });
+
+    await runPipeline(
+      remoteRequest,
+      ['resolve_input', 'extract_text', 'build_patch'],
+      'pdf',
+      'derived',
+      harness.value,
+    );
+
+    expect(harness.put).toHaveBeenCalledWith(
+      expect.stringMatching(/^artifact-.+\.pdf$/),
+      rawPdf,
+    );
+  });
+
+  it('keeps preprocessing successful when snapshot storage fails', async () => {
+    const harness = deps(vi.fn().mockResolvedValue(undefined));
+    harness.put.mockRejectedValue(new Error('blob unavailable'));
+    extractMock.mockResolvedValue({
+      content: 'paper text',
+      rawPdf: Buffer.from('%PDF-test'),
+    });
+
+    const result = await runPipeline(
+      remoteRequest,
+      ['resolve_input', 'extract_text', 'build_patch'],
+      'pdf',
+      'derived',
+      harness.value,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'SNAPSHOT_FAILED', level: 'warning' }),
+      ]),
+    );
   });
 });

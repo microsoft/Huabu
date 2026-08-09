@@ -52,6 +52,14 @@ export function tryCacheShortCircuit(
       : resolved.artifactUri;
   if (!targetSrc) return false;
 
+  // Remote PDF URLs pre-date canvas-local PDF snapshots. Let them pass
+  // through Extract once so the fetched bytes can be stored in BlobStore and
+  // `src` migrated to an artifact key. Once migrated, normal cache reuse
+  // resumes because the source is no longer remote.
+  if (request.nodeType === 'pdf' && /^https?:\/\//i.test(targetSrc)) {
+    return false;
+  }
+
   const existing = store.readNode(request.nodeId);
   if (
     !existing ||

@@ -87,21 +87,26 @@ export async function persist(
       }
 
       // Content-based dedup: body unchanged → don't rewrite the (potentially
-      // large) body; only refresh `label` / `mhtmlArtifact` frontmatter if
-      // they drifted. Without the mhtml refresh, a legacy web node would
-      // re-fetch + re-write its snapshot forever.
+      // large) body; only refresh source metadata that drifted. Without these
+      // refreshes, legacy remote web/PDF nodes would recreate their snapshots
+      // forever without adopting the new local artifact reference.
       if (existing && existing.content === normalized.canonicalContent) {
         const labelDrifted =
           !!normalized.label && existing.label !== normalized.label;
+        const srcDrifted = !!src && existing.src !== src;
         const newMhtml = normalized.metadata?.mhtmlArtifact;
         const mhtmlDrifted =
           typeof newMhtml === 'string' &&
           newMhtml.length > 0 &&
           (existing as Record<string, unknown>).mhtmlArtifact !== newMhtml;
-        if (labelDrifted || mhtmlDrifted) {
+        if (labelDrifted || srcDrifted || mhtmlDrifted) {
           branch = 'dedup-refresh';
           const merged: NodeContent = { ...existing };
           if (labelDrifted) merged.label = normalized.label ?? null;
+          if (srcDrifted) {
+            merged.src = src;
+            existingSrc = src;
+          }
           if (mhtmlDrifted) merged.mhtmlArtifact = newMhtml;
           return merged;
         }
