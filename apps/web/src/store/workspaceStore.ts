@@ -20,6 +20,7 @@ const FREE_PATH_KEY = 'huabu:workspace-path';
 const RECENT_PATHS_KEY = 'huabu:recent-workspaces';
 const MAX_RECENT = 5;
 const WORLD_ENABLED_KEY = 'huabu:world-enabled';
+const PREVIEW_WORKSPACE_ENABLED_KEY = 'huabu:preview-workspace-enabled';
 
 /**
  * Storage backend abstraction. In Electron we delegate to the main
@@ -145,6 +146,12 @@ interface WorkspaceState {
   worldCanvasId: string | null;
   /** Whether World is exposed as the workspace landing page. */
   worldEnabled: boolean;
+  /**
+   * Whether the tabbed preview workspace replaces the single Expanded Node
+   * panel. Off by default while the surface is still being built out; see
+   * `docs/proposals/unified-preview-workspace.md`.
+   */
+  previewWorkspaceEnabled: boolean;
   /** Derived ordinary Space titles used by World Portal rendering. */
   spaceTitles: Record<string, string | null>;
   spaceTitlesLoaded: boolean;
@@ -189,6 +196,7 @@ interface WorkspaceState {
    */
   setCanvasCount: (count: number | null) => void;
   setWorldEnabled: (enabled: boolean) => void;
+  setPreviewWorkspaceEnabled: (enabled: boolean) => void;
   refreshSpaceTitles: () => Promise<void>;
 }
 
@@ -256,6 +264,10 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     typeof localStorage === 'undefined'
       ? false
       : localStorage.getItem(WORLD_ENABLED_KEY) === 'true',
+  previewWorkspaceEnabled:
+    typeof localStorage === 'undefined'
+      ? false
+      : localStorage.getItem(PREVIEW_WORKSPACE_ENABLED_KEY) === 'true',
   spaceTitles: {},
   spaceTitlesLoaded: false,
   recentWorkspaces:
@@ -268,6 +280,13 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   setWorldEnabled: (worldEnabled) => {
     localStorage.setItem(WORLD_ENABLED_KEY, String(worldEnabled));
     set({ worldEnabled });
+  },
+  setPreviewWorkspaceEnabled: (previewWorkspaceEnabled) => {
+    localStorage.setItem(
+      PREVIEW_WORKSPACE_ENABLED_KEY,
+      String(previewWorkspaceEnabled),
+    );
+    set({ previewWorkspaceEnabled });
   },
   refreshSpaceTitles: async () => {
     set({ spaceTitlesLoaded: false });

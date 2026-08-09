@@ -231,6 +231,10 @@
     "worldCanvasDescription": "Use World as the workspace landing page and show cross-Space Portals.",
     "showWorldCanvas": "Show World Canvas",
     "hideWorldCanvas": "Hide World Canvas",
+    "previewWorkspace": "Tabbed previews",
+    "previewWorkspaceDescription": "Preview several nodes at once in tabs, with an optional split view. In development.",
+    "showPreviewWorkspace": "Show tabbed previews",
+    "hidePreviewWorkspace": "Hide tabbed previews",
     "inputMode": "Input mode",
     "inputModeDescription": "Choose the pointer that operates the canvas. Mouse mode ignores touchscreen and pen input.",
     "inputMode_mouse": "Mouse",
@@ -375,6 +379,17 @@
     "unpinNode": "Unpin from World",
     "pinFailed": "Failed to update World pins",
     "pinSourceMissing": "Cannot pin: this Space no longer exists"
+  },
+  "preview": {
+    "tabStrip": "Open previews",
+    "group": "Preview group",
+    "chatTab": "Chat",
+    "closeTab": "Close {{title}}",
+    "resizeGroups": "Resize preview groups",
+    "openToSide": "Open to the side",
+    "emptyGroup": "No preview open in this group",
+    "emptyWorkspace": "Double-click a node on the Space to preview it here",
+    "nodeUnavailable": "This node is no longer available"
   },
   "node": {
     "untitled": "Untitled",

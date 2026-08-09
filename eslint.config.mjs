@@ -280,6 +280,15 @@ export default typescriptEslint.config(
         'error',
         { handlers: A11Y_INTERACTION_HANDLERS },
       ],
+      // A focusable `separator` is the ARIA window-splitter pattern: a pane
+      // divider the user can move with the keyboard, carrying
+      // `aria-valuenow` / `aria-valuemin` / `aria-valuemax`. The rule treats
+      // `separator` as non-interactive regardless of whether it is focusable,
+      // so it is added alongside the default `tabpanel` exemption.
+      'jsx-a11y/no-noninteractive-tabindex': [
+        'error',
+        { tags: [], roles: ['tabpanel', 'separator'] },
+      ],
       // Only flag `autoFocus` on real DOM elements — the prop's meaning on
       // our own components (Button, TextInput, DropdownMenuItem) is theirs
       // to define.

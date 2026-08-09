@@ -11,12 +11,14 @@ import { Button } from '../../components/Common/Button';
 import { cn } from '../../components/Common/cn';
 import { Canvas } from '../../components/Panels/Canvas/Canvas';
 import { ExpandedNodePanel } from '../../components/Panels/ExpandedNodePanel/ExpandedNodePanel';
+import { PreviewWorkspace } from '../../components/Panels/PreviewWorkspace/PreviewWorkspace';
 import { openUserHandbook } from '../../config/handbook';
 import { isElectron } from '../../hooks/useElectron';
 import {
   selectActiveNodeId,
   usePreviewWorkspaceStore,
 } from '../../store/previewWorkspace/store';
+import { useWorkspaceStore } from '../../store/workspaceStore';
 
 const SPLIT_MIN_PX = 200;
 const SPLIT_DEFAULT_RATIO = 0.5;
@@ -44,6 +46,14 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
 }) => {
   const { t } = useTranslation();
   const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
+  const previewWorkspaceEnabled = useWorkspaceStore(
+    (s) => s.previewWorkspaceEnabled,
+  );
+  // The workspace shows Chat tabs too, so its occupancy is "any tab open",
+  // not "a node is being shown".
+  const hasAnyTab = usePreviewWorkspaceStore(
+    (s) => Object.keys(s.workspace.tabs).length > 0,
+  );
 
   // The custom Electron title bar already exposes Handbook + Settings
   // globally — suppress the duplicate floating versions on the canvas
@@ -56,7 +66,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
   // Suspends width transition during drag so the split bar tracks the cursor.
   const [isResizing, setIsResizing] = React.useState(false);
 
-  const hasExpanded = !!expandedNodeId;
+  const hasExpanded = previewWorkspaceEnabled ? hasAnyTab : !!expandedNodeId;
 
   /* ---- Drag handle for split mode ---- */
   const onHandlePointerDown = useCallback(
@@ -194,7 +204,11 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
       {/* Expanded panel – rendered only when needed. */}
       {hasExpanded && (
         <div className="h-full min-w-0 flex-1">
-          <ExpandedNodePanel />
+          {previewWorkspaceEnabled ? (
+            <PreviewWorkspace />
+          ) : (
+            <ExpandedNodePanel />
+          )}
         </div>
       )}
     </div>

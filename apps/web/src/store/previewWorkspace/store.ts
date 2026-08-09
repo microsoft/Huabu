@@ -55,7 +55,7 @@ export type LegacyChatSeed = {
   questionNodeId?: string;
 };
 
-type PreviewWorkspaceState = {
+export type PreviewWorkspaceState = {
   /** Canvas whose layout is currently in memory; `''` before the first load. */
   canvasId: string;
   workspace: CanvasPreviewWorkspace;
