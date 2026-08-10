@@ -79,15 +79,19 @@ export const SidebarPanel = ({
                 />
               </>
             )}
-            <Button
-              variant="ghost"
-              iconOnly
-              onClick={onToggle}
-              title={`Collapse ${title}`}
-              tooltipPlacement="bottom"
-            >
-              {iconExpanded}
-            </Button>
+            {/* No collapse control when the host owns collapsing — e.g. a
+                preview tab, whose own close control replaces it. */}
+            {onToggle && (
+              <Button
+                variant="ghost"
+                iconOnly
+                onClick={onToggle}
+                title={`Collapse ${title}`}
+                tooltipPlacement="bottom"
+              >
+                {iconExpanded}
+              </Button>
+            )}
           </div>
         </div>
       )}
