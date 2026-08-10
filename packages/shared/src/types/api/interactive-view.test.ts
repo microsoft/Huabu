@@ -4,9 +4,44 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createInteractiveViewRequestSchema,
   interactiveViewActionRequestSchema,
   validateInteractiveViewStateSchema,
 } from './interactive-view.js';
+
+describe('createInteractiveViewRequestSchema', () => {
+  const request = {
+    rendererArtifact: 'upload/view.html',
+    ownerThreadId: 'thread-owner',
+    state: {
+      schema: {
+        type: 'object' as const,
+        properties: {},
+        additionalProperties: false as const,
+      },
+      value: {},
+    },
+    position: { x: 0, y: 0 },
+  };
+
+  it('accepts only one safe HTML renderer filename', () => {
+    expect(createInteractiveViewRequestSchema.safeParse(request).success).toBe(
+      true,
+    );
+    expect(
+      createInteractiveViewRequestSchema.safeParse({
+        ...request,
+        rendererArtifact: 'upload/../view.html',
+      }).success,
+    ).toBe(false);
+    expect(
+      createInteractiveViewRequestSchema.safeParse({
+        ...request,
+        rendererArtifact: 'upload/view name.html',
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe('validateInteractiveViewStateSchema', () => {
   it('rejects inconsistent bounds and undeclared required properties', () => {

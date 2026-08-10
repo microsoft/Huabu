@@ -11,12 +11,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { interactiveViewResourceSchema } from '@huabu/shared';
 
 import rfsRoutes from './rfs.route.js';
+import {
+  agenetes,
+  EXTERNAL_DRIVER_KIND,
+  type AcpWorkloadSpec,
+} from '../agent/agenetes/drivers.js';
 import interactiveViewRoutes from '../interactive-view/interactive-view.route.js';
 import {
   canvasBlobs,
   getCanvasStore,
   resetStorageCache,
 } from '../storage/index.js';
+import { canvasAcpNamespace } from '../workspace/disk/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
 let workspace: string;
@@ -50,6 +56,22 @@ function seedCanvas() {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   });
+  const ownerSpec: AcpWorkloadSpec = {
+    threadId: 'thread-owner',
+    kind: EXTERNAL_DRIVER_KIND,
+    workloadType: 'Deployment',
+    namespace: canvasAcpNamespace('c1'),
+    spec: {
+      initialPreamble: [],
+      binding: {
+        profileId: 'profile-test',
+        alias: 'Test Agent',
+      },
+      agentletId: 'agentlet-test',
+      recipe: null,
+    },
+  };
+  agenetes.create(ownerSpec);
 }
 
 const state = {
@@ -73,6 +95,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  agenetes.close('thread-owner');
   resetStorageCache();
   rmSync(workspace, { recursive: true, force: true });
 });

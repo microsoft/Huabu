@@ -26,11 +26,11 @@ import {
   agentThreadService,
   type ExternalAgentThreadTarget,
 } from '../agent/agent-thread.service.js';
+import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
 import {
   executeOnServer,
   type InteractiveViewConflict,
 } from '../canvas/canvas-executor.js';
-import { resolveReadable } from '../remote_fs/node-meta.js';
 import {
   canvasBlobs,
   getCanvasStore,
@@ -44,6 +44,9 @@ interface StoredNode {
   type?: unknown;
   data?: unknown;
 }
+
+const STAGED_RENDERER_ARTIFACT_RE =
+  /^upload\/([a-zA-Z0-9][a-zA-Z0-9._-]*\.html?)$/i;
 
 export type InteractiveViewServiceErrorCode =
   | 'canvas_not_found'
@@ -85,6 +88,16 @@ function resolveOwnerThread(
     }
     throw error;
   }
+}
+
+function stagedRendererPath(
+  canvasId: string,
+  rendererArtifact: string,
+): string | null {
+  const match = STAGED_RENDERER_ARTIFACT_RE.exec(rendererArtifact);
+  const filename = match?.[1];
+  if (!filename) return null;
+  return safeResolve(canvasId, `.upload/${filename}`);
 }
 
 function validateDefinition(definition: InteractiveViewDefinitionV1): void {
@@ -323,8 +336,11 @@ export class InteractiveViewService {
         `Owner thread ${request.ownerThreadId} is not an external Agent thread in this Canvas`,
       );
     }
+    const stagedPath = request.rendererArtifact.startsWith('upload/')
+      ? stagedRendererPath(canvasId, request.rendererArtifact)
+      : null;
     const rendererExists = request.rendererArtifact.startsWith('upload/')
-      ? existsSync(resolveReadable(canvasId, request.rendererArtifact).absPath)
+      ? stagedPath !== null && existsSync(stagedPath)
       : Boolean(await canvasBlobs(canvasId).head(request.rendererArtifact));
     if (!rendererExists) {
       throw new InteractiveViewServiceError(

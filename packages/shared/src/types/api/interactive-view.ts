@@ -261,7 +261,7 @@ export const createInteractiveViewRequestSchema = z
       .string()
       .min(1)
       .max(255)
-      .regex(/^(?:upload\/)?[^/\\]+\.(?:html?|HTML?)$/),
+      .regex(/^(?:upload\/)?[a-zA-Z0-9][a-zA-Z0-9._-]*\.html?$/i),
     viewKey: z.string().min(1).max(128).optional(),
     label: z.string().min(1).max(256).optional(),
     ownerThreadId: z.string().min(1),
