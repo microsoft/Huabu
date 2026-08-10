@@ -68,9 +68,19 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 interface ChatPanelProps {
   isCollapsed?: boolean;
   onToggle?: () => void;
+  /**
+   * The conversation to render. A preview tab passes its own, which is what
+   * lets two Chat renderers coexist. Omitted by the single-panel layout,
+   * which still resolves the conversation from the store-wide pointer.
+   */
+  session?: ChatSession;
 }
 
-export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
+export const ChatPanel = ({
+  isCollapsed,
+  onToggle,
+  session: providedSession,
+}: ChatPanelProps) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const setDraft = useChatStore((state) => state.setDraft);
@@ -82,22 +92,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // `setLastAction(agentMode)` on every send.
   const lastAction = useChatStore((state) => state.lastAction);
   const canvasId = useCanvasStore((state) => state.canvasId);
-  const threadId = useChatStore((state) => state.threadId);
-
-  // Composer draft lives in the store keyed by threadId (see chatStore
-  // `ChatThreadState.draft`) so an unsent draft stays with its own session
-  // instead of being wiped when the user switches canvas or opens a
-  // question replay.
-  const input = useChatStore((state) => selectThreadDraft(state, threadId));
-
-  // Point the chat at the canvas's own thread when the canvas changes.
-  // This is a canvas-level concern, not a history-loading one, so it lives
-  // with the panel that decides which conversation to show.
-  useEffect(() => {
-    if (canvasId) {
-      useChatStore.getState().switchToCanvas(canvasId);
-    }
-  }, [canvasId]);
+  // The store-wide current thread. Only the single-panel path reads it; a
+  // provided session wins, and once nothing renders without one this
+  // pointer can go (L1 of the proposal's leak inventory).
+  const storeThreadId = useChatStore((state) => state.threadId);
 
   // When the panel is replaying a question node's thread, the mode is a
   // property of that NODE (`data.agentMode`), not the canvas-level
@@ -110,29 +108,57 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // (their mode is ACP-managed), so they pin to ask. Falls back to ask
   // for legacy nodes that pre-date the `@` picker.
   const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
-  const activeConversationView =
+  const storeConversationView =
     viewingQuestionThread?.presentationAnchor.canvasId === canvasId
       ? viewingQuestionThread
       : null;
-  const viewingQuestionNodeId =
-    activeConversationView?.conversationOwner.nodeId;
-  const ownerCanvasId =
-    activeConversationView?.conversationOwner.canvasId || canvasId;
-  const headlessConversation = isHeadlessConversation(activeConversationView);
 
   // The conversation this panel renders. Hooks take it as an argument and
   // descendants read it from context, so nothing has to ask the store
   // "which thread is current" — a question with no answer once two Chat
   // renderers can be mounted at once.
-  const session = useMemo<ChatSession>(
+  const storeSession = useMemo<ChatSession>(
     () => ({
-      threadId,
+      threadId: storeThreadId,
       canvasId,
-      ownerCanvasId,
-      conversationView: activeConversationView,
+      ownerCanvasId:
+        storeConversationView?.conversationOwner.canvasId || canvasId,
+      conversationView: storeConversationView,
     }),
-    [threadId, canvasId, ownerCanvasId, activeConversationView],
+    [storeThreadId, canvasId, storeConversationView],
   );
+  const session = providedSession ?? storeSession;
+  const { threadId, ownerCanvasId } = session;
+  const activeConversationView = session.conversationView;
+  // `openSequence` / `openPosition` are presentation state carried on the
+  // store-wide replay pointer, not part of the conversation identity, so
+  // they only apply when that pointer is what this panel is rendering. A
+  // tab-supplied session takes the defaults until tabs own this too.
+  const replayPresentation =
+    activeConversationView === storeConversationView
+      ? viewingQuestionThread
+      : null;
+
+  // Composer draft lives in the store keyed by threadId (see chatStore
+  // `ChatThreadState.draft`) so an unsent draft stays with its own session
+  // instead of being wiped when the user switches canvas or opens a
+  // question replay.
+  const input = useChatStore((state) => selectThreadDraft(state, threadId));
+
+  // Point the chat at the canvas's own thread when the canvas changes.
+  // This is a canvas-level concern, not a history-loading one, so it lives
+  // with the panel that decides which conversation to show. A provided
+  // session already names its conversation, so moving the store-wide
+  // pointer would only disturb whoever is still reading it.
+  useEffect(() => {
+    if (canvasId && !providedSession) {
+      useChatStore.getState().switchToCanvas(canvasId);
+    }
+  }, [canvasId, providedSession]);
+
+  const viewingQuestionNodeId =
+    activeConversationView?.conversationOwner.nodeId;
+  const headlessConversation = isHeadlessConversation(activeConversationView);
   const conversationOwnerSource = useCanvasStore((state) =>
     resolveConversationOwnerSource(
       state.canvasId,
@@ -202,7 +228,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   }, [isEditingQuestionTitle]);
 
   const mode: AgentMode =
-    viewingQuestionThread && !isComposingQuestion
+    activeConversationView && !isComposingQuestion
       ? (questionReplayMode ?? 'ask')
       : lastAction;
 
@@ -565,16 +591,16 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     closeQuestionThread(canvasId || undefined);
   }, [closeQuestionThread, canvasId]);
   const openOwnerSpaceForReview = useCallback(() => {
-    if (!viewingQuestionThread || !headlessConversation) return;
-    const owner = viewingQuestionThread.conversationOwner;
-    openQuestionThreadInOwnerCanvas(viewingQuestionThread, agentBinding);
+    if (!activeConversationView || !headlessConversation) return;
+    const owner = activeConversationView.conversationOwner;
+    openQuestionThreadInOwnerCanvas(activeConversationView, agentBinding);
     navigate(`/canvas/${owner.canvasId}`);
   }, [
     agentBinding,
     headlessConversation,
     navigate,
     openQuestionThreadInOwnerCanvas,
-    viewingQuestionThread,
+    activeConversationView,
   ]);
 
   useEffect(() => {
@@ -584,7 +610,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   }, [llmConfig, llmLoading, llmInit]);
 
   const panelTitle = useMemo(() => {
-    if (viewingQuestionThread) {
+    if (activeConversationView) {
       // Composing a fresh node: it has no real label yet, so show a
       // neutral title instead of the auto-generated "Question N". A
       // manual sidebar rename is real authored identity and stays visible.
@@ -603,7 +629,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   }, [
     agentBinding,
     t,
-    viewingQuestionThread,
+    activeConversationView,
     isComposingQuestion,
     isViewingUserNamedQuestion,
     viewingQuestionLabel,
@@ -721,7 +747,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   );
 
   const canSave =
-    !viewingQuestionThread &&
+    !activeConversationView &&
     !isLoading &&
     messages.some((m) => m.role === 'user' && m.content.trim().length > 0);
   const handleSaveChat = useCallback(() => {
@@ -771,7 +797,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         title={panelTitle}
         tabs={
           <span className="flex min-w-0 flex-1 items-center gap-1">
-            {viewingQuestionThread && (
+            {activeConversationView && (
               <Button
                 variant="ghost"
                 iconOnly
@@ -846,7 +872,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         iconExpanded={<ListIndentIncrease size={16} />}
         className="border-edge-default border-l"
         tools={
-          viewingQuestionThread ? null : (
+          activeConversationView ? null : (
             <NewChatMenu
               currentMode={mode}
               currentBinding={agentBinding}
@@ -866,12 +892,12 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
             messages={messages}
             isLoading={isLoading}
             isHistoryLoading={!isHistoryLoaded}
-            viewKey={`${threadId}:${viewingQuestionThread?.openSequence ?? 0}`}
+            viewKey={`${threadId}:${replayPresentation?.openSequence ?? 0}`}
             isActive={!isCollapsed}
             openPosition={
               pendingPermission
                 ? 'bottom'
-                : (viewingQuestionThread?.openPosition ?? 'bottom')
+                : (replayPresentation?.openPosition ?? 'bottom')
             }
             onRetry={() => {
               // Find the last user message and re-send it

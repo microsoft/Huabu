@@ -12,16 +12,19 @@
  * could be perfectly normalized and every renderer could still read the
  * same global pointer, which is exactly what the code did before.
  *
- * The one thing deliberately not asserted here is two mounted `ChatPanel`s.
- * `ChatPanel` is still the layer that *decides* which session to build, and
- * it decides by reading the global `threadId` (leak L1). See the skipped
- * test at the bottom, which is the acceptance criterion for Stage 3.
+ * The last section mounts two real `ChatPanel`s. That is the acceptance
+ * criterion for the tab work: the panel used to decide which conversation to
+ * show by reading the store-wide `threadId` (leak L1), so two of them could
+ * only ever render the same thread. It now takes a session, and a preview tab
+ * supplies one.
  */
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ChatPanel } from '@/components/Panels/ChatPanel';
+import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import {
   selectThreadBinding,
   selectThreadDraft,
@@ -32,11 +35,60 @@ import {
   useChatStore,
 } from '@/store/chatStore';
 import { findPendingPermissionRequest } from '@/store/chatTypes';
+import { useLLMStore } from '@/store/llmStore';
 
 import { ChatSessionProvider, useChatSession } from './useChatSession';
 
 import type { ChatSession } from './useChatSession';
 import type { ChatMessage } from '@/store/chatTypes';
+
+(
+  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
+// Everything below reaches the network or a live agent process. The panel's
+// session plumbing is what is under test, so they are stubbed to inert.
+vi.mock('react-router-dom', () => ({ useNavigate: () => () => {} }));
+// `Loading` pulls in lottie-web, which paints to a canvas at import time and
+// needs more of the 2D context than the happy-dom shim provides.
+vi.mock('@/components/Common/Loading', () => ({
+  Loading: () => null,
+}));
+vi.mock('./useAgentStream', () => ({
+  useAgentStream: () => ({
+    isLoading: false,
+    setIsLoading: () => {},
+    startStream: async () => {},
+    stopStream: () => {},
+  }),
+}));
+vi.mock('./useChatHistory', () => ({ useChatHistory: () => {} }));
+vi.mock('./useAcpProfiles', () => ({
+  useAcpProfiles: () => ({ profiles: [], refresh: () => {}, loaded: true }),
+}));
+vi.mock('./useAcpSessionMeta', () => ({
+  useAcpSessionMeta: () => ({
+    meta: null,
+    applyOptimistic: () => {},
+    setRpcSpawnCtx: () => {},
+  }),
+}));
+vi.mock('./useAcpSlashCommands', () => ({
+  useAcpSlashCommands: () => ({ commands: [] }),
+}));
+vi.mock('./useInternalSlashCommands', () => ({
+  useInternalSlashCommands: () => ({ commands: [] }),
+}));
+vi.mock('./useBuiltinThreadSettings', () => ({
+  useBuiltinThreadSettings: () => ({
+    models: [],
+    settings: { modelId: null, reasoningEffort: null },
+    effectiveModelId: null,
+    loading: false,
+    selectModel: () => {},
+    selectReasoningEffort: () => {},
+  }),
+}));
 
 const THREAD_A = 'thread-a';
 const THREAD_B = 'thread-b';
@@ -126,6 +178,12 @@ async function commit(mutate: () => void): Promise<void> {
 }
 
 beforeEach(async () => {
+  // A loaded config keeps the panel from firing its init fetch on mount.
+  useLLMStore.setState({
+    config: { provider: 'test', model: 'test-model', authenticated: true },
+    loading: false,
+  });
+  useAcpThreadChangesStore.setState({ load: async () => {} });
   useChatStore.setState({
     threadsById: {},
     // Deliberately points at neither renderer: nothing on screen may resolve
@@ -269,11 +327,42 @@ describe('two mounted Chat renderers', () => {
   });
 });
 
-describe.skip('two mounted ChatPanels (Stage 3)', () => {
-  it('renders a different conversation in each panel', () => {
-    // Blocked on L1/L4. `ChatPanel` resolves its session from the global
-    // `threadId` and the `_savedCanvas*` restore stack, so two panels would
-    // build the same session and render the same conversation. Unskip once a
-    // tab supplies the session instead.
+describe('two mounted ChatPanels', () => {
+  it('renders a different conversation in each panel', async () => {
+    await commit(() => {
+      const s = useChatStore.getState();
+      s.addMessage(THREAD_A, userMessage('m1', 'alpha conversation'));
+      s.addMessage(THREAD_B, userMessage('m2', 'beta conversation'));
+      // A pointer neither panel owns: if either resolved its session from
+      // the store instead of its prop, it would render this thread.
+      s.addMessage('thread-unrelated', userMessage('m3', 'not on screen'));
+      useChatStore.setState({ threadId: 'thread-unrelated' });
+    });
+
+    await commit(() => {
+      root?.render(
+        <>
+          <ChatPanel session={SESSION_A} />
+          <ChatPanel session={SESSION_B} />
+        </>,
+      );
+    });
+
+    const text = container?.textContent ?? '';
+    expect(text).toContain('alpha conversation');
+    expect(text).toContain('beta conversation');
+    expect(text).not.toContain('not on screen');
+  });
+
+  it('leaves the store-wide pointer alone', async () => {
+    await commit(() => useChatStore.setState({ threadId: 'thread-unrelated' }));
+
+    await commit(() => {
+      root?.render(<ChatPanel session={SESSION_A} />);
+    });
+
+    // A panel given its session must not reach back and re-point the store;
+    // doing so is what made two panels fight over one conversation.
+    expect(useChatStore.getState().threadId).toBe('thread-unrelated');
   });
 });
