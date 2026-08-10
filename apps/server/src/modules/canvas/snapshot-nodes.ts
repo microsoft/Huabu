@@ -77,7 +77,7 @@ import type {
 } from '@huabu/shared';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
-type GetStroke = typeof import('perfect-freehand')['default'];
+type GetStroke = (typeof getStrokeImport)['default'];
 
 const getStroke = (
   typeof getStrokeImport === 'function'
