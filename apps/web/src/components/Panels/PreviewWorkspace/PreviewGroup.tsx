@@ -84,7 +84,11 @@ export function PreviewGroup({
         className="min-h-0 flex-1 overflow-auto"
       >
         {activeTab ? (
-          <PreviewRenderer target={activeTab.target} />
+          <PreviewRenderer
+            target={activeTab.target}
+            onClose={() => onClose(activeTab.id)}
+            hasFocusPriority={isFocused}
+          />
         ) : (
           <div className="text-fg-subtle flex h-full items-center justify-center text-sm">
             {t('preview.emptyGroup')}

@@ -374,6 +374,30 @@ describe('split', () => {
 
     expect(container?.querySelectorAll('[role="tablist"]')).toHaveLength(1);
   });
+
+  it('answers Escape in the focused group only', () => {
+    const firstTab = openNode('a');
+    openNode('b');
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    act(() => {
+      store().openPreviewTarget(
+        { kind: 'node', canvasId: CANVAS_ID, nodeId: 'b' },
+        { openToSide: true },
+      );
+    });
+    const sideTab = store().workspace.groups[1].tabIds[0];
+
+    // Both panes are mounted and both install a window-level handler, so an
+    // unguarded one would close a tab in each group at once.
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+
+    expect(store().workspace.tabs[sideTab]).toBeUndefined();
+    expect(store().workspace.tabs[firstTab]).toBeDefined();
+  });
 });
 
 describe('target resolution', () => {

@@ -42,6 +42,22 @@ import type { Node } from '@xyflow/react';
 /*  ExpandedNodePanel – inline panel that sits beside the canvas.      */
 /* ------------------------------------------------------------------ */
 
+type ExpandedNodePanelProps = {
+  /**
+   * Node to show. Omitted by the single-panel layout, which falls back to
+   * the focused group's active tab.
+   */
+  nodeId?: string;
+  /** Closes this instance; defaults to closing the focused group's tab. */
+  onClose?: () => void;
+  /**
+   * Whether this instance owns the window-level shortcuts. With two panes
+   * mounted only the focused group's may, or Escape would close both
+   * (§14, leak L10).
+   */
+  hasFocusPriority?: boolean;
+};
+
 type ConnectedNodeMenuProps = {
   groups: Array<{
     direction: ExpandedNodeDirection;
@@ -207,11 +223,17 @@ const ConnectedNodeMenu = ({
   );
 };
 
-export const ExpandedNodePanel = () => {
+export const ExpandedNodePanel = ({
+  nodeId,
+  onClose,
+  hasFocusPriority = true,
+}: ExpandedNodePanelProps = {}) => {
   const { t } = useTranslation();
   // Canvas Store State
-  const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
-  const closeExpandedCanvas = useCanvasStore((s) => s.closeExpanded);
+  const focusedGroupNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
+  const expandedNodeId = nodeId ?? focusedGroupNodeId;
+  const closeFocusedGroupTab = useCanvasStore((s) => s.closeExpanded);
+  const closeExpandedCanvas = onClose ?? closeFocusedGroupTab;
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const openExpandedCanvas = useCanvasStore((s) => s.openExpanded);
@@ -338,7 +360,7 @@ export const ExpandedNodePanel = () => {
   // panel. Note: Escape inside a cross-origin iframe won't reach this handler
   // due to browser security boundaries – that's an acceptable limitation.
   useEffect(() => {
-    if (!activeItem) return;
+    if (!activeItem || !hasFocusPriority) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -361,7 +383,7 @@ export const ExpandedNodePanel = () => {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeItem, navigateDirection]);
+  }, [activeItem, navigateDirection, hasFocusPriority]);
 
   // Scroll container of the preview body. Stored in component state
   // (not a plain ref) so that mounting the div triggers a re-render —

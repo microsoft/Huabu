@@ -18,8 +18,8 @@ import { useTranslation } from 'react-i18next';
 
 import useCanvasStore from '@/store/canvasStore';
 
-import { NodePreviewContent } from '../../Nodes/NodePreviewContent';
 import { ChatPanel } from '../ChatPanel';
+import { ExpandedNodePanel } from '../ExpandedNodePanel/ExpandedNodePanel';
 
 import type { ChatSession } from '@/hooks/useChatSession';
 import type { PreviewTarget } from '@/store/previewWorkspace/model';
@@ -44,7 +44,17 @@ function questionSession(node: Node, canvasId: string): ChatSession | null {
   };
 }
 
-export function PreviewRenderer({ target }: { target: PreviewTarget }) {
+export function PreviewRenderer({
+  target,
+  onClose,
+  hasFocusPriority,
+}: {
+  target: PreviewTarget;
+  /** Closes the tab rendering this target. */
+  onClose: () => void;
+  /** Whether this tab's group is the focused one (§14). */
+  hasFocusPriority: boolean;
+}) {
   const { t } = useTranslation();
   const node = useCanvasStore((s) =>
     target.kind === 'node'
@@ -83,10 +93,10 @@ export function PreviewRenderer({ target }: { target: PreviewTarget }) {
   }
 
   return (
-    <NodePreviewContent
-      id={node.id}
-      type={node.type ?? 'text'}
-      data={node.data as Record<string, unknown>}
+    <ExpandedNodePanel
+      nodeId={node.id}
+      onClose={onClose}
+      hasFocusPriority={hasFocusPriority}
     />
   );
 }
