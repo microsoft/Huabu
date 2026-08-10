@@ -27,6 +27,10 @@ import { useSwipeNavigation } from './swipeNavigation';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useChatStore } from '../../../store/chatStore.ts';
 import {
+  closeActivePreviewNode,
+  openPreviewNode,
+} from '../../../store/previewWorkspace/actions.ts';
+import {
   selectActiveNodeId,
   usePreviewWorkspaceStore,
 } from '../../../store/previewWorkspace/store.ts';
@@ -235,11 +239,9 @@ export const ExpandedNodePanel = ({
   // Canvas Store State
   const focusedGroupNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
   const expandedNodeId = nodeId ?? focusedGroupNodeId;
-  const closeFocusedGroupTab = useCanvasStore((s) => s.closeExpanded);
-  const closeExpandedCanvas = onClose ?? closeFocusedGroupTab;
+  const closeExpandedCanvas = onClose ?? closeActivePreviewNode;
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
-  const openExpandedCanvas = useCanvasStore((s) => s.openExpanded);
   const selectCanvasNodes = useCanvasStore((s) => s.selectNodes);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   // Routed through `tryRename` so a sibling-label collision triggers the
@@ -313,11 +315,11 @@ export const ExpandedNodePanel = ({
       setOpenNeighborDirection(null);
       // Connected-node navigation browses, so it reuses the group's
       // inspection slot rather than appending a tab (§9.2).
-      openExpandedCanvas(nodeId, { transient: true });
+      openPreviewNode(nodeId, { transient: true });
       selectCanvasNodes([nodeId]);
       panelRef.current?.focus({ preventScroll: true });
     },
-    [openExpandedCanvas, selectCanvasNodes],
+    [selectCanvasNodes],
   );
 
   // Shared by the arrow shortcuts and the touch swipe. Returns whether the

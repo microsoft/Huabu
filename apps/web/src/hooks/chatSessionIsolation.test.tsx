@@ -188,13 +188,10 @@ beforeEach(async () => {
     threadsById: {},
     // Deliberately points at neither renderer: nothing on screen may resolve
     // its conversation through this field.
-    threadId: 'thread-unrelated',
     threadMap: {},
     lastActionByThread: {},
     bindingMap: {},
     selectionAttachment: null,
-    viewingQuestionThread: null,
-    questionReplayByCanvas: {},
   });
 
   container = document.createElement('div');
@@ -308,24 +305,6 @@ describe('two mounted Chat renderers', () => {
     expect(read(THREAD_A, 'selection')).toBe('excerpt');
     expect(read(THREAD_B, 'selection')).toBe('excerpt');
   });
-
-  it('ignores the store-wide current thread', async () => {
-    await commit(() => {
-      const s = useChatStore.getState();
-      s.addMessage(THREAD_A, userMessage('m1', 'hello a'));
-      s.addMessage('thread-unrelated', userMessage('m3', 'not on screen'));
-    });
-
-    // Moving the global pointer onto a thread neither renderer owns, and then
-    // onto one it does, must change nothing: both address their own session.
-    await commit(() => useChatStore.setState({ threadId: THREAD_B }));
-    expect(read(THREAD_A, 'messages')).toBe('hello a');
-    expect(read(THREAD_B, 'messages')).toBe('');
-
-    await commit(() => useChatStore.setState({ threadId: 'thread-unrelated' }));
-    expect(read(THREAD_A, 'messages')).toBe('hello a');
-    expect(read(THREAD_B, 'messages')).toBe('');
-  });
 });
 
 describe('two mounted ChatPanels', () => {
@@ -334,17 +313,14 @@ describe('two mounted ChatPanels', () => {
       const s = useChatStore.getState();
       s.addMessage(THREAD_A, userMessage('m1', 'alpha conversation'));
       s.addMessage(THREAD_B, userMessage('m2', 'beta conversation'));
-      // A pointer neither panel owns: if either resolved its session from
-      // the store instead of its prop, it would render this thread.
       s.addMessage('thread-unrelated', userMessage('m3', 'not on screen'));
-      useChatStore.setState({ threadId: 'thread-unrelated' });
     });
 
     await commit(() => {
       root?.render(
         <>
-          <ChatPanel session={SESSION_A} />
-          <ChatPanel session={SESSION_B} />
+          <ChatPanel session={SESSION_A} previewTabId="tab-a" />
+          <ChatPanel session={SESSION_B} previewTabId="tab-b" />
         </>,
       );
     });
@@ -353,18 +329,6 @@ describe('two mounted ChatPanels', () => {
     expect(text).toContain('alpha conversation');
     expect(text).toContain('beta conversation');
     expect(text).not.toContain('not on screen');
-  });
-
-  it('leaves the store-wide pointer alone', async () => {
-    await commit(() => useChatStore.setState({ threadId: 'thread-unrelated' }));
-
-    await commit(() => {
-      root?.render(<ChatPanel session={SESSION_A} />);
-    });
-
-    // A panel given its session must not reach back and re-point the store;
-    // doing so is what made two panels fight over one conversation.
-    expect(useChatStore.getState().threadId).toBe('thread-unrelated');
   });
 
   it('renders each thread with its own compose mode', async () => {
@@ -376,10 +340,10 @@ describe('two mounted ChatPanels', () => {
       root?.render(
         <>
           <div data-panel="a">
-            <ChatPanel session={SESSION_A} />
+            <ChatPanel session={SESSION_A} previewTabId="tab-a" />
           </div>
           <div data-panel="b">
-            <ChatPanel session={SESSION_B} />
+            <ChatPanel session={SESSION_B} previewTabId="tab-b" />
           </div>
         </>,
       );

@@ -13,11 +13,7 @@ vi.mock('@/api/canvas', async (importOriginal) => ({
 }));
 
 import useCanvasStore from './canvasStore';
-import {
-  selectThreadBinding,
-  selectThreadIsLoading,
-  useChatStore,
-} from './chatStore';
+import { useChatStore } from './chatStore';
 import {
   ConversationIntegrityError,
   conversationRequestScope,
@@ -82,10 +78,7 @@ beforeEach(() => {
     edges: [],
   });
   useChatStore.setState({
-    threadId: 'thread-world',
-    viewingQuestionThread: null,
     threadsById: {},
-    questionReplayByCanvas: {},
   });
 });
 
@@ -291,73 +284,6 @@ describe('conversation owner routing', () => {
 
     expect(useCanvasStore.getState().version).toBe(2);
     expect(useCanvasStore.getState().nodes[0]?.data.status).toBe('running');
-  });
-
-  it('switches foreground owners without stopping an existing run', () => {
-    useChatStore
-      .getState()
-      .openQuestionThread(worldView, { kind: 'internal' }, 'canvas-world');
-    useChatStore.getState().setThreadLoading('thread-source', true);
-
-    const second: AgentConversationView = {
-      presentationAnchor: {
-        canvasId: 'canvas-world',
-        nodeId: 'node-ref-second',
-      },
-      conversationOwner: {
-        canvasId: 'canvas-second',
-        nodeId: 'node-second',
-        threadId: 'thread-second',
-      },
-    };
-    useChatStore
-      .getState()
-      .openQuestionThread(second, { kind: 'internal' }, 'canvas-world');
-
-    const state = useChatStore.getState();
-    expect(state.threadId).toBe('thread-second');
-    expect(state.viewingQuestionThread?.conversationOwner).toEqual(
-      second.conversationOwner,
-    );
-    expect(selectThreadIsLoading(state, 'thread-source')).toBe(true);
-  });
-
-  it('preserves the owner Canvas chat when moving a headless replay into it', () => {
-    useChatStore.setState({
-      threadMap: {
-        'canvas-world': 'thread-world',
-        'canvas-source': 'thread-source-canvas',
-      },
-      bindingMap: {
-        'canvas-world': { kind: 'internal' },
-        'canvas-source': {
-          kind: 'external',
-          profileId: 'profile-source',
-          alias: 'Source Agent',
-        },
-      },
-      lastActionByThread: {
-        'thread-source-canvas': 'operate',
-      },
-    });
-    useChatStore
-      .getState()
-      .openQuestionThread(worldView, { kind: 'internal' }, 'canvas-world');
-
-    useChatStore
-      .getState()
-      .openQuestionThreadInOwnerCanvas(worldView, { kind: 'internal' });
-    useChatStore.getState().switchToCanvas('canvas-source');
-    useChatStore.getState().closeQuestionThread('canvas-source');
-
-    const state = useChatStore.getState();
-    expect(state.threadId).toBe('thread-source-canvas');
-    expect(state.threadMap['canvas-source']).toBe('thread-source-canvas');
-    expect(selectThreadBinding(state, 'thread-source-canvas')).toEqual({
-      kind: 'external',
-      profileId: 'profile-source',
-      alias: 'Source Agent',
-    });
   });
 
   it('serializes lifecycle writes for the same source owner', async () => {

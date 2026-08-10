@@ -24,6 +24,10 @@ import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { Fragment, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import useCanvasStore, {
+  getProtectedPreviewTabIds,
+  settleNodePreprocess,
+} from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import {
   usePreviewWorkspaceStore,
@@ -33,10 +37,30 @@ import {
 import { PreviewGroup } from './PreviewGroup';
 import { resolveTabDropDestination } from './tabDnd';
 
+import type { CanvasPreviewWorkspace } from '@/store/previewWorkspace/model';
+import type { Node } from '@xyflow/react';
+
 /** Keyboard nudge per Arrow press on the separator. */
 const RATIO_STEP = 0.05;
 
 const selectWorkspace = (s: PreviewWorkspaceState) => s.workspace;
+
+export function settleActivePreviewTab(
+  workspace: CanvasPreviewWorkspace,
+  nodes: readonly Node[],
+  tabId: string,
+  settle: (nodeId: string) => void = settleNodePreprocess,
+): void {
+  const group = workspace.groups.find((candidate) =>
+    candidate.tabIds.includes(tabId),
+  );
+  if (group?.activeTabId !== tabId) return;
+
+  const target = workspace.tabs[tabId]?.target;
+  if (target?.kind !== 'node') return;
+  const node = nodes.find((candidate) => candidate.id === target.nodeId);
+  if (node?.type === 'note' || node?.type === 'text') settle(node.id);
+}
 
 const tabCollisionDetection: CollisionDetection = (args) => {
   const tabContainers = args.droppableContainers.filter(
@@ -70,10 +94,33 @@ export function PreviewWorkspace({
   const setActiveGroup = usePreviewWorkspaceStore((s) => s.setActiveGroup);
   const setSplitRatio = usePreviewWorkspaceStore((s) => s.setSplitRatio);
 
+  const settleTab = useCallback((tabId: string) => {
+    settleActivePreviewTab(
+      usePreviewWorkspaceStore.getState().workspace,
+      useCanvasStore.getState().nodes,
+      tabId,
+    );
+  }, []);
+
+  const activateWorkspaceTab = useCallback(
+    (tabId: string) => {
+      const current = usePreviewWorkspaceStore.getState().workspace;
+      const group = current.groups.find((candidate) =>
+        candidate.tabIds.includes(tabId),
+      );
+      if (group?.activeTabId && group.activeTabId !== tabId) {
+        settleTab(group.activeTabId);
+      }
+      activateTab(tabId);
+    },
+    [activateTab, settleTab],
+  );
+
   const closeWorkspaceTab = (tabId: string) => {
     const isFinalTab =
       Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs).length ===
       1;
+    settleTab(tabId);
     closeTab(tabId);
     if (isFinalTab) onCollapse?.();
   };
@@ -86,18 +133,33 @@ export function PreviewWorkspace({
       const tab = usePreviewWorkspaceStore.getState().workspace.tabs[tabId];
       // Open to Side relocates the one tab rather than duplicating the
       // target, so it goes through the same open path (§8).
-      if (tab) openPreviewTarget(tab.target, { openToSide: true });
+      if (tab) {
+        settleTab(tabId);
+        openPreviewTarget(
+          tab.target,
+          { openToSide: true },
+          getProtectedPreviewTabIds(),
+        );
+      }
     },
-    [openPreviewTarget],
+    [openPreviewTarget, settleTab],
   );
 
   const openNewChat = useCallback(
     (groupId: string) => {
       if (!canvasId) return;
       const threadId = useChatStore.getState().createThread();
-      openPreviewTarget({ kind: 'chat', canvasId, threadId }, { groupId });
+      const activeTabId = usePreviewWorkspaceStore
+        .getState()
+        .workspace.groups.find((group) => group.id === groupId)?.activeTabId;
+      if (activeTabId) settleTab(activeTabId);
+      openPreviewTarget(
+        { kind: 'chat', canvasId, threadId },
+        { groupId },
+        getProtectedPreviewTabIds(),
+      );
     },
-    [canvasId, openPreviewTarget],
+    [canvasId, openPreviewTarget, settleTab],
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -119,10 +181,11 @@ export function PreviewWorkspace({
         String(over.id),
       );
       if (!destination) return;
+      settleTab(tabId);
       moveTab(tabId, destination);
       activateTab(tabId);
     },
-    [activateTab, moveTab],
+    [activateTab, moveTab, settleTab],
   );
 
   const onSeparatorPointerDown = useCallback(
@@ -211,7 +274,7 @@ export function PreviewWorkspace({
                 workspace={workspace}
                 isFocused={group.id === workspace.activeGroupId}
                 onFocus={() => setActiveGroup(group.id)}
-                onActivate={activateTab}
+                onActivate={activateWorkspaceTab}
                 onClose={closeWorkspaceTab}
                 onPromote={promoteTab}
                 onOpenToSide={openToSide}

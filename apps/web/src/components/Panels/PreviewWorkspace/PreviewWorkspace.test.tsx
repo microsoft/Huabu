@@ -18,7 +18,7 @@ import useCanvasStore from '@/store/canvasStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
-import { PreviewWorkspace } from './PreviewWorkspace';
+import { PreviewWorkspace, settleActivePreviewTab } from './PreviewWorkspace';
 import { PreviewWorkspacePanel } from './PreviewWorkspacePanel';
 import { groupDropId, resolveTabDropDestination } from './tabDnd';
 
@@ -48,18 +48,8 @@ vi.hoisted(() => {
 // The Chat panel pulls in the whole agent stack; the workspace only needs to
 // know it dispatched to it.
 vi.mock('../ChatPanel', () => ({
-  ChatPanel: ({
-    embedded,
-    session,
-  }: {
-    embedded?: boolean;
-    session?: { threadId: string };
-  }) => (
-    <div
-      data-testid="chat-panel"
-      data-embedded={embedded || undefined}
-      data-thread-id={session?.threadId}
-    />
+  ChatPanel: ({ session }: { session?: { threadId: string } }) => (
+    <div data-testid="chat-panel" data-thread-id={session?.threadId} />
   ),
 }));
 
@@ -118,11 +108,11 @@ afterEach(() => {
   container?.remove();
   root = null;
   container = null;
-  useCanvasStore.setState({ nodes: [], canvasId: '' });
+  useCanvasStore.setState({ nodes: [], canvasId: '', worldReferences: {} });
 });
 
 describe('tab strip', () => {
-  it('renders an unbound Chat with compact embedded chrome', () => {
+  it('renders an unbound Chat session with compact workspace chrome', () => {
     store().openPreviewTarget({
       kind: 'chat',
       canvasId: CANVAS_ID,
@@ -133,8 +123,8 @@ describe('tab strip', () => {
     expect(
       container
         ?.querySelector('[data-testid="chat-panel"]')
-        ?.getAttribute('data-embedded'),
-    ).toBe('true');
+        ?.getAttribute('data-thread-id'),
+    ).toBe('thread-1');
     expect(tabs()[0].classList.contains('h-9')).toBe(true);
   });
 
@@ -177,6 +167,35 @@ describe('tab strip', () => {
         ?.querySelector('[data-testid="chat-panel"]')
         ?.getAttribute('data-thread-id'),
     ).toBe('thread-question-1');
+  });
+
+  it('renders a World Question reference through its source session', () => {
+    openNode('question-ref');
+    useCanvasStore.setState({
+      worldReferences: {
+        'question-ref': {
+          kind: 'nodeRef',
+          referenceNodeId: 'question-ref',
+          target: { canvasId: 'source-canvas', nodeId: 'source-question' },
+          status: 'ok',
+          source: {
+            type: 'question',
+            threadId: 'source-thread',
+            status: 'done',
+            viewed: true,
+            agentMode: 'ask',
+            agentBinding: { kind: 'internal' },
+          },
+        },
+      },
+    });
+    render([canvasNode('question-ref', 'Pinned question', 'nodeRef')]);
+
+    expect(
+      container
+        ?.querySelector('[data-testid="chat-panel"]')
+        ?.getAttribute('data-thread-id'),
+    ).toBe('source-thread');
   });
 
   it('creates a Chat tab from the workspace toolbar while a node is active', () => {
@@ -248,6 +267,45 @@ describe('tab strip', () => {
 });
 
 describe('activation', () => {
+  it('settles an active authored node before its renderer is left', () => {
+    const first = openNode('a');
+    openNode('b');
+    store().activateTab(first);
+    const workspace = store().workspace;
+    const settle = vi.fn();
+
+    settleActivePreviewTab(
+      workspace,
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],
+      first,
+      settle,
+    );
+
+    expect(settle).toHaveBeenCalledWith('a');
+  });
+
+  it('does not settle an inactive or read-only preview tab', () => {
+    const inactive = openNode('a');
+    const active = openNode('b');
+    const workspace = store().workspace;
+    const settle = vi.fn();
+
+    settleActivePreviewTab(
+      workspace,
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta', 'pdf')],
+      inactive,
+      settle,
+    );
+    settleActivePreviewTab(
+      workspace,
+      [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta', 'pdf')],
+      active,
+      settle,
+    );
+
+    expect(settle).not.toHaveBeenCalled();
+  });
+
   it('switches the mounted panel on click', () => {
     openNode('a');
     openNode('b');

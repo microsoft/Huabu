@@ -23,9 +23,10 @@ import {
   mergeLineRects,
 } from '@/handler/pdfHighlight/highlight';
 import { scheduleScrollToMatch } from '@/hooks/searchDom';
-import useCanvasStore from '@/store/canvasStore';
+import useCanvasStore, { getProtectedPreviewTabIds } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { usePreviewSearchStore } from '@/store/previewSearchStore';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
 import {
@@ -492,12 +493,23 @@ export const PDFPreview = ({
   // ---------------------------------------------------------------------------
   // Send captured area to chat as a pending attachment
   // ---------------------------------------------------------------------------
-  // Send to Chat stages onto whichever thread is currently visible; that
-  // becomes the focused group's active tab once the workspace lands.
-  const handleSendToChat = useCallback((attachment: ChatAttachment) => {
-    const { threadId, addPendingAttachment } = useChatStore.getState();
-    addPendingAttachment(threadId, attachment);
-  }, []);
+  // PDF capture always targets this Canvas's canonical unbound Chat.
+  const handleSendToChat = useCallback(
+    (attachment: ChatAttachment) => {
+      const chat = useChatStore.getState();
+      const threadId = chat.ensureCanvasThread(canvasId);
+      const { addPendingAttachment } = chat;
+      addPendingAttachment(threadId, attachment);
+      usePreviewWorkspaceStore
+        .getState()
+        .openPreviewTarget(
+          { kind: 'chat', canvasId, threadId },
+          undefined,
+          getProtectedPreviewTabIds(),
+        );
+    },
+    [canvasId],
+  );
 
   // ---------------------------------------------------------------------------
   // Set captured area as the PDF node cover image

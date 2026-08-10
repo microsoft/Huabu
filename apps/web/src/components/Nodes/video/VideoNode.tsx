@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import useCanvasStore from '@/store/canvasStore.ts';
+import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
 import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
 import {
@@ -23,7 +24,6 @@ export type VideoNodeType = Node<CanvasVideoNodeData, 'video'>;
 export const VideoNode = memo(
   ({ id, data, selected }: NodeProps<VideoNodeType>) => {
     const { t } = useTranslation();
-    const openExpanded = useCanvasStore((s) => s.openExpanded);
     const canvasId = useCanvasStore((s) => s.canvasId);
     const missingFileKind = getMissingFileKind(data);
 
@@ -32,7 +32,7 @@ export const VideoNode = memo(
         title={t('node.openLargeView')}
         onClick={(e) => {
           e.stopPropagation();
-          openExpanded(id);
+          openPreviewNode(id);
         }}
       >
         <Fullscreen />

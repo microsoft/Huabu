@@ -269,6 +269,23 @@ describe('tab cap', () => {
     // The tab just opened is its group's active tab and is therefore exempt.
     expect(store().workspace.tabs[opened.at(-1) as string]).toBeDefined();
   });
+
+  it('does not evict a protected inactive tab', () => {
+    store().loadForCanvas(CANVAS);
+    const protectedTab = store().openPreviewTarget(node('protected'));
+    for (let i = 1; i < MAX_TABS_PER_GROUP; i += 1) {
+      store().openPreviewTarget(node(`n${i}`));
+    }
+
+    store().openPreviewTarget(
+      node('overflow'),
+      undefined,
+      new Set([protectedTab]),
+    );
+
+    expect(store().workspace.tabs[protectedTab]).toBeDefined();
+    expect(store().workspace.groups[0].tabIds).toHaveLength(MAX_TABS_PER_GROUP);
+  });
 });
 
 describe('selectors', () => {

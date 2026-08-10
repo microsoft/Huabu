@@ -22,6 +22,7 @@ import {
   useChatStore,
 } from '@/store/chatStore.ts';
 import { findPendingPermissionRequestId } from '@/store/chatTypes.ts';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import {
   getQuestionFontOpts,
   QUESTION_FONT_FAMILY,
@@ -144,10 +145,10 @@ export const QuestionNode = memo(
         ) !== null
       );
     });
-    const showChatAnchor = useChatStore(
-      (s) =>
-        s.viewingQuestionThread?.presentationAnchor.nodeId === id &&
-        s.viewingQuestionThread.conversationOwner.nodeId === id,
+    const showChatAnchor = usePreviewWorkspaceStore((state) =>
+      Object.values(state.workspace.tabs).some(
+        (tab) => tab.target.kind === 'node' && tab.target.nodeId === id,
+      ),
     );
     // Composing = this node is the chat anchor AND it has never been
     // authored/run yet (`idle`). Derived from the node's status, not a stored

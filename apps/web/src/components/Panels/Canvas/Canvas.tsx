@@ -83,6 +83,10 @@ import {
 } from '@/hooks/useInputMode';
 import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
 import { useSketchStrokeMove } from '@/hooks/useSketchStrokeMove';
+import {
+  closeActivePreviewNode,
+  openPreviewNode,
+} from '@/store/previewWorkspace/actions';
 import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
@@ -458,8 +462,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     setRfInstance,
     setCanvasWrapper,
     setViewport,
-    openExpanded,
-    closeExpanded,
     frameNodesInRect,
     selectNodes,
     refreshWorldReferences,
@@ -1166,10 +1168,10 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       // 3. No tool active → background click closes the expanded view.
       if (expandedNodeId) {
-        closeExpanded();
+        closeActivePreviewNode();
       }
     },
-    [pendingNodeType, expandedNodeId, closeExpanded, placePendingNode],
+    [pendingNodeType, expandedNodeId, placePendingNode],
   );
 
   // Keep layout-driven canvas resizes spatially stable. Side panels and split
@@ -1531,7 +1533,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           e.stopPropagation();
           // Expand any expandable node type on double-click.
           if (EXPANDABLE_TYPES.has(node.type ?? '')) {
-            openExpanded(node.id);
+            openPreviewNode(node.id);
           }
         }}
         onEdgeDoubleClick={(e, edge) => {

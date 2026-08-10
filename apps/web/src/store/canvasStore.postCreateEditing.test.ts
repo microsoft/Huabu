@@ -5,12 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import useCanvasStore from './canvasStore';
 import { usePanelStore } from './panelStore';
+import {
+  closeActivePreviewNode,
+  openPreviewNode,
+} from './previewWorkspace/actions';
 import { createEmptyWorkspace } from './previewWorkspace/model';
 import {
   selectActiveNodeId,
   usePreviewWorkspaceStore,
 } from './previewWorkspace/store';
-import { useWorkspaceStore } from './workspaceStore';
 
 /** The node the workspace is showing; presentation moved off `canvasStore`. */
 const expandedNodeId = () =>
@@ -33,7 +36,6 @@ function resetStore() {
     isRightCollapsed: true,
     rightPanelAnchorNodeId: null,
   });
-  useWorkspaceStore.setState({ previewWorkspaceEnabled: true });
 }
 
 beforeEach(() => {
@@ -48,7 +50,7 @@ afterEach(() => {
 
 describe('post-create editing', () => {
   it('opens the right workspace with an explicitly expanded node', () => {
-    useCanvasStore.getState().openExpanded('node-note');
+    openPreviewNode('node-note');
 
     expect(expandedNodeId()).toBe('node-note');
     expect(usePanelStore.getState()).toMatchObject({
@@ -58,20 +60,11 @@ describe('post-create editing', () => {
   });
 
   it('closes the node preview without collapsing the workspace', () => {
-    useCanvasStore.getState().openExpanded('node-note');
-    useCanvasStore.getState().closeExpanded();
+    openPreviewNode('node-note');
+    closeActivePreviewNode();
 
     expect(expandedNodeId()).toBeNull();
     expect(usePanelStore.getState().isRightCollapsed).toBe(false);
-  });
-
-  it('keeps the legacy expanded-node layout independent from Chat', () => {
-    useWorkspaceStore.setState({ previewWorkspaceEnabled: false });
-
-    useCanvasStore.getState().openExpanded('node-note');
-
-    expect(expandedNodeId()).toBe('node-note');
-    expect(usePanelStore.getState().isRightCollapsed).toBe(true);
   });
 
   it('opens a newly created note in expanded editing view', () => {

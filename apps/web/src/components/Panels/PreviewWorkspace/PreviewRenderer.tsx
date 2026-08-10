@@ -17,12 +17,14 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import useCanvasStore from '@/store/canvasStore';
+import { conversationViewFromWorldReference } from '@/store/conversationOwner';
 
 import { ChatPanel } from '../ChatPanel';
 import { ExpandedNodePanel } from '../ExpandedNodePanel/ExpandedNodePanel';
 
 import type { ChatSession } from '@/hooks/useChatSession';
 import type { PreviewTarget } from '@/store/previewWorkspace/model';
+import type { ResolvedWorldReference } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 /**
@@ -30,25 +32,39 @@ import type { Node } from '@xyflow/react';
  * yet — a node mints its thread on first open, so there is nothing to show
  * before that.
  */
-function questionSession(node: Node, canvasId: string): ChatSession | null {
-  const threadId = node.data.threadId;
-  if (typeof threadId !== 'string' || !threadId) return null;
+function questionSession(
+  node: Node,
+  canvasId: string,
+  reference: ResolvedWorldReference | undefined,
+): ChatSession | null {
+  const conversationView =
+    node.type === 'question' && typeof node.data.threadId === 'string'
+      ? {
+          presentationAnchor: { canvasId, nodeId: node.id },
+          conversationOwner: {
+            canvasId,
+            nodeId: node.id,
+            threadId: node.data.threadId,
+          },
+        }
+      : conversationViewFromWorldReference(canvasId, node.id, reference);
+  if (!conversationView) return null;
+
   return {
-    threadId,
+    threadId: conversationView.conversationOwner.threadId,
     canvasId,
-    ownerCanvasId: canvasId,
-    conversationView: {
-      presentationAnchor: { canvasId, nodeId: node.id },
-      conversationOwner: { canvasId, nodeId: node.id, threadId },
-    },
+    ownerCanvasId: conversationView.conversationOwner.canvasId,
+    conversationView,
   };
 }
 
 export function PreviewRenderer({
+  tabId,
   target,
   onClose,
   hasFocusPriority,
 }: {
+  tabId: string;
   target: PreviewTarget;
   /** Closes the tab rendering this target. */
   onClose: () => void;
@@ -61,6 +77,9 @@ export function PreviewRenderer({
       ? s.nodes.find((n) => n.id === target.nodeId)
       : undefined,
   );
+  const reference = useCanvasStore((s) =>
+    target.kind === 'node' ? s.worldReferences[target.nodeId] : undefined,
+  );
 
   const session = useMemo<ChatSession | null>(() => {
     if (target.kind === 'chat') {
@@ -71,12 +90,10 @@ export function PreviewRenderer({
         conversationView: null,
       };
     }
-    return node?.type === 'question'
-      ? questionSession(node, target.canvasId)
-      : null;
-  }, [target, node]);
+    return node ? questionSession(node, target.canvasId, reference) : null;
+  }, [target, node, reference]);
 
-  if (session) return <ChatPanel session={session} embedded />;
+  if (session) return <ChatPanel session={session} previewTabId={tabId} />;
 
   // An unbound Chat target always resolves; only a Question node can be
   // waiting for its thread.

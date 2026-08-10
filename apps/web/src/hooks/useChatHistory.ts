@@ -24,6 +24,7 @@ import {
   resolveConversationOwnerSource,
   validateConversationView,
 } from '@/store/conversationOwner';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { handleStreamEvent } from './useAgentStream';
 
@@ -51,20 +52,14 @@ const KNOWN_HISTORY_ROLES = new Set<string>(['user', 'assistant', 'status']);
 export function useChatHistory(
   session: ChatSession,
   setIsLoading: (threadId: string, loading: boolean) => void,
+  previewTabId?: string,
 ): void {
   const { threadId, canvasId } = session;
   const isHistoryLoaded = useChatStore((state) =>
     selectThreadHistoryLoaded(state, threadId),
   );
   const addMessage = useChatStore((state) => state.addMessage);
-  const savedReplay = useChatStore((state) =>
-    canvasId ? state.questionReplayByCanvas[canvasId]?.view : undefined,
-  );
-  // History has to survive a refresh that lands before the viewed question is
-  // restored, so it falls back to the saved replay. The panel deliberately
-  // does not — it renders only what is actively open.
-  const effectiveConversationView =
-    session.conversationView ?? savedReplay ?? null;
+  const effectiveConversationView = session.conversationView;
   const ownerCanvasId =
     effectiveConversationView?.conversationOwner.canvasId || canvasId;
 
@@ -91,18 +86,8 @@ export function useChatHistory(
           await validateConversationView(effectiveConversationView);
         } catch (error) {
           if (error instanceof ConversationIntegrityError) {
-            const current = useChatStore.getState().viewingQuestionThread;
-            if (
-              current?.presentationAnchor.canvasId ===
-                effectiveConversationView.presentationAnchor.canvasId &&
-              current.presentationAnchor.nodeId ===
-                effectiveConversationView.presentationAnchor.nodeId
-            ) {
-              useChatStore
-                .getState()
-                .closeQuestionThread(
-                  effectiveConversationView.presentationAnchor.canvasId,
-                );
+            if (previewTabId) {
+              usePreviewWorkspaceStore.getState().closeTab(previewTabId);
             }
             return;
           }
@@ -122,23 +107,18 @@ export function useChatHistory(
         const overrideTid =
           res.threadId && res.threadId !== tid ? res.threadId : null;
         const finalTid = overrideTid ?? tid;
-        if (overrideTid) {
-          const current = useChatStore.getState();
-          const currentOwnerCanvasId =
-            current.viewingQuestionThread?.conversationOwner.canvasId ||
-            useCanvasStore.getState().canvasId;
-          if (
-            current.threadId === tid &&
-            currentOwnerCanvasId === ownerCanvasId
-          ) {
-            useChatStore.setState((state) => ({
-              threadId: overrideTid,
-              threadMap: {
-                ...state.threadMap,
-                [ownerCanvasId]: overrideTid,
-              },
-            }));
-          }
+        if (overrideTid && !effectiveConversationView && previewTabId) {
+          usePreviewWorkspaceStore.getState().replaceTabTarget(previewTabId, {
+            kind: 'chat',
+            canvasId,
+            threadId: overrideTid,
+          });
+          useChatStore.setState((state) => ({
+            threadMap: {
+              ...state.threadMap,
+              [canvasId]: overrideTid,
+            },
+          }));
         }
 
         const serverMessages: ChatMessage[] = res.messages.flatMap(
@@ -229,7 +209,7 @@ export function useChatHistory(
     return () => {
       cancelled = true;
     };
-  }, [threadId, ownerCanvasId, effectiveConversationView]);
+  }, [threadId, ownerCanvasId, effectiveConversationView, previewTabId]);
 
   // Try to reconnect to an active server-side run after history is loaded.
   // This handles the page-refresh case: events buffered during the refresh
@@ -273,16 +253,8 @@ export function useChatHistory(
           await validateConversationView(ownerView);
         } catch (error) {
           if (error instanceof ConversationIntegrityError) {
-            const current = useChatStore.getState().viewingQuestionThread;
-            if (
-              current?.presentationAnchor.canvasId ===
-                ownerView.presentationAnchor.canvasId &&
-              current.presentationAnchor.nodeId ===
-                ownerView.presentationAnchor.nodeId
-            ) {
-              useChatStore
-                .getState()
-                .closeQuestionThread(ownerView.presentationAnchor.canvasId);
+            if (previewTabId) {
+              usePreviewWorkspaceStore.getState().closeTab(previewTabId);
             }
             return;
           }
@@ -472,6 +444,7 @@ export function useChatHistory(
     threadId,
     ownerCanvasId,
     effectiveConversationView,
+    previewTabId,
     addMessage,
     setIsLoading,
   ]);

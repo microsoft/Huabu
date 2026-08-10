@@ -41,6 +41,7 @@ import {
   validateConversationView,
 } from '@/store/conversationOwner';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
 
 import type { AssistantSegment } from '../store/chatTypes';
@@ -126,8 +127,8 @@ function normalizeInternalToolResultData(
 interface StreamEventContext {
   /**
    * The thread that owns this stream. Captured at send time; all
-   * message reads / writes inside the SSE handler key off this — never
-   * `state.threadId` — so events keep landing on the originating
+   * message reads / writes inside the SSE handler key off this explicit
+   * session address, so events keep landing on the originating
    * thread even after the user navigates away.
    */
   threadId: string;
@@ -637,7 +638,10 @@ export interface UseAgentStreamReturn {
  * thread happens to be visible, so two mounted Chat renderers stream
  * independently.
  */
-export function useAgentStream(session: ChatSession): UseAgentStreamReturn {
+export function useAgentStream(
+  session: ChatSession,
+  previewTabId?: string,
+): UseAgentStreamReturn {
   const { threadId, canvasId, conversationView } = session;
   // Loading is per-thread: a question node's thread can stream independently
   // of the canvas chat.
@@ -709,19 +713,19 @@ export function useAgentStream(session: ChatSession): UseAgentStreamReturn {
           }
           throw error;
         }
-        // Validation is async, so re-check that this conversation is still the
-        // one on screen before sending. Reads the globally viewed question
-        // because that is still where "what the user is looking at" lives;
-        // it retires with L4 when tabs own presentation.
-        const currentChat = useChatStore.getState();
-        if (
-          currentChat.threadId !== threadId ||
-          currentChat.viewingQuestionThread?.presentationAnchor.canvasId !==
-            conversationView.presentationAnchor.canvasId ||
-          currentChat.viewingQuestionThread?.presentationAnchor.nodeId !==
-            conversationView.presentationAnchor.nodeId
-        ) {
-          return;
+        // Validation is async, so confirm this renderer still owns the same
+        // tab. Closing or replacing it invalidates the pending send.
+        if (previewTabId) {
+          const tab =
+            usePreviewWorkspaceStore.getState().workspace.tabs[previewTabId];
+          if (
+            tab?.target.kind !== 'node' ||
+            tab.target.canvasId !==
+              conversationView.presentationAnchor.canvasId ||
+            tab.target.nodeId !== conversationView.presentationAnchor.nodeId
+          ) {
+            return;
+          }
         }
       }
 
@@ -841,9 +845,10 @@ export function useAgentStream(session: ChatSession): UseAgentStreamReturn {
 
       // ── Question-node follow-up bookkeeping ─────────────────────────
       //
-      // Selectable Question Nodes retain the client-authored lifecycle.
-      // Fixed Agent Nodes route content/status/error through the server;
-      // this hook writes only their client presentation state (`viewed`).
+      // When this session renders a selectable Question Node, this hook keeps
+      // its client-authored lifecycle honest across follow-up turns. Fixed
+      // Agent Nodes route content/status/error through the server; this hook
+      // writes only their client presentation state (`viewed`).
       //
       // We also track whether a successful `done` event was observed so
       // a late cap-out `error` event (`Agent loop exceeded maximum
@@ -1182,6 +1187,7 @@ export function useAgentStream(session: ChatSession): UseAgentStreamReturn {
       canvasId,
       setThreadLoading,
       conversationView,
+      previewTabId,
     ],
   );
 

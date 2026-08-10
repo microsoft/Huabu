@@ -12,13 +12,13 @@ import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
 import { Loading } from '../../components/Common/Loading';
 import { toast } from '../../components/Common/Toast';
 import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
-import { ChatPanel } from '../../components/Panels/ChatPanel';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { PreviewWorkspacePanel } from '../../components/Panels/PreviewWorkspace/PreviewWorkspacePanel';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
 import { useTrackCanvasAttention } from '../../store/canvasAttentionStore';
 import useStore, { dismissVersionConflictToast } from '../../store/canvasStore';
 import { useCanvasSyncStore } from '../../store/canvasSyncStore';
+import { openPreviewNode } from '../../store/previewWorkspace/actions';
 import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
 import { useToolStore } from '../../store/toolStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
@@ -27,6 +27,21 @@ type NewCanvasPlacementIntent = {
   canvasId: string;
   nodeType: 'note' | 'sketch';
 };
+
+function readPreviewNodeIntent(
+  state: unknown,
+  routeCanvasId: string | undefined,
+): string | null {
+  if (!routeCanvasId || typeof state !== 'object' || state === null)
+    return null;
+  const intent = (state as Record<string, unknown>)['previewNode'];
+  if (typeof intent !== 'object' || intent === null) return null;
+  const candidate = intent as Record<string, unknown>;
+  return candidate['canvasId'] === routeCanvasId &&
+    typeof candidate['nodeId'] === 'string'
+    ? candidate['nodeId']
+    : null;
+}
 
 function readNewCanvasPlacementIntent(
   state: unknown,
@@ -65,9 +80,6 @@ export default function CanvasPage() {
   const isLoading = useStore((s) => s.isLoading);
   const canvasNotFound = useStore((s) => s.canvasNotFound);
   const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
-  const previewWorkspaceEnabled = useWorkspaceStore(
-    (s) => s.previewWorkspaceEnabled,
-  );
   const refreshSpaceTitles = useWorkspaceStore((s) => s.refreshSpaceTitles);
   const nodeCount = useStore((s) => s.nodes.length);
   // Subscribed so the very first render can detect a mismatch between the
@@ -78,6 +90,7 @@ export default function CanvasPage() {
   const storeCanvasId = useStore((s) => s.canvasId);
   const initialised = useRef(false);
   const newCanvasPlacementRef = useRef<NewCanvasPlacementIntent | null>(null);
+  const previewNodeIntentRef = useRef<string | null>(null);
   const setPendingNodeType = useToolStore((s) => s.setPendingNodeType);
   const isShortcutsOpen = useShortcutsUiStore((s) => s.isOpen);
   const openShortcuts = useShortcutsUiStore((s) => s.open);
@@ -109,19 +122,30 @@ export default function CanvasPage() {
   // so refresh/back navigation cannot arm Note placement again.
   useEffect(() => {
     const placement = readNewCanvasPlacementIntent(location.state, canvasId);
-    if (!placement) {
+    const previewNodeId = readPreviewNodeIntent(location.state, canvasId);
+    if (!placement && !previewNodeId) {
       if (newCanvasPlacementRef.current?.canvasId !== canvasId) {
         newCanvasPlacementRef.current = null;
       }
       return;
     }
 
-    newCanvasPlacementRef.current = placement;
+    if (placement) newCanvasPlacementRef.current = placement;
+    if (previewNodeId) previewNodeIntentRef.current = previewNodeId;
     navigate(`${location.pathname}${location.search}${location.hash}`, {
       replace: true,
       state: null,
     });
   }, [canvasId, location, navigate]);
+
+  useEffect(() => {
+    const nodeId = previewNodeIntentRef.current;
+    if (!nodeId || storeCanvasId !== canvasId || isLoading) return;
+    previewNodeIntentRef.current = null;
+    if (useStore.getState().nodes.some((node) => node.id === nodeId)) {
+      openPreviewNode(nodeId);
+    }
+  }, [canvasId, isLoading, storeCanvasId]);
 
   useEffect(() => {
     if (!canvasId) {
@@ -238,9 +262,7 @@ export default function CanvasPage() {
     <MainLayout
       header={<CanvasHeader onOpenShortcuts={openShortcuts} />}
       leftPanel={<CanvasLayerPanel />}
-      rightPanel={
-        previewWorkspaceEnabled ? <PreviewWorkspacePanel /> : <ChatPanel />
-      }
+      rightPanel={<PreviewWorkspacePanel />}
     >
       <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />
     </MainLayout>

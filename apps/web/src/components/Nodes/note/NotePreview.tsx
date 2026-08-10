@@ -370,7 +370,7 @@ export const NotePreview = ({
   // node" — covering both the first mount (e.g., double-click an
   // unopened note) AND a repeat double-click on the already-expanded
   // node. We drive this off `expandedNodeFocusTick`, a store counter
-  // bumped by every `openExpanded` call. The ref-tracked
+  // bumped by every explicit preview-node open. The ref-tracked
   // `lastHandledTickRef` skips redundant focuses on unrelated effect
   // runs (e.g., toggling raw ↔ wysiwyg) so we never steal focus from
   // an input elsewhere on the page when no expansion was requested.

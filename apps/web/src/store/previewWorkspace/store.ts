@@ -72,6 +72,7 @@ export type PreviewWorkspaceState = {
   openPreviewTarget: (
     target: PreviewTarget,
     options?: OpenPreviewTargetOptions,
+    protectedTabIds?: ReadonlySet<string>,
   ) => string;
   closeTab: (tabId: string) => void;
   activateTab: (tabId: string) => void;
@@ -111,14 +112,18 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       if (canvasId) writeWorkspace(canvasId, workspace);
     },
 
-    openPreviewTarget: (target, options) => {
+    openPreviewTarget: (target, options, protectedTabIds) => {
       const opened = openTarget(get().workspace, target, options);
       if (!opened.tabId) return '';
       // The active tab of each group is exempt, so eviction cannot remove the
       // tab just opened. Stream and unsettled-content exemptions arrive with
       // their renderers.
       set({
-        workspace: enforceTabLimit(opened.workspace, MAX_TABS_PER_GROUP),
+        workspace: enforceTabLimit(
+          opened.workspace,
+          MAX_TABS_PER_GROUP,
+          protectedTabIds,
+        ),
       });
       return opened.tabId;
     },

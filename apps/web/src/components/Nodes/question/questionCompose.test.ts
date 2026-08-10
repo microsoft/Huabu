@@ -4,14 +4,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import {
   selectActiveNodeId,
   usePreviewWorkspaceStore,
 } from '@/store/previewWorkspace/store';
-import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import {
   enterQuestionCompose,
@@ -43,8 +41,6 @@ beforeEach(() => {
     rightPanelAnchorNodeId: null,
     focusChatInputRequest: null,
   });
-  useChatStore.setState({ viewingQuestionThread: null });
-  useWorkspaceStore.setState({ previewWorkspaceEnabled: true });
 });
 
 describe('Question conversation presentation', () => {
@@ -55,7 +51,6 @@ describe('Question conversation presentation', () => {
       'question-1',
     );
     expect(usePanelStore.getState().isRightCollapsed).toBe(false);
-    expect(useChatStore.getState().viewingQuestionThread).toBeNull();
   });
 
   it('opens Question compose as a workspace tab and focuses its thread', () => {
@@ -67,17 +62,5 @@ describe('Question conversation presentation', () => {
     expect(usePanelStore.getState().focusChatInputRequest?.threadId).toBe(
       'thread-1',
     );
-  });
-
-  it('keeps the legacy replay pointer when the workspace is disabled', () => {
-    useWorkspaceStore.setState({ previewWorkspaceEnabled: false });
-
-    enterQuestionConversation(view, undefined, 'canvas-1', 'bottom');
-
-    expect(
-      useChatStore.getState().viewingQuestionThread?.presentationAnchor.nodeId,
-    ).toBe('question-1');
-    expect(selectActiveNodeId(usePreviewWorkspaceStore.getState())).toBeNull();
-    expect(usePanelStore.getState().isRightCollapsed).toBe(false);
   });
 });

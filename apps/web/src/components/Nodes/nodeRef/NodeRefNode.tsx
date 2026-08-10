@@ -9,14 +9,13 @@ import { Button } from '@/components/Common/Button';
 import { toast } from '@/components/Common/Toast';
 import { NodeWrapper } from '@/components/Nodes/NodeWrapper';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
 import {
   ConversationIntegrityError,
   conversationViewFromWorldReference,
   patchConversationOwnerNode,
   refreshConversationPresentation,
 } from '@/store/conversationOwner';
-import { usePanelStore } from '@/store/panelStore';
+import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
 import type { NodeRefNodeData } from '@/components/Nodes/types';
 import type { Node, NodeProps } from '@xyflow/react';
@@ -39,12 +38,6 @@ export const NodeRefNode = memo(
     const canvasId = useCanvasStore((state) => state.canvasId);
     const refreshWorldReferences = useCanvasStore(
       (state) => state.refreshWorldReferences,
-    );
-    const openQuestionThread = useChatStore(
-      (state) => state.openQuestionThread,
-    );
-    const requestOpenRightPanel = usePanelStore(
-      (state) => state.requestOpenRightPanel,
     );
     const canOpenConversation = status === 'ok' && source?.type === 'question';
 
@@ -79,15 +72,7 @@ export const NodeRefNode = memo(
         throw error;
       }
       if (!view) return;
-      openQuestionThread(
-        view,
-        latest.source.agentBinding,
-        presentationCanvasId,
-        latest.source.status === 'done' && !latest.source.viewed
-          ? 'last-user'
-          : 'bottom',
-      );
-      requestOpenRightPanel(id);
+      openPreviewNode(id);
 
       if (
         (latest.source.status === 'done' || latest.source.status === 'error') &&
@@ -109,9 +94,7 @@ export const NodeRefNode = memo(
       data.target.canvasId,
       data.target.nodeId,
       id,
-      openQuestionThread,
       refreshWorldReferences,
-      requestOpenRightPanel,
       t,
     ]);
 

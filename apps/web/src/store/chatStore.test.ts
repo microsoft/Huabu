@@ -29,7 +29,6 @@ describe('chatStore composer drafts', () => {
     testStorage.clear();
     useChatStore.setState({
       threadsById: {},
-      threadId: 'thread-a',
     });
   });
 
@@ -50,64 +49,5 @@ describe('chatStore composer drafts', () => {
     expect(selectThreadDraft(useChatStore.getState(), 'thread-a')).toBe(
       'first draft',
     );
-  });
-});
-
-describe('chatStore question compose binding', () => {
-  beforeEach(() => {
-    testStorage.clear();
-    useChatStore.setState({
-      threadId: 'canvas-thread',
-      agentBinding: { kind: 'internal' },
-      lastAction: 'ask',
-      bindingMap: {
-        'canvas-a': {
-          kind: 'external',
-          profileId: 'canvas-default',
-          alias: 'Canvas Default',
-        },
-      },
-      messagesByThread: {},
-      historyLoadedThreads: new Set(),
-      viewingQuestionThread: null,
-    });
-  });
-
-  const view = {
-    presentationAnchor: { canvasId: 'canvas-a', nodeId: 'node-question' },
-    conversationOwner: {
-      canvasId: 'canvas-a',
-      nodeId: 'node-question',
-      threadId: 'thread-question',
-    },
-  };
-
-  it('uses an explicitly persisted binding for a prebound Question Node', () => {
-    useChatStore.getState().openQuestionCompose(view, {
-      canvasId: 'canvas-a',
-      binding: {
-        kind: 'external',
-        profileId: 'fixed-profile',
-        alias: 'Fixed Agent',
-      },
-    });
-
-    expect(useChatStore.getState().agentBinding).toEqual({
-      kind: 'external',
-      profileId: 'fixed-profile',
-      alias: 'Fixed Agent',
-    });
-  });
-
-  it('keeps the Canvas default for an ordinary unbound Question Node', () => {
-    useChatStore.getState().openQuestionCompose(view, {
-      canvasId: 'canvas-a',
-    });
-
-    expect(useChatStore.getState().agentBinding).toEqual({
-      kind: 'external',
-      profileId: 'canvas-default',
-      alias: 'Canvas Default',
-    });
   });
 });

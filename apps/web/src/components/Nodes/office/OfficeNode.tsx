@@ -13,6 +13,7 @@ import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { OFFICE_FORMAT_ICON } from '@/config/nodeIcons';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
+import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
 import { getAccentTokens } from '../accentTokens';
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
@@ -78,7 +79,6 @@ export const OfficeNode = memo(
   ({ id, data, selected }: NodeProps<OfficeNodeType>) => {
     const { t } = useTranslation();
     const scale = useNodeScale(id, 'office');
-    const openExpanded = useCanvasStore((s) => s.openExpanded);
     const canvasId = useCanvasStore((s) => s.canvasId);
 
     const src = typeof data.src === 'string' ? data.src : '';
@@ -123,7 +123,7 @@ export const OfficeNode = memo(
           title={t('node.openLargeView')}
           onClick={(e) => {
             e.stopPropagation();
-            openExpanded(id);
+            openPreviewNode(id);
           }}
         >
           <Fullscreen />

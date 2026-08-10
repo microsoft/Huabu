@@ -13,12 +13,10 @@
 import { createId } from '@huabu/shared';
 
 import useCanvasStore from '@/store/canvasStore.ts';
-import { useChatStore } from '@/store/chatStore.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
-import { useWorkspaceStore } from '@/store/workspaceStore.ts';
+import { openPreviewNode } from '@/store/previewWorkspace/actions.ts';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent.ts';
-import type { QuestionThreadOpenPosition } from '@/store/chatStore.ts';
 import type {
   AgentBinding,
   AgentConversationView,
@@ -28,21 +26,11 @@ import type {
 /** Open an authored Question conversation in the active presentation mode. */
 export function enterQuestionConversation(
   view: AgentConversationView,
-  binding: AgentBinding | undefined,
-  canvasId: string | null,
-  openPosition: QuestionThreadOpenPosition,
+  _binding: AgentBinding | undefined,
+  _canvasId: string | null,
+  _openPosition: 'last-user' | 'bottom',
 ): void {
-  if (useWorkspaceStore.getState().previewWorkspaceEnabled) {
-    useCanvasStore.getState().openExpanded(view.presentationAnchor.nodeId);
-    return;
-  }
-
-  useChatStore
-    .getState()
-    .openQuestionThread(view, binding, canvasId || undefined, openPosition);
-  usePanelStore
-    .getState()
-    .requestOpenRightPanel(view.presentationAnchor.nodeId);
+  openPreviewNode(view.presentationAnchor.nodeId);
 }
 
 /**
@@ -51,20 +39,10 @@ export function enterQuestionConversation(
  */
 export function enterQuestionCompose(
   view: AgentConversationView,
-  canvasId: string | null,
-  binding?: AgentBinding,
+  _canvasId: string | null,
+  _binding?: AgentBinding,
 ): void {
-  if (useWorkspaceStore.getState().previewWorkspaceEnabled) {
-    useCanvasStore.getState().openExpanded(view.presentationAnchor.nodeId);
-  } else {
-    useChatStore.getState().openQuestionCompose(view, {
-      ...(canvasId ? { canvasId } : {}),
-      ...(binding ? { binding } : {}),
-    });
-    usePanelStore
-      .getState()
-      .requestOpenRightPanel(view.presentationAnchor.nodeId);
-  }
+  openPreviewNode(view.presentationAnchor.nodeId);
   usePanelStore
     .getState()
     .requestFocusChatInput(view.conversationOwner.threadId);

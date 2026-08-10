@@ -84,7 +84,6 @@ let container: HTMLDivElement | undefined;
 /** History ends on a user turn: the state that arms the reconnect. */
 function seedStore(isStreaming: boolean) {
   useChatStore.setState({
-    threadId: THREAD_ID,
     threadMap: { [CANVAS_ID]: THREAD_ID },
     threadsById: {
       [THREAD_ID]: {
@@ -98,8 +97,6 @@ function seedStore(isStreaming: boolean) {
         pendingAttachments: [],
       },
     },
-    viewingQuestionThread: null,
-    questionReplayByCanvas: {},
   });
 }
 

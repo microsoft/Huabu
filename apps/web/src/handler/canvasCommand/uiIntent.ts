@@ -264,7 +264,6 @@ export type CanvasUiIntent =
       nodeId: string;
       reorderTarget?: { nodeId: string; position: 'before' | 'after' };
     }
-  | { type: 'EXPAND_NODE'; nodeId: string; transient?: boolean }
   | {
       /**
        * Stroke-level split / cross-region move (Stage 4B). Pulls the
@@ -309,7 +308,6 @@ export interface UiIntentResolution {
    * not part of the canvas graph. `dispatchUiIntent` hands this to the
    * preview workspace rather than setting panel state directly.
    */
-  openPreviewNode?: { nodeId: string; transient: boolean };
 }
 
 // ---------------------------------------------------------------------------
@@ -411,19 +409,6 @@ export function resolveUiIntent(
       return resolveMoveNodeIntoFrame(intent, ui);
     case 'MOVE_NODE_OUT_OF_FRAME':
       return resolveMoveNodeOutOfFrame(intent, ui);
-    case 'EXPAND_NODE': {
-      const node = ui.nodes.find((n) => n.id === intent.nodeId);
-      return {
-        commands: [],
-        openPreviewNode: {
-          nodeId: intent.nodeId,
-          transient: intent.transient ?? false,
-        },
-        trace: node
-          ? [{ action: 'node_expanded', node: extractNodeRef(node) }]
-          : [],
-      };
-    }
     case 'CONVERT_NODE_TYPE': {
       const node = ui.nodes.find((n) => n.id === intent.nodeId);
       if (!node) return { commands: [], trace: [] };

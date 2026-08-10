@@ -2,17 +2,13 @@
 // Licensed under the MIT license.
 
 import clsx from 'clsx';
-import {
-  ArrowLeft,
-  Bookmark,
-  ListIndentIncrease,
-  PanelRightOpen,
-} from 'lucide-react';
+import { Bookmark, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 import {
+  createId,
   getQuestionNodeStatus,
   MODE_SELECTION_ID,
   MODEL_SELECTION_ID,
@@ -50,6 +46,7 @@ import {
   resolveConversationOwnerSource,
 } from '@/store/conversationOwner';
 import { useLLMStore } from '@/store/llmStore';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
 
 import {
@@ -61,43 +58,35 @@ import { AgentSelector, type AgentChoice } from './AgentSelector';
 import { BuiltinSessionSelectors } from './BuiltinSessionSelectors';
 import { ChangeReviewCard } from './ChangeReviewCard';
 import { ChatInput } from './ChatInput';
-import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
 import { parseSlashInvocations } from './parseSlashInvocations';
-import { startNewChat } from './startNewChat';
+import { saveChatAsQuestion } from './saveChatAsQuestion';
+import { bindingsEqual } from './agentMenu';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
 import { SidebarPanel } from '../SidebarPanel';
 
-import type { AgentIcon, AgentMode } from '@huabu/shared';
+import type { AgentIcon, AgentMode, CanvasNodeId } from '@huabu/shared';
 
 interface ChatPanelProps {
   isCollapsed?: boolean;
   onToggle?: () => void;
-  /** Uses compact chrome when a Preview Workspace tab owns the outer title. */
-  embedded?: boolean;
-  /**
-   * The conversation to render. A preview tab passes its own, which is what
-   * lets two Chat renderers coexist. Omitted by the single-panel layout,
-   * which still resolves the conversation from the store-wide pointer.
-   */
-  session?: ChatSession;
+  /** The conversation rendered by this Preview Workspace tab. */
+  session: ChatSession;
+  /** Workspace tab to convert in place when an unbound Chat is saved. */
+  previewTabId: string;
 }
 
 export const ChatPanel = ({
   isCollapsed,
   onToggle,
-  embedded = false,
-  session: providedSession,
+  session,
+  previewTabId,
 }: ChatPanelProps) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const setDraft = useChatStore((state) => state.setDraft);
   const canvasId = useCanvasStore((state) => state.canvasId);
-  // The store-wide current thread. Only the single-panel path reads it; a
-  // provided session wins, and once nothing renders without one this
-  // pointer can go (L1 of the proposal's leak inventory).
-  const storeThreadId = useChatStore((state) => state.threadId);
 
   // When the panel is replaying a question node's thread, the mode is a
   // property of that NODE (`data.agentMode`), not the thread's mutable
@@ -108,27 +97,6 @@ export const ChatPanel = ({
   // question stays in ask. External bindings have no ask/operate split
   // (their mode is ACP-managed), so they pin to ask. Falls back to ask
   // for legacy nodes that pre-date the `@` picker.
-  const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
-  const storeConversationView =
-    viewingQuestionThread?.presentationAnchor.canvasId === canvasId
-      ? viewingQuestionThread
-      : null;
-
-  // The conversation this panel renders. Hooks take it as an argument and
-  // descendants read it from context, so nothing has to ask the store
-  // "which thread is current" — a question with no answer once two Chat
-  // renderers can be mounted at once.
-  const storeSession = useMemo<ChatSession>(
-    () => ({
-      threadId: storeThreadId,
-      canvasId,
-      ownerCanvasId:
-        storeConversationView?.conversationOwner.canvasId || canvasId,
-      conversationView: storeConversationView,
-    }),
-    [storeThreadId, canvasId, storeConversationView],
-  );
-  const session = providedSession ?? storeSession;
   const { threadId, ownerCanvasId } = session;
   const setThreadLastAction = useChatStore(
     (state) => state.setThreadLastAction,
@@ -137,31 +105,12 @@ export const ChatPanel = ({
     selectThreadLastAction(state, threadId),
   );
   const activeConversationView = session.conversationView;
-  // `openSequence` / `openPosition` are presentation state carried on the
-  // store-wide replay pointer, not part of the conversation identity, so
-  // they only apply when that pointer is what this panel is rendering. A
-  // tab-supplied session takes the defaults until tabs own this too.
-  const replayPresentation =
-    activeConversationView && activeConversationView === storeConversationView
-      ? viewingQuestionThread
-      : null;
 
   // Composer draft lives in the store keyed by threadId (see chatStore
   // `ChatThreadState.draft`) so an unsent draft stays with its own session
   // instead of being wiped when the user switches canvas or opens a
   // question replay.
   const input = useChatStore((state) => selectThreadDraft(state, threadId));
-
-  // Point the chat at the canvas's own thread when the canvas changes.
-  // This is a canvas-level concern, not a history-loading one, so it lives
-  // with the panel that decides which conversation to show. A provided
-  // session already names its conversation, so moving the store-wide
-  // pointer would only disturb whoever is still reading it.
-  useEffect(() => {
-    if (canvasId && !providedSession) {
-      useChatStore.getState().switchToCanvas(canvasId);
-    }
-  }, [canvasId, providedSession]);
 
   const viewingQuestionNodeId =
     activeConversationView?.conversationOwner.nodeId;
@@ -244,11 +193,13 @@ export const ChatPanel = ({
       : lastAction;
 
   // Agent stream hook — manages streaming and loading state
-  const { isLoading, setIsLoading, startStream, stopStream } =
-    useAgentStream(session);
+  const { isLoading, setIsLoading, startStream, stopStream } = useAgentStream(
+    session,
+    previewTabId,
+  );
 
   // Chat history hook — loads history and handles reconnection
-  useChatHistory(session, setIsLoading);
+  useChatHistory(session, setIsLoading, previewTabId);
 
   // Persistent chat state. Messages are per-thread (see chatStore.ts);
   // every read names this session's thread, so a stream running in another
@@ -263,7 +214,6 @@ export const ChatPanel = ({
   const isHistoryLoaded = useChatStore((state) =>
     selectThreadHistoryLoaded(state, threadId),
   );
-  const clearMessages = useChatStore((state) => state.clearMessages);
   // Wire the composer's onChange to the current thread's draft slot. An
   // empty string clears the draft (see `setDraft`), so the existing
   // `setInput('')` on send doubles as clear-on-send.
@@ -277,13 +227,14 @@ export const ChatPanel = ({
   const llmInit = useLLMStore((state) => state.init);
 
   // Thread → agent binding. The binding is locked for the lifetime of
-  // a thread; the only way to change it is to start a new thread via
-  // the `NewChatMenu`. New threads default to `{kind:'internal'}`
-  // unless the user picks an external agent from the menu.
+  // a thread; the only way to change it is to open a new workspace Chat.
   const agentBinding = useChatStore((state) =>
     selectThreadBinding(state, threadId),
   );
   const setAgentBinding = useChatStore((state) => state.setAgentBinding);
+  const fixedAgentBinding = viewingQuestionBindingIsFixed
+    ? conversationOwnerSource?.agentBinding
+    : undefined;
   const {
     profiles: acpProfiles,
     refresh: refreshAcpProfiles,
@@ -294,12 +245,17 @@ export const ChatPanel = ({
       ? acpProfiles.find((profile) => profile.id === agentBinding.profileId)
       : undefined;
 
+  useEffect(() => {
+    if (!fixedAgentBinding || bindingsEqual(agentBinding, fixedAgentBinding)) {
+      return;
+    }
+    setAgentBinding(threadId, fixedAgentBinding);
+  }, [agentBinding, fixedAgentBinding, setAgentBinding, threadId]);
+
   // Auto-reset a stale external binding on an *empty* thread: the
   // persisted binding refers to a profile that no longer exists
   // (user deleted it from Settings, or imported a workspace whose
-  // profiles were never created locally). Without this, the "+"
-  // shortcut in `NewChatMenu` would try to start a new thread bound
-  // to a missing profile and reliably 404. Threads with messages
+  // profiles were never created locally). Threads with messages
   // keep the stale binding so the title still reads "Chat with
   // <alias>" — the user can recreate the profile in Settings to
   // bring the binding back to life.
@@ -591,28 +547,15 @@ export const ChatPanel = ({
   );
 
   // Question thread replay mode
-  const closeQuestionThread = useChatStore((s) => s.closeQuestionThread);
-  const openQuestionThreadInOwnerCanvas = useChatStore(
-    (s) => s.openQuestionThreadInOwnerCanvas,
-  );
-  // Bind canvasId so closing also drops the per-canvas replay pointer
-  // in `questionReplayByCanvas` — otherwise a refresh would re-open the
-  // replay the user just dismissed.
-  const handleCloseQuestionThread = useCallback(() => {
-    closeQuestionThread(canvasId || undefined);
-  }, [closeQuestionThread, canvasId]);
   const openOwnerSpaceForReview = useCallback(() => {
     if (!activeConversationView || !headlessConversation) return;
     const owner = activeConversationView.conversationOwner;
-    openQuestionThreadInOwnerCanvas(activeConversationView, agentBinding);
-    navigate(`/canvas/${owner.canvasId}`);
-  }, [
-    agentBinding,
-    headlessConversation,
-    navigate,
-    openQuestionThreadInOwnerCanvas,
-    activeConversationView,
-  ]);
+    navigate(`/canvas/${owner.canvasId}`, {
+      state: {
+        previewNode: { canvasId: owner.canvasId, nodeId: owner.nodeId },
+      },
+    });
+  }, [headlessConversation, navigate, activeConversationView]);
 
   useEffect(() => {
     if (!llmConfig && !llmLoading) {
@@ -710,21 +653,11 @@ export const ChatPanel = ({
     );
   };
 
-  // Preview Workspace preserves this conversation and opens the fresh thread
-  // in a new tab. The legacy single-panel path replaces its global thread.
-  const handleStartNewChat = useCallback(
-    (choice: NewChatChoice) => {
-      if (isLoading) return;
-      startNewChat({ embedded, canvasId, choice });
-    },
-    [isLoading, embedded, canvasId],
-  );
-
   // Inline agent selector (left of the chat input toolbar). The binding
   // is mutable only while the thread has no user message yet — once a
   // turn is sent, 1-thread-1-binding locks it and the selector renders
   // read-only. Picking an agent rebinds the *current* (empty) thread in
-  // place; it never mints a new thread (that is `NewChatMenu`'s job).
+  // place; it never mints a new thread.
   const threadHasUserMessage = messages.some((m) => m.role === 'user');
   const agentSelectorEditable =
     !headlessConversation &&
@@ -763,27 +696,35 @@ export const ChatPanel = ({
     const content = firstUser.content.trim();
     if (!content) return;
 
-    addNode({
-      nodeType: 'question',
-      data: {
-        type: 'question',
-        content,
-        status: 'done',
-        viewed: true,
-        threadId,
-        agentBinding,
-        agentIcon: snapshotAgentIcon(
+    const questionNodeId = createId('node') as CanvasNodeId;
+    saveChatAsQuestion(
+      {
+        id: questionNodeId,
+        nodeType: 'question',
+        data: {
+          type: 'question',
+          content,
+          status: 'done',
+          viewed: true,
+          threadId,
           agentBinding,
-          useAcpProfilesStore.getState().profiles,
-        ),
-        agentMode: mode,
+          agentIcon: snapshotAgentIcon(
+            agentBinding,
+            useAcpProfilesStore.getState().profiles,
+          ),
+          agentMode: mode,
+        },
       },
-    });
-
-    clearMessages(canvasId || undefined, {
-      ...(agentBinding.kind === 'external' ? { binding: agentBinding } : {}),
-      lastAction: mode,
-    });
+      {
+        canvasId,
+        previewTabId,
+        addNode,
+        nodeExists: (nodeId) =>
+          useCanvasStore.getState().nodes.some((node) => node.id === nodeId),
+        replaceTabTarget: (tabId, target) =>
+          usePreviewWorkspaceStore.getState().replaceTabTarget(tabId, target),
+      },
+    );
   }, [
     isLoading,
     messages,
@@ -792,7 +733,7 @@ export const ChatPanel = ({
     mode,
     canvasId,
     addNode,
-    clearMessages,
+    previewTabId,
   ]);
 
   return (
@@ -801,18 +742,6 @@ export const ChatPanel = ({
         title={panelTitle}
         tabs={
           <span className="flex min-w-0 flex-1 items-center gap-1">
-            {activeConversationView && !embedded && (
-              <Button
-                variant="ghost"
-                iconOnly
-                onClick={handleCloseQuestionThread}
-                title={t('chat.backToChat')}
-                tooltipPlacement="bottom"
-                className="-ml-1 shrink-0"
-              >
-                <ArrowLeft size={16} />
-              </Button>
-            )}
             {canRenameQuestion && isEditingQuestionTitle ? (
               <Input
                 ref={questionTitleInputRef}
@@ -866,11 +795,10 @@ export const ChatPanel = ({
         onToggle={onToggle}
         iconCollapsed={<PanelRightOpen size={16} />}
         iconExpanded={<ListIndentIncrease size={16} />}
-        className={embedded ? undefined : 'border-edge-default border-l'}
-        compactHeader={embedded}
-        hideTitle={embedded && !activeConversationView}
+        compactHeader
+        hideTitle={!activeConversationView}
         tools={
-          activeConversationView ? null : embedded ? (
+          activeConversationView ? null : (
             <Button
               variant="ghost"
               tone="neutral"
@@ -883,18 +811,6 @@ export const ChatPanel = ({
             >
               <Bookmark />
             </Button>
-          ) : (
-            <NewChatMenu
-              currentMode={mode}
-              currentBinding={agentBinding}
-              profiles={acpProfiles}
-              onRefreshProfiles={refreshAcpProfiles}
-              onSelect={handleStartNewChat}
-              onSave={handleSaveChat}
-              canSave={canSave}
-              disabled={!isHistoryLoaded}
-              busy={isLoading}
-            />
           )
         }
       >
@@ -903,13 +819,9 @@ export const ChatPanel = ({
             messages={messages}
             isLoading={isLoading}
             isHistoryLoading={!isHistoryLoaded}
-            viewKey={`${threadId}:${replayPresentation?.openSequence ?? 0}`}
+            viewKey={threadId}
             isActive={!isCollapsed}
-            openPosition={
-              pendingPermission
-                ? 'bottom'
-                : (replayPresentation?.openPosition ?? 'bottom')
-            }
+            openPosition={pendingPermission ? 'bottom' : 'bottom'}
             onRetry={() => {
               // Find the last user message and re-send it
               const lastUserMsg = [...messages]

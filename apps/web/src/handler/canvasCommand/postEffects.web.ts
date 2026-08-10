@@ -31,7 +31,6 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { canvasHistoryManager } from '@/store/canvasHistoryManager';
-import { useChatStore } from '@/store/chatStore';
 
 import type { Edge, Node } from '@xyflow/react';
 
@@ -88,7 +87,7 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
   // `H.md` → `He.md` → …). Those keystroke edits arrive as `MERGE_NODE_DATA`
   // content rewrites (their ids land in `contentEditedNodeIds`) and are
   // instead settled on exit-edit (`settleNodePreprocess`, wired from
-  // `closeExpanded` / `openExpanded` for `note` and `TextNode`'s blur for
+  // Preview Workspace settle boundaries for `note` and `TextNode`'s blur for
   // `text`). But a one-time structural mutation — create / duplicate /
   // import — is NOT a keystroke edit (it arrives via `CREATE_NODES` and never
   // appears in `contentEditedNodeIds`), so it still needs its single
@@ -112,15 +111,6 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     // Release the node's per-node save-queue state so a long session of
     // create/delete churn doesn't leak bookkeeping keyed by dead ids.
     forgetNodeContent(nodeId);
-  }
-
-  // 2b. If a deleted node was a question node whose conversation is
-  // currently open in the chat panel, roll that view back to the plain
-  // canvas chat so the user isn't stranded on an orphaned thread.
-  if (effects.deletedNodeIds.length > 0) {
-    useChatStore
-      .getState()
-      .handleQuestionNodesDeleted(canvasId, effects.deletedNodeIds);
   }
 
   // 3. Refit frames whose children need a render cycle to settle their

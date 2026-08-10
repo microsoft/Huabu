@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { Bot, BookOpen } from 'lucide-react';
-import React, { useCallback, useRef } from 'react';
+import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { SettingsPopover } from '@/components/Settings/SettingsPopover';
@@ -10,22 +10,10 @@ import { SettingsPopover } from '@/components/Settings/SettingsPopover';
 import { Button } from '../../components/Common/Button';
 import { cn } from '../../components/Common/cn';
 import { Canvas } from '../../components/Panels/Canvas/Canvas';
-import { ExpandedNodePanel } from '../../components/Panels/ExpandedNodePanel/ExpandedNodePanel';
 import { openUserHandbook } from '../../config/handbook';
 import { isElectron } from '../../hooks/useElectron';
-import {
-  selectActiveNodeId,
-  usePreviewWorkspaceStore,
-} from '../../store/previewWorkspace/store';
-import { useWorkspaceStore } from '../../store/workspaceStore';
 
-const SPLIT_MIN_PX = 200;
-const SPLIT_DEFAULT_RATIO = 0.5;
-
-/**
- * Hosts the Canvas. While the workspace flag is off, it also preserves the
- * legacy side-by-side Expanded Node layout for rollback.
- */
+/** Hosts the Canvas and its floating controls. */
 type CenterAreaProps = {
   canvasShortcutsDisabled?: boolean;
   /**
@@ -43,90 +31,20 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
   onToggleChat,
 }) => {
   const { t } = useTranslation();
-  const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
-  const previewWorkspaceEnabled = useWorkspaceStore(
-    (s) => s.previewWorkspaceEnabled,
-  );
 
   // The custom Electron title bar already exposes Handbook + Settings
   // globally — suppress the duplicate floating versions on the canvas
   // when running inside the desktop shell.
   const isElectronApp = isElectron();
 
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const splitRatioRef = useRef(SPLIT_DEFAULT_RATIO);
-  const [splitRatio, setSplitRatio] = React.useState(SPLIT_DEFAULT_RATIO);
-  // Suspends width transition during drag so the split bar tracks the cursor.
-  const [isResizing, setIsResizing] = React.useState(false);
-
-  // With the workspace mounted as the right panel there is nothing left for
-  // the centre to host besides the Canvas.
-  const hasExpanded = !previewWorkspaceEnabled && !!expandedNodeId;
-
-  /* ---- Drag handle for split mode ---- */
-  const onHandlePointerDown = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      const target = e.currentTarget;
-      target.setPointerCapture(e.pointerId);
-      setIsResizing(true);
-
-      const startX = e.clientX;
-      const startRatio = splitRatioRef.current;
-
-      const onMove = (ev: PointerEvent) => {
-        const container = containerRef.current;
-        if (!container) return;
-        const totalWidth = container.getBoundingClientRect().width;
-        if (totalWidth <= 0) return;
-
-        const dx = ev.clientX - startX;
-        const deltaRatio = dx / totalWidth;
-        const minRatio = SPLIT_MIN_PX / totalWidth;
-        const maxRatio = 1 - minRatio;
-        const next = Math.min(
-          Math.max(startRatio + deltaRatio, minRatio),
-          maxRatio,
-        );
-        splitRatioRef.current = next;
-        setSplitRatio(next);
-      };
-
-      const onUp = () => {
-        window.removeEventListener('pointermove', onMove);
-        window.removeEventListener('pointerup', onUp);
-        setIsResizing(false);
-      };
-
-      window.addEventListener('pointermove', onMove);
-      window.addEventListener('pointerup', onUp);
-    },
-    [],
-  );
-
-  // Always keep Canvas mounted in the same structural position to prevent
-  // ReactFlow from unmounting/remounting (which would re-trigger fitView and
-  // cause a visible "resize" whenever a node is expanded or a preview opens).
-  const leftPercent = splitRatio * 100;
-
-  const canvasWidth = hasExpanded ? `${leftPercent}%` : '100%';
-
   return (
-    <div
-      ref={containerRef}
-      className="relative flex h-full w-full overflow-hidden"
-    >
+    <div className="relative flex h-full w-full overflow-hidden">
       {/* Canvas – always mounted; width controlled via CSS. Hosts the
           floating top-right controls so they pin to the canvas's right
           edge (not the whole CenterArea) — in split mode the buttons
           stay over the canvas portion instead of bleeding into the
           expanded preview panel on the right. */}
-      <div
-        className="relative h-full shrink-0 overflow-hidden"
-        data-animate-width
-        data-resizing={isResizing ? 'true' : undefined}
-        style={{ width: canvasWidth }}
-      >
+      <div className="relative h-full w-full overflow-hidden">
         <Canvas shortcutsDisabled={canvasShortcutsDisabled} />
 
         {/* Floating top-right controls — in the browser these host the
@@ -183,25 +101,6 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
           )}
         </div>
       </div>
-
-      {/* Resize handle */}
-      {hasExpanded && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center bg-transparent outline-none"
-          onPointerDown={onHandlePointerDown}
-        >
-          <div className="bg-text-faded h-8 w-1 rounded-full opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100" />
-        </div>
-      )}
-
-      {/* Expanded panel – rendered only when needed. */}
-      {hasExpanded && (
-        <div className="h-full min-w-0 flex-1">
-          <ExpandedNodePanel />
-        </div>
-      )}
     </div>
   );
 };

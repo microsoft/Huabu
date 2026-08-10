@@ -92,6 +92,7 @@ export function PreviewGroup({
       >
         {activeTab ? (
           <PreviewRenderer
+            tabId={activeTab.id}
             target={activeTab.target}
             onClose={() => onClose(activeTab.id)}
             hasFocusPriority={isFocused}

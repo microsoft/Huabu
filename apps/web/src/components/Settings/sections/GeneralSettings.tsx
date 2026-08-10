@@ -50,12 +50,6 @@ export const GeneralSettings: React.FC = () => {
   const toggleMinimap = useCanvasStore((s) => s.toggleMinimap);
   const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
   const setWorldEnabled = useWorkspaceStore((s) => s.setWorldEnabled);
-  const previewWorkspaceEnabled = useWorkspaceStore(
-    (s) => s.previewWorkspaceEnabled,
-  );
-  const setPreviewWorkspaceEnabled = useWorkspaceStore(
-    (s) => s.setPreviewWorkspaceEnabled,
-  );
   const inputModePreference = useToolStore(
     (state) => state.inputModePreference,
   );
@@ -197,20 +191,6 @@ export const GeneralSettings: React.FC = () => {
             worldEnabled
               ? t('settings.hideWorldCanvas')
               : t('settings.showWorldCanvas')
-          }
-        />
-      </SettingRow>
-      <SettingRow
-        title={t('settings.previewWorkspace')}
-        description={t('settings.previewWorkspaceDescription')}
-      >
-        <Toggle
-          checked={previewWorkspaceEnabled}
-          onChange={setPreviewWorkspaceEnabled}
-          label={
-            previewWorkspaceEnabled
-              ? t('settings.hidePreviewWorkspace')
-              : t('settings.showPreviewWorkspace')
           }
         />
       </SettingRow>
