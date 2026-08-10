@@ -92,6 +92,7 @@ import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
 import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
+import { usePanelStore } from './panelStore';
 import {
   selectActiveNodeId,
   selectActiveTab,
@@ -1392,6 +1393,14 @@ const useCanvasStore = create<RFState>()(
 
     expandedNodeFocusTick: 0,
     openExpanded: (nodeId, options) => {
+      const workspaceState = useWorkspaceStore.getState();
+      const panelState = usePanelStore.getState();
+      if (
+        workspaceState.previewWorkspaceEnabled &&
+        panelState.isRightCollapsed
+      ) {
+        panelState.requestOpenRightPanel(nodeId);
+      }
       // Switching straight from one expanded node to another does not fire
       // `closeExpanded`, so settle the outgoing authored node here to
       // commit its auto-derived label (the `.md` filename). See

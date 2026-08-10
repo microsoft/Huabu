@@ -22,7 +22,6 @@ import {
   useChatStore,
 } from '@/store/chatStore.ts';
 import { findPendingPermissionRequestId } from '@/store/chatTypes.ts';
-import { usePanelStore } from '@/store/panelStore.ts';
 import {
   getQuestionFontOpts,
   QUESTION_FONT_FAMILY,
@@ -34,7 +33,10 @@ import { resolveQuestionAgentPresentation } from '@/utils/questionAgentPresentat
 
 import { MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
-import { enterQuestionCompose } from './questionCompose.ts';
+import {
+  enterQuestionCompose,
+  enterQuestionConversation,
+} from './questionCompose.ts';
 import { QuestionTakeoverMark } from './QuestionTakeoverMark.tsx';
 import { TextNodeBody } from '../shared/TextNodeBody';
 
@@ -134,7 +136,6 @@ export const QuestionNode = memo(
     const canOpenInChat =
       !!data.threadId && (hasRun || status === 'running') && !isForkPending;
 
-    const openQuestionThread = useChatStore((s) => s.openQuestionThread);
     const needsApproval = useChatStore((s) => {
       if (!data.threadId) return false;
       return (
@@ -163,7 +164,6 @@ export const QuestionNode = memo(
       data.threadId ? selectThreadLastAction(s, data.threadId) : 'ask',
     );
     const agentProfiles = useAcpProfilesStore((s) => s.profiles);
-    const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
     // True only while this node's conversation is open AND the chat panel is
     // expanded — the badge shows `open` only then; a collapsed panel falls
     // back to the node's real status.
@@ -175,7 +175,7 @@ export const QuestionNode = memo(
     // ------------------------------------------------------------------
     const openInChat = useCallback(() => {
       if (!data.threadId) return;
-      openQuestionThread(
+      enterQuestionConversation(
         {
           presentationAnchor: { canvasId, nodeId: id },
           conversationOwner: {
@@ -185,14 +185,13 @@ export const QuestionNode = memo(
           },
         },
         data.agentBinding,
-        canvasId || undefined,
+        canvasId,
         needsApproval
           ? 'bottom'
           : hasRun && !data.viewed
             ? 'last-user'
             : 'bottom',
       );
-      requestOpenRightPanel(id);
       // Mark as viewed only once the run has finished.
       if (hasRun && !data.viewed) {
         patchNodeSilent(id, { viewed: true });
@@ -205,8 +204,6 @@ export const QuestionNode = memo(
       needsApproval,
       hasRun,
       canvasId,
-      openQuestionThread,
-      requestOpenRightPanel,
       patchNodeSilent,
     ]);
 

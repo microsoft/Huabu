@@ -2,7 +2,12 @@
 // Licensed under the MIT license.
 
 import clsx from 'clsx';
-import { ArrowLeft, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
+import {
+  ArrowLeft,
+  Bookmark,
+  ListIndentIncrease,
+  PanelRightOpen,
+} from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -58,17 +63,19 @@ import { ChangeReviewCard } from './ChangeReviewCard';
 import { ChatInput } from './ChatInput';
 import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
 import { parseSlashInvocations } from './parseSlashInvocations';
+import { startNewChat } from './startNewChat';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
 import { SidebarPanel } from '../SidebarPanel';
 
 import type { AgentIcon, AgentMode } from '@huabu/shared';
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 interface ChatPanelProps {
   isCollapsed?: boolean;
   onToggle?: () => void;
+  /** Uses compact chrome when a Preview Workspace tab owns the outer title. */
+  embedded?: boolean;
   /**
    * The conversation to render. A preview tab passes its own, which is what
    * lets two Chat renderers coexist. Omitted by the single-panel layout,
@@ -80,6 +87,7 @@ interface ChatPanelProps {
 export const ChatPanel = ({
   isCollapsed,
   onToggle,
+  embedded = false,
   session: providedSession,
 }: ChatPanelProps) => {
   const { t } = useTranslation();
@@ -702,21 +710,14 @@ export const ChatPanel = ({
     );
   };
 
-  // Atomic "reset thread + apply (mode, binding)". Both the mode
-  // and binding land in the same zustand commit inside
-  // `clearMessages`, so the user never sees an intermediate frame
-  // with the old mode or a stale internal binding.
+  // Preview Workspace preserves this conversation and opens the fresh thread
+  // in a new tab. The legacy single-panel path replaces its global thread.
   const handleStartNewChat = useCallback(
     (choice: NewChatChoice) => {
       if (isLoading) return;
-      clearMessages(canvasId || undefined, {
-        ...(choice.binding.kind === 'external'
-          ? { binding: choice.binding }
-          : {}),
-        lastAction: choice.mode,
-      });
+      startNewChat({ embedded, canvasId, choice });
     },
-    [isLoading, canvasId, clearMessages],
+    [isLoading, embedded, canvasId],
   );
 
   // Inline agent selector (left of the chat input toolbar). The binding
@@ -800,7 +801,7 @@ export const ChatPanel = ({
         title={panelTitle}
         tabs={
           <span className="flex min-w-0 flex-1 items-center gap-1">
-            {activeConversationView && (
+            {activeConversationView && !embedded && (
               <Button
                 variant="ghost"
                 iconOnly
@@ -834,30 +835,22 @@ export const ChatPanel = ({
                   }
                 }}
               />
-            ) : (
-              <span
+            ) : canRenameQuestion ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                title={t('node.rename')}
+                aria-label={t('node.rename')}
+                tooltipPlacement="bottom"
                 className={clsx(
-                  'min-w-0 truncate rounded border border-transparent px-1 py-0.5',
-                  canRenameQuestion &&
-                    'hover:text-fg-default focus-visible:outline-info cursor-text focus-visible:outline-1',
+                  'hover:text-fg-default min-w-0 cursor-text justify-start truncate rounded border border-transparent px-1 py-0.5 text-sm font-semibold',
                 )}
-                title={canRenameQuestion ? t('node.rename') : panelTitle}
-                {...(canRenameQuestion
-                  ? {
-                      role: 'button' as const,
-                      tabIndex: 0,
-                      onClick: () => setIsEditingQuestionTitle(true),
-                      onKeyDown: (event: ReactKeyboardEvent) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          setIsEditingQuestionTitle(true);
-                        }
-                      },
-                    }
-                  : {})}
+                onClick={() => setIsEditingQuestionTitle(true)}
               >
                 {panelTitle}
-              </span>
+              </Button>
+            ) : (
+              <span className="min-w-0 truncate px-1 py-0.5">{panelTitle}</span>
             )}
             {acpConnectionStatus && agentBinding.kind === 'external' && (
               <AcpConnectionBadge
@@ -873,9 +866,24 @@ export const ChatPanel = ({
         onToggle={onToggle}
         iconCollapsed={<PanelRightOpen size={16} />}
         iconExpanded={<ListIndentIncrease size={16} />}
-        className="border-edge-default border-l"
+        className={embedded ? undefined : 'border-edge-default border-l'}
+        compactHeader={embedded}
+        hideTitle={embedded && !activeConversationView}
         tools={
-          activeConversationView ? null : (
+          activeConversationView ? null : embedded ? (
+            <Button
+              variant="ghost"
+              tone="neutral"
+              size="md"
+              iconOnly
+              onClick={handleSaveChat}
+              disabled={!isHistoryLoaded || isLoading || !canSave}
+              title={t('chat.saveAsQuestion')}
+              tooltipPlacement="bottom"
+            >
+              <Bookmark />
+            </Button>
+          ) : (
             <NewChatMenu
               currentMode={mode}
               currentBinding={agentBinding}

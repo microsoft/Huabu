@@ -56,7 +56,7 @@ export function PreviewWorkspacePanel({
   }, [canvasId, isEmpty, isHostCollapsed, openPreviewTarget]);
 
   return (
-    <div className="bg-surface h-full">
+    <div className="bg-surface h-full shadow-[-1px_0_0_var(--edge-default)]">
       <PreviewWorkspace onCollapse={onToggle} />
     </div>
   );

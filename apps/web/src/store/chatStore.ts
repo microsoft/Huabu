@@ -171,6 +171,14 @@ export interface ChatState {
   setHistoryLoaded: (threadId: string, loaded: boolean) => void;
   setThreadLastAction: (threadId: string, action: AgentMode) => void;
   /**
+   * Create an empty loaded thread without changing the active-canvas pointer.
+   * Preview Workspace uses this before opening the thread in a new Chat tab.
+   */
+  createThread: (options?: {
+    binding?: AgentBinding;
+    lastAction?: AgentMode;
+  }) => string;
+  /**
    * Reset the current thread: clear messages, mint a fresh threadId,
    * and reset the binding. By default the new thread starts on the
    * built-in agent (`DEFAULT_BINDING`); pass `options.binding` to start
@@ -496,6 +504,22 @@ export const useChatStore = create<ChatState>()(
           ...patchThread(state, threadId, { lastAction: action }),
           lastActionByThread: rememberLastAction(state, threadId, action),
         })),
+
+      createThread: (options) => {
+        const threadId = createId('thread');
+        const binding = options?.binding ?? DEFAULT_BINDING;
+        const lastAction = options?.lastAction ?? 'ask';
+        set((state) => ({
+          ...patchThread(state, threadId, {
+            messages: [],
+            historyLoaded: true,
+            binding,
+            lastAction,
+          }),
+          lastActionByThread: rememberLastAction(state, threadId, lastAction),
+        }));
+        return threadId;
+      },
 
       clearMessages: (canvasId, options) => {
         const state = get();

@@ -76,7 +76,7 @@ export function PreviewRenderer({
       : null;
   }, [target, node]);
 
-  if (session) return <ChatPanel session={session} />;
+  if (session) return <ChatPanel session={session} embedded />;
 
   // An unbound Chat target always resolves; only a Question node can be
   // waiting for its thread.
@@ -96,6 +96,7 @@ export function PreviewRenderer({
     <ExpandedNodePanel
       nodeId={node.id}
       onClose={onClose}
+      embedded
       hasFocusPriority={hasFocusPriority}
     />
   );

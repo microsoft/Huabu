@@ -50,6 +50,8 @@ type ExpandedNodePanelProps = {
   nodeId?: string;
   /** Closes this instance; defaults to closing the focused group's tab. */
   onClose?: () => void;
+  /** Uses the compact chrome shared by Preview Workspace renderers. */
+  embedded?: boolean;
   /**
    * Whether this instance owns the window-level shortcuts. With two panes
    * mounted only the focused group's may, or Escape would close both
@@ -226,6 +228,7 @@ const ConnectedNodeMenu = ({
 export const ExpandedNodePanel = ({
   nodeId,
   onClose,
+  embedded = false,
   hasFocusPriority = true,
 }: ExpandedNodePanelProps = {}) => {
   const { t } = useTranslation();
@@ -525,16 +528,16 @@ export const ExpandedNodePanel = ({
       tabIndex={-1}
       data-search-scope="node"
       data-search-node-id={previewNodeId}
-      className="border-edge-default bg-surface flex h-full w-full flex-col overflow-hidden border-l"
+      className={`bg-surface flex h-full w-full flex-col overflow-hidden ${embedded ? '' : 'border-edge-default border-l'}`}
     >
       {/* Header bar */}
-      <div className="border-edge-default bg-surface flex h-12 shrink-0 items-center justify-between gap-3 border-b px-3">
-        {/* Left: node identity and node-specific actions, followed by
-            connected-node navigation. Content-sized so short
-            labels hug their text — the title region must not stretch,
-            otherwise the trailing divider gets pushed far away from
-            the action group and the header reads as having a giant
-            empty middle. */}
+      <div
+        data-testid="expanded-node-header"
+        className={`bg-surface flex shrink-0 items-center justify-between ${embedded ? 'h-9 gap-2 px-2' : 'border-edge-default h-12 gap-3 border-b px-3'}`}
+      >
+        {/* Left: connected-node navigation and rename editing. The workspace
+          tab already shows node identity, so embedded previews expose an
+          icon until editing begins instead of repeating the title. */}
         <div className="flex min-w-0 items-center gap-2">
           {connectedNodeGroups.length > 0 && (
             <ConnectedNodeMenu
@@ -581,27 +584,25 @@ export const ExpandedNodePanel = ({
                   }
                 }}
               />
-            ) : (
-              <span
+            ) : canEditTitle ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                title={t('node.rename')}
+                aria-label={t('node.rename')}
+                tooltipPlacement="bottom"
                 className={clsx(
-                  'text-fg-muted max-w-lg truncate rounded border border-transparent px-1 py-0.5',
-                  canEditTitle && 'hover:text-fg-default cursor-text',
+                  'hover:text-fg-default max-w-lg cursor-text justify-start truncate rounded border border-transparent py-0.5',
+                  embedded
+                    ? 'text-fg-subtle hover:bg-hover max-w-40 px-1.5 text-xs font-normal'
+                    : 'text-fg-muted px-1 text-sm font-medium',
                 )}
-                title={canEditTitle ? t('node.rename') : undefined}
-                {...(canEditTitle
-                  ? {
-                      role: 'button' as const,
-                      tabIndex: 0,
-                      onClick: () => setIsEditingTitle(true),
-                      onKeyDown: (e: ReactKeyboardEvent) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          setIsEditingTitle(true);
-                        }
-                      },
-                    }
-                  : {})}
+                onClick={() => setIsEditingTitle(true)}
               >
+                {liveLabel || t('node.untitled')}
+              </Button>
+            ) : (
+              <span className="text-fg-muted max-w-lg truncate px-1 py-0.5">
                 {liveLabel || t('node.untitled')}
               </span>
             )}
@@ -614,24 +615,28 @@ export const ExpandedNodePanel = ({
             ref={setHeaderSlotEl}
             className="peer flex items-center gap-1 empty:hidden"
           />
-          <div
-            aria-hidden="true"
-            className="bg-edge-default mx-1 h-5 w-px peer-empty:hidden"
-          />
+          {!embedded && (
+            <div
+              aria-hidden="true"
+              className="bg-edge-default mx-1 h-5 w-px peer-empty:hidden"
+            />
+          )}
 
-          <Button
-            variant="ghost"
-            iconOnly
-            size="sm"
-            title={t('actions.close')}
-            tooltipPlacement="bottom"
-            onClick={(e) => {
-              e.stopPropagation();
-              activeItem.close();
-            }}
-          >
-            <X />
-          </Button>
+          {!embedded && (
+            <Button
+              variant="ghost"
+              iconOnly
+              size="sm"
+              title={t('actions.close')}
+              tooltipPlacement="bottom"
+              onClick={(e) => {
+                e.stopPropagation();
+                activeItem.close();
+              }}
+            >
+              <X />
+            </Button>
+          )}
         </div>
       </div>
 

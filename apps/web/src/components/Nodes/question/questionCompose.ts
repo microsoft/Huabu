@@ -15,13 +15,35 @@ import { createId } from '@huabu/shared';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
+import { useWorkspaceStore } from '@/store/workspaceStore.ts';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent.ts';
+import type { QuestionThreadOpenPosition } from '@/store/chatStore.ts';
 import type {
   AgentBinding,
   AgentConversationView,
   CanvasNodeId,
 } from '@huabu/shared';
+
+/** Open an authored Question conversation in the active presentation mode. */
+export function enterQuestionConversation(
+  view: AgentConversationView,
+  binding: AgentBinding | undefined,
+  canvasId: string | null,
+  openPosition: QuestionThreadOpenPosition,
+): void {
+  if (useWorkspaceStore.getState().previewWorkspaceEnabled) {
+    useCanvasStore.getState().openExpanded(view.presentationAnchor.nodeId);
+    return;
+  }
+
+  useChatStore
+    .getState()
+    .openQuestionThread(view, binding, canvasId || undefined, openPosition);
+  usePanelStore
+    .getState()
+    .requestOpenRightPanel(view.presentationAnchor.nodeId);
+}
 
 /**
  * Open the chat panel in compose mode for a question node's thread and
@@ -32,13 +54,17 @@ export function enterQuestionCompose(
   canvasId: string | null,
   binding?: AgentBinding,
 ): void {
-  useChatStore.getState().openQuestionCompose(view, {
-    ...(canvasId ? { canvasId } : {}),
-    ...(binding ? { binding } : {}),
-  });
-  usePanelStore
-    .getState()
-    .requestOpenRightPanel(view.presentationAnchor.nodeId);
+  if (useWorkspaceStore.getState().previewWorkspaceEnabled) {
+    useCanvasStore.getState().openExpanded(view.presentationAnchor.nodeId);
+  } else {
+    useChatStore.getState().openQuestionCompose(view, {
+      ...(canvasId ? { canvasId } : {}),
+      ...(binding ? { binding } : {}),
+    });
+    usePanelStore
+      .getState()
+      .requestOpenRightPanel(view.presentationAnchor.nodeId);
+  }
   usePanelStore
     .getState()
     .requestFocusChatInput(view.conversationOwner.threadId);

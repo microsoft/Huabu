@@ -278,6 +278,24 @@ describe('chatStore switchToCanvas', () => {
 });
 
 describe('chatStore clearMessages', () => {
+  it('can create an independent loaded thread without moving the current pointer', () => {
+    const store = useChatStore.getState();
+    store.setMessages('thread-initial', [userMessage('old', 'Keep me')]);
+
+    const created = store.createThread({
+      binding: EXTERNAL,
+      lastAction: 'operate',
+    });
+    const state = useChatStore.getState();
+
+    expect(state.threadId).toBe('thread-initial');
+    expect(selectThreadMessages(state, 'thread-initial')).toHaveLength(1);
+    expect(selectThreadMessages(state, created)).toEqual([]);
+    expect(selectThreadHistoryLoaded(state, created)).toBe(true);
+    expect(selectThreadBinding(state, created)).toEqual(EXTERNAL);
+    expect(selectThreadLastAction(state, created)).toBe('operate');
+  });
+
   it('mints a fresh thread, seeds it loaded-and-empty, and resets the binding', () => {
     const s = useChatStore.getState();
     s.switchToCanvas('canvas-1');

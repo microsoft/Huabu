@@ -82,7 +82,7 @@ function edge(
   };
 }
 
-function renderPanel(nodes: Node[], edges: Edge[]) {
+function renderPanel(nodes: Node[], edges: Edge[], embedded = false) {
   useCanvasStore.setState({
     nodes,
     edges,
@@ -98,7 +98,7 @@ function renderPanel(nodes: Node[], edges: Edge[]) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root?.render(<ExpandedNodePanel />));
+  act(() => root?.render(<ExpandedNodePanel embedded={embedded} />));
 }
 
 function dispatchArrow(target: EventTarget, key: 'ArrowLeft' | 'ArrowRight') {
@@ -168,6 +168,51 @@ afterEach(() => {
 });
 
 describe('ExpandedNodePanel edge navigation', () => {
+  it('uses compact chrome only when embedded in Preview Workspace', () => {
+    renderPanel([canvasNode('a', 'Alpha')], [], true);
+
+    const header = container?.querySelector(
+      '[data-testid="expanded-node-header"]',
+    );
+    expect(header?.classList.contains('h-9')).toBe(true);
+    expect(header?.classList.contains('px-2')).toBe(true);
+    expect(header?.classList.contains('border-b')).toBe(false);
+    const renameTitle = header?.querySelector<HTMLElement>(
+      '[aria-label="Rename node"]',
+    );
+    expect(renameTitle?.textContent).toBe('Alpha');
+    expect(renameTitle?.classList.contains('text-fg-subtle')).toBe(true);
+    expect(renameTitle?.classList.contains('text-xs')).toBe(true);
+    act(() => renameTitle?.click());
+    expect(header?.querySelector<HTMLInputElement>('input')?.value).toBe(
+      'Alpha',
+    );
+    expect(
+      header?.querySelector<HTMLButtonElement>('[aria-label="Close"]'),
+    ).toBeNull();
+    expect(header?.querySelector('.h-5.w-px')).toBeNull();
+    expect(container?.firstElementChild?.classList.contains('border-l')).toBe(
+      false,
+    );
+  });
+
+  it('keeps the full header in the legacy layout', () => {
+    renderPanel([canvasNode('a', 'Alpha')], []);
+
+    const header = container?.querySelector(
+      '[data-testid="expanded-node-header"]',
+    );
+    expect(header?.classList.contains('h-12')).toBe(true);
+    expect(header?.classList.contains('px-3')).toBe(true);
+    expect(header?.classList.contains('border-b')).toBe(true);
+    expect(
+      header?.querySelector<HTMLButtonElement>('[aria-label="Close"]'),
+    ).not.toBeNull();
+    expect(container?.firstElementChild?.classList.contains('border-l')).toBe(
+      true,
+    );
+  });
+
   it('groups available relationships behind one menu', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],

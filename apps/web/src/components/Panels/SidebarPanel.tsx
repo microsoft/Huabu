@@ -23,6 +23,10 @@ interface SidebarPanelProps {
    * The collapsed-state strip is unaffected so users can still re-expand.
    */
   hideHeader?: boolean;
+  /** Uses a denser header when this panel is nested inside another surface. */
+  compactHeader?: boolean;
+  /** Visually hides a redundant title while preserving its accessible text. */
+  hideTitle?: boolean;
 }
 
 export const SidebarPanel = ({
@@ -36,6 +40,8 @@ export const SidebarPanel = ({
   children,
   className,
   hideHeader,
+  compactHeader,
+  hideTitle,
 }: SidebarPanelProps) => {
   if (isCollapsed) {
     return (
@@ -65,19 +71,31 @@ export const SidebarPanel = ({
     <div className={clsx('bg-surface flex h-full flex-col', className)}>
       {/* header */}
       {!hideHeader && (
-        <div className="border-edge-default flex h-12 shrink-0 items-center justify-between border-b px-3">
+        <div
+          className={clsx(
+            'flex shrink-0 items-center justify-between',
+            !compactHeader && 'border-edge-default border-b',
+            compactHeader ? 'h-9 px-2' : 'h-12 px-3',
+          )}
+        >
           <div className="text-fg-muted flex min-w-0 flex-1 items-center text-sm font-semibold">
-            {tabs ? tabs : title}
+            {hideTitle ? (
+              <span className="sr-only">{title}</span>
+            ) : tabs ? (
+              tabs
+            ) : (
+              title
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {tools && (
-              <>
-                <div className="text-fg-muted flex items-center">{tools}</div>
-                <span
-                  aria-hidden
-                  className="bg-edge-default mx-1 h-4 w-px shrink-0"
-                />
-              </>
+              <div className="text-fg-muted flex items-center">{tools}</div>
+            )}
+            {tools && onToggle && (
+              <span
+                aria-hidden
+                className="bg-edge-default mx-1 h-4 w-px shrink-0"
+              />
             )}
             {/* No collapse control when the host owns collapsing — e.g. a
                 preview tab, whose own close control replaces it. */}

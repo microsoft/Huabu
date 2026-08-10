@@ -102,13 +102,7 @@ user message + assistant reply across all turns, deliberately skipping tool
 calls / results. Only question nodes carry a `threadId`, so threads not anchored
 to a node are out of search scope.
 
-Activating a `conversation` result row
-([CanvasSearchResults.tsx](../../apps/web/src/components/Panels/CanvasLayerPanel/CanvasSearchResults.tsx))
-focuses the node on the canvas **and** opens its thread in the chat panel
-(`openQuestionThread` + `requestOpenRightPanel`), then highlights the query and
-scrolls the matched message into view inside the thread — the chat scroller is
-tagged `data-chat-thread-root` so the shared highlight / `scheduleScrollToMatch`
-helpers can target it, mirroring how preview-body matches are handled.
+Activating a `conversation` result row ([CanvasSearchResults.tsx](../../apps/web/src/components/Panels/CanvasLayerPanel/CanvasSearchResults.tsx)) focuses the node on the canvas **and** opens its thread in the chat panel (`openQuestionThread` + `requestOpenRightPanel`), then highlights the query and scrolls the matched message into view inside the thread — the chat scroller is tagged `data-chat-thread-root` so the shared highlight / `scheduleScrollToMatch` helpers can target it, mirroring how preview-body matches are handled.
 
 ---
 
@@ -116,9 +110,7 @@ helpers can target it, mirroring how preview-body matches are handled.
 
 ### 5.1 Trigger
 
-Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)).
-Creating a question through the toolbar placement flow or the connected-node
-picker also mints the thread and opens compose immediately:
+Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)). Creating a question through the toolbar placement flow or the connected-node picker also mints the thread and opens compose immediately. [`questionCompose.ts`](../../apps/web/src/components/Nodes/question/questionCompose.ts) selects the presentation: Preview Workspace opens the Question's node tab, while the fallback layout updates the single Chat panel's replay pointer.
 
 - mints a `threadId` if missing, opens the chat panel in **compose mode**
 - inherits the canvas's last-used agent binding; user can switch agent
@@ -187,7 +179,7 @@ A World `nodeRef` may present a source question in the same ChatPanel without lo
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Component + toolbar  | [QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)                                                                                                                                                                                                                                                                                |
 | Agent status mark    | [QuestionTakeoverMark.tsx](../../apps/web/src/components/Nodes/question/QuestionTakeoverMark.tsx) renders the readable corner badge and the zoomed-out collapsed mark in one component; zoom morph via [NodeTakeoverLayer.tsx](../../apps/web/src/components/Nodes/NodeTakeoverLayer.tsx) + [useNodeTakeover.ts](../../apps/web/src/hooks/useNodeTakeover.ts)    |
-| Compose / replay     | [chatStore.ts](../../apps/web/src/store/chatStore.ts) `openQuestionCompose` / `openQuestionThread`                                                                                                                                                                                                                                                               |
+| Compose / replay     | [questionCompose.ts](../../apps/web/src/components/Nodes/question/questionCompose.ts) routes to a workspace node tab or the fallback [chatStore.ts](../../apps/web/src/store/chatStore.ts) `openQuestionCompose` / `openQuestionThread` path                                                                                                                     |
 | Cross-Canvas owner   | [conversationOwner.ts](../../apps/web/src/store/conversationOwner.ts) resolves presentation/owner addresses and routes headless lifecycle mutations                                                                                                                                                                                                              |
 | Server-side creation | [agent-node.service.ts](../../apps/server/src/modules/agent/agent-node.service.ts) validates a selectable external Profile and anchor, then creates the fixed-binding Question Node and lineage edge through the canonical Canvas executor                                                                                                                       |
 | Fixed-thread lookup  | [agent-thread-resolver.ts](../../apps/server/src/modules/agent/agent-thread-resolver.ts) is the thin Canvas-scan boundary for resolving a fixed Agent Node by thread; a Workspace-global DB index will replace only its storage lookup after issue #60                                                                                                           |

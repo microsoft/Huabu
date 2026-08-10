@@ -15,13 +15,15 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { X } from 'lucide-react';
+import { MessageSquare, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { getNodeIcon } from '@/config/nodeIcons';
 import useCanvasStore from '@/store/canvasStore';
 
+import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
+import { Tooltip } from '../../Common/Tooltip';
 
 import type { PreviewTab as PreviewTabModel } from '@/store/previewWorkspace/model';
 
@@ -74,7 +76,7 @@ export function PreviewTab({
   const label =
     isNode && typeof node?.data.label === 'string' ? node.data.label : '';
   const title = isNode ? label || t('node.untitled') : t('preview.chatTab');
-  const Icon = isNode ? getNodeIcon(node?.type, node?.data) : undefined;
+  const Icon = isNode ? getNodeIcon(node?.type, node?.data) : MessageSquare;
 
   // Two tabs may legitimately show the same label, so the accessible name
   // carries the node type to keep screen-reader output distinguishable.
@@ -93,7 +95,6 @@ export function PreviewTab({
       aria-controls={panelElementId}
       aria-label={accessibleName}
       tabIndex={isActive ? 0 : -1}
-      title={title}
       data-preview-tab-id={tab.id}
       onClick={onActivate}
       onDoubleClick={onPromote}
@@ -113,38 +114,47 @@ export function PreviewTab({
         zIndex: isDragging ? 1 : undefined,
       }}
       className={cn(
-        'group flex max-w-48 min-w-0 shrink-0 cursor-pointer items-center gap-1.5',
-        'border-edge-default border-r px-3 py-1.5 text-xs',
+        'group relative flex h-9 w-fit max-w-48 min-w-20 flex-[0_1_auto] cursor-pointer items-center gap-1.5 px-2.5 text-sm',
+        'border-edge-default border-r',
         'focus-visible:outline-info focus-visible:outline-1 focus-visible:-outline-offset-2',
         isActive
-          ? 'bg-bg-default text-fg-default'
+          ? 'bg-surface text-fg-default after:bg-info-light after:absolute after:inset-x-0 after:top-0 after:h-0.5'
           : 'text-fg-muted hover:bg-hover',
         // Italic marks the reusable inspection slot, per §9.2.
         tab.transient && 'italic',
         isDragging && 'opacity-60',
       )}
     >
-      {Icon && <Icon size={13} className="shrink-0" />}
-      <span className="min-w-0 flex-1 truncate">{title}</span>
-      <button
-        type="button"
-        aria-label={t('preview.closeTab', { title })}
+      {Icon && <Icon size={14} className="shrink-0" />}
+      <Tooltip
+        content={title}
+        placement="bottom"
+        wrapperClassName="inline-flex min-w-0"
+      >
+        <span className="min-w-0 truncate">{title}</span>
+      </Tooltip>
+      <Button
+        variant="ghost"
+        iconOnly
+        size="sm"
         title={t('actions.close')}
+        aria-label={t('preview.closeTab', { title })}
+        tooltipPlacement="bottom"
+        tooltipWrapperClassName="inline-flex shrink-0"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();
           onClose();
         }}
         className={cn(
-          'hover:bg-hover flex shrink-0 items-center justify-center rounded p-0.5',
-          'focus-visible:outline-info focus-visible:outline-1',
+          'shrink-0 rounded !p-0.5',
           // Kept out of the way until the tab is hovered or focused, so the
           // strip stays quiet, but never hidden from keyboards.
           !isActive && 'opacity-0 group-hover:opacity-100 focus:opacity-100',
         )}
       >
-        <X size={12} />
-      </button>
+        <X size={13} />
+      </Button>
     </div>
   );
 }

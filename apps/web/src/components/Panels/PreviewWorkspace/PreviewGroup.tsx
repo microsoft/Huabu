@@ -33,6 +33,7 @@ type PreviewGroupProps = {
   onClose: (tabId: string) => void;
   onPromote: (tabId: string) => void;
   onOpenToSide: (tabId: string) => void;
+  onNewChat: () => void;
   /** Collapses the whole surface; only the last group offers it. */
   onCollapse?: () => void;
 };
@@ -46,6 +47,7 @@ export function PreviewGroup({
   onClose,
   onPromote,
   onOpenToSide,
+  onNewChat,
   onCollapse,
 }: PreviewGroupProps) {
   const { t } = useTranslation();
@@ -76,6 +78,7 @@ export function PreviewGroup({
         onClose={onClose}
         onPromote={onPromote}
         onOpenToSide={onOpenToSide}
+        onNewChat={onNewChat}
         canOpenToSide={workspace.groups.length < 2 && tabs.length > 1}
         onCollapse={onCollapse}
       />

@@ -17,7 +17,8 @@ import {
   horizontalListSortingStrategy,
   SortableContext,
 } from '@dnd-kit/sortable';
-import { Columns2, PanelRightClose } from 'lucide-react';
+import { Columns2, ListIndentIncrease, Plus } from 'lucide-react';
+import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { PreviewTab } from './PreviewTab';
@@ -37,6 +38,8 @@ type PreviewTabStripProps = {
   onOpenToSide: (tabId: string) => void;
   /** Hidden once both groups exist, since there is no third to open into. */
   canOpenToSide: boolean;
+  /** Creates a fresh Chat tab in this group. */
+  onNewChat: () => void;
   /** Collapses the whole surface; only the last group offers it. */
   onCollapse?: () => void;
 };
@@ -54,6 +57,7 @@ export function PreviewTabStrip({
   onPromote,
   onOpenToSide,
   canOpenToSide,
+  onNewChat,
   onCollapse,
 }: PreviewTabStripProps) {
   const { t } = useTranslation();
@@ -61,6 +65,16 @@ export function PreviewTabStrip({
     id: groupDropId(groupId),
     data: { type: 'preview-group', groupId },
   });
+
+  useEffect(() => {
+    if (!activeTabId) return;
+    const frame = requestAnimationFrame(() => {
+      document
+        .getElementById(tabElementId(groupId, activeTabId))
+        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeTabId, groupId]);
 
   const focusTab = (tabId: string) => {
     onActivate(tabId);
@@ -99,13 +113,13 @@ export function PreviewTabStrip({
   };
 
   return (
-    <div className="border-edge-default bg-surface flex shrink-0 items-stretch border-b">
+    <div className="bg-surface after:bg-edge-default relative flex h-9 shrink-0 items-stretch after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:z-20 after:h-px">
       <div
         ref={setNodeRef}
         role="tablist"
         aria-label={t('preview.tabStrip')}
         aria-orientation="horizontal"
-        className="flex min-w-0 flex-1 overflow-x-auto"
+        className="flex min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
       >
         <SortableContext
           items={tabs.map((tab) => tab.id)}
@@ -127,34 +141,47 @@ export function PreviewTabStrip({
           ))}
         </SortableContext>
       </div>
-      {(canOpenToSide || onCollapse) && (
-        <div className="flex shrink-0 items-center px-1">
-          {canOpenToSide && activeTabId && (
-            <Button
-              variant="ghost"
-              iconOnly
-              size="sm"
-              title={t('preview.openToSide')}
-              tooltipPlacement="bottom"
-              onClick={() => onOpenToSide(activeTabId)}
-            >
-              <Columns2 />
-            </Button>
-          )}
-          {onCollapse && (
-            <Button
-              variant="ghost"
-              iconOnly
-              size="sm"
-              title={t('preview.collapse')}
-              tooltipPlacement="bottom"
-              onClick={onCollapse}
-            >
-              <PanelRightClose />
-            </Button>
-          )}
-        </div>
-      )}
+      <div className="flex shrink-0 items-center px-1">
+        <Button
+          variant="ghost"
+          iconOnly
+          size="md"
+          title={t('chat.newConversation')}
+          tooltipPlacement="bottom"
+          onClick={onNewChat}
+        >
+          <Plus />
+        </Button>
+        {(canOpenToSide || onCollapse) && (
+          <>
+            {canOpenToSide && activeTabId && (
+              <Button
+                variant="ghost"
+                iconOnly
+                size="md"
+                title={t('preview.openToSide')}
+                tooltipPlacement="bottom"
+                onClick={() => onOpenToSide(activeTabId)}
+              >
+                <Columns2 />
+              </Button>
+            )}
+            {onCollapse && (
+              <Button
+                variant="ghost"
+                iconOnly
+                size="md"
+                data-testid="collapse-preview"
+                title={t('preview.collapse')}
+                tooltipPlacement="bottom"
+                onClick={onCollapse}
+              >
+                <ListIndentIncrease size={16} />
+              </Button>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

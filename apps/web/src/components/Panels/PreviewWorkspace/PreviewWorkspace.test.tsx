@@ -48,7 +48,19 @@ vi.hoisted(() => {
 // The Chat panel pulls in the whole agent stack; the workspace only needs to
 // know it dispatched to it.
 vi.mock('../ChatPanel', () => ({
-  ChatPanel: () => <div data-testid="chat-panel" />,
+  ChatPanel: ({
+    embedded,
+    session,
+  }: {
+    embedded?: boolean;
+    session?: { threadId: string };
+  }) => (
+    <div
+      data-testid="chat-panel"
+      data-embedded={embedded || undefined}
+      data-thread-id={session?.threadId}
+    />
+  ),
 }));
 
 vi.mock('../../Nodes/NodePreviewContent', () => ({
@@ -110,6 +122,82 @@ afterEach(() => {
 });
 
 describe('tab strip', () => {
+  it('renders an unbound Chat with compact embedded chrome', () => {
+    store().openPreviewTarget({
+      kind: 'chat',
+      canvasId: CANVAS_ID,
+      threadId: 'thread-1',
+    });
+    render([]);
+
+    expect(
+      container
+        ?.querySelector('[data-testid="chat-panel"]')
+        ?.getAttribute('data-embedded'),
+    ).toBe('true');
+    expect(tabs()[0].classList.contains('h-9')).toBe(true);
+  });
+
+  it('sizes tabs to content and shrinks them before scrolling', () => {
+    openNode('a');
+    openNode('b');
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+
+    const [inactiveTab, activeTab] = tabs();
+    expect(inactiveTab.classList.contains('min-w-20')).toBe(true);
+    expect(inactiveTab.classList.contains('w-fit')).toBe(true);
+    expect(inactiveTab.classList.contains('flex-[0_1_auto]')).toBe(true);
+    expect(activeTab.classList.contains('border-r')).toBe(true);
+    expect(activeTab.classList.contains('last:border-r-0')).toBe(false);
+    expect(activeTab.classList.contains('bg-surface')).toBe(true);
+    expect(activeTab.classList.contains('after:bg-info-light')).toBe(true);
+    expect(activeTab.classList.contains('after:top-0')).toBe(true);
+    expect(activeTab.classList.contains('after:bottom-0')).toBe(false);
+    expect(activeTab.classList.contains('before:bg-surface')).toBe(false);
+    expect(activeTab.classList.contains('bg-bg-default')).toBe(false);
+    expect(activeTab.parentElement?.classList.contains('overflow-x-auto')).toBe(
+      true,
+    );
+    expect(
+      activeTab.parentElement?.classList.contains('overflow-y-hidden'),
+    ).toBe(true);
+  });
+
+  it('renders a Question node through its own Chat session', () => {
+    openNode('question-1');
+    render([
+      {
+        ...canvasNode('question-1', 'Why?', 'question'),
+        data: { label: 'Why?', threadId: 'thread-question-1' },
+      },
+    ]);
+
+    expect(
+      container
+        ?.querySelector('[data-testid="chat-panel"]')
+        ?.getAttribute('data-thread-id'),
+    ).toBe('thread-question-1');
+  });
+
+  it('creates a Chat tab from the workspace toolbar while a node is active', () => {
+    openNode('a');
+    render([canvasNode('a', 'Alpha')]);
+
+    const newChatButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="New conversation"]',
+    );
+    expect(newChatButton).not.toBeNull();
+    act(() => newChatButton?.click());
+
+    expect(tabs()).toHaveLength(2);
+    expect(activeTabName()).toBe('Chat');
+    expect(
+      Object.values(store().workspace.tabs).some(
+        (tab) => tab.target.kind === 'node' && tab.target.nodeId === 'a',
+      ),
+    ).toBe(true);
+  });
+
   it('shows one tab per open target and mounts only the active one', () => {
     openNode('a');
     openNode('b');
@@ -178,6 +266,9 @@ describe('activation', () => {
     render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
 
     const close = tabs()[1].querySelector('button');
+    expect(tabs()[1].hasAttribute('title')).toBe(false);
+    expect(close?.hasAttribute('title')).toBe(false);
+    expect(close?.getAttribute('aria-label')).toContain('Beta');
     act(() => close?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 
     expect(tabs()).toHaveLength(1);
@@ -490,6 +581,7 @@ describe('target resolution', () => {
 describe('right panel host', () => {
   it('seeds one Chat only when the host becomes visible', () => {
     useCanvasStore.setState({ nodes: [], canvasId: CANVAS_ID });
+    const onToggle = vi.fn();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -506,12 +598,17 @@ describe('right panel host', () => {
     act(() =>
       root?.render(
         <StrictMode>
-          <PreviewWorkspacePanel isHostCollapsed={false} />
+          <PreviewWorkspacePanel isHostCollapsed={false} onToggle={onToggle} />
         </StrictMode>,
       ),
     );
 
     expect(Object.values(store().workspace.tabs)).toHaveLength(1);
     expect(Object.values(store().workspace.tabs)[0].target.kind).toBe('chat');
+    expect(
+      container
+        ?.querySelector('[data-testid="collapse-preview"]')
+        ?.classList.contains('p-1.5'),
+    ).toBe(true);
   });
 });

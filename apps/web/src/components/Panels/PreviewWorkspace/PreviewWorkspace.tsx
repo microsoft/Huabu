@@ -24,6 +24,7 @@ import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { Fragment, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useChatStore } from '@/store/chatStore';
 import {
   usePreviewWorkspaceStore,
   type PreviewWorkspaceState,
@@ -61,6 +62,7 @@ export function PreviewWorkspace({
 } = {}) {
   const { t } = useTranslation();
   const workspace = usePreviewWorkspaceStore(selectWorkspace);
+  const canvasId = usePreviewWorkspaceStore((s) => s.canvasId);
   const activateTab = usePreviewWorkspaceStore((s) => s.activateTab);
   const closeTab = usePreviewWorkspaceStore((s) => s.closeTab);
   const promoteTab = usePreviewWorkspaceStore((s) => s.promoteTab);
@@ -87,6 +89,15 @@ export function PreviewWorkspace({
       if (tab) openPreviewTarget(tab.target, { openToSide: true });
     },
     [openPreviewTarget],
+  );
+
+  const openNewChat = useCallback(
+    (groupId: string) => {
+      if (!canvasId) return;
+      const threadId = useChatStore.getState().createThread();
+      openPreviewTarget({ kind: 'chat', canvasId, threadId }, { groupId });
+    },
+    [canvasId, openPreviewTarget],
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -204,6 +215,7 @@ export function PreviewWorkspace({
                 onClose={closeWorkspaceTab}
                 onPromote={promoteTab}
                 onOpenToSide={openToSide}
+                onNewChat={() => openNewChat(group.id)}
                 onCollapse={
                   index === workspace.groups.length - 1 ? onCollapse : undefined
                 }
