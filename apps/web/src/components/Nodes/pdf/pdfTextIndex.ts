@@ -34,13 +34,13 @@ export function findPdfTextMatches(
   pages: Iterable<PdfPageText>,
   query: string,
 ): PdfTextMatch[] {
-  const needle = query.trim().toLocaleLowerCase();
+  const needle = query.trim().toLowerCase();
   if (!needle) return [];
 
   const matches: PdfTextMatch[] = [];
   const sortedPages = [...pages].sort((a, b) => a.pageIndex - b.pageIndex);
   for (const page of sortedPages) {
-    const haystack = page.text.toLocaleLowerCase();
+    const haystack = page.text.toLowerCase();
     let from = 0;
     let pageOccurrenceIndex = 0;
     while (from < haystack.length) {

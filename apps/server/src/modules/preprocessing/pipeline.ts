@@ -171,9 +171,9 @@ async function runPipelineStages(
       ) {
         try {
           const artifactName = `${createId('artifact')}.pdf`;
-          await deps.blobs.put(artifactName, ctx.extracted.rawPdf);
-          ctx.resolved.artifactUri = artifactName;
-          ctx.resolved.artifactName = artifactName;
+          const info = await deps.blobs.put(artifactName, ctx.extracted.rawPdf);
+          ctx.resolved.artifactUri = info.name;
+          ctx.resolved.artifactName = info.name;
         } catch (snapshotError) {
           diagnostics.push({
             code: 'SNAPSHOT_FAILED',
