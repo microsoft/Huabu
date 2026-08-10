@@ -394,7 +394,9 @@ function seedInitialPreferences(
     const selector = selectors.find(
       (candidate) => candidate.category === category,
     );
-    if (!selector || !offeredValues(selector.options).has(value)) return false;
+    if (!selector?.id || !offeredValues(selector.options).has(value)) {
+      return false;
+    }
     entry.selections[selector.id] = value;
     return true;
   };
