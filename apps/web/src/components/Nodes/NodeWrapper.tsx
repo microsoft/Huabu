@@ -46,6 +46,7 @@ import {
   getResizeSnappedRect,
 } from '@/handler/snap/snapSession.ts';
 import { useIsNotMouse } from '@/hooks/useInputMode.ts';
+import { useMultiSelectModifierHeld } from '@/hooks/useMultiSelectModifier.ts';
 import { useNodeLOD } from '@/hooks/useNodeLOD.ts';
 import useCanvasStore, {
   clearNodeDuplicateGuard,
@@ -561,12 +562,19 @@ export const NodeWrapper = memo(
     const isCollapsedToMark = useNodeCollapseStore(
       (s) => s.marks[id] !== undefined,
     );
+    // Holding the multi-select modifier (Ctrl / Cmd) is an explicit "I'm
+    // reaching for another node" intent. The corner resize handles frame
+    // this node and reach outward past its edges, so they occlude whatever
+    // sits next to it — stand them down for the duration of the hold, just
+    // like the floating toolbar.
+    const multiSelectModifierHeld = useMultiSelectModifierHeld();
     const showResizer =
       selected &&
       resizable &&
       !data.locked &&
       selectedCount === 1 &&
-      !isCollapsedToMark;
+      !isCollapsedToMark &&
+      !multiSelectModifierHeld;
 
     // While a stroke-level (sketch) selection exists, its own toolbar (or,
     // on desktop, none) owns the surface — suppress this node's floating
