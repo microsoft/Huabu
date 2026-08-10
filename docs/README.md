@@ -84,6 +84,7 @@ docs/
 | [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md) | Draft          | Follow-up credential storage hardening.                                    |
 | [direct-space-operations.md](./proposals/direct-space-operations.md)                               | In-Progress    | #348 deterministic RFS query and mutation operations for external agents.  |
 | [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                 | Partly shipped | Server-side headless canvas executor and structure/content sync.           |
+| [interactive-agent-views.md](./proposals/interactive-agent-views.md)                               | In-Progress    | Capability-bound HTML views for persistent external-Agent interaction.     |
 | [long-horizon-tasks.md](./proposals/long-horizon-tasks.md)                                         | Partly shipped | Canvas-scoped recursive Agent creation, invocation, and handoff pipeline.  |
 | [managed-acp-harness.md](./proposals/managed-acp-harness.md)                                       | Draft          | Resource-first Agent Team Profile compilation.                             |
 | [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.          |

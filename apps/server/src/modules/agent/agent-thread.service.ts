@@ -19,6 +19,7 @@ import { planSkillDispatch } from './skill-model-routing.js';
 import { acquireAgentTurn, waitForAgentTurnRelease } from './turn-lease.js';
 import { loadAgent } from '../../prompt/index.js';
 
+import type { HuabuSubmission } from './agenetes/handle.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type {
   AgentBinding,
@@ -69,6 +70,8 @@ export interface AgentThreadInvocationOptions {
   content: string;
   mode: AgentMode;
   envelope: ChatEnvelope;
+  /** Canonical durable submission; ordinary chat callers omit it. */
+  submission?: HuabuSubmission;
   requestBinding?: AgentBinding;
   fixedTarget?: FixedAgentNodeTarget | null;
   modelId?: string;
@@ -129,6 +132,12 @@ export class AgentThreadService {
     return canvasId
       ? this.dependencies.resolveFixedAgentNode(canvasId, threadId)
       : null;
+  }
+
+  invokeSubmission(
+    options: AgentThreadInvocationOptions & { submission: HuabuSubmission },
+  ): Promise<AgentThreadInvocation> {
+    return this.invoke(options);
   }
 
   async invoke(
@@ -263,6 +272,7 @@ export class AgentThreadService {
         threadId: options.threadId,
         canvasId: options.canvasId,
         envelope: options.envelope,
+        submission: options.submission,
         overlay: emptyAcpOverlay(),
         ...(fixedTarget?.launchOverrides
           ? { launchOverrides: fixedTarget.launchOverrides }
@@ -288,6 +298,7 @@ export class AgentThreadService {
       threadId: options.threadId,
       canvasId: options.canvasId,
       envelope: options.envelope,
+      submission: options.submission,
       context: {
         systemPrompt: buildAgentSystemPrompt({
           canvasId: options.canvasId,

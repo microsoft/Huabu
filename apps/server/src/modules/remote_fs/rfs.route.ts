@@ -41,16 +41,21 @@ import {
   RFS_HEARTBEAT_MAX_SEC,
   RFS_HEARTBEAT_MIN_SEC,
   createTaskRequestSchema,
+  createInteractiveViewRequestSchema,
   HUABU_AGENT_PROFILE_ID,
+  interactiveViewLookupQuerySchema,
+  interactiveViewResourceParamsSchema,
   rfsAgentCreateHeadersSchema,
   rfsAgentCreateRequestSchema,
   rfsAgentHeadersSchema,
   rfsAgentPromptRequestSchema,
   rfsExecuteHeadersSchema,
   rfsExecuteRequestSchema,
+  replaceInteractiveViewStateRequestSchema,
   spaceQuerySchema,
   startTaskRunRequestSchema,
   type CreateTaskResponse,
+  type CreateInteractiveViewRequest,
   type RfsAgentEventMode,
   type RfsAgentCreateResponse,
   type RfsAgentProfilesResponse,
@@ -100,6 +105,10 @@ import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
 import { MissingWorldPortalError } from '../canvas/canvas-command-router.js';
 import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
+import {
+  InteractiveViewServiceError,
+  interactiveViewService,
+} from '../interactive-view/interactive-view.service.js';
 import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
 import { TaskCreationError, taskService } from '../task/task.service.js';
 
@@ -116,11 +125,30 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 function rfsError(
   reason: string,
   code?: string,
-): { message: string; code?: string } {
+  details?: unknown,
+): { message: string; code?: string; details?: unknown } {
   return {
     message: `${reason} To see how to use this Space, run: curl -fsS "$HUABU_RFS_URL/skill"`,
     ...(code ? { code } : {}),
+    ...(details !== undefined ? { details } : {}),
   };
+}
+
+function interactiveViewStatus(error: InteractiveViewServiceError): number {
+  switch (error.code) {
+    case 'canvas_not_found':
+    case 'view_not_found':
+      return 404;
+    case 'view_conflict':
+      return 409;
+    case 'invalid_definition':
+    case 'invalid_state':
+    case 'invalid_owner_thread':
+    case 'renderer_not_found':
+      return 400;
+    default:
+      return 500;
+  }
 }
 
 /**
@@ -268,6 +296,193 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         .send(guide);
     },
   );
+
+  // ── Interactive Views ──
+  app.get<{
+    Params: { canvasId: string };
+    Querystring: { viewKey?: string };
+  }>('/:canvasId/interactive-views', async (request, reply) => {
+    const query = interactiveViewLookupQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      return reply
+        .code(400)
+        .send(rfsError('Invalid Interactive View query.', 'validation_failed'));
+    }
+    try {
+      return reply.send({
+        views: interactiveViewService.list(
+          request.params.canvasId,
+          query.data.viewKey,
+        ),
+      });
+    } catch (error) {
+      if (error instanceof InteractiveViewServiceError) {
+        return reply
+          .code(interactiveViewStatus(error))
+          .send(rfsError(error.message, error.code));
+      }
+      throw error;
+    }
+  });
+
+  app.post<{
+    Params: { canvasId: string };
+    Body: CreateInteractiveViewRequest;
+  }>('/:canvasId/interactive-views', async (request, reply) => {
+    let json: unknown;
+    try {
+      json = JSON.parse(
+        Buffer.isBuffer(request.body)
+          ? request.body.toString('utf8') || '{}'
+          : '{}',
+      );
+    } catch {
+      return reply
+        .code(400)
+        .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
+    }
+    const parsed = createInteractiveViewRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return reply
+        .code(400)
+        .send(
+          rfsError(
+            parsed.error.issues[0]?.message ??
+              'Invalid Interactive View request.',
+            'validation_failed',
+          ),
+        );
+    }
+    try {
+      const resource = await interactiveViewService.create(
+        request.params.canvasId,
+        parsed.data,
+      );
+      return reply.code(201).send(resource);
+    } catch (error) {
+      if (error instanceof InteractiveViewServiceError) {
+        return reply
+          .code(interactiveViewStatus(error))
+          .send(rfsError(error.message, error.code));
+      }
+      throw error;
+    }
+  });
+
+  app.get<{
+    Params: { canvasId: string; nodeId: string };
+  }>('/:canvasId/interactive-views/:nodeId', async (request, reply) => {
+    const params = interactiveViewResourceParamsSchema.safeParse(
+      request.params,
+    );
+    if (!params.success) {
+      return reply
+        .code(400)
+        .send(
+          rfsError('Invalid Interactive View identity.', 'validation_failed'),
+        );
+    }
+    try {
+      return reply.send(
+        interactiveViewService.get(params.data.canvasId, params.data.nodeId),
+      );
+    } catch (error) {
+      if (error instanceof InteractiveViewServiceError) {
+        return reply
+          .code(interactiveViewStatus(error))
+          .send(rfsError(error.message, error.code));
+      }
+      throw error;
+    }
+  });
+
+  app.get<{
+    Params: { canvasId: string; nodeId: string };
+  }>('/:canvasId/interactive-views/:nodeId/runtime', async (request, reply) => {
+    const params = interactiveViewResourceParamsSchema.safeParse(
+      request.params,
+    );
+    if (!params.success) {
+      return reply
+        .code(400)
+        .send(
+          rfsError('Invalid Interactive View identity.', 'validation_failed'),
+        );
+    }
+    try {
+      return reply.send(
+        await interactiveViewService.runtimeSnapshot(
+          params.data.canvasId,
+          params.data.nodeId,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof InteractiveViewServiceError) {
+        return reply
+          .code(interactiveViewStatus(error))
+          .send(rfsError(error.message, error.code));
+      }
+      throw error;
+    }
+  });
+
+  app.put<{
+    Params: { canvasId: string; nodeId: string };
+  }>('/:canvasId/interactive-views/:nodeId/state', async (request, reply) => {
+    const params = interactiveViewResourceParamsSchema.safeParse(
+      request.params,
+    );
+    let json: unknown;
+    try {
+      json = JSON.parse(
+        Buffer.isBuffer(request.body)
+          ? request.body.toString('utf8') || '{}'
+          : '{}',
+      );
+    } catch {
+      return reply
+        .code(400)
+        .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
+    }
+    const body = replaceInteractiveViewStateRequestSchema.safeParse(json);
+    if (!params.success || !body.success) {
+      return reply
+        .code(400)
+        .send(
+          rfsError(
+            'Invalid Interactive View state replacement.',
+            'validation_failed',
+          ),
+        );
+    }
+    try {
+      return reply.send(
+        await interactiveViewService.replaceState(
+          params.data.canvasId,
+          params.data.nodeId,
+          body.data.revision,
+          body.data.value,
+          'trusted-agent',
+        ),
+      );
+    } catch (error) {
+      if (error instanceof InteractiveViewServiceError) {
+        return reply.code(interactiveViewStatus(error)).send(
+          rfsError(
+            error.message,
+            error.code,
+            error.conflict
+              ? {
+                  currentRevision: error.conflict.currentRevision,
+                  currentState: error.conflict.currentState,
+                }
+              : undefined,
+          ),
+        );
+      }
+      throw error;
+    }
+  });
 
   // ── Direct Space operation discovery ──
   app.get('/:canvasId/capabilities', async (_request, reply) =>

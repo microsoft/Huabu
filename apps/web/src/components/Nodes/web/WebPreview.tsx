@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { resolveArtifactUrl } from '@/api/artifact';
 import { getWebPage, getWebReader } from '@/api/web';
 
+import { useInteractiveViewBridge } from './useInteractiveViewBridge';
 import { isElectron } from '../../../hooks/useElectron.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { Button } from '../../Common/Button';
@@ -70,6 +71,19 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
   const [readerError, setReaderError] = useState<string | null>(null);
   const [iframeReady, setIframeReady] = useState(false);
   const [iframeBumpKey, setIframeBumpKey] = useState(0);
+  const liveIframeRef = useRef<HTMLIFrameElement>(null);
+  const connectedInteractiveLoadRef = useRef<string | null>(null);
+  const isInteractiveView =
+    data.interactiveView !== null &&
+    typeof data.interactiveView === 'object' &&
+    pageKind === 'html' &&
+    !pageSnapshot;
+  const interactiveBridge = useInteractiveViewBridge({
+    enabled: mode === 'live' && isInteractiveView,
+    canvasId,
+    nodeId: id ?? '',
+    iframeRef: liveIframeRef,
+  });
 
   // Electron is detected once at mount — it does not change at runtime.
   // Inside the desktop shell the main process strips X-Frame-Options /
@@ -347,8 +361,9 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
   //  - `html` interactive artifact / `data:` URL: scripts ON but no
   //    `allow-same-origin`, so an attacker-controlled upload served from our
   //    same-origin artifact route can't read the host's cookies.
-  const livePageSandbox =
-    pageKind === 'url'
+  const livePageSandbox = isInteractiveView
+    ? 'allow-scripts allow-forms'
+    : pageKind === 'url'
       ? 'allow-scripts allow-forms allow-popups allow-same-origin'
       : pageSnapshot
         ? 'allow-popups'
@@ -413,6 +428,7 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
                   after the spinner deadline. */}
               <iframe
                 key={`${pageSrc}-${iframeBumpKey}`}
+                ref={liveIframeRef}
                 src={pageSrc}
                 // Sandbox is computed above as `livePageSandbox` — the flag
                 // set depends on whether `src` is a remote URL, a static
@@ -422,7 +438,17 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
                 title={t('node.livePage')}
                 className="bg-surface block h-full w-full border-0"
                 style={pageSnapshot ? { colorScheme: 'light' } : undefined}
-                onLoad={() => setIframeReady(true)}
+                onLoad={() => {
+                  setIframeReady(true);
+                  if (!isInteractiveView) return;
+                  const loadKey = `${pageSrc}-${iframeBumpKey}`;
+                  if (connectedInteractiveLoadRef.current === loadKey) {
+                    interactiveBridge.closePort();
+                    return;
+                  }
+                  connectedInteractiveLoadRef.current = loadKey;
+                  void interactiveBridge.connect();
+                }}
               />
               {!iframeReady ? (
                 <div className="bg-bg-default/90 pointer-events-none absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full px-2 py-1 shadow-sm backdrop-blur">

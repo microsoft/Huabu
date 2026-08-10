@@ -280,6 +280,7 @@ Load these authenticated guides only when the request needs them:
 - `GET skill/layout` — structured diagrams, grids, flowcharts, roadmaps, and advanced Frame layout.
 - `GET skill/tasks` — durable long-horizon Tasks and Runs.
 - `GET skill/agents` — available Profiles, Agent creation, launch configuration, continued conversations, and recursive delegation.
+- `GET skill/interactive-views` — durable sandboxed HTML Views with Host-owned state, data, navigation, and Agent actions.
 
 ```bash
 curl -fsS -H "$AUTH" "$HUABU_RFS_URL/skill/tasks"

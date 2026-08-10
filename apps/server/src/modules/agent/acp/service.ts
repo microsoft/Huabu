@@ -41,6 +41,7 @@ import {
 import { createChatSubmission } from '../agenetes/handle.js';
 import { dumpAssembledPrompt } from '../conversation/prompt/debug-prompt.js';
 
+import type { HuabuSubmission } from '../agenetes/handle.js';
 import type { ChatEnvelope } from '../conversation/envelope.js';
 import type { AcpBindingRecipe, AcpTurnOverlay } from '@agenetes/acp-driver';
 import type { AgentProfileSnapshot } from '@agenetes/agent-team';
@@ -78,6 +79,8 @@ export interface RunAcpAgentOptions {
    * drift from what the built-in serializer renders.
    */
   envelope: ChatEnvelope;
+  /** Pre-rendered durable submission for non-chat host events. */
+  submission?: HuabuSubmission;
   /**
    * Mutable per-turn ACP overlay. We accumulate tool extensions
    * (keyed by `toolCallId`) and the turn's plan here; the route folds
@@ -258,13 +261,17 @@ export async function* runAcpAgent(
 ): AsyncGenerator<AgentStreamEvent, void> {
   const { binding, threadId, overlay, signal, logger } = opts;
   const canvasId = opts.canvasId ?? '';
-  const rendered = await renderExternalAgentInputs({
-    envelope: opts.envelope,
-    agentAlias: binding.alias,
-    canvasId: canvasId || null,
-    logger,
-  });
-  const submission = createChatSubmission(opts.envelope, rendered);
+  const submission =
+    opts.submission ??
+    createChatSubmission(
+      opts.envelope,
+      await renderExternalAgentInputs({
+        envelope: opts.envelope,
+        agentAlias: binding.alias,
+        canvasId: canvasId || null,
+        logger,
+      }),
+    );
 
   // Bake this thread's WorkloadSpec (I9.6). The ACP handle self-resolves
   // (opens or reuses) its live session per turn from these fields — L1 no

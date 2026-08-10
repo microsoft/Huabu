@@ -7,6 +7,7 @@ vi.mock('./memory/index.js', () => ({
   readWorkspaceMemory: () => '',
 }));
 
+import { createInteractiveViewSubmission } from './agenetes/handle.js';
 import {
   AgentThreadBusyError,
   AgentThreadService,
@@ -162,6 +163,29 @@ describe('AgentThreadService', () => {
     expect(harness.finishLifecycle).toHaveBeenCalledWith(TARGET);
     expect(harness.failLifecycle).not.toHaveBeenCalled();
     expect(harness.release).toHaveBeenCalledOnce();
+  });
+
+  it('passes a structured submission to the external Agent handle', async () => {
+    const harness = createHarness();
+    const submission = createInteractiveViewSubmission({
+      protocolVersion: 1,
+      nodeId: 'node-view',
+      actionId: 'approve-plan',
+      input: { approved: true },
+      viewRevision: 'view-rev',
+    });
+    const invocation = await harness.service.invokeSubmission({
+      ...invocationOptions(),
+      submission,
+    });
+
+    for await (const _event of invocation.events) {
+      // Drain the canonical invocation stream.
+    }
+
+    expect(harness.runExternal).toHaveBeenCalledWith(
+      expect.objectContaining({ submission }),
+    );
   });
 
   it('writes an error terminal for a failed fixed-node stream', async () => {

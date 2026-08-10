@@ -92,13 +92,19 @@ Parent lineage is best effort. The route resolves `parentThreadId` or `X-Huabu-H
 
 ## External-agent bootstrap
 
-Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent environment. Every external-agent Deployment persists the bootstrap as its initial preamble, including Deployments first created by mode, model, or configuration control requests; startup repair backfills older undelivered records that omitted it. The preamble owns the authentication contract and curl header setup because every external Agent needs them before loading any Skill. The complete basic guide is loaded without credentials from `GET /skill`; advanced layout, Task, and recursive-Agent procedures are loaded on demand from authenticated `GET /skill/layout`, `/skill/tasks`, and `/skill/agents`.
+Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent environment. Every external-agent Deployment persists the bootstrap as its initial preamble, including Deployments first created by mode, model, or configuration control requests; startup repair backfills older undelivered records that omitted it. The preamble owns the authentication contract and curl header setup because every external Agent needs them before loading any Skill. The complete basic guide is loaded without credentials from `GET /skill`; advanced layout, Task, recursive-Agent, and Interactive View procedures are loaded on demand from authenticated `GET /skill/layout`, `/skill/tasks`, `/skill/agents`, and `/skill/interactive-views`.
 
 Skills explain when and how to compose workflows, but they do not duplicate the wire protocol. `GET /capabilities` and its per-operation endpoints remain the canonical, schema-derived source for current query and command fields, limits, and semantics.
 
 The guide is direct-first: an external agent can discover, query, download, snapshot, upload, execute, and verify without creating another Agent. `POST /agent` remains an optional high-level interpretation and delegation path.
 
 RFS errors use the normal API error body and include a runnable `/skill` recovery command so a caller can reload the current usage contract after a malformed request.
+
+## Interactive View resources
+
+`GET|POST /interactive-views`, `GET /interactive-views/:nodeId`, and `PUT /interactive-views/:nodeId/state` expose Interactive Views as Web Node resources rather than a separate repository. Creation accepts a staged `upload/*.html` renderer, imports it through the canonical Canvas executor, validates the owner thread, closed state schema, bindings, actions, and initial value, and returns the created Node identity plus a deterministic View revision. State writes replace the complete value and compare that revision inside the Canvas write mutex.
+
+The focused `GET /skill/interactive-views` guide owns the external-Agent procedure. The iframe never receives RFS credentials or routes; its runtime bridge is described in [`web-architecture.md`](./web-architecture.md).
 
 ## Environment injection and isolation
 
@@ -126,6 +132,8 @@ An external agent runs as an untrusted third-party CLI. It must receive its Huab
 | [`apps/server/src/prompt/external-agent/layout.md`](../../apps/server/src/prompt/external-agent/layout.md)                                     | Advanced RFS adapter over the shared Space layout recipes.                                                |
 | [`apps/server/src/prompt/external-agent/tasks.md`](../../apps/server/src/prompt/external-agent/tasks.md)                                       | Durable Task and Run workflow served by `GET /skill/tasks`.                                               |
 | [`apps/server/src/prompt/external-agent/agents.md`](../../apps/server/src/prompt/external-agent/agents.md)                                     | Delegated and recursive Agent workflow served by `GET /skill/agents`.                                     |
+| [`apps/server/src/prompt/external-agent/interactive-views.md`](../../apps/server/src/prompt/external-agent/interactive-views.md)               | Interactive View creation and bridge workflow served by `GET /skill/interactive-views`.                   |
+| [`apps/server/src/modules/interactive-view/`](../../apps/server/src/modules/interactive-view/)                                                 | View resource validation, persistence, binding snapshots, and Agent action dispatch.                      |
 | [`apps/server/src/prompt/external-agent/system-preamble.ts`](../../apps/server/src/prompt/external-agent/system-preamble.ts)                   | Render the canonical external-agent bootstrap preamble.                                                   |
 | [`apps/server/src/modules/agent/acp/reachback-env.ts`](../../apps/server/src/modules/agent/acp/reachback-env.ts)                               | Inject the canvas-scoped RFS environment into external sessions.                                          |
 | [`apps/server/src/modules/storage/migrate-agenetes-threads.ts`](../../apps/server/src/modules/storage/migrate-agenetes-threads.ts)             | Repair persisted undelivered external Deployments that omitted the bootstrap preamble.                    |

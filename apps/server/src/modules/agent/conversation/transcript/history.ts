@@ -18,7 +18,10 @@
 import { commandFromRawInput, variantForInternalTool } from '@huabu/shared';
 
 import { projectUserVisibleAttachments } from './attachment-chips.js';
-import { chatEnvelopeFromSubmission } from '../../agenetes/handle.js';
+import {
+  chatEnvelopeFromSubmission,
+  interactiveViewEventFromSubmission,
+} from '../../agenetes/handle.js';
 
 import type { ChatEnvelope } from '../envelope.js';
 import type { AgentTurn, FoldedMessage } from '@agenetes/protocol';
@@ -257,6 +260,7 @@ export function buildHistoryFromTurns(
 ): void {
   for (const turn of turns) {
     const envelope = envelopeOf(turn);
+    const viewEvent = interactiveViewEventFromSubmission(turn.request);
 
     // 1. User item, straight from the structured envelope.
     if (envelope) {
@@ -288,6 +292,11 @@ export function buildHistoryFromTurns(
           ...(invokedSkills.length > 0 && { invokedSkills }),
         });
       }
+    } else if (viewEvent) {
+      messages.push({
+        role: 'user',
+        content: `Interactive View action: ${viewEvent.actionId}`,
+      });
     }
 
     // 2. Transcript: assistant / tool items, in emission order.

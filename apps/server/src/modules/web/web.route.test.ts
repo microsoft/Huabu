@@ -61,4 +61,66 @@ describe('GET /api/web/page', () => {
       await app.close();
     }
   });
+
+  it('routes Interactive Views through the restricted renderer endpoint', async () => {
+    const canvasId = 'c-view';
+    const nodeId = 'node-view';
+    createCanvas(canvasId);
+    const store = getCanvasStore(canvasId);
+    const current = store.read();
+    if (!current) throw new Error('Canvas was not created');
+    store.write({
+      ...current,
+      state: {
+        nodes: [
+          {
+            id: nodeId,
+            type: 'web',
+            position: { x: 0, y: 0 },
+            data: {
+              interactiveView: {
+                protocolVersion: 1,
+                ownerThreadId: 'thread-owner',
+                state: {
+                  schema: {
+                    type: 'object',
+                    properties: {},
+                    additionalProperties: false,
+                  },
+                  value: {},
+                },
+                bindings: [],
+                actions: [],
+              },
+            },
+          },
+        ],
+        edges: [],
+      },
+    });
+    store.writeNode(nodeId, {
+      nodeId,
+      type: 'web',
+      label: 'Interactive View',
+      content: '',
+      src: 'view.html',
+    });
+
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/web/page?canvasId=${canvasId}&nodeId=${nodeId}`,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        src: '/api/interactive-views/c-view/node-view/renderer',
+        kind: 'html',
+        embeddable: true,
+      });
+    } finally {
+      await app.close();
+    }
+  });
 });
