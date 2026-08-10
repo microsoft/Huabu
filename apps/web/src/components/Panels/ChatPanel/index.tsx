@@ -135,7 +135,7 @@ export const ChatPanel = ({
   // they only apply when that pointer is what this panel is rendering. A
   // tab-supplied session takes the defaults until tabs own this too.
   const replayPresentation =
-    activeConversationView === storeConversationView
+    activeConversationView && activeConversationView === storeConversationView
       ? viewingQuestionThread
       : null;
 
