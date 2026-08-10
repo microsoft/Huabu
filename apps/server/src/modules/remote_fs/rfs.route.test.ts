@@ -1026,6 +1026,51 @@ describe('POST /api/rfs/:canvasId/execute', () => {
     }
   });
 
+  it('unwraps a downloaded node sidecar when it is written back as content', async () => {
+    const file = seedNote('c1', 'node-1', 'Alpha', '# Existing body');
+    const app = await buildApp();
+    try {
+      const download = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/download/${file}`,
+      });
+      expect(download.body).toMatch(/^---\n/);
+      const revision = String(download.headers['etag']).replace(/"/g, '');
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          commands: [
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'node-1',
+                  expectRev: revision,
+                  patch: { content: download.body },
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(rfsExecuteResponseSchema.parse(response.json())).toMatchObject({
+        fromVersion: 1,
+        toVersion: 2,
+        results: [{ applied: true }],
+      });
+      expect(getCanvasStore('c1').readNode('node-1')?.content).toBe(
+        '# Existing body',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it('rejects caller-owned origin and UI-only commands', async () => {
     seedNote('c1', 'node-1', 'Alpha', 'body');
     const app = await buildApp();

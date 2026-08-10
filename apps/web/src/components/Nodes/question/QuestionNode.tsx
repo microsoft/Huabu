@@ -346,10 +346,12 @@ export const QuestionNode = memo(
                         : status === 'error' && data.errorMessage
                           ? data.errorMessage
                           : canOpenInChat
-                            ? status === 'running'
-                              ? t('node.watchLiveConversation')
-                              : t('node.openConversation')
-                            : undefined
+                            ? `${agentPresentation.alias} · ${
+                                status === 'running'
+                                  ? t('node.watchLiveConversation')
+                                  : t('node.openConversation')
+                              }`
+                            : agentPresentation.alias
                     }
                   />
                 ),

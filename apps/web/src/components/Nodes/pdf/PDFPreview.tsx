@@ -3,23 +3,40 @@
 
 import clsx from 'clsx';
 import { Highlighter, Scan } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Document } from 'react-pdf';
 
 import { resolveArtifactUrl, uploadImage } from '@/api/artifact';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
+import { useRegisterPreviewSearchAdapter } from '@/components/Panels/ExpandedNodePanel/PreviewSearchAdapterContext';
 import {
   computeHighlightUpdate,
   mergeLineRects,
 } from '@/handler/pdfHighlight/highlight';
+import { scheduleScrollToMatch } from '@/hooks/searchDom';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import { usePreviewSearchStore } from '@/store/previewSearchStore';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
+import {
+  DEFAULT_PDF_PAGE_ASPECT_RATIO,
+  updateRetainedPdfPages,
+  updateVisiblePdfPages,
+} from './pdfPageRendering';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
+import { findPdfTextMatches } from './pdfTextIndex';
 import { PDF_DOCUMENT_OPTIONS } from './pdfWorker';
+import { usePdfTextIndex, type PdfIndexDocument } from './usePdfTextIndex';
 import { Button } from '../../Common/Button';
 import { Loading } from '../../Common/Loading';
 
@@ -58,11 +75,32 @@ export const PDFPreview = ({
   const canvasId = useCanvasStore((s) => s.canvasId);
   const resolvedSrc = resolveArtifactUrl(src, canvasId);
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
+  const previewSearchNodeId = usePreviewSearchStore((s) => s.nodeId);
+  const searchQuery = usePreviewSearchStore((s) => s.query);
+  const isPreviewSearchOpen = usePreviewSearchStore((s) => s.isOpen);
   const [numPages, setNumPages] = useState<number | null>(null);
+  const [pdfDocument, setPdfDocument] = useState<PdfIndexDocument | null>(null);
   const [docLoaded, setDocLoaded] = useState(false);
+  const [forcedPageIndex, setForcedPageIndex] = useState<number | null>(null);
+  const searchNavigationCancelRef = useRef<(() => void) | null>(null);
+  const [visiblePageIndexes, setVisiblePageIndexes] = useState<
+    ReadonlySet<number>
+  >(() => new Set([0]));
+  const [retainedPageIndexes, setRetainedPageIndexes] = useState<
+    ReadonlySet<number>
+  >(() => new Set([0]));
+  const [pageAspectRatios, setPageAspectRatios] = useState<
+    ReadonlyMap<number, number>
+  >(() => new Map());
   // Reset loading state when the PDF source changes.
   useEffect(() => {
     setDocLoaded(false);
+    setNumPages(null);
+    setPdfDocument(null);
+    setForcedPageIndex(null);
+    setVisiblePageIndexes(new Set([0]));
+    setRetainedPageIndexes(new Set([0]));
+    setPageAspectRatios(new Map());
   }, [src]);
   const [captureMode, setCaptureMode] = useState(false);
   const [highlightMode, setHighlightMode] = useState(false);
@@ -102,6 +140,38 @@ export const PDFPreview = ({
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    const root = scrollContainerRef.current;
+    if (!root || !numPages) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const changes = entries.flatMap((entry) => {
+          const pageIndex = Number(
+            (entry.target as HTMLElement).dataset.pdfPageShell,
+          );
+          return Number.isInteger(pageIndex)
+            ? [{ pageIndex, isVisible: entry.isIntersecting }]
+            : [];
+        });
+        startTransition(() => {
+          setVisiblePageIndexes((current) =>
+            updateVisiblePdfPages(current, changes),
+          );
+          setRetainedPageIndexes((current) =>
+            updateRetainedPdfPages(current, changes),
+          );
+        });
+      },
+      { root, rootMargin: '100% 0px' },
+    );
+
+    root
+      .querySelectorAll<HTMLElement>('[data-pdf-page-shell]')
+      .forEach((page) => observer.observe(page));
+    return () => observer.disconnect();
+  }, [numPages]);
 
   // Debounced re-render: when the container is significantly larger than the
   // rendered canvas, schedule a state update so react-pdf re-renders at full
@@ -281,13 +351,85 @@ export const PDFPreview = ({
       ? containerWidth / renderedWidth
       : 1;
 
-  const onDocumentLoadSuccess = useCallback(
-    ({ numPages: n }: { numPages: number }) => {
-      setNumPages(n);
-      setDocLoaded(true);
+  const onDocumentLoadSuccess = useCallback((document: PdfIndexDocument) => {
+    setPdfDocument(document);
+    setNumPages(document.numPages);
+    setDocLoaded(true);
+  }, []);
+
+  const handlePageAspectRatioResolved = useCallback(
+    (pageIndex: number, aspectRatio: number) => {
+      setPageAspectRatios((current) => {
+        if (current.get(pageIndex) === aspectRatio) return current;
+        const next = new Map(current);
+        next.set(pageIndex, aspectRatio);
+        return next;
+      });
     },
     [],
   );
+
+  const isPdfSearchActive =
+    isPreviewSearchOpen &&
+    previewSearchNodeId === id &&
+    searchQuery.trim().length > 0;
+  const textIndex = usePdfTextIndex({
+    document: pdfDocument,
+    enabled: isPdfSearchActive,
+    onPageAspectRatio: handlePageAspectRatioResolved,
+  });
+  const searchMatches = useMemo(
+    () => findPdfTextMatches(textIndex.pages.values(), searchQuery),
+    [searchQuery, textIndex.pages],
+  );
+
+  const navigateToSearchMatch = useCallback(
+    (matchIndex: number) => {
+      const match = searchMatches[matchIndex] ?? searchMatches[0];
+      const root = scrollContainerRef.current;
+      if (!match || !root) return;
+
+      searchNavigationCancelRef.current?.();
+      setForcedPageIndex(match.pageIndex);
+      const pageShell = root.querySelector<HTMLElement>(
+        `[data-pdf-page-shell="${match.pageIndex}"]`,
+      );
+      pageShell?.scrollIntoView({ block: 'center', behavior: 'auto' });
+      searchNavigationCancelRef.current = scheduleScrollToMatch(
+        () => pageShell,
+        searchQuery.trim(),
+        match.pageOccurrenceIndex,
+      );
+    },
+    [searchMatches, searchQuery],
+  );
+
+  useEffect(() => {
+    return () => {
+      searchNavigationCancelRef.current?.();
+      searchNavigationCancelRef.current = null;
+      setForcedPageIndex(null);
+    };
+  }, [searchQuery]);
+
+  const searchAdapter = useMemo(
+    () =>
+      isPdfSearchActive
+        ? {
+            matchCount: searchMatches.length,
+            isSearching: textIndex.isIndexing,
+            canNavigate: !textIndex.isIndexing,
+            navigateToMatch: navigateToSearchMatch,
+          }
+        : null,
+    [
+      isPdfSearchActive,
+      navigateToSearchMatch,
+      searchMatches.length,
+      textIndex.isIndexing,
+    ],
+  );
+  useRegisterPreviewSearchAdapter(searchAdapter);
 
   // ---------------------------------------------------------------------------
   // Area-capture handler
@@ -452,20 +594,38 @@ export const PDFPreview = ({
               className={clsx('flex flex-col items-center gap-0')}
             >
               {Array.from(new Array(numPages ?? 0), (_el, index) => (
-                <PDFPageWithOverlay
+                <div
                   key={`page_${index + 1}`}
-                  pageNumber={index + 1}
-                  pageIndex={index}
-                  pageWidth={renderedWidth > 0 ? renderedWidth : undefined}
-                  captureEnabled={captureMode}
-                  onAreaCaptured={handleAreaCaptured}
-                  persistedRect={
-                    pendingCapture && pendingCapture.pageIndex === index
-                      ? pendingCapture.captureRect
-                      : undefined
-                  }
-                  highlights={highlights.filter((h) => h.pageIndex === index)}
-                />
+                  data-pdf-page-shell={index}
+                  className="bg-bg-default w-full"
+                  style={{
+                    aspectRatio:
+                      pageAspectRatios.get(index) ??
+                      pageAspectRatios.get(0) ??
+                      DEFAULT_PDF_PAGE_ASPECT_RATIO,
+                  }}
+                >
+                  {visiblePageIndexes.has(index) ||
+                  retainedPageIndexes.has(index) ||
+                  forcedPageIndex === index ? (
+                    <PDFPageWithOverlay
+                      pageNumber={index + 1}
+                      pageIndex={index}
+                      pageWidth={renderedWidth > 0 ? renderedWidth : undefined}
+                      captureEnabled={captureMode}
+                      onAreaCaptured={handleAreaCaptured}
+                      persistedRect={
+                        pendingCapture && pendingCapture.pageIndex === index
+                          ? pendingCapture.captureRect
+                          : undefined
+                      }
+                      highlights={highlights.filter(
+                        (h) => h.pageIndex === index,
+                      )}
+                      onAspectRatioResolved={handlePageAspectRatioResolved}
+                    />
+                  ) : null}
+                </div>
               ))}
             </Document>
           </div>

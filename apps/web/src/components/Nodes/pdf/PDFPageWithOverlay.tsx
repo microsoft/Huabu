@@ -64,6 +64,7 @@ type PDFPageWithOverlayProps = {
   persistedRect?: NormalizedRect;
   /** Persistent highlights to render on this page. */
   highlights?: PdfHighlight[];
+  onAspectRatioResolved?: (pageIndex: number, aspectRatio: number) => void;
 };
 
 export const PDFPageWithOverlay = ({
@@ -74,6 +75,7 @@ export const PDFPageWithOverlay = ({
   onAreaCaptured,
   persistedRect,
   highlights,
+  onAspectRatioResolved,
 }: PDFPageWithOverlayProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const pageProxyRef = useRef<PdfPageProxy | null>(null);
@@ -275,6 +277,11 @@ export const PDFPageWithOverlay = ({
         renderAnnotationLayer={false}
         renderTextLayer={!captureEnabled}
         loading=""
+        onLoadSuccess={(page) => {
+          pageProxyRef.current = page as unknown as PdfPageProxy;
+          const viewport = page.getViewport({ scale: 1 });
+          onAspectRatioResolved?.(pageIndex, viewport.width / viewport.height);
+        }}
         onRenderSuccess={(p) => {
           pageProxyRef.current = p as unknown as PdfPageProxy;
           setRendered(true);

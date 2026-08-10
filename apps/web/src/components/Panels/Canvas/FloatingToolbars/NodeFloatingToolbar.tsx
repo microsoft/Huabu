@@ -24,6 +24,7 @@ import { Tooltip } from '@/components/Common/Tooltip';
 import { useHeightMode } from '@/components/Nodes/shared/height/useHeightMode';
 import { NODE_ICON } from '@/config/nodeIcons';
 import { useIsNotMouse } from '@/hooks/useInputMode';
+import { useMultiSelectModifierHeld } from '@/hooks/useMultiSelectModifier';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
 import {
@@ -109,6 +110,13 @@ export const NodeFloatingToolbar = memo(
     );
     const ingestion = useCanvasStore((s) => s.ingestionByNodeId[id]);
     const isNotMouse = useIsNotMouse();
+    // While the user holds the multi-select modifier (Ctrl / Cmd) they are
+    // reaching for *another* node to add to the selection — this toolbar,
+    // pinned above the current node, would occlude that target. Stand it
+    // down for the duration of the hold; it returns the moment the key is
+    // released (or once the multi-selection lands, at which point the
+    // single-node toolbar is replaced by the multi-select one anyway).
+    const multiSelectModifierHeld = useMultiSelectModifierHeld();
     const isTextFlowNode = isAlwaysAutoHeightNodeType(type);
     const accentPickerOptions = useMemo(
       () => translateColorOptions(ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT, t),
@@ -230,7 +238,7 @@ export const NodeFloatingToolbar = memo(
     return (
       <CanvasFloatingPopover
         anchor={anchor}
-        open
+        open={!multiSelectModifierHeld}
         offset={12}
         side="top"
         className={FLOATING_TOOLBAR_CLASS}

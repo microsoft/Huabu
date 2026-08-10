@@ -158,6 +158,36 @@ async function runPipelineStages(
       if (has('fetch_remote_content'))
         usedCapabilities.push('fetch_remote_content');
 
+      // PDF one-shot snapshot: the Extract stage already fetched the remote
+      // bytes for text extraction, so store that same buffer as a canvas-local
+      // artifact and make it the canonical source for Persist + rendering.
+      // Failures are non-fatal: the node keeps the remote URL and remains
+      // usable online rather than losing its extracted content.
+      if (
+        request.nodeType === 'pdf' &&
+        ctx.extracted?.rawPdf &&
+        ctx.resolved.artifactUri &&
+        /^https?:\/\//i.test(ctx.resolved.artifactUri)
+      ) {
+        try {
+          const artifactName = `${createId('artifact')}.pdf`;
+          const info = await deps.blobs.put(artifactName, ctx.extracted.rawPdf);
+          ctx.resolved.artifactUri = info.name;
+          ctx.resolved.artifactName = info.name;
+        } catch (snapshotError) {
+          diagnostics.push({
+            code: 'SNAPSHOT_FAILED',
+            level: 'warning',
+            message:
+              snapshotError instanceof Error
+                ? snapshotError.message
+                : String(snapshotError),
+          });
+        }
+        const { rawPdf: _rawPdf, ...rest } = ctx.extracted;
+        ctx.extracted = rest;
+      }
+
       // Web one-shot snapshot: persist the fetched HTML as a `.mhtml`
       // artifact so subsequent renders can load from disk instead of
       // re-hitting the live URL. Only fires when the loader actually

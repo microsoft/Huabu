@@ -160,6 +160,31 @@ describe('persist — authored-body CAS guard', () => {
     expect(result.contentChanged).toBe(false);
     expect(store.readNode('pdf1')).toBeNull();
   });
+
+  it('refreshes a PDF src when unchanged content adopts a local snapshot', async () => {
+    seedNode('c4', 'pdf1', 'pdf', 'same extracted text');
+    const store = getCanvasStore('c4');
+    store.writeNode('pdf1', {
+      nodeId: 'pdf1',
+      type: 'pdf',
+      label: 'Paper',
+      src: 'https://arxiv.org/pdf/2505.10831',
+      content: 'same extracted text',
+    });
+
+    const result = await persist(
+      normalized('pdf1', 'same extracted text'),
+      'pdf',
+      'derived',
+      store,
+      'artifact_local.pdf',
+      true,
+    );
+
+    expect(result.contentChanged).toBe(false);
+    expect(result.persistedSrc).toBe('artifact_local.pdf');
+    expect(store.readNode('pdf1')?.src).toBe('artifact_local.pdf');
+  });
 });
 
 describe('persist — concurrency with a content PUT (authored body not clobbered)', () => {

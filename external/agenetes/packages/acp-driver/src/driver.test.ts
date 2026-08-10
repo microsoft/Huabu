@@ -74,11 +74,22 @@ describe('acpDriverFactory (M5 FACTORY)', () => {
     expect(
       driver.validateSpec({
         binding: { alias: 'claude', profileId: 'prof_2' },
+        initialPreferences: {
+          model: 'claude-opus',
+          thoughtLevel: 'high',
+        },
         cwd: '/work',
         recipe: null,
         env: { HUABU_THREAD_ID: 'thr_2' },
       }),
-    ).toMatchObject({ binding: { alias: 'claude' }, cwd: '/work' });
+    ).toMatchObject({
+      binding: { alias: 'claude' },
+      initialPreferences: {
+        model: 'claude-opus',
+        thoughtLevel: 'high',
+      },
+      cwd: '/work',
+    });
     expect(driver.initialState()).toEqual({
       initialPreambleDelivered: false,
     });
@@ -87,6 +98,12 @@ describe('acpDriverFactory (M5 FACTORY)', () => {
     );
     expect(() =>
       driver.validateSpec({ binding: { alias: 'claude' } }),
+    ).toThrowError(expect.objectContaining({ code: 'invalid_driver_spec' }));
+    expect(() =>
+      driver.validateSpec({
+        binding: { alias: 'claude', profileId: 'prof_2' },
+        initialPreferences: { allowAll: true },
+      }),
     ).toThrowError(expect.objectContaining({ code: 'invalid_driver_spec' }));
 
     const handle = driver.create(

@@ -241,20 +241,6 @@ export const CanvasLayerPanel = ({
   const isSearchOpen = usePanelStore((s) => s.isSearchOpen);
   const toggleSearchOpen = usePanelStore((s) => s.toggleSearchOpen);
 
-  // Auto-expand the left panel whenever the search input is
-  // revealed OR a query is in flight. Cmd+F also calls this path
-  // (the hotkey flips `isSearchOpen` first), so the user never has
-  // to manually un-collapse the panel just to start searching. We
-  // only force-open — never force-close — so the user can
-  // collapse mid-search if they want to peek at the canvas
-  // without losing the query.
-  const setLeftCollapsed = usePanelStore((s) => s.setLeftCollapsed);
-  useEffect(() => {
-    if ((isSearchOpen || isSearchActive) && isLeftCollapsed) {
-      setLeftCollapsed(false);
-    }
-  }, [isSearchOpen, isSearchActive, isLeftCollapsed, setLeftCollapsed]);
-
   // Mirror the chip whitelist into the search store so chip
   // toggles also narrow the canvas-wide search request (the
   // server reads `nodeTypes` and skips non-matching nodes /

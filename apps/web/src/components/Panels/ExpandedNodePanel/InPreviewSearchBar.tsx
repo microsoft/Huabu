@@ -16,14 +16,9 @@
  *      `::highlight()` ranges over all visible matches without
  *      mutating Milkdown / pdf.js text nodes. The paint rule lives
  *      in `index.css` (`::highlight(huabu-search)`).
- *   2. A server-side `nodeId`-restricted search query, driven via
- *      `searchStore.setQuery` whenever the find-bar input changes
- *      (the store routes node-scope queries to the same NDJSON
- *      endpoint with `nodeId` + `fields: ['content']` set). This
- *      backs server-aware counts and "Next / Prev" navigation for
- *      matches outside the visible viewport (e.g. inside a
- *      collapsed Milkdown block) without needing the inline DOM
- *      walk to scan offscreen content.
+ *   2. A preview-local query consumed by adapters such as the PDF
+ *      text index. It is deliberately independent from canvas-wide
+ *      search state and never opens or updates the Layers panel.
  *
  * Esc closes the bar (the parent panel's existing Esc handler still
  * closes the panel itself when the bar is gone).
@@ -33,36 +28,49 @@ import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { usePreviewSearchAdapter } from './PreviewSearchAdapterContext';
 import { formatShortcutById } from '../../../config/shortcuts';
 import { findNthRange, scrollRangeIntoView } from '../../../hooks/searchDom';
 import { useTextHighlight } from '../../../hooks/useTextHighlight';
-import { useSearchStore } from '../../../store/searchStore';
+import { usePreviewSearchStore } from '../../../store/previewSearchStore';
 import { Button } from '../../Common/Button';
 
 interface InPreviewSearchBarProps {
   /** Root of the preview content. Highlights paint over its descendants. */
   scopeEl: HTMLElement | null;
+  nodeId: string | null;
 }
 
 export const InPreviewSearchBar = ({
   scopeEl,
+  nodeId,
 }: InPreviewSearchBarProps): React.JSX.Element | null => {
   const { t } = useTranslation();
-  const scope = useSearchStore((s) => s.scope);
-  const query = useSearchStore((s) => s.query);
-  const setQuery = useSearchStore((s) => s.setQuery);
-  const close = useSearchStore((s) => s.close);
+  const isOpen = usePreviewSearchStore((s) => s.isOpen);
+  const ownerNodeId = usePreviewSearchStore((s) => s.nodeId);
+  const query = usePreviewSearchStore((s) => s.query);
+  const setQuery = usePreviewSearchStore((s) => s.setQuery);
+  const close = usePreviewSearchStore((s) => s.close);
   const inputRef = useRef<HTMLInputElement>(null);
   const [activeMatchIdx, setActiveMatchIdx] = useState(0);
-
-  const isNodeScope = scope?.kind === 'node';
+  const searchAdapter = usePreviewSearchAdapter();
+  const isActive = isOpen && ownerNodeId === nodeId;
 
   useEffect(() => {
-    if (isNodeScope) {
+    if (isActive) {
       inputRef.current?.focus();
       inputRef.current?.select();
     }
-  }, [isNodeScope]);
+  }, [isActive]);
+
+  // Preview search is a per-node session. When the owning node changes or
+  // the panel unmounts, reset the shared store so reopening the same node
+  // does not resurrect a stale query and steal focus on mount.
+  useEffect(() => {
+    return () => {
+      usePreviewSearchStore.getState().close();
+    };
+  }, [nodeId]);
 
   // Track whether the user has already navigated at least once. The
   // inline highlight visually implies the first match is "current", so
@@ -77,15 +85,14 @@ export const InPreviewSearchBar = ({
   // readout below stays accurate as pdf.js / Milkdown mount text
   // asynchronously.
   //
-  // Only paint when *this* find bar owns the search scope. Canvas-wide
-  // search uses the same `HIGHLIGHT_NAME` and includes the preview
-  // body itself as a paint target; if we also painted here on canvas
-  // scope, the two registrations would race and the canvas overlay's
-  // multi-container set would get clobbered.
-  const { matchCount } = useTextHighlight({
-    container: isNodeScope ? scopeEl : null,
+  // Only paint when this node owns preview search. Canvas-wide search
+  // deliberately excludes the preview body, so the two surfaces never
+  // compete for query or highlight ownership.
+  const { matchCount: domMatchCount } = useTextHighlight({
+    container: isActive ? scopeEl : null,
     query,
   });
+  const matchCount = searchAdapter?.matchCount ?? domMatchCount;
 
   // Reset cursor whenever the query changes so Next/Prev starts from top.
   useEffect(() => {
@@ -94,15 +101,25 @@ export const InPreviewSearchBar = ({
   }, [query]);
 
   const jumpToMatch = (idx: number): void => {
-    if (!scopeEl || !query || matchCount === 0) return;
+    if (
+      !scopeEl ||
+      !query ||
+      matchCount === 0 ||
+      (searchAdapter && !searchAdapter.canNavigate)
+    )
+      return;
     const normalised = ((idx % matchCount) + matchCount) % matchCount;
     setActiveMatchIdx(normalised);
     setHasNavigated(true);
+    if (searchAdapter) {
+      searchAdapter.navigateToMatch(normalised);
+      return;
+    }
     const range = findNthRange(scopeEl, query, normalised);
     if (range) scrollRangeIntoView(range);
   };
 
-  if (!isNodeScope) return null;
+  if (!isActive) return null;
 
   return (
     <div
@@ -139,8 +156,10 @@ export const InPreviewSearchBar = ({
       <span className="text-fg-subtle shrink-0 px-1 text-[11px] tabular-nums">
         {query.length > 0
           ? matchCount > 0
-            ? `${activeMatchIdx + 1}/${matchCount}`
-            : '0/0'
+            ? `${activeMatchIdx + 1}/${matchCount}${searchAdapter?.isSearching ? '+' : ''}`
+            : searchAdapter?.isSearching
+              ? '…'
+              : '0/0'
           : ''}
       </span>
       <Button
@@ -148,7 +167,9 @@ export const InPreviewSearchBar = ({
         iconOnly
         size="sm"
         title={`${t('search.previousMatch')} (${formatShortcutById('search.previousMatch')})`}
-        disabled={matchCount === 0}
+        disabled={
+          matchCount === 0 || (!!searchAdapter && !searchAdapter.canNavigate)
+        }
         onClick={() => jumpToMatch(activeMatchIdx - 1)}
       >
         <ChevronUp />
@@ -158,7 +179,9 @@ export const InPreviewSearchBar = ({
         iconOnly
         size="sm"
         title={`${t('search.nextMatch')} (${formatShortcutById('search.jumpResult')})`}
-        disabled={matchCount === 0}
+        disabled={
+          matchCount === 0 || (!!searchAdapter && !searchAdapter.canNavigate)
+        }
         onClick={() => jumpToMatch(activeMatchIdx + 1)}
       >
         <ChevronDown />
