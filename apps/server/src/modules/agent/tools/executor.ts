@@ -55,6 +55,12 @@ import {
   handleSnapshotNodes,
   type SnapshotNodesArgs,
 } from './handlers/snapshot-node.js';
+import {
+  handleCreateTask,
+  handleStartTaskRun,
+  type CreateTaskArgs,
+  type StartTaskRunArgs,
+} from './handlers/task.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 import { resolveWorldReadCanvasId } from '../../canvas/world-target-access.js';
 
@@ -170,6 +176,16 @@ export async function executeTool(
         withCanvasId<CanvasCommandsArgs>(args, 'space_commands'),
         context?.origin,
         { threadId: context?.threadId, readSet: context?.readSet },
+      );
+
+    case 'create_task':
+      return handleCreateTask(
+        withCanvasId<CreateTaskArgs>(args, 'create_task'),
+      );
+
+    case 'start_task_run':
+      return handleStartTaskRun(
+        withCanvasId<StartTaskRunArgs>(args, 'start_task_run'),
       );
 
     case 'fs_write':

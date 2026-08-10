@@ -5,6 +5,7 @@ import {
   awaitSelectionReplay,
   hydrateSelectionsFromPersistedMeta,
   reconcileSessionSelections,
+  seedInitialPreferences,
 } from './session.js';
 
 import type { AcpSessionEntry } from './session-registry.js';
@@ -100,6 +101,69 @@ describe('selection hydration', () => {
 
     expect(e.selections).toEqual({ model: 'a' });
     expect(e.selectionsUpdatedAt).toBe(7);
+  });
+});
+
+describe('initial profile preferences', () => {
+  it('seeds only offered model and thought-level values', () => {
+    const e = entry({
+      configOptions: [
+        {
+          ...configOption('model_id', 'gpt-5'),
+          category: 'model',
+          options: [
+            { value: 'gpt-5', name: 'GPT-5' },
+            { value: 'claude-opus', name: 'Claude Opus' },
+          ],
+        },
+        {
+          ...configOption('reasoning', 'low'),
+          category: 'thought_level',
+          options: [
+            { value: 'low', name: 'Low' },
+            { value: 'high', name: 'High' },
+          ],
+        },
+        {
+          ...configOption('allow_all', false),
+          category: 'permission',
+          type: 'boolean',
+        },
+      ] as unknown as AcpSessionEntry['configOptions'],
+    });
+
+    seedInitialPreferences(e, {
+      model: 'claude-opus',
+      thoughtLevel: 'high',
+    });
+
+    expect(e.selections).toEqual({
+      model_id: 'claude-opus',
+      reasoning: 'high',
+    });
+    expect(e.selections).not.toHaveProperty('allow_all');
+  });
+
+  it('uses the legacy model channel and ignores retired values', () => {
+    const e = entry({
+      availableModels: [
+        { modelId: 'sonnet', name: 'Sonnet' },
+      ] as AcpSessionEntry['availableModels'],
+      configOptions: [
+        {
+          ...configOption('reasoning', 'low'),
+          category: 'thought_level',
+          options: [{ value: 'low', name: 'Low' }],
+        },
+      ] as unknown as AcpSessionEntry['configOptions'],
+    });
+
+    seedInitialPreferences(e, {
+      model: 'sonnet',
+      thoughtLevel: 'retired',
+    });
+
+    expect(e.selections).toEqual({ model: 'sonnet' });
   });
 });
 

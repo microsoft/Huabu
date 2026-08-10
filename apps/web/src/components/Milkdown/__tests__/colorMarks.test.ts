@@ -57,6 +57,22 @@ describe('Milkdown color marks', () => {
     ).not.toBeNull();
   });
 
+  it('migrates persisted Sediment background-color spans', async () => {
+    const { instance, root } = await mount(
+      '<span data-sediment-background-color="purple" style="background-color: color-mix(in srgb, #9B8AC4 25%, transparent)">Highlighted text</span>',
+    );
+
+    expect(root.textContent).toContain('Highlighted text');
+    expect(root.textContent).not.toContain('data-sediment-background-color');
+    expect(
+      root.querySelector('span[data-huabu-background-color="purple"]'),
+    ).not.toBeNull();
+    expect(instance.getMarkdown()).toContain(
+      'data-huabu-background-color="purple"',
+    );
+    expect(instance.getMarkdown()).not.toContain('data-sediment');
+  });
+
   it('round-trips color marks with nested inline marks', async () => {
     const { instance } = await mount('hello');
 
@@ -76,7 +92,7 @@ describe('Milkdown color marks', () => {
 
   it('keeps indented fragment content out of a code block when inserted', async () => {
     const span =
-      '<span data-huabu-background-color="purple" style="background-color: color-mix(in srgb, #9B8AC4 25%, transparent)">Nan:  </span>';
+      '<span data-huabu-background-color="purple" style="background-color: color-mix(in srgb, #9B8AC4 25%, transparent)">Highlighted text</span>';
     const { instance, root } = await mount('intro\n');
 
     // Markdown extracted from a nested list item carries its indentation.

@@ -8,10 +8,20 @@ Guidelines:
 
 ## Working with this Space
 
-Before acting on the Space, fetch the access guide — it documents direct reads, queries, and writes plus the optional internal Space agent:
+Before acting on the Space, fetch its access guide with authentication so Huabu can return a Space-specific `skill.md` override when one exists:
 
-```
-GET ${HUABU_RFS_URL}/skill      (header: Authorization: Bearer ${AGENTLET_TOKEN})
+```bash
+curl -fsS -H "Authorization: Bearer $AGENTLET_TOKEN" "$HUABU_RFS_URL/skill"
 ```
 
-Both `HUABU_RFS_URL` and `AGENTLET_TOKEN` are set in your environment. Read the guide once, then use plain `curl` (or any HTTP client) for everything.
+The bundled root guide is also available as public bootstrap documentation. Fetching without an Authorization header always returns that bundled guide:
+
+```bash
+curl -fsS "$HUABU_RFS_URL/skill"
+```
+
+Every operational endpoint and advanced skill requires `Authorization: Bearer $AGENTLET_TOKEN`; missing or invalid credentials return `401`, and invalid credentials on the root Skill never fall back to the public guide. Both `HUABU_RFS_URL` and `AGENTLET_TOKEN` are set in your environment. For the authenticated examples in the guides, use:
+
+```bash
+AUTH="Authorization: Bearer $AGENTLET_TOKEN"
+```

@@ -31,6 +31,7 @@ import { cn } from '@/components/Common/cn.ts';
 import { Tooltip } from '@/components/Common/Tooltip.tsx';
 import { createQuestionNodeAndCompose } from '@/components/Nodes/question/questionCompose.ts';
 import { localMarkRect } from '@/config/nodeTakeover.ts';
+import { useMultiSelectModifierHeld } from '@/hooks/useMultiSelectModifier.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useConnectPortStore } from '@/store/connectPortStore.ts';
 import {
@@ -611,7 +612,15 @@ export const NodeConnectionHandles = memo(
     // port the pointer is actually aiming at grows and reveals the `+`,
     // so the idle state stays four quiet dots instead of four buttons.
     const [hotSide, setHotSide] = useState<Position | null>(null);
-    const exposed = !dragging && (isNotMouse ? selected : hovered);
+    // While the multi-select modifier (Ctrl / Cmd) is held the user is
+    // reaching for another node, so keep this node's ports quiet: the
+    // edge-endpoint handles stay mounted (they always map below), only the
+    // outward-reaching `+` dots that would occlude the neighbour are hidden.
+    const multiSelectModifierHeld = useMultiSelectModifierHeld();
+    const exposed =
+      !dragging &&
+      !multiSelectModifierHeld &&
+      (isNotMouse ? selected : hovered);
     const hotHandleSize = isNotMouse ? 22 : 20;
 
     const pinnedPosition = pinnedSide ? SIDE_POSITION[pinnedSide] : null;

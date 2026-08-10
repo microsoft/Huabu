@@ -6,7 +6,8 @@
  *
  * The curl-native reachback surface for external agents (replaces the v1
  * node-CRUD `.mjs` reachback tool). Endpoints are all Bearer-gated by the
- * global auth hook in `app.ts`:
+ * global auth hook in `app.ts`, except the bundled root `GET skill`
+ * bootstrap:
  *
  * - `GET    download/<path>` — fetch a canvas file as raw bytes. Node files
  *   also carry their metadata (id/type/label/src/locked + parent/child edges)
@@ -14,10 +15,14 @@
  * - `POST   upload/<file>`   — stage bytes into the shared `.upload/` scratch
  *   dir (rejects on collision — the agent self-suffixes).
  * - `DELETE upload/<file>`   — remove a staged payload.
- * - `POST   agent`           — talk to the canvas-internal agent; always
- *   streams `text/event-stream` (heartbeats + plain-text answer frames).
+ * - `POST   agent`           — create a visible Agent and optionally start it.
+ * - `POST   agent/:threadId/prompt` — submit a turn to an existing Agent.
+ * - `POST   task/create`     — create a durable Task and static Task Note.
+ * - `POST   task/:taskId/run/create` — create and start one Task Run.
+ * - `GET    agent/profiles`  — list available Agent Profiles.
  * - `GET    skill`           — pull the canvas-access guide (per-canvas
  *   override → bundled default).
+ * - `GET    skill/:skillId`  — pull one authenticated advanced RFS guide.
  * - `GET    capabilities*`   — discover direct query/command contracts.
  * - `POST   query`           — run one bounded canonical SpaceQuery.
  * - `POST   execute`         — execute validated agent Space commands.
@@ -35,14 +40,23 @@ import {
   RFS_HEARTBEAT_DEFAULT_SEC,
   RFS_HEARTBEAT_MAX_SEC,
   RFS_HEARTBEAT_MIN_SEC,
-  createId,
+  createTaskRequestSchema,
+  HUABU_AGENT_PROFILE_ID,
+  rfsAgentCreateHeadersSchema,
+  rfsAgentCreateRequestSchema,
   rfsAgentHeadersSchema,
-  rfsAgentRequestSchema,
+  rfsAgentPromptRequestSchema,
   rfsExecuteHeadersSchema,
   rfsExecuteRequestSchema,
   spaceQuerySchema,
+  startTaskRunRequestSchema,
+  type CreateTaskResponse,
   type RfsAgentEventMode,
+  type RfsAgentCreateResponse,
+  type RfsAgentProfilesResponse,
   type RfsUploadResponse,
+  type AgentStreamEvent,
+  type StartTaskRunResponse,
 } from '@huabu/shared';
 
 import { mimeForPath } from './mime.js';
@@ -51,31 +65,44 @@ import {
   resolveReadable,
   rfsMetaHeaders,
 } from './node-meta.js';
-import { resolveCanvasSkill } from './skill.js';
+import {
+  resolveBundledRootSkill,
+  resolveCanvasSkill,
+  resolveFocusedSkill,
+} from './skill.js';
 import {
   getCommandCapability,
   getQueryCapability,
   getRfsCapabilities,
 } from './space-capabilities.js';
 import { executeRfsCommands } from './space-execute.js';
-import { loadAgent } from '../../prompt/index.js';
 import {
-  agenetes,
-  INTERNAL_DRIVER_KIND,
-  type BuiltinHandle,
-} from '../agent/agenetes/drivers.js';
-import { createChatSubmission } from '../agent/agenetes/handle.js';
-import { runAgent, type StreamEvent } from '../agent/agent.service.js';
+  AgentNodeCreationError,
+  agentNodeService,
+  resolveAgentNodePosition,
+} from '../agent/agent-node.service.js';
+import {
+  agentThreadResolver,
+  AgentThreadResolutionError,
+} from '../agent/agent-thread-resolver.js';
+import {
+  AgentThreadBusyError,
+  agentThreadService,
+  type AgentThreadInvocation,
+} from '../agent/agent-thread.service.js';
+import { buildChatEnvelope } from '../agent/conversation/envelope.js';
 import { isPromptDebugEnabled } from '../agent/conversation/prompt/debug-prompt.js';
+import {
+  listAvailableAgentProfiles,
+  SelectableAgentProfileError,
+} from '../agent/selectable-agent-profile.js';
 import { safeResolve } from '../agent/tools/handlers/fs-sandbox.js';
-import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { MissingWorldPortalError } from '../canvas/canvas-command-router.js';
 import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
-import { canvasAcpNamespace } from '../storage/paths.js';
+import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
+import { TaskCreationError, taskService } from '../task/task.service.js';
 
-import type { ChatEnvelope } from '../agent/conversation/envelope.js';
-import type { Context } from '@earendil-works/pi-ai';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
 // ── Error helper: fold a runnable /skill recovery command into { message } ──
@@ -91,9 +118,7 @@ function rfsError(
   code?: string,
 ): { message: string; code?: string } {
   return {
-    message:
-      `${reason} To see how to use this Space, run: ` +
-      `curl -sH "Authorization: Bearer $AGENTLET_TOKEN" "$HUABU_RFS_URL/skill"`,
+    message: `${reason} To see how to use this Space, run: curl -fsS "$HUABU_RFS_URL/skill"`,
     ...(code ? { code } : {}),
   };
 }
@@ -144,36 +169,6 @@ function clampHeartbeatSec(sec: number | undefined): number {
   return Math.min(RFS_HEARTBEAT_MAX_SEC, Math.max(RFS_HEARTBEAT_MIN_SEC, sec));
 }
 
-function createRfsEnvelope(prompt: string): ChatEnvelope {
-  return {
-    user: { text: prompt, attachments: [] },
-    skills: { invokedIds: [], resolved: [] },
-    focus: {
-      selection: {
-        refs: [],
-        selectedIds: [],
-        imageAttachments: [],
-        snapshotAttachments: [],
-      },
-    },
-  };
-}
-
-function normalizeInternalEvent(event: StreamEvent): StreamEvent {
-  if (event.type !== 'tool_call') return event;
-  return {
-    ...event,
-    data: {
-      ...event.data,
-      internalToolName:
-        event.data.internalToolName ??
-        (event.data.title && event.data.title.length > 0
-          ? event.data.title
-          : undefined),
-    },
-  };
-}
-
 // ── Reachback ask-agent debug logging (gated by HUABU_DEBUG_PROMPT) ──
 
 /** Truncate a value to keep a single debug log line readable. */
@@ -193,7 +188,7 @@ function truncForLog(text: string, max = 500): string {
 function logReachbackEvent(
   request: FastifyRequest,
   threadId: string,
-  event: StreamEvent,
+  event: AgentStreamEvent,
 ): void {
   const tag = `[reachback ${threadId}]`;
   switch (event.type) {
@@ -239,7 +234,9 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const { canvasId } = request.params;
       try {
-        const guide = resolveCanvasSkill(canvasId);
+        const guide = request.headers.authorization
+          ? resolveCanvasSkill(canvasId)
+          : resolveBundledRootSkill();
         return reply
           .header('Content-Type', 'text/markdown; charset=utf-8')
           .send(guide);
@@ -249,6 +246,26 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           .code(500)
           .send(rfsError('Failed to load the canvas access guide.'));
       }
+    },
+  );
+
+  app.get<{ Params: { canvasId: string; skillId: string } }>(
+    '/:canvasId/skill/:skillId',
+    async (request, reply) => {
+      const guide = resolveFocusedSkill(request.params.skillId);
+      if (!guide) {
+        return reply
+          .code(404)
+          .send(
+            rfsError(
+              `Unknown advanced skill "${request.params.skillId}".`,
+              'skill_not_found',
+            ),
+          );
+      }
+      return reply
+        .header('Content-Type', 'text/markdown; charset=utf-8')
+        .send(guide);
     },
   );
 
@@ -539,130 +556,552 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
-  // ── POST /:canvasId/agent ── (always SSE)
+  // ── Task creation and Run launch ──
+  app.get<{ Params: { canvasId: string } }>(
+    '/:canvasId/agent/profiles',
+    async (_request, reply) => {
+      try {
+        const response: RfsAgentProfilesResponse = {
+          profiles: listAvailableAgentProfiles(),
+        };
+        return reply.send(response);
+      } catch (error) {
+        if (
+          error instanceof SelectableAgentProfileError &&
+          error.code === 'registry_unavailable'
+        ) {
+          return reply.code(503).send(rfsError(error.message, error.code));
+        }
+        throw error;
+      }
+    },
+  );
+
   app.post<{ Params: { canvasId: string } }>(
-    '/:canvasId/agent',
+    '/:canvasId/task/create',
     async (request, reply) => {
-      const { canvasId } = request.params;
-      const parsedHeaders = rfsAgentHeadersSchema.safeParse(request.headers);
-      if (!parsedHeaders.success) {
+      const body = Buffer.isBuffer(request.body)
+        ? request.body.toString('utf8')
+        : '';
+      let json: unknown;
+      try {
+        json = JSON.parse(body || '{}');
+      } catch {
+        return reply
+          .code(400)
+          .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
+      }
+      const parsed = createTaskRequestSchema.safeParse(json);
+      if (!parsed.success) {
         return reply
           .code(400)
           .send(
             rfsError(
-              parsedHeaders.error.issues[0]?.message ??
-                'Invalid RFS agent headers.',
+              parsed.error.issues[0]?.message ?? 'Invalid Task request.',
               'validation_failed',
             ),
           );
       }
 
-      // Body: JSON `{prompt, doneTextOnly?, heartbeatSec?}` or a raw text prompt.
-      const body = request.body;
-      const buf = Buffer.isBuffer(body) ? body : Buffer.alloc(0);
+      try {
+        const task = await taskService.create(
+          request.params.canvasId,
+          parsed.data,
+        );
+        const response: CreateTaskResponse = { task };
+        return reply.code(201).send(response);
+      } catch (error) {
+        if (error instanceof TaskCreationError) {
+          const status =
+            error.code === 'invalid_input'
+              ? 400
+              : error.code === 'profile_registry_unavailable'
+                ? 503
+                : ['canvas_not_found', 'profile_not_found'].includes(error.code)
+                  ? 404
+                  : 500;
+          const reason = error.createdAnchorNodeId
+            ? `${error.message} Created Task Note: ${error.createdAnchorNodeId}.`
+            : error.message;
+          return reply.code(status).send(rfsError(reason, error.code));
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{ Params: { canvasId: string; taskId: string } }>(
+    '/:canvasId/task/:taskId/run/create',
+    async (request, reply) => {
+      const body = Buffer.isBuffer(request.body)
+        ? request.body.toString('utf8')
+        : '';
+      let json: unknown;
+      try {
+        json = JSON.parse(body || '{}');
+      } catch {
+        return reply
+          .code(400)
+          .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
+      }
+      const parsed = startTaskRunRequestSchema.safeParse(json);
+      if (!parsed.success) {
+        return reply
+          .code(400)
+          .send(
+            rfsError(
+              parsed.error.issues[0]?.message ?? 'Invalid Run request.',
+              'validation_failed',
+            ),
+          );
+      }
+
+      try {
+        const run = await runLauncher.start(
+          request.params.canvasId,
+          request.params.taskId,
+          parsed.data,
+          { logger: request.log },
+        );
+        const response: StartTaskRunResponse = { run };
+        return reply.code(201).send(response);
+      } catch (error) {
+        if (error instanceof RunLaunchError) {
+          const status =
+            error.code === 'invalid_input'
+              ? 400
+              : error.code === 'profile_registry_unavailable'
+                ? 503
+                : ['task_not_found', 'profile_not_found'].includes(error.code)
+                  ? 404
+                  : error.code === 'root_position_failed'
+                    ? 409
+                    : 500;
+          const partial = [
+            error.runId ? `Run: ${error.runId}.` : '',
+            error.rootNodeId ? `Root node: ${error.rootNodeId}.` : '',
+            error.rootThreadId ? `Root thread: ${error.rootThreadId}.` : '',
+          ]
+            .filter(Boolean)
+            .join(' ');
+          const reason = partial
+            ? `${error.message} ${partial}`
+            : error.message;
+          return reply.code(status).send(rfsError(reason, error.code));
+        }
+        throw error;
+      }
+    },
+  );
+
+  // ── POST /:canvasId/agent ──
+  app.post<{ Params: { canvasId: string } }>(
+    '/:canvasId/agent',
+    async (request, reply) => {
+      const { canvasId } = request.params;
+      const parsedHeaders = rfsAgentCreateHeadersSchema.safeParse(
+        request.headers,
+      );
+      if (!parsedHeaders.success) {
+        return reply
+          .code(400)
+          .send(rfsError('Invalid Agent creation headers.'));
+      }
+
+      const body = Buffer.isBuffer(request.body)
+        ? request.body.toString('utf8')
+        : '';
       const contentType = request.headers['content-type'] ?? '';
-
-      let prompt: string;
-      let legacyEventMode: RfsAgentEventMode = 'final';
-      let legacyHeartbeatSec: number | undefined;
-
+      let creation: {
+        profileId: string;
+        prompt?: string;
+        position?: { x: number; y: number };
+        parentThreadId?: string;
+        workingDirPath?: string;
+        additionalInitialPreamble?: string;
+      };
       if (contentType.includes('application/json')) {
         let json: unknown;
         try {
-          json = JSON.parse(buf.toString('utf8') || '{}');
+          json = JSON.parse(body || '{}');
         } catch {
           return reply
             .code(400)
-            .send(rfsError('Request body is not valid JSON.'));
+            .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
         }
-        const parsed = rfsAgentRequestSchema.safeParse(json);
+        const parsed = rfsAgentCreateRequestSchema.safeParse(json);
         if (!parsed.success) {
-          return reply.code(400).send(rfsError('Invalid agent request body.'));
+          return reply
+            .code(400)
+            .send(
+              rfsError(
+                parsed.error.issues[0]?.message ??
+                  'Invalid Agent creation request.',
+                'validation_failed',
+              ),
+            );
         }
-        prompt = parsed.data.prompt;
-        if (parsed.data.doneTextOnly !== undefined) {
-          legacyEventMode = parsed.data.doneTextOnly ? 'final' : 'all';
-        }
-        legacyHeartbeatSec = parsed.data.heartbeatSec;
+        creation = parsed.data;
       } else {
-        prompt = buf.toString('utf8').trim();
+        const prompt = body.trim();
+        if (!prompt) {
+          return reply
+            .code(400)
+            .send(rfsError('A non-empty prompt is required.'));
+        }
+        creation = { profileId: HUABU_AGENT_PROFILE_ID, prompt };
       }
 
+      const start = parsedHeaders.data['x-huabu-agent-start'] ?? true;
+      if (!start && !contentType.includes('application/json')) {
+        return reply
+          .code(400)
+          .send(
+            rfsError(
+              'Create-only Agent requests must use application/json.',
+              'invalid_creation_mode',
+            ),
+          );
+      }
+      if (start && !creation.prompt) {
+        return reply
+          .code(400)
+          .send(
+            rfsError(
+              'An initial prompt is required when X-Huabu-Agent-Start is true.',
+              'prompt_required',
+            ),
+          );
+      }
+      if (!start && creation.prompt) {
+        return reply
+          .code(400)
+          .send(
+            rfsError(
+              'Create-only Agent requests must omit prompt.',
+              'prompt_not_allowed',
+            ),
+          );
+      }
+
+      const parentThreadId =
+        creation.parentThreadId ?? parsedHeaders.data['x-huabu-host-thread-id'];
+      let parentNodeId;
+      let parentLookupFailed = false;
+      if (parentThreadId) {
+        try {
+          parentNodeId = agentThreadResolver.resolveAgentNodeId(
+            canvasId,
+            parentThreadId,
+          );
+        } catch (error) {
+          parentLookupFailed = true;
+          request.log.warn(
+            { error, canvasId, parentThreadId },
+            'rfs Agent parent lookup failed; creating without connection',
+          );
+        }
+      }
+
+      let position;
+      try {
+        position =
+          creation.position ??
+          resolveAgentNodePosition(canvasId, parentNodeId ?? undefined);
+      } catch (error) {
+        if (
+          error instanceof AgentNodeCreationError &&
+          error.code === 'canvas_not_found'
+        ) {
+          return reply.code(404).send(rfsError(error.message, error.code));
+        }
+        throw error;
+      }
+
+      let created;
+      try {
+        created = await agentNodeService.create({
+          canvasId,
+          profileId: creation.profileId,
+          position,
+          ...(parentNodeId
+            ? {
+                anchor: {
+                  kind: 'delegated' as const,
+                  parentAgentNodeId: parentNodeId,
+                },
+              }
+            : {}),
+          launchOverrides: {
+            ...(creation.workingDirPath !== undefined
+              ? { workingDirPath: creation.workingDirPath }
+              : {}),
+            ...(creation.additionalInitialPreamble !== undefined
+              ? {
+                  additionalInitialPreamble: creation.additionalInitialPreamble,
+                }
+              : {}),
+          },
+        });
+      } catch (error) {
+        if (error instanceof AgentNodeCreationError) {
+          const status =
+            error.code === 'canvas_not_found'
+              ? 404
+              : error.code === 'profile_registry_unavailable'
+                ? 503
+                : error.code === 'profile_not_selectable'
+                  ? 404
+                  : ['invalid_launch_overrides', 'invalid_position'].includes(
+                        error.code,
+                      )
+                    ? 400
+                    : 500;
+          const code =
+            error.code === 'profile_not_selectable'
+              ? 'profile_not_found'
+              : error.code;
+          const message =
+            error.code === 'profile_not_selectable'
+              ? `Agent Profile ${creation.profileId} is unavailable.`
+              : error.message;
+          return reply.code(status).send(rfsError(message, code));
+        }
+        throw error;
+      }
+
+      const eventMode = parsedHeaders.data['x-huabu-event-mode'] ?? 'final';
+      const heartbeatSec = clampHeartbeatSec(
+        parsedHeaders.data['x-huabu-heartbeat-sec'],
+      );
+      const warnings: RfsAgentCreateResponse['warnings'] = [];
+      let parentConnection: RfsAgentCreateResponse['parentConnection'] =
+        'not_requested';
+      if (parentThreadId) {
+        if (parentLookupFailed || created.parentConnection === 'failed') {
+          parentConnection = 'failed';
+          warnings.push({
+            code: 'parent_connection_failed',
+            message: 'The Agent was created without a parent connection.',
+          });
+        } else if (!parentNodeId) {
+          parentConnection = 'not_found';
+          warnings.push({
+            code: 'parent_not_found',
+            message:
+              'No Agent Node was found for the requested parent thread; the Agent was created without a parent connection.',
+          });
+        } else {
+          parentConnection = 'connected';
+        }
+      }
+
+      const response: RfsAgentCreateResponse = {
+        nodeId: created.nodeId,
+        threadId: created.threadId,
+        profileId: created.profileId,
+        parentConnection,
+        warnings,
+      };
+      if (!start) return reply.code(201).send(response);
+      const initialPrompt = creation.prompt;
+      if (!initialPrompt) {
+        return reply
+          .code(400)
+          .send(rfsError('An initial prompt is required.', 'prompt_required'));
+      }
+
+      const target = agentThreadService.resolveFixedTarget(
+        canvasId,
+        created.threadId,
+      );
+      if (!target) {
+        return reply
+          .code(500)
+          .send(
+            rfsError(
+              `Agent ${created.nodeId} was created with thread ${created.threadId}, but its first turn could not resolve the new conversation.`,
+              'agent_resolution_failed',
+            ),
+          );
+      }
+      let envelope;
+      try {
+        envelope = await buildChatEnvelope({
+          content: initialPrompt,
+          anchorNodeId: target.nodeId,
+          canvasId,
+          logger: request.log,
+        });
+      } catch (error) {
+        request.log.error(
+          {
+            error,
+            canvasId,
+            nodeId: created.nodeId,
+            threadId: created.threadId,
+          },
+          'rfs created Agent prompt preparation failed',
+        );
+        return reply
+          .code(500)
+          .send(
+            rfsError(
+              `Agent ${created.nodeId} was created with thread ${created.threadId}, but its first prompt could not be prepared.`,
+              'prompt_preparation_failed',
+            ),
+          );
+      }
+      let invocation;
+      try {
+        invocation = await agentThreadService.invoke({
+          threadId: created.threadId,
+          canvasId,
+          content: initialPrompt,
+          mode: 'operate',
+          envelope,
+          fixedTarget: target,
+          logger: request.log,
+        });
+      } catch (error) {
+        if (error instanceof AgentThreadBusyError) {
+          return reply.code(409).send(rfsError(error.message, 'thread_busy'));
+        }
+        request.log.error(
+          {
+            error,
+            canvasId,
+            nodeId: created.nodeId,
+            threadId: created.threadId,
+          },
+          'rfs created Agent invocation failed',
+        );
+        return reply
+          .code(500)
+          .send(
+            rfsError(
+              `Agent ${created.nodeId} was created with thread ${created.threadId}, but its first turn could not start.`,
+              'invocation_failed',
+            ),
+          );
+      }
+      await streamAgent(reply, request, {
+        canvasId,
+        prompt: initialPrompt,
+        threadId: created.threadId,
+        eventMode,
+        heartbeatSec,
+        invocation,
+        created: response,
+        statusCode: 201,
+      });
+    },
+  );
+
+  // ── POST /:canvasId/agent/:threadId/prompt ──
+  app.post<{ Params: { canvasId: string; threadId: string } }>(
+    '/:canvasId/agent/:threadId/prompt',
+    async (request, reply) => {
+      const { canvasId, threadId } = request.params;
+      const parsedHeaders = rfsAgentHeadersSchema.safeParse(request.headers);
+      if (!parsedHeaders.success) {
+        return reply
+          .code(400)
+          .send(rfsError('Invalid Agent prompt headers.', 'validation_failed'));
+      }
+      const body = Buffer.isBuffer(request.body)
+        ? request.body.toString('utf8')
+        : '';
+      const contentType = request.headers['content-type'] ?? '';
+      let prompt: string;
+      let eventMode: RfsAgentEventMode =
+        parsedHeaders.data['x-huabu-event-mode'] ?? 'final';
+      let heartbeatSec = parsedHeaders.data['x-huabu-heartbeat-sec'];
+      if (contentType.includes('application/json')) {
+        let json: unknown;
+        try {
+          json = JSON.parse(body || '{}');
+        } catch {
+          return reply
+            .code(400)
+            .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
+        }
+        const parsed = rfsAgentPromptRequestSchema.safeParse(json);
+        if (!parsed.success) {
+          return reply
+            .code(400)
+            .send(
+              rfsError('Invalid Agent prompt request.', 'validation_failed'),
+            );
+        }
+        prompt = parsed.data.prompt;
+        eventMode =
+          parsedHeaders.data['x-huabu-event-mode'] ??
+          parsed.data.eventMode ??
+          'final';
+        heartbeatSec ??= parsed.data.heartbeatSec;
+      } else {
+        prompt = body.trim();
+      }
       if (!prompt) {
         return reply
           .code(400)
           .send(rfsError('A non-empty prompt is required.'));
       }
 
-      const requestedThreadId = parsedHeaders.data['x-huabu-thread-id'];
-      const threadId = requestedThreadId ?? createId('reachback');
-      const eventMode =
-        parsedHeaders.data['x-huabu-event-mode'] ?? legacyEventMode;
-      const heartbeatSec = clampHeartbeatSec(
-        parsedHeaders.data['x-huabu-heartbeat-sec'] ?? legacyHeartbeatSec,
-      );
-
-      let liveHandle: BuiltinHandle | undefined;
-      if (requestedThreadId) {
-        const record = agenetes.record(
-          canvasAcpNamespace(canvasId),
-          requestedThreadId,
-        );
-        if (!record || record.spec.workloadType !== 'Deployment') {
+      let target;
+      try {
+        target = agentThreadService.resolveFixedTarget(canvasId, threadId);
+      } catch (error) {
+        if (error instanceof AgentThreadResolutionError) {
           return reply
-            .code(404)
-            .send(
-              rfsError(
-                'No Deployment exists for this thread in the requested Space.',
-                'thread_not_found',
-              ),
-            );
+            .code(error.code === 'canvas_not_found' ? 404 : 409)
+            .send(rfsError(error.message, 'invalid_thread_binding'));
         }
-        if (record.spec.kind !== INTERNAL_DRIVER_KIND) {
-          return reply
-            .code(409)
-            .send(
-              rfsError(
-                'This thread uses an unsupported agent driver.',
-                'unsupported_thread_kind',
-              ),
-            );
-        }
-        liveHandle = agenetes.get(requestedThreadId) as
-          | BuiltinHandle
-          | undefined;
-        if (!liveHandle) {
-          return reply
-            .code(409)
-            .send(
-              rfsError(
-                'The Deployment exists but its agent handle is not live.',
-                'thread_not_live',
-              ),
-            );
-        }
+        throw error;
       }
-
-      const releaseTurn = acquireAgentTurn(threadId);
-      if (!releaseTurn) {
+      if (!target) {
         return reply
-          .code(409)
+          .code(404)
           .send(
             rfsError(
-              'Another turn is already running for this thread.',
-              'thread_busy',
+              'No Agent Node exists for this thread in the requested Space.',
+              'thread_not_found',
             ),
           );
       }
 
+      const envelope = await buildChatEnvelope({
+        content: prompt,
+        anchorNodeId: target.nodeId,
+        canvasId,
+        logger: request.log,
+      });
+      let invocation;
+      try {
+        invocation = await agentThreadService.invoke({
+          threadId,
+          canvasId,
+          content: prompt,
+          mode: 'operate',
+          envelope,
+          fixedTarget: target,
+          logger: request.log,
+        });
+      } catch (error) {
+        if (error instanceof AgentThreadBusyError) {
+          return reply.code(409).send(rfsError(error.message, 'thread_busy'));
+        }
+        throw error;
+      }
       await streamAgent(reply, request, {
         canvasId,
         prompt,
         threadId,
         eventMode,
-        heartbeatSec,
-        liveHandle,
-        releaseTurn,
+        heartbeatSec: clampHeartbeatSec(heartbeatSec),
+        invocation,
+        statusCode: 200,
       });
     },
   );
@@ -676,8 +1115,9 @@ interface StreamAgentInput {
   threadId: string;
   eventMode: RfsAgentEventMode;
   heartbeatSec: number;
-  liveHandle?: BuiltinHandle;
-  releaseTurn: () => void;
+  invocation: AgentThreadInvocation;
+  statusCode: 200 | 201;
+  created?: RfsAgentCreateResponse;
 }
 
 async function streamAgent(
@@ -691,8 +1131,9 @@ async function streamAgent(
     threadId,
     eventMode,
     heartbeatSec,
-    liveHandle,
-    releaseTurn,
+    invocation,
+    statusCode,
+    created,
   } = input;
   const debug = isPromptDebugEnabled();
   const startedAt = Date.now();
@@ -708,63 +1149,43 @@ async function streamAgent(
     );
   }
 
-  const envelope = createRfsEnvelope(prompt);
-
-  reply.hijack();
   const raw = reply.raw;
-  raw.writeHead(200, SSE_HEADERS);
-  raw.flushHeaders?.();
-  raw.write(': ok\n\n');
-  raw.write(`: threadId ${threadId}\n\n`);
-  if (eventMode === 'all') {
-    raw.write(
-      `event: ${AGENT_SSE_EVENTS.Meta}\ndata: ${JSON.stringify({
-        threadId,
-        mode: 'operate',
-      })}\n\n`,
-    );
+  try {
+    reply.hijack();
+    raw.writeHead(statusCode, SSE_HEADERS);
+    raw.flushHeaders?.();
+    raw.write(': ok\n\n');
+    raw.write(`: threadId ${threadId}\n\n`);
+    if (created) {
+      raw.write(`event: created\ndata: ${JSON.stringify(created)}\n\n`);
+    }
+    if (eventMode === 'all') {
+      raw.write(
+        `event: ${AGENT_SSE_EVENTS.Meta}\ndata: ${JSON.stringify({
+          threadId,
+          mode: 'operate',
+        })}\n\n`,
+      );
+    }
+  } catch (error) {
+    await invocation.dispose(error);
+    throw error;
   }
 
+  let clientConnected = true;
   // Timer-driven heartbeats keep proxies / client timeouts at bay during a
   // long agent turn, independent of how often the agent actually emits.
   const heartbeat = setInterval(() => {
-    raw.write(': ping\n\n');
+    if (clientConnected) raw.write(': ping\n\n');
   }, heartbeatSec * 1000);
 
-  const abortController = new AbortController();
-  const onClose = (): void => abortController.abort();
+  const onClose = (): void => {
+    clientConnected = false;
+  };
   request.raw.socket?.once('close', onClose);
 
   try {
-    const logger = { info: (message: string) => request.log.info(message) };
-    const stream = liveHandle
-      ? liveHandle.run(
-          createChatSubmission(envelope, [{ type: 'text', text: prompt }]),
-          {
-            signal: abortController.signal,
-            logger,
-            maxIterations: 20,
-          },
-        )
-      : runAgent({
-          scope: 'operate',
-          workloadType: 'Deployment',
-          threadId,
-          canvasId,
-          origin: { type: 'ai-operate' },
-          envelope,
-          context: {
-            systemPrompt: loadAgent('operate', { canvasId }).systemPrompt,
-            messages: [],
-            tools: [],
-          } satisfies Context,
-          logger,
-          signal: abortController.signal,
-          maxIterations: 20,
-        });
-
-    for await (const rawEvent of stream) {
-      const event = normalizeInternalEvent(rawEvent);
+    for await (const event of invocation.events) {
       if (event.type === 'tool_call') toolCalls += 1;
       else if (event.type === 'done') outcome = 'ok';
       else if (event.type === 'error') outcome = 'error';
@@ -772,38 +1193,40 @@ async function streamAgent(
       if (eventMode === 'final') {
         // Clean mode: only the final answer text reaches the wire, as
         // `data:` frames a `sed` one-liner can extract.
-        if (event.type === 'done') writeDataText(raw, event.data.message);
-        else if (event.type === 'error') {
+        if (event.type === 'done' && clientConnected) {
+          writeDataText(raw, event.data.message);
+        } else if (event.type === 'error' && clientConnected) {
           raw.write(
             `event: ${AGENT_SSE_EVENTS.Error}\ndata: ${JSON.stringify(
               event.data,
             )}\n\n`,
           );
         }
-      } else {
+      } else if (clientConnected) {
         raw.write(
           `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`,
         );
       }
     }
-    if (eventMode === 'all' && outcome !== 'error') {
+    if (clientConnected && eventMode === 'all' && outcome !== 'error') {
       raw.write(`event: ${AGENT_SSE_EVENTS.End}\ndata: {}\n\n`);
     }
   } catch (err: unknown) {
     outcome = 'error';
     const message = err instanceof Error ? err.message : 'Internal agent error';
-    raw.write(
-      `event: ${AGENT_SSE_EVENTS.Error}\ndata: ${JSON.stringify({
-        error: message,
-      })}\n\n`,
-    );
+    if (clientConnected) {
+      raw.write(
+        `event: ${AGENT_SSE_EVENTS.Error}\ndata: ${JSON.stringify({
+          error: message,
+        })}\n\n`,
+      );
+    }
   } finally {
     clearInterval(heartbeat);
     request.raw.socket?.removeListener('close', onClose);
-    releaseTurn();
-    raw.end();
+    if (clientConnected) raw.end();
     if (debug) {
-      if (outcome === 'incomplete' && abortController.signal.aborted) {
+      if (outcome === 'incomplete' && invocation.signal.aborted) {
         outcome = 'aborted';
       }
       const secs = ((Date.now() - startedAt) / 1000).toFixed(1);

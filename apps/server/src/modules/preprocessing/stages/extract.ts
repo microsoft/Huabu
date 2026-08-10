@@ -88,6 +88,7 @@ export async function extract(resolved: ResolvedInput): Promise<ExtractResult> {
         content: result.content,
         title: result.title,
         metadata: result.metadata,
+        rawPdf: buffer,
       };
     }
 

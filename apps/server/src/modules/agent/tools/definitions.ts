@@ -25,6 +25,8 @@ import {
   inspectEdgesQueryParamsSchema,
   inspectNodesQueryParamsSchema,
   snapshotNodesQueryParamsSchema,
+  startTaskRunToolParamsSchema,
+  createTaskRequestSchema,
 } from '@huabu/shared';
 
 import { zodToToolSchema } from './zod-tool-schema.js';
@@ -196,6 +198,32 @@ For worked multi-command recipes (group into frame, brainstorm-and-connect, merg
   executionMode: 'sequential',
 };
 
+// ==================== Task Tools ====================
+
+export const createTaskParamsSchema = zodToToolSchema(createTaskRequestSchema);
+
+export const createTaskTool: ToolDefinition = {
+  name: 'create_task',
+  label: 'Create Task',
+  description:
+    'Create one durable Task in the current Space and one static Task Note containing its goal. Use this only when the user explicitly wants durable long-horizon work or delegation; ordinary discussion and Space edits do not need a Task. `defaultRootProfileId` must be an exact selectable external Agent Profile id supplied by the user or current context; ask the user if it is unavailable rather than guessing. Returns `{ task: { taskId, canvasId, goal, defaultRootProfileId, anchorNodeId, createdAt } }`. Creation does not start a Run; use `start_task_run` with the returned taskId when execution should begin.',
+  parameters: createTaskParamsSchema,
+  executionMode: 'sequential',
+};
+
+export const startTaskRunParamsSchema = zodToToolSchema(
+  startTaskRunToolParamsSchema,
+);
+
+export const startTaskRunTool: ToolDefinition = {
+  name: 'start_task_run',
+  label: 'Start Task Run',
+  description:
+    'Start a new Run for an existing Task in the current Space when execution is explicitly requested. Creates a visible fixed root Agent Node and submits the snapshotted Task goal as its first turn. Omit `rootProfileId` to use the Task default; otherwise provide an exact selectable Profile id. `workingDirPath` must be absolute, and launch overrides apply only when the new external Agent thread is first realized. Returns `{ run: { runId, taskId, canvasIdSnapshot, goalSnapshot, rootProfileIdSnapshot, status, rootNodeId, rootThreadId, createdAt, startedAt } }`. A Task may have multiple Runs.',
+  parameters: startTaskRunParamsSchema,
+  executionMode: 'sequential',
+};
+
 // ==================== Canvas Filesystem Tools ====================
 //
 // Tool names and parameter shapes mirror pi-coding-agent / Claude Code
@@ -230,11 +258,11 @@ export const readParamsSchema = Type.Object({
 export const readTool: ToolDefinition = {
   name: 'read',
   label: 'Read',
-  description: `Read the contents of a **single** file under the current Space folder — no globs (use find to enumerate, then read each match). In a World conversation, targetCanvasId may select a source Space exposed by a canonical Portal. Text files return JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter? }, truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging.
+  description: `Read the contents of a **single** file under the current Space folder — no globs (use find to enumerate, then read each match). In a World conversation, targetCanvasId may select a source Space exposed by a canonical Portal. Text files return JSON: { path, startLine, endLine, totalLines, truncated, nextOffset?, content, frontmatter?, rev? }, truncated to 2000 lines or 50 KB, whichever is hit first; when truncated:true, nextOffset is the 1-indexed line number of the next unread line — pass it as the next offset to keep paging.
 
 Raster image artifacts (png / jpg / gif / webp, stored under \`.artifacts/\`) are returned **inline as vision content you can actually see** — so to view an inline \`![](<key>)\` image referenced in a note body, call \`read(".artifacts/<key>")\` (the file also shows up as \`.artifacts/<key>\` in find / grep / ls output). Other binary files (pdf / video / archives) are rejected with an error; use the node's \`src\` URL or the Space UI for those.
 
-When the file begins with a YAML frontmatter block ("---" fences), the parsed frontmatter is also returned as a structured object so you don't have to parse YAML yourself.
+For a canonical \`nodes/*.md\` sidecar, \`content\` is the authored Markdown body only, \`frontmatter\` contains the parsed node metadata, \`rev\` is the content revision used by guarded writes, and line offsets refer to the body. Other text files preserve their full file content; when one begins with YAML frontmatter, the parsed object is attached without removing the raw fence block.
 
 See 'skills/space/SKILL.md' for the Space folder layout, frontmatter fields per file type, the node filename ↔ label derivation rule, and the read vs inspect_nodes boundary.`,
   parameters: readParamsSchema,
@@ -477,6 +505,8 @@ export const TOOL_REGISTRY: Readonly<Record<string, ToolDefinition>> =
         inspectNodesTool,
         inspectEdgesTool,
         canvasCommandsTool,
+        createTaskTool,
+        startTaskRunTool,
         readTool,
         grepTool,
         findTool,

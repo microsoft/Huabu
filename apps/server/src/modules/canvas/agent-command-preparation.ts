@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
+
 import type {
   AgentOperationCommand,
   CanvasCommand,
@@ -14,6 +16,18 @@ export interface PrepareAgentCommandsOptions {
 }
 
 const DEFAULT_ORIGIN: NodeOrigin = { type: 'ai-operate' };
+
+function normalizeAgentAuthoredContent(
+  content: unknown,
+  nodeId: string,
+): unknown {
+  if (typeof content !== 'string' || !content.startsWith('---')) {
+    return content;
+  }
+
+  const parsed = parseFrontmatter(content);
+  return parsed.meta['id'] === nodeId ? parsed.content : content;
+}
 
 /**
  * Add server-owned authorship metadata and optional built-in-agent read-set
@@ -50,6 +64,10 @@ export function prepareAgentCanvasCommands(
         patches: command.patches.map((entry) => {
           const { expectRev: callerRevision, ...patchEntry } = entry;
           const hasLabel = typeof entry.patch.label === 'string';
+          const content = normalizeAgentAuthoredContent(
+            entry.patch.content,
+            entry.nodeId,
+          );
           const injectedRev =
             'content' in entry.patch && options.readSet
               ? options.readSet.get(entry.nodeId)
@@ -61,6 +79,7 @@ export function prepareAgentCanvasCommands(
             ...patchEntry,
             patch: {
               ...entry.patch,
+              ...('content' in entry.patch ? { content } : {}),
               ...(hasLabel ? { labelSource: 'agent' as const } : {}),
             },
             ...(revision !== undefined ? { expectRev: revision } : {}),

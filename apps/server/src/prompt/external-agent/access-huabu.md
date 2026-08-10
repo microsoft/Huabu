@@ -5,12 +5,8 @@ You are working with a **Huabu** Space, an infinite visual surface of notes, ima
 These environment variables are already set:
 
 - `HUABU_RFS_URL` — the base URL for this Space, with no trailing slash.
-- `AGENTLET_TOKEN` — the bearer token for every request.
+- `AGENTLET_TOKEN` — the RFS bearer credential.
 - `HUABU_THREAD_ID` — your conversation ID. Pass it on `execute` (see §6) to attribute your edits.
-
-```bash
-AUTH="Authorization: Bearer $AGENTLET_TOKEN"
-```
 
 Prefer deterministic direct operations:
 
@@ -233,26 +229,64 @@ A command cannot refer to a server-assigned ID before you receive it. Create fir
 
 For a `MERGE_NODE_DATA` patch that changes `content`, first download the node and copy its unquoted `ETag` into `expectRev`. A missing or stale revision produces an HTTP 200 business result with `applied: false`, `reason: "conflict"`, and a structured conflict. Re-download, reconcile, and submit a new request.
 
+Downloaded node Markdown is a complete Huabu sidecar: server-owned YAML frontmatter followed by the authored Markdown body. `CREATE_NODES.data.content` and `MERGE_NODE_DATA.patch.content` accept the Markdown body only. Never pass the downloaded file verbatim or copy its leading `---` block into `content`; remove exactly the first frontmatter block and preserve everything after its closing fence. Huabu serializes canonical node metadata itself. As a final safety net, an update whose submitted frontmatter `id` matches its target `nodeId` is unwrapped at the server boundary.
+
 `runId` is an optional opaque correlation label of 1–256 characters. It does not need to be unique. When omitted, Huabu generates a fresh `run-<UUID>` value; either way, the response returns the effective value. Reusing one `runId` in adjacent requests does not join them, reject the later request, deduplicate execution, or return an earlier result: every request executes independently and may create another committed delta-log entry carrying the same label. Reuse a value only to correlate related requests; use distinct values when you need to distinguish them.
 
 `runId` is not an idempotency key and provides no retry safety. After a timeout or dropped connection, never blindly retry a mutation—even with the same `runId`: query the Space, reconcile the observed state, then decide whether another command is needed.
 
 The response includes version transition, projected commands, command results, generated IDs, affected IDs, and new revisions. It intentionally excludes Web UI deltas and internal change-review records.
 
-## 8. Optional internal agent
+## 8. Create or continue an Agent
 
-`POST agent` is optional. Direct `query` (including `SNAPSHOT_NODES`), `download`, `upload`, and `execute` work without an internal model provider. Use the internal agent only for an intentionally open-ended task where model interpretation is valuable.
+Use an Agent when open-ended work benefits from interpretation or a durable visible conversation. Prefer direct `query`, `download`, `upload`, and `execute` for deterministic operations; they work without an internal model provider.
 
-The response is an SSE stream. Omit `X-Huabu-Thread-Id` to start a live conversation; return the emitted thread ID to continue it. Continuation does not survive a closed handle or Huabu restart.
+### 8.1 Create and start a Huabu Agent
+
+Plain text creates a visible Agent with the default `huabu` Profile and immediately submits its first prompt:
 
 ```bash
-curl -N -H "$AUTH" -H "Content-Type: text/plain" \
-  --data-binary @./prompt.txt "$HUABU_RFS_URL/agent"
+SSE="$(curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
+  --data-binary @./prompt.txt "$HUABU_RFS_URL/agent")"
+THREAD_ID="$(printf '%s\n' "$SSE" | sed -n 's/^: threadId //p' | head -n 1)"
+printf '%s\n' "$SSE" | sed -n 's/^data: //p' | tail -n +2
+```
+
+The SSE `created` event reports the new Node, thread, effective Profile, and optional parent-connection result. Save `THREAD_ID`.
+
+### 8.2 Continue the Agent
+
+Address the existing thread in the URL. This submits another turn without creating an Agent:
+
+```bash
+SSE="$(curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
+  --data-binary @./follow-up.txt \
+  "$HUABU_RFS_URL/agent/$THREAD_ID/prompt")"
+printf '%s\n' "$SSE" | sed -n 's/^data: //p'
+```
+
+### 8.3 Choose Profiles or create without starting
+
+For available Profile discovery, launch configuration, create-only requests, optional parent connections, or recursive delegation, load:
+
+```bash
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/skill/agents"
+```
+
+## Advanced workflows
+
+Load these authenticated guides only when the request needs them:
+
+- `GET skill/layout` — structured diagrams, grids, flowcharts, roadmaps, and advanced Frame layout.
+- `GET skill/tasks` — durable long-horizon Tasks and Runs.
+- `GET skill/agents` — available Profiles, Agent creation, launch configuration, continued conversations, and recursive delegation.
+
+```bash
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/skill/tasks"
 ```
 
 ## Error handling
 
-- Authenticate every request; missing or invalid bearer credentials return `401`.
 - Validation and transport errors use `{ "message": ..., "code"?: ... }`.
 - HTTP 200 execution responses may still contain rejected commands or content conflicts.
 - Error messages include a command that reloads this guide.

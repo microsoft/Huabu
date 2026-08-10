@@ -346,6 +346,12 @@ export interface AcpThreadCommandsResponse {
  * needs to spawn an agentlet just to populate the toolbar.
  */
 export interface AcpThreadCachedMetaResponse {
+  /**
+   * Ownership of the returned snapshot. Profile snapshots provide only a
+   * warm catalogue; their current values belong to another thread and must
+   * not be presented as this thread's active configuration.
+   */
+  source: 'thread' | 'profile' | 'none';
   sessionMeta: AcpSessionMetaSnapshot;
 }
 
@@ -624,6 +630,7 @@ export const acpThreadCommandsResponseSchema = z.object({
 
 /** Schema mirror of {@link AcpThreadCachedMetaResponse}. */
 export const acpThreadCachedMetaResponseSchema = z.object({
+  source: z.enum(['thread', 'profile', 'none']),
   sessionMeta: acpSessionMetaSnapshotSchema,
 }) satisfies z.ZodType<AcpThreadCachedMetaResponse>;
 

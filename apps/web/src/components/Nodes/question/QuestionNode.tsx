@@ -217,8 +217,9 @@ export const QuestionNode = memo(
           conversationOwner: { canvasId, nodeId: id, threadId },
         },
         canvasId,
+        data.agentBinding,
       );
-    }, [id, data.threadId, canvasId, patchNodeSilent]);
+    }, [id, data.threadId, data.agentBinding, canvasId, patchNodeSilent]);
 
     // ------------------------------------------------------------------
     // Double-click:
@@ -345,10 +346,12 @@ export const QuestionNode = memo(
                         : status === 'error' && data.errorMessage
                           ? data.errorMessage
                           : canOpenInChat
-                            ? status === 'running'
-                              ? t('node.watchLiveConversation')
-                              : t('node.openConversation')
-                            : undefined
+                            ? `${agentPresentation.alias} · ${
+                                status === 'running'
+                                  ? t('node.watchLiveConversation')
+                                  : t('node.openConversation')
+                              }`
+                            : agentPresentation.alias
                     }
                   />
                 ),

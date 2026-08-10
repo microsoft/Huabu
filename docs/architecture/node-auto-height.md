@@ -1,7 +1,7 @@
 # Node Auto Height
 
 > Authoritative model for who owns a node's height, how a content height is measured, and how a derived height reaches geometry.
-> Last updated: 2026-07-28
+> Last updated: 2026-08-07
 
 ## 1. Scope and the invariant
 
@@ -76,6 +76,8 @@ Two paths produce an intrinsic height, and both go through the same box and the 
 
 Both resolve under a bounded protocol ([`stability.ts`](../../apps/web/src/components/Nodes/shared/height/measure/stability.ts)): wait for fonts, accept a value only once two consecutive samples agree, resolve _provisionally_ rather than waiting on an undecoded image, and always meet a deadline. A queue that cannot drain is worse than a wrong number. A provisional hint reads as `stale` on the next load, so it is never trusted indefinitely.
 
+An offscreen editor build or measurement failure emits a `[height] offscreen note measurement failed; retrying` console warning with the node id, measurement key, attempt number, retry delay, and original error, then retries with capped exponential backoff. The singleton host clears a rejected build promise before the retry, so one transient chunk-load or Milkdown mount failure cannot strand every later agent-created note at the policy minimum for the rest of the app session. A successful measurement is not considered complete until the live node carries its current hint; if a proposal is silently dropped before that write, prewarming uses the same backoff path instead of suppressing that node for the rest of the session. The confirmation window starts only after interaction suspension settles, so a legitimately held proposal is never reported or re-measured as a failure.
+
 Measurement reads `.ProseMirror` rather than the host, whose `scrollHeight` Crepe's absolutely positioned block handle inflates. `.ProseMirror` is `display: flow-root` so a leading child's margin cannot collapse out of the box being measured.
 
 ## 7. Commit gating
@@ -83,7 +85,7 @@ Measurement reads `.ProseMirror` rather than the host, whose `scrollHeight` Crep
 Proposals go to a singleton queue ([`commitQueue.ts`](../../apps/web/src/components/Nodes/shared/height/commitQueue.ts)) with two gates, both evaluated **at flush time against the live store** — a proposal held through a gesture routinely describes a node the user has since pinned, resized, or deleted.
 
 1. **No-op suppression.** Discard when the proposal resolves to the height the node already has _and_ the stored hint already carries the proposal's key. The comparison is exact, because quantization has already collapsed anything smaller than one step. The provenance half is not optional: content that changes without changing its height would otherwise leave the hint pointing at old content and be re-measured on every load forever.
-2. **Interaction suspension.** Pan, zoom, node drag, and resize hold commits until they settle. The ref-counted counter lives in its own dependency-free module ([`commitSuspension.ts`](../../apps/web/src/components/Nodes/shared/height/commitSuspension.ts)) because the gesture handlers live in `canvasStore` and the queue reads `canvasStore`.
+2. **Interaction suspension.** Pan, zoom, node drag, and resize hold commits until they settle. Real interactions use named, idempotent holds, so duplicate start notifications cannot leak a counter. The normal end event releases its hold; `pointercancel`, window blur, document hiding, and Canvas unmount explicitly cancel named holds when React Flow cannot deliver an end event. No elapsed-time heuristic releases an active gesture, so a user may pause while holding the pointer without geometry changing underneath it. The hold state lives in its own dependency-free module ([`commitSuspension.ts`](../../apps/web/src/components/Nodes/shared/height/commitSuspension.ts)) because the gesture handlers live in `canvasStore` and the queue reads `canvasStore`.
 
 Proposals are keyed by node, so a burst collapses to one command and therefore one end-of-batch frame refit.
 
@@ -129,22 +131,22 @@ Unit tests cannot cover this class: the failures live in CSS layout, and happy-d
 
 ## Code entry points
 
-| File                                                                                                                          | Responsibility                                                                         |
-| ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| [`height/policy.ts`](../../packages/shared/src/canvas-engine/height/policy.ts)                                                | Per-type policy, node shell inset, `resolveHeightMode` — the only ownership judgement. |
-| [`height/compute.ts`](../../packages/shared/src/canvas-engine/height/compute.ts)                                              | `contentScaleFor`, `intrinsicToLayoutHeight`, quantization.                            |
-| [`height/freshness.ts`](../../packages/shared/src/canvas-engine/height/freshness.ts)                                          | `AutoHeightKey`, `HEIGHT_LAYOUT_VERSION`, `readAutoHeightHint`.                        |
-| [`height/materialize.ts`](../../packages/shared/src/canvas-engine/height/materialize.ts)                                      | Hint → `style.height`; shared by web load and headless hydration.                      |
-| [`commands/setNodeGeometry.ts`](../../packages/shared/src/canvas-engine/commands/setNodeGeometry.ts)                          | Authored geometry; the `'auto'` branch.                                                |
-| [`commands/applyMeasuredHeight.ts`](../../packages/shared/src/canvas-engine/commands/applyMeasuredHeight.ts)                  | Derived correction; non-undoable; collects frame ancestors.                            |
-| [`commands/changeNodeType.ts`](../../packages/shared/src/canvas-engine/commands/changeNodeType.ts)                            | Drops the hint on conversion and records the target type's ownership.                  |
-| [`note/noteContentHost.ts`](../../apps/web/src/components/Nodes/note/noteContentHost.ts)                                      | The box and the reader shared by the mounted note and the offscreen measurer.          |
-| [`note/NoteNode.tsx`](../../apps/web/src/components/Nodes/note/NoteNode.tsx)                                                  | Renders from `style.height`; reports an intrinsic height; never sizes itself.          |
-| [`note/heightMemory.ts`](../../apps/web/src/components/Nodes/note/heightMemory.ts)                                            | Session-scoped remembered pinned height; gated on ownership, not on numericness.       |
-| [`shared/height/commitQueue.ts`](../../apps/web/src/components/Nodes/shared/height/commitQueue.ts)                            | No-op suppression, coalescing, flush-time validation.                                  |
-| [`shared/height/commitSuspension.ts`](../../apps/web/src/components/Nodes/shared/height/commitSuspension.ts)                  | Ref-counted interaction hold; kept dependency-free to stay acyclic with the store.     |
-| [`shared/height/measure/`](../../apps/web/src/components/Nodes/shared/height/measure/offscreenMeasurer.ts)                    | Offscreen singleton measurer, stability protocol, viewport-priority prewarm queue.     |
-| [`canvasStore/load/normalizeNodeHeights.ts`](../../apps/web/src/store/canvasStore/load/normalizeNodeHeights.ts)               | Load-time ownership normalization and materialization.                                 |
-| [`canvasStore/load/warmupNodeHeights.ts`](../../apps/web/src/store/canvasStore/load/warmupNodeHeights.ts)                     | Bounded pre-paint measurement of never-measured notes.                                 |
-| [`canvasStore/height/measureMissingAutoHeights.ts`](../../apps/web/src/store/canvasStore/height/measureMissingAutoHeights.ts) | On-demand measurement behind a fixed → auto toggle.                                    |
-| [`hooks/useNodeScale.ts`](../../apps/web/src/hooks/useNodeScale.ts)                                                           | Content scale; delegates to `contentScaleFor` so one formula exists.                   |
+| File                                                                                                                          | Responsibility                                                                                           |
+| ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| [`height/policy.ts`](../../packages/shared/src/canvas-engine/height/policy.ts)                                                | Per-type policy, node shell inset, `resolveHeightMode` — the only ownership judgement.                   |
+| [`height/compute.ts`](../../packages/shared/src/canvas-engine/height/compute.ts)                                              | `contentScaleFor`, `intrinsicToLayoutHeight`, quantization.                                              |
+| [`height/freshness.ts`](../../packages/shared/src/canvas-engine/height/freshness.ts)                                          | `AutoHeightKey`, `HEIGHT_LAYOUT_VERSION`, `readAutoHeightHint`.                                          |
+| [`height/materialize.ts`](../../packages/shared/src/canvas-engine/height/materialize.ts)                                      | Hint → `style.height`; shared by web load and headless hydration.                                        |
+| [`commands/setNodeGeometry.ts`](../../packages/shared/src/canvas-engine/commands/setNodeGeometry.ts)                          | Authored geometry; the `'auto'` branch.                                                                  |
+| [`commands/applyMeasuredHeight.ts`](../../packages/shared/src/canvas-engine/commands/applyMeasuredHeight.ts)                  | Derived correction; non-undoable; collects frame ancestors.                                              |
+| [`commands/changeNodeType.ts`](../../packages/shared/src/canvas-engine/commands/changeNodeType.ts)                            | Drops the hint on conversion and records the target type's ownership.                                    |
+| [`note/noteContentHost.ts`](../../apps/web/src/components/Nodes/note/noteContentHost.ts)                                      | The box and the reader shared by the mounted note and the offscreen measurer.                            |
+| [`note/NoteNode.tsx`](../../apps/web/src/components/Nodes/note/NoteNode.tsx)                                                  | Renders from `style.height`; reports an intrinsic height; never sizes itself.                            |
+| [`note/heightMemory.ts`](../../apps/web/src/components/Nodes/note/heightMemory.ts)                                            | Session-scoped remembered pinned height; gated on ownership, not on numericness.                         |
+| [`shared/height/commitQueue.ts`](../../apps/web/src/components/Nodes/shared/height/commitQueue.ts)                            | No-op suppression, coalescing, flush-time validation.                                                    |
+| [`shared/height/commitSuspension.ts`](../../apps/web/src/components/Nodes/shared/height/commitSuspension.ts)                  | Named interaction holds with explicit cancellation; kept dependency-free to stay acyclic with the store. |
+| [`shared/height/measure/`](../../apps/web/src/components/Nodes/shared/height/measure/offscreenMeasurer.ts)                    | Offscreen singleton measurer, stability protocol, viewport-priority prewarm queue.                       |
+| [`canvasStore/load/normalizeNodeHeights.ts`](../../apps/web/src/store/canvasStore/load/normalizeNodeHeights.ts)               | Load-time ownership normalization and materialization.                                                   |
+| [`canvasStore/load/warmupNodeHeights.ts`](../../apps/web/src/store/canvasStore/load/warmupNodeHeights.ts)                     | Bounded pre-paint measurement of never-measured notes.                                                   |
+| [`canvasStore/height/measureMissingAutoHeights.ts`](../../apps/web/src/store/canvasStore/height/measureMissingAutoHeights.ts) | On-demand measurement behind a fixed → auto toggle.                                                      |
+| [`hooks/useNodeScale.ts`](../../apps/web/src/hooks/useNodeScale.ts)                                                           | Content scale; delegates to `contentScaleFor` so one formula exists.                                     |

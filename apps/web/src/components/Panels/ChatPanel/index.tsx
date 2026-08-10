@@ -127,11 +127,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const ownerScopeReady =
     !headlessConversation || conversationOwnerSource !== undefined;
   // "Composing" = the viewed question node has never been authored/run yet
-  // (its status is still `idle`), so the binding is still mutable and the mode
-  // follows the user's inline pick (`lastAction`) rather than the node's
-  // not-yet-written `agentMode`. Derived from the node itself — the single
-  // source of truth — rather than a stored `compose` flag. Replay (already-run
-  // node) keeps deriving from the node.
+  // (its status is still `idle`). Its binding remains mutable unless creation
+  // explicitly fixed it; the mode follows the inline pick (`lastAction`).
   const isComposingQuestion =
     !headlessConversation &&
     !!viewingQuestionNodeId &&
@@ -141,6 +138,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     const d = conversationOwnerSource;
     return d.agentBinding?.kind === 'external' ? 'ask' : (d.agentMode ?? 'ask');
   })();
+  const viewingQuestionBindingIsFixed =
+    conversationOwnerSource?.agentBindingPolicy === 'fixed';
   // Bind-time avatar snapshot of the viewing question node, used as the
   // fallback icon in the agent chip when the bound external Profile no
   // longer exists — mirrors how the canvas node preserves its identity.
@@ -248,6 +247,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   // bring the binding back to life.
   useEffect(() => {
     if (headlessConversation) return;
+    if (viewingQuestionBindingIsFixed) return;
     if (!isHistoryLoaded) return;
     if (messages.length > 0) return;
     if (!acpProfilesLoaded) return;
@@ -265,6 +265,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     acpProfiles,
     canvasId,
     headlessConversation,
+    viewingQuestionBindingIsFixed,
     setAgentBinding,
   ]);
 
@@ -756,6 +757,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const agentSelectorEditable =
     !headlessConversation &&
     !viewingSketchCluster &&
+    !viewingQuestionBindingIsFixed &&
     !threadHasUserMessage &&
     !isLoading;
   const handleSelectAgent = useCallback(
@@ -763,11 +765,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       // Agent binding is immutable once a turn starts (1 thread = 1 binding).
       // The selector is already read-only then; keep this guard as defense in
       // depth in case a stale menu event arrives during the transition.
-      if (isLoading) return;
+      if (isLoading || viewingQuestionBindingIsFixed) return;
       setAgentBinding(choice.binding, canvasId || undefined);
       setLastAction(choice.mode);
     },
-    [isLoading, setAgentBinding, setLastAction, canvasId],
+    [
+      isLoading,
+      viewingQuestionBindingIsFixed,
+      setAgentBinding,
+      setLastAction,
+      canvasId,
+    ],
   );
 
   const canSave =

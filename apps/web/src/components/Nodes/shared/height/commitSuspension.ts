@@ -17,28 +17,45 @@
 
 type SettleListener = () => void;
 
-let depth = 0;
+export type HeightCommitSuspension = 'viewport' | 'node-drag' | 'node-resize';
+
+const namedHolds = new Set<HeightCommitSuspension>();
+let anonymousDepth = 0;
 const listeners = new Set<SettleListener>();
 
 /**
  * Hold back derived-geometry writes. Every call must be paired with
  * {@link resumeHeightCommits}.
  */
-export function suspendHeightCommits(): void {
-  depth += 1;
+export function suspendHeightCommits(reason?: HeightCommitSuspension): void {
+  if (!reason) {
+    anonymousDepth += 1;
+    return;
+  }
+  namedHolds.add(reason);
 }
 
 /** Release one hold; notifies listeners when the last one clears. */
-export function resumeHeightCommits(): void {
-  if (depth === 0) return;
-  depth -= 1;
-  if (depth > 0) return;
-  for (const listener of listeners) listener();
+export function resumeHeightCommits(reason?: HeightCommitSuspension): void {
+  const wasSuspended = isHeightCommitSuspended();
+  if (reason) {
+    namedHolds.delete(reason);
+  } else if (anonymousDepth > 0) anonymousDepth -= 1;
+  if (!wasSuspended || isHeightCommitSuspended()) return;
+  notifySettled();
+}
+
+/** Release named interaction holds after an explicit cancellation signal. */
+export function cancelHeightCommitSuspensions(): void {
+  const wasSuspended = isHeightCommitSuspended();
+  namedHolds.clear();
+  if (!wasSuspended || isHeightCommitSuspended()) return;
+  notifySettled();
 }
 
 /** True while any interaction is in progress. */
 export function isHeightCommitSuspended(): boolean {
-  return depth > 0;
+  return anonymousDepth > 0 || namedHolds.size > 0;
 }
 
 /** Run `listener` each time the last active interaction settles. */
@@ -47,7 +64,12 @@ export function onHeightCommitsSettled(listener: SettleListener): () => void {
   return () => listeners.delete(listener);
 }
 
-/** Test seam: forget all holds and listeners. */
+function notifySettled(): void {
+  for (const listener of listeners) listener();
+}
+
+/** Test seam: forget all holds. */
 export function __resetHeightCommitSuspension(): void {
-  depth = 0;
+  anonymousDepth = 0;
+  namedHolds.clear();
 }

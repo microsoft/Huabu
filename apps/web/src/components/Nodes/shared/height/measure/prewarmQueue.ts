@@ -33,6 +33,10 @@ import {
 import useCanvasStore from '@/store/canvasStore';
 
 import { proposeMeasuredHeight } from '../commitQueue';
+import {
+  isHeightCommitSuspended,
+  onHeightCommitsSettled,
+} from '../commitSuspension';
 import { measureNoteHeightOffscreen } from './offscreenMeasurer';
 
 import type { Node } from '@xyflow/react';
@@ -42,6 +46,15 @@ const BATCH_SIZE = 3;
 
 /** Re-scan this long after the last store change settles. */
 const RESCAN_DEBOUNCE_MS = 400;
+
+/** Allow the rAF-coalesced commit queue time to write the measured hint. */
+const COMMIT_CONFIRM_MS = 1000;
+
+/** Initial retry delay for a transient offscreen measurement failure. */
+const RETRY_BASE_MS = 1000;
+
+/** Retry cap keeps a persistent editor failure from creating a hot loop. */
+const RETRY_MAX_MS = 30_000;
 
 export interface PrewarmCandidate {
   nodeId: string;
@@ -60,6 +73,10 @@ let running = false;
 let stopped = true;
 let rescanHandle: ReturnType<typeof setTimeout> | null = null;
 let unsubscribe: (() => void) | null = null;
+const retryHandles = new Map<string, ReturnType<typeof setTimeout>>();
+const commitCheckHandles = new Map<string, ReturnType<typeof setTimeout>>();
+const commitSettleWaiters = new Map<string, () => void>();
+const failureCounts = new Map<string, number>();
 
 /**
  * Nodes measured this session, keyed by node id + measurement key.
@@ -85,6 +102,15 @@ export function stopHeightPrewarm(): void {
     clearTimeout(rescanHandle);
     rescanHandle = null;
   }
+  for (const handle of retryHandles.values()) clearTimeout(handle);
+  retryHandles.clear();
+  for (const handle of commitCheckHandles.values()) clearTimeout(handle);
+  commitCheckHandles.clear();
+  for (const unsubscribeSettle of commitSettleWaiters.values()) {
+    unsubscribeSettle();
+  }
+  commitSettleWaiters.clear();
+  failureCounts.clear();
   attempted.clear();
 }
 
@@ -115,7 +141,11 @@ async function drain(): Promise<void> {
             markdown: candidate.markdown,
             canvasId,
           });
-          if (stopped || measured.height <= 0) continue;
+          if (stopped) return;
+          if (measured.height <= 0) {
+            scheduleRetry(candidate);
+            continue;
+          }
           // The note was edited while its measurement was in flight, so
           // this height describes content the node no longer has. Drop
           // it; the next scan picks the node up again.
@@ -127,10 +157,12 @@ async function drain(): Promise<void> {
             measuredFor: candidate.measuredFor,
             provisional: measured.provisional,
           });
-        } catch {
-          // A measurement that throws is not worth retrying this
-          // session; the node keeps its existing footprint and
-          // self-measures if the user reaches it.
+          confirmCommit(candidate);
+        } catch (error: unknown) {
+          // Chunk loading and Milkdown mounting can fail transiently. Keeping
+          // the attempt forever would strand an offscreen agent-created note
+          // at the policy minimum for the rest of the app session.
+          scheduleRetry(candidate, error);
         }
       }
       await nextIdle();
@@ -138,6 +170,71 @@ async function drain(): Promise<void> {
   } finally {
     running = false;
   }
+}
+
+function confirmCommit(candidate: PrewarmCandidate): void {
+  const key = attemptKey(candidate.nodeId, candidate.measuredFor);
+  if (commitCheckHandles.has(key) || commitSettleWaiters.has(key)) return;
+  if (isHeightCommitSuspended()) {
+    const unsubscribeSettle = onHeightCommitsSettled(() => {
+      unsubscribeSettle();
+      commitSettleWaiters.delete(key);
+      confirmCommit(candidate);
+    });
+    commitSettleWaiters.set(key, unsubscribeSettle);
+    return;
+  }
+  const handle = setTimeout(() => {
+    commitCheckHandles.delete(key);
+    if (stopped) return;
+    if (isHeightCommitSuspended()) {
+      confirmCommit(candidate);
+      return;
+    }
+    const node = useCanvasStore
+      .getState()
+      .nodes.find((candidateNode) => candidateNode.id === candidate.nodeId);
+    if (!node || resolveHeightMode(node) !== 'auto') {
+      failureCounts.delete(key);
+      return;
+    }
+    const { hint, freshness } = readAutoHeightHint(node);
+    if (
+      freshness === 'current' &&
+      hint?.measuredFor === candidate.measuredFor
+    ) {
+      failureCounts.delete(key);
+      return;
+    }
+    if (autoHeightKey(node) !== candidate.measuredFor) {
+      failureCounts.delete(key);
+      return;
+    }
+    scheduleRetry(candidate, new Error('measured height was not committed'));
+  }, COMMIT_CONFIRM_MS);
+  commitCheckHandles.set(key, handle);
+}
+
+function scheduleRetry(candidate: PrewarmCandidate, error?: unknown): void {
+  if (stopped) return;
+  const key = attemptKey(candidate.nodeId, candidate.measuredFor);
+  if (retryHandles.has(key)) return;
+  const failures = (failureCounts.get(key) ?? 0) + 1;
+  failureCounts.set(key, failures);
+  const delay = Math.min(RETRY_BASE_MS * 2 ** (failures - 1), RETRY_MAX_MS);
+  console.warn('[height] offscreen note measurement failed; retrying', {
+    nodeId: candidate.nodeId,
+    measuredFor: candidate.measuredFor,
+    attempt: failures,
+    retryInMs: delay,
+    error,
+  });
+  const handle = setTimeout(() => {
+    retryHandles.delete(key);
+    attempted.delete(key);
+    scheduleRescan();
+  }, delay);
+  retryHandles.set(key, handle);
 }
 
 /**

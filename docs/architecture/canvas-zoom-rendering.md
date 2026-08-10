@@ -31,6 +31,10 @@ The governing rule is semantic priority rather than uniform scaling: structural 
 
 Participating binary types render the generic tier-sized title label in `minimal`.
 
+PDF rendering has a second cost boundary in the expanded preview. The canvas node lazy-loads pdf.js only when it needs an uncached first-page thumbnail, while the expanded preview keeps a lightweight aspect-ratio placeholder for every page and mounts the expensive canvas and text layer only within one scroll viewport of the visible area. A six-page LRU retains recently visited renders to avoid churn during short reverse scrolls; older pages are unmounted so canvas memory remains bounded.
+
+PDF in-preview search is independent of both the render window and canvas-wide search. Cmd+F inside an expanded PDF opens preview-local state; a two-worker background index extracts text and the true aspect ratio from every page without mounting its canvas. The result count becomes final when indexing completes; Next/Previous is held until then so concurrently indexed pages cannot renumber an active result. Navigation forces the target page into the render window, scrolls its stable placeholder into view, and then resolves the page-local occurrence after the text layer mounts. Its query, lifecycle, highlights, and navigation never open or mutate the Canvas Layers panel. Canvas-wide search can still find and open a PDF node, but it does not inject its query into the PDF preview, build the PDF page index, paint preview highlights, or navigate to an in-document occurrence.
+
 [`useNodeLOD`](../../apps/web/src/hooks/useNodeLOD.ts) compares `nodeWidth × zoom` with a 150 px screen-width boundary. A 10 px hysteresis buffer means a full node must shrink below 140 px to collapse, while a minimal node must grow to at least 160 px to expand; retaining the previous mode prevents rapid switching near the boundary.
 
 [`NodeWrapper`](../../apps/web/src/components/Nodes/NodeWrapper.tsx) keeps the full body and [`SemanticPlaceholder`](../../apps/web/src/components/Nodes/SemanticPlaceholder.tsx) in the same node shell so CSS can cross-fade the two render modes without changing geometry.

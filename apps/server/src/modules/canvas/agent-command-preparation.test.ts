@@ -94,4 +94,49 @@ describe('prepareAgentCanvasCommands', () => {
       patches: [{ expectRev: 'explicit' }],
     });
   });
+
+  it('unwraps a downloaded node sidecar before writing its body back', () => {
+    const [command] = prepareAgentCanvasCommands([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          {
+            nodeId: 'node-1',
+            patch: {
+              content:
+                '---\nid: node-1\ntype: note\nlabel: Example\n---\n# Updated body',
+            },
+          },
+        ],
+      },
+    ]);
+
+    expect(command).toHaveProperty('patches.0.patch.content', '# Updated body');
+  });
+
+  it('preserves frontmatter-like content that is not the target sidecar', () => {
+    const content = '---\ntitle: Example\n---\n# Body';
+    const [command] = prepareAgentCanvasCommands([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: 'node-1', patch: { content } }],
+      },
+    ]);
+
+    expect(command).toHaveProperty('patches.0.patch.content', content);
+  });
+
+  it.each([
+    '---\nid: node-2\ntype: note\n---\n# Different node',
+    '---\nid: [unterminated\n---\n# Malformed YAML',
+  ])('preserves unsafe sidecar candidate %j', (content) => {
+    const [command] = prepareAgentCanvasCommands([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: 'node-1', patch: { content } }],
+      },
+    ]);
+
+    expect(command).toHaveProperty('patches.0.patch.content', content);
+  });
 });

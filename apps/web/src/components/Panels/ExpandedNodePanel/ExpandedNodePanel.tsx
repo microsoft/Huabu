@@ -29,6 +29,7 @@ import {
   isExpandedNodeNavigationBlocked,
   type ExpandedNodeDirection,
 } from './navigation';
+import { PreviewSearchAdapterProvider } from './PreviewSearchAdapterContext';
 import { useSwipeNavigation } from './swipeNavigation';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { useChatStore } from '../../../store/chatStore.ts';
@@ -730,25 +731,27 @@ export const ExpandedNodePanel = ({
           preview document underneath fully visible instead of
           pushing it down with an inline find row. */}
       <div ref={setPreviewBodyEl} className="relative flex-1 overflow-hidden">
-        {/* In-preview find bar — renders nothing unless search scope
-            is `'node'`. Wires the highlight walk to the body element
-            (via state-as-ref) so only the visible preview gets
-            `::highlight()` ranges. */}
-        <InPreviewSearchBar scopeEl={previewBodyEl} />
-        <PreviewHeaderSlotContext.Provider value={headerSlotValue}>
-          <NodePreviewContent
-            key={expandedNodeId ?? previewType}
-            id={expandedNodeId ?? undefined}
-            type={activeItem.type}
-            data={activeItem.data}
-            readOnly={activeItem.readOnly}
-            onDataChange={
-              activeItem.isNode && expandedNodeId
-                ? (patch) => updateNodeData(expandedNodeId, patch)
-                : undefined
-            }
-          />
-        </PreviewHeaderSlotContext.Provider>
+        <PreviewSearchAdapterProvider>
+          {/* In-preview find bar — renders nothing unless search scope
+              is `'node'`. Wires the highlight walk to the body element
+              (via state-as-ref) so only the visible preview gets
+              `::highlight()` ranges. */}
+          <InPreviewSearchBar scopeEl={previewBodyEl} nodeId={expandedNodeId} />
+          <PreviewHeaderSlotContext.Provider value={headerSlotValue}>
+            <NodePreviewContent
+              key={expandedNodeId ?? previewType}
+              id={expandedNodeId ?? undefined}
+              type={activeItem.type}
+              data={activeItem.data}
+              readOnly={activeItem.readOnly}
+              onDataChange={
+                activeItem.isNode && expandedNodeId
+                  ? (patch) => updateNodeData(expandedNodeId, patch)
+                  : undefined
+              }
+            />
+          </PreviewHeaderSlotContext.Provider>
+        </PreviewSearchAdapterProvider>
       </div>
     </div>
   );

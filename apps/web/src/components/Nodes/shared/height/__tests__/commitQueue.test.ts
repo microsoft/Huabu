@@ -11,6 +11,7 @@ import {
 } from '../commitQueue';
 import {
   __resetHeightCommitSuspension,
+  cancelHeightCommitSuspensions,
   resumeHeightCommits,
   suspendHeightCommits,
 } from '../commitSuspension';
@@ -239,6 +240,52 @@ describe('height commit queue — gesture suspension', () => {
     expect(applyMeasuredHeights).not.toHaveBeenCalled();
 
     resumeHeightCommits();
+    __flushHeightCommitsNow();
+    expect(applyMeasuredHeights).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats duplicate starts for the same interaction as one hold', () => {
+    suspendHeightCommits('viewport');
+    suspendHeightCommits('viewport');
+    proposeMeasuredHeight({
+      nodeId: 'n1',
+      intrinsicHeight: 400,
+      measuredFor: 'k1',
+    });
+
+    resumeHeightCommits('viewport');
+    __flushHeightCommitsNow();
+    expect(applyMeasuredHeights).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not release an active gesture based on elapsed time', () => {
+    vi.useFakeTimers();
+    suspendHeightCommits('node-drag');
+    proposeMeasuredHeight({
+      nodeId: 'n1',
+      intrinsicHeight: 400,
+      measuredFor: 'k1',
+    });
+
+    vi.advanceTimersByTime(60_000);
+    __flushHeightCommitsNow();
+    expect(applyMeasuredHeights).not.toHaveBeenCalled();
+
+    resumeHeightCommits('node-drag');
+    __flushHeightCommitsNow();
+    expect(applyMeasuredHeights).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('flushes named holds after an explicit cancellation signal', () => {
+    suspendHeightCommits('node-drag');
+    proposeMeasuredHeight({
+      nodeId: 'n1',
+      intrinsicHeight: 400,
+      measuredFor: 'k1',
+    });
+
+    cancelHeightCommitSuspensions();
     __flushHeightCommitsNow();
     expect(applyMeasuredHeights).toHaveBeenCalledTimes(1);
   });

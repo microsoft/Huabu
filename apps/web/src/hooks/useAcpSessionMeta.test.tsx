@@ -71,7 +71,10 @@ async function renderHarness(autoEnsure: boolean): Promise<void> {
 
 describe('useAcpSessionMeta', () => {
   it('does not send manifest Profiles through command-session auto-ensure', async () => {
-    apiMocks.getCached.mockResolvedValue({ sessionMeta: EMPTY_META });
+    apiMocks.getCached.mockResolvedValue({
+      source: 'none',
+      sessionMeta: EMPTY_META,
+    });
 
     await renderHarness(false);
 
@@ -81,12 +84,51 @@ describe('useAcpSessionMeta', () => {
   });
 
   it('keeps auto-ensure enabled for command and unknown Profiles', async () => {
-    apiMocks.getCached.mockResolvedValue({ sessionMeta: EMPTY_META });
+    apiMocks.getCached.mockResolvedValue({
+      source: 'none',
+      sessionMeta: EMPTY_META,
+    });
     apiMocks.ensure.mockResolvedValue({
       sessionMeta: {
         ...EMPTY_META,
         availableModes: [{ id: 'default', name: 'Default' }],
         updatedAt: 1,
+      },
+    });
+
+    await renderHarness(true);
+
+    expect(apiMocks.ensure).toHaveBeenCalledOnce();
+  });
+
+  it('ensures a real command session when only profile defaults are cached', async () => {
+    apiMocks.getCached.mockResolvedValue({
+      source: 'profile',
+      sessionMeta: {
+        ...EMPTY_META,
+        configOptions: [
+          {
+            id: 'allow_all',
+            name: 'Auto approve',
+            type: 'boolean',
+            currentValue: true,
+          },
+        ],
+        updatedAt: 1,
+      },
+    });
+    apiMocks.ensure.mockResolvedValue({
+      sessionMeta: {
+        ...EMPTY_META,
+        configOptions: [
+          {
+            id: 'allow_all',
+            name: 'Auto approve',
+            type: 'boolean',
+            currentValue: false,
+          },
+        ],
+        updatedAt: 2,
       },
     });
 

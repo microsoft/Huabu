@@ -10,7 +10,7 @@ import { FloatingToolbar } from './FloatingToolbar';
 let roots: Root[] = [];
 let containers: HTMLElement[] = [];
 
-function render(element: JSX.Element): HTMLElement {
+function render(element: React.JSX.Element): HTMLElement {
   const container = document.createElement('div');
   document.body.appendChild(container);
   const root = createRoot(container);

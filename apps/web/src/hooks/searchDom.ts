@@ -11,8 +11,7 @@
  * Used by:
  *   - `InPreviewSearchBar` for Next / Prev navigation inside the
  *     expanded preview.
- *   - `CanvasSearchResults` for follow-up scroll-into-view on the
- *     preview body when a canvas-wide search row is activated.
+ *   - `CanvasSearchResults` for conversation-thread result navigation.
  */
 
 /**

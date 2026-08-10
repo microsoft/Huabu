@@ -13,23 +13,24 @@
  * given profile (e.g. "Copilot @ ~/projects/foo"), the schema portion
  * of the meta — `availableModels`, `availableModes`, `configOptions`
  * shape — is **identical across every thread bound to that profile**.
- * Only the `current*` values are per-thread state.
+ * The `current*` values are per-thread state and are retained only so an
+ * already-associated thread snapshot can be reconstructed elsewhere. They
+ * are never authoritative for a brand-new thread.
  *
  * By caching the most recent push from any session of a profile, the
- * toolbar can render immediately on a brand-new thread **without
- * spawning** the agent. The user can browse model / mode options, see
- * the same defaults they used last time, and only when they actually
- * pick something different (or send a message) do we incur the
- * spawn cost.
+ * cache can still identify a known profile catalogue. A brand-new command
+ * thread opens a real session before rendering active values; a manifest
+ * thread waits for its first unified turn. This prevents another thread's
+ * last-known auto-approve value from being presented as the new session's
+ * effective policy.
  *
  * ### What gets cached
  *
  * The full {@link AcpSessionPersistedMeta} shape — schema (lists) AND
  * last-known state (`currentModelId`, `currentModeId`, per-option
- * `currentValue`). The state is treated as a "best-effort default"
- * for a new thread: if the agent disagrees on session/new it will
- * push corrections via SSE and overwrite. This matches the user
- * expectation of "use my usual settings" when starting a new chat.
+ * `currentValue`). The state remains useful when folding updates, but the
+ * cached-meta API marks this fallback as profile-owned so clients do not
+ * treat those values as a new thread's active configuration.
  *
  * `availableCommands` is included on an **optimistic** basis — the
  * agent's slash-command catalogue is effectively static per profile
@@ -85,8 +86,9 @@ const DEBOUNCE_MS = 250;
 /**
  * Subset of {@link AcpSessionPersistedMeta} suitable for per-profile
  * caching. Mirrors the on-the-wire snapshot shape — schema fields are
- * shared across all threads of the profile; `current*` fields are
- * stored as "last-known default" for a new thread. `availableCommands`
+ * shared across all threads of the profile; `current*` fields are retained
+ * as last-known observations but are not defaults for a new thread.
+ * `availableCommands`
  * is cached optimistically (see the file header); the SSE
  * `available_commands_update` replaces it wholesale on each session.
  */

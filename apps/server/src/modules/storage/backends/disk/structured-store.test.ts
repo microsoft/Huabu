@@ -20,6 +20,7 @@ import {
 import { DiskStructuredStore } from './structured-store.js';
 import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
 import { toSafeFilename } from '../../../workspace/disk/naming.js';
+import { tasksPath } from '../../../workspace/disk/paths.js';
 import { describeCanvasLogRepositoriesContract } from '../../ports/contracts/canvas-log-repository.contract.js';
 import { describeSpaceRepositoryContract } from '../../ports/contracts/space-repository.contract.js';
 import { describeStructuredStoreContract } from '../../ports/contracts/structured-store.contract.js';
@@ -111,6 +112,167 @@ describeCanvasLogRepositoriesContract('Disk log-family repositories', () => {
       rmSync(root, { recursive: true, force: true });
     },
   };
+});
+
+describe('Disk Canvas Task repository', () => {
+  let root = '';
+  let store: DiskStructuredStore;
+
+  beforeAll(() => {
+    root = freshWorkspace('huabu-task-repo-');
+    seedSpace(root, 'canvas-task', 'Canvas Task');
+    seedSpace(root, 'canvas-empty', 'Canvas Empty');
+    store = new DiskStructuredStore();
+  });
+
+  afterAll(() => {
+    resetStorageCache();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('serializes Task and Run mutations across independent handles', async () => {
+    const first = store.space('canvas-task').tasks;
+    const second = store.space('canvas-task').tasks;
+    await Promise.all([
+      first.insertTask({
+        taskId: 'task-a',
+        canvasId: 'canvas-task',
+        goal: 'Goal A',
+        defaultRootProfileId: 'profile-a',
+        anchorNodeId: 'node-a',
+        createdAt: 1,
+      }),
+      second.insertTask({
+        taskId: 'task-b',
+        canvasId: 'canvas-task',
+        goal: 'Goal B',
+        defaultRootProfileId: 'profile-b',
+        anchorNodeId: 'node-b',
+        createdAt: 2,
+      }),
+    ]);
+    await first.insertRun({
+      runId: 'run-a',
+      taskId: 'task-a',
+      canvasIdSnapshot: 'canvas-task',
+      goalSnapshot: 'Goal A',
+      rootProfileIdSnapshot: 'profile-a',
+      status: 'pending',
+      createdAt: 3,
+    });
+    const updated = await second.updateRun('run-a', {
+      rootNodeId: 'node-root',
+      rootThreadId: 'thread-root',
+      status: 'running',
+      startedAt: 4,
+    });
+
+    expect(updated.status).toBe('running');
+    await expect(first.read()).resolves.toMatchObject({
+      version: 1,
+      tasks: [
+        expect.objectContaining({ taskId: 'task-a' }),
+        expect.objectContaining({ taskId: 'task-b' }),
+      ],
+      runs: [
+        expect.objectContaining({
+          runId: 'run-a',
+          rootNodeId: 'node-root',
+          rootThreadId: 'thread-root',
+        }),
+      ],
+    });
+  });
+
+  it('returns an empty versioned snapshot when no Task store exists', async () => {
+    await expect(store.space('canvas-empty').tasks.read()).resolves.toEqual({
+      version: 1,
+      tasks: [],
+      runs: [],
+    });
+  });
+
+  it('rejects mutations for a missing Space', async () => {
+    await expect(
+      store.space('missing-canvas').tasks.insertTask({
+        taskId: 'task-missing',
+        canvasId: 'missing-canvas',
+        goal: 'Missing',
+        defaultRootProfileId: 'profile-a',
+        anchorNodeId: 'node-missing',
+        createdAt: 1,
+      }),
+    ).rejects.toThrow(/cannot write a missing Space/);
+  });
+
+  it('fails fast on malformed and internally inconsistent Task stores', async () => {
+    writeFileSync(tasksPath('canvas-task'), '{"version":1,"tasks":{}}');
+    await expect(store.space('canvas-task').tasks.read()).rejects.toThrow(
+      /Invalid Task store/,
+    );
+
+    writeFileSync(
+      tasksPath('canvas-task'),
+      JSON.stringify({
+        version: 1,
+        tasks: [
+          {
+            taskId: 'task-duplicate',
+            canvasId: 'canvas-task',
+            goal: 'Goal',
+            defaultRootProfileId: 'profile-a',
+            anchorNodeId: 'node-a',
+            createdAt: 1,
+          },
+          {
+            taskId: 'task-duplicate',
+            canvasId: 'canvas-task',
+            goal: 'Goal',
+            defaultRootProfileId: 'profile-a',
+            anchorNodeId: 'node-b',
+            createdAt: 2,
+          },
+        ],
+        runs: [],
+      }),
+    );
+    await expect(store.space('canvas-task').tasks.read()).rejects.toThrow(
+      /duplicate Task/,
+    );
+
+    writeFileSync(
+      tasksPath('canvas-task'),
+      JSON.stringify({
+        version: 1,
+        tasks: [],
+        runs: [
+          {
+            runId: 'run-orphan',
+            taskId: 'task-missing',
+            canvasIdSnapshot: 'canvas-task',
+            goalSnapshot: 'Goal',
+            rootProfileIdSnapshot: 'profile-a',
+            status: 'pending',
+            createdAt: 1,
+          },
+        ],
+      }),
+    );
+    await expect(store.space('canvas-task').tasks.read()).rejects.toThrow(
+      /references missing Task/,
+    );
+  });
+
+  it('rejects a retained handle after the active Workspace changes', async () => {
+    const retained = store.space('canvas-empty').tasks;
+    const replacement = freshWorkspace('huabu-task-repo-next-');
+
+    await expect(retained.read()).rejects.toThrow(/inactive workspace/);
+
+    workspaceState.path = root;
+    resetStorageCache();
+    rmSync(replacement, { recursive: true, force: true });
+  });
 });
 
 /**

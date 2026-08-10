@@ -655,6 +655,15 @@ export interface SketchNodeData extends BaseNodeData {
 /** Execution status of a question node. */
 export type QuestionNodeStatus = 'idle' | 'running' | 'done' | 'error';
 
+/** Whether an idle question thread may be rebound before its first turn. */
+export type AgentBindingPolicy = 'selectable' | 'fixed';
+
+/** Bounded per-thread overrides applied when an external Agent is realized. */
+export interface AgentLaunchOverrides {
+  workingDirPath?: string;
+  additionalInitialPreamble?: string;
+}
+
 /** Resolve the sparse persisted question status; absent means idle. */
 export function getQuestionNodeStatus(data: unknown): QuestionNodeStatus {
   const status =
@@ -695,12 +704,19 @@ export interface QuestionNodeData extends BaseNodeData {
    */
   agentBinding?: AgentBinding;
   /**
+   * Whether the binding may change before the first turn. Absent means
+   * `selectable` for compatibility with user-created Question Nodes.
+   */
+  agentBindingPolicy?: AgentBindingPolicy;
+  /**
    * Bind-time avatar fallback for this question's external agent. The UI
    * prefers the current Profile icon while that Profile exists, then uses this
    * snapshot if the Profile is deleted or unavailable. Internal agents use the
    * built-in Huabu identity instead.
    */
   agentIcon?: AgentIcon;
+  /** External-Agent launch overrides fixed when this node is created. */
+  agentLaunchOverrides?: AgentLaunchOverrides;
   /**
    * Built-in agent mode when `agentBinding` is internal or omitted.
    * Defaults to `'ask'`. Ignored for external bindings.

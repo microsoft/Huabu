@@ -281,7 +281,10 @@ export interface ChatState {
    * case needs no agent pick. Stashes the canvas thread / binding /
    * lastAction so leaving compose restores the plain canvas chat.
    */
-  openQuestionCompose: (view: AgentConversationView, canvasId?: string) => void;
+  openQuestionCompose: (
+    view: AgentConversationView,
+    options?: { canvasId?: string; binding?: AgentBinding },
+  ) => void;
   /**
    * Close question thread replay and return to normal canvas chat.
    * Pass `canvasId` to also drop the persisted replay pointer so the
@@ -766,7 +769,7 @@ export const useChatStore = create<ChatState>()(
         get().evictInactiveThreads();
       },
 
-      openQuestionCompose: (view, canvasId) => {
+      openQuestionCompose: (view, options) => {
         const {
           threadId: currentThreadId,
           agentBinding: currentBinding,
@@ -789,9 +792,11 @@ export const useChatStore = create<ChatState>()(
 
         // Default the new node to the canvas's last-used agent so the
         // common case (one agent per canvas) needs no explicit pick.
-        const initialBinding: AgentBinding = canvasId
-          ? (bindingMap[canvasId] ?? DEFAULT_BINDING)
-          : DEFAULT_BINDING;
+        const initialBinding: AgentBinding = options?.binding
+          ? options.binding
+          : options?.canvasId
+            ? (bindingMap[options.canvasId] ?? DEFAULT_BINDING)
+            : DEFAULT_BINDING;
 
         // Seed an empty message list for the node's thread and mark it
         // history-loaded so `useChatHistory` doesn't round-trip for a

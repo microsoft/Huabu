@@ -240,7 +240,7 @@ export const mergeNodeDataCommandSchema = z
   })
   .strict()
   .describe(
-    'Merge patches into node data. Use expectRev for optimistic concurrency when rewriting content or src.',
+    'Merge patches into node data. patch.content is the Markdown body only, never a downloaded node sidecar or YAML frontmatter. Use expectRev for optimistic concurrency when rewriting content or src.',
   );
 
 export const setNodeParentCommandSchema = z

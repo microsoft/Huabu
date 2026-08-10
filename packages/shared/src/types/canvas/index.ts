@@ -65,6 +65,8 @@ export type {
   FrameSizing,
   SketchNodeData,
   SketchStroke,
+  AgentBindingPolicy,
+  AgentLaunchOverrides,
   QuestionNodeData,
   QuestionNodeStatus,
   LabelSource,

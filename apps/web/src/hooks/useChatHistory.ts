@@ -12,8 +12,10 @@ import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import {
   ConversationIntegrityError,
+  filterClientOwnedQuestionPatch,
   patchConversationOwnerNode,
   refreshConversationPresentation,
+  resolveConversationOwnerSource,
   validateConversationView,
 } from '@/store/conversationOwner';
 
@@ -300,7 +302,18 @@ export function useChatHistory(
           ownerView?.conversationOwner.threadId === forThreadId &&
           ownerView.conversationOwner.canvasId === ownerCanvasId
         ) {
-          void patchConversationOwnerNode(ownerView, patch)
+          const canvas = useCanvasStore.getState();
+          const ownerPatch = filterClientOwnedQuestionPatch(
+            resolveConversationOwnerSource(
+              canvas.canvasId,
+              canvas.nodes,
+              canvas.worldReferences,
+              ownerView,
+            ),
+            patch,
+          );
+          if (!ownerPatch) return;
+          void patchConversationOwnerNode(ownerView, ownerPatch)
             .then(async () => {
               await refreshConversationPresentation(ownerView);
               if (
@@ -331,10 +344,26 @@ export function useChatHistory(
                 forThreadId,
           );
         if (!node) return;
+        const bindingPolicy = (
+          node.data as { agentBindingPolicy?: unknown } | undefined
+        )?.agentBindingPolicy;
+        const ownerPatch = filterClientOwnedQuestionPatch(
+          bindingPolicy === 'fixed' || bindingPolicy === 'selectable'
+            ? { agentBindingPolicy: bindingPolicy }
+            : undefined,
+          patch,
+        );
+        if (!ownerPatch) return;
         const curStatus = (node.data as Record<string, unknown> | undefined)
           ?.status;
-        if (curStatus !== 'running' && curStatus !== 'pending') return;
-        useCanvasStore.getState().patchNodeSilent(node.id, patch);
+        if (
+          bindingPolicy !== 'fixed' &&
+          curStatus !== 'running' &&
+          curStatus !== 'pending'
+        ) {
+          return;
+        }
+        useCanvasStore.getState().patchNodeSilent(node.id, ownerPatch);
       };
 
       // Clear assistant / status messages loaded from history for the
