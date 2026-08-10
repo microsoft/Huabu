@@ -133,6 +133,8 @@ Which node the panel shows is owned by the preview workspace, not by `canvasStor
 
 Local HTML Web Nodes carrying `data.interactiveView` mount as Interactive Views through a dedicated renderer route whose CSP permits only self-contained inline/data/blob content and denies network connections, form submission, nested frames, workers, objects, and external navigation. `WebPreview` removes `allow-same-origin`, keeps only script/form sandbox capabilities, transfers one Host-owned `MessagePort` on the expected document load, and closes rather than reconnecting if that document navigates itself; all later iframe intents use the port. `useInteractiveViewBridge` loads persisted state and typed binding snapshots, rejects oversized, replayed, or excessive requests, dispatches only declared actions, performs native Node/thread navigation against Host-derived binding references, and closes the port, focus listener, and polling timer on unmount or mode change. Binding refresh runs only while mounted and visible. The iframe receives no token, cookie, API route, Host DOM, Electron bridge, or arbitrary query capability.
 
+Each Chat renderer addresses an explicit thread. Messages, drafts, loading, binding, model settings, pending attachments, and the mutable compose mode live on that thread; a bounded thread-keyed mode projection is persisted for refresh. An authored Question node's agent mode remains authoritative for replay and follow-up turns.
+
 ---
 
 ## 5. Internationalisation

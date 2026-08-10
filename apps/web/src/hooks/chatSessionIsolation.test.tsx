@@ -190,6 +190,7 @@ beforeEach(async () => {
     // its conversation through this field.
     threadId: 'thread-unrelated',
     threadMap: {},
+    lastActionByThread: {},
     bindingMap: {},
     selectionAttachment: null,
     viewingQuestionThread: null,
@@ -364,5 +365,35 @@ describe('two mounted ChatPanels', () => {
     // A panel given its session must not reach back and re-point the store;
     // doing so is what made two panels fight over one conversation.
     expect(useChatStore.getState().threadId).toBe('thread-unrelated');
+  });
+
+  it('renders each thread with its own compose mode', async () => {
+    await commit(() =>
+      useChatStore.getState().setThreadLastAction(THREAD_A, 'operate'),
+    );
+
+    await commit(() => {
+      root?.render(
+        <>
+          <div data-panel="a">
+            <ChatPanel session={SESSION_A} />
+          </div>
+          <div data-panel="b">
+            <ChatPanel session={SESSION_B} />
+          </div>
+        </>,
+      );
+    });
+
+    expect(
+      container
+        ?.querySelector('[data-panel="a"] textarea')
+        ?.getAttribute('placeholder'),
+    ).toBe('Describe the Space change you want...');
+    expect(
+      container
+        ?.querySelector('[data-panel="b"] textarea')
+        ?.getAttribute('placeholder'),
+    ).toBe('Asking anything here...');
   });
 });

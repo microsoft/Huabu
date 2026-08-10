@@ -35,6 +35,7 @@ import {
   selectThreadBinding,
   selectThreadDraft,
   selectThreadHistoryLoaded,
+  selectThreadLastAction,
   selectThreadMessages,
   useChatStore,
 } from '@/store/chatStore';
@@ -84,13 +85,6 @@ export const ChatPanel = ({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const setDraft = useChatStore((state) => state.setDraft);
-  const setLastAction = useChatStore((state) => state.setLastAction);
-
-  // Canvas-level chat mode toggle. Persisted to localStorage so a page
-  // refresh restores the last-used mode for the canvas thread; kept in
-  // sync by `useAgentStream.startStream`, which calls
-  // `setLastAction(agentMode)` on every send.
-  const lastAction = useChatStore((state) => state.lastAction);
   const canvasId = useCanvasStore((state) => state.canvasId);
   // The store-wide current thread. Only the single-panel path reads it; a
   // provided session wins, and once nothing renders without one this
@@ -98,10 +92,9 @@ export const ChatPanel = ({
   const storeThreadId = useChatStore((state) => state.threadId);
 
   // When the panel is replaying a question node's thread, the mode is a
-  // property of that NODE (`data.agentMode`), not the canvas-level
-  // `lastAction` toggle (the replay view hides the mode selector). We
-  // derive it straight from the node rather than mirroring it into
-  // `lastAction` on open, so the composer + every follow-up turn stay
+  // property of that NODE (`data.agentMode`), not the thread's mutable
+  // compose mode (the replay view hides the mode selector). We derive it
+  // straight from the node, so the composer + every follow-up turn stay
   // structurally consistent with how the question itself runs: an
   // `@Agent` (operate) question keeps emitting operate turns, an `@Chat`
   // question stays in ask. External bindings have no ask/operate split
@@ -129,6 +122,12 @@ export const ChatPanel = ({
   );
   const session = providedSession ?? storeSession;
   const { threadId, ownerCanvasId } = session;
+  const setThreadLastAction = useChatStore(
+    (state) => state.setThreadLastAction,
+  );
+  const lastAction = useChatStore((state) =>
+    selectThreadLastAction(state, threadId),
+  );
   const activeConversationView = session.conversationView;
   // `openSequence` / `openPosition` are presentation state carried on the
   // store-wide replay pointer, not part of the conversation identity, so
@@ -171,7 +170,11 @@ export const ChatPanel = ({
     !headlessConversation || conversationOwnerSource !== undefined;
   // "Composing" = the viewed question node has never been authored/run yet
   // (its status is still `idle`). Its binding remains mutable unless creation
-  // explicitly fixed it; the mode follows the inline pick (`lastAction`).
+  // explicitly fixed it; the mode follows this thread's inline pick rather
+  // than the node's
+  // not-yet-written `agentMode`. Derived from the node itself — the single
+  // source of truth — rather than a stored `compose` flag. Replay (already-run
+  // node) keeps deriving from the node.
   const isComposingQuestion =
     !headlessConversation &&
     !!viewingQuestionNodeId &&
@@ -734,13 +737,13 @@ export const ChatPanel = ({
       // depth in case a stale menu event arrives during the transition.
       if (isLoading || viewingQuestionBindingIsFixed) return;
       setAgentBinding(threadId, choice.binding, canvasId || undefined);
-      setLastAction(choice.mode);
+      setThreadLastAction(threadId, choice.mode);
     },
     [
       isLoading,
       viewingQuestionBindingIsFixed,
       setAgentBinding,
-      setLastAction,
+      setThreadLastAction,
       canvasId,
       threadId,
     ],

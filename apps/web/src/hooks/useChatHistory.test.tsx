@@ -92,6 +92,7 @@ function seedStore(isStreaming: boolean) {
         draft: '',
         historyLoaded: true,
         isStreaming,
+        lastAction: 'ask',
         binding: { kind: 'internal' },
         settings: { modelId: null, reasoningEffort: null },
         pendingAttachments: [],

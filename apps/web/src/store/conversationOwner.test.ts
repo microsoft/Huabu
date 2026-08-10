@@ -336,7 +336,9 @@ describe('conversation owner routing', () => {
           alias: 'Source Agent',
         },
       },
-      lastAction: 'operate',
+      lastActionByThread: {
+        'thread-source-canvas': 'operate',
+      },
     });
     useChatStore
       .getState()

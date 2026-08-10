@@ -648,7 +648,9 @@ export function useAgentStream(session: ChatSession): UseAgentStreamReturn {
 
   const addMessage = useChatStore((state) => state.addMessage);
   const updateMessage = useChatStore((state) => state.updateMessage);
-  const setLastAction = useChatStore((state) => state.setLastAction);
+  const setThreadLastAction = useChatStore(
+    (state) => state.setThreadLastAction,
+  );
   const pendingAttachments = useChatStore((state) =>
     selectThreadPendingAttachments(state, threadId),
   );
@@ -723,7 +725,7 @@ export function useAgentStream(session: ChatSession): UseAgentStreamReturn {
         }
       }
 
-      setLastAction(agentMode);
+      setThreadLastAction(threadId, agentMode);
 
       // Merge pending attachments + selection attachment into a single array.
       // Sketch-rasterization is now performed server-side in `agent.route.ts`
@@ -1174,7 +1176,7 @@ export function useAgentStream(session: ChatSession): UseAgentStreamReturn {
       selectionAttachment,
       clearPendingAttachments,
       addMessage,
-      setLastAction,
+      setThreadLastAction,
       threadId,
       getAgentChatContext,
       canvasId,

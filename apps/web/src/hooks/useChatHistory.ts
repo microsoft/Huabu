@@ -12,6 +12,7 @@ import useCanvasStore from '@/store/canvasStore';
 import {
   selectThreadHistoryLoaded,
   selectThreadIsLoading,
+  selectThreadLastAction,
   selectThreadMessages,
   useChatStore,
 } from '@/store/chatStore';
@@ -80,11 +81,9 @@ export function useChatHistory(
 
     let cancelled = false;
 
-    const {
-      lastAction: action,
-      setMessages: set,
-      setHistoryLoaded: setLoaded,
-    } = useChatStore.getState();
+    const currentState = useChatStore.getState();
+    const action = selectThreadLastAction(currentState, tid);
+    const { setMessages: set, setHistoryLoaded: setLoaded } = currentState;
 
     const fetchValidatedHistory = async () => {
       if (effectiveConversationView) {

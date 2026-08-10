@@ -17,6 +17,7 @@ import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore.ts';
 import useCanvasStore from '@/store/canvasStore.ts';
 import {
   selectThreadBinding,
+  selectThreadLastAction,
   selectThreadMessages,
   useChatStore,
 } from '@/store/chatStore.ts';
@@ -156,10 +157,11 @@ export const QuestionNode = memo(
     const composeAgentBinding = useChatStore((s) =>
       data.threadId ? selectThreadBinding(s, data.threadId) : undefined,
     );
-    // While composing a brand-new question, the mode follows the user's inline
-    // Chat/Agent pick (`lastAction`) rather than the node's not-yet-written
-    // `agentMode` (mirrors ChatPanel's compose logic).
-    const composeAgentMode = useChatStore((s) => s.lastAction);
+    // While composing a brand-new question, the mode follows this thread's
+    // inline Chat/Agent pick rather than the not-yet-written node field.
+    const composeAgentMode = useChatStore((s) =>
+      data.threadId ? selectThreadLastAction(s, data.threadId) : 'ask',
+    );
     const agentProfiles = useAcpProfilesStore((s) => s.profiles);
     const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
     // True only while this node's conversation is open AND the chat panel is

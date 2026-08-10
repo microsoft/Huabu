@@ -16,6 +16,7 @@ import {
   selectThreadDraft,
   selectThreadHistoryLoaded,
   selectThreadIsLoading,
+  selectThreadLastAction,
   selectThreadMessages,
   selectThreadPendingAttachments,
   selectThreadSettings,
@@ -47,7 +48,7 @@ function resetStore() {
   useChatStore.setState({
     threadsById: {},
     threadId: 'thread-initial',
-    lastAction: 'ask',
+    lastActionByThread: {},
     threadMap: {},
     bindingMap: {},
     viewingQuestionThread: null,
@@ -137,6 +138,15 @@ describe('chatStore per-thread agent binding', () => {
       reasoningEffort: null,
     });
   });
+
+  it('keeps the compose mode with its own thread', () => {
+    const s = useChatStore.getState();
+    s.setThreadLastAction('thread-a', 'operate');
+
+    const state = useChatStore.getState();
+    expect(selectThreadLastAction(state, 'thread-a')).toBe('operate');
+    expect(selectThreadLastAction(state, 'thread-b')).toBe('ask');
+  });
 });
 
 describe('chatStore staged attachments', () => {
@@ -213,6 +223,25 @@ describe('chatStore switchToCanvas', () => {
     expect(currentBinding()).toEqual(EXTERNAL);
   });
 
+  it('restores each canvas thread compose mode', () => {
+    const s = useChatStore.getState();
+
+    s.switchToCanvas('canvas-1');
+    const firstThread = useChatStore.getState().threadId;
+    s.setThreadLastAction(firstThread, 'operate');
+
+    s.switchToCanvas('canvas-2');
+    const secondThread = useChatStore.getState().threadId;
+    expect(selectThreadLastAction(useChatStore.getState(), secondThread)).toBe(
+      'ask',
+    );
+
+    s.switchToCanvas('canvas-1');
+    expect(selectThreadLastAction(useChatStore.getState(), firstThread)).toBe(
+      'operate',
+    );
+  });
+
   it('drops a dangling question view when moving to a canvas with no replay', () => {
     const s = useChatStore.getState();
     s.switchToCanvas('canvas-1');
@@ -267,7 +296,7 @@ describe('chatStore clearMessages', () => {
     expect(state.bindingMap['canvas-1']).toEqual(INTERNAL);
     // A brand-new thread starts with nothing staged.
     expect(selectThreadPendingAttachments(state, state.threadId)).toEqual([]);
-    expect(state.lastAction).toBe('ask');
+    expect(selectThreadLastAction(state, state.threadId)).toBe('ask');
   });
 
   it('can start the new thread already bound to an agent and mode', () => {
@@ -278,7 +307,38 @@ describe('chatStore clearMessages', () => {
     const state = useChatStore.getState();
     expect(currentBinding()).toEqual(EXTERNAL);
     expect(state.bindingMap['canvas-1']).toEqual(EXTERNAL);
-    expect(state.lastAction).toBe('operate');
+    expect(selectThreadLastAction(state, state.threadId)).toBe('operate');
+  });
+});
+
+describe('chatStore compose mode persistence projection', () => {
+  it('bounds remembered thread modes', () => {
+    const s = useChatStore.getState();
+    for (let index = 0; index <= 50; index += 1) {
+      s.setThreadLastAction(`thread-${index}`, 'operate');
+    }
+
+    const remembered = useChatStore.getState().lastActionByThread;
+    expect(Object.keys(remembered)).toHaveLength(50);
+    expect(remembered['thread-0']).toBeUndefined();
+    expect(remembered['thread-50']).toBe('operate');
+  });
+
+  it('migrates the v2 global mode onto its current thread', async () => {
+    const migrate = useChatStore.persist.getOptions().migrate;
+    expect(migrate).toBeDefined();
+
+    const migrated = (await migrate?.(
+      {
+        threadId: 'thread-legacy',
+        lastAction: 'operate',
+      },
+      2,
+    )) as Partial<ReturnType<typeof useChatStore.getState>>;
+
+    expect(migrated.lastActionByThread).toEqual({
+      'thread-legacy': 'operate',
+    });
   });
 });
 
@@ -287,7 +347,7 @@ describe('chatStore question thread lifecycle', () => {
     const s = useChatStore.getState();
     s.switchToCanvas('canvas-1');
     s.setAgentBinding(useChatStore.getState().threadId, EXTERNAL, 'canvas-1');
-    s.setLastAction('operate');
+    s.setThreadLastAction(useChatStore.getState().threadId, 'operate');
     const canvasThread = useChatStore.getState().threadId;
 
     s.openQuestionThread(
@@ -298,15 +358,14 @@ describe('chatStore question thread lifecycle', () => {
     expect(useChatStore.getState().threadId).toBe('thread-q');
     expect(currentBinding()).toEqual(INTERNAL);
 
-    // A follow-up send inside the replay may pollute the global mode.
-    useChatStore.getState().setLastAction('ask');
+    useChatStore.getState().setThreadLastAction('thread-q', 'ask');
 
     s.closeQuestionThread('canvas-1');
     const state = useChatStore.getState();
     expect(state.viewingQuestionThread).toBeNull();
     expect(state.threadId).toBe(canvasThread);
     expect(currentBinding()).toEqual(EXTERNAL);
-    expect(state.lastAction).toBe('operate');
+    expect(selectThreadLastAction(state, canvasThread)).toBe('operate');
     expect(state.questionReplayByCanvas['canvas-1']).toBeUndefined();
   });
 
