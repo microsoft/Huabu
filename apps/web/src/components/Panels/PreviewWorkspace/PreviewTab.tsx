@@ -13,6 +13,8 @@
  * tab a `button` too would nest interactive elements.
  */
 
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -25,6 +27,7 @@ import type { PreviewTab as PreviewTabModel } from '@/store/previewWorkspace/mod
 
 type PreviewTabProps = {
   tab: PreviewTabModel;
+  groupId: string;
   isActive: boolean;
   /** Ids wiring the tab to its panel for `aria-controls` / `aria-labelledby`. */
   tabElementId: string;
@@ -39,6 +42,7 @@ type PreviewTabProps = {
 
 export function PreviewTab({
   tab,
+  groupId,
   isActive,
   tabElementId,
   panelElementId,
@@ -48,6 +52,17 @@ export function PreviewTab({
   onNavigate,
 }: PreviewTabProps) {
   const { t } = useTranslation();
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: tab.id,
+    data: { type: 'preview-tab', groupId, tabId: tab.id },
+  });
   const target = tab.target;
   const node = useCanvasStore((s) =>
     target.kind === 'node'
@@ -69,6 +84,9 @@ export function PreviewTab({
 
   return (
     <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
       role="tab"
       id={tabElementId}
       aria-selected={isActive}
@@ -80,12 +98,19 @@ export function PreviewTab({
       onClick={onActivate}
       onDoubleClick={onPromote}
       onKeyDown={(e) => {
+        listeners?.onKeyDown?.(e);
+        if (e.defaultPrevented) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onActivate();
           return;
         }
         onNavigate(e);
+      }}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        zIndex: isDragging ? 1 : undefined,
       }}
       className={cn(
         'group flex max-w-48 min-w-0 shrink-0 cursor-pointer items-center gap-1.5',
@@ -96,6 +121,7 @@ export function PreviewTab({
           : 'text-fg-muted hover:bg-hover',
         // Italic marks the reusable inspection slot, per §9.2.
         tab.transient && 'italic',
+        isDragging && 'opacity-60',
       )}
     >
       {Icon && <Icon size={13} className="shrink-0" />}
@@ -104,6 +130,7 @@ export function PreviewTab({
         type="button"
         aria-label={t('preview.closeTab', { title })}
         title={t('actions.close')}
+        onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation();
           onClose();

@@ -12,10 +12,16 @@
  * tabs is how the user browses.
  */
 
+import { useDroppable } from '@dnd-kit/core';
+import {
+  horizontalListSortingStrategy,
+  SortableContext,
+} from '@dnd-kit/sortable';
 import { Columns2, PanelRightClose } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { PreviewTab } from './PreviewTab';
+import { groupDropId } from './tabDnd';
 import { Button } from '../../Common/Button';
 
 import type { PreviewTab as PreviewTabModel } from '@/store/previewWorkspace/model';
@@ -51,6 +57,10 @@ export function PreviewTabStrip({
   onCollapse,
 }: PreviewTabStripProps) {
   const { t } = useTranslation();
+  const { setNodeRef } = useDroppable({
+    id: groupDropId(groupId),
+    data: { type: 'preview-group', groupId },
+  });
 
   const focusTab = (tabId: string) => {
     onActivate(tabId);
@@ -91,24 +101,31 @@ export function PreviewTabStrip({
   return (
     <div className="border-edge-default bg-surface flex shrink-0 items-stretch border-b">
       <div
+        ref={setNodeRef}
         role="tablist"
         aria-label={t('preview.tabStrip')}
         aria-orientation="horizontal"
         className="flex min-w-0 flex-1 overflow-x-auto"
       >
-        {tabs.map((tab) => (
-          <PreviewTab
-            key={tab.id}
-            tab={tab}
-            isActive={tab.id === activeTabId}
-            tabElementId={tabElementId(groupId, tab.id)}
-            panelElementId={panelElementId(groupId)}
-            onActivate={() => onActivate(tab.id)}
-            onClose={() => onClose(tab.id)}
-            onPromote={() => onPromote(tab.id)}
-            onNavigate={handleKeyDown}
-          />
-        ))}
+        <SortableContext
+          items={tabs.map((tab) => tab.id)}
+          strategy={horizontalListSortingStrategy}
+        >
+          {tabs.map((tab) => (
+            <PreviewTab
+              key={tab.id}
+              tab={tab}
+              groupId={groupId}
+              isActive={tab.id === activeTabId}
+              tabElementId={tabElementId(groupId, tab.id)}
+              panelElementId={panelElementId(groupId)}
+              onActivate={() => onActivate(tab.id)}
+              onClose={() => onClose(tab.id)}
+              onPromote={() => onPromote(tab.id)}
+              onNavigate={handleKeyDown}
+            />
+          ))}
+        </SortableContext>
       </div>
       {(canOpenToSide || onCollapse) && (
         <div className="flex shrink-0 items-center px-1">

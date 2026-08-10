@@ -383,7 +383,7 @@ The acceptance criterion split the same way while Stage 2 was landing. [`chatSes
 
 - **Done.** Bind the Stage 1 model into a zustand store and add the compatibility adapters for the existing single-panel actions. The adapters are one-directional: the workspace store is authoritative and the legacy actions delegate to it. Nothing writes back into `canvasStore`, so there is never a second source of truth.
 - **Done.** Retire `expandMode` and the four guards that depended on it, per §11.1.
-- **Done.** Build the tab strip, group, renderer dispatch, split handle, empty state, transient-tab affordance, and accessibility behavior. Drag-and-drop reordering is the one piece still outstanding.
+- **Done.** Build the tab strip, group, renderer dispatch, split handle, drag-and-drop reordering, empty state, transient-tab affordance, and accessibility behavior. Pointer and keyboard drag sensors resolve a tab or group drop target to the Stage 1 `moveTab` action, so same-group ordering, cross-group movement, and empty-source-group removal retain one topology authority.
 - **Done.** Resolve L1, and L4 as far as the single-panel fallback allows: `ChatPanel` takes a session, a tab supplies one from its own target, and the two-`ChatPanel` case in [`chatSessionIsolation.test.tsx`](../../apps/web/src/hooks/chatSessionIsolation.test.tsx) is unskipped as the proof.
 - **Done.** Resolve L10 of §10.1 by scoping window-level keyboard handlers to the focused group; the existing selection handler was already panel-scoped.
 - **Done.** Resolve the `lastAction` remainder of L2: each mounted Chat and composing Question reads and writes its explicit thread's mode.

@@ -20,6 +20,7 @@ import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { PreviewWorkspace } from './PreviewWorkspace';
 import { PreviewWorkspacePanel } from './PreviewWorkspacePanel';
+import { groupDropId, resolveTabDropDestination } from './tabDnd';
 
 import type { Node } from '@xyflow/react';
 
@@ -291,6 +292,24 @@ describe('keyboard', () => {
       tabs().filter((t) => t.getAttribute('tabindex') === '0'),
     ).toHaveLength(1);
   });
+
+  it('keeps sortable tabs available to the keyboard drag sensor', () => {
+    openNode('a');
+    openNode('b');
+    openNode('c');
+    render([
+      canvasNode('a', 'Alpha'),
+      canvasNode('b', 'Beta'),
+      canvasNode('c', 'Gamma'),
+    ]);
+
+    expect(tabs().every((tab) => tab.getAttribute('role') === 'tab')).toBe(
+      true,
+    );
+    expect(tabs().every((tab) => tab.hasAttribute('aria-describedby'))).toBe(
+      true,
+    );
+  });
 });
 
 describe('split', () => {
@@ -416,6 +435,27 @@ describe('split', () => {
 
     expect(store().workspace.tabs[sideTab]).toBeUndefined();
     expect(store().workspace.tabs[firstTab]).toBeDefined();
+  });
+
+  it('maps tab and group drop targets to model destinations', () => {
+    const firstTab = openNode('a');
+    const secondTab = openNode('b');
+    store().openPreviewTarget(
+      { kind: 'node', canvasId: CANVAS_ID, nodeId: 'b' },
+      { openToSide: true },
+    );
+    const [firstGroup, sideGroup] = store().workspace.groups;
+
+    expect(
+      resolveTabDropDestination(store().workspace, firstTab, secondTab),
+    ).toEqual({ groupId: sideGroup.id, index: 0 });
+    expect(
+      resolveTabDropDestination(
+        store().workspace,
+        secondTab,
+        groupDropId(firstGroup.id),
+      ),
+    ).toEqual({ groupId: firstGroup.id, index: 1 });
   });
 });
 

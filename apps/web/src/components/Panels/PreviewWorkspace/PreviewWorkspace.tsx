@@ -9,6 +9,18 @@
  * model so neither group can be dragged to uselessness.
  */
 
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  pointerWithin,
+  useSensor,
+  useSensors,
+  type CollisionDetection,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { Fragment, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -18,11 +30,28 @@ import {
 } from '@/store/previewWorkspace/store';
 
 import { PreviewGroup } from './PreviewGroup';
+import { resolveTabDropDestination } from './tabDnd';
 
 /** Keyboard nudge per Arrow press on the separator. */
 const RATIO_STEP = 0.05;
 
 const selectWorkspace = (s: PreviewWorkspaceState) => s.workspace;
+
+const tabCollisionDetection: CollisionDetection = (args) => {
+  const tabContainers = args.droppableContainers.filter(
+    (container) => container.data.current?.type === 'preview-tab',
+  );
+
+  if (args.pointerCoordinates) {
+    const pointerCollisions = pointerWithin(args);
+    const tabCollision = pointerCollisions.find((collision) =>
+      tabContainers.some((container) => container.id === collision.id),
+    );
+    return tabCollision ? [tabCollision] : pointerCollisions;
+  }
+
+  return closestCenter({ ...args, droppableContainers: tabContainers });
+};
 
 export function PreviewWorkspace({
   onCollapse,
@@ -35,6 +64,7 @@ export function PreviewWorkspace({
   const activateTab = usePreviewWorkspaceStore((s) => s.activateTab);
   const closeTab = usePreviewWorkspaceStore((s) => s.closeTab);
   const promoteTab = usePreviewWorkspaceStore((s) => s.promoteTab);
+  const moveTab = usePreviewWorkspaceStore((s) => s.moveTab);
   const setActiveGroup = usePreviewWorkspaceStore((s) => s.setActiveGroup);
   const setSplitRatio = usePreviewWorkspaceStore((s) => s.setSplitRatio);
 
@@ -61,6 +91,28 @@ export function PreviewWorkspace({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const isSplit = workspace.groups.length > 1;
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+
+  const onTabDragEnd = useCallback(
+    ({ active, over }: DragEndEvent) => {
+      if (!over) return;
+      const tabId = String(active.id);
+      const destination = resolveTabDropDestination(
+        usePreviewWorkspaceStore.getState().workspace,
+        tabId,
+        String(over.id),
+      );
+      if (!destination) return;
+      moveTab(tabId, destination);
+      activateTab(tabId);
+    },
+    [activateTab, moveTab],
+  );
 
   const onSeparatorPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -106,54 +158,60 @@ export function PreviewWorkspace({
   }
 
   return (
-    <div ref={containerRef} className="flex h-full w-full overflow-hidden">
-      {workspace.groups.map((group, index) => (
-        <Fragment key={group.id}>
-          {index > 0 && (
-            /*
-             * Keyboard-movable pane divider (§9). `jsx-a11y` treats
-             * `separator` as non-interactive even when focusable, so the key
-             * handler needs an exemption; the matching `tabIndex` allowance
-             * is configured repo-wide in `eslint.config.mjs`.
-             */
-            /* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */
+    <DndContext
+      sensors={sensors}
+      collisionDetection={tabCollisionDetection}
+      onDragEnd={onTabDragEnd}
+    >
+      <div ref={containerRef} className="flex h-full w-full overflow-hidden">
+        {workspace.groups.map((group, index) => (
+          <Fragment key={group.id}>
+            {index > 0 && (
+              /*
+               * Keyboard-movable pane divider (§9). `jsx-a11y` treats
+               * `separator` as non-interactive even when focusable, so the key
+               * handler needs an exemption; the matching `tabIndex` allowance
+               * is configured repo-wide in `eslint.config.mjs`.
+               */
+              /* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={t('preview.resizeGroups')}
+                aria-valuenow={Math.round(workspace.splitRatio * 100)}
+                aria-valuemin={20}
+                aria-valuemax={80}
+                tabIndex={0}
+                onPointerDown={onSeparatorPointerDown}
+                onKeyDown={onSeparatorKeyDown}
+                className="group hover:bg-info/30 focus-visible:outline-info flex w-1 shrink-0 cursor-col-resize items-center justify-center focus-visible:outline-1"
+              />
+            )}
             <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t('preview.resizeGroups')}
-              aria-valuenow={Math.round(workspace.splitRatio * 100)}
-              aria-valuemin={20}
-              aria-valuemax={80}
-              tabIndex={0}
-              onPointerDown={onSeparatorPointerDown}
-              onKeyDown={onSeparatorKeyDown}
-              className="group hover:bg-info/30 focus-visible:outline-info flex w-1 shrink-0 cursor-col-resize items-center justify-center focus-visible:outline-1"
-            />
-          )}
-          <div
-            className="flex h-full min-w-0 flex-col"
-            style={{
-              width: isSplit
-                ? `${(index === 0 ? workspace.splitRatio : 1 - workspace.splitRatio) * 100}%`
-                : '100%',
-            }}
-          >
-            <PreviewGroup
-              group={group}
-              workspace={workspace}
-              isFocused={group.id === workspace.activeGroupId}
-              onFocus={() => setActiveGroup(group.id)}
-              onActivate={activateTab}
-              onClose={closeWorkspaceTab}
-              onPromote={promoteTab}
-              onOpenToSide={openToSide}
-              onCollapse={
-                index === workspace.groups.length - 1 ? onCollapse : undefined
-              }
-            />
-          </div>
-        </Fragment>
-      ))}
-    </div>
+              className="flex h-full min-w-0 flex-col"
+              style={{
+                width: isSplit
+                  ? `${(index === 0 ? workspace.splitRatio : 1 - workspace.splitRatio) * 100}%`
+                  : '100%',
+              }}
+            >
+              <PreviewGroup
+                group={group}
+                workspace={workspace}
+                isFocused={group.id === workspace.activeGroupId}
+                onFocus={() => setActiveGroup(group.id)}
+                onActivate={activateTab}
+                onClose={closeWorkspaceTab}
+                onPromote={promoteTab}
+                onOpenToSide={openToSide}
+                onCollapse={
+                  index === workspace.groups.length - 1 ? onCollapse : undefined
+                }
+              />
+            </div>
+          </Fragment>
+        ))}
+      </div>
+    </DndContext>
   );
 }
