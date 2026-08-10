@@ -12,7 +12,7 @@
  * tabs is how the user browses.
  */
 
-import { Columns2 } from 'lucide-react';
+import { Columns2, PanelRightClose } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { PreviewTab } from './PreviewTab';
@@ -31,6 +31,8 @@ type PreviewTabStripProps = {
   onOpenToSide: (tabId: string) => void;
   /** Hidden once both groups exist, since there is no third to open into. */
   canOpenToSide: boolean;
+  /** Collapses the whole surface; only the last group offers it. */
+  onCollapse?: () => void;
 };
 
 export const tabElementId = (groupId: string, tabId: string) =>
@@ -46,6 +48,7 @@ export function PreviewTabStrip({
   onPromote,
   onOpenToSide,
   canOpenToSide,
+  onCollapse,
 }: PreviewTabStripProps) {
   const { t } = useTranslation();
 
@@ -107,18 +110,32 @@ export function PreviewTabStrip({
           />
         ))}
       </div>
-      {canOpenToSide && activeTabId && (
+      {(canOpenToSide || onCollapse) && (
         <div className="flex shrink-0 items-center px-1">
-          <Button
-            variant="ghost"
-            iconOnly
-            size="sm"
-            title={t('preview.openToSide')}
-            tooltipPlacement="bottom"
-            onClick={() => onOpenToSide(activeTabId)}
-          >
-            <Columns2 />
-          </Button>
+          {canOpenToSide && activeTabId && (
+            <Button
+              variant="ghost"
+              iconOnly
+              size="sm"
+              title={t('preview.openToSide')}
+              tooltipPlacement="bottom"
+              onClick={() => onOpenToSide(activeTabId)}
+            >
+              <Columns2 />
+            </Button>
+          )}
+          {onCollapse && (
+            <Button
+              variant="ghost"
+              iconOnly
+              size="sm"
+              title={t('preview.collapse')}
+              tooltipPlacement="bottom"
+              onClick={onCollapse}
+            >
+              <PanelRightClose />
+            </Button>
+          )}
         </div>
       )}
     </div>

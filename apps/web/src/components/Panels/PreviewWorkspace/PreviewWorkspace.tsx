@@ -24,7 +24,12 @@ const RATIO_STEP = 0.05;
 
 const selectWorkspace = (s: PreviewWorkspaceState) => s.workspace;
 
-export function PreviewWorkspace() {
+export function PreviewWorkspace({
+  onCollapse,
+}: {
+  /** Collapses the surface, when the host offers that. */
+  onCollapse?: () => void;
+} = {}) {
   const { t } = useTranslation();
   const workspace = usePreviewWorkspaceStore(selectWorkspace);
   const activateTab = usePreviewWorkspaceStore((s) => s.activateTab);
@@ -32,6 +37,14 @@ export function PreviewWorkspace() {
   const promoteTab = usePreviewWorkspaceStore((s) => s.promoteTab);
   const setActiveGroup = usePreviewWorkspaceStore((s) => s.setActiveGroup);
   const setSplitRatio = usePreviewWorkspaceStore((s) => s.setSplitRatio);
+
+  const closeWorkspaceTab = (tabId: string) => {
+    const isFinalTab =
+      Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs).length ===
+      1;
+    closeTab(tabId);
+    if (isFinalTab) onCollapse?.();
+  };
   const openPreviewTarget = usePreviewWorkspaceStore(
     (s) => s.openPreviewTarget,
   );
@@ -131,9 +144,12 @@ export function PreviewWorkspace() {
               isFocused={group.id === workspace.activeGroupId}
               onFocus={() => setActiveGroup(group.id)}
               onActivate={activateTab}
-              onClose={closeTab}
+              onClose={closeWorkspaceTab}
               onPromote={promoteTab}
               onOpenToSide={openToSide}
+              onCollapse={
+                index === workspace.groups.length - 1 ? onCollapse : undefined
+              }
             />
           </div>
         </Fragment>

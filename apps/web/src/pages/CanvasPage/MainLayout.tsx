@@ -339,6 +339,7 @@ export const MainLayout = ({
           {React.isValidElement(rightPanel)
             ? React.cloneElement(rightPanel as React.ReactElement<any>, {
                 isCollapsed: false,
+                isHostCollapsed: isRightCollapsed,
                 onToggle: toggleRightPanel,
               })
             : rightPanel}

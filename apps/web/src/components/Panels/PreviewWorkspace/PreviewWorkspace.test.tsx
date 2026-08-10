@@ -10,7 +10,7 @@
  * ARIA tabs pattern.
  */
 
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -19,6 +19,7 @@ import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { PreviewWorkspace } from './PreviewWorkspace';
+import { PreviewWorkspacePanel } from './PreviewWorkspacePanel';
 
 import type { Node } from '@xyflow/react';
 
@@ -180,6 +181,24 @@ describe('activation', () => {
 
     expect(tabs()).toHaveLength(1);
     expect(mountedNodeId()).toBe('a');
+  });
+
+  it('collapses the host when the final tab closes', () => {
+    const onCollapse = vi.fn();
+    openNode('a');
+    useCanvasStore.setState({
+      nodes: [canvasNode('a', 'Alpha')],
+      canvasId: CANVAS_ID,
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root?.render(<PreviewWorkspace onCollapse={onCollapse} />));
+
+    const close = tabs()[0].querySelector('button');
+    act(() => close?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+    expect(onCollapse).toHaveBeenCalledOnce();
   });
 
   it('promotes a transient tab on double click', () => {
@@ -425,5 +444,34 @@ describe('target resolution', () => {
     render([]);
 
     expect(container?.textContent).toContain('Double-click a node');
+  });
+});
+
+describe('right panel host', () => {
+  it('seeds one Chat only when the host becomes visible', () => {
+    useCanvasStore.setState({ nodes: [], canvasId: CANVAS_ID });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() =>
+      root?.render(
+        <StrictMode>
+          <PreviewWorkspacePanel isHostCollapsed />
+        </StrictMode>,
+      ),
+    );
+    expect(Object.keys(store().workspace.tabs)).toHaveLength(0);
+
+    act(() =>
+      root?.render(
+        <StrictMode>
+          <PreviewWorkspacePanel isHostCollapsed={false} />
+        </StrictMode>,
+      ),
+    );
+
+    expect(Object.values(store().workspace.tabs)).toHaveLength(1);
+    expect(Object.values(store().workspace.tabs)[0].target.kind).toBe('chat');
   });
 });

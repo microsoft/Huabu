@@ -387,6 +387,7 @@
     "closeTab": "关闭“{{title}}”",
     "resizeGroups": "调整预览分组宽度",
     "openToSide": "在旁边打开",
+    "collapse": "收起预览",
     "emptyGroup": "此分组没有打开的预览",
     "emptyWorkspace": "在 Space 上双击节点即可在此预览",
     "nodeUnavailable": "此节点已不存在"

@@ -1,7 +1,7 @@
 # Unified Preview Workspace
 
-Status: Proposed
-Last updated: 2026-08-05
+Status: In progress
+Last updated: 2026-08-10
 
 ## 1. Summary
 
@@ -226,7 +226,7 @@ The migration is not a data-structure tidy-up. Chat state is now one `ChatThread
 | L7  | ~~`ChatPanel` feeds hooks and descendants the global `threadId`~~                                                                                                                                                                                                                | [`ChatPanel/index.tsx`](../../apps/web/src/components/Panels/ChatPanel/index.tsx)                                                        | **Done.** `ChatPanel` builds one `ChatSession` and provides it via context; every descendant reads that.                                                                                |
 | L8  | ~~`intentStore._setOnIntentChosen` is a single callback slot registered by `ChatPanel`~~                                                                                                                                                                                         | —                                                                                                                                        | **Resolved by deletion.** The intent recogniser and sketch gesture recognition were removed; no callback slot remains.                                                                  |
 | L9  | ~~`panelStore.focusChatInputNonce` is one global nonce, so a focus request cannot address a specific group~~                                                                                                                                                                     | [`panelStore.ts`](../../apps/web/src/store/panelStore.ts)                                                                                | **Done.** The request carries a thread id; a composer takes focus only when the request names its own session. Retarget to a tab or group in §8.                                        |
-| L10 | `ExpandedNodePanel` installs window-level `keydown` (Escape, upstream/downstream navigation) and `document`-level `selectionchange` listeners that assume a single instance                                                                                                      | [`ExpandedNodePanel.tsx`](../../apps/web/src/components/Panels/ExpandedNodePanel/ExpandedNodePanel.tsx)                                  | Scope to the focused group, per §14.                                                                                                                                                    |
+| L10 | ~~`ExpandedNodePanel` installs window-level `keydown` (Escape, upstream/downstream navigation) and `document`-level `selectionchange` listeners that assume a single instance~~                                                                                                  | [`ExpandedNodePanel.tsx`](../../apps/web/src/components/Panels/ExpandedNodePanel/ExpandedNodePanel.tsx)                                  | **Done.** Window-level shortcuts run only in the focused group; selection tracking was already scoped to the panel element.                                                             |
 
 `AcpSessionSelectors` already uses React `useId()`, and `useAgentStream`'s `AbortController` registry is already keyed by `threadId`; neither needs work.
 
@@ -385,11 +385,11 @@ The acceptance criterion splits the same way. [`chatSessionIsolation.test.tsx`](
 - **Done.** Retire `expandMode` and the four guards that depended on it, per §11.1.
 - **Done.** Build the tab strip, group, renderer dispatch, split handle, empty state, transient-tab affordance, and accessibility behavior. Drag-and-drop reordering is the one piece still outstanding.
 - **Done.** Resolve L1, and L4 as far as the single-panel fallback allows: `ChatPanel` takes a session, a tab supplies one from its own target, and the two-`ChatPanel` case in [`chatSessionIsolation.test.tsx`](../../apps/web/src/hooks/chatSessionIsolation.test.tsx) is unskipped as the proof.
-- Resolve L10 of §10.1 by scoping window-level keyboard and selection handlers to the focused group.
+- **Done.** Resolve L10 of §10.1 by scoping window-level keyboard handlers to the focused group; the existing selection handler was already panel-scoped.
 - Resolve the `lastAction` remainder of L2, deferred from Stage 2.
 - Mount only the active tab in each group and settle editable Note/Text content before switching or closing.
 - Extract `ChatPreview` and `NodePreviewPane` while preserving their existing feature behavior.
-- Mount the workspace in `MainLayout` and simplify `CenterArea` to the Canvas surface.
+- **Done behind the feature flag.** Mount the workspace in `MainLayout`, keep `CenterArea` Canvas-only on that path, lazily seed one Chat when an empty right workspace opens, and collapse the outer panel when its final tab closes. The flag-off path retains the legacy `ChatPanel` and side-by-side `ExpandedNodePanel` for rollback.
 
 **Correction, found while implementing.** `canvasStore.expandedNodeId` did not survive to Stage 5 as planned. Keeping it while the workspace also tracked the shown node would have been exactly the second source of truth the first item forbids, so it was deleted as part of the adapter change and every reader now derives the node from the workspace's active tab. The `UiIntentResolution.expandedNodeId` retarget listed under Stage 4 moved with it, for the same reason and at no extra cost: the field had one producer and one consumer.
 

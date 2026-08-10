@@ -387,6 +387,7 @@
     "closeTab": "Close {{title}}",
     "resizeGroups": "Resize preview groups",
     "openToSide": "Open to the side",
+    "collapse": "Collapse previews",
     "emptyGroup": "No preview open in this group",
     "emptyWorkspace": "Double-click a node on the Space to preview it here",
     "nodeUnavailable": "This node is no longer available"

@@ -14,6 +14,7 @@ import { toast } from '../../components/Common/Toast';
 import { CanvasLayerPanel } from '../../components/Panels/CanvasLayerPanel';
 import { ChatPanel } from '../../components/Panels/ChatPanel';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
+import { PreviewWorkspacePanel } from '../../components/Panels/PreviewWorkspace/PreviewWorkspacePanel';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
 import { useTrackCanvasAttention } from '../../store/canvasAttentionStore';
 import useStore, { dismissVersionConflictToast } from '../../store/canvasStore';
@@ -64,6 +65,9 @@ export default function CanvasPage() {
   const isLoading = useStore((s) => s.isLoading);
   const canvasNotFound = useStore((s) => s.canvasNotFound);
   const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
+  const previewWorkspaceEnabled = useWorkspaceStore(
+    (s) => s.previewWorkspaceEnabled,
+  );
   const refreshSpaceTitles = useWorkspaceStore((s) => s.refreshSpaceTitles);
   const nodeCount = useStore((s) => s.nodes.length);
   // Subscribed so the very first render can detect a mismatch between the
@@ -234,7 +238,9 @@ export default function CanvasPage() {
     <MainLayout
       header={<CanvasHeader onOpenShortcuts={openShortcuts} />}
       leftPanel={<CanvasLayerPanel />}
-      rightPanel={<ChatPanel />}
+      rightPanel={
+        previewWorkspaceEnabled ? <PreviewWorkspacePanel /> : <ChatPanel />
+      }
     >
       <CenterArea canvasShortcutsDisabled={isShortcutsOpen} />
     </MainLayout>

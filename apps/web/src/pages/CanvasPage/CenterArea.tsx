@@ -11,7 +11,6 @@ import { Button } from '../../components/Common/Button';
 import { cn } from '../../components/Common/cn';
 import { Canvas } from '../../components/Panels/Canvas/Canvas';
 import { ExpandedNodePanel } from '../../components/Panels/ExpandedNodePanel/ExpandedNodePanel';
-import { PreviewWorkspace } from '../../components/Panels/PreviewWorkspace/PreviewWorkspace';
 import { openUserHandbook } from '../../config/handbook';
 import { isElectron } from '../../hooks/useElectron';
 import {
@@ -24,9 +23,8 @@ const SPLIT_MIN_PX = 200;
 const SPLIT_DEFAULT_RATIO = 0.5;
 
 /**
- * CenterArea renders the canvas and, when a node is expanded, either replaces
- * the canvas with the expanded panel or shows them side-by-side with a
- * draggable resize handle.
+ * Hosts the Canvas. While the workspace flag is off, it also preserves the
+ * legacy side-by-side Expanded Node layout for rollback.
  */
 type CenterAreaProps = {
   canvasShortcutsDisabled?: boolean;
@@ -49,11 +47,6 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
   const previewWorkspaceEnabled = useWorkspaceStore(
     (s) => s.previewWorkspaceEnabled,
   );
-  // The workspace shows Chat tabs too, so its occupancy is "any tab open",
-  // not "a node is being shown".
-  const hasAnyTab = usePreviewWorkspaceStore(
-    (s) => Object.keys(s.workspace.tabs).length > 0,
-  );
 
   // The custom Electron title bar already exposes Handbook + Settings
   // globally — suppress the duplicate floating versions on the canvas
@@ -66,7 +59,9 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
   // Suspends width transition during drag so the split bar tracks the cursor.
   const [isResizing, setIsResizing] = React.useState(false);
 
-  const hasExpanded = previewWorkspaceEnabled ? hasAnyTab : !!expandedNodeId;
+  // With the workspace mounted as the right panel there is nothing left for
+  // the centre to host besides the Canvas.
+  const hasExpanded = !previewWorkspaceEnabled && !!expandedNodeId;
 
   /* ---- Drag handle for split mode ---- */
   const onHandlePointerDown = useCallback(
@@ -204,11 +199,7 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
       {/* Expanded panel – rendered only when needed. */}
       {hasExpanded && (
         <div className="h-full min-w-0 flex-1">
-          {previewWorkspaceEnabled ? (
-            <PreviewWorkspace />
-          ) : (
-            <ExpandedNodePanel />
-          )}
+          <ExpandedNodePanel />
         </div>
       )}
     </div>
