@@ -63,6 +63,15 @@ export const InPreviewSearchBar = ({
     }
   }, [isActive]);
 
+  // Preview search is a per-node session. When the owning node changes or
+  // the panel unmounts, reset the shared store so reopening the same node
+  // does not resurrect a stale query and steal focus on mount.
+  useEffect(() => {
+    return () => {
+      usePreviewSearchStore.getState().close();
+    };
+  }, [nodeId]);
+
   // Track whether the user has already navigated at least once. The
   // inline highlight visually implies the first match is "current", so
   // the first Enter should jump TO match #1, not to match #2. We model
