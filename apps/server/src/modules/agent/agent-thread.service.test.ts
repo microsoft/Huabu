@@ -11,12 +11,17 @@ import { createInteractiveViewSubmission } from './agenetes/handle.js';
 import {
   AgentThreadBusyError,
   AgentThreadService,
+  externalBindingFromWorkloadSpec,
 } from './agent-thread.service.js';
 
 import type { FixedAgentNodeTarget } from './agent-thread-resolver.js';
 import type { runAgent } from './agent.service.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
-import type { AgentStreamEvent, CanvasNodeId } from '@huabu/shared';
+import type {
+  AgentBinding,
+  AgentStreamEvent,
+  CanvasNodeId,
+} from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 const ENVELOPE: ChatEnvelope = {
@@ -73,6 +78,7 @@ function createHarness(options?: {
   externalEvents?: AgentStreamEvent[];
   startError?: Error;
   finishError?: Error;
+  persistedBinding?: Extract<AgentBinding, { kind: 'external' }> | null;
 }) {
   const release = vi.fn();
   const startLifecycle = options?.startError
@@ -100,6 +106,10 @@ function createHarness(options?: {
   const service = new AgentThreadService({
     resolveFixedAgentNode: () =>
       options && 'target' in options ? (options.target ?? null) : TARGET,
+    resolvePersistedExternalBinding: () =>
+      options && 'persistedBinding' in options
+        ? (options.persistedBinding ?? null)
+        : null,
     waitForTurnRelease: vi.fn().mockResolvedValue(undefined),
     acquireTurn: vi.fn(() => (options?.busy ? null : release)),
     startLifecycle,
@@ -139,6 +149,46 @@ function invocationOptions() {
 }
 
 describe('AgentThreadService', () => {
+  it('validates an external binding from a durable workload spec', () => {
+    expect(
+      externalBindingFromWorkloadSpec({
+        binding: { profileId: 'profile-a', alias: 'Researcher' },
+      }),
+    ).toEqual({
+      kind: 'external',
+      profileId: 'profile-a',
+      alias: 'Researcher',
+    });
+    expect(externalBindingFromWorkloadSpec({ binding: {} })).toBeNull();
+  });
+
+  it('resolves a persisted external Thread without a fixed Agent Node', () => {
+    const binding = {
+      kind: 'external' as const,
+      profileId: 'profile-selectable',
+      alias: 'Selectable Agent',
+    };
+    const harness = createHarness({ target: null, persistedBinding: binding });
+
+    expect(
+      harness.service.resolveExternalTarget('canvas-a', 'thread-a'),
+    ).toEqual({ binding, fixedTarget: null });
+  });
+
+  it('prefers the fixed Agent Node binding when one exists', () => {
+    const harness = createHarness({
+      persistedBinding: {
+        kind: 'external',
+        profileId: 'profile-record',
+        alias: 'Recorded Agent',
+      },
+    });
+
+    expect(
+      harness.service.resolveExternalTarget('canvas-a', 'thread-a'),
+    ).toEqual({ binding: TARGET.agentBinding, fixedTarget: TARGET });
+  });
+
   it('uses persisted fixed binding and overrides under one leased lifecycle', async () => {
     const harness = createHarness();
     const invocation = await harness.service.invoke(invocationOptions());

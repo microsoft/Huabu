@@ -93,9 +93,9 @@ Huabu provides only generic primitives. The Issue Tracker package defines its fi
 
 Huabu is currently a personal, single-user tool. Every external Agent that holds the valid `AGENTLET_TOKEN` is a trusted actor. The token protects the RFS transport boundary; it does not establish a distinct security principal for each Agent thread.
 
-`HUABU_THREAD_ID`, `X-Huabu-Host-Thread-Id`, and persisted owner-thread fields provide correlation and routing, not authentication or authorization. The Server validates that a referenced owner thread exists in the current Canvas, but it does not issue per-thread credentials, enforce Agent-to-Agent ACLs, or prevent one trusted Agent from naming another known thread.
+`HUABU_THREAD_ID`, `X-Huabu-Host-Thread-Id`, and persisted owner-thread fields provide correlation and routing, not authentication or authorization. The Server validates that a referenced owner is a durable external Agent thread in the current Canvas namespace, but it does not require an Agent Node or fixed Node binding policy, issue per-thread credentials, enforce Agent-to-Agent ACLs, or prevent one trusted Agent from naming another known thread.
 
-The iframe remains untrusted. It cannot choose a thread at action time and may invoke only the fixed owner thread persisted by a trusted Agent in the owning Node. Multi-user identity, untrusted Agents, thread-scoped credentials, and cross-Agent authorization are deferred until the product trust model requires them.
+The iframe remains untrusted. It cannot choose a thread at action time and may invoke only the owner thread persisted by a trusted Agent in the owning Node. The owner identity is fixed as `canvasId + ownerThreadId`; the current external binding is recovered from that thread's durable Agenetes workload record. Multi-user identity, untrusted Agents, thread-scoped credentials, and cross-Agent authorization are deferred until the product trust model requires them.
 
 ## 6. Vocabulary
 
@@ -354,7 +354,7 @@ Bound rows are presentation snapshots. An action always re-resolves the current 
 
 ### 12.1 Agent-facing creation
 
-RFS adds a resource-oriented Interactive View creation operation. Its request and response schemas live in `packages/shared/src/types/api/*`, and every input passes `safeParse`. `AGENTLET_TOKEN` authenticates the trusted Agentlet transport. The request supplies the owner thread for routing, normally from the caller's `HUABU_THREAD_ID` / `X-Huabu-Host-Thread-Id`, and the server verifies that the thread exists in the current Canvas.
+RFS adds a resource-oriented Interactive View creation operation. Its request and response schemas live in `packages/shared/src/types/api/*`, and every input passes `safeParse`. `AGENTLET_TOKEN` authenticates the trusted Agentlet transport. The request supplies the owner thread for routing, normally from the caller's `HUABU_THREAD_ID` / `X-Huabu-Host-Thread-Id`, and the server verifies that the durable external thread exists in the current Canvas namespace without requiring a corresponding Agent Node.
 
 The creation request references a previously uploaded same-Canvas HTML artifact, supplies the proposed state schema and initial state, requests bindings and actions, and provides normal Canvas placement. The server validates the complete definition, creates one Web Node containing the definition and state through the canonical Canvas command path, and returns its `nodeId`, derived View revision, and granted capabilities.
 
@@ -499,7 +499,7 @@ The Issue Tracker Agent receives the approved structured event in its existing c
 - The owning Node is the only View identity and persistence resource; no separate View repository, revision, tombstone, or cleanup transaction exists.
 - The iframe never receives an RFS token, cookie, raw API route, arbitrary Thread target, or ambient host capability.
 - A user action reaches the pre-bound external Agent thread as a validated durable View Event.
-- Existing thread leases, history, recovery, and Agent Node lifecycle remain authoritative.
+- Existing thread leases, history, and recovery remain authoritative; Agent Node lifecycle is updated only when the owner Thread has a fixed Agent Node target.
 - A bounded Task/Run projection updates independently from the persisted HTML artifact.
 - Bound Node and thread links open through native Huabu navigation.
 - Unknown, malformed, stale, oversized, unauthorized, replayed, and rate-limited intents fail explicitly before reaching an application service.

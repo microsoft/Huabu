@@ -102,7 +102,7 @@ RFS errors use the normal API error body and include a runnable `/skill` recover
 
 ## Interactive View resources
 
-`GET|POST /interactive-views`, `GET /interactive-views/:nodeId`, and `PUT /interactive-views/:nodeId/state` expose Interactive Views as Web Node resources rather than a separate repository. Creation accepts a staged `upload/*.html` renderer, imports it through the canonical Canvas executor, validates the owner thread, closed state schema, bindings, actions, and initial value, and returns the created Node identity plus a deterministic View revision. State writes replace the complete value and compare that revision inside the Canvas write mutex.
+`GET|POST /interactive-views`, `GET /interactive-views/:nodeId`, and `PUT /interactive-views/:nodeId/state` expose Interactive Views as Web Node resources rather than a separate repository. Creation accepts a staged `upload/*.html` renderer, imports it through the canonical Canvas executor, validates that the owner is a durable external Agent thread in the current Canvas namespace, validates the closed state schema, bindings, actions, and initial value, and returns the created Node identity plus a deterministic View revision. The owner identity is `canvasId + ownerThreadId`; it does not require an Agent Node or a fixed Node binding policy. State writes replace the complete value and compare that revision inside the Canvas write mutex.
 
 The focused `GET /skill/interactive-views` guide owns the external-Agent procedure. The iframe never receives RFS credentials or routes; its runtime bridge is described in [`web-architecture.md`](./web-architecture.md).
 

@@ -20,10 +20,11 @@ import {
 } from '@huabu/shared';
 
 import { createInteractiveViewSubmission } from '../agent/agenetes/handle.js';
-import { agentThreadResolver } from '../agent/agent-thread-resolver.js';
+import { AgentThreadResolutionError } from '../agent/agent-thread-resolver.js';
 import {
   AgentThreadBusyError,
   agentThreadService,
+  type ExternalAgentThreadTarget,
 } from '../agent/agent-thread.service.js';
 import {
   executeOnServer,
@@ -66,6 +67,23 @@ export class InteractiveViewServiceError extends Error {
   ) {
     super(message);
     this.name = 'InteractiveViewServiceError';
+  }
+}
+
+function resolveOwnerThread(
+  canvasId: string,
+  threadId: string,
+): ExternalAgentThreadTarget | null {
+  try {
+    return agentThreadService.resolveExternalTarget(canvasId, threadId);
+  } catch (error) {
+    if (error instanceof AgentThreadResolutionError) {
+      throw new InteractiveViewServiceError(
+        'invalid_owner_thread',
+        `Owner thread ${threadId} is invalid in this Canvas: ${error.message}`,
+      );
+    }
+    throw error;
   }
 }
 
@@ -299,12 +317,10 @@ export class InteractiveViewService {
         `Canvas ${canvasId} does not exist`,
       );
     }
-    if (
-      !agentThreadResolver.resolveAgentNodeId(canvasId, request.ownerThreadId)
-    ) {
+    if (!resolveOwnerThread(canvasId, request.ownerThreadId)) {
       throw new InteractiveViewServiceError(
         'invalid_owner_thread',
-        `Owner thread ${request.ownerThreadId} does not exist in this Canvas`,
+        `Owner thread ${request.ownerThreadId} is not an external Agent thread in this Canvas`,
       );
     }
     const rendererExists = request.rendererArtifact.startsWith('upload/')
@@ -468,14 +484,14 @@ export class InteractiveViewService {
       ...(input !== undefined ? { input } : {}),
       viewRevision: resource.revision,
     };
-    const fixedTarget = agentThreadService.resolveFixedTarget(
+    const ownerTarget = resolveOwnerThread(
       canvasId,
       resource.definition.ownerThreadId,
     );
-    if (!fixedTarget || fixedTarget.agentBinding.kind !== 'external') {
+    if (!ownerTarget) {
       throw new InteractiveViewServiceError(
         'invalid_owner_thread',
-        `Owner thread ${resource.definition.ownerThreadId} is not a fixed external Agent thread`,
+        `Owner thread ${resource.definition.ownerThreadId} is not an external Agent thread in this Canvas`,
       );
     }
     const envelope = {
@@ -503,7 +519,8 @@ export class InteractiveViewService {
         mode: 'operate',
         envelope,
         submission: createInteractiveViewSubmission(event),
-        fixedTarget,
+        requestBinding: ownerTarget.binding,
+        fixedTarget: ownerTarget.fixedTarget,
         logger,
       });
     } catch (error) {
