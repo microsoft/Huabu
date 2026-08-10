@@ -54,7 +54,7 @@ interface AgentTeamMember {
 
 Members are discovered from that one collection and retain the existing `(agentletId, manifestPath)` identity so durable Profiles and threads continue using the generic Agent Team runtime contract.
 
-The package remains in the read-only application resources. Huabu and Agenetes do not copy it into the selected workspace; setup materializes only the user-selected Profile `workingDirPath`, which follows the same explicit work-directory interaction as a command-backed ACP Profile.
+The package remains in the read-only application resources. Huabu and Agenetes do not copy it into the selected workspace; setup materializes only the resolved Profile `workingDirPath`, which may be a Huabu-managed default workspace or a user-selected custom directory.
 
 ### R3 — One Agenetes Agent Profile model
 
@@ -106,7 +106,7 @@ Deleting a Profile prevents new bindings but does not stop or invalidate existin
 
 The backend registry is unified, but Huabu retains two task-oriented Settings tabs:
 
-- **Agent Team** manages bundled members, member Configs, manifest-backed Profiles, user-selected working directories, and preparation.
+- **Agent Team** manages bundled members, member Configs, manifest-backed Profiles, default or custom working directories, and preparation.
 - **External Agent** manages command-backed Profiles and removes the legacy Agent Team option.
 
 The Agent Team tab initially loads only lightweight bundled-member summaries. The internal bundled root is not editable or rendered. Every member is collapsed by default. A summary contains the member identity and display metadata, discovery status, manifest-backed Profile count, and aggregate preparation status; it does not contain Config fields, Profile records, or setup logs.
@@ -145,7 +145,7 @@ Profile deletion is rejected while setup or cancellation is active. Setup is nev
 
 Before a new manifest-backed ACP session starts, the daemon validates that the prepared workspace remains usable. Validation never performs implicit repair. A failed validation returns a structured runtime error and makes the source Profile unavailable for new bindings until the user explicitly retries Setup. A durable thread whose Profile was deleted still reports its own validation or spawn failure without recreating Profile state.
 
-Profile creation requires the user to choose an absolute `workingDirPath`, using the same folder-picker and path-input interaction as a command-backed ACP Profile. Huabu does not default this path into the read-only bundled package.
+Profile creation defaults to a Huabu-managed, Profile-owned working directory under `<HUABU_DATA_DIR>/agent-team/workspaces/<member>/<harness>/<profile-id>`. The user may instead choose a custom absolute path using the same folder-picker and path-input interaction as a command-backed ACP Profile. Huabu resolves either policy to the concrete `workingDirPath` persisted by Agenetes and never writes into the read-only bundled package.
 
 At runtime, environment sources merge in this precedence order:
 

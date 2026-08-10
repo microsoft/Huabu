@@ -6,6 +6,8 @@
   "save": "Save",
   "cancel": "Cancel",
   "workingDirectory": "Working directory",
+  "useDefaultWorkingDirectory": "Use default working directory",
+  "useDefaultWorkingDirectoryHint": "Huabu creates an isolated workspace for this preset and agent.",
   "harness": "Harness",
   "pickFolder": "Pick a folder",
   "roots": "Collection Roots",

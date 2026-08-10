@@ -191,6 +191,31 @@ export type CreateAgentProfileBody = z.infer<
   typeof createAgentProfileBodySchema
 >;
 
+const createAgentTeamProfileBaseSchema = profileBaseSchema
+  .omit({ id: true, workingDirPath: true })
+  .extend({ launch: manifestLaunchSchema });
+
+export const createAgentTeamProfileBodySchema = z.union([
+  createAgentTeamProfileBaseSchema
+    .extend({
+      workingDirectory: z.object({ kind: z.literal('default') }).strict(),
+    })
+    .strict(),
+  createAgentTeamProfileBaseSchema
+    .extend({
+      workingDirectory: z
+        .object({
+          kind: z.literal('custom'),
+          path: pathSchema,
+        })
+        .strict(),
+    })
+    .strict(),
+]);
+export type CreateAgentTeamProfileBody = z.infer<
+  typeof createAgentTeamProfileBodySchema
+>;
+
 export const createAcpCommandProfileBodySchema = profileBaseSchema
   .omit({ id: true, agentletId: true })
   .extend({

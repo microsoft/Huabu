@@ -235,6 +235,11 @@ describe('AgentProfileEditor (create)', () => {
         'machine-a\u0000C:\\templates\\reviewer\\agentlet.yaml';
       templateSelect.dispatchEvent(new Event('change', { bubbles: true }));
     });
+    const defaultWorkspace =
+      container?.querySelector<HTMLButtonElement>('[role="switch"]');
+    await act(async () => {
+      defaultWorkspace?.click();
+    });
     const path = container?.querySelector<HTMLInputElement>(
       '[aria-label="path"]',
     );
@@ -259,7 +264,10 @@ describe('AgentProfileEditor (create)', () => {
     expect(apiMocks.createManifest).toHaveBeenCalledWith({
       alias: 'Reviewer (project)',
       agentletId: 'machine-a',
-      workingDirPath: 'C:\\work\\project',
+      workingDirectory: {
+        kind: 'custom',
+        path: 'C:\\work\\project',
+      },
       launch: {
         kind: 'agent-team-manifest',
         manifestPath: 'C:\\templates\\reviewer\\agentlet.yaml',
@@ -273,6 +281,49 @@ describe('AgentProfileEditor (create)', () => {
       },
     });
     expect(apiMocks.setupManifest).toHaveBeenCalledWith('profile-1');
+  });
+
+  it('uses an isolated default workspace without requiring a path', async () => {
+    apiMocks.listClis.mockResolvedValue({ agents });
+    apiMocks.createManifest.mockResolvedValue({ id: 'profile-default' });
+    apiMocks.setupManifest.mockResolvedValue({ id: 'profile-default' });
+    renderFlow();
+    const templateSelect = container?.querySelector('select');
+    await act(async () => {
+      if (!templateSelect) return;
+      templateSelect.value =
+        'machine-a\u0000C:\\templates\\reviewer\\agentlet.yaml';
+      templateSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    expect(
+      container?.querySelector<HTMLInputElement>('[aria-label="path"]'),
+    ).toBeNull();
+    const buttons = [...(container?.querySelectorAll('button') ?? [])];
+    const create = buttons.at(-1);
+    expect(create?.disabled).toBe(false);
+    await act(async () => {
+      create?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.createManifest).toHaveBeenCalledWith({
+      alias: 'Reviewer',
+      agentletId: 'machine-a',
+      workingDirectory: { kind: 'default' },
+      launch: {
+        kind: 'agent-team-manifest',
+        manifestPath: 'C:\\templates\\reviewer\\agentlet.yaml',
+        harness: 'copilot',
+      },
+      customData: {
+        icon: {
+          shape: expect.any(String),
+          color: expect.any(String),
+        },
+      },
+    });
   });
 });
 
