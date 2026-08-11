@@ -77,6 +77,33 @@ describe('QuestionTakeoverMark', () => {
     });
   });
 
+  it('animates the avatar only while the question is running', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    const renderMark = (status: QuestionAgentBadgeStatus) => {
+      act(() => {
+        root?.render(
+          <QuestionTakeoverMark
+            state={{ stage: 'collapsed', size: 30 }}
+            status={status}
+            agent={{ kind: 'internal', alias: 'Huabu', mode: 'ask' }}
+            unread={false}
+            conflictCount={0}
+            interactive={false}
+          />,
+        );
+      });
+    };
+
+    renderMark('open');
+    expect(container.querySelector('.agent-icon-working-body')).toBeNull();
+
+    renderMark('running');
+    expect(container.querySelector('.agent-icon-working-body')).not.toBeNull();
+  });
+
   it('renders an interactive mark as an accessible button', () => {
     const onOpen = vi.fn();
     container = document.createElement('div');
