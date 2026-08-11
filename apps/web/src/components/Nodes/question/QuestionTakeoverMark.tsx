@@ -198,7 +198,7 @@ export function QuestionTakeoverMark({
             agent={agent}
             size={innerSize}
             detail={size >= MARK_FACE_MIN ? 'full' : 'dot'}
-            motion={chip.isRunning || chip.isOpen ? 'working' : 'none'}
+            motion={chip.isRunning ? 'working' : 'none'}
             className="shrink-0"
           />
         </span>
