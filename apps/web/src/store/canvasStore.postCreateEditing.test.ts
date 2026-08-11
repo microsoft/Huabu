@@ -70,7 +70,13 @@ describe('post-create editing', () => {
   it('opens a newly created note in expanded editing view', () => {
     useCanvasStore.getState().dispatchUiIntent({
       type: 'ADD_NODES',
-      inputs: [{ id: 'node-note', nodeType: 'note' }],
+      inputs: [
+        {
+          id: 'node-note',
+          nodeType: 'note',
+          data: { origin: { type: 'user-created' } },
+        },
+      ],
     });
 
     const state = useCanvasStore.getState();
@@ -82,12 +88,38 @@ describe('post-create editing', () => {
   it('requests inline editing for a newly created text node', () => {
     useCanvasStore.getState().dispatchUiIntent({
       type: 'ADD_NODES',
-      inputs: [{ id: 'node-text', nodeType: 'text' }],
+      inputs: [
+        {
+          id: 'node-text',
+          nodeType: 'text',
+          data: { origin: { type: 'user-created' } },
+        },
+      ],
     });
 
     const state = useCanvasStore.getState();
     expect(expandedNodeId()).toBeNull();
     expect(state.pendingInlineEditNodeId).toBe('node-text');
+  });
+
+  it('keeps an excerpt-created note on the Canvas without opening it', () => {
+    useCanvasStore.getState().dispatchUiIntent({
+      type: 'ADD_NODES',
+      inputs: [
+        {
+          id: 'node-excerpt',
+          nodeType: 'note',
+          data: { origin: { type: 'user-excerpt' } },
+        },
+      ],
+    });
+
+    const state = useCanvasStore.getState();
+    expect(expandedNodeId()).toBeNull();
+    expect(state.pendingInlineEditNodeId).toBeNull();
+    expect(
+      state.nodes.find((node) => node.id === 'node-excerpt'),
+    ).toBeDefined();
   });
 
   it('does not request editing for non-UI node creation', () => {

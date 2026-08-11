@@ -267,7 +267,7 @@ describe('ExpandedNodePanel edge navigation', () => {
         .getState()
         .nodes.filter((node) => node.selected)
         .map((node) => node.id),
-    ).toEqual(['b']);
+    ).toEqual([]);
   });
 
   it('releases the relationship menu so arrow navigation can continue', () => {
@@ -327,7 +327,7 @@ describe('ExpandedNodePanel edge navigation', () => {
         .getState()
         .nodes.filter((node) => node.selected)
         .map((node) => node.id),
-    ).toEqual(['b']);
+    ).toEqual([]);
     expect(document.activeElement).toBe(
       container?.querySelector('[data-search-scope="node"]'),
     );

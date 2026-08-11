@@ -242,7 +242,6 @@ export const ExpandedNodePanel = ({
   const closeExpandedCanvas = onClose ?? closeActivePreviewNode;
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
-  const selectCanvasNodes = useCanvasStore((s) => s.selectNodes);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   // Routed through `tryRename` so a sibling-label collision triggers the
   // shared alert + revert flow (same path used by the layer tree and
@@ -310,17 +309,13 @@ export const ExpandedNodePanel = ({
     useState<ExpandedNodeDirection | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const selectNeighbor = useCallback(
-    (nodeId: string) => {
-      setOpenNeighborDirection(null);
-      // Connected-node navigation browses, so it reuses the group's
-      // inspection slot rather than appending a tab (§9.2).
-      openPreviewNode(nodeId, { transient: true });
-      selectCanvasNodes([nodeId]);
-      panelRef.current?.focus({ preventScroll: true });
-    },
-    [selectCanvasNodes],
-  );
+  const selectNeighbor = useCallback((nodeId: string) => {
+    setOpenNeighborDirection(null);
+    // Connected-node navigation browses, so it reuses the group's
+    // inspection slot rather than appending a tab (§9.2).
+    openPreviewNode(nodeId, { transient: true });
+    panelRef.current?.focus({ preventScroll: true });
+  }, []);
 
   // Shared by the arrow shortcuts and the touch swipe. Returns whether the
   // direction had anywhere to go, so callers can leave the input untouched.
