@@ -74,6 +74,8 @@ describe('MainLayout Chat motion', () => {
       | undefined;
 
     expect(slot?.style.width).toBe('0px');
+    expect(slot?.classList.contains('bg-surface')).toBe(true);
+    expect(slot?.classList.contains('overflow-hidden')).toBe(false);
     expect(content?.dataset.visible).toBeUndefined();
     expect(slot?.dataset.moving).toBeUndefined();
 

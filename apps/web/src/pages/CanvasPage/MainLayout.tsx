@@ -311,7 +311,7 @@ export const MainLayout = ({
           While closing, the zero-width slot right-aligns the absolute inner
           panel so it can slide offscreen instead of disappearing immediately. */}
       <div
-        className="relative shrink-0"
+        className="bg-surface relative shrink-0"
         data-right-panel-slot
         data-collapsed={isRightCollapsed ? 'true' : undefined}
         data-moving={isRightPanelMoving ? 'true' : undefined}
