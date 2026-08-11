@@ -55,8 +55,6 @@ export class DiskNodeRepository implements NodeRepository {
     const requested = new Set(nodeIds);
     if (requested.size === 0) return new Map();
 
-    // The legacy batch reader performs one bounded-concurrency directory scan
-    // and primes the filename index used by subsequent mutations.
     const records = await this.#store.readAllNodes({ strict: true });
     const snapshots = new Map<string, NodeSnapshot>();
     for (const nodeId of requested) {
@@ -105,6 +103,7 @@ export class DiskNodeRepository implements NodeRepository {
     // write. That preserves the existing single-process CAS critical section.
     const result = this.#store.writeNode(input.nodeId, input.record, {
       strictRename: input.strictLabel,
+      ownershipValidated: true,
     });
     if (!result.ok) {
       switch (result.reason) {
@@ -146,7 +145,8 @@ export class DiskNodeRepository implements NodeRepository {
 
   async delete(nodeId: string): Promise<NodeDeleteResult> {
     this.#assertActiveWorkspace();
-    return this.#store.deleteNode(nodeId);
+    this.#store.readNodeStrict(nodeId);
+    return this.#store.deleteNode(nodeId, { ownershipValidated: true });
   }
 
   #assertActiveWorkspace(): void {

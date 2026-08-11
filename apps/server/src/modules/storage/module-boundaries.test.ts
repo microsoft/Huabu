@@ -91,6 +91,7 @@ describe('storage module tree', () => {
       'paths.ts',
       'profile.test.ts',
       'profile.ts',
+      'space-lifecycle-admission.ts',
       'storage.ts',
     ]);
   });

@@ -28,10 +28,6 @@ import {
   getWorkspacePath,
 } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
-import {
-  withSpaceDeleteAdmission,
-  withSpacePutAdmission,
-} from './backends/disk/legacy/space-lifecycle-admission.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import {
   parseStorageProfile,
@@ -40,6 +36,7 @@ import {
   validateStorageProfile,
   type StorageProfile,
 } from './profile.js';
+import { withSpacePutAdmission } from './space-lifecycle-admission.js';
 
 import type {
   BlobInfo,
@@ -239,19 +236,19 @@ export async function deleteSpace(
   const workspaceLease = acquireWorkspaceOperationLease();
   try {
     const storage = ensure();
-    return await withCanvasDeletionAdmission(canvasId, async () => {
-      // World protection must be decided before deleting bytes. A configured
-      // Workspace has one stable World; a missing/corrupt World is an
-      // integrity error rather than permission to continue.
-      if ((await storage.structured.catalog().worldId()) === canvasId) {
-        return { ok: false, reason: 'world-forbidden' };
-      }
-
+    const started = await storage.structured
+      .lifecycle()
+      .beginDelete({ canvasId });
+    if (!started.ok) return started;
+    try {
       // Preserve the old retryable cleanup behavior: sweep even when the
       // structured record is already absent, so orphan blobs can be removed.
       await storage.blobs.scope({ kind: 'canvas', canvasId }).deleteAll();
-      return storage.structured.lifecycle().delete({ canvasId });
-    });
+      return await started.session.finish();
+    } catch (error) {
+      await started.session.abort();
+      throw error;
+    }
   } finally {
     workspaceLease.release();
   }
@@ -317,23 +314,6 @@ export function canvasBlobs(canvasId: string): BlobScope {
       return delegate.deleteAll();
     },
   };
-}
-
-/**
- * Run Space deletion exclusively against blob puts admitted for the same
- * workspace and Space. Kept here because it coordinates two otherwise
- * independent storage ports; the compatibility lifecycle facade supplies the
- * actual sweep and structured destroy operation.
- */
-export function withCanvasDeletionAdmission<T>(
-  canvasId: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const workspacePath = activeWorkspacePath();
-  return withSpaceDeleteAdmission(workspacePath, canvasId, async () => {
-    assertActiveWorkspace(workspacePath, canvasId);
-    return operation();
-  });
 }
 
 export async function storageHealth(): Promise<StorageHealth[]> {

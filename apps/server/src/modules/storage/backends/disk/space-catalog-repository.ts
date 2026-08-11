@@ -5,12 +5,12 @@
 
 import path from 'node:path';
 
+import { titleVisibleAtDirectory } from './space-title.js';
 import {
   listCanvasDirEntries,
   refreshCanvasDirIndex,
   requireWorldCanvasId,
 } from '../../../workspace/disk/canvas-dirs.js';
-import { toSafeFilename } from '../../../workspace/disk/naming.js';
 import { getWorkspacePath } from '../../../workspace.js';
 
 import type { SpaceCatalogRepository } from '../../ports/structured.js';
@@ -29,14 +29,9 @@ export class DiskSpaceCatalogRepository implements SpaceCatalogRepository {
     refreshCanvasDirIndex();
 
     return listCanvasDirEntries().map((entry) => {
-      const expectedDir = toSafeFilename(entry.title, entry.id);
-      const title =
-        entry.filename && entry.filename !== expectedDir
-          ? entry.filename
-          : entry.title;
       return {
         canvasId: entry.id,
-        title,
+        title: titleVisibleAtDirectory(entry.title, entry.id, entry.filename),
         nodeCount: entry.nodeCount ?? 0,
         createdAt: entry.createdAt ?? 0,
         updatedAt: entry.updatedAt ?? 0,

@@ -28,7 +28,6 @@ import path from 'node:path';
 
 import { atomicWriteJson, mkdirp, sanitizeId } from '../../../utils/fs.js';
 import {
-  isWorldCanvasId,
   listCanvasDirEntries,
   refreshCanvasDirIndex,
   registerCanvasDir,
@@ -39,15 +38,9 @@ import {
   canvasJsonPath,
   SPACE_JSON_FILENAME,
 } from '../../workspace/disk/paths.js';
-import {
-  acquireWorkspaceOperationLease,
-  getWorkspacePath,
-} from '../../workspace.js';
-import {
-  forgetCanvasStore,
-  getCanvasStore,
-} from '../backends/disk/legacy/canvas-store-cache.js';
-import { canvasBlobs, withCanvasDeletionAdmission } from '../storage.js';
+import { getWorkspacePath } from '../../workspace.js';
+import { getCanvasStore } from '../backends/disk/legacy/canvas-store-cache.js';
+import { deleteSpace } from '../storage.js';
 
 import type { CanvasFile } from '../../canvas/persistence-types.js';
 
@@ -143,25 +136,9 @@ export function createCanvas(
  * Returns true when the Space existed.
  */
 export async function deleteCanvas(canvasId: string): Promise<boolean> {
-  // Blob deletion can yield before the synchronous record destroy. Pin the
-  // active workspace across both halves so a runtime workspace switch cannot
-  // make them operate on different roots.
-  const workspaceLease = acquireWorkspaceOperationLease();
-  try {
-    const store = getCanvasStore(canvasId);
-    // `destroy()` refuses the World canvas too, but that check has to happen
-    // before the blob sweep now that the sweep runs first — otherwise a
-    // refused deletion would still have destroyed the World's bytes.
-    if (isWorldCanvasId(store.canvasId)) {
-      throw new Error('World canvas cannot be deleted');
-    }
-    return await withCanvasDeletionAdmission(store.canvasId, async () => {
-      await canvasBlobs(store.canvasId).deleteAll();
-      const ok = store.destroy();
-      forgetCanvasStore(store.canvasId);
-      return ok;
-    });
-  } finally {
-    workspaceLease.release();
+  const result = await deleteSpace(canvasId);
+  if (!result.ok && result.reason === 'world-forbidden') {
+    throw new Error('World canvas cannot be deleted');
   }
+  return result.ok;
 }

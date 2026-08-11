@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/** Process-local coordination for one Disk Space's blob/record lifecycle. */
+/** Process-local coordination for one Space's blob/structured lifecycle. */
 
 type Admission = () => void;
 
@@ -21,13 +21,14 @@ class SpaceLifecycleGate {
     }
   }
 
-  async withDelete<T>(operation: () => Promise<T>): Promise<T> {
+  async acquireDelete(): Promise<() => void> {
     await this.#acquireDelete();
-    try {
-      return await operation();
-    } finally {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
       this.#releaseDelete();
-    }
+    };
   }
 
   get deletionPending(): boolean {
@@ -109,18 +110,15 @@ function gateFor(workspacePath: string, canvasId: string): SpaceLifecycleGate {
   return gate;
 }
 
-async function withAdmission<T>(
+async function withPutAdmission<T>(
   workspacePath: string,
   canvasId: string,
-  mode: 'put' | 'delete',
   operation: () => Promise<T>,
 ): Promise<T> {
   const gateKey = key(workspacePath, canvasId);
   const gate = gateFor(workspacePath, canvasId);
   try {
-    return mode === 'put'
-      ? await gate.withPut(operation)
-      : await gate.withDelete(operation);
+    return await gate.withPut(operation);
   } finally {
     if (gate.idle && gates.get(gateKey) === gate) gates.delete(gateKey);
   }
@@ -131,15 +129,23 @@ export function withSpacePutAdmission<T>(
   canvasId: string,
   operation: () => Promise<T>,
 ): Promise<T> {
-  return withAdmission(workspacePath, canvasId, 'put', operation);
+  return withPutAdmission(workspacePath, canvasId, operation);
 }
 
-export function withSpaceDeleteAdmission<T>(
+export async function beginSpaceDeleteAdmission(
   workspacePath: string,
   canvasId: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  return withAdmission(workspacePath, canvasId, 'delete', operation);
+): Promise<() => void> {
+  const gateKey = key(workspacePath, canvasId);
+  const gate = gateFor(workspacePath, canvasId);
+  const releaseGate = await gate.acquireDelete();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    releaseGate();
+    if (gate.idle && gates.get(gateKey) === gate) gates.delete(gateKey);
+  };
 }
 
 /** Reject a structured mutation once deletion is active or queued. */

@@ -53,6 +53,11 @@ describeSpaceLifecycleContract('Disk', () => {
   return {
     lifecycle: fixture.store.lifecycle(),
     read: (canvasId: string) => fixture.store.space(canvasId).record.read(),
+    attemptMutation: (canvasId: string) =>
+      fixture.store.space(canvasId).nodes.put({
+        nodeId: 'delete-fence-node',
+        record: note('delete-fence-node', 'Delete fence node', 'body'),
+      }),
     worldCanvasId: fixture.worldCanvasId,
     cleanup: fixture.cleanup,
   };

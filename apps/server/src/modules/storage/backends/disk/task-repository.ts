@@ -12,11 +12,11 @@ import {
   type TaskStoreSnapshot,
 } from '@huabu/shared';
 
-import { assertSpaceMutationAllowed } from './legacy/space-lifecycle-admission.js';
 import { readDiskSpaceRecord } from './space-repository.js';
 import { atomicWriteJson, readJsonStrict } from '../../../../utils/fs.js';
 import { tasksPath } from '../../../workspace/disk/paths.js';
 import { getWorkspacePath } from '../../../workspace.js';
+import { assertSpaceMutationAllowed } from '../../space-lifecycle-admission.js';
 
 import type { CanvasStore } from './legacy/canvas-store.js';
 import type {

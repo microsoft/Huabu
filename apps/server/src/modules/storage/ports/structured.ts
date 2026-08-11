@@ -93,6 +93,28 @@ export type SpaceDeleteResult =
       readonly reason: 'not-found' | 'world-forbidden';
     };
 
+export type SpaceDeleteFinishResult =
+  | { readonly ok: true; readonly reason: 'deleted' }
+  | { readonly ok: false; readonly reason: 'not-found' };
+
+/**
+ * Exclusive structured-deletion session for one Space.
+ *
+ * While open, every mutation for the same Space must reject, including
+ * create/rename, record CAS, nodes, ordered batches, logs, and Tasks. Reads
+ * remain available so composition can identify and clean external blobs.
+ * `finish` removes structured state and closes the session; `abort` leaves
+ * it intact and is idempotent. A caller must invoke one terminal method.
+ */
+export interface SpaceDeleteSession {
+  finish(): Promise<SpaceDeleteFinishResult>;
+  abort(): Promise<void>;
+}
+
+export type SpaceBeginDeleteResult =
+  | { readonly ok: true; readonly session: SpaceDeleteSession }
+  | { readonly ok: false; readonly reason: 'world-forbidden' };
+
 export interface SpaceRenameInput {
   readonly canvasId: string;
   readonly title: string | null;
@@ -107,6 +129,8 @@ export type SpaceRenameResult =
   | {
       readonly ok: false;
       readonly reason: 'title-conflict';
+      /** Existing logical title that owns the conflicting backend slot. */
+      readonly conflictingTitle: string | null;
     };
 
 /**
@@ -123,7 +147,15 @@ export type SpaceRenameResult =
  */
 export interface SpaceLifecycleRepository {
   create(input: SpaceCreateInput): Promise<SpaceCreateResult>;
-  delete(input: SpaceDeleteInput): Promise<SpaceDeleteResult>;
+  /**
+   * Fence mutations before cross-store cleanup begins.
+   *
+   * An absent ordinary Space still returns a session so orphan blobs can be
+   * swept; `session.finish()` then reports `not-found`. The guarantee covers
+   * overlapping calls through this backend instance, not uncoordinated
+   * processes or a crash while the session is open.
+   */
+  beginDelete(input: SpaceDeleteInput): Promise<SpaceBeginDeleteResult>;
   rename(input: SpaceRenameInput): Promise<SpaceRenameResult>;
 }
 

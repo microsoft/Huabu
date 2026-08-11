@@ -25,7 +25,6 @@ import {
   markNodeDeleted,
   restoreNodeTombstones,
 } from './node-tombstones.js';
-import { assertSpaceMutationAllowed } from './space-lifecycle-admission.js';
 import {
   appendJsonLine,
   appendJsonLines,
@@ -66,7 +65,9 @@ import {
   nodesDir,
 } from '../../../../workspace/disk/paths.js';
 import { getWorkspacePath } from '../../../../workspace.js';
+import { assertSpaceMutationAllowed } from '../../../space-lifecycle-admission.js';
 import { readValidCanvasFile } from '../space-record-validation.js';
+import { titleVisibleAtDirectory } from '../space-title.js';
 
 import type {
   CanvasEvent,
@@ -278,6 +279,8 @@ export class CanvasStore {
   /** Workspace this handle was created for; handles never follow activation. */
   readonly #workspacePath: string;
   private nodes: NameIndex<NodeFileEntry> | null = null;
+  /** Invalidates stale async batch scans without serializing their I/O. */
+  private nodeIndexGeneration = 0;
   /**
    * Ids that resolve to more than one `.md` sidecar on disk, captured
    * during the most recent index scan. Kept in sync with {@link nodes}:
@@ -349,20 +352,24 @@ export class CanvasStore {
       );
     }
     const dirName = path.basename(canvasRoot(this.canvasId));
-    const expectedDir = toSafeFilename(file.title, this.canvasId);
-    if (!isWorldCanvasId(this.canvasId) && dirName && dirName !== expectedDir) {
+    const visibleTitle = titleVisibleAtDirectory(
+      file.title,
+      this.canvasId,
+      dirName,
+    );
+    if (!isWorldCanvasId(this.canvasId) && visibleTitle !== file.title) {
       const next: CanvasFile = {
         ...file,
-        title: dirName,
+        title: visibleTitle,
         updatedAt: Date.now(),
       };
       try {
         assertSpaceMutationAllowed(this.#workspacePath, this.canvasId);
         atomicWriteJson(canvasJsonPath(this.canvasId), next);
-        patchCanvasDirTitle(this.canvasId, dirName);
+        patchCanvasDirTitle(this.canvasId, visibleTitle);
         return next;
       } catch {
-        return { ...file, title: dirName };
+        return { ...file, title: visibleTitle };
       }
     }
 
@@ -499,6 +506,11 @@ export class CanvasStore {
       );
     }
 
+    // Freeze physical node ownership for the synchronous batch. Every node
+    // mutation below updates this fresh index in the same JavaScript turn.
+    this.invalidateNodeIndex();
+    this.nodeIndex();
+
     const tombstoneSnapshot = captureNodeTombstones(
       this.#workspacePath,
       this.canvasId,
@@ -592,6 +604,7 @@ export class CanvasStore {
 
   private invalidateNodeIndex(): void {
     this.nodes = null;
+    this.nodeIndexGeneration += 1;
   }
 
   /**
@@ -599,15 +612,15 @@ export class CanvasStore {
    * (the manual-refresh path), dropping the cache only when a rescan is
    * actually warranted. Two triggers force the drop:
    *
-   *   1. `nodeId` is currently flagged duplicate. The cheap count probe
+   *   1. `nodeId` is currently flagged duplicate. The cheap filename probe
    *      below can't see a duplicate being *resolved*: while duplicated,
    *      the index collapses the two sidecars to one id, so deleting one
    *      file makes the on-disk `.md` count match the cached index size
    *      again (1 === 1) and the probe reads "fresh". A flagged node
    *      therefore always re-reads so the resolution is detected.
-   *   2. the on-disk `.md` count drifted from the index size — a sibling
-   *      sidecar appeared or vanished since the last scan (e.g. a new
-   *      duplicate, or another CanvasStore instance's write).
+   *   2. the on-disk `.md` filename set drifted from the cached index — a
+   *      sibling sidecar appeared, vanished, or was replaced since the last
+   *      scan (e.g. a new duplicate or another store instance's write).
    *
    * Otherwise the warm cache is trusted. The probe is a names-only
    * `readdir`; per-file contents are only re-read when a rescan fires.
@@ -646,21 +659,25 @@ export class CanvasStore {
   }
 
   /**
-   * Cheap staleness probe: compare the number of `.md` files currently on
-   * disk against the cached index size. A names-only `readdirSync` (no
-   * file contents read) is enough to notice that a sidecar appeared or
-   * vanished since the last scan — the signal {@link writeNode} uses to
-   * decide whether a full content rescan is needed before treating a
-   * write as a create. Returns `true` when a rescan is warranted.
+   * Cheap staleness probe: compare the `.md` filenames currently on disk
+   * against the cached index. A names-only `readdirSync` (no file contents
+   * read) notices appearances, removals, renames, and equal-count
+   * replacements before a write trusts cached physical ownership.
    */
   private nodeIndexCountStale(idx: NameIndex<NodeFileEntry>): boolean {
     const dir = nodesDir(this.canvasId);
     if (!existsSync(dir)) return idx.size() > 0;
-    let count = 0;
-    for (const file of readdirSync(dir)) {
-      if (file.endsWith('.md')) count++;
-    }
-    return count !== idx.size();
+    const diskFiles = readdirSync(dir)
+      .filter((file) => file.endsWith('.md'))
+      .sort();
+    const indexedFiles = idx
+      .list()
+      .map((entry) => entry.filename)
+      .sort();
+    return (
+      diskFiles.length !== indexedFiles.length ||
+      diskFiles.some((file, index) => file !== indexedFiles[index])
+    );
   }
 
   /**
@@ -767,12 +784,33 @@ export class CanvasStore {
       }
     };
 
-    const filename = this.nodeFilenameOf(nodeId);
-    let raw = read(filename);
+    const readOwned = (filename: string): string | null => {
+      const raw = read(filename);
+      if (raw === null) return null;
+      const { meta } = parseFrontmatter(raw, { strict: true });
+      const rawId = meta['id'];
+      const persistedId =
+        typeof rawId === 'string' && rawId
+          ? rawId
+          : filename.replace(/\.md$/, '');
+      return persistedId === nodeId ? raw : null;
+    };
+
+    let filename = this.nodeIndex().get(nodeId)?.filename;
+    if (filename === undefined) {
+      // A warm filename cache cannot detect an in-place frontmatter id edit.
+      // Rebuild content ownership before declaring a stable id absent.
+      this.invalidateNodeIndex();
+      filename = this.nodeIndex().get(nodeId)?.filename;
+      if (filename === undefined) return null;
+    }
+    let raw = readOwned(filename);
     if (raw === null) {
       this.invalidateNodeIndex();
-      const retryFilename = this.nodeFilenameOf(nodeId);
-      if (retryFilename !== filename) raw = read(retryFilename);
+      const retryFilename = this.nodeIndex().get(nodeId)?.filename;
+      if (retryFilename === undefined) return null;
+      filename = retryFilename;
+      raw = readOwned(filename);
       if (raw === null) return null;
     }
     return markdownToNodeContent(nodeId, raw, true);
@@ -801,6 +839,7 @@ export class CanvasStore {
     strict?: boolean;
   }): Promise<Map<string, NodeContent>> {
     this.assertActiveWorkspace();
+    const generation = this.nodeIndexGeneration;
     const contents = new Map<string, NodeContent>();
     const idx = new NameIndex<NodeFileEntry>();
     const duplicates = new Set<string>();
@@ -833,8 +872,10 @@ export class CanvasStore {
         contents.set(id, markdownToNodeContent(id, raw, options?.strict));
       }
     }
-    this.nodes = idx;
-    this.nodeDuplicateIds = duplicates;
+    if (this.nodeIndexGeneration === generation) {
+      this.nodes = idx;
+      this.nodeDuplicateIds = duplicates;
+    }
     return contents;
   }
 
@@ -863,6 +904,7 @@ export class CanvasStore {
     signal?: { readonly aborted: boolean },
   ): Promise<Map<string, NodeContent>> {
     this.assertActiveWorkspace();
+    const generation = this.nodeIndexGeneration;
     const contents = new Map<string, NodeContent>();
     const idx = new NameIndex<NodeFileEntry>();
     const duplicates = new Set<string>();
@@ -889,8 +931,10 @@ export class CanvasStore {
         onNode(id, content);
       });
     }
-    this.nodes = idx;
-    this.nodeDuplicateIds = duplicates;
+    if (this.nodeIndexGeneration === generation) {
+      this.nodes = idx;
+      this.nodeDuplicateIds = duplicates;
+    }
     return contents;
   }
 
@@ -901,7 +945,7 @@ export class CanvasStore {
   writeNode(
     nodeId: string,
     content: NodeContent,
-    opts: { strictRename?: boolean } = {},
+    opts: { strictRename?: boolean; ownershipValidated?: boolean } = {},
   ): RenameResult {
     this.assertActiveWorkspace();
     if (content.nodeId !== nodeId) {
@@ -920,6 +964,16 @@ export class CanvasStore {
     }
     mkdirp(nodesDir(this.canvasId));
 
+    // Standalone mutation calls must establish current frontmatter ownership,
+    // not just compare filenames. Executor batches already performed this
+    // refresh once in withValidatedNodeMutationTransaction().
+    if (
+      this.nodeMutationTransactionDepth === 0 &&
+      opts.ownershipValidated !== true
+    ) {
+      this.invalidateNodeIndex();
+    }
+
     let idx = this.nodeIndex();
     let existing = idx.get(nodeId);
 
@@ -932,8 +986,8 @@ export class CanvasStore {
     // fresh name (a duplicate) or rename the wrong file. Two cheap probes
     // decide whether a full content rescan is warranted:
     //   1. the file the index points at for this id is gone, or
-    //   2. the on-disk `.md` count no longer matches the index size
-    //      (a sibling appeared / vanished — e.g. another instance's write).
+    //   2. the on-disk `.md` filename set no longer matches the cached set
+    //      (a sibling appeared, vanished, or was replaced externally).
     // Only then do we pay for a rescan, which also refreshes the
     // duplicate-id set consulted by the guard below. Steady-state edits
     // and batch creates skip the rescan and stay on the fast path.
@@ -1046,7 +1100,10 @@ export class CanvasStore {
         // the rollback unlink ALSO fails (double failure) the duplicate is
         // now persistent: flag the id so the next read/write reports it.
         const rollback = this.tryUnlink(newPath);
-        if (!rollback.ok) this.nodeDuplicateIds.add(nodeId);
+        if (!rollback.ok) {
+          this.nodeDuplicateIds.add(nodeId);
+          this.nodeIndexGeneration += 1;
+        }
         const message = `Failed to remove stale node sidecar "${oldFilename}" after writing "${target}": ${toErrnoString(removed.error)}`;
         log.warn(
           {
@@ -1064,6 +1121,8 @@ export class CanvasStore {
     } else if (!existing) {
       idx.add({ id: nodeId, filename: target });
     }
+
+    this.nodeIndexGeneration += 1;
 
     return { ok: true, filename: target, label: finalLabel };
   }
@@ -1085,7 +1144,10 @@ export class CanvasStore {
    * would leave structural state without a reference to the node while its
    * `.md` stays on disk as a permanent orphan.
    */
-  deleteNode(nodeId: string): 'deleted' | 'absent' {
+  deleteNode(
+    nodeId: string,
+    options: { ownershipValidated?: boolean } = {},
+  ): 'deleted' | 'absent' {
     this.assertActiveWorkspace();
     // Keep idempotent delete semantics, but do not retain a tombstone for an
     // id whose Space itself does not exist.
@@ -1094,6 +1156,18 @@ export class CanvasStore {
       !this.readValidSpaceForMutation('delete node content')
     ) {
       return 'absent';
+    }
+    if (
+      this.nodeMutationTransactionDepth === 0 &&
+      options.ownershipValidated !== true
+    ) {
+      this.invalidateNodeIndex();
+    }
+    this.nodeIndex();
+    if (this.nodeDuplicateIds.has(nodeId)) {
+      throw new Error(
+        `Cannot delete node ${JSON.stringify(nodeId)} while multiple sidecars claim that id`,
+      );
     }
     // Tombstone the id up front (before any early return or throw) so a late
     // in-flight write cannot resurrect the sidecar regardless of which delete
@@ -1106,6 +1180,7 @@ export class CanvasStore {
     const filePath = nodeFilePath(this.canvasId, filename);
     if (!existsSync(filePath)) {
       idx.remove(nodeId);
+      this.nodeIndexGeneration += 1;
       return 'absent';
     }
     const removed = this.tryUnlink(filePath);
@@ -1118,6 +1193,7 @@ export class CanvasStore {
       throw new CanvasStoreIOError(message, { cause: removed.error });
     }
     idx.remove(nodeId);
+    this.nodeIndexGeneration += 1;
     return 'deleted';
   }
 
