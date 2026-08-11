@@ -1,10 +1,10 @@
 # Canvas Storage Architecture
 
-> Last updated: 2026-08-08
+> Last updated: 2026-08-11
 
 ## 1. Overview
 
-Every Space remains fully self-contained on Disk by default, but storage no longer presents one all-purpose `CanvasStore` as its backend contract. `apps/server/src/modules/storage/` now separates backend-neutral blob and structured ports, Disk adapters, process-wide composition, and a Disk compatibility facade. Opaque artifact bytes flow through `BlobStore`; `StructuredStore.catalog()` exposes read-only Space listing and World discovery, while `StructuredStore.space(canvasId)` exposes async Space-record, Canvas-log, and Task repositories plus a transitional node surface whose single-node read, write, and delete primitives remain synchronous for the write-coordinator invariant. The Canvas list, Workspace World lookup, Canvas events and thread-change reads, memory analyzer record/event/intent reads, Task services, and cross-store blob-put guard use repositories. Structured writers, node access, and lifecycle mutations still use the compatibility facade.
+Every Space remains fully self-contained on Disk by default, but storage no longer presents one all-purpose `CanvasStore` as its backend contract. `apps/server/src/modules/storage/` separates backend-neutral blob and structured ports, Disk adapters, process-wide composition, and a shrinking Disk compatibility facade. Opaque artifact bytes flow through `BlobStore`; `StructuredStore` now exposes catalogue and lifecycle repositories, while `SpaceHandle` exposes async Space-record, node, Canvas-log, Task, and ordered-writer repositories. The structured lifecycle, standalone node, executor, preprocessing, event, change, and intent mutations enumerated in the Phase-4 plan enter these ports. The remaining compatibility consumers are explicit Disk capabilities and paths such as ZIP import/export, RFS upload/delete, external-note observation/claim, bootstrap/migration, and hydration helpers; some read and some mutate physical files, so they keep non-Disk profiles unselectable until their own contracts are designed.
 
 Runtime Home-folder activation prepares and migrates the selected directory in a disposable child process before committing it as the active workspace. This isolation is required because synchronous filesystem calls against cloud, network, or virtual drives can block indefinitely; a stuck preparation is terminated after 70 seconds with `WORKSPACE_ACTIVATION_TIMEOUT`, while the Server event loop and previously active workspace remain available. Concurrent activation attempts return `WORKSPACE_ACTIVATION_IN_PROGRESS`. Managed-mode startup still prepares synchronously before the Server accepts requests.
 
@@ -54,7 +54,7 @@ Key points:
 - `GET /api/canvas/:worldCanvasId/references` batch-resolves Portal titles and pinned source-node display data for both reference types without writing it into World topology. Results distinguish `ok`, `canvas-missing`, and `node-missing`; storage or parse failures remain request errors.
 - Node filenames are `safe(label).md`; the node's stable id lives in the `id:` frontmatter field.
 - The Disk `BlobStore` maps each Space scope to `.artifacts/`, with blobs named `<artifactId><ext>` and no manifest file — the filename is the URL key. Ordinary callers resolve the scope through `canvasBlobs(canvasId)`: `put()` requires an existing `SpaceRepository` record, while reads and `deleteAll()` remain available for recovery after a record goes missing. `CanvasStore` owns no artifact methods. Only the Disk blob and structured backends are implemented and selectable today.
-- Remote PDF preprocessing writes the already-fetched source bytes into the Space BlobStore as `artifact-<id>.pdf` before structured persistence and replaces the node's remote `src` with that key. As with other artifact imports, this blob write precedes the node write-coordinator transaction; a later structured persistence failure may therefore leave an unreferenced blob until Space deletion, while a blob-write failure degrades to retaining the remote URL.
+- Remote PDF preprocessing writes the already-fetched source bytes into the Space BlobStore as `artifact-<id>.pdf` before structured persistence and replaces the node's remote `src` with that key. As with other artifact imports, this blob write precedes the node write operation; a later structured persistence failure may therefore leave an unreferenced blob until Space deletion, while a blob-write failure degrades to retaining the remote URL.
 - Events are append-only JSONL (`events.jsonl`); each line is `{ ts: number, payload: RecentAction }`.
 - The memory analyzer reads Space existence, at most 100 recent action events, and intent episodes through one `SpaceHandle`. A missing Space skips the pass before reading memory state/chat files or calling the model; corrupt repository data still fails the pass. Chat digest and memory body/state files remain explicit Disk paths.
 - **Chat history is Chat-V2, owned by Agenetes L2 — not `CanvasStore`.** The canonical per-thread conversation is a two-tier append-only log under `chat_v2/`: Tier-1 `<threadId>.events.jsonl` (`AgentStreamEvent` deltas a running turn appends, written by `FileEventLogStore`) and Tier-2 `<threadId>.turns.jsonl` (folded `AgentTurn`s, written by `FileTurnStore` — the only tier `history()` reads back). These files sit under the canvas `.history/` only because it is the Agenetes namespace `storage.root` (`canvasAcpNamespace(canvasId)`); `CanvasStore` never touches them. Do **not** confuse `chat_v2/<threadId>.events.jsonl` (agent stream events) with the sibling `events.jsonl` (canvas action log) — same suffix, unrelated content.
@@ -66,25 +66,26 @@ Key points:
 
 `apps/server/src/modules/storage/` has three layers plus its composition root:
 
-| Path                                            | Responsibility                                                                                                                                                                                     |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ports/blob.ts`                                 | Backend-neutral `BlobStore` connection/scope contract for opaque bytes and bounded materialization leases.                                                                                         |
-| `ports/structured.ts`                           | Backend-neutral `StructuredStore`, read-only catalogue, composite `SpaceHandle`, version-CAS record repository, four log-family repositories, Task repository, and transitional `LegacyNodeStore`. |
-| `ports/contracts/`                              | Reusable catalogue, record, log, Task, blob, and store suites; their concurrency guarantees apply to repository calls, not legacy facade writes.                                                   |
-| `backends/disk/`                                | Disk implementations for blobs, catalogue, structured handles, Space records, Canvas logs, Tasks, and recovery/validation rules.                                                                   |
-| `backends/disk/legacy/`                         | The legacy `CanvasStore` and its synchronous mutation primitives, bounded Workspace-qualified cache, node tombstones, and process-local lifecycle admission.                                       |
-| `compatibility/canvas.ts`                       | Legacy API for create/delete, create-time full-record `listCanvases`, and `getCanvasStore()`; deletion may yield.                                                                                  |
-| `profile.ts` and `storage.ts`                   | Two-axis backend selection, validation, adapter construction, process-wide lifecycle, blob scopes, and cross-store deletion admission.                                                             |
-| `index.ts`                                      | Public exports only; application code imports here rather than reaching into an adapter.                                                                                                           |
-| `canvas-store.ts`, `paths.ts`, `canvas-dirs.ts` | Deprecated forwarding shims with no logic, retained only for high-fanout compatibility imports.                                                                                                    |
+| Path                                            | Responsibility                                                                                                                                       |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ports/blob.ts`                                 | Backend-neutral `BlobStore` connection/scope contract for opaque bytes and bounded materialization leases.                                           |
+| `ports/structured.ts`                           | Backend-neutral `StructuredStore`, catalogue/lifecycle, composite `SpaceHandle`, Space CAS, async nodes, ordered writes, Canvas logs, and Tasks.     |
+| `ports/contracts/`                              | Reusable lifecycle, catalogue, record, node, ordered-writer, log, Task, blob, and store suites; guarantees are the minimum every adapter implements. |
+| `backends/disk/`                                | Disk implementations plus before-image restoration for rejected in-process ordered batches; no journal or startup recovery.                          |
+| `backends/disk/legacy/`                         | The legacy `CanvasStore` and its synchronous adapter primitives, bounded Workspace-qualified cache, and process-local node tombstones.               |
+| `compatibility/canvas.ts`                       | Residual Disk reads plus direct-module create/delete test fixtures; lifecycle writers are not exported from the public storage barrel.               |
+| `space-lifecycle-admission.ts`                  | Backend-neutral, writer-preferring single-process coordinator shared by structured mutations and blob puts during a delete session.                  |
+| `profile.ts` and `storage.ts`                   | Two-axis backend selection, validation, adapter construction, process-wide lifecycle, blob scopes, and the blob-first deletion saga.                 |
+| `index.ts`                                      | Public exports only; application code imports here rather than reaching into an adapter.                                                             |
+| `canvas-store.ts`, `paths.ts`, `canvas-dirs.ts` | Deprecated forwarding shims with no logic, retained only for high-fanout compatibility imports.                                                      |
 
-The Disk structured adapter and compatibility facade resolve the same cached legacy object, so they do not create two in-memory authorities. Repository CAS, append, and Task mutation guarantees are adapter-local while the compatibility facade remains a second write entry point. `SpaceCatalogRepository`, `SpaceRepository`, the event/delta/change/intent repositories, and `CanvasTaskRepository` are async; `LegacyNodeStore.readAllNodes()` and `streamAllNodes()` are also async, while its single-node read/write/delete primitives stay synchronous until the write-coordinator invariant is redesigned for async node storage. Catalogue listing and World discovery use the repository path. Title, create, delete, and every other lifecycle mutation remain on the compatibility path; their future portable outcomes are specified in the multi-backend proposal, not exposed as write methods yet.
+The Disk structured adapter and compatibility facade resolve the same cached legacy object, so migration does not create two in-memory authorities. All portable repository methods are async. `SpaceLifecycleRepository` owns structured create/rename and an exclusive `beginDelete()` session; composition holds that session across the existing blob-first delete saga and then calls `finish()` or `abort()`. `NodeRepository` returns complete records plus revision tokens without exposing filenames. `OrderedSpaceWriter` preserves the old node mutations → Space record → optional delta order. When a normal in-process node → record → delta batch rejects, the adapter must restore that batch's prestate before returning the rejection. An explicit title rename remains the preceding ordered, best-effort boundary and is not rolled back with the batch. The port does not promise process-crash or power-loss recovery, a determinate result after an unknown remote outcome, multi-process serialization, idempotent retry, or publication. Disk meets the in-process restoration requirement with its existing before-image rollback; a SQL adapter may use a native transaction.
 
 Canvas persistence DTOs and the write coordinator live under `modules/canvas/`; physical Workspace paths, name indexes, directory-handle arbitration, and boot migrations live under `modules/workspace/`; generic filesystem and Markdown codecs live under `utils/`. `module-boundaries.test.ts` enforces the storage dependency direction and prevents new consumers of the forwarding shims.
 
-Space deletion is serialized against blob puts by a process-local, writer-preferring admission gate and holds an active-Workspace lease across blob cleanup and structured destruction. Blobs are swept before structure so a failed sweep can be retried while the Space record still names them. Puts already admitted may finish; a put queued behind a successful deletion rechecks existence and fails without recreating blobs, while a failed blob sweep leaves the record available for retry. Mutations through existing Space handles and repositories reject while deletion is active or queued; reads are not gated.
+Space deletion is serialized against composed blob puts by a writer-preferring admission coordinator and holds an active-Workspace lease across blob cleanup and structured destruction. `beginDelete()` acquires the exclusive session before blob I/O; `finish()` removes structured state, while `abort()` releases the fence without doing so. Blobs are swept before structure so a failed sweep can be retried while the Space record still names them. Puts already admitted may finish; a put queued behind a successful deletion rechecks existence and fails without recreating blobs, while a failed blob sweep leaves the record available for retry. Mutations through existing Space handles and repositories reject while deletion is active or queued; reads remain available for cleanup. Residual direct-filesystem capabilities such as ZIP import, RFS upload/delete, and external-note claim are outside this repository fence and remain blockers for a non-Disk profile.
 
-Retained Disk catalogue/Space repository handles, blob scopes, and legacy `CanvasStore` instances reject use after the active Workspace changes. Each `catalog()` call returns a fresh Workspace-bound handle and each read rescans current Disk state. The Workspace-qualified LRU is cleared and rebuilt on the next lookup after a switch. All lifecycle admission, cache invalidation, and retained-handle checks are process-local Disk guarantees, not a portable multi-process transaction contract.
+Retained Disk catalogue/Space repository handles, blob scopes, and legacy `CanvasStore` instances reject use after the active Workspace changes. Each `catalog()` call returns a fresh Workspace-bound handle and each read rescans current Disk state. The Workspace-qualified LRU is cleared and rebuilt on the next lookup after a switch. The delete-session contract covers overlapping operations through one configured backend instance. Disk realizes it with the shared process-local coordinator; it is not a multi-process transaction or distributed lock, and a SQL adapter must supply an equivalent backend-instance fence using its own mechanisms.
 
 The `chat_v2/` two-tier log and `threads.json` remain owned by Agenetes L2 (`FileEventLogStore`, `FileTurnStore`, and `FileThreadStore`), wired in [agenetes/drivers.ts](../../apps/server/src/modules/agent/agenetes/drivers.ts); see [agent-architecture.md](./agent-architecture.md) §5. Workspace activation is coordinated by `apps/server/src/modules/workspace-activation.ts`; the isolated child entry is `workspace-prepare.worker.ts`, and the ordered migration sequence is centralized in `workspace-prepare.ts` with migration implementations under `modules/workspace/migrations/`.
 
@@ -102,35 +103,37 @@ The launcher creates the fixed root Agent Node through `AgentNodeService`, recor
 
 Phase 1 deliberately has no compensation transaction or terminal Run state. A launch failure leaves the Run `pending`, while any root node or thread ids already created are retained in the Run record when available and returned on `RunLaunchError` for explicit recovery.
 
-## 4. Write coordinator — one chokepoint for durable node writes
+## 4. Portable write seam and application ordering
 
-`store.readNode` / `store.writeNode` are the raw sync primitives, but a node's
-`nodes/<safe(label)>.md` has **three** would-be writers — the content PUT
-(in-app editor), preprocess persist, and the agent executor. To stop them
-interleaving or clobbering each other, every durable node write funnels through
-[write-coordinator.ts](../../apps/server/src/modules/canvas/write-coordinator.ts):
+Standalone content PUT and preprocessing persist call
+`updateNode(NodeRepository, ...)`. The Canvas-domain promise-chain mutex remains
+per Space and stays held across the repository's asynchronous read and CAS put.
+The caller still owns field-merging policy; authored-content revisions remain
+`nodeRevisionOf({ content, src })`, and a stale baseline still maps to the same
+`NODE_CONTENT_CONFLICT` response.
 
-| Export                                                        | Concurrency                                                                       | Used by                                                |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `withCanvasMutex(canvasId, fn)`                               | per-canvas promise-chain lock                                                     | the lock itself; executor holds it for its whole batch |
-| `updateNode(store, id, { expectRev?, apply, strictRename? })` | **locking** `read → rev-CAS → apply(current) → writeNode`, atomic under the mutex | content PUT, preprocess persist                        |
-| `applyNodeUpdate(store, id, opts)`                            | the same core **without** the lock (caller already holds it)                      | executor (its batch already owns `withCanvasMutex`)    |
+Executor and revert batches already hold that mutex for their whole command
+batch, so they make one `SpaceHandle.writer.apply(...)` call instead of
+re-entering the standalone coordinator per node. That call receives complete
+node puts/deletes, the next Space record, and its optional delta row. HTTP
+response schemas/statuses, version increments, no-op handling, and SSE
+publication remain in the Canvas application layer. Conflict responses now
+report the existing logical title/label instead of a Disk filename or directory
+locator.
 
-- **rev-CAS** compares `expectRev` against `nodeRevisionOf({ content, src })` of
-  the current on-disk record; a stale baseline returns `{ status: 'rev-conflict', currentRev }`
-  (mapped to `NODE_CONTENT_CONFLICT` 409) and writes nothing.
-- **Field-ownership policy stays in each caller's `apply(current)`** — the
-  coordinator only guarantees serialization + CAS, not which fields win. (e.g.
-  preprocess's authored-body guard and label protection live in its `apply`.)
-- The mutex being per-canvas (coarser than per-node) is deliberate. `updateNode`
-  holds it only for its short synchronous single-node critical section, while the
-  executor holds it across the entire batch, including awaited blob-backed image
-  normalization. A user save can therefore wait behind an agent batch.
+Phase 4 changes no shared schema or web/client source. HTTP statuses and schemas
+and the SSE shape remain stable, subject to the logical conflict-value correction
+above. Publication remains an application action after persistence rather than
+a storage-port responsibility.
 
-### 4.1 Executor persistence rollback
+The mutex is single-process application policy. It is not advertised as a
+backend transaction or distributed lock; an adapter supplies its own CAS and
+may be stronger than the common contract.
 
-The executor's synchronous commit section writes multiple Disk files: affected node sidecars, `space.json`, and the append-only delta log. `runCanvasPersistenceTransaction()` captures raw bytes for `space.json` and affected sidecars, plus the delta log's existence and byte length. A malformed trailing JSONL crash fragment is repaired before that boundary is recorded. If any write fails, rollback restores the sidecars and record bytes and truncates or removes the delta log back to its captured state.
+### 4.1 Executor persistence restoration
 
-`CanvasStore.withValidatedNodeMutationTransaction()` validates `space.json` once, snapshots adapter-local tombstones for affected node ids, and grants the authoritative inserted-id set a tombstone bypass until the full commit succeeds. Rollback restores `space.json` through `writeNodeMutationRollback()` without inferring another tombstone transition, then restores the captured in-memory tombstones. If any restore step fails, `CanvasPersistenceRollbackError` preserves both the original failure and every rollback error.
+For a node/delta batch, Disk's ordered writer changes multiple files: affected node sidecars, `space.json`, and the append-only delta log. Its existing `runCanvasPersistenceTransaction()` helper now lives inside the Disk adapter. It captures raw bytes for `space.json` and affected sidecars, plus the delta log's existence and byte length. If a normal in-process write throws, rollback restores the sidecars and record bytes and truncates or removes the delta log back to its captured state before the rejection returns. A rejected node → record → delta batch therefore does not expose a completed prefix.
 
-Artifact import happens before the Canvas mutex and is not part of this rollback boundary. Post-commit change-review persistence also happens outside the transaction. This remains Disk-era application glue under the existing Canvas mutex, not a portable cross-backend `SpaceCommit` API.
+`CanvasStore.withValidatedNodeMutationTransaction()` validates `space.json` once, snapshots adapter-local tombstones for affected node ids, and grants the authoritative inserted-id set a tombstone bypass until the full commit succeeds. Rollback restores `space.json` through `writeNodeMutationRollback()` without inferring another tombstone transition, then restores the captured in-memory tombstones. The normal rejection path returns only after the persisted and in-memory prestate has been restored.
+
+An explicit title rename is resolved before the protected node → record → delta batch and retains the old ordered, best-effort behavior; a later batch rejection does not promise to undo that rename. Artifact import happens before the Canvas mutex and is also outside this restoration boundary. Post-write change-review persistence happens afterwards. Process termination, power loss, an unknown remote outcome, and uncoordinated multi-process access can still leave an unknown or partial result: Phase 4 adds no filesystem WAL, commit marker, startup recovery, durable tombstone, idempotency record, or outbox. SQLite/Postgres may satisfy the in-process batch guarantee with a native transaction, but callers cannot infer any of those additional guarantees from it.
