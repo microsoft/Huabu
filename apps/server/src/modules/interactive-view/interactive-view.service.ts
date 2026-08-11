@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import { existsSync } from 'node:fs';
+import path from 'node:path';
 
 import {
   createId,
@@ -97,7 +98,10 @@ function stagedRendererPath(
   const match = STAGED_RENDERER_ARTIFACT_RE.exec(rendererArtifact);
   const filename = match?.[1];
   if (!filename) return null;
-  return safeResolve(canvasId, `.upload/${filename}`);
+  const uploadRoot = safeResolve(canvasId, '.upload');
+  const candidate = path.resolve(uploadRoot, filename);
+  if (!candidate.startsWith(uploadRoot + path.sep)) return null;
+  return candidate;
 }
 
 function validateDefinition(definition: InteractiveViewDefinitionV1): void {
