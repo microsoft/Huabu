@@ -2,23 +2,17 @@
 // Licensed under the MIT license.
 
 /**
- * Compatibility facade — the current legacy application storage API.
+ * Compatibility facade for residual Disk reads and test fixtures.
  *
- * This layer exists so Phase 2 can make the port/adapter side correct
- * without an `await` cascade through every consumer. It owns the surface the
- * application uses today: the `CanvasStore` factory and its cache, synchronous
- * Space listing/creation, and async Space deletion. Those remaining lifecycle
- * writers have no portable contract yet; see
- * docs/proposals/multi-backend-storage.md §12.2.3.
+ * Production structured mutations use the portable repositories. The
+ * `CanvasStore` factory remains temporarily available for Disk-specific read
+ * capabilities that earlier phases did not migrate. `createCanvas` and
+ * `deleteCanvas` remain direct-module test helpers; the public storage barrel
+ * deliberately does not export them.
  *
  * It delegates to the Disk legacy implementation directly rather than going
  * through `StructuredStore`, and both views resolve the *same* cached legacy
  * object, so a write through either is immediately visible through the other.
- *
- * This is also, deliberately, still a second **mutation entry point**. Until
- * its writers migrate, the repository CAS and log guarantees hold for calls
- * made through the repositories; they are not a global single-write-authority
- * guarantee for the running application.
  *
  * Nothing under `ports/` or `backends/` may import this file.
  */

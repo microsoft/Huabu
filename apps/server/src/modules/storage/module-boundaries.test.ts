@@ -9,10 +9,10 @@
  * files, so the shape survives contact with the next person who needs "just
  * one import".
  *
- * What this is **not**: evidence that the application is backend-neutral. Most
- * consumers still use the synchronous compatibility facade, and the three root
- * forwarding shims still have dozens of importers. This asserts that the
- * layering is intact and that the shim list only shrinks.
+ * What this is **not**: evidence that every read capability is portable. The
+ * compatibility facade and three root forwarding shims still serve explicit
+ * Disk-only/read paths. This asserts that the portable write boundary and
+ * dependency direction stay intact while that remaining list only shrinks.
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -186,6 +186,59 @@ describe('storage dependency direction', () => {
 
     const nonAdapter = importers.filter((f) => !inLayer(f, 'backends'));
     expect(nonAdapter).toEqual(['modules/storage/storage.ts']);
+  });
+});
+
+describe('structured write authority', () => {
+  it('does not expose compatibility create/delete writers from the public barrel', () => {
+    expect(read('modules/storage/index.ts')).not.toMatch(
+      /\b(?:createCanvas|deleteCanvas)\b/,
+    );
+  });
+
+  it('does not import the compatibility layer from production application code', () => {
+    const violations: string[] = [];
+    for (const file of sourceFiles) {
+      if (file.endsWith('.test.ts') || file.startsWith('modules/storage/')) {
+        continue;
+      }
+      for (const spec of specifiersOf(file)) {
+        const target = resolveSpecifier(file, spec);
+        if (target?.includes('modules/storage/compatibility')) {
+          violations.push(`${file} → ${spec}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps legacy CanvasStore mutations inside the Disk adapter and compatibility layer', () => {
+    const unambiguousMutation =
+      /\.\s*(?:writeNode|deleteNode|renameSelf|destroy|appendDeltaLogEntry|appendEvents|appendChanges|removeChange|upsertIntent)\s*\(/;
+    const callsLegacyMutation = (source: string): boolean => {
+      if (unambiguousMutation.test(source)) return true;
+      if (/getCanvasStore\s*\([^)]*\)\s*\.\s*write\s*\(/.test(source)) {
+        return true;
+      }
+      for (const match of source.matchAll(
+        /\b([A-Za-z_$][\w$]*)\s*=\s*getCanvasStore\s*\(/g,
+      )) {
+        const identifier = match[1].replace(/[$]/g, '\\$&');
+        if (
+          new RegExp(`\\b${identifier}\\s*\\.\\s*write\\s*\\(`).test(source)
+        ) {
+          return true;
+        }
+      }
+      return false;
+    };
+    const violations = sourceFiles
+      .filter((file) => !file.endsWith('.test.ts'))
+      .filter((file) => !inLayer(file, 'backends'))
+      .filter((file) => !inLayer(file, 'compatibility'))
+      .filter((file) => callsLegacyMutation(read(file)));
+
+    expect(violations).toEqual([]);
   });
 });
 

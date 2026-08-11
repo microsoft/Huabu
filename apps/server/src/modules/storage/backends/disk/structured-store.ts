@@ -38,7 +38,7 @@ export class DiskStructuredStore implements StructuredStore {
 
   async init(): Promise<void> {
     // The workspace directory is prepared by `workspace-prepare.ts`; Space
-    // directories are created on demand by `createCanvas`.
+    // directories are created on demand by the lifecycle repository.
   }
 
   async health(): Promise<StorageHealth> {

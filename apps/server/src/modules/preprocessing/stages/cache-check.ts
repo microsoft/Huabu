@@ -17,7 +17,7 @@
  * when src is unchanged.
  */
 
-import type { CanvasStore } from '../../storage/canvas-store.js';
+import type { NodeContent, NodeRepository } from '../../storage/index.js';
 import type {
   PipelineContext,
   PreprocessDiagnostic,
@@ -34,13 +34,13 @@ export type CacheCheckResult = { hit: boolean };
  *
  * Callers should `return project(...)` immediately when this returns `true`.
  */
-export function tryCacheShortCircuit(
+export async function tryCacheShortCircuit(
   request: PreprocessNodeRequest,
   resolved: ResolvedInput,
   ctx: PipelineContext,
   diagnostics: PreprocessDiagnostic[],
-  store: CanvasStore,
-): boolean {
+  nodes: NodeRepository,
+): Promise<boolean> {
   if (request.options?.force) return false;
   if (request.nodeType !== 'web' && request.nodeType !== 'pdf') return false;
 
@@ -60,7 +60,14 @@ export function tryCacheShortCircuit(
     return false;
   }
 
-  const existing = store.readNode(request.nodeId);
+  let existing: NodeContent | null;
+  try {
+    existing = (await nodes.read(request.nodeId))?.record ?? null;
+  } catch {
+    // Preserve the legacy cache behavior: an unreadable/corrupt sidecar is
+    // not a usable cache hit, but it must not prevent a fresh extraction.
+    return false;
+  }
   if (
     !existing ||
     existing.content.length === 0 ||

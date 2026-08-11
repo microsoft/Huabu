@@ -25,9 +25,10 @@ import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { persist } from './persist.js';
 import canvasRoutes from '../../canvas/canvas.route.js';
-import { getCanvasStore } from '../../storage/index.js';
+import { getStructuredStore } from '../../storage/index.js';
 import { setWorkspacePath } from '../../workspace.js';
 
+import type { NodeContent, NodeRepository } from '../../storage/index.js';
 import type { NormalizeResult } from '../types.js';
 
 let tmp: string;
@@ -41,17 +42,22 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-/** Seed a canvas with one node whose `.md` body is `content`. */
-function seedNode(
+/** Seed a Space topology with one node and return its async node repository. */
+async function seedSpace(
   canvasId: string,
   nodeId: string,
   type: string,
-  content: string,
-): void {
-  const store = getCanvasStore(canvasId);
-  store.write({
+): Promise<NodeRepository> {
+  const structured = getStructuredStore();
+  const created = await structured.lifecycle().create({
     canvasId,
     title: null,
+  });
+  if (!created.ok) throw new Error(`failed to create ${canvasId}`);
+
+  const space = structured.space(canvasId);
+  const write = await space.record.compareAndSwap(0, {
+    ...created.record,
     version: 1,
     state: {
       nodes: [
@@ -59,14 +65,33 @@ function seedNode(
       ],
       edges: [],
     },
-    createdAt: Date.now(),
     updatedAt: Date.now(),
   });
-  store.writeNode(nodeId, { nodeId, type, label: 'A', content });
+  if (!write.ok) throw new Error(`failed to seed topology for ${canvasId}`);
+  return space.nodes;
 }
 
-function bodyOf(canvasId: string, nodeId: string): string | undefined {
-  return getCanvasStore(canvasId).readNode(nodeId)?.content ?? undefined;
+/** Seed a Space with one node whose persisted body is `content`. */
+async function seedNode(
+  canvasId: string,
+  nodeId: string,
+  type: string,
+  content: string,
+): Promise<NodeRepository> {
+  const nodes = await seedSpace(canvasId, nodeId, type);
+  const result = await nodes.put({
+    nodeId,
+    record: { nodeId, type, label: 'A', content },
+  });
+  if (!result.ok) throw new Error(`failed to seed node ${nodeId}`);
+  return nodes;
+}
+
+async function bodyOf(
+  nodes: NodeRepository,
+  nodeId: string,
+): Promise<string | undefined> {
+  return (await nodes.read(nodeId))?.record.content ?? undefined;
 }
 
 function normalized(nodeId: string, canonicalContent: string): NormalizeResult {
@@ -75,122 +100,121 @@ function normalized(nodeId: string, canonicalContent: string): NormalizeResult {
 
 describe('persist — authored-body CAS guard', () => {
   it('skips (no write) when an authored body diverged from disk', async () => {
-    seedNode('c1', 'n1', 'note', 'newer-disk-version');
-    const store = getCanvasStore('c1');
+    const nodes = await seedNode('c1', 'n1', 'note', 'newer-disk-version');
 
     // Preprocess snapshot is stale — on-disk body has moved on.
     const result = await persist(
       normalized('n1', 'stale-snapshot'),
       'note',
       'authored',
-      store,
+      nodes,
     );
 
     expect(result.contentChanged).toBe(false);
     // The newer on-disk body is preserved — NOT clobbered.
-    expect(bodyOf('c1', 'n1')).toBe('newer-disk-version');
+    await expect(bodyOf(nodes, 'n1')).resolves.toBe('newer-disk-version');
   });
 
   it('still persists a derived body that diverged (no guard)', async () => {
-    seedNode('c1', 'n1', 'web', 'old-extraction');
-    const store = getCanvasStore('c1');
+    const nodes = await seedNode('c1', 'n1', 'web', 'old-extraction');
 
     const result = await persist(
       normalized('n1', 'fresh-extraction'),
       'web',
       'derived',
-      store,
+      nodes,
     );
 
     expect(result.contentChanged).toBe(true);
-    expect(bodyOf('c1', 'n1')).toBe('fresh-extraction');
+    await expect(bodyOf(nodes, 'n1')).resolves.toBe('fresh-extraction');
   });
 
   it('creates an authored body when none exists (guard needs an existing body)', async () => {
     // No seedNode → no `.md` on disk yet.
-    getCanvasStore('c2').write({
-      canvasId: 'c2',
-      title: null,
-      version: 1,
-      state: {
-        nodes: [{ id: 'n1', type: 'note', position: { x: 0, y: 0 }, data: {} }],
-        edges: [],
-      },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    const store = getCanvasStore('c2');
+    const nodes = await seedSpace('c2', 'n1', 'note');
 
     const result = await persist(
       normalized('n1', 'first body'),
       'note',
       'authored',
-      store,
+      nodes,
     );
 
     expect(result.contentChanged).toBe(true);
-    expect(bodyOf('c2', 'n1')).toBe('first body');
+    await expect(bodyOf(nodes, 'n1')).resolves.toBe('first body');
   });
 
   it('does not recreate a missing sidecar when preprocessing requires one', async () => {
-    getCanvasStore('c3').write({
-      canvasId: 'c3',
-      title: null,
-      version: 1,
-      state: {
-        nodes: [
-          { id: 'pdf1', type: 'pdf', position: { x: 0, y: 0 }, data: {} },
-        ],
-        edges: [],
-      },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    const store = getCanvasStore('c3');
+    const nodes = await seedSpace('c3', 'pdf1', 'pdf');
 
     const result = await persist(
       normalized('pdf1', ''),
       'pdf',
       'derived',
-      store,
+      nodes,
       undefined,
       true,
     );
 
     expect(result.contentChanged).toBe(false);
-    expect(store.readNode('pdf1')).toBeNull();
+    await expect(nodes.read('pdf1')).resolves.toBeNull();
+  });
+
+  it('quietly skips a late write suppressed after deletion', async () => {
+    const nodes = {
+      canvasId: 'c-deleted',
+      read: async () => null,
+      put: async () => ({ ok: false, reason: 'write-suppressed' as const }),
+    } as unknown as NodeRepository;
+
+    await expect(
+      persist(
+        normalized('deleted-node', 'late extraction'),
+        'web',
+        'derived',
+        nodes,
+      ),
+    ).resolves.toEqual({
+      nodeId: 'deleted-node',
+      isNew: false,
+      contentChanged: false,
+    });
   });
 
   it('refreshes a PDF src when unchanged content adopts a local snapshot', async () => {
-    seedNode('c4', 'pdf1', 'pdf', 'same extracted text');
-    const store = getCanvasStore('c4');
-    store.writeNode('pdf1', {
+    const nodes = await seedNode('c4', 'pdf1', 'pdf', 'same extracted text');
+    const record: NodeContent = {
       nodeId: 'pdf1',
       type: 'pdf',
       label: 'Paper',
       src: 'https://arxiv.org/pdf/2505.10831',
       content: 'same extracted text',
-    });
+    };
+    const setup = await nodes.put({ nodeId: 'pdf1', record });
+    if (!setup.ok) throw new Error('failed to seed remote PDF source');
 
     const result = await persist(
       normalized('pdf1', 'same extracted text'),
       'pdf',
       'derived',
-      store,
+      nodes,
       'artifact_local.pdf',
       true,
     );
 
     expect(result.contentChanged).toBe(false);
     expect(result.persistedSrc).toBe('artifact_local.pdf');
-    expect(store.readNode('pdf1')?.src).toBe('artifact_local.pdf');
+    await expect(nodes.read('pdf1')).resolves.toEqual(
+      expect.objectContaining({
+        record: expect.objectContaining({ src: 'artifact_local.pdf' }),
+      }),
+    );
   });
 });
 
 describe('persist — concurrency with a content PUT (authored body not clobbered)', () => {
   it('preserves a concurrent user PUT even when preprocess persists a stale snapshot', async () => {
-    seedNode('c1', 'n1', 'note', 'v1');
-    const store = getCanvasStore('c1');
+    const nodes = await seedNode('c1', 'n1', 'note', 'v1');
     const revV1 = nodeRevisionOf({ content: 'v1' });
 
     const app = fastify();
@@ -212,7 +236,7 @@ describe('persist — concurrency with a content PUT (authored body not clobbere
           expectRev: revV1,
         }),
       });
-      const pre = persist(normalized('n1', 'v1'), 'note', 'authored', store);
+      const pre = persist(normalized('n1', 'v1'), 'note', 'authored', nodes);
       const [putRes, preRes] = await Promise.all([put, pre]);
 
       // The user PUT always lands (persist never advances the body, so its
@@ -222,7 +246,7 @@ describe('persist — concurrency with a content PUT (authored body not clobbere
       // a skip when the PUT diverged the body first.
       expect(preRes.contentChanged).toBe(false);
       // The user's authored body survives — NOT clobbered by the stale snapshot.
-      expect(bodyOf('c1', 'n1')).toBe('user-v2');
+      await expect(bodyOf(nodes, 'n1')).resolves.toBe('user-v2');
     } finally {
       await app.close();
     }

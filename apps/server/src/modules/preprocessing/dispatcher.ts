@@ -14,7 +14,7 @@ import { isLabelProtected } from './label-policy.js';
 import { runPipeline, type PipelineDeps } from './pipeline.js';
 import { getProfile } from './profiles.js';
 import { ProviderManager } from './provider-manager.js';
-import { canvasBlobs, getCanvasStore } from '../storage/index.js';
+import { canvasBlobs, getStructuredStore } from '../storage/index.js';
 
 import type {
   Capability,
@@ -165,7 +165,7 @@ export class PreprocessDispatcher {
     const plan = buildPlan(profile, request);
 
     const deps: PipelineDeps = {
-      store: getCanvasStore(request.canvasId),
+      nodes: getStructuredStore().space(request.canvasId).nodes,
       blobs: canvasBlobs(request.canvasId),
       provider: this.provider,
     };

@@ -31,15 +31,14 @@ import type {
   PreprocessDiagnostic,
   PreprocessNodeResult,
 } from './types.js';
-import type { CanvasStore } from '../storage/canvas-store.js';
-import type { BlobLease, BlobScope } from '../storage/index.js';
+import type { BlobLease, BlobScope, NodeRepository } from '../storage/index.js';
 import type { PreprocessNodeRequest } from '@huabu/shared';
 
 const log = getLogger('preprocessing.pipeline');
 
 /** Dependencies injected into the pipeline runner. */
 export interface PipelineDeps {
-  store: CanvasStore;
+  nodes: NodeRepository;
   blobs: BlobScope;
   provider: ProviderManager;
 }
@@ -138,7 +137,13 @@ async function runPipelineStages(
   // has cached content on disk and `src` is unchanged, skip Stages 2-5 and
   // project directly from the cached node. See `stages/cache-check.ts`.
   if (
-    tryCacheShortCircuit(request, ctx.resolved, ctx, diagnostics, deps.store)
+    await tryCacheShortCircuit(
+      request,
+      ctx.resolved,
+      ctx,
+      diagnostics,
+      deps.nodes,
+    )
   ) {
     return project(
       request,
@@ -296,7 +301,7 @@ async function runPipelineStages(
           ctx.normalized,
           plan,
           deps.provider,
-          deps.store.canvasId,
+          request.canvasId,
         );
         if (has('generate_label')) usedCapabilities.push('generate_label');
         if (has('generate_summary')) usedCapabilities.push('generate_summary');
@@ -379,7 +384,7 @@ async function runPipelineStages(
             placeholderNormalized,
             contentKind,
             bodyOwnership,
-            deps.store,
+            deps.nodes,
             src,
             true,
           );
@@ -395,7 +400,7 @@ async function runPipelineStages(
             ctx.normalized,
             contentKind,
             bodyOwnership,
-            deps.store,
+            deps.nodes,
             src,
             true,
           );

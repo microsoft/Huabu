@@ -15,7 +15,7 @@
  * plugin directly needs no Bearer token.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,6 +30,7 @@ import {
   getStorage,
   setStorageForTesting,
 } from '../storage/index.js';
+import { nodesDir } from '../workspace/disk/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { BlobScope, BlobStore } from '../storage/index.js';
@@ -171,6 +172,35 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       });
       expect(res.statusCode).toBe(409);
       expect(res.json<{ code: string }>().code).toBe('NODE_CONTENT_CONFLICT');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps duplicate sidecars as the existing actionable 409 outcome', async () => {
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      getCanvasStore('c1').writeNode('n1', {
+        nodeId: 'n1',
+        type: 'note',
+        label: 'Note',
+        content: 'body',
+      });
+      const dir = nodesDir('c1');
+      const [original] = readdirSync(dir);
+      copyFileSync(join(dir, original), join(dir, 'Duplicate.md'));
+
+      const response = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'must not overwrite either file',
+        expectRev: nodeRevisionOf({ content: 'body' }),
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json<{ code: string }>().code).toBe(
+        'NODE_DUPLICATE_FILES',
+      );
     } finally {
       await app.close();
     }

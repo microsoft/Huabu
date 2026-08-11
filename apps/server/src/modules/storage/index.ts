@@ -18,11 +18,8 @@
 
 export {
   CanvasStore,
-  createCanvas,
-  deleteCanvas,
   forgetCanvasStore,
   getCanvasStore,
-  listCanvases,
   resetStorageCache,
 } from './compatibility/canvas.js';
 export type { RenameResult, RenameSelfResult } from './compatibility/canvas.js';
@@ -32,11 +29,7 @@ export {
   isWorldCanvasId,
   requireWorldCanvasId,
 } from '../workspace/disk/canvas-dirs.js';
-export {
-  withCanvasMutex,
-  updateNode,
-  applyNodeUpdate,
-} from '../canvas/write-coordinator.js';
+export { withCanvasMutex, updateNode } from '../canvas/write-coordinator.js';
 export type {
   UpdateNodeOptions,
   UpdateNodeOutcome,

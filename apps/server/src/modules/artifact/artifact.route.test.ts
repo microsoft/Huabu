@@ -21,10 +21,9 @@ import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import artifactRoute from './artifact.route.js';
+import { createCanvas, deleteCanvas } from '../storage/compatibility/canvas.js';
 import {
   canvasBlobs,
-  createCanvas,
-  deleteCanvas,
   getStorage,
   resetStorageCache,
   setStorageForTesting,

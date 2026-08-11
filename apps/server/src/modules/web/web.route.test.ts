@@ -9,7 +9,8 @@ import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import webRoutes from './web.route.js';
-import { createCanvas, getCanvasStore } from '../storage/index.js';
+import { createCanvas } from '../storage/compatibility/canvas.js';
+import { getCanvasStore } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 let tmp: string;

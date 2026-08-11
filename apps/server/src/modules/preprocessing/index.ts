@@ -38,7 +38,7 @@ let dispatcherInstance: PreprocessDispatcher | null = null;
 
 /**
  * Get or create the singleton PreprocessDispatcher.
- * The dispatcher resolves the appropriate `CanvasStore` per request,
+ * The dispatcher resolves the appropriate `NodeRepository` per request,
  * so it does not need to be reset when the workspace path changes.
  */
 export function getPreprocessDispatcher(): PreprocessDispatcher {

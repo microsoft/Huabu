@@ -15,7 +15,7 @@
 import { getLogger } from '../../../utils/logger.js';
 import { updateNode } from '../../canvas/write-coordinator.js';
 
-import type { CanvasStore, NodeContent } from '../../storage/canvas-store.js';
+import type { NodeContent, NodeRepository } from '../../storage/index.js';
 import type {
   BodyOwnership,
   NodeContentKind,
@@ -29,7 +29,7 @@ export async function persist(
   normalized: NormalizeResult,
   contentKind: NodeContentKind | undefined,
   bodyOwnership: BodyOwnership | undefined,
-  store: CanvasStore,
+  nodes: NodeRepository,
   src?: string,
   requireExisting = false,
 ): Promise<PersistResult> {
@@ -50,7 +50,7 @@ export async function persist(
   let isNew = false;
   let existingSrc: string | undefined;
 
-  const outcome = await updateNode(store, nodeId, {
+  const outcome = await updateNode(nodes, nodeId, {
     apply: (existing) => {
       existingSrc =
         typeof existing?.src === 'string' ? existing.src : undefined;
@@ -127,6 +127,14 @@ export async function persist(
       };
     },
   });
+
+  // The repository reports anti-resurrection suppression at put time, after
+  // `apply` has selected a branch. Preserve the legacy coordinator behavior,
+  // where suppression happened before `apply` and therefore surfaced as a
+  // quiet skipped persist rather than a retryable PERSIST_FAILED diagnostic.
+  if (outcome.status === 'skipped-deleted') {
+    return { nodeId, isNew: false, contentChanged: false };
+  }
 
   // `branch` / `isNew` / `existingSrc` are set inside `apply` above, which
   // runs synchronously within `updateNode`'s critical section — but TS's
