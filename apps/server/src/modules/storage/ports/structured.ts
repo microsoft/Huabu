@@ -7,22 +7,14 @@
  * The connection ({@link StructuredStore}) owns backend identity and
  * lifecycle, and vends a {@link SpaceHandle} per Space. The handle is a
  * composite of narrow, asynchronous repositories: the versioned Space record
- * ({@link SpaceRepository}), four Canvas-owned log-family repositories, and
- * the canonical Task/Run repository.
+ * ({@link SpaceRepository}), four Canvas-owned log-family repositories, the
+ * canonical Task/Run repository, and read-only node snapshots
+ * ({@link NodeRepository}).
  *
- * Scope note: node sidecars are still reached through
- * {@link LegacyNodeStore}, a deliberately narrow *synchronous* transitional
- * surface. Node persistence is the one part of the Space a non-Disk adapter
- * cannot yet implement, because the write coordinator's atomicity argument
- * depends on `readNode` / `writeNode` being synchronous. Replacing it is a
- * later phase; see docs/proposals/multi-backend-storage.md §12.2.7.
- *
- * Guarantee scope: the concurrency properties below (single-winner CAS,
- * linearizable appends) are **adapter-local**. They hold for calls made
- * through these repositories. The compatibility facade remains a second
- * mutation entry point until its writers migrate, so a passing contract suite
- * is not evidence that the running application has one write authority. See
- * §12.2.3.
+ * Record, delta, and node repositories are deliberately read-only. Durable
+ * aggregate mutation is reachable only through {@link SpaceHandle.commit},
+ * so a caller cannot advance one part of a Space independently of its version
+ * and publication row.
  *
  * This file may not import a backend implementation or the compatibility
  * layer. Persistence DTOs come from the Canvas domain.
@@ -36,7 +28,9 @@ import type {
   NodeContent,
 } from '../../canvas/persistence-types.js';
 import type {
+  CanvasCommitEvent,
   CanvasSummary,
+  ExecuteOriginator,
   IntentEpisode,
   RecentAction,
   TaskRecord,
@@ -63,6 +57,15 @@ export interface StructuredStore {
    */
   catalog(): SpaceCatalogRepository;
   /**
+   * Return the backend-neutral owner of Space creation and deletion.
+   *
+   * Lifecycle repositories are bound to the backend namespace that was
+   * active when they were created. Cross-store cleanup (currently Canvas
+   * blobs) is supplied through the delete hook so the structured record stays
+   * present until that independently durable cleanup succeeds.
+   */
+  lifecycle(): SpaceLifecycleRepository;
+  /**
    * Return the handle for one validated Space id.
    *
    * Handles for the same id denote the same Space; handles for different ids
@@ -73,6 +76,50 @@ export interface StructuredStore {
    * durable state and belongs in a repository, not on a handle.
    */
   space(canvasId: string): SpaceHandle;
+}
+
+// ─── Space lifecycle ───────────────────────────────────────────────────────────────────
+
+export interface SpaceCreateInput {
+  readonly canvasId: string;
+  readonly title: string | null;
+}
+
+export type SpaceCreateResult =
+  | {
+      readonly ok: true;
+      readonly record: CanvasFile;
+      /** Canonical title after filesystem-name de-duplication. */
+      readonly effectiveTitle: string | null;
+    }
+  | { readonly ok: false; readonly reason: 'already-exists' };
+
+export interface SpaceDeleteInput {
+  readonly canvasId: string;
+  /**
+   * Cleanup owned by another store that must finish while the structured
+   * record still names it. A rejection leaves the Space intact and retryable.
+   * The hook is never invoked for World.
+   */
+  readonly beforeRemove?: () => Promise<void>;
+}
+
+export type SpaceDeleteResult =
+  | { readonly ok: true; readonly reason: 'deleted' }
+  | {
+      readonly ok: false;
+      readonly reason: 'not-found' | 'world-forbidden';
+    };
+
+/** Aggregate membership lifecycle for one structured backend namespace. */
+export interface SpaceLifecycleRepository {
+  /** Create one empty version-0 Space; exactly one same-id caller wins. */
+  create(input: SpaceCreateInput): Promise<SpaceCreateResult>;
+  /**
+   * Delete one Space. Environmental failures reject; business outcomes are
+   * returned explicitly.
+   */
+  delete(input: SpaceDeleteInput): Promise<SpaceDeleteResult>;
 }
 
 /** Read-only membership and World identity for one backend namespace. */
@@ -101,46 +148,112 @@ export interface SpaceHandle {
   readonly changes: CanvasChangeRepository;
   readonly intents: CanvasIntentRepository;
   readonly tasks: CanvasTaskRepository;
-  /** Synchronous transitional surface; replaced in a later phase. */
-  readonly nodes: LegacyNodeStore;
+  /** Portable, asynchronous node reads. */
+  readonly nodes: NodeRepository;
+  /**
+   * Atomically replace the Space record, mutate node records, advance the
+   * global version, and append the durable publication row.
+   *
+   * This is the only portable structured mutation authority. Repositories on
+   * the handle remain independently readable, but application writers must
+   * express their changes as one aggregate commit.
+   */
+  commit(input: SpaceCommitInput): Promise<SpaceCommitResult>;
 }
 
-// ─── Space record ───────────────────────────────────────────────────────────
+// ─── Aggregate Space commit ───────────────────────────────────────────────
 
-export type SpaceWriteResult =
-  | { ok: true }
-  | { ok: false; reason: 'not-found' }
-  | { ok: false; reason: 'version-conflict'; actualVersion: number };
+/** Record fields authored by a Space commit; identity/version are derived. */
+export interface SpaceCommitRecord {
+  readonly title: string | null;
+  readonly state: CanvasFile['state'];
+}
+
+/** Durable publication metadata stored with the version transition. */
+export interface SpaceCommitPublication {
+  readonly originator: ExecuteOriginator;
+  /** Whether the initiating client already applied the mutation locally. */
+  readonly optimistic: boolean;
+  readonly commands: readonly unknown[];
+  readonly structureDeltas: readonly unknown[];
+  readonly runId?: string;
+}
+
+export interface SpaceCommitInput {
+  /** Current global Space version observed by the caller. */
+  readonly expectedVersion: number;
+  /** Canonical post-commit title and state. */
+  readonly record: SpaceCommitRecord;
+  /** Whole-record OCC baselines for every node mutation. */
+  readonly nodePreconditions: readonly NodePrecondition[];
+  readonly nodeMutations: readonly SpaceNodeMutation[];
+  readonly publication: SpaceCommitPublication;
+  /**
+   * Temporary Canvas-PUT compatibility: advance even when the canonical
+   * aggregate is unchanged. Remove with the tracked no-op autosave follow-up.
+   */
+  readonly forceVersionBump?: boolean;
+}
+
+export type SpaceCommitConflict =
+  | { readonly reason: 'not-found' }
+  | {
+      readonly reason: 'version-conflict';
+      readonly actualVersion: number;
+      readonly structureRevision: string;
+    }
+  | {
+      readonly reason: 'node-conflict';
+      readonly nodeId: string;
+      readonly actualRevision: NodeRecordRevision | null;
+    }
+  | {
+      /** A put must agree with the canonical post-commit topology. */
+      readonly reason: 'node-topology-conflict';
+      readonly nodeId: string;
+      readonly mutationType: string;
+      readonly topologyType: string | null;
+    }
+  | {
+      readonly reason: 'node-name-conflict';
+      readonly nodeId: string;
+      readonly conflictWith: {
+        readonly id: string;
+        readonly logicalName: string;
+      };
+    }
+  | {
+      readonly reason: 'duplicate-node';
+      readonly nodeId: string;
+      readonly logicalNames: readonly string[];
+    }
+  | { readonly reason: 'node-write-suppressed'; readonly nodeId: string }
+  | { readonly reason: 'world-title-forbidden' }
+  | { readonly reason: 'title-conflict'; readonly conflictWith: string };
+
+export type SpaceCommitResult =
+  | {
+      readonly ok: true;
+      readonly committed: boolean;
+      readonly record: CanvasFile;
+      /** Canonical response/broadcast envelope minted by the server. */
+      readonly event: CanvasCommitEvent;
+      /** Post-commit snapshots for successful puts; deletes are omitted. */
+      readonly nodes: readonly NodeSnapshot[];
+    }
+  | ({ readonly ok: false } & SpaceCommitConflict);
+
+// ─── Space record ───────────────────────────────────────────────────────────
 
 /**
  * The versioned structural record for one Space (`space.json` on Disk).
  *
- * Scoped deliberately: create, delete, World rules, and title/directory
- * rename are aggregate lifecycle concerns that stay on the compatibility path
- * until their portable contract is designed. This repository only replaces
- * the record of a Space that already exists.
+ * Mutation belongs to {@link SpaceHandle.commit}; lifecycle membership belongs
+ * to {@link SpaceLifecycleRepository}.
  */
 export interface SpaceRepository {
   /** The current record, or null when the Space does not exist. */
   read(): Promise<CanvasFile | null>;
-  /**
-   * Replace the record iff its version is still `expectedVersion`.
-   *
-   * `next.version` must be exactly `expectedVersion + 1`, `next.canvasId`
-   * must match this handle, and the identity fields (`canvasId`, `title`,
-   * `createdAt`) must match the current record — this is not the rename or
-   * lifecycle path.
-   *
-   * The version check and the replacement are **one** operation: two
-   * concurrent calls with the same expected version cannot both succeed.
-   *
-   * Environmental IO failures reject; they never masquerade as `not-found`
-   * or as a business result.
-   */
-  compareAndSwap(
-    expectedVersion: number,
-    next: CanvasFile,
-  ): Promise<SpaceWriteResult>;
 }
 
 // ─── Canvas logs ────────────────────────────────────────────────────────────
@@ -159,13 +272,10 @@ export interface CanvasEventRepository {
 }
 
 /**
- * Executor deltas for one Space.
- *
- * Versions are unique and strictly increasing; duplicate or older appends
- * reject, and reads preserve version order.
+ * Durable commit publications for one Space. Writes are emitted only by
+ * {@link SpaceHandle.commit}; reads preserve version order.
  */
 export interface CanvasDeltaRepository {
-  append(entry: DeltaLogEntry): Promise<void>;
   /** Rows with `version` strictly greater than `fromVersion`, in order. */
   readSince(fromVersion: number): Promise<DeltaLogEntry[]>;
 }
@@ -206,62 +316,62 @@ export interface CanvasTaskRepository {
   updateRun(runId: string, update: TaskRunUpdate): Promise<TaskRunRecord>;
 }
 
-// ─── Node sidecars (transitional) ───────────────────────────────────────────
+// ─── Node records ──────────────────────────────────────────────────────────
+
+declare const nodeRecordRevisionBrand: unique symbol;
 
 /**
- * Outcome of a node sidecar write.
+ * Opaque revision of one complete canonical node record.
  *
- * Declared here rather than imported from the Disk legacy class so this port
- * stays free of backend imports; the Disk wrapper's return value is
- * structurally this type.
+ * Callers may retain and compare the token, but must not parse or synthesize
+ * it. The revision changes when any persisted record field or its logical name
+ * changes; it is deliberately broader than content-only HTTP ETags.
  */
-export type NodeWriteResult =
+export type NodeRecordRevision = string & {
+  readonly [nodeRecordRevisionBrand]: true;
+};
+
+/** One canonical node record together with its backend-neutral identity. */
+export interface NodeSnapshot {
+  readonly record: NodeContent;
+  readonly revision: NodeRecordRevision;
+  /**
+   * Single-segment logical sidecar name (for example `Meeting notes.md`).
+   * It is never an absolute path or a backend storage locator.
+   */
+  readonly logicalName: string;
+  /** All colliding logical names when more than one record claims this id. */
+  readonly duplicateLogicalNames?: readonly string[];
+}
+
+/** Expected node state used by an aggregate Space commit. */
+export interface NodePrecondition {
+  readonly nodeId: string;
+  /** `null` means the node must be absent. */
+  readonly revision: NodeRecordRevision | null;
+}
+
+/** Node portion of an aggregate Space commit. */
+export type SpaceNodeMutation =
   | {
-      ok: true;
-      /** Filesystem-safe filename (`safe(label) [(N)].md`). */
-      filename: string;
-      /** The label as actually persisted, including any dedupe suffix. */
-      label: string | null;
+      readonly kind: 'put';
+      readonly record: NodeContent;
+      /** User-authored label renames reject instead of auto-deduping. */
+      readonly strictRename?: boolean;
     }
-  | {
-      ok: false;
-      reason: 'conflict';
-      conflictWith: { id: string; filename: string };
-    }
-  | { ok: false; reason: 'duplicate'; files: string[] }
-  | { ok: false; reason: 'not-found' };
+  | { readonly kind: 'delete'; readonly nodeId: string };
 
 /**
- * Node-sidecar operations only.
+ * Portable, read-only access to canonical node records.
  *
- * This surface exists so `handle.nodes` cannot be widened, or cast, back into
- * the old all-purpose store: it must never grow a Space-record, log, title,
- * or lifecycle method. The Disk wrapper delegates each call to the legacy
- * object rather than re-exposing it.
- *
- * It is synchronous because the write coordinator's atomicity argument
- * depends on it: read → revision check → apply → write must stay `await`-free
- * inside the canvas lock. The async node phase replaces this only after
- * re-establishing that invariant.
+ * Mutation intentionally belongs to the aggregate Space commit rather than
+ * this repository, so structural state and node sidecars cannot acquire
+ * independent write authorities.
  */
-export interface LegacyNodeStore {
-  readNode(nodeId: string): NodeContent | null;
-  readAllNodes(options?: {
-    strict?: boolean;
-  }): Promise<Map<string, NodeContent>>;
-  streamAllNodes(
-    onNode: (id: string, content: NodeContent) => void,
-    signal?: { readonly aborted: boolean },
-  ): Promise<Map<string, NodeContent>>;
-  writeNode(
-    nodeId: string,
-    content: NodeContent,
-    opts?: { strictRename?: boolean },
-  ): NodeWriteResult;
-  deleteNode(nodeId: string): 'deleted' | 'absent';
-  nodeIdForFilename(filename: string): string | null;
-  isDuplicateNode(nodeId: string): boolean;
-  duplicateNodeFiles(nodeId: string): string[];
-  revalidateNodeForRead(nodeId: string): void;
-  isNodeWriteSuppressed(nodeId: string): boolean;
+export interface NodeRepository {
+  read(nodeId: string): Promise<NodeSnapshot | null>;
+  /** Return found records keyed by id; missing ids are omitted. */
+  readMany(
+    nodeIds: readonly string[],
+  ): Promise<ReadonlyMap<string, NodeSnapshot>>;
 }

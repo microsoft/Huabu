@@ -156,7 +156,7 @@ const intentRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       });
     }
     const { episode, canvasId } = parsed.data;
-    logIntentEpisode(episode, canvasId);
+    await logIntentEpisode(episode, canvasId);
     return reply.send({ success: true });
   });
 };

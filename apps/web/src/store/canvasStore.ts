@@ -76,44 +76,54 @@ import {
 } from '@/handler/snap/snapSession';
 import { i18n } from '@/i18n';
 
+import {
+  ApiError,
+  getCanvas,
+  getNodeContent,
+  getWorldReferences,
+  postCanvasExecute,
+  putCanvas,
+} from '../api';
+import { canvasSyncTabId, createCanvasCommitGate } from './canvasCommitSync';
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { useWorkspaceStore } from './workspaceStore';
+import { agentApi } from '../api/agent';
+import { cloneArtifactToCanvas, resolveArtifactUrl } from '../api/artifact';
+import { CanvasConflictError } from '../api/canvas';
 import { measureMissingAutoHeights } from './canvasStore/height/measureMissingAutoHeights';
 import { createIntentActionWindow } from './canvasStore/intentActionWindow';
+import { toast, dismissToast } from '../components/Common/Toast';
+import { copyCanvasClipboard } from '../utils/io/clipboard';
+import { nodesToPlainText } from '../utils/io/nodeToPlainText';
 import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
 import { shouldBackfillNodeLabel } from './canvasStore/load/shouldBackfillNodeLabel';
 import { warmupNodeHeights } from './canvasStore/load/warmupNodeHeights';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
-import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
-import { createNodeContentQueue } from './canvasStore/save/nodeContentQueue';
+import {
+  createNodeContentQueue,
+  type NodeBaselineRebaseTicket,
+} from './canvasStore/save/nodeContentQueue';
+import {
+  createNodeInvalidationTracker,
+  retryTrackedInvalidation,
+} from './canvasStore/save/nodeInvalidationTracker';
 import { createPreprocessQueue } from './canvasStore/save/preprocessQueue';
+import { overlayLocalFieldsOnStructureDeltas } from './canvasStore/save/structureDeltaOverlay';
 import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDetector';
+import { stripNodeContentForStructurePut } from './canvasStore/save/structureNodePayload';
 import { createStructureScheduler } from './canvasStore/save/structureScheduler';
 import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
 import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useToolStore } from './toolStore';
-import { useWorkspaceStore } from './workspaceStore';
-import {
-  ApiError,
-  getCanvas,
-  getWorldReferences,
-  postCanvasExecute,
-  putCanvas,
-} from '../api';
-import { agentApi } from '../api/agent';
-import { cloneArtifactToCanvas, resolveArtifactUrl } from '../api/artifact';
-import { CanvasConflictError } from '../api/canvas';
-import { toast, dismissToast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
 import {
   resumeHeightCommits,
   suspendHeightCommits,
 } from '../components/Nodes/shared/height/commitSuspension';
-import { copyCanvasClipboard } from '../utils/io/clipboard';
-import { nodesToPlainText } from '../utils/io/nodeToPlainText';
 
 import type {
   FrameFitPreview,
@@ -137,6 +147,9 @@ import type {
   WireCanvasNode,
   WireSelectionNode,
   ResolvedWorldReference,
+  CanvasCommitEvent,
+  MutationAck,
+  NodeChange,
 } from '@huabu/shared';
 import type { StructuredReflowEntry } from '@huabu/shared/canvas-engine';
 
@@ -379,35 +392,37 @@ export function dismissVersionConflictToast(): void {
 //
 // Markdown sidecar persistence (debounced per-node PUT + serialized
 // in-flight chain) lives in `./canvasStore/save/nodeContentQueue.ts`.
-// The factory call is in the module-scope singletons section below;
-// `stripNodeContentForStructurePut` is the only piece that stays here
-// because it's only used inside the `saveCanvas` action body.
+// The queue factory call and structure-payload builder live in the save
+// modules below so the create/ACK race stays independently testable.
 
-/**
- * Remove every {@link NODE_CONTENT_KEYS} member from each node's
- * `data` before sending a structure PUT — those fields live in the
- * `.md` sidecar now and are persisted exclusively via the per-node
- * content endpoint. Structure-only fields (`id`, `type`, geometry,
- * `parentId`, custom data) are preserved verbatim. Returns the
- * original `node` reference when nothing was stripped so the array
- * stays identity-stable for downstream diffing.
- */
-function stripNodeContentForStructurePut(nodes: readonly Node[]): Node[] {
-  return nodes.map((node) => {
-    const data = node.data;
-    if (!data) return node;
-    let mutated = false;
-    const slim: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(data)) {
-      if (NODE_CONTENT_KEYS.has(k)) {
-        mutated = true;
-        continue;
-      }
-      slim[k] = v;
+type CommitPendingEffects = {
+  mutatedNodes: Node[];
+  deletedNodeIds: string[];
+  contentEditedNodeIds: string[];
+  deferredFitFrameIds: string[];
+};
+
+export type ConsumeCanvasCommitRequest =
+  | {
+      kind: 'event';
+      commit: CanvasCommitEvent;
+      pendingEffects?: CommitPendingEffects;
+      /** Local structure generation captured by an HTTP request. */
+      acknowledgedStructureGeneration?: number;
     }
-    return mutated ? { ...node, data: slim } : node;
-  });
-}
+  | {
+      kind: 'ack';
+      ack: MutationAck;
+      /** Local structure generation captured when the request started. */
+      acknowledgedStructureGeneration?: number;
+    };
+
+export type ConsumeCanvasCommitResult = {
+  status: 'accepted' | 'duplicate' | 'stale' | 'invalid' | 'gap';
+  skippedNodeIds: string[];
+  /** A gap reload is safe only when no local structure/content is dirty. */
+  shouldReload: boolean;
+};
 
 // ── Spatial data ──────────────────────────────────────────────
 //
@@ -425,6 +440,12 @@ type RFState = {
   edges: Edge[];
   canvasId: string;
   version: number;
+  /** Server CAS token for slim title/topology, independent of `version`. */
+  structureRevision: string | null;
+  /** Incremented for every local structural edit. */
+  structureDirtyGeneration: number;
+  /** Highest local generation acknowledged as durably committed. */
+  structureSyncedGeneration: number;
   isLoading: boolean;
   canvasNotFound: boolean;
   worldReferences: Record<string, ResolvedWorldReference>;
@@ -827,7 +848,7 @@ type RFState = {
 
   loadCanvas: (
     canvasId?: string,
-    options?: { resetHistory?: boolean },
+    options?: { resetHistory?: boolean; preserveLocalChanges?: boolean },
   ) => Promise<void>;
   switchCanvas: (canvasId: string) => Promise<void>;
   /**
@@ -903,6 +924,10 @@ type RFState = {
       deferredFitFrameIds: string[];
     },
   ) => string[];
+  /** Version-gated entry point shared by HTTP acks and SSE commits. */
+  consumeCommit: (
+    request: ConsumeCanvasCommitRequest,
+  ) => ConsumeCanvasCommitResult;
   /**
    * Ids of nodes with un-persisted local content edits (pending debounced
    * save or in-flight PUT). Exposed so the sync store can avoid a blind
@@ -954,6 +979,161 @@ const structureScheduler = createStructureScheduler({
   delayMs: AUTOSAVE_DEBOUNCE_MS,
 });
 
+/** Shared ordering/dedupe gate for both mutation responses and broadcasts. */
+const canvasCommitGate = createCanvasCommitGate<ConsumeCanvasCommitRequest>();
+
+/** Prevent an older invalidate GET from overwriting a later inline/delete. */
+const nodeInvalidationTracker = createNodeInvalidationTracker();
+/** Commit post-effects waiting for an authoritative inline/GET projection. */
+const pendingCommitPreprocessVersions = new Map<string, number>();
+/** Latest authoritative load owns every post-await store mutation. */
+let canvasLoadGeneration = 0;
+let safeReloadInFlight: { canvasId: string; promise: Promise<boolean> } | null =
+  null;
+
+function scheduleExplicitStructureSave(): void {
+  const state = useCanvasStore.getState();
+  state._setStateNoAutosave({
+    structureDirtyGeneration: state.structureDirtyGeneration + 1,
+  });
+  structureScheduler.schedule();
+}
+
+function consumeMutationPublication(
+  canvasId: string,
+  response: { commit?: CanvasCommitEvent; ack?: MutationAck },
+): void {
+  const state = useCanvasStore.getState();
+  // Node/preprocess requests can settle after navigation. Their publication
+  // belongs to the captured Space, never the newly active store cursor.
+  if (state.canvasId !== canvasId) return;
+  let consumed: ConsumeCanvasCommitResult | undefined;
+  if (response.commit) {
+    consumed = state.consumeCommit({ kind: 'event', commit: response.commit });
+  } else if (response.ack) {
+    consumed = state.consumeCommit({ kind: 'ack', ack: response.ack });
+  }
+  if (consumed?.shouldReload) {
+    void reloadCanvasWhenSafe(canvasId);
+  }
+}
+
+function reorderByCanonicalIds<T extends { id: string }>(
+  values: readonly T[],
+  ids: readonly string[] | undefined,
+): T[] {
+  if (!ids) return values as T[];
+  const byId = new Map(values.map((value) => [value.id, value]));
+  const ordered: T[] = [];
+  for (const id of ids) {
+    const value = byId.get(id);
+    if (!value) continue;
+    ordered.push(value);
+    byId.delete(id);
+  }
+  ordered.push(...byId.values());
+  return ordered;
+}
+
+function projectionPatch(
+  change: Extract<NodeChange, { kind: 'inline' }>,
+): Record<string, unknown> {
+  const projection = change.projection;
+  return {
+    label: projection.label,
+    content: projection.content,
+    labelSource: projection.labelSource,
+    src: projection.src,
+    summary: projection.summary,
+    keywords: projection.keywords,
+    provenance: projection.provenance,
+    contentMissing: projection.contentMissing ?? false,
+    artifactMissing: projection.artifactMissing ?? false,
+    contentDuplicate: projection.contentDuplicate ?? false,
+    duplicateFiles: projection.duplicateFiles ?? [],
+  };
+}
+
+async function refreshInvalidatedNode(
+  canvasId: string,
+  nodeId: string,
+  recordRevision: string,
+  commitVersion: number,
+  baselineRebaseTicket?: NodeBaselineRebaseTicket,
+): Promise<void> {
+  const invalidationTicket = nodeInvalidationTracker.begin(
+    nodeId,
+    recordRevision,
+    commitVersion,
+  );
+  try {
+    const response = await retryTrackedInvalidation({
+      tracker: nodeInvalidationTracker,
+      ticket: invalidationTicket,
+      fetch: () => getNodeContent(canvasId, nodeId),
+    });
+    if (!nodeInvalidationTracker.consume(invalidationTicket)) return;
+    if (!response || useCanvasStore.getState().canvasId !== canvasId) return;
+
+    const responseMatchesCommit =
+      response.recordRevision === undefined ||
+      response.recordRevision === recordRevision;
+    const preserveLocalBody =
+      baselineRebaseTicket !== undefined ||
+      nodeContentQueue.pendingNodeIds().includes(nodeId);
+    if (preserveLocalBody) {
+      // Local-first keeps the editor body, but the skipped remote write still
+      // advanced the server CAS. Serialize behind any older local PUT, adopt
+      // only the exact fetched rev, then retry the preserved body on top.
+      const rebaseTicket =
+        baselineRebaseTicket ?? nodeContentQueue.beginBaselineRebase(nodeId);
+      pendingCommitPreprocessVersions.delete(nodeId);
+      await nodeContentQueue.completeBaselineRebase(
+        canvasId,
+        rebaseTicket,
+        response.rev,
+      );
+      return;
+    }
+
+    // A later commit may have landed while the fetch was in flight. When the
+    // endpoint proves that happened, leave the newer local view untouched.
+    if (!responseMatchesCommit) return;
+
+    const current = useCanvasStore.getState();
+    let refreshed: Node | undefined;
+    const nodes = current.nodes.map((node) => {
+      if (node.id !== nodeId) return node;
+      refreshed = {
+        ...node,
+        type: response.type,
+        data: {
+          ...(node.data ?? {}),
+          label: response.label,
+          content: response.content,
+          labelSource: response.labelSource,
+          src: response.src,
+          summary: response.summary,
+          keywords: response.keywords,
+          contentMissing: response.contentMissing ?? false,
+          artifactMissing: response.artifactMissing ?? false,
+          contentDuplicate: response.contentDuplicate ?? false,
+          duplicateFiles: response.duplicateFiles ?? [],
+        },
+      };
+      return refreshed;
+    });
+    if (!refreshed) return;
+    current._setStateNoAutosave({ nodes });
+    nodeContentQueue.seedBaselines([refreshed]);
+    releasePendingCommitPreprocess(nodeId, commitVersion);
+  } finally {
+    if (baselineRebaseTicket) {
+      nodeContentQueue.cancelBaselineRebase(baselineRebaseTicket);
+    }
+  }
+}
+
 // ─── Outgoing event buffer ────────────────────────────────────────────────
 //
 // Every `RecentAction` produced by a UI intent / undo / redo is mirrored
@@ -983,16 +1163,6 @@ const structureScheduler = createStructureScheduler({
 const canvasEvents = createCanvasEventBuffer();
 
 /**
- * Module-scoped per-node preprocessing queue. Each store mutation
- * that affects a markdown-backed node schedules a debounced
- * `preprocessNode` POST through this queue.
- */
-const preprocessQueue = createPreprocessQueue({
-  delayMs: PREPROCESS_DEBOUNCE_MS,
-  getState: () => useCanvasStore.getState(),
-});
-
-/**
  * Module-scoped per-node markdown sidecar save queue. Coalesces rapid
  * editor edits into one PUT per node and serializes in-flight writes
  * so the server never sees two PUTs for the same node concurrently.
@@ -1000,7 +1170,46 @@ const preprocessQueue = createPreprocessQueue({
 const nodeContentQueue = createNodeContentQueue({
   delayMs: NODE_CONTENT_DEBOUNCE_MS,
   getState: () => useCanvasStore.getState(),
+  onMutationCommit: (canvasId, commit) =>
+    consumeMutationPublication(canvasId, { commit }),
+  onMutationAck: (canvasId, ack) =>
+    consumeMutationPublication(canvasId, { ack }),
 });
+
+/**
+ * Module-scoped per-node preprocessing queue. Each store mutation
+ * that affects a markdown-backed node schedules a debounced
+ * `preprocessNode` POST through this queue. New-node work is held until the
+ * node-content queue observes the aggregate structure-create ACK.
+ */
+const preprocessQueue = createPreprocessQueue({
+  delayMs: PREPROCESS_DEBOUNCE_MS,
+  getState: () => useCanvasStore.getState(),
+  shouldDeferNode: (nodeId) =>
+    nodeContentQueue.isAggregateCreatePending(nodeId),
+  originator: { source: 'ui', tabId: canvasSyncTabId },
+  onMutationResponse: consumeMutationPublication,
+});
+
+function releasePendingCommitPreprocess(
+  nodeId: string,
+  throughVersion: number,
+): void {
+  const pendingVersion = pendingCommitPreprocessVersions.get(nodeId);
+  if (pendingVersion === undefined || pendingVersion > throughVersion) return;
+  pendingCommitPreprocessVersions.delete(nodeId);
+  const node = useCanvasStore
+    .getState()
+    .nodes.find((candidate) => candidate.id === nodeId);
+  if (node) preprocessQueue.schedule(node);
+}
+
+function forgetNodePersistence(nodeId: string): void {
+  pendingCommitPreprocessVersions.delete(nodeId);
+  nodeInvalidationTracker.cancelThrough(nodeId, Number.MAX_SAFE_INTEGER);
+  nodeContentQueue.forgetNode(nodeId);
+  preprocessQueue.forgetNode(nodeId);
+}
 
 /**
  * Promote every pending canvas-level structure save AND every pending
@@ -1040,6 +1249,37 @@ export async function drainPendingSaves(): Promise<void> {
     });
   }
   await nodeContentQueue.flushAll();
+}
+
+/**
+ * Heal an unrecoverable publication gap without discarding local-first work.
+ * All pending writes drain before the snapshot begins; a failed/conflicting
+ * drain leaves the current canvas untouched for explicit user recovery.
+ */
+export function reloadCanvasWhenSafe(canvasId: string): Promise<boolean> {
+  if (safeReloadInFlight?.canvasId === canvasId) {
+    return safeReloadInFlight.promise;
+  }
+  const promise = (async (): Promise<boolean> => {
+    await drainPendingSaves();
+    const state = useCanvasStore.getState();
+    if (state.canvasId !== canvasId || state.versionConflict) return false;
+    if (
+      state.structureDirtyGeneration !== state.structureSyncedGeneration ||
+      state.pendingContentNodeIds().length > 0
+    ) {
+      return false;
+    }
+    await state.loadCanvas(canvasId, {
+      resetHistory: true,
+      preserveLocalChanges: true,
+    });
+    return true;
+  })().finally(() => {
+    if (safeReloadInFlight?.promise === promise) safeReloadInFlight = null;
+  });
+  safeReloadInFlight = { canvasId, promise };
+  return promise;
 }
 
 /**
@@ -1164,16 +1404,21 @@ const autoSaveMiddleware =
       if (!prev.isLoading) {
         const next = get();
         // Gate the structure autosave on a real structural diff so pure
-        // content edits do NOT bump the canvas `version` — they ride
-        // the per-node content PUT instead. See
+        // content edits do not schedule a redundant structure PUT — they
+        // ride their own versioned node commit instead. See
         // `./canvasStore/save/structureDirtyDetector.ts`.
         if (shouldScheduleStructureSave(prev, next)) {
+          // Raw `set` avoids recursively running this middleware. The two
+          // generations let realtime commits distinguish a clean structure
+          // from unsaved or in-flight local geometry/title edits.
+          (set as (partial: Partial<RFState>) => void)({
+            structureDirtyGeneration: next.structureDirtyGeneration + 1,
+          });
           structureScheduler.schedule();
         }
         // --- Per-node content diff ---
         // Independent of the structure autosave so editor edits flush
-        // on their own (faster) debounce and never participate in the
-        // canvas-level `version` counter.
+        // on their own (faster) debounce and do not dirty structureRevision.
         if (prev.nodes !== next.nodes) {
           nodeContentQueue.scheduleChanges(
             next.canvasId,
@@ -1300,6 +1545,9 @@ const useCanvasStore = create<RFState>()(
     edges: [],
     canvasId: '',
     version: 0,
+    structureRevision: null,
+    structureDirtyGeneration: 0,
+    structureSyncedGeneration: 0,
     isLoading: false,
     canvasNotFound: false,
     worldReferences: {},
@@ -1580,7 +1828,11 @@ const useCanvasStore = create<RFState>()(
         getEdges: () => get().edges,
         setNodes: (nodes) => set({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
-        forgetNodeContent: nodeContentQueue.forgetNode,
+        forgetNodeContent: forgetNodePersistence,
+        deleteMutationOptions: {
+          originator: { source: 'ui', tabId: canvasSyncTabId },
+          onResponse: consumeMutationPublication,
+        },
       });
     },
 
@@ -1607,6 +1859,7 @@ const useCanvasStore = create<RFState>()(
       const dirty = new Set(nodeContentQueue.pendingNodeIds());
       const skippedNodeIds: string[] = [];
       const skippedRemoteNodes: Node[] = [];
+      const skippedDeletedNodeIds: string[] = [];
       const safeDeltas =
         dirty.size === 0
           ? deltas
@@ -1618,6 +1871,7 @@ const useCanvasStore = create<RFState>()(
               }
               if (d.type === 'DELETE_NODE' && dirty.has(d.node.id)) {
                 skippedNodeIds.push(d.node.id);
+                skippedDeletedNodeIds.push(d.node.id);
                 return false;
               }
               return true;
@@ -1634,6 +1888,13 @@ const useCanvasStore = create<RFState>()(
       if (skippedRemoteNodes.length > 0) {
         nodeContentQueue.seedBaselines(skippedRemoteNodes);
       }
+      let armedAggregateRecreate = false;
+      for (const nodeId of skippedDeletedNodeIds) {
+        armedAggregateRecreate =
+          nodeContentQueue.markAggregateRecreate(nodeId) ||
+          armedAggregateRecreate;
+      }
+      if (armedAggregateRecreate) scheduleExplicitStructureSave();
 
       if (safeDeltas.length === 0) {
         // Nothing to apply locally (empty batch, or every row protected).
@@ -1733,10 +1994,309 @@ const useCanvasStore = create<RFState>()(
         getEdges: () => get().edges,
         setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
-        forgetNodeContent: nodeContentQueue.forgetNode,
+        forgetNodeContent: forgetNodePersistence,
+        deleteMutationOptions: {
+          originator: { source: 'ui', tabId: canvasSyncTabId },
+          onResponse: consumeMutationPublication,
+        },
       });
 
       return skippedNodeIds;
+    },
+
+    consumeCommit: (request) => {
+      const before = get();
+      const decision = canvasCommitGate.consume(
+        request.kind === 'event'
+          ? {
+              kind: 'event',
+              commit: request.commit,
+              localTabId: canvasSyncTabId,
+              context: request,
+            }
+          : { kind: 'ack', ack: request.ack, context: request },
+        {
+          version: before.version,
+          structureRevision: before.structureRevision,
+          structureDirtyGeneration: before.structureDirtyGeneration,
+          structureSyncedGeneration: before.structureSyncedGeneration,
+        },
+      );
+
+      const cancelSupersededInvalidations = (
+        commit: CanvasCommitEvent,
+      ): void => {
+        for (const change of commit.nodeChanges) {
+          if (change.kind !== 'invalidate') {
+            nodeInvalidationTracker.cancelThrough(
+              change.nodeId,
+              commit.toVersion,
+            );
+          }
+        }
+      };
+      if (request.kind === 'event' && decision.kind !== 'invalid') {
+        // This also runs for a duplicate SSE event whose HTTP ack won first.
+        // The full event is still newer than an invalidate GET it supersedes.
+        cancelSupersededInvalidations(request.commit);
+      }
+
+      const acknowledgeStructureGeneration = (
+        generation: number | undefined,
+      ): void => {
+        if (generation === undefined) return;
+        const current = get();
+        current._setStateNoAutosave({
+          structureSyncedGeneration: Math.max(
+            current.structureSyncedGeneration,
+            generation,
+          ),
+        });
+      };
+
+      // Even when SSE won the race and deduped the later HTTP response, the
+      // response still tells us exactly which local structure generation it
+      // made durable. A gap does too: only its local application is deferred.
+      if (
+        request.acknowledgedStructureGeneration !== undefined &&
+        decision.kind !== 'invalid'
+      ) {
+        acknowledgeStructureGeneration(request.acknowledgedStructureGeneration);
+      }
+
+      if (decision.kind !== 'accepted') {
+        return {
+          status: decision.kind,
+          skippedNodeIds: [],
+          // Ordinary Phase 4 gaps stay buffered until their predecessor
+          // arrives. Capacity overflow is different: one ordered publication
+          // was evicted, so only an authoritative snapshot can close the hole.
+          shouldReload:
+            decision.kind === 'gap' && decision.requiresReload === true,
+        };
+      }
+
+      const skippedNodeIds = new Set<string>();
+
+      const applyCommitNodeChanges = (
+        commitVersion: number,
+        nodeChanges: readonly NodeChange[],
+      ): void => {
+        if (nodeChanges.length === 0) return;
+        const dirty = new Set(nodeContentQueue.pendingNodeIds());
+        const state = get();
+        let nodes = state.nodes;
+        let changed = false;
+        const baselines: Node[] = [];
+        let armedAggregateRecreate = false;
+
+        for (const change of nodeChanges) {
+          if (dirty.has(change.nodeId)) {
+            skippedNodeIds.add(change.nodeId);
+            pendingCommitPreprocessVersions.delete(change.nodeId);
+            if (change.kind === 'inline') {
+              const rebaseTicket = nodeContentQueue.beginBaselineRebase(
+                change.nodeId,
+              );
+              void nodeContentQueue
+                .completeBaselineRebase(
+                  state.canvasId,
+                  rebaseTicket,
+                  change.projection.rev,
+                )
+                .catch(() => undefined);
+            } else if (change.kind === 'invalidate') {
+              // Fetch the authoritative projection so we can advance only its
+              // exact CAS rev while preserving the user's in-editor body.
+              const rebaseTicket = nodeContentQueue.beginBaselineRebase(
+                change.nodeId,
+              );
+              void refreshInvalidatedNode(
+                state.canvasId,
+                change.nodeId,
+                change.recordRevision,
+                commitVersion,
+                rebaseTicket,
+              ).catch(() => undefined);
+            } else if (change.kind === 'delete') {
+              // The user wins this conflict. Recreate topology + sidecar in one
+              // aggregate commit; a standalone content PUT would be suppressed
+              // by the server's durable delete tombstone.
+              armedAggregateRecreate =
+                nodeContentQueue.markAggregateRecreate(change.nodeId) ||
+                armedAggregateRecreate;
+            }
+            continue;
+          }
+          if (change.kind === 'invalidate') {
+            void refreshInvalidatedNode(
+              state.canvasId,
+              change.nodeId,
+              change.recordRevision,
+              commitVersion,
+            ).catch(() => undefined);
+            continue;
+          }
+          // Topology deletion is replayed through structureDeltas. Applying
+          // it again here would bypass the existing dirty-node protection.
+          if (change.kind === 'delete') {
+            pendingCommitPreprocessVersions.delete(change.nodeId);
+            continue;
+          }
+
+          nodes = nodes.map((node) => {
+            if (node.id !== change.nodeId) return node;
+            const next: Node = {
+              ...node,
+              type: change.projection.type,
+              data: {
+                ...(node.data ?? {}),
+                ...projectionPatch(change),
+              },
+            };
+            baselines.push(next);
+            changed = true;
+            return next;
+          });
+        }
+
+        if (changed) {
+          get()._setStateNoAutosave({ nodes });
+          nodeContentQueue.seedBaselines(baselines);
+        }
+        if (armedAggregateRecreate) scheduleExplicitStructureSave();
+      };
+
+      for (const accepted of decision.accepted) {
+        const acceptedRequest =
+          accepted.input.context ??
+          (accepted.input.kind === 'event'
+            ? ({
+                kind: 'event',
+                commit: accepted.input.commit,
+              } satisfies ConsumeCanvasCommitRequest)
+            : ({
+                kind: 'ack',
+                ack: accepted.input.ack,
+              } satisfies ConsumeCanvasCommitRequest));
+        const commit =
+          accepted.input.kind === 'event' ? accepted.input.commit : undefined;
+        if (commit) cancelSupersededInvalidations(commit);
+
+        // Only an HTTP request carries the exact local generation it made
+        // durable. A delayed/buffered optimistic SSE echo cannot be matched
+        // safely to whichever structure save happens to be in flight when it
+        // is eventually drained (that may already be a newer generation).
+        const acknowledgedStructureGeneration =
+          acceptedRequest.acknowledgedStructureGeneration;
+        acknowledgeStructureGeneration(acknowledgedStructureGeneration);
+
+        const effects =
+          acceptedRequest.kind === 'event'
+            ? (acceptedRequest.pendingEffects ?? {
+                mutatedNodes: [],
+                deletedNodeIds: [],
+                contentEditedNodeIds: [],
+                deferredFitFrameIds: [],
+              })
+            : {
+                mutatedNodes: [],
+                deletedNodeIds: [],
+                contentEditedNodeIds: [],
+                deferredFitFrameIds: [],
+              };
+        const commitPreprocessNodeIds = new Set<string>();
+        if (commit && accepted.apply !== 'none') {
+          const contentEdited = new Set(effects.contentEditedNodeIds);
+          for (const node of effects.mutatedNodes) {
+            if (
+              (node.type === 'note' || node.type === 'text') &&
+              contentEdited.has(node.id)
+            ) {
+              continue;
+            }
+            commitPreprocessNodeIds.add(node.id);
+            pendingCommitPreprocessVersions.set(
+              node.id,
+              Math.max(
+                pendingCommitPreprocessVersions.get(node.id) ?? 0,
+                commit.toVersion,
+              ),
+            );
+          }
+        }
+
+        if (commit && accepted.apply === 'structure') {
+          // Durable commit effects carry canonical slim nodes. Defer their
+          // preprocess fan-out until nodeChanges (or invalidate GETs) have
+          // supplied authoritative sidecar fields.
+          const nonPreprocessEffects = { ...effects, mutatedNodes: [] };
+          const structureDeltas = overlayLocalFieldsOnStructureDeltas(
+            commit.structureDeltas as Delta[],
+            get().nodes,
+          );
+          for (const nodeId of get().applyDeltasFromAgent(
+            structureDeltas,
+            commit.toVersion,
+            nonPreprocessEffects,
+          )) {
+            skippedNodeIds.add(nodeId);
+            pendingCommitPreprocessVersions.delete(nodeId);
+          }
+          applyCommitNodeChanges(commit.toVersion, commit.nodeChanges);
+          const afterApply = get();
+          afterApply._setStateNoAutosave({
+            nodes: normalizeTreeOrder(
+              reorderByCanonicalIds(
+                afterApply.nodes,
+                commit.nodeOrder,
+              ) as NestableNode[],
+            ) as Node[],
+            edges: reorderByCanonicalIds(afterApply.edges, commit.edgeOrder),
+            ...(commit.title !== undefined
+              ? { canvasTitle: commit.title ?? 'Untitled' }
+              : {}),
+            version: accepted.cursor.version,
+            structureRevision: accepted.cursor.structureRevision,
+          });
+        } else if (commit && accepted.apply === 'nodes') {
+          applyCommitNodeChanges(commit.toVersion, commit.nodeChanges);
+          get()._setStateNoAutosave({
+            version: accepted.cursor.version,
+            structureRevision: accepted.cursor.structureRevision,
+          });
+        } else {
+          get()._setStateNoAutosave({
+            version: accepted.cursor.version,
+            structureRevision: accepted.cursor.structureRevision,
+          });
+        }
+
+        if (commit) {
+          const changesByNodeId = new Map(
+            commit.nodeChanges.map((change) => [change.nodeId, change]),
+          );
+          for (const nodeId of commitPreprocessNodeIds) {
+            if (skippedNodeIds.has(nodeId)) {
+              pendingCommitPreprocessVersions.delete(nodeId);
+              continue;
+            }
+            const change = changesByNodeId.get(nodeId);
+            if (change?.kind === 'invalidate') continue;
+            if (change?.kind === 'delete') {
+              pendingCommitPreprocessVersions.delete(nodeId);
+              continue;
+            }
+            releasePendingCommitPreprocess(nodeId, commit.toVersion);
+          }
+        }
+      }
+
+      return {
+        status: 'accepted',
+        skippedNodeIds: [...skippedNodeIds],
+        shouldReload: false,
+      };
     },
 
     pendingContentNodeIds: () => nodeContentQueue.pendingNodeIds(),
@@ -1848,10 +2408,19 @@ const useCanvasStore = create<RFState>()(
         }
         const response = await postCanvasExecute(callerCanvasId, {
           commands: [{ type: 'SET_PORTAL_NODE_PINS', updates }],
-          originator: { source: 'ui' },
+          originator: { source: 'ui', tabId: canvasSyncTabId },
         });
         const current = get();
-        if (
+        if (current.canvasId === response.canvasId && response.commit) {
+          const consumed = current.consumeCommit({
+            kind: 'event',
+            commit: response.commit,
+            pendingEffects: response.pendingEffects as CommitPendingEffects,
+          });
+          if (consumed.shouldReload) {
+            await reloadCanvasWhenSafe(callerCanvasId);
+          }
+        } else if (
           current.canvasId === response.canvasId &&
           current.version === response.fromVersion
         ) {
@@ -1956,21 +2525,70 @@ const useCanvasStore = create<RFState>()(
     },
 
     loadCanvas: async (canvasId, options) => {
+      const targetId = canvasId ?? get().canvasId;
+      const loadGeneration = ++canvasLoadGeneration;
+      const protectedNodes = options?.preserveLocalChanges ? get().nodes : null;
+      const protectedEdges = options?.preserveLocalChanges ? get().edges : null;
+      const protectedTitle = options?.preserveLocalChanges
+        ? get().canvasTitle
+        : null;
+      const protectedVersion = options?.preserveLocalChanges
+        ? get().version
+        : null;
+      const protectedStructureRevision = options?.preserveLocalChanges
+        ? get().structureRevision
+        : null;
+      const protectedStructureGeneration = options?.preserveLocalChanges
+        ? get().structureDirtyGeneration
+        : null;
+      const localStateIsStillProtected = (): boolean =>
+        protectedNodes === null ||
+        (get().nodes === protectedNodes &&
+          get().edges === protectedEdges &&
+          get().canvasTitle === protectedTitle &&
+          get().version === protectedVersion &&
+          get().structureRevision === protectedStructureRevision &&
+          get().structureDirtyGeneration === protectedStructureGeneration &&
+          get().structureDirtyGeneration === get().structureSyncedGeneration &&
+          get().pendingContentNodeIds().length === 0 &&
+          !get().versionConflict);
+      const abortProtectedLoad = (): void => {
+        if (
+          loadGeneration === canvasLoadGeneration &&
+          get().canvasId === targetId
+        ) {
+          set({ isLoading: false });
+        }
+      };
       set({ isLoading: true, canvasNotFound: false, versionConflict: false });
       // Clear any stale "modified elsewhere" toast before we fetch a
       // fresh baseline — the warning is bound to the old version we're
       // about to replace.
       dismissVersionConflictToast();
       try {
-        const targetId = canvasId ?? get().canvasId;
-        canvasHistoryManager.activate(targetId, options?.resetHistory);
+        if (!options?.preserveLocalChanges) {
+          canvasHistoryManager.activate(targetId, options?.resetHistory);
+        }
         if (canvasId) {
           set({ canvasId: targetId });
         }
         const response = await getCanvas(targetId);
+        if (
+          loadGeneration !== canvasLoadGeneration ||
+          get().canvasId !== targetId
+        ) {
+          return;
+        }
+        if (!localStateIsStillProtected()) {
+          abortProtectedLoad();
+          return;
+        }
         if (!response) {
           console.warn('Canvas not found:', targetId);
           canvasHistoryManager.clear();
+          canvasCommitGate.clear();
+          nodeInvalidationTracker.clear();
+          pendingCommitPreprocessVersions.clear();
           set({
             isLoading: false,
             canvasNotFound: true,
@@ -2019,13 +2637,6 @@ const useCanvasStore = create<RFState>()(
         const loadedNodeRefSignature = nodeRefTopologySignature(loadedNodes);
         const previousNodeRefSignature =
           nodeRefTopologySignatures.get(targetId);
-        if (
-          previousNodeRefSignature !== undefined &&
-          previousNodeRefSignature !== loadedNodeRefSignature
-        ) {
-          canvasHistoryManager.clearCanvas(targetId);
-        }
-        nodeRefTopologySignatures.set(targetId, loadedNodeRefSignature);
         // Prefer this client's persistent UI state; fall back to whatever the
         // server still has from before viewport was moved client-side.
         // A corrupt entry on either side falls through to `null`, which
@@ -2052,7 +2663,28 @@ const useCanvasStore = create<RFState>()(
           edges: loadedEdges,
           centre: viewportCentreOf(loadedViewport),
         });
+        if (
+          loadGeneration !== canvasLoadGeneration ||
+          get().canvasId !== targetId
+        ) {
+          return;
+        }
+        if (!localStateIsStillProtected()) {
+          abortProtectedLoad();
+          return;
+        }
+        if (options?.preserveLocalChanges) {
+          canvasHistoryManager.activate(targetId, options.resetHistory);
+        }
+        if (
+          previousNodeRefSignature !== undefined &&
+          previousNodeRefSignature !== loadedNodeRefSignature
+        ) {
+          canvasHistoryManager.clearCanvas(targetId);
+        }
+        nodeRefTopologySignatures.set(targetId, loadedNodeRefSignature);
         const warmedNodes = warmedCanvas.nodes;
+        const loadedStructureGeneration = get().structureDirtyGeneration + 1;
         // An authoritative node replacement invalidates every transient that
         // points at the previous in-memory geometry. This applies both to a
         // different-canvas switch and to a same-canvas SSE gap/snapshot heal:
@@ -2076,6 +2708,9 @@ const useCanvasStore = create<RFState>()(
           viewport: loadedViewport,
           canvasTitle: response.title || 'Untitled',
           version: response.version,
+          structureRevision: response.structureRevision ?? null,
+          structureDirtyGeneration: loadedStructureGeneration,
+          structureSyncedGeneration: loadedStructureGeneration,
           isLoading: false,
           canUndo: canvasHistoryManager.canUndo,
           canRedo: canvasHistoryManager.canRedo,
@@ -2085,6 +2720,9 @@ const useCanvasStore = create<RFState>()(
           worldReferenceError: null,
           pinnedSourceNodeIds: {},
         });
+        canvasCommitGate.clear();
+        nodeInvalidationTracker.clear();
+        pendingCommitPreprocessVersions.clear();
         void get().refreshWorldReferences();
 
         // Warmup hints were folded in before the commit, and a load
@@ -2096,14 +2734,14 @@ const useCanvasStore = create<RFState>()(
         // model moves them all onto a dedicated channel that touches
         // neither `version` nor the broadcast.
         if (warmedNodes !== loadedNodes) {
-          structureScheduler.schedule();
+          scheduleExplicitStructureSave();
         }
 
         // Seed each md-backed node's optimistic-concurrency baseline from
         // the authoritative content we just loaded, so the first edit
         // carries the correct `expectRev` and the per-node content CAS can
         // catch a concurrent (cross-tab / cross-device / agent) write.
-        nodeContentQueue.seedBaselines(warmedNodes);
+        nodeContentQueue.replaceBaselines(warmedNodes);
 
         // If the user left a question-replay open on this canvas in a
         // previous session and that question node has since been
@@ -2126,13 +2764,23 @@ const useCanvasStore = create<RFState>()(
         }
       } catch (error) {
         console.error('Failed to load canvas:', error);
-        set({ isLoading: false });
+        if (
+          loadGeneration === canvasLoadGeneration &&
+          get().canvasId === targetId
+        ) {
+          set({ isLoading: false });
+        }
       }
     },
 
     switchCanvas: async (canvasId: string) => {
       const currentId = get().canvasId;
       if (canvasId === currentId) return;
+
+      // Invalidate a primary GET/warmup for the outgoing canvas immediately;
+      // waiting until the replacement load starts leaves a drain window where
+      // that old response could still install itself into the new route.
+      canvasLoadGeneration += 1;
 
       // Flip into the loading state *before* awaiting anything so the
       // shell shows the loading state on the very next render instead of
@@ -2211,24 +2859,78 @@ const useCanvasStore = create<RFState>()(
       set({ isSaving: true });
       let saveSucceeded = false;
       try {
-        const { nodes, edges, version, canvasId, canvasTitle } = get();
-        // Strip every per-node content / label / src / summary / etc.
-        // field from the body. Those live in `nodes/<safe(label)>.md`
-        // now and ride the per-node content PUT, so the structure PUT
-        // body shrinks to pure geometry + parenthood.
+        const {
+          nodes,
+          edges,
+          version,
+          canvasId,
+          canvasTitle,
+          structureRevision,
+          structureDirtyGeneration,
+        } = get();
+        // Strip every per-node content / label / src / summary / etc. field
+        // for nodes that already exist. A new markdown-backed node is the
+        // exception: topology and its initial sidecar must be one aggregate
+        // commit, so its content-owned fields ride this structure PUT.
         // Viewport is intentionally omitted: it's local UI state mirrored
         // into `localStorage`, not canvas data.
-        const slimNodes = stripNodeContentForStructurePut(nodes);
+        const aggregateCreateAttempt =
+          nodeContentQueue.beginAggregateCreateCommit(nodes);
+        const slimNodes = stripNodeContentForStructurePut(
+          nodes,
+          new Set(aggregateCreateAttempt.nodeIds),
+        );
         const response = await putCanvas(
           canvasId,
           {
             version,
             title: canvasTitle || 'Untitled',
             state: { nodes: slimNodes, edges },
+            ...(structureRevision
+              ? { expectStructureRevision: structureRevision }
+              : {}),
+            originator: { source: 'ui', tabId: canvasSyncTabId },
           },
           { keepalive: options?.keepalive },
         );
-        set({ version: response.version });
+        let shouldReloadAfterSave = false;
+        if (response.commit) {
+          // Consume the complete HTTP commit so the same gate handles it and
+          // SSE in either order. Even if SSE won and this is now a duplicate,
+          // the explicit generation still marks our local structure durable.
+          shouldReloadAfterSave = get().consumeCommit({
+            kind: 'event',
+            commit: response.commit,
+            acknowledgedStructureGeneration: structureDirtyGeneration,
+          }).shouldReload;
+        } else if (response.ack) {
+          shouldReloadAfterSave = get().consumeCommit({
+            kind: 'ack',
+            ack: response.ack,
+            acknowledgedStructureGeneration: structureDirtyGeneration,
+          }).shouldReload;
+        } else {
+          // Legacy response fallback. Never let a delayed response regress a
+          // version already advanced by realtime delivery.
+          const current = get();
+          current._setStateNoAutosave({
+            version: Math.max(current.version, response.version),
+            structureSyncedGeneration: Math.max(
+              current.structureSyncedGeneration,
+              structureDirtyGeneration,
+            ),
+          });
+        }
+        const committedCreateIds =
+          await nodeContentQueue.completeAggregateCreateCommit(
+            canvasId,
+            aggregateCreateAttempt,
+            response.commit,
+          );
+        for (const nodeId of committedCreateIds) {
+          preprocessQueue.releaseDeferred(nodeId);
+        }
+        if (shouldReloadAfterSave) void reloadCanvasWhenSafe(canvasId);
         saveSucceeded = true;
       } catch (error) {
         if (error instanceof CanvasConflictError) {
@@ -2303,7 +3005,9 @@ const useCanvasStore = create<RFState>()(
           // optimistically applied was never actually persisted, so
           // revert and report failure to the caller.
           if (get().versionConflict) {
-            set({ canvasTitle: previous });
+            if (get().canvasTitle === trimmed) {
+              set({ canvasTitle: previous });
+            }
             return false;
           }
           return true;
@@ -2312,7 +3016,9 @@ const useCanvasStore = create<RFState>()(
             err instanceof CanvasConflictError &&
             err.code === 'CANVAS_TITLE_CONFLICT'
           ) {
-            set({ canvasTitle: previous });
+            if (get().canvasTitle === trimmed) {
+              set({ canvasTitle: previous });
+            }
             const taken = err.conflictWith ?? trimmed;
             toast(
               `Canvas name "${taken}" is already in use. Choose a different name.`,
@@ -2385,12 +3091,18 @@ const useCanvasStore = create<RFState>()(
           get()._setStateNoAutosave({
             nodes: get().nodes.map((n) => {
               if (n.id !== id) return n;
+              const latestData = (n.data ?? {}) as Record<string, unknown>;
+              if (
+                latestData['label'] !== trimmed ||
+                latestData['labelSource'] !== 'user'
+              ) {
+                return n;
+              }
               // Strip the optimistic `labelSource: 'user'` first so we
               // can restore the original provenance exactly — including
               // the "was previously absent" case (omit the key entirely
               // rather than leaving a literal `undefined` value behind).
-              const { labelSource: _omitted, ...rest } = (n.data ??
-                {}) as Record<string, unknown>;
+              const { labelSource: _omitted, ...rest } = latestData;
               return {
                 ...n,
                 data: {
@@ -3005,7 +3717,7 @@ const useCanvasStore = create<RFState>()(
           return live.position.x !== start.x || live.position.y !== start.y;
         });
         if (moved) {
-          structureScheduler.schedule();
+          scheduleExplicitStructureSave();
           // A real move: the pre-drag snapshot beginGesture took is a
           // legitimate undo entry — keep it (executeCommands already
           // consumed it for frame-transition moves; this is idempotent
@@ -4020,6 +4732,10 @@ const useCanvasStore = create<RFState>()(
         nodes,
         snapshot.nodes,
         preprocessQueue.schedule,
+        {
+          originator: { source: 'ui', tabId: canvasSyncTabId },
+          onResponse: consumeMutationPublication,
+        },
       );
     },
 
@@ -4045,6 +4761,10 @@ const useCanvasStore = create<RFState>()(
         nodes,
         snapshot.nodes,
         preprocessQueue.schedule,
+        {
+          originator: { source: 'ui', tabId: canvasSyncTabId },
+          onResponse: consumeMutationPublication,
+        },
       );
     },
   })),

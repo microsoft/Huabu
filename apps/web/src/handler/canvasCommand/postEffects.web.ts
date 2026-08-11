@@ -30,7 +30,10 @@ import {
   type PendingEffects,
 } from '@huabu/shared/canvas-engine';
 
-import { canvasHistoryManager } from '@/store/canvasHistoryManager';
+import {
+  canvasHistoryManager,
+  type DeleteNodeMutationOptions,
+} from '@/store/canvasHistoryManager';
 import { useChatStore } from '@/store/chatStore';
 
 import type { Edge, Node } from '@xyflow/react';
@@ -58,6 +61,8 @@ export interface RunWebPostEffectsInput {
    * a back-import cycle with the canvas store.
    */
   forgetNodeContent: (nodeId: string) => void;
+  /** Publication/originator plumbing for aggregate node deletes. */
+  deleteMutationOptions?: DeleteNodeMutationOptions;
 }
 
 /**
@@ -77,6 +82,7 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     setNodes,
     triggerPreprocessing,
     forgetNodeContent,
+    deleteMutationOptions,
   } = input;
 
   // 1. Trigger preprocessing for created / mutated nodes. The server
@@ -108,7 +114,7 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
 
   // 2. Track server-side deletes for local history.
   for (const nodeId of effects.deletedNodeIds) {
-    canvasHistoryManager.trackDelete(canvasId, nodeId);
+    canvasHistoryManager.trackDelete(canvasId, nodeId, deleteMutationOptions);
     // Release the node's per-node save-queue state so a long session of
     // create/delete churn doesn't leak bookkeeping keyed by dead ids.
     forgetNodeContent(nodeId);

@@ -471,9 +471,9 @@ function tryParsePartialCandidates(raw: string): IntentCandidate[] {
 // Episode logging
 // ---------------------------------------------------------------------------
 
-export function logIntentEpisode(
+export async function logIntentEpisode(
   episode: IntentEpisode,
   canvasId?: string,
-): void {
-  storeEpisode(episode, canvasId);
+): Promise<void> {
+  await storeEpisode(episode, canvasId);
 }

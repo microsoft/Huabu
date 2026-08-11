@@ -188,4 +188,67 @@ describe('preprocessQueue', () => {
 
     expect(preprocessNodeIfNeeded).not.toHaveBeenCalled();
   });
+
+  it('holds a new-node preprocess until its aggregate create is released', async () => {
+    const node: Node = {
+      id: 'note-new',
+      type: 'note',
+      position: { x: 0, y: 0 },
+      data: { content: 'initial' },
+    };
+    let createPending = true;
+    const queue = createPreprocessQueue({
+      delayMs: 1_000,
+      shouldDeferNode: () => createPending,
+      getState: () => ({
+        canvasId: 'canvas-1',
+        nodes: [node],
+        setNodeIngestion: vi.fn(),
+        clearNodeIngestion: vi.fn(),
+        patchNodeSilent: vi.fn(),
+      }),
+    });
+
+    queue.schedule(node);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(preprocessNodeIfNeeded).not.toHaveBeenCalled();
+
+    createPending = false;
+    queue.releaseDeferred(node.id);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(preprocessNodeIfNeeded).toHaveBeenCalledOnce();
+  });
+
+  it('forgets held preprocessing when a new node is deleted before ACK', async () => {
+    const node: Node = {
+      id: 'note-deleted',
+      type: 'note',
+      position: { x: 0, y: 0 },
+      data: { content: 'temporary' },
+    };
+    let nodes: Node[] = [node];
+    let createPending = true;
+    const clearNodeIngestion = vi.fn();
+    const queue = createPreprocessQueue({
+      delayMs: 1_000,
+      shouldDeferNode: () => createPending,
+      getState: () => ({
+        canvasId: 'canvas-1',
+        nodes,
+        setNodeIngestion: vi.fn(),
+        clearNodeIngestion,
+        patchNodeSilent: vi.fn(),
+      }),
+    });
+
+    queue.schedule(node);
+    nodes = [];
+    queue.forgetNode(node.id);
+    createPending = false;
+    queue.releaseDeferred(node.id);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(clearNodeIngestion).toHaveBeenCalledWith(node.id);
+    expect(preprocessNodeIfNeeded).not.toHaveBeenCalled();
+  });
 });

@@ -9,6 +9,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -167,6 +168,26 @@ afterEach(() => {
 });
 
 describe('strict structured reads', () => {
+  it('projects a Finder-renamed title without mutating the record', async () => {
+    seedSpace('finder-pure-read');
+    const from = path.join(root, 'finder-pure-read');
+    const to = path.join(root, 'Finder Pure Read');
+    renameSync(from, to);
+    refreshCanvasDirIndex();
+    const file = path.join(to, 'space.json');
+    const before = readFileSync(file, 'utf8');
+    const beforeMtime = statSync(file).mtimeMs;
+
+    await expect(
+      new DiskStructuredStore().space('finder-pure-read').record.read(),
+    ).resolves.toMatchObject({
+      title: 'Finder Pure Read',
+      updatedAt: 1,
+    });
+    expect(readFileSync(file, 'utf8')).toBe(before);
+    expect(statSync(file).mtimeMs).toBe(beforeMtime);
+  });
+
   it.each(['{"canvasId":', '{}'])(
     'surfaces an unindexable titled Space during a cold scan: %s',
     async (contents) => {
@@ -187,30 +208,16 @@ describe('strict structured reads', () => {
   );
 
   it('does not report malformed or unreadable space.json as not-found', async () => {
-    const record = seedSpace('broken-record');
+    seedSpace('broken-record');
     const repository = new DiskStructuredStore().space('broken-record').record;
     const file = path.join(root, 'broken-record', 'space.json');
 
     writeFileSync(file, '{"canvasId":', 'utf8');
     await expect(repository.read()).rejects.toBeInstanceOf(SyntaxError);
-    await expect(
-      repository.compareAndSwap(0, {
-        ...record,
-        version: 1,
-        updatedAt: 2,
-      }),
-    ).rejects.toBeInstanceOf(SyntaxError);
 
     rmSync(file);
     mkdirSync(file);
     await expect(repository.read()).rejects.toMatchObject({ code: 'EISDIR' });
-    await expect(
-      repository.compareAndSwap(0, {
-        ...record,
-        version: 1,
-        updatedAt: 2,
-      }),
-    ).rejects.toMatchObject({ code: 'EISDIR' });
   });
 
   it('reconciles the single strict record value without a legacy reread', async () => {
@@ -258,13 +265,6 @@ describe('strict structured reads', () => {
       writeFileSync(file, bytes, 'utf8');
 
       await expect(repository.read()).rejects.toBeInstanceOf(SyntaxError);
-      await expect(
-        repository.compareAndSwap(0, {
-          ...record,
-          version: 1,
-          updatedAt: 2,
-        }),
-      ).rejects.toBeInstanceOf(SyntaxError);
       expect(readFileSync(file, 'utf8')).toBe(bytes);
     },
   );
@@ -286,30 +286,6 @@ describe('strict structured reads', () => {
     await expect(repository.read()).rejects.toBeInstanceOf(SyntaxError);
     expect(readFileSync(file, 'utf8')).toBe(bytes);
   });
-
-  it.each(invalidRecordCases)(
-    'rejects CAS next records with %s and preserves the current bytes',
-    async (_description, buildInvalid) => {
-      const record = seedSpace('invalid-next-record');
-      const repository = new DiskStructuredStore().space(
-        'invalid-next-record',
-      ).record;
-      const file = path.join(root, 'invalid-next-record', 'space.json');
-      const bytes = readFileSync(file, 'utf8');
-
-      await expect(
-        repository.compareAndSwap(
-          0,
-          buildInvalid({
-            ...record,
-            version: 1,
-            updatedAt: 2,
-          }) as CanvasFile,
-        ),
-      ).rejects.toBeInstanceOf(TypeError);
-      expect(readFileSync(file, 'utf8')).toBe(bytes);
-    },
-  );
 
   it('does not replace malformed mutable JSON with an empty baseline', async () => {
     seedSpace('broken-mutable');
@@ -444,7 +420,6 @@ describe('JSONL recovery and ordering', () => {
 
     await expect(events.read(1)).rejects.toBeInstanceOf(SyntaxError);
     await expect(deltas.readSince(0)).rejects.toBeInstanceOf(SyntaxError);
-    await expect(deltas.append(delta(3))).rejects.toBeInstanceOf(SyntaxError);
 
     expect(readFileSync(eventFile, 'utf8')).toBe(eventRaw);
     expect(readFileSync(deltaFile, 'utf8')).toBe(deltaRaw);
@@ -465,17 +440,14 @@ describe('JSONL recovery and ordering', () => {
 
     await expect(events.read(1)).rejects.toBeInstanceOf(SyntaxError);
     await expect(deltas.readSince(0)).rejects.toBeInstanceOf(SyntaxError);
-    await expect(deltas.append(delta(2))).rejects.toBeInstanceOf(SyntaxError);
 
     expect(readFileSync(eventFile, 'utf8')).toBe(eventRaw);
     expect(readFileSync(deltaFile, 'utf8')).toBe(deltaRaw);
   });
 
-  it('validates event and delta append inputs before touching durable bytes', async () => {
+  it('validates event append inputs before touching durable bytes', async () => {
     seedSpace('invalid-log-inputs');
-    const { deltas, events } = new DiskStructuredStore().space(
-      'invalid-log-inputs',
-    );
+    const { events } = new DiskStructuredStore().space('invalid-log-inputs');
     const eventFile = eventsPath('invalid-log-inputs');
     const deltaFile = deltaLogPath('invalid-log-inputs');
     mkdirSync(path.dirname(eventFile), { recursive: true });
@@ -487,10 +459,6 @@ describe('JSONL recovery and ordering', () => {
     await expect(
       events.append([{ ts: 0, payload: action('invalid') }]),
     ).rejects.toBeInstanceOf(TypeError);
-    await expect(
-      deltas.append({ ...delta(2), commands: null as unknown as unknown[] }),
-    ).rejects.toBeInstanceOf(TypeError);
-
     expect(readFileSync(eventFile, 'utf8')).toBe(eventRaw);
     expect(readFileSync(deltaFile, 'utf8')).toBe(deltaRaw);
   });
@@ -511,9 +479,15 @@ describe('JSONL recovery and ordering', () => {
     expect(readFileSync(eventsPath('valid-tail'), 'utf8')).toMatch(/\n$/);
   });
 
-  it('removes a malformed crash tail before events and delta appends', async () => {
-    seedSpace('broken-tail');
-    const { deltas, events } = new DiskStructuredStore().space('broken-tail');
+  it('removes a malformed crash tail before event append and aggregate commit', async () => {
+    const initial = seedSpace('broken-tail');
+    getCanvasStore('broken-tail').write({
+      ...initial,
+      version: 5,
+      updatedAt: 5,
+    });
+    const handle = new DiskStructuredStore().space('broken-tail');
+    const { deltas, events } = handle;
     mkdirSync(path.dirname(eventsPath('broken-tail')), { recursive: true });
     writeFileSync(
       eventsPath('broken-tail'),
@@ -528,8 +502,20 @@ describe('JSONL recovery and ordering', () => {
 
     await expect(events.read(1)).resolves.toMatchObject([{ ts: 1 }]);
     await events.append([{ payload: action('third'), ts: 3 }]);
-    await expect(deltas.append(delta(4))).rejects.toThrow(/already at 5/);
-    await deltas.append(delta(6));
+    const committed = await handle.commit({
+      expectedVersion: 5,
+      record: { title: initial.title, state: initial.state },
+      nodePreconditions: [],
+      nodeMutations: [],
+      publication: {
+        originator: { source: 'agent' },
+        optimistic: false,
+        commands: [],
+        structureDeltas: [],
+      },
+      forceVersionBump: true,
+    });
+    expect(committed).toMatchObject({ ok: true, committed: true });
 
     expect((await events.read()).map((event) => event.ts)).toEqual([1, 3]);
     expect((await deltas.readSince(0)).map((entry) => entry.version)).toEqual([
@@ -543,14 +529,32 @@ describe('JSONL recovery and ordering', () => {
     );
   });
 
-  it('uses a valid unterminated delta as the monotonicity baseline', async () => {
-    seedSpace('delta-tail');
-    const deltas = new DiskStructuredStore().space('delta-tail').deltas;
+  it('preserves a valid unterminated delta before an aggregate commit', async () => {
+    const initial = seedSpace('delta-tail');
+    getCanvasStore('delta-tail').write({
+      ...initial,
+      version: 2,
+      updatedAt: 2,
+    });
+    const handle = new DiskStructuredStore().space('delta-tail');
+    const { deltas } = handle;
     mkdirSync(path.dirname(deltaLogPath('delta-tail')), { recursive: true });
     writeFileSync(deltaLogPath('delta-tail'), JSON.stringify(delta(2)), 'utf8');
 
-    await expect(deltas.append(delta(2))).rejects.toThrow(/already at 2/);
-    await deltas.append(delta(3));
+    const committed = await handle.commit({
+      expectedVersion: 2,
+      record: { title: initial.title, state: initial.state },
+      nodePreconditions: [],
+      nodeMutations: [],
+      publication: {
+        originator: { source: 'agent' },
+        optimistic: false,
+        commands: [],
+        structureDeltas: [],
+      },
+      forceVersionBump: true,
+    });
+    expect(committed).toMatchObject({ ok: true, committed: true });
 
     expect((await deltas.readSince(0)).map((entry) => entry.version)).toEqual([
       2, 3,
@@ -584,9 +588,6 @@ describe('Space lifecycle guards and reopen', () => {
     await expect(
       handle.events.append([{ payload: action('n1'), ts: 1 }]),
     ).rejects.toThrow(/missing Space/);
-    await expect(handle.deltas.append(delta(1))).rejects.toThrow(
-      /missing Space/,
-    );
     await expect(handle.intents.upsert(episode('e1'))).rejects.toThrow(
       /missing Space/,
     );
@@ -617,14 +618,23 @@ describe('Space lifecycle guards and reopen', () => {
   it('round-trips every scoped family after cache reset and reopen', async () => {
     const initial = seedSpace('reopen');
     const first = new DiskStructuredStore().space('reopen');
-    await first.record.compareAndSwap(0, {
-      ...initial,
-      version: 1,
-      state: { nodes: [{ id: 'n1' }], edges: [] },
-      updatedAt: 2,
+    const committed = await first.commit({
+      expectedVersion: initial.version,
+      record: {
+        title: initial.title,
+        state: { nodes: [{ id: 'n1' }], edges: [] },
+      },
+      nodePreconditions: [],
+      nodeMutations: [],
+      publication: {
+        originator: { source: 'agent' },
+        optimistic: false,
+        commands: [],
+        structureDeltas: [],
+      },
     });
+    expect(committed).toMatchObject({ ok: true, committed: true });
     await first.events.append([{ payload: action('n1'), ts: 7 }]);
-    await first.deltas.append(delta(1));
     await first.intents.upsert(episode('e1'));
     const storedChanges = await first.changes.append('thread-1', [
       change('n1'),

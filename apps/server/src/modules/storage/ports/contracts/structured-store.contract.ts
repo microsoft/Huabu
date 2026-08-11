@@ -68,6 +68,16 @@ export function describeStructuredStoreContract(
       expect(first.worldId).toBeTypeOf('function');
     });
 
+    it('vends fresh lifecycle repository handles', async () => {
+      const store = await open();
+      const first = store.lifecycle();
+      const second = store.lifecycle();
+
+      expect(second).not.toBe(first);
+      expect(first.create).toBeTypeOf('function');
+      expect(first.delete).toBeTypeOf('function');
+    });
+
     it('scopes handles by Space id', async () => {
       const store = await open();
       const first = store.space('canvas-a');

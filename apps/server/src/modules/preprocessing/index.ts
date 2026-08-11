@@ -7,7 +7,10 @@
 
 import { PreprocessDispatcher } from './dispatcher.js';
 
-export { PreprocessDispatcher } from './dispatcher.js';
+export {
+  capturePreprocessExecutionBaseline,
+  PreprocessDispatcher,
+} from './dispatcher.js';
 export { ProviderManager } from './provider-manager.js';
 export { getProfile, profiles } from './profiles.js';
 export { runPipeline } from './pipeline.js';

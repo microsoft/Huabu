@@ -2,13 +2,14 @@
 // Licensed under the MIT license.
 
 /**
- * Intent Store — thin wrapper over `CanvasStore` for intent log I/O.
+ * Intent Store — thin wrapper over the structured storage port for intent
+ * log I/O.
  *
  * Persists `IntentEpisode` arrays per canvas under
  * `<canvasId>/.history/intent.json`.
  */
 
-import { getCanvasStore } from '../../storage/index.js';
+import { getStructuredStore } from '../../storage/index.js';
 
 import type { IntentEpisode } from '@huabu/shared';
 
@@ -16,10 +17,10 @@ import type { IntentEpisode } from '@huabu/shared';
  * Append (or replace by id) an intent episode for a canvas.
  * No-op when `canvasId` is missing.
  */
-export function logIntentEpisode(
+export async function logIntentEpisode(
   episode: IntentEpisode,
   canvasId?: string,
-): void {
+): Promise<void> {
   if (!canvasId) return;
-  getCanvasStore(canvasId).upsertIntent(episode);
+  await getStructuredStore().space(canvasId).intents.upsert(episode);
 }

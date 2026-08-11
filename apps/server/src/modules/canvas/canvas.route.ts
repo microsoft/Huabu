@@ -14,6 +14,7 @@ import {
   createCanvasBodySchema,
   canvasSearchRequestSchema,
   createId,
+  deleteNodeBodySchema,
   exportCanvasQuerySchema,
   getCanvasEventsQuerySchema,
   postCanvasEventsBodySchema,
@@ -23,16 +24,28 @@ import {
   putNodeContentBodySchema,
   setPortalNodePinsCommandSchema,
 } from '@huabu/shared';
-import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+import {
+  diffCanvasState,
+  nodeRevisionOf,
+  type CanvasEdge,
+  type CanvasNode,
+} from '@huabu/shared/canvas-engine';
 
 import {
   CanvasCommandRoutingError,
   executeCanvasCommandsOnHost,
   MissingWorldPortalError,
 } from './canvas-command-router.js';
-import { CanvasNotFoundError, applyDeltasOnServer } from './canvas-executor.js';
+import {
+  CanvasNotFoundError,
+  revertChangeOnServer,
+} from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import {
+  projectSlimCanvasStructure,
+  structureRevisionOf,
+} from './structure-revision.js';
 import {
   assertWorldPortalTopologyAllowed,
   WorldPortalMutationError,
@@ -44,7 +57,11 @@ import {
 } from './world-reference-resolver.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
-import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
+import {
+  capturePreprocessExecutionBaseline,
+  getPreprocessDispatcher,
+  getProfile,
+} from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import {
   isWorldCanvasId,
@@ -54,19 +71,17 @@ import {
 } from '../storage/canvas-dirs.js';
 import {
   canvasBlobs,
-  createCanvas,
-  deleteCanvas,
+  createSpace,
+  deleteSpace,
   getCanvasStore,
   getStructuredStore,
   listCanvases,
-  updateNode,
+  withCanvasMutex,
   type CanvasFile,
-  type UpdateNodeOutcome,
 } from '../storage/index.js';
 import { canvasRoot, nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
 import { toSafeFilename } from '../workspace/disk/naming.js';
-import { withSpaceDirHandlesReleased } from '../workspace/disk/space-dir-handles.js';
-import { getWorkspacePath } from '../workspace.js';
+import { getWorkspacePath, withWorkspaceOperationLease } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type { CanvasNodeType } from '@huabu/shared';
@@ -75,9 +90,11 @@ import type {
   CanvasCommand,
   CanvasConflictResponse,
   CanvasSearchEvent,
+  CanvasCommitEvent,
   CreateCanvasRequest,
   CreateCanvasResponse,
   DeleteCanvasResponse,
+  DeleteNodeRequest,
   DeleteNodeResponse,
   DeleteThreadChangeResponse,
   ExportCanvasQuery,
@@ -89,6 +106,7 @@ import type {
   GetThreadChangesResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
+  MutationAck,
   PostCanvasEventsRequest,
   PostCanvasEventsResponse,
   PostCanvasExecuteRequest,
@@ -115,10 +133,6 @@ interface NodeLike {
   [key: string]: unknown;
 }
 
-function nowMs(): number {
-  return Date.now();
-}
-
 /**
  * Generate a default canvas title that doesn't collide with existing ones.
  * Returns "Untitled", "Untitled (1)", "Untitled (2)", etc.
@@ -134,6 +148,42 @@ function generateDefaultTitle(existingCanvases: CanvasFile[]): string {
 
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function mutationAckOf(event: CanvasCommitEvent): MutationAck {
+  return {
+    commitId: event.commitId,
+    fromVersion: event.fromVersion,
+    toVersion: event.toVersion,
+    structureRevision: event.structureRevision,
+    recordChanged: event.recordChanged,
+  };
+}
+
+/** Publish only after `SpaceHandle.commit()` has returned durable success. */
+function publishNodeCommit(
+  canvasId: string,
+  event: CanvasCommitEvent,
+  deletedNodeIds: string[] = [],
+): void {
+  publishCanvasUpdate(canvasId, {
+    type: 'update',
+    data: {
+      fromVersion: event.fromVersion,
+      toVersion: event.toVersion,
+      deltas: event.structureDeltas,
+      pendingEffects: {
+        mutatedNodes: [],
+        deletedNodeIds,
+        contentEditedNodeIds: [],
+        deferredFitFrameIds: [],
+      },
+      ...(event.originator.threadId
+        ? { threadId: event.originator.threadId }
+        : {}),
+      commit: event,
+    },
+  });
 }
 
 /**
@@ -233,8 +283,8 @@ const TEXT_BEARING_NODE_TYPES = new Set([
  * `question` IS inlined: the prompt is short, the QuestionNode reads
  * `data.content` to render the textarea, and skipping the inline copy
  * would leave every question node blank on first paint (its
- * `data.content` is stripped by `stripNodesForCanvas` on the PUT, so
- * the sidecar body is the only surviving copy).
+ * `data.content` is stripped by the canonical slim-structure projection on
+ * PUT, so the sidecar body is the only surviving copy).
  */
 const WIRE_INLINE_CONTENT_TYPES = new Set([
   'note',
@@ -245,50 +295,51 @@ const WIRE_INLINE_CONTENT_TYPES = new Set([
 ]);
 
 /**
- * Per-node `data` keys whose values live exclusively in the markdown
- * sidecar (`nodes/<safe(label)>.md`). The structure PUT strips these
- * before persisting structural state so the two stores cannot drift;
- * `hydrateNodeContent` re-attaches them from the `.md` on read.
+ * Build the initial canonical sidecar for a topology insertion.
  *
- * Must stay in sync with `NODE_CONTENT_KEYS` on the web (see
- * `apps/web/src/store/canvasStore.ts`).
+ * Existing-node content in a structure PUT is never trusted: callers use
+ * the dedicated content endpoint for that. Only an id absent from the
+ * persisted topology may contribute these fields, allowing its topology and
+ * first sidecar to become visible in the same aggregate commit.
  */
-const NODE_CONTENT_KEYS = new Set([
-  'content',
-  'label',
-  'labelSource',
-  'src',
-  'summary',
-  'keywords',
-  'provenance',
-]);
-
-/**
- * Strip every per-node content / label / source / summary / keyword
- * field from each node's `data` before persisting structural state. The
- * structure PUT no longer carries those fields — they are persisted via
- * the dedicated `PUT /:canvasId/nodes/:nodeId/content` endpoint and
- * re-attached on read by {@link hydrateNodeContent}.
- *
- * Pure: takes a node list, returns a new list with the same `id` /
- * `type` / geometry / parenthood and a copy of `data` containing only
- * non-content keys. The original node objects are not mutated.
- *
- * Legacy clients that still send content in the structure body have it
- * silently dropped here; their per-node content PUTs (issued in
- * parallel) are the actual write path now.
- */
-function stripNodesForCanvas(nodes: NodeLike[]): NodeLike[] {
-  return nodes.map((node) => {
-    const data = node.data;
-    if (!data) return { ...node };
-    const cleanData: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(data)) {
-      if (NODE_CONTENT_KEYS.has(k)) continue;
-      cleanData[k] = v;
-    }
-    return { ...node, data: cleanData };
-  });
+function initialNodeContent(node: NodeLike): NodeContent | null {
+  if (
+    typeof node.id !== 'string' ||
+    typeof node.type !== 'string' ||
+    !MD_BACKED_NODE_TYPES.has(node.type)
+  ) {
+    return null;
+  }
+  const data = node.data ?? {};
+  const record: NodeContent = {
+    nodeId: node.id,
+    type: node.type,
+    label: typeof data['label'] === 'string' ? data['label'] : null,
+    content:
+      TEXT_BEARING_NODE_TYPES.has(node.type) &&
+      typeof data['content'] === 'string'
+        ? data['content']
+        : '',
+  };
+  if (
+    data['labelSource'] === 'user' ||
+    data['labelSource'] === 'auto' ||
+    data['labelSource'] === 'agent'
+  ) {
+    record['labelSource'] = data['labelSource'];
+  }
+  if (typeof data['src'] === 'string') record.src = data['src'];
+  if (typeof data['summary'] === 'string') {
+    record['summary'] = data['summary'];
+  }
+  if (
+    Array.isArray(data['keywords']) &&
+    data['keywords'].every((keyword) => typeof keyword === 'string')
+  ) {
+    record['keywords'] = data['keywords'];
+  }
+  if ('provenance' in data) record['provenance'] = data['provenance'];
+  return record;
 }
 
 /**
@@ -385,7 +436,7 @@ function hydrateOneNode(
   // ----- Read markdown side-file first -----
   // The structure PUT strips every per-node content key (src,
   // provenance, label, summary, keywords, …) before persisting structural
-  // state via {@link stripNodesForCanvas}. The markdown sidecar
+  // state via the canonical slim-structure projection. The markdown sidecar
   // is the only source of truth for those fields, so we read it before
   // any check that depends on them (notably the artifact-missing probe,
   // which needs the hydrated `src`).
@@ -450,7 +501,7 @@ function hydrateOneNode(
   // Rehydrate the source URL for artifact-backed (image/pdf/video) and
   // remote (web) nodes. Without this step the structure PUT permanently
   // wipes `data.src` from the canvas state on the next reload because
-  // `stripNodesForCanvas` removed it before persistence.
+  // the slim-structure projection removed it before persistence.
   if (typeof nodeContent.src === 'string' && nodeContent.src.length > 0) {
     data['src'] = nodeContent.src;
   }
@@ -583,17 +634,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const canvasId = createId('canvas');
     const existingCanvases = listCanvases();
     const title = parsed.data.title ?? generateDefaultTitle(existingCanvases);
-    const canvas = createCanvas(canvasId, title);
+    const created = await createSpace({ canvasId, title });
 
-    if (!canvas) {
+    if (!created.ok) {
       return reply
         .code(409)
         .send({ message: 'Canvas with this ID already exists' });
     }
 
-    return reply
-      .code(201)
-      .send({ canvasId: canvas.canvasId, title: canvas.title });
+    return reply.code(201).send({
+      canvasId: created.record.canvasId,
+      title: created.effectiveTitle,
+    });
   });
 
   // --- Delete a canvas ---
@@ -603,54 +655,145 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<DeleteCanvasResponse>;
   }>('/:canvasId', async function (request, reply) {
     const { canvasId } = request.params;
-    if (isWorldCanvasId(canvasId)) {
+    const deleted = await deleteSpace(canvasId);
+    if (!deleted.ok && deleted.reason === 'world-forbidden') {
       return reply
         .code(403)
         .send({ message: 'World canvas cannot be deleted' });
     }
-    // Release any handle held inside this Space's directory across the
-    // delete: on Windows a live `fs.watch` handle makes `rmSync` fail with
-    // EPERM (same root cause as the rename path). A no-op unless the Space
-    // currently has an open external-note stream.
-    const deleted = await withSpaceDirHandlesReleased(canvasId, () =>
-      deleteCanvas(canvasId),
-    );
-
-    if (!deleted) {
+    if (!deleted.ok) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
     return reply.send({ success: true });
   });
 
-  // Delete a node — removes its markdown sidecar.
-  //
-  // This endpoint deliberately does not mutate structural state.
-  // The client owns the canvas state (nodes / edges) and will persist
-  // the updated state via the autosave PUT on `/:canvasId`. Doing so here
-  // would race with that PUT and surface as a
-  // spurious 409 (CANVAS_VERSION_MISMATCH) on the very next autosave.
-  //
-  // What only the server can do — and therefore what this route
-  // exists for — is unlink the per-node markdown sidecar in
-  // `<canvasId>/nodes/<nodeId>.md`, since that file is invisible to
-  // the client's `state` payload.
+  // Delete one node as an aggregate: topology, every incident edge, sidecar,
+  // tombstone, global version, durable row, and publication land together.
   fastify.delete<{
     Params: { canvasId: string; nodeId: string };
-    Reply: ApiResult<DeleteNodeResponse>;
+    Body: DeleteNodeRequest;
+    Reply: ApiResult<DeleteNodeResponse> | CanvasConflictResponse;
   }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
     const { canvasId, nodeId } = request.params;
-    const store = getCanvasStore(canvasId);
-    const canvas = store.read();
-    if (!canvas) {
-      return reply.code(404).send({
-        code: 'CANVAS_NOT_FOUND',
-        message: 'Canvas not found',
+    const parsed = deleteNodeBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.code(400).send({
+        code: 'INVALID_REQUEST',
+        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
       });
     }
+    const originator = parsed.data.originator ?? { source: 'ui' as const };
 
     try {
-      store.deleteNode(nodeId);
+      const outcome = await withCanvasMutex(canvasId, async () => {
+        const handle = getStructuredStore().space(canvasId);
+        const canvas = await handle.record.read();
+        if (canvas === null) return { status: 'not-found' as const };
+
+        const beforeNodes = canvas.state.nodes as CanvasNode[];
+        const beforeEdges = canvas.state.edges as CanvasEdge[];
+        const afterNodes = beforeNodes.filter((node) => node.id !== nodeId);
+        const afterEdges = beforeEdges.filter(
+          (edge) => edge.source !== nodeId && edge.target !== nodeId,
+        );
+        try {
+          assertWorldPortalTopologyAllowed(canvasId, beforeNodes, afterNodes);
+        } catch (error) {
+          if (error instanceof WorldPortalMutationError) {
+            return {
+              status: 'portal-conflict' as const,
+              message: error.message,
+            };
+          }
+          throw error;
+        }
+        const nextState = {
+          ...canvas.state,
+          nodes: afterNodes,
+          edges: afterEdges,
+        };
+        const deltas = diffCanvasState(
+          { nodes: beforeNodes, edges: beforeEdges },
+          { nodes: afterNodes, edges: afterEdges },
+        );
+        const current = await handle.nodes.read(nodeId);
+        const result = await handle.commit({
+          expectedVersion: canvas.version,
+          record: { title: canvas.title, state: nextState },
+          nodePreconditions: [{ nodeId, revision: current?.revision ?? null }],
+          nodeMutations: [{ kind: 'delete', nodeId }],
+          publication: {
+            originator,
+            optimistic: originator.source === 'ui',
+            commands: [{ type: 'DELETE_NODES', nodeIds: [nodeId] }],
+            structureDeltas: deltas,
+          },
+        });
+
+        if (!result.ok) return { status: 'conflict' as const, result };
+        if (result.committed) {
+          // Keep publication ordered with other writers by emitting before
+          // the shared per-Space mutex is released. `commit()` returning is
+          // the durability boundary (record + sidecar + row are finalized).
+          publishNodeCommit(canvasId, result.event, [nodeId]);
+        }
+        return { status: 'ok' as const, result };
+      });
+
+      if (outcome.status === 'not-found') {
+        return reply.code(404).send({
+          code: 'CANVAS_NOT_FOUND',
+          message: 'Canvas not found',
+        });
+      }
+      if (outcome.status === 'portal-conflict') {
+        return reply.code(409).send({
+          code: 'INVALID_REQUEST',
+          message: outcome.message,
+        });
+      }
+      if (outcome.status === 'conflict') {
+        const { result } = outcome;
+        if (result.reason === 'not-found') {
+          return reply.code(404).send({
+            code: 'CANVAS_NOT_FOUND',
+            message: 'Canvas not found',
+          });
+        }
+        if (result.reason === 'version-conflict') {
+          return reply.code(409).send({
+            code: 'CANVAS_VERSION_CONFLICT',
+            message: 'Canvas changed while deleting node content',
+            serverVersion: result.actualVersion,
+          });
+        }
+        if (result.reason === 'node-conflict') {
+          const latest = await getStructuredStore()
+            .space(canvasId)
+            .nodes.read(nodeId);
+          return reply.code(409).send({
+            code: 'NODE_CONTENT_CONFLICT',
+            message: `Node "${nodeId}" changed while its file was being deleted`,
+            nodeId,
+            currentRev: nodeRevisionOf({
+              ...(typeof latest?.record.content === 'string'
+                ? { content: latest.record.content }
+                : {}),
+              ...(typeof latest?.record.src === 'string'
+                ? { src: latest.record.src }
+                : {}),
+            }),
+          });
+        }
+        throw new Error(`Unexpected node delete conflict: ${result.reason}`);
+      }
+
+      return reply.send({
+        success: true,
+        commit: outcome.result.event,
+        ack: mutationAckOf(outcome.result.event),
+      });
     } catch (error) {
       // CanvasStoreIOError (unlink rejected by the OS, e.g. EPERM /
       // EACCES). Surface the failure so the client can revert its
@@ -670,18 +813,16 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         message: `Failed to delete node file for "${nodeId}"`,
       });
     }
-
-    return reply.send({ success: true });
   });
 
   // --- Per-node content endpoints --------------------------------------
   //
   // These let the web client persist a single node's markdown sidecar
   // (`nodes/<safe(label)>.md`) without going through the full canvas
-  // PUT, so editor edits no longer collide with the canvas-level
+  // PUT. Each actual sidecar change participates in the Space's global
   // optimistic-concurrency `version` counter. The structure PUT in
-  // `PUT /:canvasId` strips every per-node content field via
-  // {@link stripNodesForCanvas} — these endpoints are the only write
+  // `PUT /:canvasId` strips every per-node content field through the canonical
+  // slim-structure projection — these endpoints are the only write
   // path for `.md` sidecars. See `docs/node-content-api-split.md`.
 
   fastify.put<{
@@ -697,12 +838,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    const store = getCanvasStore(canvasId);
-    const canvas = store.read();
-    if (!canvas) {
-      return reply.code(404).send({ message: 'Canvas not found' });
-    }
-
     const {
       nodeType,
       content: incomingContent,
@@ -713,93 +848,174 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       keywords,
       provenance,
       expectRev,
+      originator: requestedOriginator,
     } = parsed.data;
-
-    if (!MD_BACKED_NODE_TYPES.has(nodeType)) {
-      return reply.code(400).send({
-        message: `Node type "${nodeType}" does not have a markdown sidecar`,
-      });
-    }
-
-    // Build the record to persist. Field-ownership policy lives HERE (the
-    // caller): body resolution, the empty-body clobber guard, and label
-    // resolution. The serialized read → rev-CAS → write is owned by
-    // `updateNode` (storage layer), which reads the current on-disk record
-    // inside the shared canvas lock and hands it to this `apply` — so the
-    // resolution below is atomic with the write and can't race another
-    // writer (another tab / device / agent / preprocess). See
-    // `canvas/write-coordinator.ts`.
-    let persisted: NodeContent | undefined;
-    const apply = (existing: NodeContent | null): NodeContent => {
-      // Body resolution:
-      //   - text-bearing nodes (including `question`): prefer the caller's
-      //     content; fall back to the existing on-disk body so a label-only
-      //     update doesn't wipe it.
-      //   - frontmatter-only nodes (image/video/frame): always empty.
-      const acceptsBody = TEXT_BEARING_NODE_TYPES.has(nodeType);
-      const body = acceptsBody
-        ? (incomingContent ?? existing?.content ?? '')
-        : '';
-      // Guard against accidental content wipes (autosave race vs. editor
-      // flush): an explicit `content: ""` over a non-empty body keeps the
-      // existing body but still refreshes the frontmatter.
-      const wouldClobber =
-        acceptsBody &&
-        incomingContent === '' &&
-        typeof existing?.content === 'string' &&
-        existing.content.length > 0;
-      const safeBody = wouldClobber ? existing!.content : body;
-      // Label resolution: explicit `null` clears; absent leaves it untouched.
-      const resolvedLabel =
-        incomingLabel === undefined
-          ? (existing?.label ?? null)
-          : (incomingLabel ?? null);
-
-      const nodeContent: NodeContent = {
-        ...(existing ?? {}),
-        nodeId,
-        type: nodeType,
-        label: resolvedLabel,
-        // Only include `src` when the caller or existing record had one, so
-        // pure note/text/frame frontmatter never gets a `src: undefined`.
-        ...(incomingSrc !== undefined
-          ? { src: incomingSrc }
-          : existing?.src !== undefined
-            ? { src: existing.src }
-            : {}),
-        content: safeBody,
-      };
-      if (labelSource !== undefined) nodeContent['labelSource'] = labelSource;
-      if (summary !== undefined) nodeContent['summary'] = summary;
-      if (keywords !== undefined) nodeContent['keywords'] = keywords;
-      if (provenance !== undefined) nodeContent['provenance'] = provenance;
-      persisted = nodeContent;
-      return nodeContent;
-    };
-
-    // Strict rename only for user-typed labels: the `tryRename` flow awaits
-    // the 409 to revert the optimistic label. Agent / auto labels lazy-dedupe
-    // with `(N)` suffixes because batched agent runs cannot react to a 409.
-    //
-    // rev-CAS gating lives HERE, keyed off the node's `bodyOwnership` in the
-    // preprocessing profiles — the single source of truth for who is
-    // CAS-guarded. Only `authored` bodies (note / text / question) are
-    // optimistic-concurrency-checked: their in-app body is the resource a
-    // stale writer could clobber. `derived` bodies (extracted / bodyless) are
-    // last-write-wins — their sole concurrent writer is preprocess `persist`,
-    // which writes without CAS, so honoring `expectRev` for them would buy no
-    // safety and only risk a false `NODE_CONTENT_CONFLICT` (e.g. a brand-new
-    // image whose `expectRev` races its own `persist_source` write). The web
-    // sends `expectRev` uniformly and need not know the classification; the
-    // server drops it for non-authored types.
-    const isAuthored =
-      getProfile(nodeType as CanvasNodeType)?.bodyOwnership === 'authored';
-    let outcome: UpdateNodeOutcome;
+    const originator = requestedOriginator ?? { source: 'ui' as const };
+    let attempted: NodeContent | undefined;
+    let outcome;
     try {
-      outcome = await updateNode(store, nodeId, {
-        expectRev: isAuthored ? expectRev : undefined,
-        apply,
-        strictRename: labelSource === 'user',
+      outcome = await withCanvasMutex(canvasId, async () => {
+        const handle = getStructuredStore().space(canvasId);
+        const canvas = await handle.record.read();
+        if (canvas === null) return { status: 'not-found' as const };
+
+        // The complete node read, authored-content CAS, metadata merge,
+        // whole-record precondition, and aggregate commit are one serialized
+        // operation. This preserves the content ETag contract while also
+        // protecting labels/frontmatter from a concurrent metadata write.
+        const current = await handle.nodes.read(nodeId);
+        const existing = current?.record ?? null;
+        const topologyNode = ((canvas.state.nodes ?? []) as NodeLike[]).find(
+          (candidate) => candidate.id === nodeId,
+        );
+
+        // A standalone content request must never mint a sidecar that is not
+        // represented by the Space topology. First visibility belongs to the
+        // structural aggregate commit, which publishes topology + sidecar
+        // together. A missing topology entry is a recoverable stale conflict,
+        // including for late writes after DELETE, so the client cannot mistake
+        // a suppressed write for durable success.
+        if (!topologyNode) {
+          return {
+            status: 'topology-conflict' as const,
+            currentRev: nodeRevisionOf({
+              ...(typeof existing?.content === 'string'
+                ? { content: existing.content }
+                : {}),
+              ...(typeof existing?.src === 'string'
+                ? { src: existing.src }
+                : {}),
+            }),
+          };
+        }
+
+        const canonicalNodeType = topologyNode.type ?? '';
+        if (canonicalNodeType !== nodeType) {
+          return {
+            status: 'type-conflict' as const,
+            canonicalNodeType,
+            currentRev: nodeRevisionOf({
+              ...(typeof existing?.content === 'string'
+                ? { content: existing.content }
+                : {}),
+              ...(typeof existing?.src === 'string'
+                ? { src: existing.src }
+                : {}),
+            }),
+          };
+        }
+        if (!MD_BACKED_NODE_TYPES.has(canonicalNodeType)) {
+          return {
+            status: 'invalid-type' as const,
+            canonicalNodeType,
+          };
+        }
+
+        const isAuthored =
+          getProfile(canonicalNodeType as CanvasNodeType)?.bodyOwnership ===
+          'authored';
+        if (isAuthored && expectRev !== undefined) {
+          const currentRev = nodeRevisionOf({
+            ...(typeof existing?.content === 'string'
+              ? { content: existing.content }
+              : {}),
+            ...(typeof existing?.src === 'string' ? { src: existing.src } : {}),
+          });
+          if (expectRev !== currentRev) {
+            return { status: 'rev-conflict' as const, currentRev };
+          }
+        }
+
+        const acceptsBody = TEXT_BEARING_NODE_TYPES.has(canonicalNodeType);
+        const body = acceptsBody
+          ? (incomingContent ?? existing?.content ?? '')
+          : '';
+        const wouldClobber =
+          acceptsBody &&
+          incomingContent === '' &&
+          typeof existing?.content === 'string' &&
+          existing.content.length > 0;
+        const safeBody = wouldClobber && existing ? existing.content : body;
+        const resolvedLabel =
+          incomingLabel === undefined
+            ? (existing?.label ?? null)
+            : (incomingLabel ?? null);
+        const next: NodeContent = {
+          ...(existing ?? {}),
+          nodeId,
+          // The topology is the sole owner of type transitions. Content PUT
+          // may update body/frontmatter, but cannot race a structural save and
+          // revert the sidecar's canonical type.
+          type: canonicalNodeType,
+          label: resolvedLabel,
+          ...(incomingSrc !== undefined
+            ? { src: incomingSrc }
+            : existing?.src !== undefined
+              ? { src: existing.src }
+              : {}),
+          content: safeBody,
+        };
+        if (labelSource !== undefined) next['labelSource'] = labelSource;
+        if (summary !== undefined) next['summary'] = summary;
+        if (keywords !== undefined) next['keywords'] = keywords;
+        if (provenance !== undefined) next['provenance'] = provenance;
+        attempted = next;
+
+        const result = await handle.commit({
+          expectedVersion: canvas.version,
+          record: { title: canvas.title, state: canvas.state },
+          nodePreconditions: [{ nodeId, revision: current?.revision ?? null }],
+          nodeMutations: [
+            {
+              kind: 'put',
+              record: next,
+              strictRename: labelSource === 'user',
+            },
+          ],
+          publication: {
+            originator,
+            optimistic: originator.source === 'ui',
+            commands: [],
+            structureDeltas: [],
+          },
+        });
+
+        if (!result.ok) {
+          if (result.reason === 'node-write-suppressed') {
+            return { status: 'skipped-deleted' as const };
+          }
+          if (result.reason === 'node-conflict') {
+            const latest = await handle.nodes.read(nodeId);
+            const currentRev = nodeRevisionOf({
+              ...(typeof latest?.record.content === 'string'
+                ? { content: latest.record.content }
+                : {}),
+              ...(typeof latest?.record.src === 'string'
+                ? { src: latest.record.src }
+                : {}),
+            });
+            return { status: 'rev-conflict' as const, currentRev };
+          }
+          return {
+            status: 'commit-conflict' as const,
+            result,
+            snapshot: current,
+          };
+        }
+
+        const snapshot =
+          result.nodes.find((entry) => entry.record.nodeId === nodeId) ??
+          current;
+        if (snapshot === null) {
+          throw new Error(`Committed node "${nodeId}" has no final snapshot`);
+        }
+        if (result.committed) publishNodeCommit(canvasId, result.event);
+        return {
+          status: 'ok' as const,
+          result,
+          snapshot,
+          contentPreserved: wouldClobber,
+        };
       });
     } catch (error) {
       // CanvasStoreIOError (ENOSPC, EACCES, EROFS, …) / any unexpected throw
@@ -809,6 +1025,33 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         'Failed to write node markdown',
       );
       return reply.code(500).send({ message: 'Failed to write node content' });
+    }
+
+    if (outcome.status === 'not-found') {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+    if (outcome.status === 'invalid-type') {
+      return reply.code(400).send({
+        message:
+          `Node type "${outcome.canonicalNodeType}" ` +
+          'does not have a markdown sidecar',
+      });
+    }
+
+    if (
+      outcome.status === 'type-conflict' ||
+      outcome.status === 'topology-conflict'
+    ) {
+      return reply.code(409).send({
+        code: 'NODE_CONTENT_CONFLICT',
+        message:
+          outcome.status === 'type-conflict'
+            ? `Node "${nodeId}" is now type "${outcome.canonicalNodeType}"; refresh before editing it`
+            : `Node "${nodeId}" is no longer present in the canvas topology`,
+        nodeId,
+        currentRev: outcome.currentRev,
+        expectedRev: expectRev,
+      } satisfies CanvasConflictResponse);
     }
 
     // rev-CAS conflict: a concurrent write (another tab / device / agent, or
@@ -826,34 +1069,64 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         expectedRev: expectRev,
       } satisfies CanvasConflictResponse);
     }
-    if (outcome.status === 'rejected') {
+    if (outcome.status === 'commit-conflict') {
       const result = outcome.result;
-      if (result.reason === 'conflict') {
+      if (result.reason === 'node-name-conflict') {
         return reply.code(409).send({
           code: 'NODE_LABEL_CONFLICT',
-          message: `Another node already uses the label "${persisted?.label ?? ''}"`,
+          message: `Another node already uses the label "${attempted?.label ?? ''}"`,
           nodeId,
-          conflictWith: result.conflictWith.filename,
+          conflictWith: result.conflictWith.logicalName,
         } satisfies CanvasConflictResponse);
       }
-      if (result.reason === 'duplicate') {
+      if (result.reason === 'duplicate-node') {
         // Two `.md` sidecars claim this nodeId (a failed rename or an external
         // copy). Refuse rather than compound it; surface a 409 to resolve.
         request.log.warn(
-          { canvasId, nodeId, files: result.files },
+          { canvasId, nodeId, files: result.logicalNames },
           'Refusing node write: duplicate sidecars on disk',
         );
         return reply.code(409).send({
           code: 'NODE_DUPLICATE_FILES',
           message:
             `Node "${nodeId}" has multiple markdown files on disk ` +
-            `(${result.files.join(', ')}); ` +
+            `(${result.logicalNames.join(', ')}); ` +
             'resolve the duplicate before editing.',
           nodeId,
-          duplicateFiles: result.files,
+          duplicateFiles: [...result.logicalNames],
         } satisfies CanvasConflictResponse);
       }
-      // `not-found` should not happen here — we just constructed the record.
+      if (result.reason === 'not-found') {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      if (result.reason === 'version-conflict') {
+        return reply.code(409).send({
+          code: 'CANVAS_VERSION_CONFLICT',
+          message: 'Canvas changed while writing node content',
+          serverVersion: result.actualVersion,
+        } satisfies CanvasConflictResponse);
+      }
+      if (result.reason === 'node-topology-conflict') {
+        return reply.code(409).send({
+          code: 'NODE_CONTENT_CONFLICT',
+          message:
+            result.topologyType === null
+              ? `Node "${nodeId}" is no longer present in the canvas topology`
+              : `Node "${nodeId}" is now type "${result.topologyType}"; refresh before editing it`,
+          nodeId,
+          currentRev: outcome.snapshot?.record
+            ? nodeRevisionOf({
+                ...(typeof outcome.snapshot.record.content === 'string'
+                  ? { content: outcome.snapshot.record.content }
+                  : {}),
+                ...(typeof outcome.snapshot.record.src === 'string'
+                  ? { src: outcome.snapshot.record.src }
+                  : {}),
+              })
+            : undefined,
+          expectedRev: expectRev,
+        } satisfies CanvasConflictResponse);
+      }
       request.log.error({ canvasId, nodeId, result }, 'Node write failed');
       return reply.code(500).send({ message: 'Failed to write node content' });
     }
@@ -875,20 +1148,38 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     const response: PutNodeContentResponse = {
       nodeId,
-      label: outcome.label,
+      label: outcome.snapshot.record.label,
+      ...(outcome.contentPreserved
+        ? {
+            contentPreserved: true,
+            content: outcome.snapshot.record.content,
+          }
+        : {}),
       // Authoritative rev of the content actually persisted (reflects the
       // refused-empty-clobber case), co-delivered with the write it confirms
       // as the client's new CAS baseline.
-      rev: outcome.rev,
+      rev: nodeRevisionOf({
+        ...(typeof outcome.snapshot.record.content === 'string'
+          ? { content: outcome.snapshot.record.content }
+          : {}),
+        ...(typeof outcome.snapshot.record.src === 'string'
+          ? { src: outcome.snapshot.record.src }
+          : {}),
+      }),
+      recordRevision: outcome.snapshot.revision,
+      commit: outcome.result.event,
+      ack: mutationAckOf(outcome.result.event),
     };
     // `artifactMissing` is only meaningful for src-backed types and is
     // surfaced so the client can render the same placeholder UI it gets
     // back on a hydrate-time miss.
-    if (ARTIFACT_BACKED_NODE_TYPES.has(nodeType)) {
+    if (ARTIFACT_BACKED_NODE_TYPES.has(outcome.snapshot.record.type)) {
       const srcForCheck =
-        typeof persisted?.src === 'string' ? persisted.src : '';
+        typeof outcome.snapshot.record.src === 'string'
+          ? outcome.snapshot.record.src
+          : '';
       if (srcForCheck) {
-        const probe = await singleArtifactProbe(store.canvasId, srcForCheck);
+        const probe = await singleArtifactProbe(canvasId, srcForCheck);
         if (isArtifactMissing(probe, { src: srcForCheck })) {
           response.artifactMissing = true;
         }
@@ -903,19 +1194,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   }>('/:canvasId/nodes/:nodeId/content', async function (request, reply) {
     const { canvasId, nodeId } = request.params;
 
+    const handle = getStructuredStore().space(canvasId);
     const store = getCanvasStore(canvasId);
-    const canvas = store.read();
+    const canvas = await handle.record.read();
     if (!canvas) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
-
-    // Reconcile the cached node index against disk before this read.
-    // Only re-scans when warranted: a node already flagged duplicate
-    // always re-reads (so a hand-resolved duplicate is detected — the
-    // cheap count probe alone can't see that case), otherwise it falls
-    // back to the names-only staleness probe. Keeps the common healthy
-    // read off the full content rescan.
-    store.revalidateNodeForRead(nodeId);
 
     // Find this node in the persisted canvas state so we know its type
     // (without it we can't apply the artifact-missing branch). For
@@ -926,17 +1210,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     let nodeType =
       stateNode && typeof stateNode.type === 'string' ? stateNode.type : '';
 
-    let existing: NodeContent | null = null;
-    try {
-      existing = store.readNode(nodeId);
-    } catch {
-      existing = null;
-    }
-    if (!nodeType && existing) {
-      nodeType = existing.type;
-    }
-
-    if (!existing) {
+    // Read the canonical record and its opaque whole-record revision as one
+    // snapshot. Reusing this exact record below keeps the content and CAS
+    // baseline co-delivered; a second legacy-store read could otherwise pair
+    // a newer body with the older snapshot revision.
+    const snapshot = await handle.nodes.read(nodeId);
+    if (!snapshot) {
       // Markdown sidecar absent — surface a placeholder shape so the
       // client can render the same "missing content" UI it gets from
       // the batched hydrate path.
@@ -951,6 +1230,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         contentMissing: true,
       } satisfies GetNodeContentResponse);
     }
+    const existing = snapshot.record;
+    if (!nodeType) {
+      nodeType = existing.type;
+    }
 
     // Reuse the batched hydration helper so single-node and whole-
     // canvas reads stay in lock-step.
@@ -962,6 +1245,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         data: { ...(stateNode?.data ?? {}) },
       },
       await singleArtifactProbe(store.canvasId, existing.src),
+      existing,
     );
     const data = (hydrated.data ?? {}) as Record<string, unknown>;
 
@@ -980,6 +1264,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         content: resolvedContent,
         ...(typeof existing.src === 'string' ? { src: existing.src } : {}),
       }),
+      recordRevision: snapshot.revision,
     };
     const ls = existing['labelSource'];
     if (ls === 'user' || ls === 'auto' || ls === 'agent') {
@@ -999,14 +1284,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     if (data['artifactMissing'] === true) {
       response.artifactMissing = true;
     }
-    // Forward the duplicate-sidecar hints so a single-node refresh can
-    // clear (or re-confirm) the editor overlay without a full canvas
-    // reload. `hydrateOneNode` already computed these onto `data`.
-    if (data['contentDuplicate'] === true) {
+    // Forward duplicate-sidecar hints from the same canonical snapshot so a
+    // single-node refresh can clear (or re-confirm) the editor overlay
+    // without a full canvas reload.
+    if (snapshot.duplicateLogicalNames?.length) {
       response.contentDuplicate = true;
-      if (Array.isArray(data['duplicateFiles'])) {
-        response.duplicateFiles = data['duplicateFiles'] as string[];
-      }
+      response.duplicateFiles = [...snapshot.duplicateLogicalNames];
     }
     return reply.send(response);
   });
@@ -1028,85 +1311,116 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    const { nodeType, trigger, snapshot, previousSnapshot, options } =
-      parsed.data;
-    const dispatcher = getPreprocessDispatcher();
-    const store = getCanvasStore(canvasId);
-
-    if (MD_BACKED_NODE_TYPES.has(nodeType) && !store.readNode(nodeId)) {
-      return reply.send({
-        nodeId,
-        success: false,
-        error: 'Node sidecar is missing',
-      });
-    }
-
-    try {
-      const ppRequest: PreprocessNodeRequest = {
-        canvasId,
-        nodeId,
+    return withWorkspaceOperationLease(async () => {
+      const {
         nodeType,
-        trigger: trigger ?? 'node_updated',
+        trigger,
         snapshot,
         previousSnapshot,
-        options: {
-          allowLLM: options?.allowLLM ?? true,
-          allowPersistence: options?.allowPersistence ?? true,
-          force: options?.force ?? false,
-          mode: options?.mode,
-        },
-      };
-
-      const result = await dispatcher.preprocess(ppRequest);
-
-      const response: PreprocessNodeResponse = {
+        options,
+        originator,
+      } = parsed.data;
+      const baseline = await capturePreprocessExecutionBaseline(
+        canvasId,
         nodeId,
-        success: result.success,
-        suggestedLabel:
-          typeof result.patch.label === 'string'
-            ? result.patch.label
-            : undefined,
-        // Surface the post-Persist canonical `src` only when the
-        // Project stage decided it diverged from the snapshot — see
-        // the `patch.src` branch in `stages/project.ts`. Reading from
-        // the patch (rather than `result.persistence`) means we
-        // automatically inherit the same "only when changed" gate so
-        // the client never receives a redundant src write.
-        src:
-          typeof result.patch.src === 'string' ? result.patch.src : undefined,
-        // For office nodes the in-canvas preview reads `data.content`
-        // directly, so ship the freshly-extracted body back so the
-        // client doesn't need a full canvas reload (or a follow-up
-        // GET /content) before the preview can render. The OfficeLoader
-        // already strips officeparser's auto-prepended YAML frontmatter
-        // and stray horizontal rule, so this value is preview-ready.
-        // Other text-bearing types (pdf / web / note) deliberately do
-        // NOT echo `content` here — their previews never read it and
-        // the extracted text can be hundreds of KB.
-        content:
-          nodeType === 'office' && typeof result.extracted?.content === 'string'
-            ? result.extracted.content
-            : undefined,
-        summary: result.enriched?.summary,
-        keywords: result.enriched?.keywords,
-        error:
-          result.diagnostics
-            .filter((d) => d.level === 'error')
-            .map((d) => `${d.code}: ${d.message}`)
-            .join('; ') || undefined,
-      };
-      return reply.send(response);
-    } catch (error) {
-      const message = toMessage(error);
-      request.log.error(
-        { nodeId, nodeType, error },
-        'Failed to preprocess node',
       );
-      return reply.code(500).send({
-        message: 'Failed to preprocess node',
-        details: message,
-      });
-    }
+      const handle = getStructuredStore().space(canvasId);
+
+      // A late request for a deleted or type-transitioned node is a benign
+      // superseded no-op. A topology-present MD node with no sidecar remains a
+      // genuine integrity error and keeps the legacy diagnostic response.
+      if (baseline.topologyType !== nodeType) {
+        return reply.send({ nodeId, success: true });
+      }
+      if (
+        MD_BACKED_NODE_TYPES.has(nodeType) &&
+        baseline.nodeRecordRevision === null
+      ) {
+        return reply.send({
+          nodeId,
+          success: false,
+          error: 'Node sidecar is missing',
+        });
+      }
+
+      try {
+        const dispatcher = getPreprocessDispatcher();
+        const ppRequest: PreprocessNodeRequest = {
+          canvasId,
+          nodeId,
+          nodeType,
+          trigger: trigger ?? 'node_updated',
+          snapshot,
+          previousSnapshot,
+          ...(originator ? { originator } : {}),
+          options: {
+            allowLLM: options?.allowLLM ?? true,
+            allowPersistence: options?.allowPersistence ?? true,
+            force: options?.force ?? false,
+            mode: options?.mode,
+          },
+        };
+
+        const result = await dispatcher.preprocess(ppRequest, baseline);
+        const recordRevision = result.superseded
+          ? undefined
+          : (result.recordRevision ??
+            (await handle.nodes.read(nodeId))?.revision);
+
+        const response: PreprocessNodeResponse = {
+          nodeId,
+          success: result.success,
+          observedVersion: result.observedVersion,
+          recordRevision,
+          commit: result.commit,
+          ack: result.ack,
+          suggestedLabel:
+            typeof result.patch.label === 'string'
+              ? result.patch.label
+              : undefined,
+          // Surface the post-Persist canonical `src` only when the
+          // Project stage decided it diverged from the snapshot — see
+          // the `patch.src` branch in `stages/project.ts`. Reading from
+          // the patch (rather than `result.persistence`) means we
+          // automatically inherit the same "only when changed" gate so
+          // the client never receives a redundant src write.
+          src:
+            typeof result.patch.src === 'string' ? result.patch.src : undefined,
+          // For office nodes the in-canvas preview reads `data.content`
+          // directly, so ship the freshly-extracted body back so the
+          // client doesn't need a full canvas reload (or a follow-up
+          // GET /content) before the preview can render. The OfficeLoader
+          // already strips officeparser's auto-prepended YAML frontmatter
+          // and stray horizontal rule, so this value is preview-ready.
+          // Other text-bearing types (pdf / web / note) deliberately do
+          // NOT echo `content` here — their previews never read it and
+          // the extracted text can be hundreds of KB.
+          content:
+            nodeType === 'office' &&
+            typeof result.extracted?.content === 'string'
+              ? result.extracted.content
+              : undefined,
+          summary: result.enriched?.summary,
+          keywords: result.enriched?.keywords,
+          error:
+            result.diagnostics
+              .filter((d) => d.level === 'error')
+              .map((d) => `${d.code}: ${d.message}`)
+              .join('; ') || undefined,
+        };
+        return reply.send(response);
+      } catch (error) {
+        const message = toMessage(error);
+        request.log.error(
+          { nodeId, nodeType, error },
+          'Failed to preprocess node',
+        );
+        return reply.code(500).send({
+          message: 'Failed to preprocess node',
+          details: message,
+        });
+      }
+    });
   });
 
   // --- GET Canvas ---
@@ -1135,6 +1449,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       canvasId: canvas.canvasId,
       title: canvas.title,
       version: canvas.version,
+      structureRevision: structureRevisionOf(canvas),
       state: {
         ...canvas.state,
         nodes: hydratedNodes,
@@ -1169,115 +1484,340 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(400).send({ message: 'Invalid request body' });
     }
 
-    const { version: clientVersion, state, title } = parsed.data;
+    const {
+      version: clientVersion,
+      state,
+      title,
+      expectStructureRevision,
+      originator: requestedOriginator,
+    } = parsed.data;
+    if (
+      typeof state !== 'object' ||
+      state === null ||
+      !Array.isArray((state as { nodes?: unknown }).nodes) ||
+      !Array.isArray((state as { edges?: unknown }).edges)
+    ) {
+      return reply.code(400).send({ message: 'Invalid canvas state' });
+    }
     const incomingState = state as {
-      nodes?: NodeLike[];
-      edges?: unknown[];
-      [key: string]: unknown;
+      nodes: NodeLike[];
+      edges: CanvasEdge[];
     };
+    const originator = requestedOriginator ?? { source: 'ui' as const };
 
-    const store = getCanvasStore(canvasId);
-    const existing = store.read();
-    const serverVersion = existing?.version ?? 0;
-    if (clientVersion !== serverVersion) {
-      return reply.code(409).send({
-        code: 'CANVAS_VERSION_CONFLICT',
-        message: 'Canvas version mismatch',
-        serverVersion,
-      } satisfies CanvasConflictResponse);
-    }
-
+    let outcome;
     try {
-      assertWorldPortalTopologyAllowed(
-        canvasId,
-        (existing?.state.nodes ?? []) as NodeLike[],
-        incomingState.nodes ?? [],
-      );
-    } catch (error) {
-      if (error instanceof WorldPortalMutationError) {
-        return reply.code(409).send({ message: error.message });
-      }
-      throw error;
-    }
+      outcome = await withCanvasMutex(canvasId, async () => {
+        let handle = getStructuredStore().space(canvasId);
+        let current = await handle.record.read();
+        let implicitCreate = false;
 
-    // Title rename (and the directory rename it implies) happens
-    // before any node persistence so a 409 doesn't half-apply changes.
-    const previousTitle = existing?.title ?? null;
-    const nextTitle = title ?? previousTitle;
-    if (typeof title === 'string' && title !== previousTitle) {
-      // Release any handle held inside this Space's directory across the
-      // rename: on Windows a live `fs.watch` handle makes `renameSync` fail
-      // with EPERM (see `withSpaceDirHandlesReleased`).
-      const renameResult = await withSpaceDirHandlesReleased(canvasId, () =>
-        store.renameSelf(title),
-      );
-      if (!renameResult.ok && renameResult.reason === 'conflict') {
+        // Compatibility only: historical clients may PUT a never-created id
+        // at version 0. Funnel even that path through lifecycle + commit so
+        // there is still one structured write authority. A failure after the
+        // v0 create leaves a visible empty Space rather than a torn record.
+        if (current === null) {
+          if (clientVersion !== 0) {
+            return { status: 'version-conflict' as const, serverVersion: 0 };
+          }
+          const created = await createSpace({
+            canvasId,
+            title: title ?? null,
+          });
+          if (!created.ok) {
+            const raced = await getStructuredStore()
+              .space(canvasId)
+              .record.read();
+            return {
+              status: 'version-conflict' as const,
+              serverVersion: raced?.version ?? 0,
+            };
+          }
+          current = created.record;
+          implicitCreate = true;
+          handle = getStructuredStore().space(canvasId);
+        }
+
+        const nextTitle = implicitCreate
+          ? current.title
+          : (title ?? current.title);
+        const currentStructure = projectSlimCanvasStructure(current);
+        const nextStructure = projectSlimCanvasStructure({
+          title: nextTitle,
+          state: {
+            nodes: incomingState.nodes,
+            edges: incomingState.edges,
+          },
+        });
+        const currentStructureRevision = structureRevisionOf(current);
+        const desiredStructureRevision = structureRevisionOf(nextStructure);
+
+        if (!implicitCreate) {
+          if (expectStructureRevision === undefined) {
+            if (clientVersion !== current.version) {
+              return {
+                status: 'version-conflict' as const,
+                serverVersion: current.version,
+              };
+            }
+          } else if (
+            clientVersion > current.version ||
+            (expectStructureRevision !== currentStructureRevision &&
+              desiredStructureRevision !== currentStructureRevision)
+          ) {
+            return {
+              status: 'version-conflict' as const,
+              serverVersion: current.version,
+            };
+          }
+        }
+
+        try {
+          assertWorldPortalTopologyAllowed(
+            canvasId,
+            currentStructure.state.nodes as NodeLike[],
+            nextStructure.state.nodes as NodeLike[],
+          );
+        } catch (error) {
+          if (error instanceof WorldPortalMutationError) {
+            return {
+              status: 'portal-conflict' as const,
+              message: error.message,
+            };
+          }
+          throw error;
+        }
+
+        const nextState = {
+          // Canvas PUT owns title/topology only. Preserve opaque state owned
+          // by other features instead of accepting a stale client copy.
+          ...current.state,
+          nodes: nextStructure.state.nodes,
+          edges: nextStructure.state.edges,
+        };
+        const deltas = diffCanvasState(
+          {
+            nodes: currentStructure.state.nodes as CanvasNode[],
+            edges: currentStructure.state.edges as CanvasEdge[],
+          },
+          {
+            nodes: nextStructure.state.nodes as CanvasNode[],
+            edges: nextStructure.state.edges as CanvasEdge[],
+          },
+        );
+
+        const currentById = new Map(
+          (currentStructure.state.nodes as CanvasNode[]).map((node) => [
+            node.id,
+            node,
+          ]),
+        );
+        const nextById = new Map(
+          (nextStructure.state.nodes as CanvasNode[]).map((node) => [
+            node.id,
+            node,
+          ]),
+        );
+        const incomingById = new Map(
+          incomingState.nodes.flatMap((node) =>
+            typeof node.id === 'string' ? [[node.id, node] as const] : [],
+          ),
+        );
+        const nodePreconditions = [];
+        const nodeMutations = [];
+        const deletedNodeIds: string[] = [];
+
+        for (const [nodeId, node] of currentById) {
+          const next = nextById.get(nodeId);
+          if (
+            !MD_BACKED_NODE_TYPES.has(node.type ?? '') ||
+            (next !== undefined && MD_BACKED_NODE_TYPES.has(next.type ?? ''))
+          ) {
+            continue;
+          }
+          const snapshot = await handle.nodes.read(nodeId);
+          nodePreconditions.push({
+            nodeId,
+            revision: snapshot?.revision ?? null,
+          });
+          nodeMutations.push({ kind: 'delete' as const, nodeId });
+          deletedNodeIds.push(nodeId);
+        }
+
+        for (const [nodeId, node] of nextById) {
+          const previous = currentById.get(nodeId);
+          if (!MD_BACKED_NODE_TYPES.has(node.type ?? '')) continue;
+
+          // A markdown-backed type transition owns topology and frontmatter
+          // together. Preserve the canonical sidecar fields and change only
+          // its type; accepting the structure while leaving stale
+          // frontmatter would make external readers disagree with the UI.
+          if (
+            previous !== undefined &&
+            MD_BACKED_NODE_TYPES.has(previous.type ?? '')
+          ) {
+            if (previous.type === node.type) continue;
+            const snapshot = await handle.nodes.read(nodeId);
+            if (snapshot === null) continue;
+            nodePreconditions.push({
+              nodeId,
+              revision: snapshot.revision,
+            });
+            nodeMutations.push({
+              kind: 'put' as const,
+              record: { ...snapshot.record, type: node.type ?? '' },
+            });
+            continue;
+          }
+
+          const initial = initialNodeContent(incomingById.get(nodeId) ?? {});
+          if (initial === null) continue;
+          const snapshot = await handle.nodes.read(nodeId);
+          // Preserve a legacy content PUT that happened to win the old
+          // create race. A type transition, however, deliberately replaces
+          // the previous representation with the incoming initial sidecar.
+          if (previous === undefined && snapshot !== null) {
+            if (snapshot.record.type !== node.type) {
+              return {
+                status: 'orphan-type-conflict' as const,
+                nodeId,
+                sidecarType: snapshot.record.type,
+                topologyType: node.type ?? '',
+              };
+            }
+            // Attach the already-canonical orphan through a semantic no-op
+            // mutation. The revision precondition closes the gap between
+            // this read and commit, while the adapter's normal put path also
+            // validates duplicate files and topology/type agreement. Because
+            // the bytes are unchanged, publication emits no node change.
+            nodePreconditions.push({
+              nodeId,
+              revision: snapshot.revision,
+            });
+            nodeMutations.push({
+              kind: 'put' as const,
+              record: snapshot.record,
+            });
+            continue;
+          }
+          nodePreconditions.push({
+            nodeId,
+            revision: snapshot?.revision ?? null,
+          });
+          nodeMutations.push({
+            kind: 'put' as const,
+            record: initial,
+            strictRename: initial['labelSource'] === 'user',
+          });
+        }
+
+        const result = await handle.commit({
+          expectedVersion: current.version,
+          record: { title: nextTitle, state: nextState },
+          nodePreconditions,
+          nodeMutations,
+          publication: {
+            originator,
+            optimistic: originator.source === 'ui',
+            commands: [],
+            structureDeltas: deltas,
+          },
+          // Preserve the current autosave contract until the separately
+          // tracked no-op cleanup: every accepted Canvas PUT advances once.
+          forceVersionBump: true,
+        });
+        if (!result.ok) return { status: 'commit-conflict' as const, result };
+        if (result.committed) {
+          publishNodeCommit(canvasId, result.event, deletedNodeIds);
+        }
+        return { status: 'ok' as const, result };
+      });
+    } catch (error) {
+      if (/deletion is pending/.test(toMessage(error))) {
         return reply.code(409).send({
-          code: 'CANVAS_TITLE_CONFLICT',
-          message: `Another canvas already uses the directory name "${renameResult.conflictWith}"`,
-          conflictWith: renameResult.conflictWith,
+          code: 'CANVAS_VERSION_CONFLICT',
+          message: 'Canvas is being deleted',
+          serverVersion: clientVersion,
         } satisfies CanvasConflictResponse);
       }
-      if (!renameResult.ok && renameResult.reason === 'forbidden') {
+      request.log.error({ canvasId, error }, 'Failed to commit canvas');
+      return reply.code(500).send({ message: 'Failed to save canvas' });
+    }
+
+    if (outcome.status === 'version-conflict') {
+      return reply.code(409).send({
+        code: 'CANVAS_VERSION_CONFLICT',
+        message: 'Canvas version or structure mismatch',
+        serverVersion: outcome.serverVersion,
+      } satisfies CanvasConflictResponse);
+    }
+    if (outcome.status === 'portal-conflict') {
+      return reply.code(409).send({
+        code: 'INVALID_REQUEST',
+        message: outcome.message,
+      });
+    }
+    if (outcome.status === 'orphan-type-conflict') {
+      return reply.code(409).send({
+        code: 'NODE_CONTENT_CONFLICT',
+        message:
+          `Node "${outcome.nodeId}" has an existing ${outcome.sidecarType} ` +
+          `sidecar that cannot be attached as ${outcome.topologyType}`,
+        nodeId: outcome.nodeId,
+      } satisfies CanvasConflictResponse);
+    }
+    if (outcome.status === 'commit-conflict') {
+      const result = outcome.result;
+      if (result.reason === 'title-conflict') {
+        return reply.code(409).send({
+          code: 'CANVAS_TITLE_CONFLICT',
+          message: `Another canvas already uses the directory name "${result.conflictWith}"`,
+          conflictWith: result.conflictWith,
+        } satisfies CanvasConflictResponse);
+      }
+      if (result.reason === 'world-title-forbidden') {
         return reply
           .code(403)
           .send({ message: 'World canvas cannot be renamed' });
       }
-      if (!renameResult.ok && renameResult.reason === 'fs-error') {
-        request.log.error(
-          { canvasId, err: renameResult.message },
-          'Failed to rename canvas directory',
-        );
-        return reply.code(500).send({ message: 'Failed to rename canvas' });
-      }
-    }
-
-    const timestamp = nowMs();
-    const nextVersion = serverVersion + 1;
-
-    const rawState = incomingState;
-
-    const slimNodes = stripNodesForCanvas(
-      (rawState?.nodes ?? []) as NodeLike[],
-    );
-
-    const canvasFile: CanvasFile = {
-      canvasId,
-      title: nextTitle,
-      version: nextVersion,
-      state: {
-        ...rawState,
-        nodes: slimNodes,
-        edges: rawState?.edges ?? [],
-      },
-      createdAt: existing?.createdAt ?? timestamp,
-      updatedAt: timestamp,
-    };
-
-    // A title rename may have yielded while an async Space deletion or a
-    // competing PUT completed. Recheck immediately before the synchronous
-    // write so a stale request that initially observed a real Space cannot
-    // recreate it after deletion (or overwrite a newer version). The legacy
-    // implicit-create path remains only for requests whose initial read was
-    // genuinely absent.
-    if (existing) {
-      const current = store.read();
-      if (!current) {
+      if (result.reason === 'not-found') {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
-      if (current.version !== existing.version) {
+      if (result.reason === 'version-conflict') {
         return reply.code(409).send({
           code: 'CANVAS_VERSION_CONFLICT',
           message: 'Canvas version mismatch',
-          serverVersion: current.version,
+          serverVersion: result.actualVersion,
         } satisfies CanvasConflictResponse);
       }
+      if (result.reason === 'node-name-conflict') {
+        return reply.code(409).send({
+          code: 'NODE_LABEL_CONFLICT',
+          message: `Another node already uses the label "${result.conflictWith.logicalName}"`,
+          nodeId: result.nodeId,
+          conflictWith: result.conflictWith.logicalName,
+        } satisfies CanvasConflictResponse);
+      }
+      if (result.reason === 'duplicate-node') {
+        return reply.code(409).send({
+          code: 'NODE_DUPLICATE_FILES',
+          message: `Node "${result.nodeId}" has multiple markdown files`,
+          nodeId: result.nodeId,
+          duplicateFiles: [...result.logicalNames],
+        } satisfies CanvasConflictResponse);
+      }
+      return reply.code(409).send({
+        code: 'NODE_CONTENT_CONFLICT',
+        message: `Node "${result.nodeId}" changed while saving the canvas`,
+        nodeId: result.nodeId,
+      } satisfies CanvasConflictResponse);
     }
-    store.write(canvasFile);
 
     return reply.send({
       canvasId,
-      version: nextVersion,
+      version: outcome.result.record.version,
+      ack: mutationAckOf(outcome.result.event),
+      commit: outcome.result.event,
     });
   });
 
@@ -1354,6 +1894,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           contentEditedNodeIds: out.pendingEffects.contentEditedNodeIds,
           deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,
         },
+        ...(out.commit
+          ? { commit: out.commit, ack: mutationAckOf(out.commit) }
+          : {}),
         ...(runId ? { runId } : {}),
       };
 
@@ -1406,12 +1949,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     '/:canvasId/threads/:threadId/changes/:changeId',
     async function (request, reply) {
       const { canvasId, threadId, changeId } = request.params;
-      const store = getCanvasStore(canvasId);
-      if (!store.read()) {
+      const outcome = await withCanvasMutex(canvasId, async () => {
+        const handle = getStructuredStore().space(canvasId);
+        if (!(await handle.record.read())) {
+          return { found: false as const, removed: false };
+        }
+        const removed = await handle.changes.remove(threadId, changeId);
+        return { found: true as const, removed: !!removed };
+      });
+      if (!outcome.found) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
-      const removed = store.removeChange(threadId, changeId);
-      return reply.send({ removed: !!removed });
+      return reply.send({ removed: outcome.removed });
     },
   );
 
@@ -1424,31 +1973,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     '/:canvasId/threads/:threadId/changes/:changeId/revert',
     async function (request, reply) {
       const { canvasId, threadId, changeId } = request.params;
-      const store = getCanvasStore(canvasId);
-      if (!store.read()) {
-        return reply.code(404).send({ message: 'Canvas not found' });
-      }
-      const records = store.readChanges(threadId);
-      const record = records.find((r) => r.id === changeId);
-      if (!record) {
-        return reply.send({ removed: false });
-      }
       try {
-        const out = await applyDeltasOnServer({
+        const reverted = await revertChangeOnServer({
           canvasId,
-          deltas: record.revertDeltas,
+          threadId,
+          changeId,
           originator: { source: 'ui' },
         });
-        if (out.toVersion > out.fromVersion) {
-          publishCanvasUpdate(canvasId, {
-            type: 'update',
-            data: {
-              fromVersion: out.fromVersion,
-              toVersion: out.toVersion,
-              deltas: out.deltas,
-              pendingEffects: out.pendingEffects,
-            },
-          });
+        if (!reverted.removed) {
+          return reply.send({ removed: false });
         }
       } catch (err) {
         if (err instanceof CanvasNotFoundError) {
@@ -1460,7 +1993,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         );
         return reply.code(500).send({ message: 'Failed to revert change' });
       }
-      store.removeChange(threadId, changeId);
       return reply.send({ removed: true });
     },
   );
@@ -1495,13 +2027,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      const store = getCanvasStore(canvasId);
-      if (!store.read()) {
+      const handle = getStructuredStore().space(canvasId);
+      if (!(await handle.record.read())) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
 
       try {
-        store.appendEvents(parsed.data.events);
+        await handle.events.append(parsed.data.events);
       } catch (error) {
         request.log.error(
           { canvasId, error },

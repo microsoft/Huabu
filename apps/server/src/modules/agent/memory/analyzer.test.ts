@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -32,7 +35,7 @@ import type {
   CanvasFile,
   SpaceHandle,
 } from '../../storage/index.js';
-import type { IntentEpisode } from '@sediment/shared';
+import type { IntentEpisode } from '@huabu/shared';
 
 let root = '';
 

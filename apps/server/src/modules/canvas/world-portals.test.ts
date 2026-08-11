@@ -13,6 +13,9 @@ const workspaceState = vi.hoisted(() => ({ path: '' }));
 
 vi.mock('../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
+  withWorkspaceOperationLease: async <T>(
+    task: (workspacePath: string) => Promise<T>,
+  ) => task(workspaceState.path),
 }));
 
 import { executeOnServer } from './canvas-executor.js';

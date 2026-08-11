@@ -6,10 +6,9 @@
  *
  * Edits to a node's markdown sidecar (content / label / src / summary /
  * keywords / provenance) are persisted via a dedicated per-node endpoint
- * (`PUT /api/canvas/:canvasId/nodes/:nodeId/content`) that never bumps
- * the canvas-level `version` counter. This decouples editor typing from
- * viewport drags / structure autosaves so the two flows can never
- * collide on the optimistic-concurrency check.
+ * (`PUT /api/canvas/:canvasId/nodes/:nodeId/content`). Phase 4 commits do
+ * advance the shared canvas version, while content and structure retain
+ * independent CAS baselines (`expectRev` and `expectStructureRevision`).
  *
  * Each node gets:
  *   - a debounced timer (via {@link createPerKeyDebouncer}) so trailing
@@ -27,6 +26,7 @@ import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import {
   CanvasConflictError,
+  deleteNode,
   getNodeContent,
   NodeDuplicateFilesError,
   putNodeContent,
@@ -41,8 +41,15 @@ import {
   TEXT_BEARING_NODE_TYPES,
 } from './nodeContentFields';
 import { createPerKeyDebouncer } from './perKeyDebouncer';
+import { canvasSyncTabId } from '../../canvasCommitSync';
 
-import type { PutNodeContentRequest } from '@huabu/shared';
+import type {
+  CanvasCommitEvent,
+  GetNodeContentResponse,
+  MutationAck,
+  NodeUiProjection,
+  PutNodeContentRequest,
+} from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 /**
@@ -76,6 +83,31 @@ export type NodeContentQueueState = {
   patchNodeSilent: (nodeId: string, patch: Record<string, unknown>) => void;
 };
 
+type AggregateNodeCreateSnapshot = {
+  nodeId: string;
+  generation: number;
+  nodeType: string;
+  /** Sidecar-owned data exactly as captured for the structure request. */
+  sentData: Readonly<Record<string, unknown>>;
+};
+
+/**
+ * Opaque capture of uncommitted markdown-backed nodes included in one
+ * structure PUT. The store uses `nodeIds` to retain their sidecar-owned
+ * fields in that request, then returns the same attempt when the response
+ * arrives so edits made while the request was in flight can be detected.
+ */
+export type AggregateNodeCreateAttempt = {
+  nodeIds: readonly string[];
+  /** @internal Queue-owned snapshots; callers must pass these back unchanged. */
+  snapshots: readonly AggregateNodeCreateSnapshot[];
+};
+
+export type NodeBaselineRebaseTicket = Readonly<{
+  nodeId: string;
+  generation: number;
+}>;
+
 /**
  * Public shape returned by {@link createNodeContentQueue}.
  */
@@ -83,10 +115,10 @@ export type NodeContentQueue = {
   /**
    * Diff `prevNodes` against `nextNodes` and schedule a per-node
    * content save for every markdown-backed node whose content keys
-   * actually changed. New nodes always schedule (their `.md` does not
-   * exist yet); deleted nodes are ignored — the DELETE endpoint
-   * handles unlink and a stale debounced timer for a deleted node
-   * no-ops on the request builder returning `null`.
+   * actually changed. New nodes are held for the aggregate structure
+   * create (their `.md` and topology must appear atomically); deleted
+   * nodes are ignored — the DELETE endpoint handles unlink and a stale
+   * debounced timer for a deleted node no-ops on the request builder.
    */
   scheduleChanges(
     canvasId: string,
@@ -160,9 +192,9 @@ export type NodeContentQueue = {
   forgetNode(nodeId: string): void;
 
   /**
-   * Node ids with un-persisted content edits — pending debounced saves
-   * plus in-flight PUTs. Used by the sync applier to protect a node the
-   * user is mid-editing from an incoming agent write.
+   * Node ids with un-persisted content edits — pending debounced saves,
+   * baseline rebases, plus in-flight PUTs. Used by the sync applier to
+   * protect a node the user is mid-editing from an incoming agent write.
    */
   pendingNodeIds(): string[];
 
@@ -177,7 +209,191 @@ export type NodeContentQueue = {
    * already reflected in the user's view.
    */
   seedBaselines(nodes: readonly Node[]): void;
+
+  /**
+   * Replace queue bookkeeping with one authoritative full-canvas snapshot.
+   * Unlike `seedBaselines`, this also prunes nodes from previously visited
+   * canvases so module-lifetime maps do not grow without bound.
+   */
+  replaceBaselines(nodes: readonly Node[]): void;
+
+  /** Pause a dirty node before asynchronously resolving a remote CAS rev. */
+  beginBaselineRebase(nodeId: string): NodeBaselineRebaseTicket;
+
+  /**
+   * After older in-flight writes settle, adopt the remote rev and immediately
+   * retry the preserved local body on top of it.
+   */
+  completeBaselineRebase(
+    canvasId: string,
+    ticket: NodeBaselineRebaseTicket,
+    rev: string,
+  ): Promise<void>;
+
+  /** Cancel an unresolved rebase without disturbing a newer generation. */
+  cancelBaselineRebase(ticket: NodeBaselineRebaseTicket): void;
+
+  /**
+   * A remote delete lost to a local dirty editor. Hold that node for the next
+   * aggregate structure commit so its topology and sidecar are recreated
+   * atomically instead of issuing a standalone PUT against a tombstone.
+   * Returns true only when a new aggregate recreation was armed.
+   */
+  markAggregateRecreate(nodeId: string): boolean;
+
+  /** True while the node's topology and initial sidecar are not committed. */
+  isAggregateCreatePending(nodeId: string): boolean;
+
+  /** Capture pending creates that will ride the next structure PUT. */
+  beginAggregateCreateCommit(
+    nodes: readonly Node[],
+  ): AggregateNodeCreateAttempt;
+
+  /**
+   * Adopt the server-authored revisions/projections for a successful
+   * structure PUT and immediately flush any content edit made after the
+   * request snapshot. Returns the node ids whose creates became durable.
+   */
+  completeAggregateCreateCommit(
+    canvasId: string,
+    attempt: AggregateNodeCreateAttempt,
+    commit?: CanvasCommitEvent,
+  ): Promise<string[]>;
 };
+
+function sidecarDataOf(node: Node): Record<string, unknown> {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  const sidecar: Record<string, unknown> = {};
+  for (const key of NODE_CONTENT_KEYS) {
+    const value = data[key];
+    // Match JSON.stringify(request): an explicit `undefined` is absent on
+    // the wire and must compare equal to an omitted optional property.
+    if (value !== undefined) sidecar[key] = value;
+  }
+  return sidecar;
+}
+
+function wireValue(
+  value: unknown,
+): { ok: true; value: string | undefined } | { ok: false } {
+  if (value === undefined) return { ok: true, value: undefined };
+  try {
+    return { ok: true, value: JSON.stringify(value) };
+  } catch {
+    // A cyclic provenance value would make the outgoing JSON fail too. Keep
+    // the comparison conservative in that exceptional case.
+    return { ok: false };
+  }
+}
+
+function sidecarFieldEqual(
+  a: Readonly<Record<string, unknown>>,
+  b: Readonly<Record<string, unknown>>,
+  key: string,
+): boolean {
+  const aValue = a[key];
+  const bValue = b[key];
+  if (Object.is(aValue, bValue)) return true;
+  const aWire = wireValue(aValue);
+  const bWire = wireValue(bValue);
+  return aWire.ok && bWire.ok && aWire.value === bWire.value;
+}
+
+function sidecarDataEqual(
+  a: Readonly<Record<string, unknown>>,
+  b: Readonly<Record<string, unknown>>,
+): boolean {
+  for (const key of NODE_CONTENT_KEYS) {
+    if (!sidecarFieldEqual(a, b, key)) return false;
+  }
+  return true;
+}
+
+type AuthoritativeNodeContent = {
+  type: string;
+  data: Record<string, unknown>;
+  rev: string;
+  contentMissing?: boolean;
+  artifactMissing?: boolean;
+  contentDuplicate?: boolean;
+  duplicateFiles?: string[];
+};
+
+function authorityFromProjection(
+  projection: NodeUiProjection,
+): AuthoritativeNodeContent {
+  const data: Record<string, unknown> = {
+    label: projection.label,
+  };
+  if (TEXT_BEARING_NODE_TYPES.has(projection.type)) {
+    data['content'] = projection.content;
+  }
+  for (const key of [
+    'labelSource',
+    'src',
+    'summary',
+    'keywords',
+    'provenance',
+  ] as const) {
+    const value = projection[key];
+    if (value !== undefined) data[key] = value;
+  }
+  return {
+    type: projection.type,
+    data,
+    rev: projection.rev,
+    contentMissing: projection.contentMissing,
+    artifactMissing: projection.artifactMissing,
+    contentDuplicate: projection.contentDuplicate,
+    duplicateFiles: projection.duplicateFiles,
+  };
+}
+
+function authorityFromGet(
+  response: GetNodeContentResponse,
+  sentData: Readonly<Record<string, unknown>>,
+): AuthoritativeNodeContent {
+  const data: Record<string, unknown> = {
+    label: response.label,
+  };
+  if (TEXT_BEARING_NODE_TYPES.has(response.type)) {
+    data['content'] = response.content;
+  }
+  for (const key of ['labelSource', 'src', 'summary', 'keywords'] as const) {
+    const value = response[key];
+    if (value !== undefined) data[key] = value;
+  }
+  // The single-node GET predates provenance on its response contract. The
+  // aggregate request did carry it, so retain that field as the best exact
+  // fallback rather than manufacturing a redundant follow-up PUT.
+  if (sentData['provenance'] !== undefined) {
+    data['provenance'] = sentData['provenance'];
+  }
+  return {
+    type: response.type,
+    data,
+    rev: response.rev,
+    contentMissing: response.contentMissing,
+    artifactMissing: response.artifactMissing,
+    contentDuplicate: response.contentDuplicate,
+    duplicateFiles: response.duplicateFiles,
+  };
+}
+
+function fallbackAuthority(
+  snapshot: AggregateNodeCreateSnapshot,
+): AuthoritativeNodeContent {
+  const content = snapshot.sentData['content'];
+  const src = snapshot.sentData['src'];
+  return {
+    type: snapshot.nodeType,
+    data: { ...snapshot.sentData },
+    rev: nodeRevisionOf({
+      ...(typeof content === 'string' ? { content } : {}),
+      ...(typeof src === 'string' ? { src } : {}),
+    }),
+  };
+}
 
 /**
  * Build a {@link NodeContentQueue}.
@@ -190,9 +406,31 @@ export type NodeContentQueue = {
 export function createNodeContentQueue(opts: {
   delayMs: number;
   getState: () => NodeContentQueueState;
+  onMutationCommit?: (canvasId: string, commit: CanvasCommitEvent) => void;
+  onMutationAck?: (canvasId: string, ack: MutationAck) => void;
 }): NodeContentQueue {
   const debouncer = createPerKeyDebouncer<string>(opts.delayMs);
   const inflight = new Map<string, Promise<void>>();
+  let aggregateCreateGeneration = 0;
+  /**
+   * Markdown-backed nodes whose topology does not exist in the committed
+   * Space yet. Their first sidecar write must be atomic with the structure
+   * create, so every ordinary content flush is held until that commit ACKs.
+   * The generation prevents a late ACK for create → delete → recreate with
+   * the same id from adopting the replacement node.
+   */
+  const aggregateCreates = new Map<string, number>();
+  /**
+   * Creates deleted locally while their structure PUT is in flight. The first
+   * DELETE can reach the server before the create and no-op, so the generation
+   * is retained until that create ACK can issue a compensating aggregate
+   * delete. A recreate receives a newer generation and supersedes the cleanup.
+   */
+  const cancelledAggregateCreates = new Map<string, number>();
+  let baselineRebaseGeneration = 0;
+  const baselineRebases = new Map<string, number>();
+  let loadLatestGeneration = 0;
+  const loadLatestTickets = new Map<string, number>();
   /**
    * Last `(label, labelSource)` the server confirmed it persisted for
    * each nodeId. Used by {@link handleSaveFailure} to revert an
@@ -262,12 +500,25 @@ export function createNodeContentQueue(opts: {
   const saveErrorToasted = new Set<string>();
 
   /**
+   * Writes that failed without persisting the current in-memory body. Keep
+   * them visible to dirty arbitration even after the in-flight promise has
+   * settled; otherwise a gap reload could immediately discard the edit that
+   * the failure toast is asking the user to retry.
+   */
+  const failedSaves = new Set<string>();
+
+  /**
    * Build the `PutNodeContentRequest` body for `nodeId` from the
    * latest store snapshot. Returns `null` when the node has gone
    * away (e.g. deleted between debounce-schedule and flush) or its
    * type is not markdown-backed.
    */
   function buildRequest(nodeId: string): PutNodeContentRequest | null {
+    // A standalone node PUT before topology exists can create an orphaned
+    // sidecar or fail preprocessing. Initial content rides the structure PUT
+    // instead and this queue resumes only after its aggregate ACK.
+    if (aggregateCreates.has(nodeId)) return null;
+    if (baselineRebases.has(nodeId)) return null;
     const node = opts.getState().nodes.find((n) => n.id === nodeId);
     if (!node) return null;
     const nodeType = typeof node.type === 'string' ? node.type : '';
@@ -280,7 +531,10 @@ export function createNodeContentQueue(opts: {
 
     const data = (node.data ?? {}) as Record<string, unknown>;
     if (data['contentMissing'] === true) return null;
-    const body: PutNodeContentRequest = { nodeType };
+    const body: PutNodeContentRequest = {
+      nodeType,
+      originator: { source: 'ui', tabId: canvasSyncTabId },
+    };
 
     if (TEXT_BEARING_NODE_TYPES.has(nodeType)) {
       const content = data['content'];
@@ -345,11 +599,20 @@ export function createNodeContentQueue(opts: {
   async function performSave(
     canvasId: string,
     nodeId: string,
+    body: PutNodeContentRequest,
     kOpts?: { keepalive?: boolean },
   ): Promise<void> {
-    const body = buildRequest(nodeId);
-    if (!body) return;
     const response = await putNodeContent(canvasId, nodeId, body, kOpts);
+    if (response.commit) {
+      opts.onMutationCommit?.(canvasId, response.commit);
+    } else if (response.ack) {
+      opts.onMutationAck?.(canvasId, response.ack);
+    }
+    // The node may have been remotely deleted while this request was in
+    // flight. Its local editor now owns an aggregate recreation; an older
+    // standalone PUT response must not install a pre-delete baseline or
+    // canonical label over that recovery attempt.
+    if (aggregateCreates.has(nodeId)) return;
     // Content and its baseline update together: record the rev the server
     // actually persisted so the next edit's `expectRev` is fresh (and a
     // rapid follow-up edit doesn't 409 against our own just-committed
@@ -358,6 +621,7 @@ export function createNodeContentQueue(opts: {
     baselineRev.set(nodeId, response.rev);
     contentConflictToasted.delete(nodeId);
     saveErrorToasted.delete(nodeId);
+    failedSaves.delete(nodeId);
     // A write that succeeded means any prior duplicate has been
     // resolved — drop the once-per-node toast guard so a future
     // recurrence alerts again, and clear the node's duplicate banner
@@ -378,9 +642,14 @@ export function createNodeContentQueue(opts: {
       labelSource:
         typeof body.labelSource === 'string' ? body.labelSource : undefined,
     });
-    // Only patch when the resolved label actually differs from what's
-    // in the store right now — avoids spurious re-renders when the
-    // server echoes back exactly what we sent.
+    // Only patch when a canonical value actually differs from what's in the
+    // store right now — avoids spurious re-renders when the server echoes the
+    // request. `contentPreserved` is the narrow recovery path for an empty
+    // PUT that the server refused to let clobber an existing body. Restore
+    // that body only while the exact optimistic empty value we sent remains
+    // current; an edit made while this request was in flight must win and is
+    // serialized into the next PUT. The authoritative rev above is adopted in
+    // either case so that follow-up write uses the correct CAS baseline.
     const state = opts.getState();
     const currentNode = state.nodes.find((n) => n.id === nodeId);
     if (!currentNode) return;
@@ -388,13 +657,38 @@ export function createNodeContentQueue(opts: {
       typeof currentNode.data?.['label'] === 'string'
         ? (currentNode.data['label'] as string)
         : null;
-    if (response.label !== null && response.label !== currentLabel) {
+    const currentContent = currentNode.data?.['content'];
+    const currentLabelSource = currentNode.data?.['labelSource'];
+    const attemptedLabel =
+      typeof body.label === 'string' || body.label === null
+        ? body.label
+        : undefined;
+    const labelAttemptIsStillCurrent =
+      attemptedLabel !== undefined &&
+      currentLabel === attemptedLabel &&
+      currentLabelSource === body.labelSource;
+    const shouldRestorePreservedContent =
+      response.contentPreserved === true &&
+      typeof response.content === 'string' &&
+      body.content === '' &&
+      currentContent === body.content;
+    const shouldPatchLabel =
+      labelAttemptIsStillCurrent &&
+      response.label !== null &&
+      response.label !== currentLabel;
+    if (shouldPatchLabel || shouldRestorePreservedContent) {
       state._setStateNoAutosave({
         nodes: state.nodes.map((n) =>
           n.id === nodeId
             ? {
                 ...n,
-                data: { ...(n.data ?? {}), label: response.label },
+                data: {
+                  ...(n.data ?? {}),
+                  ...(shouldPatchLabel ? { label: response.label } : {}),
+                  ...(shouldRestorePreservedContent
+                    ? { content: response.content }
+                    : {}),
+                },
               }
             : n,
         ),
@@ -462,6 +756,7 @@ export function createNodeContentQueue(opts: {
    * and re-freezes (correct — the user can decide again).
    */
   async function resolveKeepMine(nodeId: string): Promise<void> {
+    loadLatestTickets.delete(nodeId);
     const currentRev = frozen.get(nodeId);
     if (currentRev !== undefined) baselineRev.set(nodeId, currentRev);
     frozen.delete(nodeId);
@@ -491,6 +786,12 @@ export function createNodeContentQueue(opts: {
     const state = opts.getState();
     const canvasId = state.canvasId;
     const cur = state.nodes.find((n) => n.id === nodeId);
+    const frozenRevision = frozen.get(nodeId);
+    if (!cur || frozenRevision === undefined) return;
+    const capturedType = cur.type;
+    const capturedData = sidecarDataOf(cur);
+    const ticket = ++loadLatestGeneration;
+    loadLatestTickets.set(nodeId, ticket);
     const localText =
       cur && typeof cur.data?.['content'] === 'string'
         ? (cur.data['content'] as string)
@@ -501,6 +802,16 @@ export function createNodeContentQueue(opts: {
     if (!canvasId) return;
 
     const res = await getNodeContent(canvasId, nodeId);
+    const latestState = opts.getState();
+    const latestNode = latestState.nodes.find((n) => n.id === nodeId);
+    const requestIsCurrent =
+      loadLatestTickets.get(nodeId) === ticket &&
+      latestState.canvasId === canvasId &&
+      frozen.get(nodeId) === frozenRevision &&
+      latestNode !== undefined &&
+      latestNode.type === capturedType &&
+      sidecarDataEqual(sidecarDataOf(latestNode), capturedData);
+    if (!requestIsCurrent) return;
     if (!res) {
       // Keep the node frozen (still safe) and let the user retry.
       toast(i18n.t('node.contentConflictLoadFailed'), {
@@ -513,7 +824,7 @@ export function createNodeContentQueue(opts: {
     // Overlay only the content-owned keys; UI / geometry fields stay
     // untouched. `_setStateNoAutosave` skips the content diff so adopting
     // the server state never schedules a PUT back onto disk.
-    const nextNodes = opts.getState().nodes.map((n) =>
+    const nextNodes = latestState.nodes.map((n) =>
       n.id === nodeId
         ? {
             ...n,
@@ -533,7 +844,7 @@ export function createNodeContentQueue(opts: {
           }
         : n,
     );
-    opts.getState()._setStateNoAutosave({ nodes: nextNodes });
+    latestState._setStateNoAutosave({ nodes: nextNodes });
 
     // Re-baseline to the server rev and unfreeze so editing resumes.
     baselineRev.set(nodeId, res.rev);
@@ -543,6 +854,7 @@ export function createNodeContentQueue(opts: {
     });
     frozen.delete(nodeId);
     contentConflictToasted.delete(nodeId);
+    loadLatestTickets.delete(nodeId);
     toast(i18n.t('node.contentConflictLoaded'), { tone: 'success' });
   }
 
@@ -565,10 +877,13 @@ export function createNodeContentQueue(opts: {
     source: 'user' | 'auto',
     kOpts?: { keepalive?: boolean },
   ): Promise<void> {
+    const body = buildRequest(nodeId);
+    if (!body) return;
     try {
-      await performSave(canvasId, nodeId, kOpts);
+      await performSave(canvasId, nodeId, body, kOpts);
     } catch (err) {
       if (err instanceof NodeDuplicateFilesError) {
+        failedSaves.add(nodeId);
         notifyDuplicate(nodeId, err);
         throw err;
       }
@@ -581,12 +896,30 @@ export function createNodeContentQueue(opts: {
         // "reload to get the latest" prompt; the baseline stays stale so
         // further autosaves keep being refused until the user reloads.
         if (err.code === 'NODE_CONTENT_CONFLICT') {
+          const currentState = opts.getState();
+          const currentNode = currentState.nodes.find(
+            (candidate) => candidate.id === nodeId,
+          );
+          if (
+            currentState.canvasId !== canvasId ||
+            !currentNode ||
+            currentNode.type !== body.nodeType ||
+            aggregateCreates.has(nodeId)
+          ) {
+            // The rejected request belongs to an incarnation that no longer
+            // exists (or is already being recreated after a remote delete).
+            // Do not resurrect a frozen entry/toast after `forgetNode`, and
+            // do not block the aggregate recovery with an obsolete CAS.
+            return;
+          }
           handleContentConflict(nodeId, err.currentRev ?? REV_EMPTY);
           return;
         }
+        failedSaves.add(nodeId);
         throw err;
       }
-      handleSaveFailure(canvasId, nodeId, source, err);
+      failedSaves.add(nodeId);
+      handleSaveFailure(canvasId, nodeId, source, err, body);
       throw err;
     }
   }
@@ -648,8 +981,10 @@ export function createNodeContentQueue(opts: {
     nodeId: string,
     source: 'user' | 'auto',
     err: unknown,
+    attemptedBody: PutNodeContentRequest,
   ): void {
     const state = opts.getState();
+    if (state.canvasId !== canvasId) return;
     const node = state.nodes.find((n) => n.id === nodeId);
     if (!node) return; // node was deleted mid-flight — nothing to do
 
@@ -657,13 +992,24 @@ export function createNodeContentQueue(opts: {
     const currentLabel =
       typeof data['label'] === 'string' ? (data['label'] as string) : null;
     const lastGood = lastSuccessful.get(nodeId);
+    const attemptedLabel =
+      typeof attemptedBody.label === 'string' || attemptedBody.label === null
+        ? attemptedBody.label
+        : undefined;
+    const currentLabelSource = data['labelSource'];
+    const attemptedRenameIsStillCurrent =
+      lastGood !== undefined &&
+      attemptedLabel !== undefined &&
+      attemptedLabel !== lastGood.label &&
+      currentLabel === attemptedLabel &&
+      currentLabelSource === attemptedBody.labelSource;
 
     // Rename failure: we have a previously-persisted label AND the
     // store's label drifted away from it. Roll back the label only —
     // preserve content / src / summary so the user's other edits
     // survive. labelSource is restored to whatever was attached to
     // the last successful PUT (or stripped entirely if none).
-    if (lastGood && lastGood.label !== currentLabel) {
+    if (lastGood && attemptedRenameIsStillCurrent) {
       state._setStateNoAutosave({
         nodes: state.nodes.map((n) => {
           if (n.id !== nodeId) return n;
@@ -794,6 +1140,163 @@ export function createNodeContentQueue(opts: {
     });
   }
 
+  async function authoritativeCreateResult(
+    canvasId: string,
+    snapshot: AggregateNodeCreateSnapshot,
+    commit: CanvasCommitEvent | undefined,
+  ): Promise<AuthoritativeNodeContent | null> {
+    const change = commit?.nodeChanges.find(
+      (candidate) => candidate.nodeId === snapshot.nodeId,
+    );
+    if (change?.kind === 'delete') return null;
+    if (change?.kind === 'inline') {
+      return authorityFromProjection(change.projection);
+    }
+
+    // `invalidate` and ack-only legacy responses do not carry the exact
+    // server-authored label/revision. Fetch the just-created sidecar so the
+    // very next edit uses the server's CAS token (and adopts label dedupe).
+    const fetched = await getNodeContent(canvasId, snapshot.nodeId).catch(
+      () => null,
+    );
+    return fetched
+      ? authorityFromGet(fetched, snapshot.sentData)
+      : fallbackAuthority(snapshot);
+  }
+
+  async function settleAggregateCreate(
+    canvasId: string,
+    snapshot: AggregateNodeCreateSnapshot,
+    commit: CanvasCommitEvent | undefined,
+  ): Promise<boolean> {
+    if (
+      cancelledAggregateCreates.get(snapshot.nodeId) === snapshot.generation
+    ) {
+      const replacementGeneration = aggregateCreates.get(snapshot.nodeId);
+      if (
+        replacementGeneration !== undefined &&
+        replacementGeneration !== snapshot.generation
+      ) {
+        cancelledAggregateCreates.delete(snapshot.nodeId);
+        return false;
+      }
+
+      // The optimistic DELETE may have beaten this structure create to the
+      // server and therefore deleted nothing. Now that create is durable,
+      // await one aggregate DELETE so a closed tab cannot leave a ghost node.
+      const response = await deleteNode(canvasId, snapshot.nodeId, {
+        originator: { source: 'ui', tabId: canvasSyncTabId },
+      });
+      if (response?.commit) {
+        opts.onMutationCommit?.(canvasId, response.commit);
+      } else if (response?.ack) {
+        opts.onMutationAck?.(canvasId, response.ack);
+      }
+      if (
+        cancelledAggregateCreates.get(snapshot.nodeId) === snapshot.generation
+      ) {
+        cancelledAggregateCreates.delete(snapshot.nodeId);
+      }
+      return false;
+    }
+
+    if (aggregateCreates.get(snapshot.nodeId) !== snapshot.generation) {
+      return false;
+    }
+
+    // A content PUT that was already in flight when a remote delete arrived
+    // may settle after the aggregate recreation response. Drain it first so
+    // its older acknowledgement cannot regress the recreated CAS baseline.
+    const olderWrite = inflight.get(snapshot.nodeId);
+    if (olderWrite) await olderWrite.catch(() => undefined);
+    if (aggregateCreates.get(snapshot.nodeId) !== snapshot.generation) {
+      return false;
+    }
+
+    const authority = await authoritativeCreateResult(
+      canvasId,
+      snapshot,
+      commit,
+    );
+
+    // The GET fallback may have raced a local delete/recreate. Only the exact
+    // generation captured by this structure request may consume its ACK.
+    if (aggregateCreates.get(snapshot.nodeId) !== snapshot.generation) {
+      return false;
+    }
+    const state = opts.getState();
+    const current = state.nodes.find((node) => node.id === snapshot.nodeId);
+    if (!current || !authority) {
+      // A delete that landed before this ACK intentionally wins locally. Its
+      // subsequent structural save removes the server-side aggregate again.
+      aggregateCreates.delete(snapshot.nodeId);
+      return false;
+    }
+
+    aggregateCreates.delete(snapshot.nodeId);
+    baselineRev.set(snapshot.nodeId, authority.rev);
+    frozen.delete(snapshot.nodeId);
+    contentConflictToasted.delete(snapshot.nodeId);
+    saveErrorToasted.delete(snapshot.nodeId);
+    failedSaves.delete(snapshot.nodeId);
+    duplicateToasted.delete(snapshot.nodeId);
+
+    const serverLabel = authority.data['label'];
+    const serverLabelSource = authority.data['labelSource'];
+    lastSuccessful.set(snapshot.nodeId, {
+      label: typeof serverLabel === 'string' ? serverLabel : null,
+      labelSource:
+        serverLabelSource === 'user' ||
+        serverLabelSource === 'auto' ||
+        serverLabelSource === 'agent'
+          ? serverLabelSource
+          : undefined,
+    });
+
+    // Merge the server projection field-by-field. A value still equal to the
+    // request snapshot is untouched local state, so the server-normalized
+    // value (notably an effective deduped label) wins. A value that changed
+    // while the request was in flight is a follow-up edit and must survive.
+    const currentData = sidecarDataOf(current);
+    const nextData = { ...(current.data ?? {}) } as Record<string, unknown>;
+    for (const key of NODE_CONTENT_KEYS) {
+      if (!sidecarFieldEqual(currentData, snapshot.sentData, key)) continue;
+      if (Object.prototype.hasOwnProperty.call(authority.data, key)) {
+        nextData[key] = authority.data[key];
+      } else {
+        delete nextData[key];
+      }
+    }
+    nextData['contentMissing'] = authority.contentMissing ?? false;
+    nextData['artifactMissing'] = authority.artifactMissing ?? false;
+    nextData['contentDuplicate'] = authority.contentDuplicate ?? false;
+    nextData['duplicateFiles'] = authority.duplicateFiles ?? [];
+
+    const nextNode: Node = {
+      ...current,
+      // A note/text conversion made while the structure request was in flight
+      // is a newer local structural edit. Keep it; the already-scheduled
+      // follow-up commit will persist that type transition.
+      type: current.type === snapshot.nodeType ? authority.type : current.type,
+      data: nextData,
+    };
+    state._setStateNoAutosave({
+      nodes: state.nodes.map((node) =>
+        node.id === snapshot.nodeId ? nextNode : node,
+      ),
+    });
+
+    if (!sidecarDataEqual(sidecarDataOf(nextNode), authority.data)) {
+      // The baseline is already the exact aggregate result. `performSave`
+      // reads the latest store snapshot when this chained flush actually
+      // runs, so additional keystrokes still coalesce into the same write.
+      await serializedFlush(canvasId, snapshot.nodeId, 'auto').catch(
+        () => undefined,
+      );
+    }
+    return true;
+  }
+
   return {
     scheduleChanges(canvasId, prevNodes, nextNodes) {
       if (!canvasId || prevNodes === nextNodes) return;
@@ -803,8 +1306,12 @@ export function createNodeContentQueue(opts: {
         if (!MD_BACKED_NODE_TYPES.has(nodeType)) continue;
         const before = prevById.get(next.id);
         if (!before) {
-          // Brand new node — its `.md` does not exist yet.
-          schedule(canvasId, next.id);
+          // Brand new node — hold every sidecar write until its topology and
+          // initial content land together through the structure commit.
+          if (!aggregateCreates.has(next.id)) {
+            aggregateCreates.set(next.id, ++aggregateCreateGeneration);
+          }
+          debouncer.cancel(next.id);
           continue;
         }
         if (before.data === next.data) continue;
@@ -812,7 +1319,9 @@ export function createNodeContentQueue(opts: {
         const afterData = (next.data ?? {}) as Record<string, unknown>;
         for (const key of NODE_CONTENT_KEYS) {
           if (beforeData[key] !== afterData[key]) {
-            schedule(canvasId, next.id);
+            if (!aggregateCreates.has(next.id)) {
+              schedule(canvasId, next.id);
+            }
             break;
           }
         }
@@ -858,18 +1367,30 @@ export function createNodeContentQueue(opts: {
 
     forgetNode(nodeId) {
       debouncer.cancel(nodeId);
+      const aggregateGeneration = aggregateCreates.get(nodeId);
+      if (aggregateGeneration !== undefined) {
+        cancelledAggregateCreates.set(nodeId, aggregateGeneration);
+        aggregateCreates.delete(nodeId);
+      }
       baselineRev.delete(nodeId);
       frozen.delete(nodeId);
       contentConflictToasted.delete(nodeId);
       saveErrorToasted.delete(nodeId);
+      failedSaves.delete(nodeId);
       duplicateToasted.delete(nodeId);
       lastSuccessful.delete(nodeId);
+      baselineRebases.delete(nodeId);
+      loadLatestTickets.delete(nodeId);
     },
 
     seedBaselines(nodes) {
       for (const node of nodes) {
         const nodeType = typeof node.type === 'string' ? node.type : '';
         if (!MD_BACKED_NODE_TYPES.has(nodeType)) continue;
+        aggregateCreates.delete(node.id);
+        cancelledAggregateCreates.delete(node.id);
+        baselineRebases.delete(node.id);
+        loadLatestTickets.delete(node.id);
         baselineRev.set(node.id, revOfNode(node));
         // A fresh authoritative baseline means any prior conflict for this
         // node is resolved — drop the toast guard and unfreeze it so a
@@ -879,12 +1400,149 @@ export function createNodeContentQueue(opts: {
       }
     },
 
-    pendingNodeIds() {
-      // Debounced-but-not-yet-fired saves plus in-flight PUTs: both mean
-      // the node holds a local edit the server hasn't acknowledged.
-      return Array.from(
-        new Set([...debouncer.pendingKeys(), ...inflight.keys()]),
+    replaceBaselines(nodes) {
+      const retained = new Set(
+        nodes
+          .filter((node) =>
+            MD_BACKED_NODE_TYPES.has(
+              typeof node.type === 'string' ? node.type : '',
+            ),
+          )
+          .map((node) => node.id),
       );
+      const pruneMap = (map: Map<string, unknown>): void => {
+        for (const key of map.keys()) {
+          if (!retained.has(key)) map.delete(key);
+        }
+      };
+      const pruneSet = (set: Set<string>): void => {
+        for (const key of set) {
+          if (!retained.has(key)) set.delete(key);
+        }
+      };
+      pruneMap(baselineRev);
+      pruneMap(lastSuccessful);
+      pruneMap(frozen);
+      pruneMap(baselineRebases);
+      pruneMap(aggregateCreates);
+      pruneMap(cancelledAggregateCreates);
+      pruneMap(loadLatestTickets);
+      pruneSet(contentConflictToasted);
+      pruneSet(duplicateToasted);
+      pruneSet(saveErrorToasted);
+      // A full snapshot is an explicit authoritative replacement. Any
+      // retained failed body was intentionally discarded by that load, while
+      // entries from earlier canvases must not leak into the new one.
+      failedSaves.clear();
+      for (const nodeId of debouncer.pendingKeys()) {
+        if (!retained.has(nodeId)) debouncer.cancel(nodeId);
+      }
+      this.seedBaselines(nodes);
+    },
+
+    beginBaselineRebase(nodeId) {
+      debouncer.cancel(nodeId);
+      const ticket = {
+        nodeId,
+        generation: ++baselineRebaseGeneration,
+      };
+      baselineRebases.set(nodeId, ticket.generation);
+      return ticket;
+    },
+
+    completeBaselineRebase(canvasId, ticket, rev) {
+      const previous = inflight.get(ticket.nodeId) ?? Promise.resolve();
+      const next = previous
+        .catch(() => undefined)
+        .then(async () => {
+          if (baselineRebases.get(ticket.nodeId) !== ticket.generation) return;
+          baselineRebases.delete(ticket.nodeId);
+          const node = opts
+            .getState()
+            .nodes.find((candidate) => candidate.id === ticket.nodeId);
+          if (!node) return;
+          baselineRev.set(ticket.nodeId, rev);
+          contentConflictToasted.delete(ticket.nodeId);
+          frozen.delete(ticket.nodeId);
+          await performSaveSafely(canvasId, ticket.nodeId, 'auto');
+        });
+      inflight.set(ticket.nodeId, next);
+      void next
+        .finally(() => {
+          if (inflight.get(ticket.nodeId) === next) {
+            inflight.delete(ticket.nodeId);
+          }
+        })
+        .catch(() => undefined);
+      return next;
+    },
+
+    cancelBaselineRebase(ticket) {
+      if (baselineRebases.get(ticket.nodeId) === ticket.generation) {
+        baselineRebases.delete(ticket.nodeId);
+      }
+    },
+
+    markAggregateRecreate(nodeId) {
+      if (aggregateCreates.has(nodeId)) return false;
+      debouncer.cancel(nodeId);
+      baselineRebases.delete(nodeId);
+      baselineRev.delete(nodeId);
+      frozen.delete(nodeId);
+      contentConflictToasted.delete(nodeId);
+      loadLatestTickets.delete(nodeId);
+      cancelledAggregateCreates.delete(nodeId);
+      aggregateCreates.set(nodeId, ++aggregateCreateGeneration);
+      return true;
+    },
+
+    pendingNodeIds() {
+      // Aggregate creates, CAS rebases, debounced saves, and in-flight PUTs
+      // all mean the node holds local content the server has not acknowledged.
+      return Array.from(
+        new Set([
+          ...aggregateCreates.keys(),
+          ...baselineRebases.keys(),
+          ...frozen.keys(),
+          ...failedSaves,
+          ...debouncer.pendingKeys(),
+          ...inflight.keys(),
+        ]),
+      );
+    },
+
+    isAggregateCreatePending(nodeId) {
+      return aggregateCreates.has(nodeId);
+    },
+
+    beginAggregateCreateCommit(nodes) {
+      const snapshots: AggregateNodeCreateSnapshot[] = [];
+      for (const node of nodes) {
+        const generation = aggregateCreates.get(node.id);
+        if (generation === undefined) continue;
+        const nodeType = typeof node.type === 'string' ? node.type : '';
+        if (!MD_BACKED_NODE_TYPES.has(nodeType)) continue;
+        snapshots.push({
+          nodeId: node.id,
+          generation,
+          nodeType,
+          sentData: { ...sidecarDataOf(node) },
+        });
+      }
+      return {
+        nodeIds: snapshots.map((snapshot) => snapshot.nodeId),
+        snapshots,
+      };
+    },
+
+    async completeAggregateCreateCommit(canvasId, attempt, commit) {
+      const committedNodeIds: string[] = [];
+      for (const snapshot of attempt.snapshots) {
+        if (await settleAggregateCreate(canvasId, snapshot, commit)) {
+          committedNodeIds.push(snapshot.nodeId);
+        }
+      }
+      return committedNodeIds;
     },
   };
 }

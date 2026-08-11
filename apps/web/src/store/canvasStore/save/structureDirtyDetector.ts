@@ -65,10 +65,11 @@ function recordsDifferIgnoring(
  *
  * Returns `false` when the only differences live inside
  * {@link NODE_CONTENT_KEYS} (or {@link NODE_TOPLEVEL_IGNORE}) — those
- * edits ride the per-node content PUT (or are pure UI state) and must
- * NOT bump the canvas `version`. Without this gate every keystroke
+ * edits ride the per-node content PUT (or are pure UI state) and must not
+ * schedule a second structure commit. Without this gate every keystroke
  * inside the editor would produce a new `nodes` array reference and
- * trigger a full structure save with an empty diff.
+ * trigger a full structure save with an empty diff. The node endpoint can
+ * still advance the global version without changing structureRevision.
  *
  * `position` is compared by reference because after the Plan A cleanup
  * every 60 fps drag tick bypasses the gate via `_setStateNoAutosave`;

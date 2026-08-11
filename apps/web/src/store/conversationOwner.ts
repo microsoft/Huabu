@@ -4,6 +4,7 @@
 import { getQuestionNodeStatus } from '@huabu/shared';
 
 import { postCanvasExecute } from '@/api/canvas';
+import { canvasSyncTabId } from '@/store/canvasCommitSync';
 import useCanvasStore from '@/store/canvasStore';
 
 import type {
@@ -196,14 +197,25 @@ async function applyConversationOwnerPatch(
         patches: [{ nodeId: owner.nodeId, patch: wirePatch }],
       },
     ],
-    originator: { source: 'ui' },
+    originator: { source: 'ui', tabId: canvasSyncTabId },
   });
   if (!response.results[0]?.applied) {
     throw new Error('Conversation owner node could not be updated');
   }
 
   const current = useCanvasStore.getState();
-  if (
+  if (current.canvasId === response.canvasId && response.commit) {
+    const consumed = current.consumeCommit({
+      kind: 'event',
+      commit: response.commit,
+      pendingEffects: response.pendingEffects as Parameters<
+        typeof current.applyDeltasFromAgent
+      >[2],
+    });
+    if (consumed.shouldReload) {
+      await current.loadCanvas(response.canvasId, { resetHistory: true });
+    }
+  } else if (
     current.canvasId === response.canvasId &&
     current.version === response.fromVersion
   ) {

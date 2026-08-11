@@ -14,13 +14,21 @@ import { isLabelProtected } from './label-policy.js';
 import { runPipeline, type PipelineDeps } from './pipeline.js';
 import { getProfile } from './profiles.js';
 import { ProviderManager } from './provider-manager.js';
-import { canvasBlobs, getCanvasStore } from '../storage/index.js';
+import {
+  canvasBlobs,
+  getCanvasStore,
+  getStructuredStore,
+  withCanvasMutex,
+} from '../storage/index.js';
+import { withWorkspaceOperationLease } from '../workspace.js';
 
 import type {
   Capability,
   NodePreprocessProfile,
+  PreprocessExecutionBaseline,
   PreprocessNodeResult,
 } from './types.js';
+import type { CanvasFile } from '../canvas/persistence-types.js';
 import type { PreprocessNodeRequest } from '@huabu/shared';
 
 /**
@@ -103,7 +111,10 @@ function stableHash(input: string): string {
  * outcome. Snapshots can be large (hundreds of KB for pdf/web), so they
  * are hashed rather than embedded verbatim.
  */
-function dedupeKey(request: PreprocessNodeRequest): string {
+function dedupeKey(
+  request: PreprocessNodeRequest,
+  baseline: PreprocessExecutionBaseline,
+): string {
   const o = request.options;
   return [
     request.canvasId,
@@ -116,7 +127,81 @@ function dedupeKey(request: PreprocessNodeRequest): string {
     o?.allowLLM === false ? 'nl' : 'll',
     o?.allowPersistence === false ? 'np' : 'pp',
     o?.mode ?? '',
+    baseline.topologyType ?? '<absent>',
+    baseline.spaceVersion === null ? '<absent>' : baseline.spaceVersion,
+    baseline.nodeRecordRevision ?? '<absent>',
   ].join('\u0000');
+}
+
+function topologyTypeOf(
+  canvas: CanvasFile | null,
+  nodeId: string,
+): string | null {
+  const topologyNode = (canvas?.state.nodes ?? []).find((candidate) => {
+    const id = (candidate as { id?: unknown } | null)?.id;
+    return id === nodeId;
+  }) as { type?: unknown } | undefined;
+  return typeof topologyNode?.type === 'string' ? topologyNode.type : null;
+}
+
+/**
+ * Capture the complete authoritative incarnation observed before any
+ * asynchronous preprocessing work starts. Route handlers pass this exact
+ * value into the dispatcher so there is no second read window in which a
+ * same-id replacement can silently become the request's new baseline.
+ */
+export function capturePreprocessExecutionBaseline(
+  canvasId: string,
+  nodeId: string,
+): Promise<PreprocessExecutionBaseline> {
+  return withCanvasMutex(canvasId, async () => {
+    const handle = getStructuredStore().space(canvasId);
+    const [canvas, node] = await Promise.all([
+      handle.record.read(),
+      handle.nodes.read(nodeId),
+    ]);
+    return {
+      topologyType: topologyTypeOf(canvas, nodeId),
+      spaceVersion: canvas?.version ?? null,
+      nodeRecordRevision: node?.revision ?? null,
+    };
+  });
+}
+
+/**
+ * Strip every client-applicable projection from work that finished after its
+ * target was deleted or structurally changed type. This is intentionally a
+ * final pipeline gate: cache hits and `allowPersistence:false` never enter the
+ * Persist stage, while Persist itself already performs the same check before
+ * durable writes.
+ */
+export function supersedePreprocessResult(
+  result: PreprocessNodeResult,
+  topologyType: string | null,
+): PreprocessNodeResult {
+  return {
+    nodeId: result.nodeId,
+    nodeType: result.nodeType,
+    trigger: result.trigger,
+    requestId: result.requestId,
+    success: true,
+    status: 'skipped',
+    superseded: true,
+    usedCapabilities: result.usedCapabilities,
+    patch: {},
+    diagnostics: [
+      {
+        code: 'PREPROCESS_SUPERSEDED',
+        level: 'info',
+        message:
+          topologyType === null
+            ? 'Node is no longer present in the Space topology'
+            : topologyType === result.nodeType
+              ? 'Node changed while preprocessing was in flight'
+              : `Node type changed to ${topologyType} while preprocessing was in flight`,
+      },
+    ],
+  };
 }
 
 export class PreprocessDispatcher {
@@ -131,14 +216,26 @@ export class PreprocessDispatcher {
 
   async preprocess(
     request: PreprocessNodeRequest,
+    baseline?: PreprocessExecutionBaseline,
   ): Promise<PreprocessNodeResult> {
-    return coalesceInFlight(this.inFlight, dedupeKey(request), () =>
-      this.runPreprocess(request),
-    );
+    return withWorkspaceOperationLease(async () => {
+      const executionBaseline =
+        baseline ??
+        (await capturePreprocessExecutionBaseline(
+          request.canvasId,
+          request.nodeId,
+        ));
+      return coalesceInFlight(
+        this.inFlight,
+        dedupeKey(request, executionBaseline),
+        () => this.runPreprocess(request, executionBaseline),
+      );
+    });
   }
 
   private async runPreprocess(
     request: PreprocessNodeRequest,
+    baseline: PreprocessExecutionBaseline,
   ): Promise<PreprocessNodeResult> {
     const profile = getProfile(request.nodeType);
 
@@ -170,12 +267,36 @@ export class PreprocessDispatcher {
       provider: this.provider,
     };
 
-    return runPipeline(
+    const result = await runPipeline(
       request,
       plan,
       profile.contentKind,
       profile.bodyOwnership,
       deps,
+      baseline,
     );
+
+    // Serialize the final observation with every aggregate Space mutation.
+    // Without this gate, cache short-circuits and non-persisting previews can
+    // return stale labels/content after a concurrent delete or type change.
+    return withCanvasMutex(request.canvasId, async () => {
+      const handle = getStructuredStore().space(request.canvasId);
+      const [canvas, node] = await Promise.all([
+        handle.record.read(),
+        handle.nodes.read(request.nodeId),
+      ]);
+      const topologyType = topologyTypeOf(canvas, request.nodeId);
+      // A committed result carries its own exact versioned event, so a later
+      // commit is ordered by the HTTP/SSE gate rather than erasing this ACK.
+      if (result.commit) return result;
+
+      const baselineStillCurrent =
+        topologyType === baseline.topologyType &&
+        canvas?.version === baseline.spaceVersion &&
+        (node?.revision ?? null) === baseline.nodeRecordRevision;
+      return topologyType === request.nodeType && baselineStillCurrent
+        ? { ...result, observedVersion: canvas.version }
+        : supersedePreprocessResult(result, topologyType);
+    });
   }
 }

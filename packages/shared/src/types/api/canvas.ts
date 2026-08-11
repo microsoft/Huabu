@@ -13,10 +13,14 @@ import { z } from 'zod';
 
 import { agentBindingSchema } from './agent.js';
 
+import type { CanvasCommitEvent, MutationAck } from './canvas-sync.js';
+
 export interface GetCanvasResponse {
   canvasId: string;
   title: string | null;
   version: number;
+  /** Opaque SHA-256 revision of the canonical slim title/nodes/edges view. */
+  structureRevision?: string;
   state: unknown;
 }
 
@@ -91,21 +95,62 @@ export type GetWorldReferencesResponse = z.infer<
   typeof getWorldReferencesResponseSchema
 >;
 
+/**
+ * Originator metadata describing who initiated a mutation. The server records
+ * this in commit metadata so tabs can filter their own optimistic echo.
+ */
+export const executeOriginatorSchema = z.object({
+  source: z.enum(['ui', 'agent', 'system']),
+  /** Web tab/session identifier; opaque to the server. */
+  tabId: z.string().optional(),
+  /** Authenticated user id when known. */
+  userId: z.string().optional(),
+  /**
+   * ACP chat thread that initiated this batch (set by the reachback
+   * tool). Lets the broadcast attribute the change to the right
+   * conversation's review card.
+   */
+  threadId: z.string().optional(),
+});
+export type ExecuteOriginator = z.infer<typeof executeOriginatorSchema>;
+
 /** Body for `PUT /api/canvas/:canvasId`. */
 export const putCanvasBodySchema = z.object({
   version: z.number().int().nonnegative(),
   state: z.unknown(),
   title: z.string().min(1).optional(),
+  /**
+   * Optional structural baseline used to distinguish a stale topology from a
+   * harmless version advance caused by a node-only commit.
+   */
+  expectStructureRevision: z.string().min(1).optional(),
+  /** No client commit/idempotency id: the server mints `ack.commitId`. */
+  originator: executeOriginatorSchema.optional(),
 });
 export type PutCanvasRequest = z.infer<typeof putCanvasBodySchema>;
 
 export interface PutCanvasResponse {
   canvasId: string;
   version: number;
+  /** Full Phase 4 publication; preferred over ack when available. */
+  commit?: CanvasCommitEvent;
+  /** Phase 4 commit acknowledgement; optional for legacy servers. */
+  ack?: MutationAck;
 }
+
+/** Optional metadata body for `DELETE /api/canvas/:canvasId/nodes/:nodeId`. */
+export const deleteNodeBodySchema = z.object({
+  /** Originating tab/session for optimistic echo filtering. */
+  originator: executeOriginatorSchema.optional(),
+});
+export type DeleteNodeRequest = z.infer<typeof deleteNodeBodySchema>;
 
 export interface DeleteNodeResponse {
   success: boolean;
+  /** Full Phase 4 publication; preferred over ack when available. */
+  commit?: CanvasCommitEvent;
+  /** Phase 4 commit acknowledgement; optional for legacy servers. */
+  ack?: MutationAck;
 }
 
 // ─── Per-node content endpoints ───────────────────────────────────────────
@@ -152,12 +197,16 @@ export const putNodeContentBodySchema = z.object({
    * and rejects the write with `NODE_CONTENT_CONFLICT` when it differs, so
    * a concurrent edit (another tab / device / an agent, or a Google-Drive
    * synced newer copy) is surfaced as a conflict instead of silently
-   * overwritten. A brand-new node the client is creating carries the
-   * revision of empty content (`nodeRevisionOf({})`), so the create only
-   * succeeds while no file exists yet (guards create-races too). Omit to
-   * skip the check entirely (kept optional so non-CAS callers still work).
+   * overwritten. The first sidecar write for an already-acknowledged topology
+   * node carries the revision of empty content (`nodeRevisionOf({})`), so it
+   * only succeeds while no file exists yet (guards create-races too). The
+   * endpoint never creates topology, and `nodeType` must still match the
+   * canonical topology type. Omit to skip the authored-content comparison
+   * (kept optional so non-CAS callers still work).
    */
   expectRev: z.string().optional(),
+  /** Originating tab/session for optimistic echo filtering. */
+  originator: executeOriginatorSchema.optional(),
 });
 export type PutNodeContentRequest = z.infer<typeof putNodeContentBodySchema>;
 
@@ -174,6 +223,13 @@ export interface PutNodeContentResponse {
   nodeId: string;
   label: string | null;
   /**
+   * Canonical body returned only when the server refused an accidental
+   * empty-body clobber. The client restores it if the optimistic empty value
+   * is still current; a newer local edit always wins.
+   */
+  content?: string;
+  contentPreserved?: boolean;
+  /**
    * The {@link nodeRevision} of the content the server actually persisted.
    * The client stores this as the node's new optimistic-concurrency
    * baseline (co-delivered with the write it confirms, so content and its
@@ -182,6 +238,12 @@ export interface PutNodeContentResponse {
    * clobber that kept the existing content).
    */
   rev: string;
+  /** Opaque revision over the complete canonical node record. */
+  recordRevision?: string;
+  /** Full Phase 4 publication; preferred over ack when available. */
+  commit?: CanvasCommitEvent;
+  /** Phase 4 commit acknowledgement; optional for legacy servers. */
+  ack?: MutationAck;
   /** True when the markdown file could not be read back after write. */
   contentMissing?: boolean;
   /** True when the referenced artifact file is missing on disk. */
@@ -207,6 +269,8 @@ export interface GetNodeContentResponse {
    * (same co-delivery discipline as {@link PutNodeContentResponse.rev}).
    */
   rev: string;
+  /** Opaque revision over the complete canonical node record. */
+  recordRevision?: string;
   summary?: string;
   keywords?: string[];
   contentMissing?: boolean;
@@ -379,26 +443,6 @@ export interface CreateCanvasResponse {
 // `apps/server/src/modules/canvas/canvas-executor.ts`.
 
 /**
- * Originator metadata describing who initiated the batch. The server
- * records this in the delta-log row so audit / replay can distinguish
- * agent-driven mutations from UI gestures.
- */
-export const executeOriginatorSchema = z.object({
-  source: z.enum(['ui', 'agent', 'system']),
-  /** Web tab/session identifier; opaque to the server. */
-  tabId: z.string().optional(),
-  /** Authenticated user id when known. */
-  userId: z.string().optional(),
-  /**
-   * ACP chat thread that initiated this batch (set by the reachback
-   * tool). Lets the broadcast attribute the change to the right
-   * conversation's review card.
-   */
-  threadId: z.string().optional(),
-});
-export type ExecuteOriginator = z.infer<typeof executeOriginatorSchema>;
-
-/**
  * Body for `POST /api/canvas/:canvasId/execute`.
  *
  * `commands` is intentionally `z.array(z.unknown())` — the canvas
@@ -418,7 +462,10 @@ export type PostCanvasExecuteRequest = z.infer<
 
 /** Per-command outcome returned alongside the structural deltas. */
 export interface CanvasExecuteCommandOutcome {
-  /** The (possibly annotated) command the server actually executed. */
+  /**
+   * Bounded projection of the command the server executed. Node sidecar
+   * fields are omitted; server-assigned ids and structural fields remain.
+   */
   command: unknown;
   applied: boolean;
   /** Engine-supplied failure reason when `applied === false`. */
@@ -434,13 +481,12 @@ export interface CanvasExecuteCommandOutcome {
  * Mirrors the subset of {@link PendingEffects} that has client-side
  * meaning.
  *
- * `mutatedNodes` is included for now because preprocessing dispatch
- * still runs on the web in Phase A; once cross-tab broadcast (M3)
- * lands and the server drives preprocessing directly, this field can
- * be dropped from the wire and the web preprocessing trigger removed.
+ * `mutatedNodes` remains while preprocessing dispatch runs on the web. Phase
+ * 4 producers send the canonical slim topology projection here; node bodies
+ * are carried only by the bounded `CanvasCommitEvent.nodeChanges` channel.
  */
 export interface CanvasExecutePendingEffects {
-  /** Final post-execution snapshots of nodes that were created or edited. */
+  /** Slim final topology nodes that were created or edited. */
   mutatedNodes: unknown[];
   deletedNodeIds: string[];
   contentEditedNodeIds: string[];
@@ -459,14 +505,18 @@ export interface PostCanvasExecuteResponse {
   canvasId: string;
   fromVersion: number;
   toVersion: number;
+  /** Full Phase 4 publication; preferred over ack when available. */
+  commit?: CanvasCommitEvent;
+  /** Phase 4 commit acknowledgement; optional for legacy servers. */
+  ack?: MutationAck;
   /** Deltas observed between prestate and poststate, in apply order. */
   deltas: unknown[];
   /** Per-command outcomes (one entry per submitted command). */
   results: CanvasExecuteCommandOutcome[];
   /**
-   * Annotated commands as the server executed them. Carries any
-   * server-assigned ids and `origin` / `labelSource` tags so the
-   * client's revert UX can still derive `revertCommand` per-batch.
+   * Bounded command projections as the server executed them. Carries
+   * server-assigned ids and structural annotations, but omits node sidecar
+   * bodies and derived metadata.
    */
   commands: unknown[];
   /** Subset of engine-pending effects that clients should drain. */

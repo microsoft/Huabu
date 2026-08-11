@@ -9,10 +9,16 @@
  * from actually changed.
  */
 
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { buildPlan } from './dispatcher.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { buildPlan, PreprocessDispatcher } from './dispatcher.js';
 import { getProfile } from './profiles.js';
+import { getCanvasStore } from '../storage/index.js';
+import { setWorkspacePath } from '../workspace.js';
 
 import type { PreprocessNodeRequest } from '@huabu/shared';
 
@@ -161,5 +167,101 @@ describe('buildPlan — overrides & unchanged', () => {
     expect(plan).not.toContain('generate_label');
     expect(plan).toContain('resolve_input');
     expect(plan).toContain('build_patch');
+  });
+});
+
+describe('PreprocessDispatcher — final topology authority', () => {
+  let workspace: string;
+
+  beforeEach(() => {
+    workspace = mkdtempSync(join(tmpdir(), 'huabu-preprocess-dispatcher-'));
+    setWorkspacePath(workspace);
+  });
+
+  afterEach(() => {
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  function seedNode(topologyType: string): void {
+    const store = getCanvasStore('canvas-test');
+    store.write({
+      canvasId: 'canvas-test',
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          {
+            id: 'node-test',
+            type: topologyType,
+            position: { x: 0, y: 0 },
+            data: {},
+          },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    store.writeNode('node-test', {
+      nodeId: 'node-test',
+      type: topologyType,
+      label: 'Canonical current label',
+      content: 'cached body',
+      src: 'document.pdf',
+      summary: 'cached summary',
+    });
+  }
+
+  function expectSanitizedSuperseded(
+    result: Awaited<ReturnType<PreprocessDispatcher['preprocess']>>,
+  ): void {
+    expect(result).toMatchObject({
+      success: true,
+      status: 'skipped',
+      patch: {},
+    });
+    expect(result.extracted).toBeUndefined();
+    expect(result.enriched).toBeUndefined();
+    expect(result.persistence).toBeUndefined();
+    expect(result.commit).toBeUndefined();
+    expect(result.ack).toBeUndefined();
+  }
+
+  it('sanitizes a warm-cache result after the node changes type', async () => {
+    // A stale PDF request would normally return before Persist through the
+    // cache short-circuit. The final topology check must still see that the
+    // canonical node is now Office and suppress every stale projection.
+    seedNode('office');
+
+    const result = await new PreprocessDispatcher().preprocess(
+      req(
+        'pdf',
+        { src: 'document.pdf', title: 'Stale request label' },
+        undefined,
+        { allowLLM: false },
+      ),
+    );
+
+    expectSanitizedSuperseded(result);
+    expect(getCanvasStore('canvas-test').read()?.version).toBe(1);
+    expect(getCanvasStore('canvas-test').readDeltaLogSince(0)).toEqual([]);
+  });
+
+  it('sanitizes a no-persistence result after the node changes type', async () => {
+    // allowPersistence:false also bypasses Persist. A stale Note pipeline can
+    // still derive a label, but it must not project that label onto the Text
+    // node that now owns this id.
+    seedNode('text');
+
+    const result = await new PreprocessDispatcher().preprocess(
+      req('note', { content: 'Stale heading\nStale body' }, undefined, {
+        allowLLM: false,
+        allowPersistence: false,
+      }),
+    );
+
+    expectSanitizedSuperseded(result);
+    expect(getCanvasStore('canvas-test').read()?.version).toBe(1);
+    expect(getCanvasStore('canvas-test').readDeltaLogSince(0)).toEqual([]);
   });
 });

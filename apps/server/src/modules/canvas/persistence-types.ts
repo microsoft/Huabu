@@ -15,7 +15,11 @@
  * directory handle). Those belong to the Disk adapter.
  */
 
-import type { CanvasEventRecord, ExecuteOriginator } from '@huabu/shared';
+import type {
+  CanvasCommitEvent,
+  CanvasEventRecord,
+  ExecuteOriginator,
+} from '@huabu/shared';
 
 /** On-disk shape of `<canvasDir>/space.json`. */
 export interface CanvasFile {
@@ -77,4 +81,9 @@ export interface DeltaLogEntry {
   /** Coarse `Delta[]` produced by diffing prestate → poststate. */
   deltas: unknown[];
   originator: ExecuteOriginator;
+  /**
+   * Canonical Phase 4 publication envelope. Optional while historical rows
+   * and compatibility writers still use the pre-commit schema.
+   */
+  commit?: CanvasCommitEvent;
 }

@@ -24,8 +24,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { persist } from './persist.js';
+import { project } from './project.js';
 import canvasRoutes from '../../canvas/canvas.route.js';
-import { getCanvasStore } from '../../storage/index.js';
+import { getCanvasStore, getStructuredStore } from '../../storage/index.js';
 import { setWorkspacePath } from '../../workspace.js';
 
 import type { NormalizeResult } from '../types.js';
@@ -104,6 +105,41 @@ describe('persist — authored-body CAS guard', () => {
 
     expect(result.contentChanged).toBe(true);
     expect(bodyOf('c1', 'n1')).toBe('fresh-extraction');
+    expect(result.ack).toMatchObject({
+      fromVersion: 1,
+      toVersion: 2,
+      recordChanged: true,
+    });
+    expect(getCanvasStore('c1').read()?.version).toBe(2);
+    const rows = getCanvasStore('c1').readDeltaLogSince(0);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.commit).toMatchObject({
+      commitId: result.ack?.commitId,
+      originator: { source: 'system' },
+    });
+    expect(result.commit).toEqual(rows[0]?.commit);
+    expect(
+      (await getStructuredStore().space('c1').nodes.read('n1'))?.revision,
+    ).toBe(result.recordRevision);
+  });
+
+  it('acknowledges a semantic no-op without version, row, or write', async () => {
+    seedNode('noop', 'n1', 'web', 'unchanged');
+
+    const result = await persist(
+      normalized('n1', 'unchanged'),
+      'web',
+      'derived',
+      getCanvasStore('noop'),
+    );
+
+    expect(result).toMatchObject({
+      contentChanged: false,
+      ack: { fromVersion: 1, toVersion: 1, recordChanged: false },
+      commit: { fromVersion: 1, toVersion: 1, recordChanged: false },
+    });
+    expect(getCanvasStore('noop').read()?.version).toBe(1);
+    expect(getCanvasStore('noop').readDeltaLogSince(0)).toEqual([]);
   });
 
   it('creates an authored body when none exists (guard needs an existing body)', async () => {
@@ -159,6 +195,92 @@ describe('persist — authored-body CAS guard', () => {
 
     expect(result.contentChanged).toBe(false);
     expect(store.readNode('pdf1')).toBeNull();
+  });
+
+  it('skips an existing orphan without advancing or rewriting it', async () => {
+    const store = getCanvasStore('orphan');
+    store.write({
+      canvasId: 'orphan',
+      title: null,
+      version: 1,
+      state: { nodes: [], edges: [] },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    store.writeNode('n1', {
+      nodeId: 'n1',
+      type: 'web',
+      label: 'Orphan',
+      content: 'keep orphan bytes',
+    });
+
+    const result = await persist(
+      normalized('n1', 'stale extraction'),
+      'web',
+      'derived',
+      store,
+    );
+
+    expect(result).toMatchObject({
+      skipped: true,
+      superseded: true,
+      contentChanged: false,
+    });
+    expect(store.readNode('n1')).toMatchObject({
+      type: 'web',
+      content: 'keep orphan bytes',
+    });
+    expect(store.read()?.version).toBe(1);
+    expect(store.readDeltaLogSince(0)).toEqual([]);
+  });
+
+  it('does not let delayed preprocessing revert a structural type transition', async () => {
+    seedNode('type-transition', 'n1', 'pdf', 'canonical pdf body');
+    const store = getCanvasStore('type-transition');
+
+    const result = await persist(
+      normalized('n1', 'late web extraction'),
+      'web',
+      'derived',
+      store,
+    );
+
+    expect(result).toMatchObject({ skipped: true, superseded: true });
+    expect(store.readNode('n1')).toMatchObject({
+      type: 'pdf',
+      content: 'canonical pdf body',
+    });
+    expect(store.read()?.version).toBe(1);
+  });
+
+  it('projects no stale patch for a superseded preprocessing result', () => {
+    const result = project(
+      {
+        canvasId: 'c1',
+        nodeId: 'n1',
+        nodeType: 'web',
+        trigger: 'node_updated',
+        snapshot: { title: 'Current' },
+      },
+      'request-1',
+      ['persist_source', 'generate_label'],
+      {
+        normalized: {
+          nodeId: 'n1',
+          canonicalContent: 'stale body',
+          label: 'Stale label',
+        },
+        enriched: { suggestedLabel: 'Stale label', summary: 'Stale summary' },
+        persisted: { skipped: true, superseded: true },
+      },
+      [],
+      'web',
+    );
+
+    expect(result).toMatchObject({ success: true, status: 'skipped' });
+    expect(result.patch).toEqual({});
+    expect(result.enriched).toBeUndefined();
+    expect(result.persistence).toBeUndefined();
   });
 });
 

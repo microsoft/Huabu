@@ -100,6 +100,57 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(putMock.mock.calls[0][2].expectRev).toBe(nodeRevisionOf({}));
   });
 
+  it('rebases a skipped remote write without replacing local content', async () => {
+    const node = noteNode('local edit');
+    const { queue, state } = makeQueue(node);
+    queue.seedBaselines([node]);
+
+    const rebase = queue.beginBaselineRebase('n1');
+    putMock.mockResolvedValueOnce({ nodeId: 'n1', label: 'Note', rev: 'SRV2' });
+    await queue.completeBaselineRebase('c1', rebase, 'REMOTE_REV');
+
+    expect(putMock.mock.calls[0][2]).toMatchObject({
+      content: 'local edit',
+      expectRev: 'REMOTE_REV',
+    });
+    expect(state.nodes[0]?.data?.['content']).toBe('local edit');
+  });
+
+  it('rebases after an older in-flight PUT conflicts, then retries local content', async () => {
+    const node = noteNode('local edit');
+    const { queue } = makeQueue(node);
+    queue.seedBaselines([node]);
+    let rejectFirst: ((reason: unknown) => void) | undefined;
+    putMock.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectFirst = reject;
+      }),
+    );
+
+    const first = queue.flushNow('c1', 'n1');
+    await vi.waitFor(() => expect(putMock).toHaveBeenCalledOnce());
+    const rebase = queue.beginBaselineRebase('n1');
+    putMock.mockResolvedValueOnce({ nodeId: 'n1', label: 'Note', rev: 'SRV2' });
+    const rebased = queue.completeBaselineRebase('c1', rebase, 'REMOTE_REV');
+    rejectFirst?.(
+      new CanvasConflictError({
+        code: 'NODE_CONTENT_CONFLICT',
+        message: 'remote write won',
+        nodeId: 'n1',
+        currentRev: 'REMOTE_REV',
+      }),
+    );
+
+    await first;
+    await rebased;
+
+    expect(putMock).toHaveBeenCalledTimes(2);
+    expect(putMock.mock.calls[1][2]).toMatchObject({
+      content: 'local edit',
+      expectRev: 'REMOTE_REV',
+    });
+  });
+
   it('does not recreate a missing markdown sidecar', async () => {
     const node = noteNode('');
     node.data = { ...node.data, contentMissing: true };
@@ -136,6 +187,82 @@ describe('nodeContentQueue baseline lifecycle', () => {
     await queue.flushNow('c1', 'n1');
     expect(putMock).toHaveBeenCalledTimes(1);
     expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(queue.pendingNodeIds()).toContain('n1');
+  });
+
+  it('ignores a late content conflict after the local node was deleted', async () => {
+    const node = noteNode('v1');
+    const { queue, state } = makeQueue(node);
+    queue.seedBaselines([node]);
+    let rejectPut: ((reason: unknown) => void) | undefined;
+    putMock.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectPut = reject;
+      }),
+    );
+
+    const pending = queue.flushNow('c1', 'n1');
+    await vi.waitFor(() => expect(putMock).toHaveBeenCalledOnce());
+    state.nodes = [];
+    queue.forgetNode('n1');
+    rejectPut?.(
+      new CanvasConflictError({
+        code: 'NODE_CONTENT_CONFLICT',
+        message: 'topology was deleted',
+        nodeId: 'n1',
+        currentRev: 'MISSING',
+      }),
+    );
+    await pending;
+
+    expect(toastMock).not.toHaveBeenCalled();
+    expect(queue.pendingNodeIds()).not.toContain('n1');
+
+    // Reusing the id in this isolated regression proves the obsolete 409 did
+    // not resurrect a frozen entry that suppresses all future writes.
+    state.nodes = [noteNode('replacement')];
+    putMock.mockResolvedValueOnce({ nodeId: 'n1', label: 'Note', rev: 'NEW' });
+    await queue.flushNow('c1', 'n1');
+    expect(putMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not let a delayed Load latest overwrite typing made after the click', async () => {
+    const node = noteNode('mine');
+    const { queue, state } = makeQueue(node);
+    queue.seedBaselines([node]);
+    putMock.mockRejectedValueOnce(
+      new CanvasConflictError({
+        code: 'NODE_CONTENT_CONFLICT',
+        message: 'changed elsewhere',
+        nodeId: 'n1',
+        currentRev: 'OTHER',
+      }),
+    );
+    await queue.flushNow('c1', 'n1');
+
+    let resolveGet: ((value: unknown) => void) | undefined;
+    getMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveGet = resolve;
+      }),
+    );
+    const loadLatest = toastMock.mock.calls[0][1].action.onClick as () => void;
+    loadLatest();
+    await vi.waitFor(() => expect(getMock).toHaveBeenCalledOnce());
+    state.nodes = [noteNode('typed after click')];
+    resolveGet?.({
+      nodeId: 'n1',
+      type: 'note',
+      label: 'Remote',
+      content: 'remote',
+      rev: 'REMOTE',
+    });
+    await vi.waitFor(() => expect(getMock).toHaveBeenCalledOnce());
+    await Promise.resolve();
+
+    expect(state._setStateNoAutosave).not.toHaveBeenCalled();
+    expect(state.nodes[0]?.data?.['content']).toBe('typed after click');
+    expect(queue.pendingNodeIds()).toContain('n1');
   });
 
   it('adopts contentMissing when Load latest finds a deleted sidecar', async () => {

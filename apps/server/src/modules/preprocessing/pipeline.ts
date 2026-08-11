@@ -29,6 +29,7 @@ import type {
   NodeContentKind,
   PipelineContext,
   PreprocessDiagnostic,
+  PreprocessExecutionBaseline,
   PreprocessNodeResult,
 } from './types.js';
 import type { CanvasStore } from '../storage/canvas-store.js';
@@ -57,6 +58,7 @@ export async function runPipeline(
   contentKind: NodeContentKind | undefined,
   bodyOwnership: BodyOwnership | undefined,
   deps: PipelineDeps,
+  baseline?: PreprocessExecutionBaseline,
 ): Promise<PreprocessNodeResult> {
   const leases: BlobLease[] = [];
   try {
@@ -67,6 +69,7 @@ export async function runPipeline(
       bodyOwnership,
       deps,
       leases,
+      baseline,
     );
   } finally {
     for (const lease of leases) {
@@ -90,6 +93,7 @@ async function runPipelineStages(
   bodyOwnership: BodyOwnership | undefined,
   deps: PipelineDeps,
   leases: BlobLease[],
+  baseline?: PreprocessExecutionBaseline,
 ): Promise<PreprocessNodeResult> {
   const requestId = randomUUID();
   const ctx: PipelineContext = {};
@@ -352,6 +356,8 @@ async function runPipelineStages(
             deps.store,
             src,
             true,
+            request.originator ?? { source: 'system' },
+            baseline,
           );
           ctx.persisted.placeholder = true;
           diagnostics.push({
@@ -368,6 +374,8 @@ async function runPipelineStages(
             deps.store,
             src,
             true,
+            request.originator ?? { source: 'system' },
+            baseline,
           );
         }
         usedCapabilities.push('persist_source');

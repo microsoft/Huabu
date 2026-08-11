@@ -85,6 +85,14 @@ interface NodeFileEntry {
   filename: string;
 }
 
+/** @internal Tombstone metadata settlement owned by the aggregate journal. */
+export interface NodeMutationTombstoneSettlement {
+  /** Apply resurrection reconciliation after the journal commit marker lands. */
+  commit(): void;
+  /** Restore exact pre-transaction metadata when the journal is aborted. */
+  rollback(): void;
+}
+
 export type RenameResult =
   | {
       ok: true;
@@ -110,7 +118,43 @@ export type RenameResult =
       /** All sidecar filenames currently claiming this nodeId on disk. */
       files: string[];
     }
+  | { ok: false; reason: 'plan-drift' }
   | { ok: false; reason: 'not-found' };
+
+export type PlannedNodeMutation =
+  | {
+      readonly kind: 'put';
+      readonly nodeId: string;
+      readonly sourceFilename: string | null;
+      readonly targetFilename: string;
+      /** Exact canonical record serialized at the planned target. */
+      readonly record: NodeContent;
+    }
+  | {
+      readonly kind: 'delete';
+      readonly nodeId: string;
+      readonly sourceFilename: string | null;
+    };
+
+export interface NodeMutationJournalPlan {
+  readonly filenames: readonly string[];
+  readonly mutations: readonly PlannedNodeMutation[];
+}
+
+export type NodeMutationJournalPlanResult =
+  | { readonly ok: true; readonly plan: NodeMutationJournalPlan }
+  | {
+      readonly ok: false;
+      readonly reason: 'conflict';
+      readonly nodeId: string;
+      readonly conflictWith: { readonly id: string; readonly filename: string };
+    }
+  | {
+      readonly ok: false;
+      readonly reason: 'duplicate';
+      readonly nodeId: string;
+      readonly files: readonly string[];
+    };
 
 export type RenameSelfResult =
   | { ok: true; dirName: string }
@@ -281,9 +325,10 @@ export class CanvasStore {
    */
   private nodeDuplicateIds = new Set<string>();
   /**
-   * Synchronous executor batches validate the aggregate once before touching
-   * several sidecars. Only node guards consult this depth; the callback never
-   * escapes and standalone mutations still perform their own strict read.
+   * Synchronous aggregate commit batches validate the record once before
+   * touching several sidecars. Only node guards consult this depth; the
+   * callback never escapes and standalone mutations still perform their own
+   * strict read.
    */
   private nodeMutationTransactionDepth = 0;
   /** INSERT ids allowed to rewrite a still-tombstoned sidecar in this commit. */
@@ -317,24 +362,38 @@ export class CanvasStore {
    * Read this Space's `space.json`. When the on-disk directory name
    * cannot be derived from the persisted title via {@link toSafeFilename}
    * we treat that as a Finder-side rename and adopt `dirName` as the new
-   * title (persisted back into `space.json`). The common case where
+   * title for this read. The common case where
    * `dirName === safe(title)` (e.g. title contains `?` / `:` / `/` that
    * was sanitised at create time) is left alone — overwriting there
    * would silently strip the user's typed characters from the title.
    */
   read(): CanvasFile | null {
-    this.assertActiveWorkspace();
-    let file = readJson<CanvasFile>(canvasJsonPath(this.canvasId));
-    if (!file) {
-      refreshCanvasDirIndex();
-      file = readJson<CanvasFile>(canvasJsonPath(this.canvasId));
-      if (!file) return null;
-    }
-
-    return this.reconcileValidatedRecord(file);
+    const file = this.readPersisted();
+    return file === null ? null : this.reconcileValidatedRecord(file);
   }
 
-  /** @internal Apply legacy Finder-title semantics without rereading disk. */
+  /** @internal Read the durable record without applying Finder title display semantics. */
+  readPersisted(): CanvasFile | null {
+    this.assertActiveWorkspace();
+    let file = readValidCanvasFile(
+      canvasJsonPath(this.canvasId),
+      this.canvasId,
+    );
+    if (!file) {
+      refreshCanvasDirIndex();
+      file = readValidCanvasFile(canvasJsonPath(this.canvasId), this.canvasId);
+      if (!file) return null;
+    }
+    return file;
+  }
+
+  /**
+   * @internal Project Finder-title semantics without rereading or writing.
+   *
+   * Reads must stay observational now that every durable title change belongs
+   * to `SpaceCommit`. A directory renamed outside the app is therefore a
+   * display override until the next real save persists the projected title.
+   */
   reconcileValidatedRecord(file: CanvasFile): CanvasFile {
     this.assertActiveWorkspace();
     if (file.canvasId !== this.canvasId) {
@@ -345,19 +404,7 @@ export class CanvasStore {
     const dirName = path.basename(canvasRoot(this.canvasId));
     const expectedDir = toSafeFilename(file.title, this.canvasId);
     if (!isWorldCanvasId(this.canvasId) && dirName && dirName !== expectedDir) {
-      const next: CanvasFile = {
-        ...file,
-        title: dirName,
-        updatedAt: Date.now(),
-      };
-      try {
-        assertSpaceMutationAllowed(this.#workspacePath, this.canvasId);
-        atomicWriteJson(canvasJsonPath(this.canvasId), next);
-        patchCanvasDirTitle(this.canvasId, dirName);
-        return next;
-      } catch {
-        return { ...file, title: dirName };
-      }
+      return { ...file, title: dirName };
     }
 
     return file;
@@ -468,11 +515,11 @@ export class CanvasStore {
   }
 
   /**
-   * Run one synchronous executor sidecar batch behind a single strict
+   * Run one synchronous aggregate sidecar batch behind a single strict
    * `space.json` validation.
    *
    * @internal This is deliberately absent from the storage ports and runtime
-   * facade. The executor already owns the Space mutex and performs all of its
+   * facade. `DiskSpaceCommitter` owns the Space mutex and performs all of its
    * sidecar mutations without yielding, so the validated record cannot change
    * between this check and the guarded writes/deletes in the callback.
    */
@@ -480,6 +527,14 @@ export class CanvasStore {
     options: {
       affectedNodeIds: ReadonlySet<string>;
       insertedNodeIds: ReadonlySet<string>;
+      /**
+       * Defer tombstone settlement to the aggregate journal decision. The
+       * callback's file/record/log writes are not durable as one decision
+       * until `COMMITTED`, so resurrection metadata cannot be cleared sooner.
+       */
+      deferTombstoneSettlement?: (
+        settlement: NodeMutationTombstoneSettlement,
+      ) => void;
     },
     callback: () => T,
   ): T {
@@ -503,10 +558,34 @@ export class CanvasStore {
     this.deferredTombstoneReconciliationNodeIds = new Set();
     try {
       const result = callback();
-      // `callback` includes the structural write and delta-log append. Only
-      // after both return successfully may a listed id clear its tombstone.
-      for (const id of this.deferredTombstoneReconciliationNodeIds) {
-        clearNodeTombstone(this.#workspacePath, this.canvasId, id);
+      const reconcileNodeIds = new Set(
+        this.deferredTombstoneReconciliationNodeIds,
+      );
+      let settled = false;
+      const settlement: NodeMutationTombstoneSettlement = {
+        commit: () => {
+          if (settled) return;
+          for (const id of reconcileNodeIds) {
+            clearNodeTombstone(this.#workspacePath, this.canvasId, id);
+          }
+          settled = true;
+        },
+        rollback: () => {
+          if (settled) return;
+          restoreNodeTombstones(
+            this.#workspacePath,
+            this.canvasId,
+            tombstoneSnapshot,
+          );
+          settled = true;
+        },
+      };
+      if (options.deferTombstoneSettlement) {
+        options.deferTombstoneSettlement(settlement);
+      } else {
+        // Compatibility callers without an enclosing Disk journal retain the
+        // original callback-success boundary.
+        settlement.commit();
       }
       return result;
     } catch (error) {
@@ -586,6 +665,183 @@ export class CanvasStore {
 
   private invalidateNodeIndex(): void {
     this.nodes = null;
+  }
+
+  /**
+   * @internal Enumerate every existing/target sidecar a legacy mutation batch
+   * may touch. Disk SpaceCommit publishes these paths in its undo journal
+   * before invoking the writer, including targets that do not exist yet.
+   */
+  planNodeMutationsForJournal(
+    mutations: readonly (
+      | { kind: 'put'; record: NodeContent; strictRename?: boolean }
+      | { kind: 'delete'; nodeId: string }
+    )[],
+  ): NodeMutationJournalPlanResult {
+    this.assertActiveWorkspace();
+    // The plan is an undo-journal declaration, not a filename hint. Always
+    // rescan after watcher handles have been released so a Finder-created
+    // sibling cannot make the legacy writer choose an undeclared dedupe
+    // target later in the transaction.
+    this.invalidateNodeIndex();
+    const current = this.nodeIndex();
+
+    const simulated = new NameIndex<NodeFileEntry>(current.list());
+    const filenames = new Set<string>();
+    const planned: PlannedNodeMutation[] = [];
+    for (const mutation of mutations) {
+      const nodeId =
+        mutation.kind === 'put' ? mutation.record.nodeId : mutation.nodeId;
+      const existing = simulated.get(nodeId);
+      if (existing) filenames.add(existing.filename);
+
+      if (this.nodeDuplicateIds.has(nodeId)) {
+        return {
+          ok: false,
+          reason: 'duplicate',
+          nodeId,
+          files: this.duplicateNodeFilenames(nodeId),
+        };
+      }
+
+      if (mutation.kind === 'delete') {
+        planned.push({
+          kind: 'delete',
+          nodeId,
+          sourceFilename: existing?.filename ?? null,
+        });
+        simulated.remove(nodeId);
+        continue;
+      }
+
+      const trimmedLabel =
+        typeof mutation.record.label === 'string' &&
+        mutation.record.label.trim().length > 0
+          ? mutation.record.label
+          : null;
+      const desired =
+        trimmedLabel === null && existing
+          ? existing.filename
+          : nodeFilenameFor(nodeId, trimmedLabel);
+      let target = existing?.filename ?? desired;
+      if (!existing || existing.filename !== desired) {
+        const conflict = simulated.findByName(desired);
+        if (!conflict || conflict.id === nodeId) {
+          target = desired;
+        } else if (mutation.strictRename) {
+          return {
+            ok: false,
+            reason: 'conflict',
+            nodeId,
+            conflictWith: {
+              id: conflict.id,
+              filename: conflict.filename,
+            },
+          };
+        } else {
+          target = simulated.suggestUnique(desired, true, nodeId);
+        }
+      }
+      const desiredStem = desired.replace(/\.md$/, '');
+      const targetStem = target.replace(/\.md$/, '');
+      const suffix =
+        targetStem.length > desiredStem.length &&
+        targetStem.startsWith(desiredStem)
+          ? targetStem.slice(desiredStem.length)
+          : '';
+      const finalLabel =
+        suffix && trimmedLabel ? `${trimmedLabel}${suffix}` : trimmedLabel;
+      const finalRecord: NodeContent =
+        suffix && trimmedLabel
+          ? { ...mutation.record, label: finalLabel }
+          : mutation.record;
+      filenames.add(target);
+      planned.push({
+        kind: 'put',
+        nodeId,
+        sourceFilename: existing?.filename ?? null,
+        targetFilename: target,
+        record: finalRecord,
+      });
+      if (existing) {
+        simulated.rename(nodeId, target);
+      } else {
+        simulated.add({ id: nodeId, filename: target });
+      }
+    }
+    return {
+      ok: true,
+      plan: { filenames: [...filenames], mutations: planned },
+    };
+  }
+
+  /** @internal Exact sidecar after-states for a deterministic Disk journal. */
+  materializeNodeMutationPlan(
+    plan: NodeMutationJournalPlan,
+  ): readonly { readonly filename: string; readonly after: Buffer | null }[] {
+    const afterByFilename = new Map<string, Buffer | null>();
+    for (const mutation of plan.mutations) {
+      if (mutation.kind === 'delete') {
+        if (mutation.sourceFilename !== null) {
+          afterByFilename.set(mutation.sourceFilename, null);
+        }
+        continue;
+      }
+      if (
+        mutation.sourceFilename !== null &&
+        mutation.sourceFilename !== mutation.targetFilename
+      ) {
+        afterByFilename.set(mutation.sourceFilename, null);
+      }
+      afterByFilename.set(
+        mutation.targetFilename,
+        Buffer.from(nodeContentToMarkdown(mutation.record), 'utf8'),
+      );
+    }
+    return plan.filenames.map((filename) => {
+      const after = afterByFilename.get(filename);
+      if (after === undefined) {
+        throw new Error(
+          `Missing planned after-state for node file ${filename}`,
+        );
+      }
+      return { filename, after };
+    });
+  }
+
+  /**
+   * @internal Stage only process/durable anti-resurrection metadata after the
+   * deterministic file transaction has applied. File bytes are journal-owned.
+   */
+  stageNodeMutationTombstones(
+    mutations: readonly PlannedNodeMutation[],
+    resurrectedNodeIds: ReadonlySet<string>,
+  ): void {
+    if (
+      this.nodeMutationTransactionDepth === 0 ||
+      this.deferredTombstoneReconciliationNodeIds === null
+    ) {
+      throw new Error(
+        'Node tombstone staging requires an aggregate transaction',
+      );
+    }
+    for (const mutation of mutations) {
+      if (mutation.kind === 'delete') {
+        markNodeDeleted(this.#workspacePath, this.canvasId, mutation.nodeId);
+      }
+    }
+    for (const nodeId of resurrectedNodeIds) {
+      if (isNodeTombstoned(this.#workspacePath, this.canvasId, nodeId)) {
+        this.deferredTombstoneReconciliationNodeIds.add(nodeId);
+      }
+    }
+  }
+
+  /** @internal Drop path caches after raw journal recovery restored bytes. */
+  invalidateNodeIndexAfterTransactionRecovery(): void {
+    this.assertActiveWorkspace();
+    refreshCanvasDirIndex();
+    this.invalidateNodeIndex();
   }
 
   /**
@@ -720,6 +976,18 @@ export class CanvasStore {
     return this.nodeIndex().findByName(filename)?.id ?? null;
   }
 
+  /**
+   * Backend-private logical name lookup for the structured node adapter.
+   *
+   * The return value is always a single directory entry name, never a path.
+   * Keeping this lookup beside the id index preserves externally renamed and
+   * deduplicated names without leaking Disk paths into the portable port.
+   */
+  nodeLogicalName(nodeId: string): string {
+    this.assertActiveWorkspace();
+    return this.nodeFilenameOf(nodeId);
+  }
+
   readNode(nodeId: string): NodeContent | null {
     this.assertActiveWorkspace();
     const filename = this.nodeFilenameOf(nodeId);
@@ -730,6 +998,22 @@ export class CanvasStore {
       const retryFilename = this.nodeFilenameOf(nodeId);
       if (retryFilename !== filename) {
         raw = readText(nodeFilePath(this.canvasId, retryFilename));
+      }
+      if (raw === null) return null;
+    }
+    return markdownToNodeContent(nodeId, raw);
+  }
+
+  /** Async counterpart used by the portable structured node repository. */
+  async readNodeAsync(nodeId: string): Promise<NodeContent | null> {
+    this.assertActiveWorkspace();
+    const filename = this.nodeFilenameOf(nodeId);
+    let raw = await readTextAsync(nodeFilePath(this.canvasId, filename));
+    if (raw === null) {
+      this.invalidateNodeIndex();
+      const retryFilename = this.nodeFilenameOf(nodeId);
+      if (retryFilename !== filename) {
+        raw = await readTextAsync(nodeFilePath(this.canvasId, retryFilename));
       }
       if (raw === null) return null;
     }
@@ -859,7 +1143,10 @@ export class CanvasStore {
   writeNode(
     nodeId: string,
     content: NodeContent,
-    opts: { strictRename?: boolean } = {},
+    opts: {
+      strictRename?: boolean;
+      plannedMutation?: Extract<PlannedNodeMutation, { kind: 'put' }>;
+    } = {},
   ): RenameResult {
     this.assertActiveWorkspace();
     if (content.nodeId !== nodeId) {
@@ -876,8 +1163,6 @@ export class CanvasStore {
     ) {
       return { ok: false, reason: 'not-found' };
     }
-    mkdirp(nodesDir(this.canvasId));
-
     let idx = this.nodeIndex();
     let existing = idx.get(nodeId);
 
@@ -946,6 +1231,21 @@ export class CanvasStore {
         target = idx.suggestUnique(desired, true, nodeId);
       }
     }
+
+    // Aggregate commits declare every source/target in their undo journal.
+    // Refuse a late filesystem/index drift before creating a directory or
+    // writing bytes; silently selecting a fresh `(N)` target here would leave
+    // an unjournaled ghost after rollback.
+    if (
+      opts.plannedMutation &&
+      (opts.plannedMutation.nodeId !== nodeId ||
+        opts.plannedMutation.sourceFilename !== (existing?.filename ?? null) ||
+        opts.plannedMutation.targetFilename !== target)
+    ) {
+      return { ok: false, reason: 'plan-drift' };
+    }
+
+    mkdirp(nodesDir(this.canvasId));
 
     const isRename = !!existing && existing.filename !== target;
 
@@ -1098,7 +1398,7 @@ export class CanvasStore {
    * tombstoned, so a first write racing its structural PUT is never
    * suppressed.
    *
-   * Called from the single write funnel {@link applyNodeUpdate}. The
+   * Called from the aggregate Space commit authority. The
    * `read()` cost is paid only for the rare write that targets a
    * recently-deleted id (the common case short-circuits on an empty map).
    */

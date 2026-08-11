@@ -34,7 +34,7 @@ describe('GET /api/web/page', () => {
   it('marks direct .mhtml artifact keys as static snapshots', async () => {
     const canvasId = 'c1';
     const nodeId = 'n1';
-    createCanvas(canvasId);
+    await createCanvas(canvasId);
     getCanvasStore(canvasId).writeNode(nodeId, {
       nodeId,
       type: 'web',

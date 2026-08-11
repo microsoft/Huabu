@@ -32,15 +32,7 @@ export {
   isWorldCanvasId,
   requireWorldCanvasId,
 } from '../workspace/disk/canvas-dirs.js';
-export {
-  withCanvasMutex,
-  updateNode,
-  applyNodeUpdate,
-} from '../canvas/write-coordinator.js';
-export type {
-  UpdateNodeOptions,
-  UpdateNodeOutcome,
-} from '../canvas/write-coordinator.js';
+export { withCanvasMutex } from '../canvas/canvas-mutex.js';
 export type {
   CanvasEvent,
   CanvasFile,
@@ -52,7 +44,9 @@ export type {
 
 export {
   canvasBlobs,
+  createSpace,
   createStorage,
+  deleteSpace,
   getBlobStore,
   getStorage,
   getStructuredStore,
@@ -85,13 +79,25 @@ export type {
   CanvasEventRepository,
   CanvasIntentRepository,
   CanvasTaskRepository,
-  LegacyNodeStore,
   NewCanvasEvent,
-  NodeWriteResult,
+  NodePrecondition,
+  NodeRecordRevision,
+  NodeRepository,
+  NodeSnapshot,
+  SpaceNodeMutation,
+  SpaceCommitConflict,
+  SpaceCommitInput,
+  SpaceCommitPublication,
+  SpaceCommitRecord,
+  SpaceCommitResult,
   SpaceHandle,
   SpaceCatalogRepository,
+  SpaceCreateInput,
+  SpaceCreateResult,
+  SpaceDeleteInput,
+  SpaceDeleteResult,
+  SpaceLifecycleRepository,
   SpaceRepository,
-  SpaceWriteResult,
   StructuredBackendKind,
   StructuredStore,
   TaskRunUpdate,

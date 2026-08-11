@@ -49,6 +49,17 @@ vi.mock('../../workspace.js', () => ({
       },
     });
   },
+  withWorkspaceOperationLease: async <T>(
+    task: (workspacePath: string) => Promise<T>,
+  ) => {
+    const workspacePath = workspaceState.path;
+    workspaceState.leaseCount += 1;
+    try {
+      return await task(workspacePath);
+    } finally {
+      workspaceState.leaseCount -= 1;
+    }
+  },
 }));
 
 function writeCanvas(directory: string, canvasId: string, title: string): void {

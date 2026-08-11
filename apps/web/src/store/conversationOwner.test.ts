@@ -12,6 +12,7 @@ vi.mock('@/api/canvas', async (importOriginal) => ({
   postCanvasExecute,
 }));
 
+import { canvasSyncTabId } from './canvasCommitSync';
 import useCanvasStore from './canvasStore';
 import { useChatStore } from './chatStore';
 import {
@@ -141,7 +142,7 @@ describe('conversation owner routing', () => {
           ],
         },
       ],
-      originator: { source: 'ui' },
+      originator: { source: 'ui', tabId: canvasSyncTabId },
     });
   });
 

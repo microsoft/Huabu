@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { withCanvasMutex } from './canvas/canvas-mutex.js';
 import {
   acquireWorkspaceOperationLease,
   commitWorkspacePath,
@@ -12,6 +13,14 @@ import {
   setWorkspacePath,
   WorkspaceOperationInProgressError,
 } from './workspace.js';
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let release: (() => void) | undefined;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, resolve: () => release?.() };
+}
 
 describe('workspace operation leases', () => {
   const roots: string[] = [];
@@ -74,5 +83,39 @@ describe('workspace operation leases', () => {
     expect(() => setWorkspacePath(next)).not.toThrow();
     expect(existsSync(next)).toBe(true);
     expect(getWorkspacePath()).toBe(path.resolve(next));
+  });
+
+  it('keeps the workspace leased while a canvas mutation is queued and running', async () => {
+    const current = tempDir('huabu-workspace-current-');
+    const next = tempDir('huabu-workspace-next-');
+    setWorkspacePath(current);
+
+    const firstStarted = deferred();
+    const releaseFirst = deferred();
+    const secondStarted = deferred();
+    const releaseSecond = deferred();
+    const first = withCanvasMutex('same-canvas', async () => {
+      firstStarted.resolve();
+      await releaseFirst.promise;
+    });
+    await firstStarted.promise;
+    const second = withCanvasMutex('same-canvas', async () => {
+      secondStarted.resolve();
+      await releaseSecond.promise;
+    });
+
+    expect(() => commitWorkspacePath(path.resolve(next))).toThrow(
+      WorkspaceOperationInProgressError,
+    );
+    releaseFirst.resolve();
+    await first;
+    await secondStarted.promise;
+    expect(() => commitWorkspacePath(path.resolve(next))).toThrow(
+      WorkspaceOperationInProgressError,
+    );
+
+    releaseSecond.resolve();
+    await second;
+    expect(() => commitWorkspacePath(path.resolve(next))).not.toThrow();
   });
 });

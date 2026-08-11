@@ -72,6 +72,7 @@ describe('nodeContentQueue — save-failure surfacing', () => {
     await queue.flushNow('c1', 'n1', { source: 'auto' }).catch(() => undefined);
 
     expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(queue.pendingNodeIds()).toContain('n1');
     const opts = toastMock.mock.calls[0][1];
     expect(opts.tone).toBe('danger');
     expect(typeof opts.action?.onClick).toBe('function');
@@ -100,6 +101,7 @@ describe('nodeContentQueue — save-failure surfacing', () => {
 
     putMock.mockResolvedValueOnce({ nodeId: 'n1', label: 'Note', rev: 'SRV1' });
     await queue.flushNow('c1', 'n1', { source: 'auto' }).catch(() => undefined);
+    expect(queue.pendingNodeIds()).not.toContain('n1');
 
     putMock.mockRejectedValueOnce(new Error('disk fail again'));
     await queue.flushNow('c1', 'n1', { source: 'auto' }).catch(() => undefined);
@@ -121,5 +123,39 @@ describe('nodeContentQueue — save-failure surfacing', () => {
     await tick();
 
     expect(putMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not roll a newer rename back for an older failed request', async () => {
+    const node = noteNode('v1', 'First');
+    node.data = { ...node.data, labelSource: 'user' };
+    const { queue, state } = makeQueue(node);
+    queue.seedBaselines([node]);
+    putMock.mockResolvedValueOnce({
+      nodeId: 'n1',
+      label: 'First',
+      rev: 'BASE',
+    });
+    await queue.flushNow('c1', 'n1');
+
+    const secondNode = noteNode('v1', 'Second');
+    secondNode.data = { ...secondNode.data, labelSource: 'user' };
+    state.nodes = [secondNode];
+    let rejectPut: ((reason: unknown) => void) | undefined;
+    putMock.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectPut = reject;
+      }),
+    );
+    const second = queue.flushNow('c1', 'n1').catch(() => undefined);
+    await vi.waitFor(() => expect(putMock).toHaveBeenCalledTimes(2));
+
+    const thirdNode = noteNode('v1', 'Third');
+    thirdNode.data = { ...thirdNode.data, labelSource: 'user' };
+    state.nodes = [thirdNode];
+    rejectPut?.(new Error('older request failed'));
+    await second;
+
+    expect(state._setStateNoAutosave).not.toHaveBeenCalled();
+    expect(state.nodes[0]?.data?.['label']).toBe('Third');
   });
 });

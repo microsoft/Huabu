@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /** Disk implementation of the read-only Space catalogue. */
 
 import path from 'node:path';
@@ -11,7 +14,7 @@ import { toSafeFilename } from '../../../workspace/disk/naming.js';
 import { getWorkspacePath } from '../../../workspace.js';
 
 import type { SpaceCatalogRepository } from '../../ports/structured.js';
-import type { CanvasSummary } from '@sediment/shared';
+import type { CanvasSummary } from '@huabu/shared';
 
 /**
  * A catalogue handle is bound to the Workspace active at construction time.

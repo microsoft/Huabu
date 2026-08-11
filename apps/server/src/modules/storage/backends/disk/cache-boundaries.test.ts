@@ -196,7 +196,7 @@ describe('CanvasStore cache boundaries', () => {
         ts: 1,
       },
     ]);
-    await held.deltas.append(delta(1));
+    getCanvasStore('shared-id').appendDeltaLogEntry(delta(1));
 
     activateWorkspace('huabu-log-workspace-b-');
     createSpace('shared-id', 'Second');
@@ -210,7 +210,7 @@ describe('CanvasStore cache boundaries', () => {
         ts: 2,
       },
     ]);
-    await active.deltas.append(delta(2));
+    getCanvasStore('shared-id').appendDeltaLogEntry(delta(2));
 
     // These reads use strict JSONL helpers directly. Without their own
     // workspace-lifetime guard, the retained A facades would silently read
@@ -227,7 +227,7 @@ describe('CanvasStore cache boundaries', () => {
 
   it('guards a held record repository before probing the active workspace', async () => {
     activateWorkspace('huabu-record-workspace-a-');
-    const first = createSpace('shared-id', 'First');
+    createSpace('shared-id', 'First');
     const held = new DiskStructuredStore().space('shared-id');
     await expect(held.record.read()).resolves.toMatchObject({ title: 'First' });
 
@@ -239,14 +239,6 @@ describe('CanvasStore cache boundaries', () => {
     });
 
     await expect(held.record.read()).rejects.toThrow(/inactive workspace/);
-    await expect(
-      held.record.compareAndSwap(first.version, {
-        ...first,
-        version: first.version + 1,
-        updatedAt: first.updatedAt + 1,
-      }),
-    ).rejects.toThrow(/inactive workspace/);
-
     // Even a corrupt same-id record in B must not leak through the strict
     // probe as a SyntaxError before the retained A handle is rejected.
     writeFileSync(
@@ -257,15 +249,17 @@ describe('CanvasStore cache boundaries', () => {
     await expect(held.record.read()).rejects.toThrow(/inactive workspace/);
   });
 
-  it('does not create a Space directory for a node write to a missing Space', () => {
-    activateWorkspace('huabu-missing-node-space-');
-    const handle = new DiskStructuredStore().space('missing-space');
+  it('guards held node reads, including an empty batch, after workspace activation', async () => {
+    activateWorkspace('huabu-node-repository-workspace-a-');
+    createSpace('shared-id', 'First');
+    const held = new DiskStructuredStore().space('shared-id').nodes;
+    await expect(held.read('missing')).resolves.toBeNull();
 
-    expect(handle.nodes.writeNode('n1', note('n1', 'Orphan'))).toEqual({
-      ok: false,
-      reason: 'not-found',
-    });
-    expect(existsSync(canvasRoot('missing-space'))).toBe(false);
+    activateWorkspace('huabu-node-repository-workspace-b-');
+    createSpace('shared-id', 'Second');
+
+    await expect(held.read('missing')).rejects.toThrow(/inactive workspace/);
+    await expect(held.readMany([])).rejects.toThrow(/inactive workspace/);
   });
 
   it('rejects an unreadable existing Space record instead of reporting not-found', () => {

@@ -42,6 +42,8 @@ export interface CanvasLogRepositoriesHarness extends CanvasLogRepositories {
    * twice.
    */
   concurrent: CanvasLogRepositories;
+  /** Fixture-only setup; durable delta writes belong to SpaceHandle.commit. */
+  seedDeltas(entries: readonly DeltaLogEntry[]): Promise<void> | void;
   cleanup?: () => Promise<void> | void;
 }
 
@@ -195,10 +197,8 @@ export function describeCanvasLogRepositoriesContract(
     });
 
     it('filters deltas strictly greater than the requested version', async () => {
-      const { deltas } = await open();
-      await deltas.append(delta(1));
-      await deltas.append(delta(2));
-      await deltas.append(delta(3));
+      const { deltas, seedDeltas } = await open();
+      await seedDeltas([delta(1), delta(2), delta(3)]);
 
       expect((await deltas.readSince(0)).map((d) => d.version)).toEqual([
         1, 2, 3,
@@ -207,34 +207,10 @@ export function describeCanvasLogRepositoriesContract(
       expect(await deltas.readSince(3)).toEqual([]);
     });
 
-    it('rejects a duplicate or out-of-order delta version', async () => {
+    it('exposes no delta mutation method', async () => {
       const { deltas } = await open();
-      await deltas.append(delta(1));
-      await deltas.append(delta(5));
-
-      await expect(deltas.append(delta(5))).rejects.toThrow();
-      await expect(deltas.append(delta(2))).rejects.toThrow();
-
-      // The rejected appends left nothing behind.
-      expect((await deltas.readSince(0)).map((d) => d.version)).toEqual([1, 5]);
-    });
-
-    it('lets exactly one of two deltas racing from one tick claim a version', async () => {
-      const { deltas, concurrent } = await open();
-      await deltas.append(delta(1));
-
-      // Issued from one tick, with no intervening await: an adapter that
-      // `await`s between its tail read and its append lets both observe
-      // version 1 as the head and both write version 2. See the same note on
-      // the SpaceRepository suite's race case.
-      const results = await Promise.allSettled([
-        deltas.append(delta(2)),
-        concurrent.deltas.append(delta(2)),
-      ]);
-
-      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-      expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
-      expect((await deltas.readSince(0)).map((d) => d.version)).toEqual([1, 2]);
+      expect(deltas).not.toHaveProperty('append');
+      expect(Object.keys(deltas)).toEqual(['readSince']);
     });
 
     // ── Change-review records ───────────────────────────────────────────────

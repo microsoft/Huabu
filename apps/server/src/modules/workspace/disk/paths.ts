@@ -36,6 +36,27 @@ import { getWorkspacePath } from '../../workspace.js';
 
 import type { Namespace } from '@agenetes/protocol';
 
+/** Workspace-owned metadata that must never be mistaken for a Space. */
+export const HUABU_WORKSPACE_METADATA_DIR_NAME = '.huabu';
+
+/** Root for Workspace-owned metadata used by storage recovery. */
+export function workspaceHuabuDir(workspacePath: string): string {
+  return path.join(
+    path.resolve(workspacePath),
+    HUABU_WORKSPACE_METADATA_DIR_NAME,
+  );
+}
+
+/** Prepared/committed Disk structured-storage transaction journals. */
+export function workspaceTransactionsDir(workspacePath: string): string {
+  return path.join(workspaceHuabuDir(workspacePath), 'transactions');
+}
+
+/** Durable Disk node tombstones (introduced by structured-storage Phase 4). */
+export function workspaceTombstonesDir(workspacePath: string): string {
+  return path.join(workspaceHuabuDir(workspacePath), 'tombstones');
+}
+
 export function canvasRoot(canvasId: string): string {
   const safeId = sanitizeId(canvasId, 'canvasId');
   return path.join(getWorkspacePath(), canvasDirName(safeId));

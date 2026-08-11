@@ -37,6 +37,7 @@ import {
   getCanvasStore,
   getStructuredStore,
   resetStorageCache,
+  withCanvasMutex,
 } from '../storage/index.js';
 import { changesPath } from '../workspace/disk/paths.js';
 import { withSpaceDirHandlesReleased } from '../workspace/disk/space-dir-handles.js';
@@ -133,16 +134,28 @@ afterEach(() => {
 
 describe('PUT /api/canvas/:canvasId lifecycle', () => {
   it('does not recreate a Space deleted after the initial read', async () => {
-    createCanvas('c1', 'Original');
+    await createCanvas('c1', 'Original');
     const paused = deferred();
     const release = deferred();
-    vi.mocked(withSpaceDirHandlesReleased).mockImplementationOnce(
-      async (_canvasId, operation) => {
-        const result = await operation();
-        paused.resolve();
-        await release.promise;
-        return result;
-      },
+    const structured = getStructuredStore();
+    const realSpace = structured.space.bind(structured);
+    vi.mocked(getStructuredStore).mockImplementationOnce(
+      () =>
+        ({
+          ...structured,
+          space: (canvasId: string) => {
+            const handle = realSpace(canvasId);
+            if (canvasId !== 'c1') return handle;
+            return {
+              ...handle,
+              commit: async (...args: Parameters<typeof handle.commit>) => {
+                paused.resolve();
+                await release.promise;
+                return handle.commit(...args);
+              },
+            };
+          },
+        }) as ReturnType<typeof getStructuredStore>,
     );
 
     const app = await buildApp();
@@ -212,9 +225,62 @@ describe('GET /api/canvas', () => {
   });
 });
 
+describe('POST/DELETE /api/canvas lifecycle outcomes', () => {
+  it('returns the effective de-duplicated title from structured creation', async () => {
+    const app = await buildApp();
+    try {
+      const first = await app.inject({
+        method: 'POST',
+        url: '/canvas',
+        payload: { title: 'Shared title' },
+      });
+      const second = await app.inject({
+        method: 'POST',
+        url: '/canvas',
+        payload: { title: 'Shared title' },
+      });
+
+      expect(first.statusCode).toBe(201);
+      expect(first.json()).toMatchObject({ title: 'Shared title' });
+      expect(second.statusCode).toBe(201);
+      expect(second.json()).toMatchObject({ title: 'Shared title (2)' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('maps deleted, missing, and World-forbidden lifecycle results', async () => {
+    const created = await createCanvas('delete-route', 'Delete route');
+    if (!created) throw new Error('Could not seed route lifecycle Space');
+    const worldCanvasId = await getStructuredStore().catalog().worldId();
+    const app = await buildApp();
+    try {
+      const deleted = await app.inject({
+        method: 'DELETE',
+        url: '/canvas/delete-route',
+      });
+      const missing = await app.inject({
+        method: 'DELETE',
+        url: '/canvas/delete-route',
+      });
+      const world = await app.inject({
+        method: 'DELETE',
+        url: `/canvas/${worldCanvasId}`,
+      });
+
+      expect(deleted.statusCode).toBe(200);
+      expect(deleted.json()).toEqual({ success: true });
+      expect(missing.statusCode).toBe(404);
+      expect(world.statusCode).toBe(403);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('GET /api/canvas/:canvasId/events', () => {
   it('returns the events in chronological order', async () => {
-    createCanvas('c1', 'Canvas One');
+    await createCanvas('c1', 'Canvas One');
     seedEvents('c1', 3);
 
     const app = await buildApp();
@@ -236,7 +302,7 @@ describe('GET /api/canvas/:canvasId/events', () => {
   });
 
   it('returns an empty list for a Space with no events', async () => {
-    createCanvas('c1', 'Canvas One');
+    await createCanvas('c1', 'Canvas One');
 
     const app = await buildApp();
     try {
@@ -250,7 +316,7 @@ describe('GET /api/canvas/:canvasId/events', () => {
   });
 
   it('tails to the most recent `limit` events', async () => {
-    createCanvas('c1', 'Canvas One');
+    await createCanvas('c1', 'Canvas One');
     seedEvents('c1', 5);
 
     const app = await buildApp();
@@ -270,7 +336,7 @@ describe('GET /api/canvas/:canvasId/events', () => {
   });
 
   it('drops events older than `since`, within the limit window', async () => {
-    createCanvas('c1', 'Canvas One');
+    await createCanvas('c1', 'Canvas One');
     seedEvents('c1', 5);
 
     const app = await buildApp();
@@ -290,7 +356,7 @@ describe('GET /api/canvas/:canvasId/events', () => {
   });
 
   it('applies `since` to the tail the limit already selected', async () => {
-    createCanvas('c1', 'Canvas One');
+    await createCanvas('c1', 'Canvas One');
     seedEvents('c1', 5);
 
     const app = await buildApp();
@@ -327,7 +393,7 @@ describe('GET /api/canvas/:canvasId/events', () => {
   });
 
   it('does not report a corrupt Space record as missing', async () => {
-    createCanvas('c1', 'Canvas One');
+    await createCanvas('c1', 'Canvas One');
     writeFileSync(join(tmp, 'Canvas One', 'space.json'), '{broken', 'utf8');
 
     const app = await buildApp();
@@ -345,7 +411,7 @@ describe('GET /api/canvas/:canvasId/events', () => {
   });
 
   it('400s on an invalid query', async () => {
-    createCanvas('c1', 'Canvas One');
+    await createCanvas('c1', 'Canvas One');
 
     const app = await buildApp();
     try {
@@ -394,7 +460,7 @@ describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
   });
 
   it('returns an empty list when the thread has no changes', async () => {
-    createCanvas('c1', 'Canvas One');
+    await createCanvas('c1', 'Canvas One');
 
     const app = await buildApp();
     try {
@@ -426,7 +492,7 @@ describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
   });
 
   it('does not report a corrupt Space record as missing', async () => {
-    createCanvas('c1', 'Canvas One');
+    await createCanvas('c1', 'Canvas One');
     writeFileSync(join(tmp, 'Canvas One', 'space.json'), '{broken', 'utf8');
 
     const app = await buildApp();
@@ -444,7 +510,7 @@ describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
   });
 
   it('rejects a corrupt change-record array', async () => {
-    createCanvas('c1', 'Canvas One');
+    await createCanvas('c1', 'Canvas One');
     await getStructuredStore()
       .space('c1')
       .changes.append('thread-1', [change('n1')]);
@@ -464,9 +530,59 @@ describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
   });
 });
 
+describe('DELETE /api/canvas/:canvasId/threads/:threadId/changes/:changeId', () => {
+  it('holds the Space mutex across the existence check and removal', async () => {
+    const readStarted = deferred();
+    const releaseRead = deferred();
+    const readRecord = vi.fn(async () => {
+      readStarted.resolve();
+      await releaseRead.promise;
+      return { canvasId: 'c1' };
+    });
+    const removedRecord = change('n1');
+    const removeChange = vi.fn().mockResolvedValue(removedRecord);
+    const space = vi.fn(() => ({
+      record: { read: readRecord },
+      changes: { remove: removeChange },
+    }));
+    vi.mocked(getStructuredStore).mockImplementationOnce(
+      () => ({ space }) as unknown as ReturnType<typeof getStructuredStore>,
+    );
+
+    const app = await buildApp();
+    try {
+      const deleting = Promise.resolve(
+        app.inject({
+          method: 'DELETE',
+          url: `/canvas/c1/threads/thread-1/changes/${removedRecord.id}`,
+        }),
+      );
+      await readStarted.promise;
+
+      let competingMutationStarted = false;
+      const competing = withCanvasMutex('c1', async () => {
+        competingMutationStarted = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(competingMutationStarted).toBe(false);
+      expect(removeChange).not.toHaveBeenCalled();
+
+      releaseRead.resolve();
+      const [response] = await Promise.all([deleting, competing]);
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ removed: true });
+      expect(removeChange).toHaveBeenCalledWith('thread-1', removedRecord.id);
+      expect(competingMutationStarted).toBe(true);
+    } finally {
+      releaseRead.resolve();
+      await app.close();
+    }
+  });
+});
+
 describe('Space export/import persistence', () => {
   it('round-trips topology, sidecars, history, and blobs after a cache reopen', async () => {
-    createCanvas('c1', 'Round Trip');
+    await createCanvas('c1', 'Round Trip');
     const store = getCanvasStore('c1');
     const current = store.read()!;
     store.write({
@@ -498,7 +614,7 @@ describe('Space export/import persistence', () => {
     ).toMatchObject({ ok: true });
     const history = getStructuredStore().space('c1');
     await history.events.append([{ payload: action('n1'), ts: 1 }]);
-    await history.deltas.append({
+    store.appendDeltaLogEntry({
       version: 1,
       ts: 2,
       commands: [],

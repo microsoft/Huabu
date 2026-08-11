@@ -31,7 +31,11 @@ import {
 
 import { createPerKeyDebouncer } from './perKeyDebouncer';
 
-import type { CanvasNodeType } from '@huabu/shared';
+import type {
+  CanvasNodeType,
+  ExecuteOriginator,
+  PreprocessNodeResponse,
+} from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 function hasMissingContent(node: Node): boolean {
@@ -45,6 +49,8 @@ function hasMissingContent(node: Node): boolean {
  */
 export type PreprocessQueueState = {
   canvasId: string;
+  /** Ordered global Space cursor used to reject stale non-commit results. */
+  version?: number;
   nodes: readonly Node[];
   setNodeIngestion: (nodeId: string, info: NodeIngestionInfo) => void;
   clearNodeIngestion: (nodeId: string) => void;
@@ -61,6 +67,12 @@ export type PreprocessQueue = {
    * are reflected in the snapshot sent to the server.
    */
   schedule(node: Node): void;
+
+  /** Release a create-time preprocess held until aggregate persistence. */
+  releaseDeferred(nodeId: string): void;
+
+  /** Cancel all pending/held work for a node that was deleted. */
+  forgetNode(nodeId: string): void;
 
   /**
    * Cancel every pending preprocess timer without firing. Used by
@@ -90,49 +102,86 @@ export type PreprocessQueue = {
 export function createPreprocessQueue(opts: {
   delayMs: number;
   getState: () => PreprocessQueueState;
+  /** Hold preprocessing while a new node has no committed topology yet. */
+  shouldDeferNode?: (nodeId: string) => boolean;
+  originator?: ExecuteOriginator;
+  onMutationResponse?: (
+    canvasId: string,
+    response: PreprocessNodeResponse,
+  ) => void;
 }): PreprocessQueue {
   const debouncer = createPerKeyDebouncer<string>(opts.delayMs);
+  const deferred = new Set<string>();
+
+  function schedule(node: Node): void {
+    // `sketch` is the only canvas node type excluded from the
+    // server's preprocess pipeline (no preprocessable payload —
+    // mirrors `preprocessableNodeTypeSchema` in packages/shared).
+    // Gating it here avoids 400s from zod validation polluting
+    // the network log. `satisfies` gives us a compile-time guard
+    // against typos without dragging a runtime list into the
+    // web bundle.
+    if (node.type === ('sketch' satisfies CanvasNodeType)) return;
+    if (hasMissingContent(node)) return;
+    const scheduledState = opts.getState();
+    if (!scheduledState.canvasId) return;
+    const nodeId = node.id;
+    scheduledState.setNodeIngestion(nodeId, {
+      status: 'pending',
+      updatedAt: Date.now(),
+    });
+
+    if (opts.shouldDeferNode?.(nodeId)) {
+      // Topology and initial sidecar are not durable yet. Remember the
+      // intent but do not let the debounce race the aggregate create.
+      debouncer.cancel(nodeId);
+      deferred.add(nodeId);
+      return;
+    }
+    deferred.delete(nodeId);
+    debouncer.schedule(nodeId, () => {
+      const state = opts.getState();
+      if (!state.canvasId) return;
+      // Re-fetch the latest node so we send the most up-to-date content.
+      const latestNode = state.nodes.find((n) => n.id === nodeId) ?? node;
+      if (hasMissingContent(latestNode)) return;
+      void preprocessNodeIfNeeded({
+        canvasId: state.canvasId,
+        node: latestNode,
+        setNodeIngestion: state.setNodeIngestion,
+        clearNodeIngestion: state.clearNodeIngestion,
+        getChildNodes: (frameId) =>
+          state.nodes.filter((n) => n.parentId === frameId),
+        getNode: (id) =>
+          opts.getState().nodes.find((candidate) => candidate.id === id),
+        getVersion: () => opts.getState().version,
+        patchNodeSilent: state.patchNodeSilent,
+        originator: opts.originator,
+        onMutationResponse: opts.onMutationResponse,
+      });
+    });
+  }
 
   return {
-    schedule(node) {
-      // `sketch` is the only canvas node type excluded from the
-      // server's preprocess pipeline (no preprocessable payload —
-      // mirrors `preprocessableNodeTypeSchema` in packages/shared).
-      // Gating it here avoids 400s from zod validation polluting
-      // the network log. `satisfies` gives us a compile-time guard
-      // against typos without dragging a runtime list into the
-      // web bundle.
-      if (node.type === ('sketch' satisfies CanvasNodeType)) return;
-      if (hasMissingContent(node)) return;
-      const scheduledState = opts.getState();
-      if (!scheduledState.canvasId) return;
-      const nodeId = node.id;
-      scheduledState.setNodeIngestion(nodeId, {
-        status: 'pending',
-        updatedAt: Date.now(),
-      });
-      debouncer.schedule(nodeId, () => {
-        const state = opts.getState();
-        if (!state.canvasId) return;
-        // Re-fetch the latest node so we send the most up-to-date content.
-        const latestNode = state.nodes.find((n) => n.id === nodeId) ?? node;
-        if (hasMissingContent(latestNode)) return;
-        void preprocessNodeIfNeeded({
-          canvasId: state.canvasId,
-          node: latestNode,
-          setNodeIngestion: state.setNodeIngestion,
-          clearNodeIngestion: state.clearNodeIngestion,
-          getChildNodes: (frameId) =>
-            state.nodes.filter((n) => n.parentId === frameId),
-          getNode: (id) =>
-            opts.getState().nodes.find((candidate) => candidate.id === id),
-          patchNodeSilent: state.patchNodeSilent,
-        });
-      });
+    schedule,
+
+    releaseDeferred(nodeId) {
+      if (!deferred.delete(nodeId)) return;
+      const node = opts
+        .getState()
+        .nodes.find((candidate) => candidate.id === nodeId);
+      if (node) schedule(node);
+    },
+
+    forgetNode(nodeId) {
+      deferred.delete(nodeId);
+      debouncer.cancel(nodeId);
+      opts.getState().clearNodeIngestion(nodeId);
     },
 
     cancelAll() {
       debouncer.cancelAll();
+      deferred.clear();
     },
 
     flushKeepalive() {
@@ -152,7 +201,12 @@ export function createPreprocessQueue(opts: {
         void preprocessNode(
           canvasId,
           nodeId,
-          { nodeType: node.type ?? '', trigger: 'flush', snapshot },
+          {
+            nodeType: node.type ?? '',
+            trigger: 'flush',
+            snapshot,
+            ...(opts.originator ? { originator: opts.originator } : {}),
+          },
           { keepalive: true },
         ).catch(() => undefined);
       }

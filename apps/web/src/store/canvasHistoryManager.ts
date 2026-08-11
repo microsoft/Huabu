@@ -10,7 +10,11 @@ import {
 import { ApiError, deleteNode } from '../api';
 import { toast } from '../components/Common/Toast';
 
-import type { RecentAction } from '@huabu/shared';
+import type {
+  DeleteNodeResponse,
+  ExecuteOriginator,
+  RecentAction,
+} from '@huabu/shared';
 import type { Node, Edge } from '@xyflow/react';
 
 const MAX_HISTORY = 50;
@@ -37,6 +41,11 @@ export type CanvasPreviewSnapshot = CanvasSnapshot & {
  * preprocessing for nodes that reappear after undo/redo.
  */
 export type TriggerPreprocessingFn = (node: Node) => void;
+
+export type DeleteNodeMutationOptions = {
+  originator?: ExecuteOriginator;
+  onResponse?: (canvasId: string, response: DeleteNodeResponse) => void;
+};
 
 // ---------------------------------------------------------------------------
 // Error message mapping
@@ -335,6 +344,7 @@ class CanvasHistoryManager {
     prevNodes: Node[],
     restoredNodes: Node[],
     triggerPreprocessing: TriggerPreprocessingFn,
+    mutationOptions?: DeleteNodeMutationOptions,
   ): void {
     const prevIds = new Set(prevNodes.map((n) => n.id));
     const restoredIds = new Set(restoredNodes.map((n) => n.id));
@@ -359,7 +369,13 @@ class CanvasHistoryManager {
         const controller = new AbortController();
         this.inflightDeletes.set(node.id, controller);
 
-        void deleteNode(canvasId, node.id, { signal: controller.signal })
+        void deleteNode(canvasId, node.id, {
+          signal: controller.signal,
+          originator: mutationOptions?.originator,
+        })
+          .then((response) => {
+            if (response) mutationOptions?.onResponse?.(canvasId, response);
+          })
           .catch((error) => {
             if (error instanceof DOMException && error.name === 'AbortError')
               return;
@@ -386,13 +402,23 @@ class CanvasHistoryManager {
    * by a subsequent undo.  Aborts any previous in-flight delete for the
    * same nodeId.  Returns the new AbortController.
    */
-  trackDelete(canvasId: string, nodeId: string): AbortController {
+  trackDelete(
+    canvasId: string,
+    nodeId: string,
+    mutationOptions?: DeleteNodeMutationOptions,
+  ): AbortController {
     this.inflightDeletes.get(nodeId)?.abort();
 
     const controller = new AbortController();
     this.inflightDeletes.set(nodeId, controller);
 
-    void deleteNode(canvasId, nodeId, { signal: controller.signal })
+    void deleteNode(canvasId, nodeId, {
+      signal: controller.signal,
+      originator: mutationOptions?.originator,
+    })
+      .then((response) => {
+        if (response) mutationOptions?.onResponse?.(canvasId, response);
+      })
       .catch((error) => {
         if (error instanceof DOMException && error.name === 'AbortError')
           return;
@@ -484,17 +510,23 @@ export class CanvasHistoryRegistry {
     prevNodes: Node[],
     restoredNodes: Node[],
     triggerPreprocessing: TriggerPreprocessingFn,
+    mutationOptions?: DeleteNodeMutationOptions,
   ): void {
     this.active.syncServerAfterRestore(
       canvasId,
       prevNodes,
       restoredNodes,
       triggerPreprocessing,
+      mutationOptions,
     );
   }
 
-  trackDelete(canvasId: string, nodeId: string): AbortController {
-    return this.active.trackDelete(canvasId, nodeId);
+  trackDelete(
+    canvasId: string,
+    nodeId: string,
+    mutationOptions?: DeleteNodeMutationOptions,
+  ): AbortController {
+    return this.active.trackDelete(canvasId, nodeId, mutationOptions);
   }
 }
 

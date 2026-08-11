@@ -164,6 +164,18 @@ export function acquireWorkspaceOperationLease(): WorkspaceOperationLease {
   });
 }
 
+/** Run one asynchronous workflow while preventing active-Workspace changes. */
+export async function withWorkspaceOperationLease<T>(
+  task: (workspacePath: string) => Promise<T>,
+): Promise<T> {
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    return await task(lease.workspacePath);
+  } finally {
+    lease.release();
+  }
+}
+
 /**
  * Display label for the currently-active workspace. In managed mode this
  * is the basename of the locked path; in free mode it's also the basename

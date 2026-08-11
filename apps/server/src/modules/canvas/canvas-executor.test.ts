@@ -31,14 +31,19 @@ import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
 import { runCanvasPersistenceTransaction } from './canvas-persistence-transaction.js';
+import { subscribeCanvasUpdates } from './canvas-sync.js';
 import {
-  applyNodeUpdate,
   canvasBlobs,
   getCanvasStore,
+  getStructuredStore,
 } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
-import type { CanvasCommand, ExecuteOriginator } from '@huabu/shared';
+import type {
+  CanvasCommand,
+  CanvasSyncEvent,
+  ExecuteOriginator,
+} from '@huabu/shared';
 
 let tmp: string;
 
@@ -401,14 +406,11 @@ describe('executeOnServer — CREATE_NODES id echo', () => {
   });
 });
 
-describe('executeOnServer — batch node writes route through the non-locking core', () => {
-  it('persists every node in a multi-node batch without self-deadlocking on the canvas lock', async () => {
-    // The executor holds `withCanvasMutex` for the WHOLE batch and writes each
-    // mutated node's `.md` via the NON-locking `applyNodeUpdate`. The
-    // promise-chain mutex is not re-entrant, so if any per-node write went
-    // through the locking `updateNode` instead, this batch would deadlock and
-    // the test would hang until vitest's timeout. Two mutated nodes under one
-    // lock is the minimal case that pins that contract.
+describe('executeOnServer — aggregate node mutation', () => {
+  it('persists a multi-node batch through one validated commit section', async () => {
+    // The executor retains its outer compute mutex, then submits every node
+    // mutation to one aggregate Space commit. Two nodes are the minimal case
+    // that catches accidental per-node commits or a re-entrant write lock.
     const store = getCanvasStore('c1');
     store.write({
       canvasId: 'c1',
@@ -463,12 +465,143 @@ describe('executeOnServer — batch node writes route through the non-locking co
     });
 
     expect(out.conflicts ?? []).toHaveLength(0);
-    // The aggregate is strictly checked once for the executor's synchronous
-    // sidecar section, rather than reparsed once per write (O(nodes²)).
+    // The adapter validates and mutates the aggregate once, rather than once
+    // per sidecar (which would lose atomicity and regress to O(nodes²)).
     expect(batchGuard).toHaveBeenCalledTimes(1);
     // Both `.md` sidecars landed — the batch completed, so no deadlock.
     expect(bodyOf('c1', 'n1')).toBe('a2');
     expect(bodyOf('c1', 'n2')).toBe('b2');
+  });
+});
+
+describe('executeOnServer — aggregate Space commit', () => {
+  it('advances once, appends one canonical row, and publishes once after commit', async () => {
+    seedNote('c1', 'n1', 'before');
+    const events: CanvasSyncEvent[] = [];
+    const unsubscribe = subscribeCanvasUpdates('c1', (event) => {
+      events.push(event);
+    });
+
+    try {
+      const out = await executeOnServer({
+        canvasId: 'c1',
+        commands: [mergeContent('n1', 'after')],
+        originator: UI,
+      });
+
+      expect(out.toVersion).toBe(out.fromVersion + 1);
+      const rows = getCanvasStore('c1').readDeltaLogSince(0);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        version: out.toVersion,
+        commit: {
+          fromVersion: out.fromVersion,
+          toVersion: out.toVersion,
+          optimistic: false,
+        },
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'update',
+        data: {
+          fromVersion: out.fromVersion,
+          toVersion: out.toVersion,
+          commit: rows[0]?.commit,
+        },
+      });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('keeps large node bodies out of the durable row and realtime payload', async () => {
+    seedNote('c1', 'n1', 'before');
+    const events: CanvasSyncEvent[] = [];
+    const unsubscribe = subscribeCanvasUpdates('c1', (event) => {
+      events.push(event);
+    });
+    const largeBody = `large-body-marker:${'x'.repeat(70 * 1024)}`;
+
+    try {
+      const out = await executeOnServer({
+        canvasId: 'c1',
+        commands: [mergeContent('n1', largeBody)],
+        originator: UI,
+      });
+
+      expect(bodyOf('c1', 'n1')).toBe(largeBody);
+      expect(out.deltas).toEqual([]);
+      expect(out.pendingEffects.mutatedNodes[0]?.data).not.toHaveProperty(
+        'content',
+      );
+      expect(out.commit?.nodeChanges).toEqual([
+        expect.objectContaining({ kind: 'invalidate', nodeId: 'n1' }),
+      ]);
+      expect(JSON.stringify(out.commands)).not.toContain('large-body-marker');
+      expect(JSON.stringify(out.results)).not.toContain('large-body-marker');
+
+      const rows = getCanvasStore('c1').readDeltaLogSince(0);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.deltas).toEqual([]);
+      expect(JSON.stringify(rows[0])).not.toContain('large-body-marker');
+      expect(JSON.stringify(rows[0]).length).toBeLessThan(10_000);
+
+      expect(events).toHaveLength(1);
+      expect(JSON.stringify(events[0])).not.toContain('large-body-marker');
+      expect(JSON.stringify(events[0]).length).toBeLessThan(10_000);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('invalidates thread review state without broadcasting full revert bodies', async () => {
+    seedNote('c1', 'n1', 'before');
+    const events: CanvasSyncEvent[] = [];
+    const unsubscribe = subscribeCanvasUpdates('c1', (event) => {
+      events.push(event);
+    });
+    const largeBody = `thread-large-body-marker:${'x'.repeat(70 * 1024)}`;
+
+    try {
+      const out = await executeOnServer({
+        canvasId: 'c1',
+        commands: [mergeContent('n1', largeBody, currentRev('c1', 'n1'))],
+        originator: { source: 'agent', threadId: 'thread-large' },
+        computeChanges: true,
+      });
+
+      // The dedicated review repository keeps the lossless inverse needed by
+      // server-side revert, while HTTP command echoes and realtime stay slim.
+      expect(JSON.stringify(out.changes)).toContain('thread-large-body-marker');
+      const storedChanges = await getStructuredStore()
+        .space('c1')
+        .changes.read('thread-large');
+      expect(JSON.stringify(storedChanges)).toContain(
+        'thread-large-body-marker',
+      );
+      expect(JSON.stringify(out.commands)).not.toContain(
+        'thread-large-body-marker',
+      );
+      expect(JSON.stringify(out.results)).not.toContain(
+        'thread-large-body-marker',
+      );
+
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'update',
+        data: {
+          threadId: 'thread-large',
+          changesInvalidated: true,
+        },
+      });
+      expect(events[0]?.data).not.toHaveProperty('changes');
+      expect(JSON.stringify(events[0])).not.toContain(
+        'thread-large-body-marker',
+      );
+      expect(JSON.stringify(events[0]).length).toBeLessThan(10_000);
+    } finally {
+      unsubscribe();
+    }
   });
 });
 
@@ -507,6 +640,11 @@ describe('executor tombstone resurrection', () => {
     });
 
     expect(out.deltas.map((delta) => delta.type)).toEqual(['INSERT_NODE']);
+    expect(out.commit).toMatchObject({
+      fromVersion: out.fromVersion,
+      toVersion: out.toVersion,
+      optimistic: false,
+    });
     expect(store.readNode('n1')?.content).toBe('restored');
     expect(store.isNodeWriteSuppressed('n1')).toBe(false);
   });
@@ -539,34 +677,99 @@ describe('executor tombstone resurrection', () => {
   it('keeps the recreated sidecar for DELETE then CREATE in one batch', async () => {
     seedNote('c1', 'n1', 'before');
     const store = getCanvasStore('c1');
+    const events: CanvasSyncEvent[] = [];
+    const unsubscribe = subscribeCanvasUpdates('c1', (event) => {
+      events.push(event);
+    });
 
-    await executeOnServer({
+    try {
+      const out = await executeOnServer({
+        canvasId: 'c1',
+        commands: [
+          { type: 'DELETE_NODES', nodeIds: ['n1'] } as unknown as CanvasCommand,
+          {
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                id: 'n1',
+                nodeType: 'note',
+                position: { x: 0, y: 0 },
+                data: { label: 'A', content: 'same-batch recreate' },
+              },
+            ],
+          } as unknown as CanvasCommand,
+        ],
+        originator: UI,
+      });
+
+      expect(store.readNode('n1')?.content).toBe('same-batch recreate');
+      expect(store.isNodeWriteSuppressed('n1')).toBe(false);
+      expect(out.pendingEffects.deletedNodeIds).toEqual([]);
+      expect(out.pendingEffects.mutatedNodes.map((node) => node.id)).toEqual([
+        'n1',
+      ]);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: 'update',
+        data: { pendingEffects: { deletedNodeIds: [] } },
+      });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('removes the old sidecar when a same-id delta crosses out of Markdown storage', async () => {
+    seedNote('c1', 'n1', 'before');
+    const store = getCanvasStore('c1');
+    const previous = {
+      id: 'n1',
+      type: 'note',
+      position: { x: 0, y: 0 },
+      data: { label: 'A', content: 'before' },
+    };
+    const portal = {
+      id: 'n1',
+      type: 'canvasRef',
+      position: { x: 0, y: 0 },
+      data: { label: 'Portal', targetCanvasId: 'target' },
+    };
+
+    const out = await applyDeltasOnServer({
       canvasId: 'c1',
-      commands: [
-        { type: 'DELETE_NODES', nodeIds: ['n1'] } as unknown as CanvasCommand,
-        {
-          type: 'CREATE_NODES',
-          nodes: [
-            {
-              id: 'n1',
-              nodeType: 'note',
-              position: { x: 0, y: 0 },
-              data: { label: 'A', content: 'same-batch recreate' },
-            },
-          ],
-        } as unknown as CanvasCommand,
-      ],
+      deltas: [{ type: 'REPLACE_NODE', prev: previous, next: portal }],
       originator: UI,
     });
 
-    expect(store.readNode('n1')?.content).toBe('same-batch recreate');
-    expect(store.isNodeWriteSuppressed('n1')).toBe(false);
+    const persisted = store.read();
+    expect(persisted?.state.nodes).toHaveLength(1);
+    expect(persisted?.state.nodes[0]).toMatchObject({
+      id: 'n1',
+      type: 'canvasRef',
+      data: { targetCanvasId: 'target' },
+    });
+    expect(store.readNode('n1')).toBeNull();
+    expect(out.pendingEffects.deletedNodeIds).toEqual([]);
+    expect(out.commit?.nodeChanges).toContainEqual({
+      kind: 'delete',
+      nodeId: 'n1',
+    });
   });
 
   it('rejects a non-ok sidecar outcome and rolls topology back', async () => {
     const store = await deleteSeededNode();
-    const originalWriteNode = store.writeNode;
-    store.writeNode = () => ({ ok: false, reason: 'not-found' });
+    const structured = getStructuredStore();
+    const originalSpace = structured.space.bind(structured);
+    const spaceSpy = vi.spyOn(structured, 'space').mockImplementation((id) => {
+      const handle = originalSpace(id);
+      return {
+        ...handle,
+        commit: async () => ({
+          ok: false as const,
+          reason: 'node-write-suppressed' as const,
+          nodeId: 'n1',
+        }),
+      };
+    });
     try {
       await expect(
         applyDeltasOnServer({
@@ -574,9 +777,9 @@ describe('executor tombstone resurrection', () => {
           deltas: [{ type: 'INSERT_NODE', node: restoredNode() }],
           originator: UI,
         }),
-      ).rejects.toThrow(/writeNode rejected n1: not-found/);
+      ).rejects.toThrow(/atomic Space commit rejected/);
     } finally {
-      store.writeNode = originalWriteNode;
+      spaceSpy.mockRestore();
     }
 
     expect(store.read()?.state.nodes).toEqual([]);
@@ -619,7 +822,7 @@ describe('executor tombstone resurrection', () => {
     expect(store.isNodeWriteSuppressed('n1')).toBe(false);
   });
 
-  it('does not clear a tombstone when an unrelated write retains the node', () => {
+  it('rejects an orphan put without clearing its prior tombstone', async () => {
     seedNote('c1', 'n1', 'before');
     const store = getCanvasStore('c1');
     expect(store.deleteNode('n1')).toBe('deleted');
@@ -638,16 +841,41 @@ describe('executor tombstone resurrection', () => {
       updatedAt: retained.updatedAt + 2,
     });
 
-    const late = applyNodeUpdate(store, 'n1', {
-      apply: () => ({
-        nodeId: 'n1',
-        type: 'note',
-        label: 'A',
-        content: 'late',
-      }),
+    const after = store.read();
+    if (!after) throw new Error('seeded Space missing');
+    const late = await getStructuredStore()
+      .space('c1')
+      .commit({
+        expectedVersion: after.version,
+        record: { title: after.title, state: after.state },
+        nodePreconditions: [{ nodeId: 'n1', revision: null }],
+        nodeMutations: [
+          {
+            kind: 'put',
+            record: {
+              nodeId: 'n1',
+              type: 'note',
+              label: 'A',
+              content: 'late',
+            },
+          },
+        ],
+        publication: {
+          originator: { source: 'agent' },
+          optimistic: false,
+          commands: [],
+          structureDeltas: [],
+        },
+      });
+    expect(late).toEqual({
+      ok: false,
+      reason: 'node-topology-conflict',
+      nodeId: 'n1',
+      mutationType: 'note',
+      topologyType: null,
     });
-    expect(late).toEqual({ status: 'skipped-deleted' });
     expect(store.readNode('n1')).toBeNull();
+    expect(store.isNodeWriteSuppressed('n1')).toBe(true);
   });
 
   it('removes a newly-created delete tombstone when the transaction rolls back', async () => {
@@ -846,7 +1074,7 @@ describe('executeOnServer — persistence failure atomicity', () => {
     const command = mergeContent('n1', 'after');
     await expect(
       executeOnServer({ canvasId: 'c1', commands: [command], originator: UI }),
-    ).rejects.toThrow('Delta log path is not a file');
+    ).rejects.toThrow(/delta-log\.jsonl/);
 
     // Snapshot validation happens before the commit callback: no sidecar,
     // topology, or version mutation needs rollback.

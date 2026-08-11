@@ -12,7 +12,10 @@ import {
   type TaskStoreSnapshot,
 } from '@huabu/shared';
 
-import { assertSpaceMutationAllowed } from './legacy/space-lifecycle-admission.js';
+import {
+  assertSpaceMutationAllowed,
+  withSpaceMutationAdmission,
+} from './legacy/space-lifecycle-admission.js';
 import { readDiskSpaceRecord } from './space-repository.js';
 import { atomicWriteJson, readJsonStrict } from '../../../../utils/fs.js';
 import { tasksPath } from '../../../workspace/disk/paths.js';
@@ -188,18 +191,23 @@ export class DiskCanvasTaskRepository implements CanvasTaskRepository {
   ): Promise<T> {
     this.assertActiveWorkspace();
     const key = `${this.#workspacePath}\0${this.#store.canvasId}`;
-    return withTaskMutationMutex(key, () => {
-      this.assertActiveWorkspace();
-      this.requireSpace();
-      const current = readTaskStore(this.#store.canvasId);
-      const next: TaskStoreSnapshot = {
-        version: 1,
-        tasks: [...current.tasks],
-        runs: [...current.runs],
-      };
-      const result = apply(next);
-      atomicWriteJson(tasksPath(this.#store.canvasId), next);
-      return result;
-    });
+    return withSpaceMutationAdmission(
+      this.#workspacePath,
+      this.#store.canvasId,
+      () =>
+        withTaskMutationMutex(key, () => {
+          this.assertActiveWorkspace();
+          this.requireSpace();
+          const current = readTaskStore(this.#store.canvasId);
+          const next: TaskStoreSnapshot = {
+            version: 1,
+            tasks: [...current.tasks],
+            runs: [...current.runs],
+          };
+          const result = apply(next);
+          atomicWriteJson(tasksPath(this.#store.canvasId), next);
+          return result;
+        }),
+    );
   }
 }

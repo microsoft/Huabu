@@ -11,6 +11,7 @@
 
 import { mkdirSync } from 'node:fs';
 
+import { recoverDiskTransactions } from './storage/backends/disk/transaction-journal.js';
 import { ensureWorldCanvasOnDisk } from './workspace/disk/world-canvas.js';
 import { migrateLegacyAcpSessions } from './workspace/migrations/migrate-acp-sessions.js';
 import {
@@ -31,6 +32,9 @@ import { renderExternalAgentSystemPreamble } from '../prompt/external-agent/syst
  */
 export function prepareWorkspaceOnDisk(workspacePath: string): void {
   mkdirSync(workspacePath, { recursive: true });
+  // A prepared journal describes the only safe before/after bytes. Resolve it
+  // before a migration or the World initializer can observe partial state.
+  recoverDiskTransactions(workspacePath);
   // Demo-stage rename: canvas.json -> space.json, .memory/canvas.md ->
   // .memory/space.md, setting/.huabu.md -> setting/user.md. Runs first so
   // later readers / migrations see the new names. DELETE-ME later.

@@ -23,7 +23,11 @@
 
 import path from 'node:path';
 
-import { getWorkspacePath } from '../workspace.js';
+import { withSpaceDirHandlesReleased } from '../workspace/disk/space-dir-handles.js';
+import {
+  acquireWorkspaceOperationLease,
+  getWorkspacePath,
+} from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
 import {
   withSpaceDeleteAdmission,
@@ -48,6 +52,11 @@ import type {
 } from './ports/blob.js';
 import type { StorageHealth } from './ports/common.js';
 import type { StructuredStore } from './ports/structured.js';
+import type {
+  SpaceCreateInput,
+  SpaceCreateResult,
+  SpaceDeleteResult,
+} from './ports/structured.js';
 import type { Readable } from 'node:stream';
 
 function activeWorkspacePath(): string {
@@ -164,6 +173,68 @@ export function getBlobStore(): BlobStore {
 
 export function getStructuredStore(): StructuredStore {
   return ensure().structured;
+}
+
+/**
+ * Create one structured Space while pinning the active Workspace.
+ *
+ * Creation takes the same exclusive per-Space admission used by deletion so
+ * a same-id create/delete pair cannot cross. The structured backend owns the
+ * catalogue + v0-record transaction and returns the effective de-duplicated
+ * title.
+ */
+export async function createSpace(
+  input: SpaceCreateInput,
+): Promise<SpaceCreateResult> {
+  const storage = ensure();
+  const workspaceLease = acquireWorkspaceOperationLease();
+  const workspacePath = path.resolve(workspaceLease.workspacePath);
+  try {
+    return await withSpaceDeleteAdmission(
+      workspacePath,
+      input.canvasId,
+      async () => {
+        assertActiveWorkspace(workspacePath, input.canvasId);
+        return storage.structured.lifecycle().create(input);
+      },
+    );
+  } finally {
+    workspaceLease.release();
+  }
+}
+
+/**
+ * Delete one Space across the independent blob and structured stores.
+ *
+ * The structured lifecycle invokes `beforeRemove` only after refusing World
+ * and while the record is still present. A blob failure therefore leaves the
+ * structured member intact and the whole operation safely retryable. Disk
+ * directory handles are released across both the sweep and quarantine move.
+ */
+export async function deleteSpace(
+  canvasId: string,
+): Promise<SpaceDeleteResult> {
+  const storage = ensure();
+  const workspaceLease = acquireWorkspaceOperationLease();
+  const workspacePath = path.resolve(workspaceLease.workspacePath);
+  try {
+    return await withSpaceDeleteAdmission(workspacePath, canvasId, async () =>
+      withSpaceDirHandlesReleased(canvasId, async () => {
+        assertActiveWorkspace(workspacePath, canvasId);
+        const blobs = storage.blobs.scope({ kind: 'canvas', canvasId });
+        return storage.structured.lifecycle().delete({
+          canvasId,
+          beforeRemove: async () => {
+            assertActiveWorkspace(workspacePath, canvasId);
+            await blobs.deleteAll();
+            assertActiveWorkspace(workspacePath, canvasId);
+          },
+        });
+      }),
+    );
+  } finally {
+    workspaceLease.release();
+  }
 }
 
 /**

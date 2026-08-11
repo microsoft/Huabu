@@ -29,6 +29,7 @@ export function project(
   contentKind?: NodeContentKind,
 ): PreprocessNodeResult {
   const patch: Record<string, unknown> = {};
+  const superseded = ctx.persisted?.superseded === true;
 
   // Apply suggested label from enrich or extract stage, but only when the
   // label is not already user/agent-owned.
@@ -41,7 +42,10 @@ export function project(
   // the deduped form once the next content-save round-trips. For nodes
   // that skip Persist (image, frame, …) fall back to the raw extracted /
   // enriched label.
-  if (!isLabelProtected(request.snapshot.labelSource, request.snapshot.title)) {
+  if (
+    !superseded &&
+    !isLabelProtected(request.snapshot.labelSource, request.snapshot.title)
+  ) {
     // `ctx.normalized.label` is the last-resort local fallback (e.g. a
     // `question`'s first line when the LLM enrich stage produced nothing —
     // offline / provider unreachable), so the node is never left nameless.
@@ -81,7 +85,11 @@ export function project(
   // sidecar — visible as a brief disagreement between the URL the user
   // sees on the node and the one that was actually saved.
   const persistedSrc = ctx.persisted?.persistedSrc;
-  if (typeof persistedSrc === 'string' && persistedSrc.length > 0) {
+  if (
+    !superseded &&
+    typeof persistedSrc === 'string' &&
+    persistedSrc.length > 0
+  ) {
     const snapshotSrc =
       typeof request.snapshot.src === 'string' ? request.snapshot.src : '';
     if (snapshotSrc !== persistedSrc) {
@@ -90,11 +98,13 @@ export function project(
   }
 
   const hasError = diagnostics.some((d) => d.level === 'error');
-  const hasPersist = ctx.persisted && !ctx.persisted.skipped;
-  const hasEnrich = ctx.enriched && !ctx.enriched.skipped;
+  const hasPersist = !superseded && ctx.persisted && !ctx.persisted.skipped;
+  const hasEnrich = !superseded && ctx.enriched && !ctx.enriched.skipped;
 
   let status: PreprocessNodeResult['status'];
-  if (hasError) {
+  if (superseded) {
+    status = 'skipped';
+  } else if (hasError) {
     status = 'error';
   } else if (hasPersist || hasEnrich) {
     status = 'success';
@@ -111,29 +121,36 @@ export function project(
     requestId,
     success: !hasError,
     status,
+    ...(superseded ? { superseded: true as const } : {}),
+    recordRevision: ctx.persisted?.recordRevision,
+    ack: ctx.persisted?.ack,
+    commit: ctx.persisted?.commit,
     usedCapabilities,
-    extracted: ctx.extracted?.skipped
-      ? undefined
-      : {
-          title: ctx.extracted?.title,
-          content: ctx.extracted?.content,
-          metadata: ctx.extracted?.metadata,
-        },
-    enriched: ctx.enriched?.skipped
-      ? undefined
-      : {
-          suggestedLabel: ctx.enriched?.suggestedLabel,
-          summary: ctx.enriched?.summary,
-          keywords: ctx.enriched?.keywords,
-        },
-    persistence: ctx.persisted?.skipped
-      ? undefined
-      : {
-          contentKind,
-          isNew: ctx.persisted?.isNew,
-          contentChanged: ctx.persisted?.contentChanged,
-          placeholder: ctx.persisted?.placeholder,
-        },
+    extracted:
+      superseded || ctx.extracted?.skipped
+        ? undefined
+        : {
+            title: ctx.extracted?.title,
+            content: ctx.extracted?.content,
+            metadata: ctx.extracted?.metadata,
+          },
+    enriched:
+      superseded || ctx.enriched?.skipped
+        ? undefined
+        : {
+            suggestedLabel: ctx.enriched?.suggestedLabel,
+            summary: ctx.enriched?.summary,
+            keywords: ctx.enriched?.keywords,
+          },
+    persistence:
+      superseded || ctx.persisted?.skipped
+        ? undefined
+        : {
+            contentKind,
+            isNew: ctx.persisted?.isNew,
+            contentChanged: ctx.persisted?.contentChanged,
+            placeholder: ctx.persisted?.placeholder,
+          },
     patch,
     diagnostics,
   };

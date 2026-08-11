@@ -85,9 +85,10 @@ export function isChangeStale(
  *
  * Records arrive two ways:
  *  - on thread open: `load()` fetches the persisted (coalesced) sidecar.
- *  - live: `replaceFromBroadcast()` is called by `canvasSyncStore` when a
- *    thread-attributed `update` event arrives — the server broadcasts the
- *    thread's FULL coalesced list, so this replaces the local list.
+ *  - live: Phase 4 broadcasts a bounded invalidation and
+ *    `refreshFromBroadcast()` reloads the dedicated endpoint. The legacy
+ *    `replaceFromBroadcast()` path remains for rolling-upgrade servers that
+ *    still put the full list on SSE.
  *
  * Accept removes a record (server + local). Revert applies the inverse
  * deltas server-side (which broadcasts the canvas change back), then
@@ -109,6 +110,12 @@ interface AcpThreadChangesState {
   replaceFromBroadcast: (
     threadId: string,
     records: CanvasChangeRecord[],
+    skippedNodeIds?: string[],
+  ) => void;
+  /** Mark live conflicts, then reload the invalidated durable review list. */
+  refreshFromBroadcast: (
+    canvasId: string,
+    threadId: string,
     skippedNodeIds?: string[],
   ) => void;
   /** Accept (keep) — discard the review record without touching the canvas. */
@@ -200,6 +207,20 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
           [threadId]: conflicted,
         },
       }));
+    },
+
+    refreshFromBroadcast: (canvasId, threadId, skippedNodeIds = []) => {
+      // Record transient local-first conflicts before starting the request.
+      // `load()` preserves them and prunes ids that are not represented by the
+      // canonical coalesced list it receives. A newer invalidation increments
+      // load's generation, so a slower older response cannot overwrite it.
+      set((s) => ({
+        conflictedByThread: {
+          ...s.conflictedByThread,
+          [threadId]: Array.from(new Set(skippedNodeIds)),
+        },
+      }));
+      void get().load(canvasId, threadId);
     },
 
     accept: async (canvasId, threadId, changeId) => {

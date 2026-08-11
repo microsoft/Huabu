@@ -6,8 +6,8 @@
  * per-node markdown sidecar pipeline. Imported by both:
  *
  *   • {@link ../save/structureDirtyDetector} — to *exclude* these
- *     fields from the structure-save diff (content edits must not
- *     bump `canvas.version`).
+ *     fields from the structure-save diff (content edits must not dirty
+ *     `structureRevision`, even though their own commit advances version).
  *   • the future `nodeContentQueue` extraction — to *include* them
  *     in the per-node `PUT /api/canvas/:id/nodes/:nodeId/content`
  *     body and decide which nodes own a `.md` sidecar.

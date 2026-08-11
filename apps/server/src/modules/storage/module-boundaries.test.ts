@@ -9,10 +9,12 @@
  * files, so the shape survives contact with the next person who needs "just
  * one import".
  *
- * What this is **not**: evidence that the application is backend-neutral. Most
- * consumers still use the synchronous compatibility facade, and the three root
- * forwarding shims still have dozens of importers. This asserts that the
- * layering is intact and that the shim list only shrinks.
+ * What this is **not**: evidence that every application capability is
+ * backend-neutral. Physical RFS, import/export, watchers, and other Disk-only
+ * flows still use the compatibility facade, and the three root forwarding
+ * shims still have importers. This asserts that the layering and single
+ * structured-write authority stay intact while that compatibility surface
+ * shrinks.
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -72,6 +74,12 @@ function resolveSpecifier(fromRelative: string, spec: string): string | null {
 
 const storageFiles = walk(STORAGE_DIR);
 const sourceFiles = walk(SRC_DIR);
+
+// Workspace activation must recover an interrupted Disk commit before any
+// migration reads or writes that Workspace. This is the sole application →
+// adapter exception; every ordinary storage consumer still crosses a port.
+const WORKSPACE_RECOVERY_IMPORT =
+  'modules/storage/backends/disk/transaction-journal';
 
 function inLayer(relative: string, layer: string): boolean {
   return relative.startsWith(`modules/storage/${layer}/`);
@@ -157,6 +165,12 @@ describe('storage dependency direction', () => {
       if (file.startsWith('modules/storage/')) continue;
       for (const spec of specifiersOf(file)) {
         const target = resolveSpecifier(file, spec);
+        if (
+          file === 'modules/workspace-prepare.ts' &&
+          target === WORKSPACE_RECOVERY_IMPORT
+        ) {
+          continue;
+        }
         if (target?.includes('modules/storage/backends')) {
           violations.push(`${file} → ${spec}`);
         }
@@ -185,6 +199,19 @@ describe('storage dependency direction', () => {
 
     const nonAdapter = importers.filter((f) => !inLayer(f, 'backends'));
     expect(nonAdapter).toEqual(['modules/storage/storage.ts']);
+  });
+});
+
+describe('single structured write authority', () => {
+  it('keeps legacy CanvasStore mutation methods inside the Disk adapter', () => {
+    const legacyMutation =
+      /\.(?:writeNode|deleteNode|renameSelf|appendDeltaLogEntry|appendChanges|removeChange|appendEvents|upsertIntent)\s*\(/;
+    const violations = sourceFiles
+      .filter((file) => !file.endsWith('.test.ts'))
+      .filter((file) => !file.startsWith('modules/storage/backends/disk/'))
+      .filter((file) => legacyMutation.test(read(file)));
+
+    expect(violations).toEqual([]);
   });
 });
 

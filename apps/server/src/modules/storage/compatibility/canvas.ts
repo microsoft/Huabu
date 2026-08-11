@@ -2,52 +2,35 @@
 // Licensed under the MIT license.
 
 /**
- * Compatibility facade — the current legacy application storage API.
+ * Compatibility facade for remaining Disk-specific application capabilities.
  *
- * This layer exists so Phase 2 can make the port/adapter side correct
- * without an `await` cascade through every consumer. It owns the surface the
- * application uses today: the `CanvasStore` factory and its cache, synchronous
- * Space listing/creation, and async Space deletion. Those remaining lifecycle
- * writers have no portable contract yet; see
- * docs/proposals/multi-backend-storage.md §12.2.3.
+ * Phase 4 moved canonical structured mutation to `SpaceHandle.commit()` and
+ * lifecycle to `StructuredStore.lifecycle()`. The old create/delete signatures
+ * below are adapters over those portable services. `getCanvasStore` remains
+ * for Disk reads and physical capabilities that later phases must model
+ * explicitly (external files, RFS, import/export, and similar consumers).
  *
  * It delegates to the Disk legacy implementation directly rather than going
  * through `StructuredStore`, and both views resolve the *same* cached legacy
  * object, so a write through either is immediately visible through the other.
  *
- * This is also, deliberately, still a second **mutation entry point**. Until
- * its writers migrate, the repository CAS and log guarantees hold for calls
- * made through the repositories; they are not a global single-write-authority
- * guarantee for the running application.
+ * The concrete legacy class still contains backend-private mutation codecs,
+ * but production callers outside the Disk adapter are source-guarded from
+ * invoking them. It is therefore compatibility surface, not a second running
+ * application write authority.
  *
  * Nothing under `ports/` or `backends/` may import this file.
  */
 
 import { existsSync } from 'node:fs';
-import path from 'node:path';
 
-import { atomicWriteJson, mkdirp, sanitizeId } from '../../../utils/fs.js';
 import {
-  isWorldCanvasId,
   listCanvasDirEntries,
   refreshCanvasDirIndex,
-  registerCanvasDir,
-  suggestCanvasDir,
 } from '../../workspace/disk/canvas-dirs.js';
-import { toSafeFilename } from '../../workspace/disk/naming.js';
-import {
-  canvasJsonPath,
-  SPACE_JSON_FILENAME,
-} from '../../workspace/disk/paths.js';
-import {
-  acquireWorkspaceOperationLease,
-  getWorkspacePath,
-} from '../../workspace.js';
-import {
-  forgetCanvasStore,
-  getCanvasStore,
-} from '../backends/disk/legacy/canvas-store-cache.js';
-import { canvasBlobs, withCanvasDeletionAdmission } from '../storage.js';
+import { getWorkspacePath } from '../../workspace.js';
+import { getCanvasStore } from '../backends/disk/legacy/canvas-store-cache.js';
+import { createSpace, deleteSpace } from '../storage.js';
 
 import type { CanvasFile } from '../../canvas/persistence-types.js';
 
@@ -91,39 +74,12 @@ export function listCanvases(): CanvasFile[] {
  *
  * Returns null when a canvas with this id already exists.
  */
-export function createCanvas(
+export async function createCanvas(
   canvasId: string,
   title: string | null = null,
-): CanvasFile | null {
-  const safeId = sanitizeId(canvasId, 'canvasId');
-  if (existsSync(canvasJsonPath(safeId))) return null;
-
-  const dirName = suggestCanvasDir(title, safeId);
-  const dirPath = path.join(getWorkspacePath(), dirName);
-  mkdirp(dirPath);
-
-  // If `dedupeName` appended a " (N)" suffix to avoid a collision, mirror
-  // it into the persisted title so `read()`'s self-heal step (which copies
-  // the on-disk basename back into `title`) does not later mutate the
-  // user's chosen title behind their back.
-  const safeFromTitle = toSafeFilename(title, safeId);
-  const dedupeSuffix =
-    dirName === safeFromTitle ? '' : dirName.slice(safeFromTitle.length);
-  const resolvedTitle =
-    title === null || dedupeSuffix === '' ? title : title + dedupeSuffix;
-
-  const now = Date.now();
-  const canvas: CanvasFile = {
-    canvasId: safeId,
-    title: resolvedTitle,
-    version: 0,
-    state: { nodes: [], edges: [] },
-    createdAt: now,
-    updatedAt: now,
-  };
-  atomicWriteJson(path.join(dirPath, SPACE_JSON_FILENAME), canvas);
-  registerCanvasDir(safeId, dirName, resolvedTitle);
-  return canvas;
+): Promise<CanvasFile | null> {
+  const result = await createSpace({ canvasId, title });
+  return result.ok ? result.record : null;
 }
 
 /**
@@ -143,25 +99,9 @@ export function createCanvas(
  * Returns true when the Space existed.
  */
 export async function deleteCanvas(canvasId: string): Promise<boolean> {
-  // Blob deletion can yield before the synchronous record destroy. Pin the
-  // active workspace across both halves so a runtime workspace switch cannot
-  // make them operate on different roots.
-  const workspaceLease = acquireWorkspaceOperationLease();
-  try {
-    const store = getCanvasStore(canvasId);
-    // `destroy()` refuses the World canvas too, but that check has to happen
-    // before the blob sweep now that the sweep runs first — otherwise a
-    // refused deletion would still have destroyed the World's bytes.
-    if (isWorldCanvasId(store.canvasId)) {
-      throw new Error('World canvas cannot be deleted');
-    }
-    return await withCanvasDeletionAdmission(store.canvasId, async () => {
-      await canvasBlobs(store.canvasId).deleteAll();
-      const ok = store.destroy();
-      forgetCanvasStore(store.canvasId);
-      return ok;
-    });
-  } finally {
-    workspaceLease.release();
+  const result = await deleteSpace(canvasId);
+  if (!result.ok && result.reason === 'world-forbidden') {
+    throw new Error('World canvas cannot be deleted');
   }
+  return result.ok;
 }

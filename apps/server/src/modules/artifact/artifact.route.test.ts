@@ -119,12 +119,12 @@ function installDeleteBlock(canvasId: string): {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   tmp = mkdtempSync(join(tmpdir(), 'huabu-artifact-'));
   setWorkspacePath(tmp);
   resetStorageCache();
   for (const canvasId of ['c1', 'src-canvas', 'dst-canvas']) {
-    createCanvas(canvasId);
+    await createCanvas(canvasId);
   }
 });
 

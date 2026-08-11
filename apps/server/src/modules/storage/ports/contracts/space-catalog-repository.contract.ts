@@ -1,9 +1,12 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /** Reusable behavioral contract for backend Space catalogues. */
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { SpaceCatalogRepository } from '../structured.js';
-import type { CanvasSummary } from '@sediment/shared';
+import type { CanvasSummary } from '@huabu/shared';
 
 export type SpaceCatalogContractScenario = 'populated' | 'empty';
 

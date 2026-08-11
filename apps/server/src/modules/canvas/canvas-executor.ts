@@ -18,15 +18,13 @@
  * with the canvas-level monotonic `version` counter so two parallel
  * callers never observe the same prestate.
  *
- * What this module does NOT do (Phase A scoping notes):
+ * What this module does NOT do (Phase 4 boundaries):
  *   - Trigger preprocessing. The web side already drives that via the
- *     dispatch endpoint based on `pendingEffects.mutatedNodes` in the
- *     response payload; pulling preprocessing fully server-side is
- *     part of M3 once cross-tab broadcast lands.
- *   - Broadcast deltas to other tabs. M3.
- *   - Per-command granular delta log rows. Phase A writes one row per
- *     /execute call. Per-command granularity arrives in M5 alongside
- *     fine-grained `SET_*` deltas.
+ *     dispatch endpoint based on the committed node consequences.
+ *   - Provide a durable realtime outbox or multi-process pub/sub. The Disk
+ *     adapter appends the durable row first, then this process publishes SSE.
+ *   - Write per-command delta-log rows. One accepted batch is one aggregate
+ *     version transition and one publication row.
  */
 
 import { imageSize } from 'image-size';
@@ -34,6 +32,7 @@ import { imageSize } from 'image-size';
 import {
   createId,
   type CanvasCommand,
+  type CanvasCommitEvent,
   type CanvasCommandFailureReason,
   type CanvasEdgeId,
   type CanvasNodeId,
@@ -53,9 +52,13 @@ import {
   type Delta,
 } from '@huabu/shared/canvas-engine';
 
-import { runCanvasPersistenceTransaction } from './canvas-persistence-transaction.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';
+import {
+  CANVAS_STRUCTURE_NODE_CONTENT_FIELDS,
+  CANVAS_STRUCTURE_NODE_DERIVED_FIELDS,
+  projectSlimCanvasStructure,
+} from './structure-revision.js';
 import {
   assertWorldPortalMutationsAllowed,
   assertWorldPortalResultAllowed,
@@ -64,42 +67,17 @@ import { getLogger } from '../../utils/logger.js';
 import {
   canvasBlobs,
   getCanvasStore,
+  getStructuredStore,
   withCanvasMutex,
-  applyNodeUpdate,
   type BlobScope,
-  type CanvasFile,
-  type CanvasStore,
-  type DeltaLogEntry,
   type NodeContent,
-  type UpdateNodeOutcome,
+  type NodeRepository,
+  type NodeSnapshot,
+  type SpaceNodeMutation,
 } from '../storage/index.js';
+import { withWorkspaceOperationLease } from '../workspace.js';
 
 const log = getLogger('canvas.executor');
-
-function insertedNodeIds(deltas: readonly Delta[]): Set<string> {
-  return new Set(
-    deltas.flatMap((delta) =>
-      delta.type === 'INSERT_NODE' ? [delta.node.id] : [],
-    ),
-  );
-}
-
-/** Executor persistence never accepts a partial/quiet sidecar outcome. */
-function requireNodeWrite(nodeId: string, outcome: UpdateNodeOutcome): void {
-  if (outcome.status === 'ok') return;
-  if (outcome.status === 'rejected') {
-    const detail =
-      outcome.result.reason === 'conflict'
-        ? `label conflicts with existing node "${outcome.result.conflictWith.filename}"`
-        : outcome.result.reason;
-    throw new Error(
-      `[canvas-executor] writeNode rejected ${nodeId}: ${detail}`,
-    );
-  }
-  throw new Error(
-    `[canvas-executor] writeNode did not commit ${nodeId}: ${outcome.status}`,
-  );
-}
 
 // ── Markdown-backed-node knowledge (mirrors canvas.route.ts) ─────────────
 //
@@ -132,30 +110,68 @@ const TEXT_BEARING_NODE_TYPES = new Set([
   'question',
 ]);
 
-const NODE_CONTENT_KEYS = new Set([
-  'content',
-  'label',
-  'labelSource',
-  'src',
-  'summary',
-  'keywords',
-  'provenance',
+function projectSlimTopology(
+  title: string | null,
+  nodes: readonly CanvasNode[],
+  edges: readonly CanvasEdge[],
+): { nodes: CanvasNode[]; edges: CanvasEdge[] } {
+  const projected = projectSlimCanvasStructure({
+    title,
+    state: { nodes, edges },
+  });
+  return {
+    nodes: projected.state.nodes as CanvasNode[],
+    edges: projected.state.edges as CanvasEdge[],
+  };
+}
+
+const omittedCommandNodeDataFields = new Set<string>([
+  ...CANVAS_STRUCTURE_NODE_CONTENT_FIELDS,
+  ...CANVAS_STRUCTURE_NODE_DERIVED_FIELDS,
 ]);
 
-function stripNodesForCanvas(nodes: readonly CanvasNode[]): CanvasNode[] {
-  return nodes.map((node) => {
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const cleanData: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(data)) {
-      if (NODE_CONTENT_KEYS.has(k)) continue;
-      cleanData[k] = v;
+function projectCommandNodeData(
+  data: Readonly<Record<string, unknown>> | undefined,
+): Record<string, unknown> | undefined {
+  if (data === undefined) return undefined;
+  return Object.fromEntries(
+    Object.entries(data).filter(
+      ([key]) => !omittedCommandNodeDataFields.has(key),
+    ),
+  );
+}
+
+/** Keep audit intent in the durable row without copying node bodies into it. */
+function projectCommandsForPublication(
+  commands: readonly CanvasCommand[],
+): CanvasCommand[] {
+  return commands.map((command) => {
+    if (command.type === 'CREATE_NODES') {
+      return {
+        ...command,
+        nodes: command.nodes.map((node) => ({
+          ...node,
+          ...(node.data === undefined
+            ? {}
+            : { data: projectCommandNodeData(node.data) }),
+        })),
+      } as CanvasCommand;
     }
-    return { ...node, data: cleanData };
+    if (command.type === 'MERGE_NODE_DATA') {
+      return {
+        ...command,
+        patches: command.patches.map((patch) => ({
+          ...patch,
+          patch: projectCommandNodeData(patch.patch) ?? {},
+        })),
+      };
+    }
+    return command;
   });
 }
 
 function hydrateNodes(
-  store: CanvasStore,
+  snapshots: ReadonlyMap<string, NodeSnapshot>,
   nodes: readonly CanvasNode[],
 ): CanvasNode[] {
   return nodes.map((node) => {
@@ -164,12 +180,7 @@ function hydrateNodes(
     const nodeType = typeof node.type === 'string' ? node.type : '';
     if (!MD_BACKED_NODE_TYPES.has(nodeType)) return { ...node };
 
-    let content: NodeContent | null = null;
-    try {
-      content = store.readNode(nodeId);
-    } catch {
-      content = null;
-    }
+    const content = snapshots.get(nodeId)?.record ?? null;
     if (!content) return { ...node };
 
     const data: Record<string, unknown> = { ...(node.data ?? {}) };
@@ -191,6 +202,117 @@ function hydrateNodes(
     }
     return { ...node, data };
   });
+}
+
+interface NodeCommitParts {
+  nodePreconditions: Array<{
+    nodeId: string;
+    revision: NodeSnapshot['revision'] | null;
+  }>;
+  nodeMutations: SpaceNodeMutation[];
+}
+
+/**
+ * Topology deletion and sidecar deletion are related, but not identical.
+ * Replacing a Markdown-backed node with a non-Markdown node under the same id
+ * keeps that id in topology, while its old sidecar must still be removed.
+ */
+function sidecarDeleteIdsForFinalTopology(input: {
+  prestateNodes: readonly CanvasNode[];
+  finalNodes: readonly CanvasNode[];
+  topologyDeletedNodeIds: readonly string[];
+}): string[] {
+  const ids = new Set(input.topologyDeletedNodeIds);
+  const finalById = new Map(input.finalNodes.map((node) => [node.id, node]));
+
+  for (const before of input.prestateNodes) {
+    if (!MD_BACKED_NODE_TYPES.has(before.type ?? '')) continue;
+    const after = finalById.get(before.id);
+    if (after === undefined || !MD_BACKED_NODE_TYPES.has(after.type ?? '')) {
+      ids.add(before.id);
+    }
+  }
+
+  return [...ids];
+}
+
+type StructuredSpaceHandle = ReturnType<
+  ReturnType<typeof getStructuredStore>['space']
+>;
+type StructuredCommitResult = Awaited<
+  ReturnType<StructuredSpaceHandle['commit']>
+>;
+
+/**
+ * Build the whole-record OCC portion of a Space commit.
+ *
+ * Existing topology ids use the snapshots that hydrated the engine prestate.
+ * Newly inserted ids are read explicitly as well: a sidecar can exist without
+ * a topology entry, and treating that orphan as absent would let a create
+ * overwrite it without a matching revision.
+ */
+async function buildNodeCommitParts(input: {
+  nodes: NodeRepository;
+  prestateTopologyIds: ReadonlySet<string>;
+  prestateSnapshots: ReadonlyMap<string, NodeSnapshot>;
+  mutatedNodes: readonly CanvasNode[];
+  deletedNodeIds: readonly string[];
+}): Promise<NodeCommitParts> {
+  const mutationsById = new Map<string, SpaceNodeMutation>();
+
+  for (const node of input.mutatedNodes) {
+    const record = buildNodeContent(node);
+    if (record === null) continue;
+    mutationsById.set(node.id, {
+      kind: 'put',
+      record,
+      ...(record['labelSource'] === 'user' ? { strictRename: true } : {}),
+    });
+  }
+  for (const nodeId of input.deletedNodeIds) {
+    mutationsById.set(nodeId, { kind: 'delete', nodeId });
+  }
+
+  const nodeMutations = [...mutationsById.values()];
+  const newTopologyIds = [...mutationsById.keys()].filter(
+    (nodeId) => !input.prestateTopologyIds.has(nodeId),
+  );
+  const newlyObserved = await input.nodes.readMany(newTopologyIds);
+  const nodePreconditions = [...mutationsById.keys()].map((nodeId) => {
+    const snapshot = input.prestateTopologyIds.has(nodeId)
+      ? input.prestateSnapshots.get(nodeId)
+      : newlyObserved.get(nodeId);
+    return { nodeId, revision: snapshot?.revision ?? null };
+  });
+
+  return { nodePreconditions, nodeMutations };
+}
+
+function describeCommitConflict(
+  result: Extract<StructuredCommitResult, { ok: false }>,
+): string {
+  switch (result.reason) {
+    case 'version-conflict':
+      return `version conflict (actual ${result.actualVersion})`;
+    case 'node-conflict':
+      return `node ${result.nodeId} changed concurrently`;
+    case 'node-topology-conflict':
+      return result.topologyType === null
+        ? `node ${result.nodeId} is absent from the committed topology`
+        : `node ${result.nodeId} type ${result.mutationType} conflicts with topology type ${result.topologyType}`;
+    case 'node-name-conflict':
+      return `node ${result.nodeId} conflicts with ${result.conflictWith.logicalName}`;
+    case 'duplicate-node':
+      return `node ${result.nodeId} has duplicate records`;
+    case 'node-write-suppressed':
+      return `node ${result.nodeId} is tombstoned`;
+    case 'title-conflict':
+      return `title conflicts with ${result.conflictWith}`;
+    case 'world-title-forbidden':
+      return 'World title mutation is forbidden';
+    case 'not-found':
+      return 'Space no longer exists';
+  }
 }
 
 /**
@@ -601,14 +723,17 @@ export interface ExecuteOnServerOutput {
       target: string;
     }>;
   }>;
-  /** Commands as the executor saw them — ids assigned, source-stamped. */
+  /**
+   * Bounded command projections as executed: ids and structural annotations
+   * are retained, while node sidecar bodies and derived metadata are omitted.
+   */
   commands: CanvasCommand[];
   /**
    * Subset of `PendingEffects` that clients need to drain locally.
    *
-   * `mutatedNodes` is included so the web's existing `triggerPreprocessing`
-   * pipeline can still run (Phase A keeps preprocessing on the web; M3
-   * will move it server-side once cross-tab broadcast lands).
+   * `mutatedNodes` contains slim topology only, enough for the web to locate
+   * the canonical node and schedule preprocessing without duplicating its
+   * body in HTTP/SSE. Bodies travel through bounded commit node changes.
    */
   pendingEffects: {
     mutatedNodes: CanvasNode[];
@@ -628,6 +753,8 @@ export interface ExecuteOnServerOutput {
    * caller reconciles from `currentContent` / `currentRev`.
    */
   conflicts?: ExecuteConflict[];
+  /** Canonical durable publication for mutating batches. */
+  commit?: CanvasCommitEvent;
 }
 
 export class CanvasNotFoundError extends Error {
@@ -650,6 +777,12 @@ export class CanvasNotFoundError extends Error {
  * see no change and never get spurious 409s from idempotent calls.
  */
 export async function executeOnServer(
+  input: ExecuteOnServerInput,
+): Promise<ExecuteOnServerOutput> {
+  return withWorkspaceOperationLease(() => executeOnLeasedWorkspace(input));
+}
+
+async function executeOnLeasedWorkspace(
   input: ExecuteOnServerInput,
 ): Promise<ExecuteOnServerOutput> {
   const { canvasId, originator, runId } = input;
@@ -677,17 +810,23 @@ export async function executeOnServer(
   }
 
   return await withCanvasMutex(canvasId, async () => {
-    const store = getCanvasStore(canvasId);
-    const canvas = store.read();
+    const handle = getStructuredStore().space(canvasId);
+    const canvas = await handle.record.read();
     if (!canvas) throw new CanvasNotFoundError(canvasId);
 
     const fromVersion = canvas.version;
+    const prestateTopologyIds = new Set(
+      (canvas.state.nodes as CanvasNode[]).map((node) => node.id),
+    );
+    const prestateSnapshots = await handle.nodes.readMany([
+      ...prestateTopologyIds,
+    ]);
 
     // Hydrate per-node content from .md sidecars before the engine sees
     // the prestate — handlers like MERGE_NODE_DATA need the current
     // `data.content` to merge against, but topology never carries it.
     const prestateNodes = hydrateNodes(
-      store,
+      prestateSnapshots,
       canvas.state.nodes as CanvasNode[],
     );
     const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];
@@ -715,6 +854,12 @@ export async function executeOnServer(
       );
     }
 
+    // Responses and durable publication both expose the executed command
+    // intent, but neither is a bulk node-content channel. Keep server-assigned
+    // ids and structural fields while stripping sidecar bodies/metadata once,
+    // then reuse that bounded projection everywhere it leaves the executor.
+    const responseCommands = projectCommandsForPublication(commands);
+
     // Compare-and-swap pre-flight (agent writes only). A stale or
     // never-read content rewrite mutates NOTHING — the whole batch is a
     // no-op and the agent reconciles from the echoed `currentContent`.
@@ -728,7 +873,7 @@ export async function executeOnServer(
           fromVersion,
           toVersion: fromVersion,
           deltas: [],
-          results: commands.map((command) => ({
+          results: responseCommands.map((command) => ({
             command,
             applied: false,
             ...(command.type === 'MERGE_NODE_DATA' &&
@@ -736,7 +881,7 @@ export async function executeOnServer(
               ? { reason: 'conflict' as const }
               : {}),
           })),
-          commands,
+          commands: responseCommands,
           pendingEffects: {
             mutatedNodes: [],
             deletedNodeIds: [],
@@ -766,19 +911,37 @@ export async function executeOnServer(
     const finalEdges = sharedOut.edges;
     assertWorldPortalResultAllowed(canvasId, prestateNodes, finalNodes);
 
-    const deltas = diffCanvasState(
+    // The engine works on hydrated nodes so content commands and review
+    // inverses remain lossless. Realtime/log publication is a separate,
+    // canonical slim diff: node bodies travel only through bounded
+    // `nodeChanges` and can therefore degrade to an invalidation.
+    const engineDeltas = diffCanvasState(
       { nodes: prestateNodes, edges: prestateEdges },
       { nodes: finalNodes, edges: finalEdges },
     );
+    const prestateTopology = projectSlimTopology(
+      canvas.title,
+      prestateNodes,
+      prestateEdges,
+    );
+    const finalTopology = projectSlimTopology(
+      canvas.title,
+      finalNodes,
+      finalEdges,
+    );
+    const structureDeltas = diffCanvasState(prestateTopology, finalTopology);
 
     // Built once: id → final node, used to echo image dimensions back so
     // agents can lay out follow-up nodes with exact geometry.
     const finalById = new Map<string, CanvasNode>();
     for (const node of finalNodes) finalById.set(node.id as string, node);
 
-    const results = commandResults.map((r) => {
+    const results = commandResults.map((r, index) => {
       const result: ExecuteOnServerOutput['results'][0] = {
-        command: r.command,
+        command:
+          responseCommands[index] ??
+          projectCommandsForPublication([r.command])[0] ??
+          r.command,
         applied: r.applied,
         ...(r.reason ? { reason: r.reason } : {}),
       };
@@ -854,124 +1017,123 @@ export async function executeOnServer(
     // leaving the agent with `applied: true` while persisted topology
     // is unchanged.
     //
-    // We do NOT synthesise a delta — Phase A has no order-aware delta
-    // type, and cross-tab broadcast (M3) is not shipped yet. We just
-    // fall through to the persistence branch so topology and the
-    // delta-log version both reflect that something happened. Catch-up
-    // clients on M3 will see the version bump and need to refetch the
-    // full canvas; that's an acceptable Phase-A trade-off.
+    // We do not synthesise a delta because the engine has no order-aware
+    // delta type. Falling through lets the commit adapter persist the order
+    // and add the canonical `nodeOrder` / `edgeOrder` consequence to its
+    // realtime envelope.
     const orderChanged =
-      prestateNodes.length !== finalNodes.length ||
-      prestateEdges.length !== finalEdges.length ||
-      prestateNodes.some((n, i) => n.id !== finalNodes[i]?.id) ||
-      prestateEdges.some((e, i) => e.id !== finalEdges[i]?.id);
+      prestateTopology.nodes.length !== finalTopology.nodes.length ||
+      prestateTopology.edges.length !== finalTopology.edges.length ||
+      prestateTopology.nodes.some(
+        (node, index) => node.id !== finalTopology.nodes[index]?.id,
+      ) ||
+      prestateTopology.edges.some(
+        (edge, index) => edge.id !== finalTopology.edges[index]?.id,
+      );
 
     // No-op fast path. Returning early preserves the invariant that
     // `toVersion === fromVersion` IFF no row was appended to the log.
-    if (deltas.length === 0 && !orderChanged) {
+    if (engineDeltas.length === 0 && !orderChanged) {
       return {
         canvasId,
         fromVersion,
         toVersion: fromVersion,
-        deltas,
+        deltas: structureDeltas,
         results,
-        commands,
+        commands: responseCommands,
         pendingEffects: {
-          mutatedNodes: pendingEffects.mutatedNodes,
-          deletedNodeIds: pendingEffects.deletedNodeIds,
-          contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
-          deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
+          mutatedNodes: [],
+          deletedNodeIds: [],
+          contentEditedNodeIds: [],
+          deferredFitFrameIds: [],
         },
       };
     }
 
-    const toVersion = fromVersion + 1;
-
-    // Persist .md sidecars first so topology never references a markdown
-    // file that does not exist on disk. The synchronous commit section is
-    // wrapped in a before-image rollback: if topology or delta-log persistence
-    // fails, the sidecars, record, and log prefix all return to `fromVersion`.
-    //
-    // `writeNode` throws `CanvasStoreIOError` on environmental failures
-    // (ENOSPC, EACCES, …); we deliberately do NOT catch it so the
-    // batch aborts before topology is mutated. The exception bubbles
-    // through `handleCanvasCommands` and surfaces as an `isError: true`
-    // tool result to the LLM (and as a 500 / error event upstream).
-    // Structural `conflict` / `not-found` results are programmer errors
-    // in the agent path (engine should have rejected them upstream and
-    // `strictRename` is rarely set for agent-authored labels); we throw
-    // a regular Error rather than letting the in-memory mutation drift
-    // away from disk.
     // Pending effects preserve command order and can mention the same id in
-    // both collections (DELETE then CREATE, or mutate then DELETE). Persist
-    // only the effect matching the authoritative final topology so a
-    // re-created node is not written and then immediately unlinked.
+    // both collections (DELETE then CREATE, or mutate then DELETE). Express
+    // only the effect matching the authoritative final topology. The commit
+    // adapter owns the record, all sidecars, and the one publication row as a
+    // single recoverable transaction.
+    // Pending effects can mention the same id more than once. Resolve puts
+    // back to the authoritative final topology so the commit receives one
+    // final record per id rather than an intermediate command snapshot.
     const finalNodeIds = new Set(finalNodes.map((node) => node.id));
-    const mutatedNodesToPersist = pendingEffects.mutatedNodes.filter((node) =>
-      finalNodeIds.has(node.id),
+    const mutatedNodeIds = new Set(
+      pendingEffects.mutatedNodes.map((node) => node.id),
     );
-    const nodeIdsToDelete = pendingEffects.deletedNodeIds.filter(
-      (nodeId) => !finalNodeIds.has(nodeId),
+    const mutatedNodesToPersist = finalNodes.filter((node) =>
+      mutatedNodeIds.has(node.id),
     );
-    const affectedNodeIds = new Set<string>([
-      ...mutatedNodesToPersist.map((node) => node.id),
-      ...nodeIdsToDelete,
-    ]);
-    const insertedIds = insertedNodeIds(deltas);
-    store.withValidatedNodeMutationTransaction(
-      { affectedNodeIds, insertedNodeIds: insertedIds },
-      () => {
-        runCanvasPersistenceTransaction({
-          canvasId,
-          affectedNodeIds,
-          nodeIdForFilename: (filename) => store.nodeIdForFilename(filename),
-          // Rollback restores exact record bytes without inferring a second
-          // tombstone transition; the enclosing transaction restores its
-          // captured process-local tombstone state after rollback completes.
-          resetRecordState: () => store.writeNodeMutationRollback(canvas),
-          commit: () => {
-            for (const node of mutatedNodesToPersist) {
-              const nodeContent = buildNodeContent(node);
-              if (!nodeContent) continue;
-              // Already inside `withCanvasMutex` (this whole batch holds the
-              // canvas lock), so use the non-locking core to avoid a
-              // re-entrant deadlock. The batch prestate CAS is the freshness
-              // guard.
-              const outcome = applyNodeUpdate(store, nodeContent.nodeId, {
-                apply: () => nodeContent,
-                strictRename: nodeContent['labelSource'] === 'user',
-              });
-              requireNodeWrite(nodeContent.nodeId, outcome);
-            }
-            for (const nodeId of nodeIdsToDelete) {
-              store.deleteNode(nodeId);
-            }
-
-            const slimNodes = stripNodesForCanvas(finalNodes);
-            const nextCanvas: CanvasFile = {
-              ...canvas,
-              version: toVersion,
-              state: {
-                ...canvas.state,
-                nodes: slimNodes,
-                edges: finalEdges,
-              },
-              updatedAt: Date.now(),
-            };
-            store.write(nextCanvas);
-            const logEntry: DeltaLogEntry = {
-              version: toVersion,
-              ts: Date.now(),
-              ...(runId ? { runId } : {}),
-              commands: commands as unknown[],
-              deltas: deltas as unknown[],
-              originator,
-            };
-            store.appendDeltaLogEntry(logEntry);
-          },
-        });
+    const slimMutatedNodes = finalTopology.nodes.filter((node) =>
+      mutatedNodeIds.has(node.id),
+    );
+    const normalizedPendingEffects = {
+      mutatedNodes: slimMutatedNodes,
+      deletedNodeIds: [
+        ...new Set(
+          pendingEffects.deletedNodeIds.filter(
+            (nodeId) => !finalNodeIds.has(nodeId),
+          ),
+        ),
+      ],
+      contentEditedNodeIds: [
+        ...new Set(
+          pendingEffects.contentEditedNodeIds.filter((nodeId) =>
+            finalNodeIds.has(nodeId),
+          ),
+        ),
+      ],
+      deferredFitFrameIds: [
+        ...new Set(
+          pendingEffects.deferredFitFrameIds.filter((nodeId) =>
+            finalNodeIds.has(nodeId),
+          ),
+        ),
+      ],
+    };
+    const sidecarDeleteNodeIds = sidecarDeleteIdsForFinalTopology({
+      prestateNodes,
+      finalNodes,
+      topologyDeletedNodeIds: normalizedPendingEffects.deletedNodeIds,
+    });
+    const nodeCommit = await buildNodeCommitParts({
+      nodes: handle.nodes,
+      prestateTopologyIds,
+      prestateSnapshots,
+      mutatedNodes: mutatedNodesToPersist,
+      deletedNodeIds: sidecarDeleteNodeIds,
+    });
+    const commit = await handle.commit({
+      expectedVersion: fromVersion,
+      record: {
+        title: canvas.title,
+        state: {
+          ...canvas.state,
+          nodes: finalTopology.nodes,
+          edges: finalTopology.edges,
+        },
       },
-    );
+      ...nodeCommit,
+      publication: {
+        originator,
+        optimistic: false,
+        commands: responseCommands,
+        structureDeltas: structureDeltas as unknown[],
+        ...(runId ? { runId } : {}),
+      },
+    });
+    if (!commit.ok) {
+      throw new Error(
+        `[canvas-executor] atomic Space commit rejected: ${describeCommitConflict(commit)}`,
+      );
+    }
+    if (!commit.committed) {
+      throw new Error(
+        '[canvas-executor] mutating batch unexpectedly resolved to a no-op commit',
+      );
+    }
+    const toVersion = commit.record.version;
 
     // Derive review records (ACP change cards) only when asked. Edge
     // endpoint labels are resolved against the post-state nodes.
@@ -984,7 +1146,9 @@ export async function executeOnServer(
         ];
         if (typeof lbl === 'string' && lbl) labelById.set(node.id, lbl);
       }
-      changes = extractCanvasChanges(deltas, { nodeLabelById: labelById });
+      changes = extractCanvasChanges(engineDeltas, {
+        nodeLabelById: labelById,
+      });
     }
 
     // Broadcast the delta to live frontends and persist review records to
@@ -992,14 +1156,15 @@ export async function executeOnServer(
     // the initiating tab applies it from the sync stream, not the tool
     // result. No-op fast path above already returned for empty diffs.
     //
-    // When attributed to a thread, fold this batch's records into the
-    // thread's coalesced change list (one net record per entity) and
-    // broadcast that full list so live cards replace their state with it —
-    // matching what GET /changes returns.
-    let broadcastChanges = changes;
+    // When attributed to a thread, fold this batch's records into the durable
+    // coalesced change list. Revert deltas intentionally retain full authored
+    // bodies, so never copy that list into SSE. A bounded invalidation tells
+    // live clients to fetch the canonical review list over its dedicated API.
+    let changesInvalidated = false;
     if (originator.threadId && changes && changes.length > 0) {
       try {
-        broadcastChanges = store.appendChanges(originator.threadId, changes);
+        await handle.changes.append(originator.threadId, changes);
+        changesInvalidated = true;
       } catch {
         /* sidecar persistence is best-effort — never fail the write */
       }
@@ -1009,15 +1174,11 @@ export async function executeOnServer(
       data: {
         fromVersion,
         toVersion,
-        deltas,
-        pendingEffects: {
-          mutatedNodes: pendingEffects.mutatedNodes,
-          deletedNodeIds: pendingEffects.deletedNodeIds,
-          contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
-          deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
-        },
+        deltas: structureDeltas,
+        pendingEffects: normalizedPendingEffects,
         ...(originator.threadId ? { threadId: originator.threadId } : {}),
-        ...(broadcastChanges ? { changes: broadcastChanges } : {}),
+        ...(changesInvalidated ? { changesInvalidated: true } : {}),
+        commit: commit.event,
       },
     });
 
@@ -1025,16 +1186,12 @@ export async function executeOnServer(
       canvasId,
       fromVersion,
       toVersion,
-      deltas,
+      deltas: structureDeltas,
       results,
-      commands,
-      pendingEffects: {
-        mutatedNodes: pendingEffects.mutatedNodes,
-        deletedNodeIds: pendingEffects.deletedNodeIds,
-        contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
-        deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
-      },
+      commands: responseCommands,
+      pendingEffects: normalizedPendingEffects,
       ...(changes ? { changes } : {}),
+      commit: commit.event,
     };
   });
 }
@@ -1050,12 +1207,14 @@ export async function executeOnServer(
  * effects so the caller can broadcast them. No-op (empty diff) leaves
  * the version untouched.
  */
-export async function applyDeltasOnServer(input: {
+export interface ApplyDeltasOnServerInput {
   canvasId: string;
   deltas: readonly Delta[];
   originator: ExecuteOriginator;
   runId?: string;
-}): Promise<{
+}
+
+export interface ApplyDeltasOnServerOutput {
   canvasId: string;
   fromVersion: number;
   toVersion: number;
@@ -1066,123 +1225,67 @@ export async function applyDeltasOnServer(input: {
     contentEditedNodeIds: string[];
     deferredFitFrameIds: string[];
   };
-}> {
+  /** Canonical envelope for the caller's existing legacy sync publication. */
+  commit?: CanvasCommitEvent;
+}
+
+async function applyDeltasWithoutLock(
+  input: ApplyDeltasOnServerInput,
+): Promise<ApplyDeltasOnServerOutput> {
   const { canvasId, originator, runId } = input;
 
-  return await withCanvasMutex(canvasId, async () => {
-    const store = getCanvasStore(canvasId);
-    const canvas = store.read();
-    if (!canvas) throw new CanvasNotFoundError(canvasId);
+  const handle = getStructuredStore().space(canvasId);
+  const canvas = await handle.record.read();
+  if (!canvas) throw new CanvasNotFoundError(canvasId);
 
-    const fromVersion = canvas.version;
-    const prestateNodes = hydrateNodes(
-      store,
-      canvas.state.nodes as CanvasNode[],
-    );
-    const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];
+  const fromVersion = canvas.version;
+  const prestateTopologyIds = new Set(
+    (canvas.state.nodes as CanvasNode[]).map((node) => node.id),
+  );
+  const prestateSnapshots = await handle.nodes.readMany([
+    ...prestateTopologyIds,
+  ]);
+  const prestateNodes = hydrateNodes(
+    prestateSnapshots,
+    canvas.state.nodes as CanvasNode[],
+  );
+  const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];
 
-    const final = applyDeltas(
-      { nodes: prestateNodes, edges: prestateEdges },
-      input.deltas,
-    );
-    const finalNodes = final.nodes;
-    const finalEdges = final.edges;
+  const final = applyDeltas(
+    { nodes: prestateNodes, edges: prestateEdges },
+    input.deltas,
+  );
+  const finalNodes = final.nodes;
+  const finalEdges = final.edges;
 
-    // Recompute the authoritative diff so the log row and broadcast
-    // reflect exactly what landed (tolerates already-applied / missing
-    // targets in the input deltas).
-    const deltas = diffCanvasState(
-      { nodes: prestateNodes, edges: prestateEdges },
-      { nodes: finalNodes, edges: finalEdges },
-    );
+  // Recompute the authoritative hydrated diff so content-bearing review
+  // inverses remain lossless (tolerates already-applied / missing targets).
+  const engineDeltas = diffCanvasState(
+    { nodes: prestateNodes, edges: prestateEdges },
+    { nodes: finalNodes, edges: finalEdges },
+  );
+  const prestateTopology = projectSlimTopology(
+    canvas.title,
+    prestateNodes,
+    prestateEdges,
+  );
+  const finalTopology = projectSlimTopology(
+    canvas.title,
+    finalNodes,
+    finalEdges,
+  );
+  const structureDeltas = diffCanvasState(prestateTopology, finalTopology);
 
-    const mutatedNodes: CanvasNode[] = [];
-    const deletedNodeIds: string[] = [];
-    const contentEditedNodeIds: string[] = [];
+  const mutatedNodes: CanvasNode[] = [];
+  const deletedNodeIds: string[] = [];
+  const contentEditedNodeIds: string[] = [];
 
-    if (deltas.length === 0) {
-      return {
-        canvasId,
-        fromVersion,
-        toVersion: fromVersion,
-        deltas,
-        pendingEffects: {
-          mutatedNodes,
-          deletedNodeIds,
-          contentEditedNodeIds,
-          deferredFitFrameIds: [],
-        },
-      };
-    }
-
-    const toVersion = fromVersion + 1;
-
-    for (const d of deltas) {
-      if (d.type === 'INSERT_NODE' || d.type === 'REPLACE_NODE') {
-        const node = d.type === 'INSERT_NODE' ? d.node : d.next;
-        mutatedNodes.push(node);
-        if (d.type === 'REPLACE_NODE') contentEditedNodeIds.push(node.id);
-      } else if (d.type === 'DELETE_NODE') {
-        deletedNodeIds.push(d.node.id);
-      }
-    }
-    const affectedNodeIds = new Set<string>([
-      ...mutatedNodes.map((node) => node.id),
-      ...deletedNodeIds,
-    ]);
-    const insertedIds = insertedNodeIds(deltas);
-    store.withValidatedNodeMutationTransaction(
-      { affectedNodeIds, insertedNodeIds: insertedIds },
-      () => {
-        runCanvasPersistenceTransaction({
-          canvasId,
-          affectedNodeIds,
-          nodeIdForFilename: (filename) => store.nodeIdForFilename(filename),
-          resetRecordState: () => store.writeNodeMutationRollback(canvas),
-          commit: () => {
-            for (const d of deltas) {
-              if (d.type === 'INSERT_NODE' || d.type === 'REPLACE_NODE') {
-                const node = d.type === 'INSERT_NODE' ? d.node : d.next;
-                const content = buildNodeContent(node);
-                if (content) {
-                  // Inside `withCanvasMutex` already → non-locking core.
-                  const outcome = applyNodeUpdate(store, content.nodeId, {
-                    apply: () => content,
-                    strictRename: content['labelSource'] === 'user',
-                  });
-                  requireNodeWrite(content.nodeId, outcome);
-                }
-              } else if (d.type === 'DELETE_NODE') {
-                store.deleteNode(d.node.id);
-              }
-            }
-
-            const slimNodes = stripNodesForCanvas(finalNodes);
-            store.write({
-              ...canvas,
-              version: toVersion,
-              state: { ...canvas.state, nodes: slimNodes, edges: finalEdges },
-              updatedAt: Date.now(),
-            });
-
-            store.appendDeltaLogEntry({
-              version: toVersion,
-              ts: Date.now(),
-              ...(runId ? { runId } : {}),
-              commands: [],
-              deltas: deltas as unknown[],
-              originator,
-            });
-          },
-        });
-      },
-    );
-
+  if (engineDeltas.length === 0) {
     return {
       canvasId,
       fromVersion,
-      toVersion,
-      deltas,
+      toVersion: fromVersion,
+      deltas: structureDeltas,
       pendingEffects: {
         mutatedNodes,
         deletedNodeIds,
@@ -1190,5 +1293,125 @@ export async function applyDeltasOnServer(input: {
         deferredFitFrameIds: [],
       },
     };
+  }
+
+  for (const d of engineDeltas) {
+    if (d.type === 'INSERT_NODE' || d.type === 'REPLACE_NODE') {
+      const node = d.type === 'INSERT_NODE' ? d.node : d.next;
+      mutatedNodes.push(node);
+      if (d.type === 'REPLACE_NODE') contentEditedNodeIds.push(node.id);
+    } else if (d.type === 'DELETE_NODE') {
+      deletedNodeIds.push(d.node.id);
+    }
+  }
+  const sidecarDeleteNodeIds = sidecarDeleteIdsForFinalTopology({
+    prestateNodes,
+    finalNodes,
+    topologyDeletedNodeIds: deletedNodeIds,
+  });
+  const nodeCommit = await buildNodeCommitParts({
+    nodes: handle.nodes,
+    prestateTopologyIds,
+    prestateSnapshots,
+    mutatedNodes,
+    deletedNodeIds: sidecarDeleteNodeIds,
+  });
+  const mutatedNodeIds = new Set(mutatedNodes.map((node) => node.id));
+  const slimMutatedNodes = finalTopology.nodes.filter((node) =>
+    mutatedNodeIds.has(node.id),
+  );
+  const commit = await handle.commit({
+    expectedVersion: fromVersion,
+    record: {
+      title: canvas.title,
+      state: {
+        ...canvas.state,
+        nodes: finalTopology.nodes,
+        edges: finalTopology.edges,
+      },
+    },
+    ...nodeCommit,
+    publication: {
+      originator,
+      optimistic: false,
+      commands: [],
+      structureDeltas: structureDeltas as unknown[],
+      ...(runId ? { runId } : {}),
+    },
+  });
+  if (!commit.ok) {
+    throw new Error(
+      `[canvas-executor] atomic Space commit rejected: ${describeCommitConflict(commit)}`,
+    );
+  }
+  if (!commit.committed) {
+    throw new Error(
+      '[canvas-executor] mutating delta batch unexpectedly resolved to a no-op commit',
+    );
+  }
+
+  return {
+    canvasId,
+    fromVersion,
+    toVersion: commit.record.version,
+    deltas: structureDeltas,
+    pendingEffects: {
+      mutatedNodes: slimMutatedNodes,
+      deletedNodeIds,
+      contentEditedNodeIds,
+      deferredFitFrameIds: [],
+    },
+    commit: commit.event,
+  };
+}
+
+export async function applyDeltasOnServer(
+  input: ApplyDeltasOnServerInput,
+): Promise<ApplyDeltasOnServerOutput> {
+  return withCanvasMutex(input.canvasId, () => applyDeltasWithoutLock(input));
+}
+
+/**
+ * Atomically claim a pending review record, apply its inverse, and remove it.
+ * Keeping all three steps beneath the application-level Space mutex prevents
+ * two local callers from reverting the same record.
+ */
+export async function revertChangeOnServer(input: {
+  canvasId: string;
+  threadId: string;
+  changeId: string;
+  originator: ExecuteOriginator;
+}): Promise<
+  { removed: false } | { removed: true; result: ApplyDeltasOnServerOutput }
+> {
+  return withCanvasMutex(input.canvasId, async () => {
+    const handle = getStructuredStore().space(input.canvasId);
+    if (!(await handle.record.read())) {
+      throw new CanvasNotFoundError(input.canvasId);
+    }
+    const record = (await handle.changes.read(input.threadId)).find(
+      (candidate) => candidate.id === input.changeId,
+    );
+    if (!record) return { removed: false };
+
+    const result = await applyDeltasWithoutLock({
+      canvasId: input.canvasId,
+      deltas: record.revertDeltas,
+      originator: input.originator,
+    });
+    if (result.toVersion > result.fromVersion) {
+      publishCanvasUpdate(input.canvasId, {
+        type: 'update',
+        data: {
+          fromVersion: result.fromVersion,
+          toVersion: result.toVersion,
+          deltas: result.deltas,
+          pendingEffects: result.pendingEffects,
+          ...(result.commit ? { commit: result.commit } : {}),
+        },
+      });
+    }
+    await handle.changes.remove(input.threadId, input.changeId);
+    return { removed: true, result };
   });
 }

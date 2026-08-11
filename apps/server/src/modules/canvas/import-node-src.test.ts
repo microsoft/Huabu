@@ -22,7 +22,7 @@ import type { CanvasCommand } from '@huabu/shared';
 
 let tmp: string;
 
-beforeEach(() => {
+beforeEach(async () => {
   tmp = mkdtempSync(path.join(tmpdir(), 'huabu-import-node-src-'));
   setWorkspacePath(tmp);
   for (const canvasId of [
@@ -34,7 +34,7 @@ beforeEach(() => {
     'c-web-merge-remote',
     'c-image-local',
   ]) {
-    createCanvas(canvasId);
+    await createCanvas(canvasId);
   }
 });
 

@@ -15,6 +15,10 @@
 
 import { z } from 'zod';
 
+import { executeOriginatorSchema } from './canvas.js';
+
+import type { CanvasCommitEvent, MutationAck } from './canvas-sync.js';
+
 // ---------------------------------------------------------------------------
 // Trigger
 // ---------------------------------------------------------------------------
@@ -90,6 +94,8 @@ export const preprocessNodeBodySchema = z.object({
   /** Previous node data snapshot (for dirty-field detection on updates). */
   previousSnapshot: z.record(z.string(), z.unknown()).optional(),
   options: preprocessOptionsSchema.optional(),
+  /** Originating tab/session for optimistic echo filtering. */
+  originator: executeOriginatorSchema.optional(),
 });
 export type PreprocessNodeBody = z.infer<typeof preprocessNodeBodySchema>;
 
@@ -121,6 +127,17 @@ export interface PreprocessNodeRequest extends Omit<
 export interface PreprocessNodeResponse {
   nodeId: string;
   success: boolean;
+  /**
+   * Space cursor observed for a non-committing projection. Clients must not
+   * apply legacy projection fields after their cursor has advanced beyond it.
+   */
+  observedVersion?: number;
+  /** Opaque revision over the complete canonical node record. */
+  recordRevision?: string;
+  /** Full Phase 4 publication; preferred over ack when available. */
+  commit?: CanvasCommitEvent;
+  /** Phase 4 commit acknowledgement; optional for legacy servers. */
+  ack?: MutationAck;
   /** LLM-suggested label from the Enrich stage (for image/frame, or title-derived for ingest types). */
   suggestedLabel?: string;
   /**

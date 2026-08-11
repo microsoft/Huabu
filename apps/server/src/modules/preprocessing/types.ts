@@ -7,7 +7,12 @@
  * These types flow between pipeline stages and are not part of the public API.
  */
 
-import type { CanvasNodeType, TriggerReason } from '@huabu/shared';
+import type {
+  CanvasCommitEvent,
+  CanvasNodeType,
+  MutationAck,
+  TriggerReason,
+} from '@huabu/shared';
 
 // ---------------------------------------------------------------------------
 // Capabilities — organized by pipeline stage
@@ -133,6 +138,27 @@ export interface PreprocessNodeResult {
   success: boolean;
   status: 'success' | 'partial' | 'error' | 'skipped';
 
+  /**
+   * The node disappeared from, or changed type in, the authoritative Space
+   * topology while preprocessing was in flight. Callers must treat the
+   * result as an acknowledgement-only no-op and apply none of its projections.
+   */
+  superseded?: true;
+
+  /**
+   * Global Space version observed by the final topology guard for a result
+   * that did not produce a commit. The web client applies legacy projection
+   * fields only while its cursor still equals this version.
+   */
+  observedVersion?: number;
+
+  /** Exact canonical node revision produced/observed by persistence. */
+  recordRevision?: string;
+  /** Aggregate commit acknowledgement when Persist attempted a commit. */
+  ack?: MutationAck;
+  /** Canonical durable publication when Persist reached the commit boundary. */
+  commit?: CanvasCommitEvent;
+
   usedCapabilities: Capability[];
 
   extracted?: {
@@ -158,6 +184,14 @@ export interface PreprocessNodeResult {
   patch: Record<string, unknown>;
 
   diagnostics: PreprocessDiagnostic[];
+}
+
+/** Conservative incarnation baseline captured before asynchronous work. */
+export interface PreprocessExecutionBaseline {
+  /** Node type owned by this id in the authoritative Space topology. */
+  readonly topologyType: string | null;
+  readonly spaceVersion: number | null;
+  readonly nodeRecordRevision: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +309,17 @@ export interface PersistResult {
   placeholder?: boolean;
   /** True when persistence was skipped (e.g. image node). */
   skipped?: boolean;
+  /**
+   * The async result no longer belongs to the current topology (the node was
+   * removed or changed type). Project must not expose its stale patch.
+   */
+  superseded?: boolean;
+  /** Exact whole-record revision observed after the Persist decision. */
+  recordRevision?: string;
+  /** Aggregate commit acknowledgement, including semantic no-ops. */
+  ack?: MutationAck;
+  /** Canonical durable publication, including semantic no-ops. */
+  commit?: CanvasCommitEvent;
   /**
    * Final on-disk label after `writeNode`'s dedup pass — mirrors
    * `RenameResult.label` from `canvas-store.ts`. When another node

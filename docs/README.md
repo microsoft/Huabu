@@ -53,7 +53,7 @@ docs/
 | [canvas-command-architecture.md](./architecture/canvas-command-architecture.md) | `CanvasUiIntent` / `CanvasCommand` / `CanvasExecution` three-layer model.                                |
 | [canvas-input-interactions.md](./architecture/canvas-input-interactions.md)     | Mouse, touch, and pen preference resolution, gesture ownership, and multi-touch arbitration.             |
 | [canvas-zoom-rendering.md](./architecture/canvas-zoom-rendering.md)             | Node LOD, Frame/edge label readability, and interaction chrome across canvas zoom.                       |
-| [canvas-storage.md](./architecture/canvas-storage.md)                           | Disk layout plus Blob/structured ports, catalogue, compatibility, and `.memory/`.                        |
+| [canvas-storage.md](./architecture/canvas-storage.md)                           | Disk layout, aggregate Space commits, lifecycle, crash recovery, Blob/structured ports, and `.memory/`.  |
 | [canvas-action-log.md](./architecture/canvas-action-log.md)                     | Persistent `events.jsonl` user-action trail; consumed by the memory curator.                             |
 | [canvas-realtime-sync.md](./architecture/canvas-realtime-sync.md)               | Multi-agent real-time sync: SSE broadcast, dirty-node conflict model, per-thread change-review card.     |
 | [credential-storage.md](./architecture/credential-storage.md)                   | Electron OS-protected credentials, utility-process bridge, migration, and standalone fallback.           |
@@ -74,23 +74,23 @@ docs/
 
 ### Active
 
-| Doc                                                                                                | Status         | Summary                                                                    |
-| -------------------------------------------------------------------------------------------------- | -------------- | -------------------------------------------------------------------------- |
-| [active-space-external-note-watcher.md](./proposals/active-space-external-note-watcher.md)         | Proposed       | Scope external-note watchers to Spaces with active SSE subscribers.        |
-| [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md)                   | In-Progress    | Read/write revision freshness across agent and web paths.                  |
-| [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                 | Proposed       | Canvas checkpoint and restoration design.                                  |
-| [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                           | In-Progress    | Roadmap from multi-agent sync to multi-user co-editing.                    |
-| [content-before-ai-design.md](./proposals/content-before-ai-design.md)                             | Needs review   | Block-level and inline authorship provenance.                              |
-| [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md) | Draft          | Follow-up credential storage hardening.                                    |
-| [direct-space-operations.md](./proposals/direct-space-operations.md)                               | In-Progress    | #348 deterministic RFS query and mutation operations for external agents.  |
-| [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                 | Partly shipped | Server-side headless canvas executor and structure/content sync.           |
-| [long-horizon-tasks.md](./proposals/long-horizon-tasks.md)                                         | Partly shipped | Canvas-scoped recursive Agent creation, invocation, and handoff pipeline.  |
-| [managed-acp-harness.md](./proposals/managed-acp-harness.md)                                       | Draft          | Resource-first Agent Team Profile compilation.                             |
-| [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.          |
-| [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Huabu-owned Milkdown toolbar and semantic editor commands.                 |
-| [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                           |
-| [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                   | Partly shipped | Phases 1–3: Blob, structured repositories, catalogue, and bounded reads.   |
-| [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)             | Proposed       | Revision-aware offscreen Note measurement and stable auto-height geometry. |
+| Doc                                                                                                | Status            | Summary                                                                              |
+| -------------------------------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------ |
+| [active-space-external-note-watcher.md](./proposals/active-space-external-note-watcher.md)         | Proposed          | Scope external-note watchers to Spaces with active SSE subscribers.                  |
+| [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md)                   | In-Progress       | Read/write revision freshness across agent and web paths.                            |
+| [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                 | Proposed          | Canvas checkpoint and restoration design.                                            |
+| [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                           | In-Progress       | Roadmap from multi-agent sync to multi-user co-editing.                              |
+| [content-before-ai-design.md](./proposals/content-before-ai-design.md)                             | Needs review      | Block-level and inline authorship provenance.                                        |
+| [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md) | Draft             | Follow-up credential storage hardening.                                              |
+| [direct-space-operations.md](./proposals/direct-space-operations.md)                               | In-Progress       | #348 deterministic RFS query and mutation operations for external agents.            |
+| [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                 | Partly shipped    | Server-side headless canvas executor and structure/content sync.                     |
+| [long-horizon-tasks.md](./proposals/long-horizon-tasks.md)                                         | Partly shipped    | Canvas-scoped recursive Agent creation, invocation, and handoff pipeline.            |
+| [managed-acp-harness.md](./proposals/managed-acp-harness.md)                                       | Draft             | Resource-first Agent Team Profile compilation.                                       |
+| [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress       | Huabu-managed discovery, configuration, preparation, and runtime.                    |
+| [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress       | Huabu-owned Milkdown toolbar and semantic editor commands.                           |
+| [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed          | Model selection by runtime role.                                                     |
+| [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                   | P1–P4 implemented | Blob split, async structured reads, aggregate commits, lifecycle, and Disk recovery. |
+| [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)             | Proposed          | Revision-aware offscreen Note measurement and stable auto-height geometry.           |
 
 ### Shipped
 

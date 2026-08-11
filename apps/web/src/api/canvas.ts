@@ -21,6 +21,7 @@ import type {
   ListCanvasesResponse,
   CreateCanvasRequest,
   CreateCanvasResponse,
+  ExecuteOriginator,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
   RevealNodesFolderResponse,
@@ -190,21 +191,22 @@ export async function putCanvas(
 export async function deleteNode(
   canvasId: string,
   nodeId: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; originator?: ExecuteOriginator },
 ): Promise<DeleteNodeResponse> {
   return apiFetch<DeleteNodeResponse>(routes.canvasNode(canvasId, nodeId), {
     method: 'DELETE',
     signal: options?.signal,
+    ...(options?.originator
+      ? { json: { originator: options.originator } }
+      : {}),
     fallbackMessage: 'Failed to delete node',
   });
 }
 
 /**
- * Persist a single node's markdown sidecar
- * (`nodes/<safe(label)>.md`). Unlike `putCanvas`, this endpoint never
- * touches structural state and therefore does not participate in the
- * canvas-level optimistic-concurrency `version` counter — concurrent
- * editor edits and viewport drags never collide on it.
+ * Persist a single node's markdown sidecar (`nodes/<safe(label)>.md`). It
+ * participates in the Phase 4 global commit sequence while leaving the
+ * independent structure revision unchanged.
  *
  * Mirrors `putCanvas`'s raw-fetch pattern so a 409 `NODE_LABEL_CONFLICT`
  * body deserialises into `CanvasConflictError` with `nodeId` +
@@ -337,6 +339,7 @@ export async function preprocessNode(
     trigger?: PreprocessNodeRequest['trigger'];
     snapshot: PreprocessNodeRequest['snapshot'];
     options?: PreprocessNodeRequest['options'];
+    originator?: ExecuteOriginator;
   },
   options?: { keepalive?: boolean },
 ): Promise<PreprocessNodeResponse> {

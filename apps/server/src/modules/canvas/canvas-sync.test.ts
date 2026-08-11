@@ -1,7 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
+
+const workspaceState = vi.hoisted(() => ({ path: '/workspace-a' }));
+
+vi.mock('../workspace.js', () => ({
+  getWorkspacePath: () => workspaceState.path,
+}));
 
 import { publishCanvasUpdate, subscribeCanvasUpdates } from './canvas-sync.js';
 
@@ -23,6 +29,10 @@ const update = (toVersion: number): CanvasSyncEvent => ({
 });
 
 describe('canvas-sync publisher', () => {
+  beforeEach(() => {
+    workspaceState.path = '/workspace-a';
+  });
+
   it('delivers events to subscribers of the same canvas only', () => {
     const a = vi.fn();
     const b = vi.fn();
@@ -81,5 +91,34 @@ describe('canvas-sync publisher', () => {
 
     unsubBad();
     unsubGood();
+  });
+
+  it('isolates the same canvas id across Workspace activation', () => {
+    const inWorkspaceA = vi.fn();
+    workspaceState.path = '/workspace-a';
+    const unsubscribeA = subscribeCanvasUpdates('same-canvas', inWorkspaceA);
+
+    workspaceState.path = '/workspace-b';
+    const inWorkspaceB = vi.fn();
+    const unsubscribeB = subscribeCanvasUpdates('same-canvas', inWorkspaceB);
+    publishCanvasUpdate('same-canvas', update(2));
+
+    expect(inWorkspaceA).not.toHaveBeenCalled();
+    expect(inWorkspaceB).toHaveBeenCalledTimes(1);
+
+    workspaceState.path = '/workspace-a';
+    publishCanvasUpdate('same-canvas', update(3));
+    expect(inWorkspaceA).toHaveBeenCalledTimes(1);
+    expect(inWorkspaceB).toHaveBeenCalledTimes(1);
+
+    // Unsubscribe must remove the captured A listener even while B is active.
+    workspaceState.path = '/workspace-b';
+    unsubscribeA();
+    workspaceState.path = '/workspace-a';
+    publishCanvasUpdate('same-canvas', update(4));
+    expect(inWorkspaceA).toHaveBeenCalledTimes(1);
+
+    workspaceState.path = '/workspace-b';
+    unsubscribeB();
   });
 });

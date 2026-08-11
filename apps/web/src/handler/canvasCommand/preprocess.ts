@@ -16,6 +16,7 @@
 
 import { preprocessNode } from '@/api/canvas';
 
+import type { ExecuteOriginator, PreprocessNodeResponse } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 // Re-export the ingestion status types (unchanged interface for canvasStore)
@@ -37,8 +38,16 @@ export type PreprocessHelperDeps = {
   getChildNodes: (frameId: string) => Node[];
   /** Get the latest node state before applying an asynchronous result. */
   getNode: (nodeId: string) => Node | undefined;
+  /** Current ordered Space cursor for non-commit response validation. */
+  getVersion?: () => number | undefined;
   /** Silently patch node data without recording undo history. */
   patchNodeSilent: (nodeId: string, patch: Record<string, unknown>) => void;
+  originator?: ExecuteOriginator;
+  /** Route the durable commit through the shared HTTP/SSE version gate. */
+  onMutationResponse?: (
+    canvasId: string,
+    response: PreprocessNodeResponse,
+  ) => void;
 };
 
 // ─── Unified preprocessing entry point ───────────────────────────────────────
@@ -112,7 +121,10 @@ export async function preprocessNodeIfNeeded({
   clearNodeIngestion,
   getChildNodes,
   getNode,
+  getVersion,
   patchNodeSilent,
+  originator,
+  onMutationResponse,
 }: PreprocessHelperDeps): Promise<void> {
   const nodeType = node.type ?? '';
 
@@ -125,48 +137,70 @@ export async function preprocessNodeIfNeeded({
       nodeType,
       trigger: 'node_updated',
       snapshot,
+      ...(originator ? { originator } : {}),
     });
 
-    // Apply results from the backend. Re-check current label ownership because
-    // the user may have renamed the node while this request was in flight.
-    // Other projected fields can be applied directly.
-    const patch: Record<string, unknown> = {};
-    const latestData = getNode(node.id)?.data as
-      | Record<string, unknown>
-      | undefined;
-    const latestLabel =
-      typeof latestData?.label === 'string' ? latestData.label.trim() : '';
-    const latestLabelSource = latestData?.labelSource;
-    const latestLabelIsProtected =
-      (latestLabelSource === 'user' || latestLabelSource === 'agent') &&
-      latestLabel.length > 0;
-    if (response.suggestedLabel && !latestLabelIsProtected) {
-      patch.label = response.suggestedLabel;
-      patch.labelSource = 'auto';
+    onMutationResponse?.(canvasId, response);
+
+    // The request snapshot belongs to one concrete topology/type. A local
+    // delete, type conversion, or intervening structural commit can replace
+    // that target while the POST is in flight. In that case neither legacy
+    // response fields nor ingestion state belong to the current node.
+    const latestNode = getNode(node.id);
+    if (!latestNode || (latestNode.type ?? '') !== nodeType) {
+      clearNodeIngestion(node.id);
+      return;
     }
-    // Adopt the server-canonical `src` whenever the pipeline normalized
-    // it (e.g. URL canonicalization for web, artifact URL rewrite for
-    // pdf). The server only emits this field when it actually diverged
-    // from the snapshot we sent, so any value here is meaningful — no
-    // need to re-compare on the client.
-    if (typeof response.src === 'string' && response.src.length > 0) {
-      patch.src = response.src;
-    }
-    // Adopt the freshly-extracted body for node types whose preview
-    // reads `data.content` directly (currently only `office`). Without
-    // this the office preview would stay blank until the next canvas
-    // reload re-hydrated the `.md` sidecar from disk.
-    if (typeof response.content === 'string') {
-      patch.content = response.content;
-    }
-    if (typeof response.summary === 'string' && response.summary.length > 0) {
-      patch.summary = response.summary;
-    }
-    if (Array.isArray(response.keywords) && response.keywords.length > 0) {
-      patch.keywords = response.keywords;
-    }
-    if (Object.keys(patch).length > 0) {
-      patchNodeSilent(node.id, patch);
+
+    // Full commit responses are applied by the shared version gate. Replaying
+    // these legacy response fields as a second patch would race SSE and can
+    // overwrite a newer server projection. Older servers return only these
+    // fields, so retain the direct-patch fallback when no commit is present.
+    if (!response.commit) {
+      // A non-committing result has no event to pass through the shared gate.
+      // Apply it only at the exact server cursor it observed; an intervening
+      // same-type delete/recreate or remote mutation otherwise makes the
+      // projection stale even though the local node id/type still match.
+      if (
+        response.observedVersion !== undefined &&
+        getVersion?.() !== response.observedVersion
+      ) {
+        clearNodeIngestion(node.id);
+        return;
+      }
+      const patch: Record<string, unknown> = {};
+      const latestData = latestNode.data as Record<string, unknown> | undefined;
+      const latestLabel =
+        typeof latestData?.label === 'string' ? latestData.label.trim() : '';
+      const latestLabelSource = latestData?.labelSource;
+      const latestLabelIsProtected =
+        (latestLabelSource === 'user' || latestLabelSource === 'agent') &&
+        latestLabel.length > 0;
+      if (response.suggestedLabel && !latestLabelIsProtected) {
+        patch.label = response.suggestedLabel;
+        patch.labelSource = 'auto';
+      }
+      // Adopt the server-canonical `src` whenever the pipeline normalized
+      // it (e.g. URL canonicalization for web, artifact URL rewrite for
+      // pdf). The server only emits this field when it actually diverged
+      // from the snapshot we sent, so any value here is meaningful.
+      if (typeof response.src === 'string' && response.src.length > 0) {
+        patch.src = response.src;
+      }
+      // Adopt the freshly-extracted body for node types whose preview reads
+      // `data.content` directly (currently only `office`).
+      if (typeof response.content === 'string') {
+        patch.content = response.content;
+      }
+      if (typeof response.summary === 'string' && response.summary.length > 0) {
+        patch.summary = response.summary;
+      }
+      if (Array.isArray(response.keywords) && response.keywords.length > 0) {
+        patch.keywords = response.keywords;
+      }
+      if (Object.keys(patch).length > 0) {
+        patchNodeSilent(node.id, patch);
+      }
     }
 
     if (response.success || response.error?.includes('EMPTY_CONTENT')) {
@@ -180,6 +214,11 @@ export async function preprocessNodeIfNeeded({
       error: response.error ?? 'Unknown preprocessing error',
     });
   } catch (error) {
+    const latestNode = getNode(node.id);
+    if (!latestNode || (latestNode.type ?? '') !== nodeType) {
+      clearNodeIngestion(node.id);
+      return;
+    }
     setNodeIngestion(node.id, {
       status: 'error',
       updatedAt: Date.now(),

@@ -134,6 +134,20 @@ export function withSpacePutAdmission<T>(
   return withAdmission(workspacePath, canvasId, 'put', operation);
 }
 
+/** Admit a structured mutation as a reader against exclusive deletion. */
+export function withSpaceMutationAdmission<T>(
+  workspacePath: string,
+  canvasId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  // Structured callers cannot usefully resume after an exclusive delete has
+  // removed the Space. Reject synchronously instead of queueing behind it;
+  // the admission acquired immediately below still closes the race with a
+  // delete that starts after this check.
+  assertSpaceMutationAllowed(workspacePath, canvasId);
+  return withAdmission(workspacePath, canvasId, 'put', operation);
+}
+
 export function withSpaceDeleteAdmission<T>(
   workspacePath: string,
   canvasId: string,

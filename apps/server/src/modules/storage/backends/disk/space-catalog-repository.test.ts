@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import {
   mkdirSync,
   mkdtempSync,
@@ -25,7 +28,7 @@ import { WORLD_CANVAS_DIR_NAME } from '../../../workspace/disk/paths.js';
 import { describeSpaceCatalogRepositoryContract } from '../../ports/contracts/space-catalog-repository.contract.js';
 
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
-import type { CanvasSummary } from '@sediment/shared';
+import type { CanvasSummary } from '@huabu/shared';
 
 const roots: string[] = [];
 

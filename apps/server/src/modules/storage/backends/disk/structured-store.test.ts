@@ -1,11 +1,27 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 const workspaceState = vi.hoisted(() => ({ path: '' }));
 
@@ -20,12 +36,18 @@ import {
 import { DiskStructuredStore } from './structured-store.js';
 import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
 import { toSafeFilename } from '../../../workspace/disk/naming.js';
-import { tasksPath } from '../../../workspace/disk/paths.js';
+import { nodesDir, tasksPath } from '../../../workspace/disk/paths.js';
 import { describeCanvasLogRepositoriesContract } from '../../ports/contracts/canvas-log-repository.contract.js';
+import { describeNodeRepositoryContract } from '../../ports/contracts/node-repository.contract.js';
+import { describeSpaceCommitContract } from '../../ports/contracts/space-commit.contract.js';
+import { describeSpaceLifecycleContract } from '../../ports/contracts/space-lifecycle.contract.js';
 import { describeSpaceRepositoryContract } from '../../ports/contracts/space-repository.contract.js';
 import { describeStructuredStoreContract } from '../../ports/contracts/structured-store.contract.js';
 
-import type { CanvasFile } from '../../../canvas/persistence-types.js';
+import type {
+  CanvasFile,
+  NodeContent,
+} from '../../../canvas/persistence-types.js';
 
 /**
  * Seed a Space directly on disk.
@@ -43,6 +65,22 @@ function seedSpace(root: string, canvasId: string, title: string): CanvasFile {
   const record: CanvasFile = {
     canvasId,
     title,
+    version: 0,
+    state: { nodes: [], edges: [] },
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  writeFileSync(path.join(dir, 'space.json'), JSON.stringify(record), 'utf8');
+  refreshCanvasDirIndex();
+  return record;
+}
+
+function seedWorld(root: string): CanvasFile {
+  const dir = path.join(root, '.world');
+  mkdirSync(dir, { recursive: true });
+  const record: CanvasFile = {
+    canvasId: 'canvas-world',
+    title: 'World',
     version: 0,
     state: { nodes: [], edges: [] },
     createdAt: 1,
@@ -71,23 +109,229 @@ describeStructuredStoreContract('DiskStructuredStore', () => {
   };
 });
 
-describeSpaceRepositoryContract('DiskSpaceRepository', () => {
-  const root = freshWorkspace('huabu-space-repo-');
-  seedSpace(root, 'canvas-a', 'Canvas A');
+describeSpaceLifecycleContract('DiskSpaceLifecycleRepository', () => {
+  const root = freshWorkspace('huabu-space-lifecycle-');
+  seedWorld(root);
   const store = new DiskStructuredStore();
   return {
-    repository: store.space('canvas-a').record,
-    // A second composite over the same id. `space()` builds a fresh wrapper
-    // per call, so these are independent objects sharing one cached instance
-    // — which is exactly the shape the concurrency case needs.
-    concurrent: store.space('canvas-a').record,
-    missing: store.space('no-such-canvas').record,
-    missingCanvasId: 'no-such-canvas',
+    lifecycle: store.lifecycle(),
+    read: (canvasId: string) => store.space(canvasId).record.read(),
+    worldCanvasId: 'canvas-world',
     cleanup: () => {
       resetStorageCache();
       rmSync(root, { recursive: true, force: true });
     },
   };
+});
+
+describeSpaceRepositoryContract('DiskSpaceRepository', () => {
+  const root = freshWorkspace('huabu-space-repo-');
+  const expected = seedSpace(root, 'canvas-a', 'Canvas A');
+  const store = new DiskStructuredStore();
+  return {
+    repository: store.space('canvas-a').record,
+    expected,
+    missing: store.space('no-such-canvas').record,
+    cleanup: () => {
+      resetStorageCache();
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+});
+
+describeNodeRepositoryContract('DiskNodeRepository', () => {
+  const root = freshWorkspace('huabu-node-repo-');
+  seedSpace(root, 'canvas-a', 'Canvas A');
+  const record: NodeContent = {
+    nodeId: 'node-a',
+    type: 'note',
+    label: 'Meeting notes',
+    content: 'Canonical body',
+    summary: 'Initial summary',
+    attributes: { priority: 2, tags: ['portable', 'async'] },
+  };
+  const legacy = getCanvasStore('canvas-a');
+  const seeded = legacy.writeNode(record.nodeId, record);
+  if (!seeded.ok) throw new Error(`Could not seed node: ${seeded.reason}`);
+
+  const structured = new DiskStructuredStore();
+  return {
+    repository: structured.space('canvas-a').nodes,
+    existing: { record, logicalName: seeded.filename },
+    missingNodeId: 'node-missing',
+    replaceExisting: (next: NodeContent) => {
+      const result = legacy.writeNode(next.nodeId, next);
+      if (!result.ok) {
+        throw new Error(`Could not replace node: ${result.reason}`);
+      }
+    },
+    cleanup: () => {
+      resetStorageCache();
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+});
+
+describeSpaceCommitContract('DiskSpaceCommitter', () => {
+  const root = freshWorkspace('huabu-space-commit-');
+  // The id deliberately resembles a conventional World id while remaining
+  // an ordinary Space. World policy is identity-based, never prefix-based.
+  const canvasId = 'canvas-world-contract-ordinary';
+  const seeded = seedSpace(root, canvasId, 'Canvas A');
+  const existingNode: NodeContent = {
+    nodeId: 'node-existing',
+    type: 'note',
+    label: 'Existing node',
+    content: 'Existing body',
+    summary: 'Existing summary',
+  };
+  const newNode: NodeContent = {
+    nodeId: 'node-new',
+    type: 'note',
+    label: 'New node',
+    content: 'New body',
+  };
+  const legacy = getCanvasStore(canvasId);
+  legacy.write({
+    ...seeded,
+    state: {
+      nodes: [
+        {
+          id: existingNode.nodeId,
+          type: existingNode.type,
+          data: { label: existingNode.label },
+          position: { x: 0, y: 0 },
+        },
+      ],
+      edges: [],
+    },
+  });
+  const nodeWrite = legacy.writeNode(existingNode.nodeId, existingNode);
+  if (!nodeWrite.ok) {
+    throw new Error(`Could not seed commit node: ${nodeWrite.reason}`);
+  }
+
+  const structured = new DiskStructuredStore();
+  return {
+    handle: structured.space(canvasId),
+    concurrent: structured.space(canvasId),
+    missing: structured.space('missing-canvas'),
+    existingNode,
+    newNode,
+    replaceExistingNodeOutOfBand: (record: NodeContent) => {
+      const result = legacy.writeNode(record.nodeId, record);
+      if (!result.ok) {
+        throw new Error(`Could not replace commit node: ${result.reason}`);
+      }
+    },
+    failNextPublicationAfterAppend: (error: Error) => {
+      const original = legacy.appendDeltaLogEntry;
+      legacy.appendDeltaLogEntry = (entry) => {
+        original.call(legacy, entry);
+        throw error;
+      };
+      return () => {
+        legacy.appendDeltaLogEntry = original;
+      };
+    },
+    cleanup: () => {
+      resetStorageCache();
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+});
+
+describe('Disk node snapshot details', () => {
+  let root = '';
+
+  afterEach(() => {
+    resetStorageCache();
+    if (root) rmSync(root, { recursive: true, force: true });
+    root = '';
+  });
+
+  it('tracks an external logical rename without exposing a path', async () => {
+    root = freshWorkspace('huabu-node-logical-name-');
+    seedSpace(root, 'canvas-a', 'Canvas A');
+    const legacy = getCanvasStore('canvas-a');
+    const record: NodeContent = {
+      nodeId: 'node-a',
+      type: 'note',
+      label: 'Original name',
+      content: 'Body',
+    };
+    const written = legacy.writeNode(record.nodeId, record);
+    if (!written.ok) throw new Error(`Could not seed node: ${written.reason}`);
+
+    const before = await new DiskStructuredStore()
+      .space('canvas-a')
+      .nodes.read(record.nodeId);
+    const renamed = 'External name.md';
+    renameSync(
+      path.join(nodesDir('canvas-a'), written.filename),
+      path.join(nodesDir('canvas-a'), renamed),
+    );
+
+    // A fresh Disk handle models a process restart / cold adapter and observes
+    // the sidecar name as logical metadata, never as a physical locator.
+    resetStorageCache();
+    const after = await new DiskStructuredStore()
+      .space('canvas-a')
+      .nodes.read(record.nodeId);
+
+    if (after === null) throw new Error('Renamed node was not readable');
+    expect(after.logicalName).toBe(renamed);
+    expect(after.logicalName).toBe(path.basename(after.logicalName));
+    expect(after.logicalName).not.toContain(root);
+    expect(after.revision).not.toBe(before?.revision);
+  });
+
+  it('reports every logical name when sidecars duplicate a node id', async () => {
+    root = freshWorkspace('huabu-node-duplicates-');
+    seedSpace(root, 'canvas-a', 'Canvas A');
+    const legacy = getCanvasStore('canvas-a');
+    const record: NodeContent = {
+      nodeId: 'node-a',
+      type: 'note',
+      label: 'First',
+      content: 'Body',
+    };
+    const written = legacy.writeNode(record.nodeId, record);
+    if (!written.ok) throw new Error(`Could not seed node: ${written.reason}`);
+    copyFileSync(
+      path.join(nodesDir('canvas-a'), written.filename),
+      path.join(nodesDir('canvas-a'), 'Second.md'),
+    );
+
+    resetStorageCache();
+    const snapshot = await new DiskStructuredStore()
+      .space('canvas-a')
+      .nodes.read(record.nodeId);
+
+    expect(snapshot?.duplicateLogicalNames).toEqual(['First.md', 'Second.md']);
+    expect(snapshot?.duplicateLogicalNames).toContain(snapshot?.logicalName);
+  });
+
+  it('rejects a commit when the durable Space record is malformed', async () => {
+    root = freshWorkspace('huabu-commit-invalid-record-');
+    seedSpace(root, 'canvas-a', 'Canvas A');
+    writeFileSync(path.join(root, 'Canvas A', 'space.json'), '{}', 'utf8');
+
+    await expect(
+      new DiskStructuredStore().space('canvas-a').commit({
+        expectedVersion: 0,
+        record: { title: 'Canvas A', state: { nodes: [], edges: [] } },
+        nodePreconditions: [],
+        nodeMutations: [],
+        publication: {
+          originator: { source: 'system' },
+          optimistic: false,
+          commands: [],
+          structureDeltas: [],
+        },
+      }),
+    ).rejects.toBeInstanceOf(SyntaxError);
+  });
 });
 
 describeCanvasLogRepositoriesContract('Disk log-family repositories', () => {
@@ -96,6 +340,7 @@ describeCanvasLogRepositoriesContract('Disk log-family repositories', () => {
   const store = new DiskStructuredStore();
   const handle = store.space('canvas-a');
   const concurrent = store.space('canvas-a');
+  const legacy = getCanvasStore('canvas-a');
   return {
     events: handle.events,
     deltas: handle.deltas,
@@ -106,6 +351,9 @@ describeCanvasLogRepositoriesContract('Disk log-family repositories', () => {
       deltas: concurrent.deltas,
       changes: concurrent.changes,
       intents: concurrent.intents,
+    },
+    seedDeltas: (entries) => {
+      for (const entry of entries) legacy.appendDeltaLogEntry(entry);
     },
     cleanup: () => {
       resetStorageCache();
@@ -275,6 +523,130 @@ describe('Disk Canvas Task repository', () => {
   });
 });
 
+describe('Disk Workspace transaction serialization', () => {
+  let root = '';
+
+  beforeAll(() => {
+    root = freshWorkspace('huabu-workspace-transactions-');
+    seedSpace(root, 'canvas-first', 'First');
+    seedSpace(root, 'canvas-second', 'Second');
+  });
+
+  afterAll(() => {
+    resetStorageCache();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('serializes journal windows for concurrent commits to different Spaces', async () => {
+    const store = new DiskStructuredStore();
+    const first = store.space('canvas-first');
+    const second = store.space('canvas-second');
+    const firstRecord = await first.record.read();
+    const secondRecord = await second.record.read();
+    if (!firstRecord || !secondRecord) throw new Error('fixture missing');
+
+    const publication = {
+      originator: { source: 'system' as const },
+      optimistic: false,
+      commands: [],
+      structureDeltas: [],
+    };
+    const results = await Promise.all([
+      first.commit({
+        expectedVersion: firstRecord.version,
+        record: { title: 'First renamed', state: firstRecord.state },
+        nodePreconditions: [],
+        nodeMutations: [],
+        publication,
+      }),
+      second.commit({
+        expectedVersion: secondRecord.version,
+        record: { title: 'Second renamed', state: secondRecord.state },
+        nodePreconditions: [],
+        nodeMutations: [],
+        publication,
+      }),
+    ]);
+
+    expect(results).toEqual([
+      expect.objectContaining({ ok: true, committed: true }),
+      expect.objectContaining({ ok: true, committed: true }),
+    ]);
+    await expect(first.record.read()).resolves.toMatchObject({
+      title: 'First renamed',
+      version: 1,
+    });
+    await expect(second.record.read()).resolves.toMatchObject({
+      title: 'Second renamed',
+      version: 1,
+    });
+  });
+
+  it('publishes a Finder title when the next node commit makes it durable', async () => {
+    const canvasId = 'canvas-finder-commit';
+    seedSpace(root, canvasId, 'Original title');
+    const legacy = getCanvasStore(canvasId);
+    const original = legacy.read();
+    if (!original) throw new Error('fixture missing');
+    legacy.write({
+      ...original,
+      state: {
+        nodes: [
+          {
+            id: 'node-a',
+            type: 'note',
+            position: { x: 0, y: 0 },
+            data: {},
+          },
+        ],
+        edges: [],
+      },
+    });
+    const seeded = legacy.writeNode('node-a', {
+      nodeId: 'node-a',
+      type: 'note',
+      label: 'A',
+      content: 'before',
+    });
+    if (!seeded.ok) throw new Error(`node seed failed: ${seeded.reason}`);
+
+    const movedRoot = path.join(root, 'Finder title');
+    renameSync(path.join(root, 'Original title'), movedRoot);
+    refreshCanvasDirIndex();
+    const handle = new DiskStructuredStore().space(canvasId);
+    const current = await handle.record.read();
+    const node = await handle.nodes.read('node-a');
+    if (!current || !node) throw new Error('renamed fixture missing');
+
+    const result = await handle.commit({
+      expectedVersion: current.version,
+      record: { title: current.title, state: current.state },
+      nodePreconditions: [{ nodeId: 'node-a', revision: node.revision }],
+      nodeMutations: [
+        {
+          kind: 'put',
+          record: { ...node.record, content: 'after' },
+        },
+      ],
+      publication: {
+        originator: { source: 'system' },
+        optimistic: false,
+        commands: [],
+        structureDeltas: [],
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      committed: true,
+      event: { title: 'Finder title' },
+    });
+    expect(
+      JSON.parse(readFileSync(path.join(movedRoot, 'space.json'), 'utf8')),
+    ).toMatchObject({ title: 'Finder title', version: 1 });
+  });
+});
+
 /**
  * Instance caching is a Disk adapter detail, so it is asserted here rather
  * than in the portable contract — including its limit, so the bound stays
@@ -325,7 +697,7 @@ describe('DiskStructuredStore instance caching', () => {
 
     expect(runtime['logs']).toBeUndefined();
     expect(Object.keys(handle.events)).toEqual(['append', 'read']);
-    expect(Object.keys(handle.deltas)).toEqual(['append', 'readSince']);
+    expect(Object.keys(handle.deltas)).toEqual(['readSince']);
     expect(Object.keys(handle.changes)).toEqual(['read', 'append', 'remove']);
     expect(Object.keys(handle.intents)).toEqual(['read', 'upsert']);
 
