@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 /** Real-filesystem regression for the missing-`nodes/` watch handoff. */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
