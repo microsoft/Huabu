@@ -23,7 +23,6 @@ export {
   forgetCanvasStore,
   getCanvasStore,
   listCanvases,
-  listCanvasSummaries,
   resetStorageCache,
 } from './compatibility/canvas.js';
 export type { RenameResult, RenameSelfResult } from './compatibility/canvas.js';
@@ -90,6 +89,7 @@ export type {
   NewCanvasEvent,
   NodeWriteResult,
   SpaceHandle,
+  SpaceCatalogRepository,
   SpaceRepository,
   SpaceWriteResult,
   StructuredBackendKind,

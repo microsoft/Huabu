@@ -1,7 +1,7 @@
 # Agent Memory
 
 > Status: Shipped
-> Last updated: 2026-06-30
+> Last updated: 2026-08-07
 
 Lets the agent remember, across sessions and canvases, "who the user is, what
 this canvas is about, and which approaches are reusable". The whole mechanism is
@@ -40,6 +40,7 @@ Two independent write paths:
 - Then a **per-canvas single-flight** worker runs ([memory/worker.ts](../../apps/server/src/modules/agent/memory/worker.ts)): an already-running pass just sets a pending flag, no queue.
 - `setImmediate` dispatch — the route responds to the client first; the curator starts on the next tick.
 - Failures only `warn`, never throw; the next trigger naturally retries.
+- If the Space record no longer exists, the pass is skipped before reading memory state/chat files or calling the model, and `markAnalyzed` is not advanced.
 - The curator uses [agents/memory/AGENT.md](../../apps/server/src/prompt/agents/memory/AGENT.md), max 5 iterations, sequential tool calls.
 - The curator runs with the `memory` model role, which resolves through the Utility Model and, when Utility is not configured, defaults to the cheapest eligible model in the chat provider (ultimately the Chat Model).
 
@@ -147,7 +148,7 @@ The curator AGENT.md points at all three sub-docs. The operate Agent receives Sk
 
 ## 6. Relationship to existing systems
 
-- `events.jsonl` / chat thread files are untouched; the curator reuses the same data.
+- The curator reads Space existence, the bounded `events.jsonl` action tail, and intents through structured repositories. Chat digests and memory body/state files remain physical Disk capabilities; the storage migration changes no file format.
 - `<canvas>/.memory/` is in `ALWAYS_SKIP` ([fs-sandbox.ts](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts)) — invisible to grep / find / ls; reachable only through the controlled `read("memory/space.md")` path.
 - The skill loader uses mtime + 2s TTL + `invalidateUserSkill(id)` for write-then-read freshness. System skills are cached once-and-done.
 

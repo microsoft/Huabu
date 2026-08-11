@@ -2,13 +2,8 @@
 // Licensed under the MIT license.
 
 /**
- * Contract for the lifecycle and Space-handle boundary currently exposed by
- * {@link StructuredStore}.
- *
- * This deliberately does not describe record repositories or asynchronous
- * query semantics: {@link SpaceHandle} is still the disk-oriented
- * `CanvasStore`. Future structured adapters must first narrow that handle;
- * until then, this suite checks only behavior the port genuinely promises.
+ * Contract for the lifecycle, catalogue, and Space-handle boundaries exposed
+ * by {@link StructuredStore}. Repository behavior has its own focused suites.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -61,6 +56,16 @@ export function describeStructuredStoreContract(
       // the same Space. The Disk adapter's own test covers its caching.
       expect(second.canvasId).toBe(first.canvasId);
       expect(first.canvasId).toBe('canvas-a');
+    });
+
+    it('vends fresh catalogue repository handles', async () => {
+      const store = await open();
+      const first = store.catalog();
+      const second = store.catalog();
+
+      expect(second).not.toBe(first);
+      expect(first.list).toBeTypeOf('function');
+      expect(first.worldId).toBeTypeOf('function');
     });
 
     it('scopes handles by Space id', async () => {

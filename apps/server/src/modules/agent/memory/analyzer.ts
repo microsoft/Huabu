@@ -8,10 +8,8 @@
  * The worker calls {@link runAnalysisPass}. We:
  *
  *   1. Build the system prompt from `prompt/agents/memory/AGENT.md`.
- *   2. Assemble a compact context bundle from disk: canvas snapshot,
- *      chat-thread digest, recent ops, intent-episode digest, and
- *      the current contents of every memory surface (workspace,
- *      canvas, user-skill catalogue).
+ *   2. Assemble a compact context bundle from backend-owned Space records and
+ *      logs plus the remaining Disk-owned chat and memory surfaces.
  *   3. Run the sub-agent against that context. The agent's only way
  *      to affect the world is via the `fs_write` tool, whose handler
  *      routes by virtual path into the writers in `./writers.ts`.
@@ -33,13 +31,16 @@ import { runAgent } from '../agent.service.js';
 import { readMemoryState } from './trigger.js';
 import { loadAgent, listSkills } from '../../../prompt/index.js';
 import {
-  canvasJsonPath,
-  chatDir,
-  eventsPath,
-  intentPath,
-  workspaceMemoryPath,
+  getStructuredStore,
+  type CanvasEvent,
+  type CanvasFile,
+  type SpaceHandle,
+} from '../../storage/index.js';
+import {
   canvasMemoryPath,
-} from '../../storage/paths.js';
+  chatDir,
+  workspaceMemoryPath,
+} from '../../workspace/disk/paths.js';
 
 import type { MemoryLogger } from './index.js';
 import type { WriteResult } from './writers.js';
@@ -80,16 +81,25 @@ const MAX_INTENT_EPISODES_IN_DIGEST = 20;
  * newer turns — without it the chat digest would re-include the
  * same messages every threshold crossing.
  */
+export type AnalysisPassResult =
+  | {
+      status: 'completed';
+      results: WriteResult[];
+      latestChatTs: number | null;
+      latestIntentTs: number | null;
+    }
+  | { status: 'skipped'; reason: 'space-not-found' };
+
 export async function runAnalysisPass(
   canvasId: string,
   logger?: MemoryLogger,
-): Promise<{
-  results: WriteResult[];
-  latestChatTs: number | null;
-  latestIntentTs: number | null;
-}> {
+): Promise<AnalysisPassResult> {
+  const handle = getStructuredStore().space(canvasId);
+  const record = await handle.record.read();
+  if (!record) return { status: 'skipped', reason: 'space-not-found' };
+
+  const bundle = await assembleContext(canvasId, handle, record);
   const agent = loadAgent('memory');
-  const bundle = assembleContext(canvasId);
   const context: Context = {
     systemPrompt: agent.systemPrompt,
     messages: bundle.messages,
@@ -134,6 +144,7 @@ export async function runAnalysisPass(
   }
 
   return {
+    status: 'completed',
     results: writeResults,
     latestChatTs: bundle.latestChatTs,
     latestIntentTs: bundle.latestIntentTs,
@@ -198,19 +209,21 @@ interface ContextBundle {
  * sources are omitted so the prompt never carries stub "(none)"
  * lines that would waste tokens.
  */
-function assembleContext(canvasId: string): ContextBundle {
+async function assembleContext(
+  canvasId: string,
+  handle: SpaceHandle,
+  record: CanvasFile,
+): Promise<ContextBundle> {
   const messages: Message[] = [];
   const parts: string[] = [];
 
-  const snapshot = readCanvasSnapshot(canvasId);
-  if (snapshot) {
-    messages.push({
-      role: 'user',
-      content: `[SYSTEM Canvas snapshot]\n${snapshot.text}`,
-      timestamp: Date.now(),
-    });
-    parts.push(`${snapshot.nodeCount} nodes`);
-  }
+  const snapshot = readCanvasSnapshot(record);
+  messages.push({
+    role: 'user',
+    content: `[SYSTEM Canvas snapshot]\n${snapshot.text}`,
+    timestamp: Date.now(),
+  });
+  parts.push(`${snapshot.nodeCount} nodes`);
 
   const state = readMemoryState(canvasId);
   const chat = readChatDigest(canvasId, state.lastSeenThreadCursor);
@@ -224,7 +237,11 @@ function assembleContext(canvasId: string): ContextBundle {
     });
     parts.push(`${chat.turns} chat turns`);
   }
-  const events = readEventsDigest(canvasId);
+  const [eventRows, intentRows] = await Promise.all([
+    handle.events.read(MAX_EVENTS_IN_DIGEST),
+    handle.intents.read(),
+  ]);
+  const events = readEventsDigest(eventRows);
   if (events) {
     messages.push({
       role: 'user',
@@ -234,7 +251,7 @@ function assembleContext(canvasId: string): ContextBundle {
     parts.push(`${events.count} ops`);
   }
 
-  const intent = readIntentDigest(canvasId, state.lastSeenIntentCursor);
+  const intent = readIntentDigest(intentRows, state.lastSeenIntentCursor);
   if (intent) {
     messages.push({
       role: 'user',
@@ -270,33 +287,24 @@ function assembleContext(canvasId: string): ContextBundle {
 
 // ─── Source readers ────────────────────────────────────────────────────────
 
-function readCanvasSnapshot(
-  canvasId: string,
-): { text: string; nodeCount: number } | null {
-  const file = canvasJsonPath(canvasId);
-  if (!existsSync(file)) return null;
-  try {
-    const raw = JSON.parse(readFileSync(file, 'utf8')) as {
-      title?: string | null;
-      state?: { nodes?: unknown[]; edges?: unknown[] };
-    };
-    const nodes = Array.isArray(raw.state?.nodes) ? raw.state!.nodes : [];
-    const edges = Array.isArray(raw.state?.edges) ? raw.state!.edges : [];
-    const summarisedNodes = nodes
-      .slice(0, MAX_NODES_IN_SNAPSHOT)
-      .map((n) => summariseNode(n));
-    const truncated = nodes.length > MAX_NODES_IN_SNAPSHOT;
-    const lines = [
-      `title: ${raw.title ?? '(untitled)'}`,
-      `nodes: ${nodes.length}${truncated ? ` (showing first ${MAX_NODES_IN_SNAPSHOT})` : ''}`,
-      `edges: ${edges.length}`,
-      '',
-      ...summarisedNodes,
-    ];
-    return { text: lines.join('\n'), nodeCount: nodes.length };
-  } catch {
-    return null;
-  }
+function readCanvasSnapshot(record: CanvasFile): {
+  text: string;
+  nodeCount: number;
+} {
+  const nodes = Array.isArray(record.state?.nodes) ? record.state.nodes : [];
+  const edges = Array.isArray(record.state?.edges) ? record.state.edges : [];
+  const summarisedNodes = nodes
+    .slice(0, MAX_NODES_IN_SNAPSHOT)
+    .map((node) => summariseNode(node));
+  const truncated = nodes.length > MAX_NODES_IN_SNAPSHOT;
+  const lines = [
+    `title: ${record.title ?? '(untitled)'}`,
+    `nodes: ${nodes.length}${truncated ? ` (showing first ${MAX_NODES_IN_SNAPSHOT})` : ''}`,
+    `edges: ${edges.length}`,
+    '',
+    ...summarisedNodes,
+  ];
+  return { text: lines.join('\n'), nodeCount: nodes.length };
 }
 
 function summariseNode(node: unknown): string {
@@ -434,33 +442,19 @@ interface EventsDigest {
   count: number;
 }
 
-function readEventsDigest(canvasId: string): EventsDigest | null {
-  const file = eventsPath(canvasId);
-  if (!existsSync(file)) return null;
-  let raw: string;
-  try {
-    raw = readFileSync(file, 'utf8');
-  } catch {
-    return null;
-  }
-  const lines = raw.split('\n').filter((l) => l.trim().length > 0);
-  const tail = lines.slice(-MAX_EVENTS_IN_DIGEST);
-  if (tail.length === 0) return null;
-  const summaries: string[] = [];
-  for (const line of tail) {
-    try {
-      const evt = JSON.parse(line) as {
-        ts?: number;
-        payload?: { kind?: string; description?: string };
-      };
-      const kind = evt.payload?.kind ?? 'event';
-      const desc = evt.payload?.description ?? '';
-      summaries.push(`- ${kind}: ${String(desc).slice(0, 120)}`);
-    } catch {
-      // malformed line — skip
-    }
-  }
-  return { text: summaries.join('\n'), count: tail.length };
+function readEventsDigest(events: readonly CanvasEvent[]): EventsDigest | null {
+  if (events.length === 0) return null;
+  const summaries = events.map((event) => {
+    // Preserve the existing output until the dedicated formatter issue is
+    // addressed. Canonical RecentAction payloads use `action`, so they still
+    // render as the historical "event" fallback in this storage-only slice.
+    const payload = event.payload as unknown as {
+      kind?: unknown;
+      description?: unknown;
+    };
+    return `- ${payload.kind ?? 'event'}: ${String(payload.description ?? '').slice(0, 120)}`;
+  });
+  return { text: summaries.join('\n'), count: events.length };
 }
 
 // ─── Intent digest ────────────────────────────────────────────
@@ -473,25 +467,9 @@ interface IntentDigest {
 }
 
 function readIntentDigest(
-  canvasId: string,
+  episodes: readonly IntentEpisode[],
   since: number | null,
 ): IntentDigest | null {
-  const file = intentPath(canvasId);
-  if (!existsSync(file)) return null;
-  let raw: string;
-  try {
-    raw = readFileSync(file, 'utf8');
-  } catch {
-    return null;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(parsed)) return null;
-
   let latestTs: number | null = null;
   let selected = 0;
   let dismissed = 0;
@@ -501,7 +479,7 @@ function readIntentDigest(
   const dismissedCandidateCounts = new Map<string, number>();
   const fresh: IntentEpisode[] = [];
 
-  for (const item of parsed) {
+  for (const item of episodes) {
     if (!item || typeof item !== 'object') continue;
     const ep = item as IntentEpisode;
     if (typeof ep.timestamp !== 'number') continue;
