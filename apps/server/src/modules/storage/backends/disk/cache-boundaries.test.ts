@@ -257,14 +257,16 @@ describe('CanvasStore cache boundaries', () => {
     await expect(held.record.read()).rejects.toThrow(/inactive workspace/);
   });
 
-  it('does not create a Space directory for a node write to a missing Space', () => {
+  it('does not create a Space directory for a node write to a missing Space', async () => {
     activateWorkspace('huabu-missing-node-space-');
     const handle = new DiskStructuredStore().space('missing-space');
 
-    expect(handle.nodes.writeNode('n1', note('n1', 'Orphan'))).toEqual({
-      ok: false,
-      reason: 'not-found',
-    });
+    await expect(
+      handle.nodes.put({
+        nodeId: 'n1',
+        record: note('n1', 'Orphan'),
+      }),
+    ).resolves.toEqual({ ok: false, reason: 'not-found' });
     expect(existsSync(canvasRoot('missing-space'))).toBe(false);
   });
 
@@ -312,6 +314,6 @@ describe('CanvasStore cache boundaries', () => {
 
     expect(runtime['store']).toBeUndefined();
     expect(Object.getOwnPropertyNames(nodes)).not.toContain('store');
-    expect(Object.keys(nodes)).toEqual([]);
+    expect(Object.keys(nodes)).toEqual(['canvasId']);
   });
 });

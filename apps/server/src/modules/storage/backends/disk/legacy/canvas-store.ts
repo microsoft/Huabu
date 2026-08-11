@@ -5,7 +5,13 @@
  * Per-canvas storage facade. One instance per `<canvasDir>/`.
  */
 
-import { existsSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  unlinkSync,
+} from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -737,6 +743,42 @@ export class CanvasStore {
   }
 
   /**
+   * Strict single-record read for the backend-neutral repository.
+   *
+   * Compatibility reads retain their historical missing-or-unreadable
+   * `null`; the portable repository must distinguish absence from corrupt or
+   * inaccessible durable state, so only ENOENT is treated as missing here.
+   * Duplicate sidecars remain readable through the selected representative;
+   * the following repository `put` reports the existing actionable duplicate
+   * outcome instead of overwriting either file.
+   */
+  readNodeStrict(nodeId: string): NodeContent | null {
+    this.assertActiveWorkspace();
+    this.revalidateNodeForRead(nodeId);
+
+    const read = (filename: string): string | null => {
+      try {
+        return readFileSync(nodeFilePath(this.canvasId, filename), 'utf8');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
+          return null;
+        }
+        throw error;
+      }
+    };
+
+    const filename = this.nodeFilenameOf(nodeId);
+    let raw = read(filename);
+    if (raw === null) {
+      this.invalidateNodeIndex();
+      const retryFilename = this.nodeFilenameOf(nodeId);
+      if (retryFilename !== filename) raw = read(retryFilename);
+      if (raw === null) return null;
+    }
+    return markdownToNodeContent(nodeId, raw, true);
+  }
+
+  /**
    * One-pass batch read of every node's markdown sidecar. Returns a
    * `Map<nodeId, NodeContent>` so the canvas GET route can hydrate the
    * full node list with a single `readdirSync` + one `readText` per
@@ -1098,7 +1140,7 @@ export class CanvasStore {
    * tombstoned, so a first write racing its structural PUT is never
    * suppressed.
    *
-   * Called from the single write funnel {@link applyNodeUpdate}. The
+   * Called from the Disk node adapter's single-record write funnel. The
    * `read()` cost is paid only for the rare write that targets a
    * recently-deleted id (the common case short-circuits on an empty map).
    */

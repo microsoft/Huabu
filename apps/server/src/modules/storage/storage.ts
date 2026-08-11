@@ -23,7 +23,10 @@
 
 import path from 'node:path';
 
-import { getWorkspacePath } from '../workspace.js';
+import {
+  acquireWorkspaceOperationLease,
+  getWorkspacePath,
+} from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
 import {
   withSpaceDeleteAdmission,
@@ -47,7 +50,11 @@ import type {
   BlobStore,
 } from './ports/blob.js';
 import type { StorageHealth } from './ports/common.js';
-import type { StructuredStore } from './ports/structured.js';
+import type {
+  SpaceCreateResult,
+  SpaceDeleteResult,
+  StructuredStore,
+} from './ports/structured.js';
 import type { Readable } from 'node:stream';
 
 function activeWorkspacePath(): string {
@@ -119,6 +126,28 @@ export function createStorage(profile: StorageProfile): Storage {
 // ─── Process-wide holder ────────────────────────────────────────────────────
 
 let current: Storage | null = null;
+let spaceCreateTail: Promise<void> = Promise.resolve();
+
+function defaultSpaceTitle(
+  existing: readonly { readonly title: string | null }[],
+): string {
+  const base = 'Untitled';
+  const titles = new Set(existing.map((space) => space.title));
+  if (!titles.has(base)) return base;
+
+  let suffix = 1;
+  while (titles.has(`${base} (${suffix})`)) suffix += 1;
+  return `${base} (${suffix})`;
+}
+
+function serializeSpaceCreate<T>(operation: () => Promise<T>): Promise<T> {
+  const result = spaceCreateTail.catch(() => undefined).then(operation);
+  spaceCreateTail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
 
 function ensure(): Storage {
   if (current) return current;
@@ -164,6 +193,68 @@ export function getBlobStore(): BlobStore {
 
 export function getStructuredStore(): StructuredStore {
   return ensure().structured;
+}
+
+/**
+ * Create one ordinary Space through the selected structured backend.
+ *
+ * Default-title allocation and lifecycle creation share one process-local
+ * serialization point. The Workspace lease is acquired before queueing, so
+ * an async catalogue read cannot strand the request in a newly activated
+ * Workspace and concurrent defaults remain Untitled, Untitled (1), ... .
+ */
+export function createSpace(
+  canvasId: string,
+  title?: string | null,
+): Promise<SpaceCreateResult> {
+  const structured = ensure().structured;
+  const workspaceLease = acquireWorkspaceOperationLease();
+  return serializeSpaceCreate(async () => {
+    try {
+      const effectiveTitle =
+        title === undefined
+          ? defaultSpaceTitle(await structured.catalog().list())
+          : title;
+      return await structured
+        .lifecycle()
+        .create({ canvasId, title: effectiveTitle });
+    } finally {
+      workspaceLease.release();
+    }
+  });
+}
+
+/**
+ * Delete one Space across the independently configured stores.
+ *
+ * The structured port deliberately does not accept a callback into the blob
+ * store: that would make a database adapter hold a transaction while running
+ * arbitrary remote I/O. Composition therefore owns the existing blob-first
+ * saga. The process-local admission gate preserves today's single-server
+ * ordering; it is not advertised as a distributed transaction guarantee.
+ */
+export async function deleteSpace(
+  canvasId: string,
+): Promise<SpaceDeleteResult> {
+  const workspaceLease = acquireWorkspaceOperationLease();
+  try {
+    const storage = ensure();
+    return await withCanvasDeletionAdmission(canvasId, async () => {
+      // World protection must be decided before deleting bytes. A configured
+      // Workspace has one stable World; a missing/corrupt World is an
+      // integrity error rather than permission to continue.
+      if ((await storage.structured.catalog().worldId()) === canvasId) {
+        return { ok: false, reason: 'world-forbidden' };
+      }
+
+      // Preserve the old retryable cleanup behavior: sweep even when the
+      // structured record is already absent, so orphan blobs can be removed.
+      await storage.blobs.scope({ kind: 'canvas', canvasId }).deleteAll();
+      return storage.structured.lifecycle().delete({ canvasId });
+    });
+  } finally {
+    workspaceLease.release();
+  }
 }
 
 /**

@@ -6,16 +6,10 @@
  *
  * The connection ({@link StructuredStore}) owns backend identity and
  * lifecycle, and vends a {@link SpaceHandle} per Space. The handle is a
- * composite of narrow, asynchronous repositories: the versioned Space record
- * ({@link SpaceRepository}), four Canvas-owned log-family repositories, and
- * the canonical Task/Run repository.
- *
- * Scope note: node sidecars are still reached through
- * {@link LegacyNodeStore}, a deliberately narrow *synchronous* transitional
- * surface. Node persistence is the one part of the Space a non-Disk adapter
- * cannot yet implement, because the write coordinator's atomicity argument
- * depends on `readNode` / `writeNode` being synchronous. Replacing it is a
- * later phase; see docs/proposals/multi-backend-storage.md §12.2.7.
+ * composite of narrow, asynchronous repositories: lifecycle and catalogue,
+ * the versioned Space record ({@link SpaceRepository}), node records, four
+ * Canvas-owned log-family repositories, the canonical Task/Run repository,
+ * and the existing ordered executor write sequence.
  *
  * Guarantee scope: the concurrency properties below (single-winner CAS,
  * linearizable appends) are **adapter-local**. They hold for calls made
@@ -62,6 +56,8 @@ export interface StructuredStore {
    * active Workspace.
    */
   catalog(): SpaceCatalogRepository;
+  /** Create/delete membership and explicitly mutate a Space title. */
+  lifecycle(): SpaceLifecycleRepository;
   /**
    * Return the handle for one validated Space id.
    *
@@ -73,6 +69,62 @@ export interface StructuredStore {
    * durable state and belongs in a repository, not on a handle.
    */
   space(canvasId: string): SpaceHandle;
+}
+
+// ─── Space lifecycle (Phase 4 additive contract) ─────────────────────────────────────
+
+export interface SpaceCreateInput {
+  readonly canvasId: string;
+  readonly title: string | null;
+}
+
+export type SpaceCreateResult =
+  | { readonly ok: true; readonly record: CanvasFile }
+  | { readonly ok: false; readonly reason: 'already-exists' };
+
+export interface SpaceDeleteInput {
+  readonly canvasId: string;
+}
+
+export type SpaceDeleteResult =
+  | { readonly ok: true; readonly reason: 'deleted' }
+  | {
+      readonly ok: false;
+      readonly reason: 'not-found' | 'world-forbidden';
+    };
+
+export interface SpaceRenameInput {
+  readonly canvasId: string;
+  readonly title: string | null;
+}
+
+export type SpaceRenameResult =
+  | { readonly ok: true; readonly record: CanvasFile }
+  | {
+      readonly ok: false;
+      readonly reason: 'not-found' | 'world-forbidden';
+    }
+  | {
+      readonly ok: false;
+      readonly reason: 'title-conflict';
+    };
+
+/**
+ * Backend-neutral creation, deletion, and explicit title mutation.
+ *
+ * Creation returns the authoritative version-0 record. For a repeated
+ * non-null requested title, allocation preserves the existing product rule:
+ * the first record keeps the title and later records receive ` (2)`, ` (3)`,
+ * ... suffixes. Deletion concerns structured state only: blob cleanup and
+ * cross-store ordering remain composition-layer responsibilities. Rename is
+ * deliberately separate from the ordered record/node writer: its existing
+ * addressing side effect may complete before a later, independent record
+ * write fails.
+ */
+export interface SpaceLifecycleRepository {
+  create(input: SpaceCreateInput): Promise<SpaceCreateResult>;
+  delete(input: SpaceDeleteInput): Promise<SpaceDeleteResult>;
+  rename(input: SpaceRenameInput): Promise<SpaceRenameResult>;
 }
 
 /** Read-only membership and World identity for one backend namespace. */
@@ -101,8 +153,9 @@ export interface SpaceHandle {
   readonly changes: CanvasChangeRepository;
   readonly intents: CanvasIntentRepository;
   readonly tasks: CanvasTaskRepository;
-  /** Synchronous transitional surface; replaced in a later phase. */
-  readonly nodes: LegacyNodeStore;
+  readonly nodes: NodeRepository;
+  /** Existing ordered executor persistence semantics; not a transaction. */
+  readonly writer: OrderedSpaceWriter;
 }
 
 // ─── Space record ───────────────────────────────────────────────────────────
@@ -115,10 +168,9 @@ export type SpaceWriteResult =
 /**
  * The versioned structural record for one Space (`space.json` on Disk).
  *
- * Scoped deliberately: create, delete, World rules, and title/directory
- * rename are aggregate lifecycle concerns that stay on the compatibility path
- * until their portable contract is designed. This repository only replaces
- * the record of a Space that already exists.
+ * Scoped deliberately: create, delete, World rules, and title mutation are
+ * lifecycle concerns. This repository only replaces the record of a Space
+ * that already exists.
  */
 export interface SpaceRepository {
   /** The current record, or null when the Space does not exist. */
@@ -144,6 +196,60 @@ export interface SpaceRepository {
 }
 
 // ─── Canvas logs ────────────────────────────────────────────────────────────
+
+export type OrderedNodeMutation =
+  | {
+      readonly kind: 'put';
+      readonly nodeId: string;
+      readonly record: NodeContent;
+      /** Refuse a colliding logical label instead of de-duplicating it. */
+      readonly strictLabel?: boolean;
+      /**
+       * Marks an executor-authoritative INSERT.
+       *
+       * This is intentionally batch-only. It lets an adapter distinguish a
+       * real re-insertion from a late direct write that should remain
+       * suppressed after deletion.
+       */
+      readonly authoritativeInsert?: boolean;
+    }
+  | { readonly kind: 'delete'; readonly nodeId: string };
+
+export interface OrderedSpaceWriteInput {
+  /** Space version observed before preparing this write. */
+  readonly expectedVersion: number;
+  /** Complete record to install after all node mutations succeed. */
+  readonly nextRecord: CanvasFile;
+  readonly nodeMutations: readonly OrderedNodeMutation[];
+  /** Optional executor delta appended after the record write. */
+  readonly delta?: DeltaLogEntry;
+  /**
+   * Preserve the legacy implicit-create path for a write to an absent Space.
+   * Omitted or false means an absent Space returns `not-found`.
+   */
+  readonly allowCreate?: boolean;
+}
+
+export type SpaceMutationResult = SpaceWriteResult;
+
+/**
+ * Apply one Space mutation in the observable order used by current writers:
+ * node puts/deletes, Space-record replacement, then an optional delta append.
+ *
+ * Business outcomes are returned as {@link SpaceMutationResult}; malformed
+ * input and operational failures reject. A rejected node/record/delta batch
+ * must not leave a visible completed prefix under continued adapter
+ * operation. This is a call-level failure guarantee, not crash durability:
+ * callers receive no portable guarantee for process termination, power loss,
+ * loss of the backend connection while the outcome is unknown,
+ * uncoordinated multi-process access, idempotent retry, or publication. Title
+ * addressing is an explicit lifecycle operation outside this batch. A
+ * successful write only means the requested storage operations completed; it
+ * does not mint or broadcast a wire-protocol event.
+ */
+export interface OrderedSpaceWriter {
+  apply(input: OrderedSpaceWriteInput): Promise<SpaceMutationResult>;
+}
 
 /** Input shape for an event append; `ts` defaults to server time. */
 export interface NewCanvasEvent {
@@ -206,62 +312,73 @@ export interface CanvasTaskRepository {
   updateRun(runId: string, update: TaskRunUpdate): Promise<TaskRunRecord>;
 }
 
-// ─── Node sidecars (transitional) ───────────────────────────────────────────
+// Node records
 
 /**
- * Outcome of a node sidecar write.
- *
- * Declared here rather than imported from the Disk legacy class so this port
- * stays free of backend imports; the Disk wrapper's return value is
- * structurally this type.
+ * One complete node record and its opaque optimistic-concurrency token.
  */
-export type NodeWriteResult =
+export interface NodeSnapshot {
+  readonly record: NodeContent;
+  readonly revision: string;
+}
+
+export interface NodePutInput {
+  readonly nodeId: string;
+  readonly record: NodeContent;
+  /**
+   * When present, the write succeeds only from this observed storage token;
+   * `null` explicitly requires the node to be absent.
+   */
+  readonly expectedRevision?: string | null;
+  /** Reject a conflicting logical label instead of assigning another one. */
+  readonly strictLabel?: boolean;
+}
+
+export type NodePutResult =
+  | ({ readonly ok: true } & NodeSnapshot)
+  | { readonly ok: false; readonly reason: 'not-found' }
   | {
-      ok: true;
-      /** Filesystem-safe filename (`safe(label) [(N)].md`). */
-      filename: string;
-      /** The label as actually persisted, including any dedupe suffix. */
-      label: string | null;
+      readonly ok: false;
+      readonly reason: 'revision-conflict';
+      readonly currentRevision: string | null;
     }
   | {
-      ok: false;
-      reason: 'conflict';
-      conflictWith: { id: string; filename: string };
+      readonly ok: false;
+      readonly reason: 'label-conflict';
+      readonly conflictingNodeId: string;
+      readonly conflictingLabel: string;
     }
-  | { ok: false; reason: 'duplicate'; files: string[] }
-  | { ok: false; reason: 'not-found' };
+  | {
+      readonly ok: false;
+      readonly reason: 'duplicate-node';
+      /** Adapter-local logical names involved in this integrity conflict. */
+      readonly names: readonly string[];
+    }
+  | { readonly ok: false; readonly reason: 'write-suppressed' };
+
+export type NodeDeleteResult = 'deleted' | 'absent';
 
 /**
- * Node-sidecar operations only.
+ * Complete node-record persistence for one Space.
  *
- * This surface exists so `handle.nodes` cannot be widened, or cast, back into
- * the old all-purpose store: it must never grow a Space-record, log, title,
- * or lifecycle method. The Disk wrapper delegates each call to the legacy
- * object rather than re-exposing it.
- *
- * It is synchronous because the write coordinator's atomicity argument
- * depends on it: read → revision check → apply → write must stay `await`-free
- * inside the canvas lock. The async node phase replaces this only after
- * re-establishing that invariant.
+ * Revisions are opaque full-record storage tokens, distinct from any public
+ * content revision. Label allocation is a domain behavior: a non-strict put
+ * may return a de-duplicated persisted label, while a strict put reports a
+ * `label-conflict`. The contract intentionally says nothing about filenames
+ * or physical layout. Environmental and malformed-record failures reject.
+ * `duplicate-node` is an optional mutation outcome for adapters that can
+ * observe conflicting physical representations of one stable id. Such an
+ * adapter may return one readable representative from `read` so a caller can
+ * construct the attempted update, but it must refuse the `put` rather than
+ * overwrite an arbitrary representation; `readMany` may reject the ambiguous
+ * batch instead. SQL adapters with a unique key never produce this outcome.
  */
-export interface LegacyNodeStore {
-  readNode(nodeId: string): NodeContent | null;
-  readAllNodes(options?: {
-    strict?: boolean;
-  }): Promise<Map<string, NodeContent>>;
-  streamAllNodes(
-    onNode: (id: string, content: NodeContent) => void,
-    signal?: { readonly aborted: boolean },
-  ): Promise<Map<string, NodeContent>>;
-  writeNode(
-    nodeId: string,
-    content: NodeContent,
-    opts?: { strictRename?: boolean },
-  ): NodeWriteResult;
-  deleteNode(nodeId: string): 'deleted' | 'absent';
-  nodeIdForFilename(filename: string): string | null;
-  isDuplicateNode(nodeId: string): boolean;
-  duplicateNodeFiles(nodeId: string): string[];
-  revalidateNodeForRead(nodeId: string): void;
-  isNodeWriteSuppressed(nodeId: string): boolean;
+export interface NodeRepository {
+  readonly canvasId: string;
+  read(nodeId: string): Promise<NodeSnapshot | null>;
+  readMany(
+    nodeIds: readonly string[],
+  ): Promise<ReadonlyMap<string, NodeSnapshot>>;
+  put(input: NodePutInput): Promise<NodePutResult>;
+  delete(nodeId: string): Promise<NodeDeleteResult>;
 }
