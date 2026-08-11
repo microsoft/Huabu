@@ -28,6 +28,9 @@ const fileIO = vi.hoisted(() => ({
   stat: vi.fn<
     (filePath: string) => Promise<{
       mtimeMs: number;
+      dev?: number;
+      ino?: number;
+      birthtimeMs?: number;
       isFile: () => boolean;
       isDirectory: () => boolean;
     }>
@@ -41,9 +44,11 @@ const fileIO = vi.hoisted(() => ({
 vi.mock('node:fs/promises', () => fileIO);
 
 const nativeWatchMock = vi.hoisted(() => vi.fn());
+const nativeStatSyncMock = vi.hoisted(() => vi.fn());
 
 vi.mock('node:fs', () => ({
   watch: nativeWatchMock,
+  statSync: nativeStatSyncMock,
 }));
 
 vi.mock('../workspace.js', () => ({
@@ -106,6 +111,13 @@ let currentNative: ReturnType<typeof makeFakeNativeWatcher>;
 
 beforeEach(() => {
   nativeWatchMock.mockReset();
+  nativeStatSyncMock.mockReset();
+  nativeStatSyncMock.mockReturnValue({
+    dev: 1,
+    ino: 1,
+    birthtimeMs: 1,
+    isDirectory: () => true,
+  });
   currentNative = makeFakeNativeWatcher();
   nativeWatchMock.mockImplementation(() => {
     currentNative = makeFakeNativeWatcher();
@@ -355,6 +367,74 @@ describe('openExternalNoteSession', () => {
     second.close();
   });
 
+  it('probes without holding the Space root open on Windows', async () => {
+    vi.useFakeTimers();
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', {
+      configurable: true,
+      value: 'win32',
+    });
+    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
+    let nodesExists = false;
+    nativeWatchMock.mockImplementation(
+      (watchPath: string, _options: unknown, _callback: unknown) => {
+        if (
+          watchPath.split('\\').join('/').endsWith('/nodes') &&
+          !nodesExists
+        ) {
+          throw Object.assign(new Error('missing nodes directory'), {
+            code: 'ENOENT',
+          });
+        }
+        currentNative = makeFakeNativeWatcher();
+        return currentNative;
+      },
+    );
+    fileIO.stat.mockImplementation(async (filePath: string) => {
+      if (filePath.split('\\').join('/').endsWith('/nodes')) {
+        if (!nodesExists) {
+          throw Object.assign(new Error('missing nodes directory'), {
+            code: 'ENOENT',
+          });
+        }
+        return {
+          mtimeMs: 1,
+          isFile: () => false,
+          isDirectory: () => true,
+        };
+      }
+      return {
+        mtimeMs: 1,
+        isFile: () => true,
+        isDirectory: () => false,
+      };
+    });
+
+    let session: Awaited<ReturnType<typeof openExternalNoteSession>> | null =
+      null;
+    try {
+      session = await openExternalNoteSession('canvas-a', vi.fn());
+
+      expect(session.snapshot).toEqual([]);
+      expect(nativeWatchMock).toHaveBeenCalledTimes(1);
+      expect(nativeWatchMock.mock.calls[0]?.[0]).toMatch(/canvas-a[\\/]nodes$/);
+
+      nodesExists = true;
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(nativeWatchMock).toHaveBeenCalledTimes(2);
+      expect(nativeWatchMock.mock.calls[1]?.[0]).toMatch(/canvas-a[\\/]nodes$/);
+      expect(fileIO.readdir).toHaveBeenCalledTimes(1);
+    } finally {
+      session?.close();
+      Object.defineProperty(process, 'platform', {
+        configurable: true,
+        value: originalPlatform,
+      });
+      vi.useRealTimers();
+    }
+  });
+
   it('falls back to the Space root when nodes is deleted, then watches its recreation', async () => {
     canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
     let nodesExists = true;
@@ -404,12 +484,14 @@ describe('openExternalNoteSession', () => {
     nodesExists = false;
     originalChildCallback?.('rename', 'nodes');
 
-    expect(originalChild.close).toHaveBeenCalledTimes(1);
-    expect(events.at(-1)).toEqual({
-      type: 'snapshot',
-      data: { items: [] },
+    await vi.waitFor(() => {
+      expect(originalChild.close).toHaveBeenCalledTimes(1);
+      expect(events.at(-1)).toEqual({
+        type: 'snapshot',
+        data: { items: [] },
+      });
+      expect(nativeWatchMock).toHaveBeenCalledTimes(3);
     });
-    expect(nativeWatchMock).toHaveBeenCalledTimes(3);
     expect(nativeWatchMock.mock.calls[1]?.[0]).toMatch(/canvas-a[\\/]nodes$/);
     expect(nativeWatchMock.mock.calls[2]?.[0]).toMatch(/canvas-a$/);
 
@@ -470,6 +552,111 @@ describe('openExternalNoteSession', () => {
 });
 
 describe('native note events', () => {
+  it('does not reset the session for an ambiguous event from the same directory', async () => {
+    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
+    fileIO.stat.mockImplementation(async (filePath: string) =>
+      filePath.split('\\').join('/').endsWith('/nodes')
+        ? {
+            mtimeMs: 1,
+            dev: 1,
+            ino: 1,
+            birthtimeMs: 1,
+            isFile: () => false,
+            isDirectory: () => true,
+          }
+        : {
+            mtimeMs: 1,
+            isFile: () => true,
+            isDirectory: () => false,
+          },
+    );
+    const events: ExternalNoteEvent[] = [];
+    const session = await openExternalNoteSession('canvas-a', (event) =>
+      events.push(event),
+    );
+    const originalChild = currentNative;
+    const callback = nativeWatchMock.mock.calls[0]?.[2] as
+      | ((eventType: string, filename: string | null) => void)
+      | undefined;
+
+    callback?.('change', null);
+
+    await vi.waitFor(() => {
+      expect(fileIO.stat).toHaveBeenCalledWith('/ws/canvas-a/nodes');
+    });
+    expect(originalChild.close).not.toHaveBeenCalled();
+    expect(nativeWatchMock).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([]);
+    session.close();
+  });
+
+  it('re-arms when an ambiguous event comes from a replaced directory', async () => {
+    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
+    fileIO.stat.mockResolvedValue({
+      mtimeMs: 2,
+      dev: 1,
+      ino: 2,
+      birthtimeMs: 2,
+      isFile: () => false,
+      isDirectory: () => true,
+    });
+    const events: ExternalNoteEvent[] = [];
+    const session = await openExternalNoteSession('canvas-a', (event) =>
+      events.push(event),
+    );
+    const originalChild = currentNative;
+    nativeStatSyncMock.mockReturnValue({
+      dev: 1,
+      ino: 2,
+      birthtimeMs: 2,
+      isDirectory: () => true,
+    });
+    const callback = nativeWatchMock.mock.calls[0]?.[2] as
+      | ((eventType: string, filename: string | null) => void)
+      | undefined;
+
+    callback?.('rename', null);
+
+    await vi.waitFor(() => {
+      expect(originalChild.close).toHaveBeenCalledTimes(1);
+      expect(nativeWatchMock).toHaveBeenCalledTimes(2);
+    });
+    expect(events).toContainEqual({
+      type: 'snapshot',
+      data: { items: [] },
+    });
+    session.close();
+  });
+
+  it('follows a Space directory renamed outside the server', async () => {
+    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'old-name' }]);
+    const events: ExternalNoteEvent[] = [];
+    const session = await openExternalNoteSession('canvas-a', (event) =>
+      events.push(event),
+    );
+    const originalChild = currentNative;
+    fileIO.stat.mockRejectedValue(
+      Object.assign(new Error('old Space path is gone'), { code: 'ENOENT' }),
+    );
+    canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'new-name' }]);
+    const callback = nativeWatchMock.mock.calls[0]?.[2] as
+      | ((eventType: string, filename: string | null) => void)
+      | undefined;
+
+    callback?.('rename', null);
+
+    await vi.waitFor(() => {
+      expect(originalChild.close).toHaveBeenCalledTimes(1);
+      expect(nativeWatchMock).toHaveBeenCalledTimes(2);
+    });
+    expect(nativeWatchMock.mock.calls[1]?.[0]).toMatch(/new-name[\\/]nodes$/);
+    expect(events).toContainEqual({
+      type: 'snapshot',
+      data: { items: [] },
+    });
+    session.close();
+  });
+
   it('emits one added event per file regardless of duplicate raw events', async () => {
     canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
     const events: ExternalNoteEvent[] = [];
