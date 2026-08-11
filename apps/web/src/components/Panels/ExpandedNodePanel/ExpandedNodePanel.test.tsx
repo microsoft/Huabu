@@ -47,8 +47,20 @@ const testStorage = vi.hoisted(() => {
 });
 
 vi.mock('../../Nodes/NodePreviewContent.tsx', () => ({
-  NodePreviewContent: ({ id }: { id?: string }) => (
-    <div data-preview-node-id={id} />
+  NodePreviewContent: ({
+    id,
+    onDataChange,
+  }: {
+    id?: string;
+    onDataChange?: (patch: Record<string, unknown>) => void;
+  }) => (
+    <div data-preview-node-id={id}>
+      <button
+        type="button"
+        data-testid="mutate-node"
+        onClick={() => onDataChange?.({ content: 'Updated' })}
+      />
+    </div>
   ),
 }));
 
@@ -82,7 +94,12 @@ function edge(
   };
 }
 
-function renderPanel(nodes: Node[], edges: Edge[], embedded = false) {
+function renderPanel(
+  nodes: Node[],
+  edges: Edge[],
+  embedded = false,
+  onCommit?: () => void,
+) {
   useCanvasStore.setState({
     nodes,
     edges,
@@ -98,7 +115,9 @@ function renderPanel(nodes: Node[], edges: Edge[], embedded = false) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root?.render(<ExpandedNodePanel embedded={embedded} />));
+  act(() =>
+    root?.render(<ExpandedNodePanel embedded={embedded} onCommit={onCommit} />),
+  );
 }
 
 function dispatchArrow(target: EventTarget, key: 'ArrowLeft' | 'ArrowRight') {
@@ -168,6 +187,19 @@ afterEach(() => {
 });
 
 describe('ExpandedNodePanel edge navigation', () => {
+  it('reports persistent content mutations to its preview owner', () => {
+    const onCommit = vi.fn();
+    renderPanel([canvasNode('a', 'Alpha')], [], true, onCommit);
+
+    act(() =>
+      container
+        ?.querySelector<HTMLButtonElement>('[data-testid="mutate-node"]')
+        ?.click(),
+    );
+
+    expect(onCommit).toHaveBeenCalledOnce();
+  });
+
   it('uses compact chrome only when embedded in Preview Workspace', () => {
     renderPanel([canvasNode('a', 'Alpha')], [], true);
 

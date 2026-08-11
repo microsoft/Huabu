@@ -48,8 +48,16 @@ vi.hoisted(() => {
 // The Chat panel pulls in the whole agent stack; the workspace only needs to
 // know it dispatched to it.
 vi.mock('../ChatPanel', () => ({
-  ChatPanel: ({ session }: { session?: { threadId: string } }) => (
-    <div data-testid="chat-panel" data-thread-id={session?.threadId} />
+  ChatPanel: ({
+    session,
+    onCommit,
+  }: {
+    session?: { threadId: string };
+    onCommit?: () => void;
+  }) => (
+    <div data-testid="chat-panel" data-thread-id={session?.threadId}>
+      <button type="button" data-testid="commit-chat" onClick={onCommit} />
+    </div>
   ),
 }));
 
@@ -361,6 +369,31 @@ describe('activation', () => {
     );
 
     expect(store().workspace.tabs[tabId].transient).toBe(false);
+  });
+
+  it('promotes a transient tab when its renderer commits a mutation', () => {
+    const tabId = store().openPreviewTarget(
+      { kind: 'chat', canvasId: CANVAS_ID, threadId: 'thread-1' },
+      { transient: true },
+    );
+    render([]);
+
+    expect(store().workspace.tabs[tabId].transient).toBe(true);
+    act(() =>
+      container
+        ?.querySelector<HTMLButtonElement>('[data-testid="commit-chat"]')
+        ?.click(),
+    );
+
+    expect(store().workspace.tabs[tabId].transient).toBe(false);
+  });
+
+  it('describes transient tabs without promoting them during browsing', () => {
+    const tabId = openNode('a', true);
+    render([canvasNode('a', 'Alpha')]);
+
+    expect(activeTabName()).toContain('Temporary preview');
+    expect(store().workspace.tabs[tabId].transient).toBe(true);
   });
 
   it('reuses the inspection slot while browsing transiently', () => {

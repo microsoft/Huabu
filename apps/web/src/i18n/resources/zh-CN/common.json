@@ -380,6 +380,8 @@
     "tabStrip": "已打开的预览",
     "group": "预览分组",
     "chatTab": "对话",
+    "transientTabHint": "{{title}} — 临时预览；双击固定",
+    "transientTabDescription": "临时预览；双击固定",
     "closeTab": "关闭“{{title}}”",
     "resizeGroups": "调整预览分组宽度",
     "openToSide": "在旁边打开",

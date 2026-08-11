@@ -83,6 +83,9 @@ export function PreviewTab({
   const accessibleName = isNode
     ? `${title} (${node?.type ?? 'node'})`
     : t('preview.chatTab');
+  const tabDescription = tab.transient
+    ? t('preview.transientTabHint', { title })
+    : title;
 
   return (
     <div
@@ -93,7 +96,11 @@ export function PreviewTab({
       id={tabElementId}
       aria-selected={isActive}
       aria-controls={panelElementId}
-      aria-label={accessibleName}
+      aria-label={
+        tab.transient
+          ? `${accessibleName}. ${t('preview.transientTabDescription')}`
+          : accessibleName
+      }
       tabIndex={isActive ? 0 : -1}
       data-preview-tab-id={tab.id}
       onClick={onActivate}
@@ -127,7 +134,7 @@ export function PreviewTab({
     >
       {Icon && <Icon size={14} className="shrink-0" />}
       <Tooltip
-        content={title}
+        content={tabDescription}
         placement="bottom"
         wrapperClassName="inline-flex min-w-0"
       >

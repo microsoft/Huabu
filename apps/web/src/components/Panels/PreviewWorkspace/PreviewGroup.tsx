@@ -95,6 +95,7 @@ export function PreviewGroup({
             tabId={activeTab.id}
             target={activeTab.target}
             onClose={() => onClose(activeTab.id)}
+            onCommit={() => onPromote(activeTab.id)}
             hasFocusPriority={isFocused}
           />
         ) : (

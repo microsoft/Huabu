@@ -380,6 +380,8 @@
     "tabStrip": "Open previews",
     "group": "Preview group",
     "chatTab": "Chat",
+    "transientTabHint": "{{title}} — temporary preview; double-click to keep",
+    "transientTabDescription": "Temporary preview; double-click to keep",
     "closeTab": "Close {{title}}",
     "resizeGroups": "Resize preview groups",
     "openToSide": "Open to the side",

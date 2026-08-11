@@ -75,6 +75,8 @@ interface ChatPanelProps {
   session: ChatSession;
   /** Workspace tab to convert in place when an unbound Chat is saved. */
   previewTabId: string;
+  /** Reports a persistent thread mutation to the owning preview surface. */
+  onCommit?: () => void;
 }
 
 export const ChatPanel = ({
@@ -82,6 +84,7 @@ export const ChatPanel = ({
   onToggle,
   session,
   previewTabId,
+  onCommit,
 }: ChatPanelProps) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -478,6 +481,7 @@ export const ChatPanel = ({
       });
       try {
         await setAcpSessionMode(threadId, { modeId, ...acpSetRpcSpawnCtx });
+        onCommit?.();
       } catch (err) {
         applyAcpSessionMetaOptimistic({
           selection: { id: MODE_SELECTION_ID, value: previous },
@@ -490,7 +494,7 @@ export const ChatPanel = ({
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, t],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, onCommit, t],
   );
 
   const handleAcpSelectModel = useCallback(
@@ -503,6 +507,7 @@ export const ChatPanel = ({
       });
       try {
         await setAcpSessionModel(threadId, { modelId, ...acpSetRpcSpawnCtx });
+        onCommit?.();
       } catch (err) {
         applyAcpSessionMetaOptimistic({
           selection: { id: MODEL_SELECTION_ID, value: previous },
@@ -515,7 +520,7 @@ export const ChatPanel = ({
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, t],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, onCommit, t],
   );
 
   const handleAcpSelectConfigOption = useCallback(
@@ -531,6 +536,7 @@ export const ChatPanel = ({
           value,
           ...acpSetRpcSpawnCtx,
         });
+        onCommit?.();
       } catch (err) {
         applyAcpSessionMetaOptimistic({
           selection: { id: optionId, value: previous },
@@ -543,7 +549,7 @@ export const ChatPanel = ({
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, t],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, onCommit, t],
   );
 
   // Question thread replay mode
@@ -603,10 +609,12 @@ export const ChatPanel = ({
     }
     setIsEditingQuestionTitle(false);
     void tryRename('node', viewingQuestionNodeId, next).then((accepted) => {
-      if (!accepted) setDraftQuestionTitle(viewingQuestionLabel ?? '');
+      if (accepted) onCommit?.();
+      else setDraftQuestionTitle(viewingQuestionLabel ?? '');
     });
   }, [
     draftQuestionTitle,
+    onCommit,
     tryRename,
     viewingQuestionLabel,
     viewingQuestionNodeId,
@@ -637,6 +645,7 @@ export const ChatPanel = ({
     if (!isSkillInvocationAllowed) {
       const prompt = raw.trim();
       if (!prompt) return;
+      onCommit?.();
       await startStream(prompt, agentMode);
       return;
     }
@@ -646,6 +655,7 @@ export const ChatPanel = ({
     );
     const prompt = message.trim();
     if (!prompt) return;
+    onCommit?.();
     await startStream(
       prompt,
       agentMode,
@@ -672,9 +682,11 @@ export const ChatPanel = ({
       if (isLoading || viewingQuestionBindingIsFixed) return;
       setAgentBinding(threadId, choice.binding, canvasId || undefined);
       setThreadLastAction(threadId, choice.mode);
+      onCommit?.();
     },
     [
       isLoading,
+      onCommit,
       viewingQuestionBindingIsFixed,
       setAgentBinding,
       setThreadLastAction,
@@ -864,6 +876,7 @@ export const ChatPanel = ({
               value={input}
               onChange={setInput}
               onSubmit={handleSubmit}
+              onCommit={onCommit}
               onStop={stopStream}
               isStreaming={isLoading}
               mode={mode}
@@ -900,10 +913,14 @@ export const ChatPanel = ({
                       builtinThreadSettings.settings.reasoningEffort
                     }
                     loading={builtinThreadSettings.loading}
-                    onSelectModel={builtinThreadSettings.selectModel}
-                    onSelectReasoningEffort={
-                      builtinThreadSettings.selectReasoningEffort
-                    }
+                    onSelectModel={async (modelId) => {
+                      await builtinThreadSettings.selectModel(modelId);
+                      onCommit?.();
+                    }}
+                    onSelectReasoningEffort={async (effort) => {
+                      await builtinThreadSettings.selectReasoningEffort(effort);
+                      onCommit?.();
+                    }}
                   />
                 )
               }

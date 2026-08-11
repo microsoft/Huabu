@@ -35,6 +35,8 @@ interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
   onSubmit: (e: React.FormEvent, mode: AgentMode) => void;
+  /** Reports a persistent composer mutation to the owning preview surface. */
+  onCommit?: () => void;
   onStop: () => void;
   isStreaming?: boolean;
   /** Current built-in mode. Affects placeholder + the value submitted to `onSubmit`. */
@@ -102,6 +104,7 @@ export const ChatInput = ({
   value,
   onChange,
   onSubmit,
+  onCommit,
   onStop,
   isStreaming = false,
   mode,
@@ -208,11 +211,12 @@ export const ChatInput = ({
             filename: file.name,
           });
         }
+        onCommit?.();
       } catch (err) {
         console.error('Failed to upload file:', err);
       }
     },
-    [addPendingAttachment, canvasId, t, threadId],
+    [addPendingAttachment, canvasId, onCommit, t, threadId],
   );
 
   // Handle paste — upload pasted images/files as attachments
@@ -444,6 +448,7 @@ export const ChatInput = ({
                     const locked = { ...att };
                     useChatStore.getState().setSelectionAttachment(null);
                     addPendingAttachment(threadId, locked);
+                    onCommit?.();
                   };
 
                   const tile = (
@@ -574,6 +579,7 @@ export const ChatInput = ({
                       onClick={(e) => {
                         e.stopPropagation();
                         removePendingAttachment(threadId, idx);
+                        onCommit?.();
                       }}
                       tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
                       className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 p-0.5"

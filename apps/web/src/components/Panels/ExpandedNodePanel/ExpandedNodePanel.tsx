@@ -54,6 +54,8 @@ type ExpandedNodePanelProps = {
   nodeId?: string;
   /** Closes this instance; defaults to closing the focused group's tab. */
   onClose?: () => void;
+  /** Reports a persistent node mutation to the owning preview surface. */
+  onCommit?: () => void;
   /** Uses the compact chrome shared by Preview Workspace renderers. */
   embedded?: boolean;
   /**
@@ -232,6 +234,7 @@ const ConnectedNodeMenu = ({
 export const ExpandedNodePanel = ({
   nodeId,
   onClose,
+  onCommit,
   embedded = false,
   hasFocusPriority = true,
 }: ExpandedNodePanelProps = {}) => {
@@ -509,7 +512,8 @@ export const ExpandedNodePanel = ({
       return;
     }
     void tryRename('node', expandedNodeId, next).then((ok) => {
-      if (!ok) setDraftTitle(liveLabel);
+      if (ok) onCommit?.();
+      else setDraftTitle(liveLabel);
     });
     setIsEditingTitle(false);
   };
@@ -657,7 +661,10 @@ export const ExpandedNodePanel = ({
               readOnly={false}
               onDataChange={
                 expandedNodeId
-                  ? (patch) => updateNodeData(expandedNodeId, patch)
+                  ? (patch) => {
+                      updateNodeData(expandedNodeId, patch);
+                      onCommit?.();
+                    }
                   : undefined
               }
             />

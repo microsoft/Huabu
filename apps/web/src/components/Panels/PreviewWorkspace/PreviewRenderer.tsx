@@ -62,12 +62,15 @@ export function PreviewRenderer({
   tabId,
   target,
   onClose,
+  onCommit,
   hasFocusPriority,
 }: {
   tabId: string;
   target: PreviewTarget;
   /** Closes the tab rendering this target. */
   onClose: () => void;
+  /** Promotes this tab after its target receives a persistent mutation. */
+  onCommit: () => void;
   /** Whether this tab's group is the focused one (§14). */
   hasFocusPriority: boolean;
 }) {
@@ -93,7 +96,11 @@ export function PreviewRenderer({
     return node ? questionSession(node, target.canvasId, reference) : null;
   }, [target, node, reference]);
 
-  if (session) return <ChatPanel session={session} previewTabId={tabId} />;
+  if (session) {
+    return (
+      <ChatPanel session={session} previewTabId={tabId} onCommit={onCommit} />
+    );
+  }
 
   // An unbound Chat target always resolves; only a Question node can be
   // waiting for its thread.
@@ -113,6 +120,7 @@ export function PreviewRenderer({
     <ExpandedNodePanel
       nodeId={node.id}
       onClose={onClose}
+      onCommit={onCommit}
       embedded
       hasFocusPriority={hasFocusPriority}
     />
