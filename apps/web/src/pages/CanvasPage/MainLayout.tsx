@@ -4,6 +4,7 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { usePanelStore } from '@/store/panelStore';
+import { openChat } from '@/store/previewWorkspace/actions';
 
 interface MainLayoutProps {
   header: React.ReactNode;
@@ -268,9 +269,7 @@ export const MainLayout = ({
       </div>
 
       {/* Center Editor — hosts the canvas and the floating Header overlay
-          when the left panel is collapsed. The chat collapse state is
-          forwarded to children so they can render their own top-right
-          floating controls (chat toggle + settings). */}
+          when the left panel is collapsed. */}
       <div
         className="relative min-w-0 flex-1"
         data-right-panel-motion={
@@ -282,8 +281,7 @@ export const MainLayout = ({
       >
         {React.isValidElement(children)
           ? React.cloneElement(children as React.ReactElement<any>, {
-              isChatCollapsed: isRightCollapsed,
-              onToggleChat: toggleRightPanel,
+              onOpenChat: openChat,
             })
           : children}
         {isLeftCollapsed && React.isValidElement(header) && (

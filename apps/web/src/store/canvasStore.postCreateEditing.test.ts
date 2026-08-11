@@ -7,6 +7,7 @@ import useCanvasStore from './canvasStore';
 import { usePanelStore } from './panelStore';
 import {
   closeActivePreviewNode,
+  openChat,
   openPreviewNode,
 } from './previewWorkspace/actions';
 import { createEmptyWorkspace } from './previewWorkspace/model';
@@ -35,6 +36,7 @@ function resetStore() {
   usePanelStore.setState({
     isRightCollapsed: true,
     rightPanelAnchorNodeId: null,
+    focusChatInputRequest: null,
   });
 }
 
@@ -49,6 +51,54 @@ afterEach(() => {
 });
 
 describe('post-create editing', () => {
+  it('creates and focuses Chat without acting as a panel toggle', () => {
+    const tabId = openChat();
+    const tab = usePreviewWorkspaceStore.getState().workspace.tabs[tabId];
+
+    expect(tab.target.kind).toBe('chat');
+    expect(usePanelStore.getState()).toMatchObject({
+      isRightCollapsed: false,
+      focusChatInputRequest: {
+        threadId: tab.target.kind === 'chat' ? tab.target.threadId : undefined,
+      },
+    });
+
+    openChat();
+
+    expect(usePanelStore.getState().isRightCollapsed).toBe(false);
+    expect(
+      Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs),
+    ).toHaveLength(1);
+  });
+
+  it('focuses the most recently active existing Chat', () => {
+    const preview = usePreviewWorkspaceStore.getState();
+    const first = preview.openPreviewTarget({
+      kind: 'chat',
+      canvasId: 'test-canvas',
+      threadId: 'thread-first',
+    });
+    const second = preview.openPreviewTarget({
+      kind: 'chat',
+      canvasId: 'test-canvas',
+      threadId: 'thread-second',
+    });
+    preview.activateTab(first);
+    preview.openPreviewTarget({
+      kind: 'node',
+      canvasId: 'test-canvas',
+      nodeId: 'node-note',
+    });
+
+    expect(openChat()).toBe(first);
+    expect(
+      usePreviewWorkspaceStore.getState().workspace.groups[0].activeTabId,
+    ).toBe(first);
+    expect(
+      usePreviewWorkspaceStore.getState().workspace.tabs[second],
+    ).toBeDefined();
+  });
+
   it('opens the right workspace with an explicitly expanded node', () => {
     openPreviewNode('node-note');
 

@@ -6,6 +6,10 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { SettingsPopover } from '@/components/Settings/SettingsPopover';
+import {
+  selectActiveTab,
+  usePreviewWorkspaceStore,
+} from '@/store/previewWorkspace/store';
 
 import { Button } from '../../components/Common/Button';
 import { cn } from '../../components/Common/cn';
@@ -16,21 +20,18 @@ import { isElectron } from '../../hooks/useElectron';
 /** Hosts the Canvas and its floating controls. */
 type CenterAreaProps = {
   canvasShortcutsDisabled?: boolean;
-  /**
-   * Mirrors the chat (right) panel collapse state. Injected by MainLayout
-   * so the floating chat-toggle button can live on top of the canvas
-   * instead of as a vertical strip at the canvas edge.
-   */
-  isChatCollapsed?: boolean;
-  onToggleChat?: () => void;
+  /** Opens or focuses Chat in Preview Workspace. Injected by MainLayout. */
+  onOpenChat?: () => void;
 };
 
 export const CenterArea: React.FC<CenterAreaProps> = ({
   canvasShortcutsDisabled = false,
-  isChatCollapsed,
-  onToggleChat,
+  onOpenChat,
 }) => {
   const { t } = useTranslation();
+  const isChatActive = usePreviewWorkspaceStore(
+    (state) => selectActiveTab(state)?.target.kind === 'chat',
+  );
 
   // The custom Electron title bar already exposes Handbook + Settings
   // globally — suppress the duplicate floating versions on the canvas
@@ -74,25 +75,19 @@ export const CenterArea: React.FC<CenterAreaProps> = ({
               <SettingsPopover variant="ghost" shape="pill" size="lg" />
             </>
           )}
-          {onToggleChat && (
+          {onOpenChat && (
             <Button
               variant="outline"
               shape="pill"
               iconOnly
               size="lg"
-              onClick={onToggleChat}
-              title={isChatCollapsed ? t('chat.open') : t('chat.close')}
+              onClick={onOpenChat}
+              title={t('chat.open')}
               tooltipPlacement="bottom"
-              aria-label={
-                isChatCollapsed ? t('chat.openPanel') : t('chat.closePanel')
-              }
-              aria-pressed={!isChatCollapsed}
+              aria-label={t('chat.openPanel')}
+              aria-pressed={isChatActive}
               className={cn(
-                // Active state mirrors the CanvasToolbar's active button —
-                // icon switches to the theme info color over a soft
-                // info-tinted background so the toggle reads as
-                // "currently engaged" without the heavy solid look.
-                !isChatCollapsed &&
+                isChatActive &&
                   'text-info bg-info-bg border-info-light enabled:hover:bg-info-bg-hover',
               )}
             >

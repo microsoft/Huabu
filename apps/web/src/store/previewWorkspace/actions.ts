@@ -5,6 +5,7 @@ import useCanvasStore, {
   getProtectedPreviewTabIds,
   settleNodePreprocess,
 } from '../canvasStore';
+import { useChatStore } from '../chatStore';
 import { usePanelStore } from '../panelStore';
 import {
   selectActiveNodeId,
@@ -38,6 +39,32 @@ export function openPreviewNode(
   useCanvasStore.setState((state) => ({
     expandedNodeFocusTick: state.expandedNodeFocusTick + 1,
   }));
+  return tabId;
+}
+
+/** Opens the most recently used Chat, creating one when none exists. */
+export function openChat(): string {
+  const preview = usePreviewWorkspaceStore.getState();
+  const canvasId = preview.canvasId || useCanvasStore.getState().canvasId;
+  if (!canvasId) return '';
+
+  const recentChat = Object.values(preview.workspace.tabs)
+    .filter(
+      (tab) => tab.target.kind === 'chat' && tab.target.canvasId === canvasId,
+    )
+    .sort((a, b) => b.lastActiveSeq - a.lastActiveSeq)[0];
+  const threadId =
+    recentChat?.target.kind === 'chat'
+      ? recentChat.target.threadId
+      : useChatStore.getState().createThread();
+
+  usePanelStore.getState().requestOpenRightPanel();
+  const tabId = preview.openPreviewTarget(
+    { kind: 'chat', canvasId, threadId },
+    undefined,
+    getProtectedPreviewTabIds(),
+  );
+  usePanelStore.getState().requestFocusChatInput(threadId);
   return tabId;
 }
 
