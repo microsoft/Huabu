@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 // @vitest-environment happy-dom
 
 import { StrictMode } from 'react';
