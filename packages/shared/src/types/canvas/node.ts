@@ -10,6 +10,7 @@ import type { AccentToken } from './color.js';
 import type { AgentMode } from '../agent/agent.js';
 import type { AgentBinding } from '../api/acp.js';
 import type { AgentIcon } from '../api/agent-profile.js';
+import type { InteractiveViewDefinitionV1 } from '../api/interactive-view.js';
 
 // ==================== Basic Node Types ====================
 
@@ -401,6 +402,10 @@ export interface TextNodeData extends BaseNodeData {
 export interface WebNodeData extends BaseNodeData {
   type: 'web';
   src: string;
+  /** Host-validated capability bridge definition for a local HTML artifact. */
+  interactiveView?: InteractiveViewDefinitionV1;
+  /** Optional Agent-defined discovery hint scoped to the owning Canvas. */
+  viewKey?: string;
 }
 
 /** A single highlight annotation on a PDF page. */

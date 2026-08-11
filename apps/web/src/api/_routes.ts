@@ -90,6 +90,16 @@ export const routes = {
   webPage: (canvasId: string, nodeId: string) =>
     `/web/page?canvasId=${enc(canvasId)}&nodeId=${enc(nodeId)}`,
 
+  // ── Interactive Views ────────────────────────────────────────────
+  interactiveView: (canvasId: string, nodeId: string) =>
+    `/interactive-views/${enc(canvasId)}/${enc(nodeId)}`,
+  interactiveViewRuntime: (canvasId: string, nodeId: string) =>
+    `/interactive-views/${enc(canvasId)}/${enc(nodeId)}/runtime`,
+  interactiveViewState: (canvasId: string, nodeId: string) =>
+    `/interactive-views/${enc(canvasId)}/${enc(nodeId)}/state`,
+  interactiveViewAction: (canvasId: string, nodeId: string, actionId: string) =>
+    `/interactive-views/${enc(canvasId)}/${enc(nodeId)}/actions/${enc(actionId)}`,
+
   // ── Intent ────────────────────────────────────────────────────────
   intentRecognizeStream: '/intent/recognize-stream',
   intentRecognizeSketch: '/intent/recognize-sketch',

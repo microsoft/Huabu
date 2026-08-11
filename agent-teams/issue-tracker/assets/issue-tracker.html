@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Issue Tracker</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 20px;
+        color: CanvasText;
+        background: Canvas;
+      }
+
+      h1,
+      h2,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        font-size: 20px;
+      }
+
+      h2 {
+        margin-top: 24px;
+        font-size: 15px;
+      }
+
+      .muted {
+        color: GrayText;
+        font-size: 13px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      input {
+        width: 100%;
+        padding: 8px 10px;
+        color: CanvasText;
+        background: Field;
+        border: 1px solid GrayText;
+        border-radius: 6px;
+      }
+
+      button {
+        padding: 7px 11px;
+        color: ButtonText;
+        background: ButtonFace;
+        border: 1px solid ButtonBorder;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: default;
+        opacity: 0.55;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .status {
+        min-height: 20px;
+        margin-top: 10px;
+      }
+
+      .summary {
+        padding: 12px;
+        white-space: pre-wrap;
+        border: 1px solid GrayText;
+        border-radius: 8px;
+      }
+
+      .table-wrap {
+        overflow: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      th,
+      td {
+        padding: 8px;
+        text-align: left;
+        vertical-align: top;
+        border-bottom: 1px solid GrayText;
+      }
+
+      th {
+        font-weight: 600;
+      }
+
+      .row-actions {
+        display: flex;
+        gap: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Issue Tracker</h1>
+    <p id="issue" class="muted">Waiting for the Issue Tracker Agent.</p>
+
+    <h2>Workspace</h2>
+    <div class="grid">
+      <label>
+        Codebase path
+        <input id="codebase" autocomplete="off" />
+      </label>
+      <label>
+        Worktree root
+        <input id="worktrees" autocomplete="off" />
+      </label>
+    </div>
+    <div class="actions">
+      <button id="save" type="button">Save configuration</button>
+      <button id="start" type="button">Start tracking</button>
+      <button id="approve" type="button">
+        Approve proposed implementation
+      </button>
+      <button id="revise" type="button">Request revision</button>
+    </div>
+    <p id="status" class="status muted"></p>
+
+    <h2>Agent update</h2>
+    <div id="summary" class="summary muted">No update yet.</div>
+
+    <h2>Tasks and Runs</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Run</th>
+            <th>Goal</th>
+            <th>Status</th>
+            <th>Open</th>
+          </tr>
+        </thead>
+        <tbody id="runs"></tbody>
+      </table>
+    </div>
+    <div class="actions">
+      <button id="refresh" type="button">Refresh</button>
+    </div>
+
+    <script>
+      let hostPort;
+      let view;
+      let sequence = 0;
+      const pending = new Map();
+
+      const elements = {
+        issue: document.querySelector('#issue'),
+        codebase: document.querySelector('#codebase'),
+        worktrees: document.querySelector('#worktrees'),
+        save: document.querySelector('#save'),
+        start: document.querySelector('#start'),
+        approve: document.querySelector('#approve'),
+        revise: document.querySelector('#revise'),
+        refresh: document.querySelector('#refresh'),
+        status: document.querySelector('#status'),
+        summary: document.querySelector('#summary'),
+        runs: document.querySelector('#runs'),
+      };
+
+      window.addEventListener('message', (event) => {
+        if (
+          event.source !== window.parent ||
+          event.data?.type !== 'huabu.view.connect' ||
+          event.data?.protocolVersion !== 1 ||
+          event.ports.length !== 1 ||
+          hostPort
+        )
+          return;
+
+        hostPort = event.ports[0];
+        hostPort.onmessage = ({ data }) => {
+          if (data.type === 'huabu.view.bootstrap') {
+            view = data;
+            render();
+          } else if (data.type === 'huabu.view.data') {
+            view.data = { ...view.data, ...data.data };
+            renderRuns();
+          } else if (data.type === 'huabu.view.outcome') {
+            handleOutcome(data);
+          }
+        };
+        hostPort.start();
+      });
+
+      function invoke(actionId, input) {
+        if (!hostPort || !view) return;
+        const requestId = `issue-tracker-${Date.now()}-${sequence++}`;
+        pending.set(requestId, actionId);
+        hostPort.postMessage({
+          type: 'huabu.view.intent',
+          protocolVersion: 1,
+          nodeId: view.nodeId,
+          requestId,
+          actionId,
+          ...(input === undefined ? {} : { input }),
+        });
+      }
+
+      function currentConfiguration() {
+        return {
+          codebasePath: elements.codebase.value.trim(),
+          worktreeRoot: elements.worktrees.value.trim(),
+        };
+      }
+
+      function replaceState(patch) {
+        invoke('save-state', {
+          revision: view.revision,
+          value: { ...view.state, ...patch },
+        });
+      }
+
+      function handleOutcome(outcome) {
+        if (outcome.status === 'pending') {
+          elements.status.textContent = 'Working…';
+          return;
+        }
+
+        const actionId = pending.get(outcome.requestId);
+        pending.delete(outcome.requestId);
+        if (outcome.status === 'success') {
+          if (actionId === 'save-state' && outcome.result) {
+            view.revision = outcome.result.revision;
+            view.state = outcome.result.state;
+          }
+          elements.status.textContent = 'Done.';
+          render();
+          return;
+        }
+
+        elements.status.textContent =
+          outcome.status === 'conflict'
+            ? 'The View changed. Reload it before saving again.'
+            : outcome.message || 'The action failed.';
+      }
+
+      function render() {
+        const state = view.state || {};
+        elements.issue.textContent =
+          state.issueUrl || 'Issue not resolved yet.';
+        elements.codebase.value = state.codebasePath || '';
+        elements.worktrees.value = state.worktreeRoot || '';
+        elements.summary.textContent = state.summary || 'No update yet.';
+        renderRuns();
+      }
+
+      function renderRuns() {
+        elements.runs.replaceChildren();
+        const runs = view?.data?.tasks?.value?.runs || [];
+        for (const run of runs) {
+          const row = document.createElement('tr');
+          const id = document.createElement('td');
+          const goal = document.createElement('td');
+          const status = document.createElement('td');
+          const actions = document.createElement('td');
+          const actionGroup = document.createElement('div');
+          actionGroup.className = 'row-actions';
+          id.textContent = run.runId;
+          goal.textContent = run.goal;
+          status.textContent = run.status;
+
+          if (run.rootNodeId) {
+            const openNode = document.createElement('button');
+            openNode.type = 'button';
+            openNode.textContent = 'Node';
+            openNode.addEventListener('click', () =>
+              invoke('open-run-node', { nodeId: run.rootNodeId }),
+            );
+            actionGroup.append(openNode);
+          }
+          if (run.rootThreadId) {
+            const openThread = document.createElement('button');
+            openThread.type = 'button';
+            openThread.textContent = 'Thread';
+            openThread.addEventListener('click', () =>
+              invoke('open-run-thread', { threadId: run.rootThreadId }),
+            );
+            actionGroup.append(openThread);
+          }
+          actions.append(actionGroup);
+          row.append(id, goal, status, actions);
+          elements.runs.append(row);
+        }
+      }
+
+      elements.save.addEventListener('click', () =>
+        replaceState(currentConfiguration()),
+      );
+      elements.start.addEventListener('click', () =>
+        invoke('notify-agent', {
+          decision: 'start',
+          ...currentConfiguration(),
+        }),
+      );
+      elements.approve.addEventListener('click', () =>
+        invoke('notify-agent', { decision: 'approve' }),
+      );
+      elements.revise.addEventListener('click', () =>
+        invoke('notify-agent', { decision: 'revise' }),
+      );
+      elements.refresh.addEventListener('click', () => invoke('refresh-tasks'));
+    </script>
+  </body>
+</html>

@@ -10,8 +10,8 @@
  * Profile of the same template) and the alias + working-directory layout.
  * They differ in what is editable:
  *
- *  - **create**: pick a trusted harness Agent, choose a working directory,
- *    optionally name it, then create the Profile *without* starting Setup.
+ *  - **create**: pick a trusted harness Agent, use a Huabu-managed workspace
+ *    or choose a custom directory, optionally name it, then create + Setup.
  *  - **edit**: harness and working directory are immutable and shown
  *    read-only; only the alias (and the shared Configs) can change.
  *
@@ -33,6 +33,7 @@ import { PathInput } from '@/components/Common/PathInput';
 import { Select } from '@/components/Common/Select';
 import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
+import { Toggle } from '@/components/Common/Toggle';
 import { SettingControl } from '@/components/Settings/Common/SettingControl';
 import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
@@ -54,7 +55,11 @@ import type {
   ManifestProfileRow,
 } from './useUnifiedAgents';
 import type { AgentIconValue } from '@/components/Common/AgentIcon';
-import type { AcpAgentCliInfo, AgentTeamMemberDetailView } from '@huabu/shared';
+import type {
+  AcpAgentCliInfo,
+  AgentTeamMemberDetailView,
+  CreateAgentTeamProfileBody,
+} from '@huabu/shared';
 
 type ManifestProfileFormProps =
   | {
@@ -113,6 +118,7 @@ function CreateManifestProfileForm({
     [supportedAgents],
   );
   const [agentId, setAgentId] = useState('');
+  const [useDefaultWorkingDir, setUseDefaultWorkingDir] = useState(true);
   const [workingDirPath, setWorkingDirPath] = useState('');
   const [alias, setAlias] = useState('');
   const [icon, setIcon] = useState<AgentIconValue>(() => randomAgentIcon());
@@ -133,13 +139,13 @@ function CreateManifestProfileForm({
     // the agent's display name keeps it distinct from the no-preset default,
     // which is derived from the agent name.
     const presetName = group.member.name;
-    const flatPath = workingDirPath
+    const flatPath = (useDefaultWorkingDir ? '' : workingDirPath)
       .trim()
       .replace(/\\/g, '/')
       .replace(/\/+$/, '');
     const folder = flatPath.slice(flatPath.lastIndexOf('/') + 1);
     return folder ? `${presetName} (${folder})` : presetName;
-  }, [group.member.name, workingDirPath]);
+  }, [group.member.name, useDefaultWorkingDir, workingDirPath]);
   const agentOptions = useMemo(() => {
     const installed = supportedAgents
       .filter((agent) => agent.installed)
@@ -161,7 +167,7 @@ function CreateManifestProfileForm({
 
   const create = useCallback(async () => {
     const cwd = workingDirPath.trim();
-    if (!agentId || !cwd) return;
+    if (!agentId || (!useDefaultWorkingDir && !cwd)) return;
     setCreating(true);
     try {
       const latest = await listAcpAgentClis();
@@ -171,17 +177,26 @@ function CreateManifestProfileForm({
         toast(t('settings.selectedAgentUnavailable'), { tone: 'danger' });
         return;
       }
-      const created = await createAgentTeamProfile({
+      const commonProfile = {
         alias: alias.trim() || defaultAlias,
         agentletId: group.member.machine,
-        workingDirPath: cwd,
         launch: {
-          kind: 'agent-team-manifest',
+          kind: 'agent-team-manifest' as const,
           manifestPath: group.member.manifestPath,
           harness: agentId,
         },
         customData: withAgentIcon(undefined, icon),
-      });
+      };
+      const profile: CreateAgentTeamProfileBody = useDefaultWorkingDir
+        ? {
+            ...commonProfile,
+            workingDirectory: { kind: 'default' },
+          }
+        : {
+            ...commonProfile,
+            workingDirectory: { kind: 'custom', path: cwd },
+          };
+      const created = await createAgentTeamProfile(profile);
       // Create is only enabled once every required field (including the
       // preset's required credentials) is complete, so setup can always run
       // immediately. Kick it off; progress is then monitored in the list.
@@ -223,6 +238,7 @@ function CreateManifestProfileForm({
     onCreated,
     t,
     tAgent,
+    useDefaultWorkingDir,
     workingDirPath,
   ]);
 
@@ -290,22 +306,37 @@ function CreateManifestProfileForm({
       ) : null}
 
       <SettingRow
-        labelFor={cwdId}
-        title={tAgent('workingDirectory')}
-        description={t('settings.templateWorkingDirHint')}
+        title={tAgent('useDefaultWorkingDirectory')}
+        description={tAgent('useDefaultWorkingDirectoryHint')}
       >
         <SettingControl>
-          <PathInput
-            id={cwdId}
-            value={workingDirPath}
-            onChange={setWorkingDirPath}
-            placeholder="/Users/me/project-x"
-            pickTitle={tAgent('pickFolder')}
-            size="sm"
-            mono
+          <Toggle
+            checked={useDefaultWorkingDir}
+            onChange={setUseDefaultWorkingDir}
+            disabled={creating}
+            label={tAgent('useDefaultWorkingDirectory')}
           />
         </SettingControl>
       </SettingRow>
+      {!useDefaultWorkingDir ? (
+        <SettingRow
+          labelFor={cwdId}
+          title={tAgent('workingDirectory')}
+          description={t('settings.templateWorkingDirHint')}
+        >
+          <SettingControl>
+            <PathInput
+              id={cwdId}
+              value={workingDirPath}
+              onChange={setWorkingDirPath}
+              placeholder="/Users/me/project-x"
+              pickTitle={tAgent('pickFolder')}
+              size="sm"
+              mono
+            />
+          </SettingControl>
+        </SettingRow>
+      ) : null}
       <SettingRow
         labelFor={displayNameId}
         title={
@@ -347,7 +378,7 @@ function CreateManifestProfileForm({
           disabled={
             creating ||
             !agentId ||
-            !workingDirPath.trim() ||
+            (!useDefaultWorkingDir && !workingDirPath.trim()) ||
             unsupported ||
             !group.config.ready
           }

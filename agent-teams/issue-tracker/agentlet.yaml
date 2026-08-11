@@ -1,0 +1,14 @@
+schema: agentlet-agent-schema-v1
+name: issue-tracker
+description: Coordinates one GitHub issue through an isolated worktree and Agent Thread
+
+command:
+  claude: claude-agent-acp
+  copilot: copilot --acp --allow-all
+
+require:
+  prompts:
+    - system_prompt.md
+  copies:
+    - from: assets/issue-tracker.html
+      to: issue-tracker.html

@@ -24,6 +24,7 @@ const FOCUSED_SKILL_TEMPLATES = {
   layout: 'external-agent/layout.md',
   tasks: 'external-agent/tasks.md',
   agents: 'external-agent/agents.md',
+  'interactive-views': 'external-agent/interactive-views.md',
 } as const;
 
 export type RfsFocusedSkillId = keyof typeof FOCUSED_SKILL_TEMPLATES;

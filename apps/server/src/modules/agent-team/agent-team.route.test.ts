@@ -128,7 +128,7 @@ describe('Agent Team Settings routes', () => {
       payload: {
         alias: '',
         agentletId: 'machine-a',
-        workingDirPath: 'relative/path',
+        workingDirectory: { kind: 'custom', path: 'relative/path' },
         launch: {
           kind: 'agent-team-manifest',
           manifestPath: '/teams/reviewer/agentlet.yaml',
@@ -183,7 +183,10 @@ describe('Agent Team Settings routes', () => {
       payload: {
         alias: 'Reviewer',
         agentletId: 'machine-a',
-        workingDirPath: '/teams/reviewer/workspaces/copilot',
+        workingDirectory: {
+          kind: 'custom',
+          path: '/teams/reviewer/workspaces/copilot',
+        },
         launch: {
           kind: 'agent-team-manifest',
           manifestPath: '/teams/reviewer/agentlet.yaml',
@@ -197,5 +200,97 @@ describe('Agent Team Settings routes', () => {
       message: 'Profile already exists',
       code: 'profile_conflict',
     });
+  });
+
+  it('compiles a default workspace into a Profile-owned absolute path', async () => {
+    const registry = createRegistry();
+    vi.mocked(registry.getMemberDetail).mockReturnValue({
+      member: {
+        machine: 'machine-a',
+        manifestPath: '/teams/reviewer/agentlet.yaml',
+        name: 'Paper Reviewer',
+        description: '',
+        harnesses: ['copilot'],
+        env: [],
+        discoveredBy: [],
+        status: 'active',
+      },
+      config: {
+        machine: 'machine-a',
+        manifestPath: '/teams/reviewer/agentlet.yaml',
+        fields: [],
+        missingRequired: [],
+        ready: true,
+      },
+      profiles: [],
+    });
+    app = Fastify({ logger: false });
+    await app.register(
+      createAgentTeamRoutes(
+        () => registry,
+        () => 'machine-a',
+        () => '/huabu/agent-team/workspaces',
+      ),
+      { prefix: '/api/agent-team' },
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/agent-team/settings/profiles',
+      payload: {
+        alias: 'Reviewer',
+        agentletId: 'machine-a',
+        workingDirectory: { kind: 'default' },
+        launch: {
+          kind: 'agent-team-manifest',
+          manifestPath: '/teams/reviewer/agentlet.yaml',
+          harness: 'copilot',
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(registry.createProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: expect.stringMatching(/^profile-/),
+        workingDirPath: expect.stringMatching(
+          /[/\\]Paper-Reviewer[/\\]copilot[/\\]profile-/,
+        ),
+      }),
+    );
+  });
+
+  it('rejects a default workspace for a remote Agentlet', async () => {
+    const registry = createRegistry();
+    app = Fastify({ logger: false });
+    await app.register(
+      createAgentTeamRoutes(
+        () => registry,
+        () => 'machine-a',
+        () => '/huabu/agent-team/workspaces',
+      ),
+      { prefix: '/api/agent-team' },
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/agent-team/settings/profiles',
+      payload: {
+        alias: 'Reviewer',
+        agentletId: 'machine-b',
+        workingDirectory: { kind: 'default' },
+        launch: {
+          kind: 'agent-team-manifest',
+          manifestPath: '/teams/reviewer/agentlet.yaml',
+          harness: 'copilot',
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      code: 'invalid_working_directory',
+    });
+    expect(registry.createProfile).not.toHaveBeenCalled();
   });
 });

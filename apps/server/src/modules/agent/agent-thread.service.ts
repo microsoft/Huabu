@@ -3,10 +3,10 @@
 
 import { emptyAcpOverlay } from '@agenetes/acp-driver';
 
-import { AGENT_SSE_EVENTS } from '@huabu/shared';
+import { AGENT_SSE_EVENTS, agentBindingSchema } from '@huabu/shared';
 
 import { runAcpAgent } from './acp/service.js';
-import { agenetes } from './agenetes/drivers.js';
+import { agenetes, EXTERNAL_DRIVER_KIND } from './agenetes/drivers.js';
 import { agentNodeLifecycle } from './agent-node-lifecycle.js';
 import {
   agentThreadResolver,
@@ -18,7 +18,9 @@ import { readWorkspaceMemory } from './memory/index.js';
 import { planSkillDispatch } from './skill-model-routing.js';
 import { acquireAgentTurn, waitForAgentTurnRelease } from './turn-lease.js';
 import { loadAgent } from '../../prompt/index.js';
+import { canvasAcpNamespace } from '../workspace/disk/paths.js';
 
+import type { HuabuSubmission } from './agenetes/handle.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type {
   AgentBinding,
@@ -33,6 +35,10 @@ interface AgentThreadServiceDependencies {
     canvasId: string,
     threadId: string,
   ) => FixedAgentNodeTarget | null;
+  resolvePersistedExternalBinding: (
+    canvasId: string,
+    threadId: string,
+  ) => Extract<AgentBinding, { kind: 'external' }> | null;
   waitForTurnRelease: typeof waitForAgentTurnRelease;
   acquireTurn: typeof acquireAgentTurn;
   startLifecycle: typeof agentNodeLifecycle.start;
@@ -43,9 +49,27 @@ interface AgentThreadServiceDependencies {
   closeHandle: (threadId: string) => void;
 }
 
+export function externalBindingFromWorkloadSpec(
+  spec: unknown,
+): Extract<AgentBinding, { kind: 'external' }> | null {
+  if (!spec || typeof spec !== 'object') return null;
+  const binding = (spec as { binding?: unknown }).binding;
+  if (!binding || typeof binding !== 'object') return null;
+  const parsed = agentBindingSchema.safeParse({
+    ...(binding as Record<string, unknown>),
+    kind: 'external',
+  });
+  return parsed.success && parsed.data.kind === 'external' ? parsed.data : null;
+}
+
 const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
   resolveFixedAgentNode: (canvasId, threadId) =>
     agentThreadResolver.resolveFixedAgentNode(canvasId, threadId),
+  resolvePersistedExternalBinding: (canvasId, threadId) => {
+    const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
+    if (!record || record.spec.kind !== EXTERNAL_DRIVER_KIND) return null;
+    return externalBindingFromWorkloadSpec(record.spec.spec);
+  },
   waitForTurnRelease: waitForAgentTurnRelease,
   acquireTurn: acquireAgentTurn,
   startLifecycle: agentNodeLifecycle.start.bind(agentNodeLifecycle),
@@ -69,6 +93,8 @@ export interface AgentThreadInvocationOptions {
   content: string;
   mode: AgentMode;
   envelope: ChatEnvelope;
+  /** Canonical durable submission; ordinary chat callers omit it. */
+  submission?: HuabuSubmission;
   requestBinding?: AgentBinding;
   fixedTarget?: FixedAgentNodeTarget | null;
   modelId?: string;
@@ -94,6 +120,11 @@ export interface AgentThreadInvocation {
   signal: AbortSignal;
   events: AsyncGenerator<AgentStreamEvent, void>;
   dispose: (error?: unknown) => Promise<void>;
+}
+
+export interface ExternalAgentThreadTarget {
+  binding: Extract<AgentBinding, { kind: 'external' }>;
+  fixedTarget: FixedAgentNodeTarget | null;
 }
 
 function buildAgentSystemPrompt(params: {
@@ -129,6 +160,29 @@ export class AgentThreadService {
     return canvasId
       ? this.dependencies.resolveFixedAgentNode(canvasId, threadId)
       : null;
+  }
+
+  resolveExternalTarget(
+    canvasId: string,
+    threadId: string,
+  ): ExternalAgentThreadTarget | null {
+    const fixedTarget = this.resolveFixedTarget(canvasId, threadId);
+    if (fixedTarget) {
+      return fixedTarget.agentBinding.kind === 'external'
+        ? { binding: fixedTarget.agentBinding, fixedTarget }
+        : null;
+    }
+    const binding = this.dependencies.resolvePersistedExternalBinding(
+      canvasId,
+      threadId,
+    );
+    return binding ? { binding, fixedTarget: null } : null;
+  }
+
+  invokeSubmission(
+    options: AgentThreadInvocationOptions & { submission: HuabuSubmission },
+  ): Promise<AgentThreadInvocation> {
+    return this.invoke(options);
   }
 
   async invoke(
@@ -263,6 +317,7 @@ export class AgentThreadService {
         threadId: options.threadId,
         canvasId: options.canvasId,
         envelope: options.envelope,
+        submission: options.submission,
         overlay: emptyAcpOverlay(),
         ...(fixedTarget?.launchOverrides
           ? { launchOverrides: fixedTarget.launchOverrides }
@@ -288,6 +343,7 @@ export class AgentThreadService {
       threadId: options.threadId,
       canvasId: options.canvasId,
       envelope: options.envelope,
+      submission: options.submission,
       context: {
         systemPrompt: buildAgentSystemPrompt({
           canvasId: options.canvasId,

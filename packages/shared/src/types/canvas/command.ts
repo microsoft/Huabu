@@ -120,6 +120,11 @@ export type CanvasNodeDataMergePatch = {
    * which are unconditional.
    */
   expectRev?: string;
+  /**
+   * Optimistic-concurrency token for `interactiveView` replacement. Derived
+   * from the complete persisted View Definition and never stored separately.
+   */
+  expectViewRev?: string;
 };
 
 export interface CanvasNodeParentUpdate {

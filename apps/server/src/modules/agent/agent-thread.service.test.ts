@@ -7,15 +7,21 @@ vi.mock('./memory/index.js', () => ({
   readWorkspaceMemory: () => '',
 }));
 
+import { createInteractiveViewSubmission } from './agenetes/handle.js';
 import {
   AgentThreadBusyError,
   AgentThreadService,
+  externalBindingFromWorkloadSpec,
 } from './agent-thread.service.js';
 
 import type { FixedAgentNodeTarget } from './agent-thread-resolver.js';
 import type { runAgent } from './agent.service.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
-import type { AgentStreamEvent, CanvasNodeId } from '@huabu/shared';
+import type {
+  AgentBinding,
+  AgentStreamEvent,
+  CanvasNodeId,
+} from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 const ENVELOPE: ChatEnvelope = {
@@ -72,6 +78,7 @@ function createHarness(options?: {
   externalEvents?: AgentStreamEvent[];
   startError?: Error;
   finishError?: Error;
+  persistedBinding?: Extract<AgentBinding, { kind: 'external' }> | null;
 }) {
   const release = vi.fn();
   const startLifecycle = options?.startError
@@ -99,6 +106,10 @@ function createHarness(options?: {
   const service = new AgentThreadService({
     resolveFixedAgentNode: () =>
       options && 'target' in options ? (options.target ?? null) : TARGET,
+    resolvePersistedExternalBinding: () =>
+      options && 'persistedBinding' in options
+        ? (options.persistedBinding ?? null)
+        : null,
     waitForTurnRelease: vi.fn().mockResolvedValue(undefined),
     acquireTurn: vi.fn(() => (options?.busy ? null : release)),
     startLifecycle,
@@ -138,6 +149,46 @@ function invocationOptions() {
 }
 
 describe('AgentThreadService', () => {
+  it('validates an external binding from a durable workload spec', () => {
+    expect(
+      externalBindingFromWorkloadSpec({
+        binding: { profileId: 'profile-a', alias: 'Researcher' },
+      }),
+    ).toEqual({
+      kind: 'external',
+      profileId: 'profile-a',
+      alias: 'Researcher',
+    });
+    expect(externalBindingFromWorkloadSpec({ binding: {} })).toBeNull();
+  });
+
+  it('resolves a persisted external Thread without a fixed Agent Node', () => {
+    const binding = {
+      kind: 'external' as const,
+      profileId: 'profile-selectable',
+      alias: 'Selectable Agent',
+    };
+    const harness = createHarness({ target: null, persistedBinding: binding });
+
+    expect(
+      harness.service.resolveExternalTarget('canvas-a', 'thread-a'),
+    ).toEqual({ binding, fixedTarget: null });
+  });
+
+  it('prefers the fixed Agent Node binding when one exists', () => {
+    const harness = createHarness({
+      persistedBinding: {
+        kind: 'external',
+        profileId: 'profile-record',
+        alias: 'Recorded Agent',
+      },
+    });
+
+    expect(
+      harness.service.resolveExternalTarget('canvas-a', 'thread-a'),
+    ).toEqual({ binding: TARGET.agentBinding, fixedTarget: TARGET });
+  });
+
   it('uses persisted fixed binding and overrides under one leased lifecycle', async () => {
     const harness = createHarness();
     const invocation = await harness.service.invoke(invocationOptions());
@@ -162,6 +213,29 @@ describe('AgentThreadService', () => {
     expect(harness.finishLifecycle).toHaveBeenCalledWith(TARGET);
     expect(harness.failLifecycle).not.toHaveBeenCalled();
     expect(harness.release).toHaveBeenCalledOnce();
+  });
+
+  it('passes a structured submission to the external Agent handle', async () => {
+    const harness = createHarness();
+    const submission = createInteractiveViewSubmission({
+      protocolVersion: 1,
+      nodeId: 'node-view',
+      actionId: 'approve-plan',
+      input: { approved: true },
+      viewRevision: 'view-rev',
+    });
+    const invocation = await harness.service.invokeSubmission({
+      ...invocationOptions(),
+      submission,
+    });
+
+    for await (const _event of invocation.events) {
+      // Drain the canonical invocation stream.
+    }
+
+    expect(harness.runExternal).toHaveBeenCalledWith(
+      expect.objectContaining({ submission }),
+    );
   });
 
   it('writes an error terminal for a failed fixed-node stream', async () => {

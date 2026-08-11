@@ -8,7 +8,7 @@ import type {
   AgentProfileView,
   AgentTeamMemberDetailView,
   AgentTeamSettingsState,
-  CreateAgentProfileBody,
+  CreateAgentTeamProfileBody,
   PatchAgentProfileBody,
   UpdateAgentTeamMemberConfigsBody,
 } from '@huabu/shared';
@@ -42,7 +42,7 @@ export async function updateAgentTeamConfigs(
 }
 
 export async function createAgentTeamProfile(
-  profile: CreateAgentProfileBody,
+  profile: CreateAgentTeamProfileBody,
 ): Promise<AgentProfileView> {
   return apiFetch(routes.agentTeamProfiles, {
     method: 'POST',

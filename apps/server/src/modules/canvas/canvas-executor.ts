@@ -33,12 +33,15 @@ import { imageSize } from 'image-size';
 
 import {
   createId,
+  interactiveViewDefinitionV1Schema,
+  interactiveViewRevision,
   type CanvasCommand,
   type CanvasCommandFailureReason,
   type CanvasEdgeId,
   type CanvasNodeId,
   type ExecuteConflict,
   type ExecuteOriginator,
+  type InteractiveViewJsonValue,
 } from '@huabu/shared';
 import {
   applySharedPostEffectsFromWriteResult,
@@ -237,6 +240,47 @@ function collectMergeConflicts(
             : {}),
           currentRev,
           ...(currentContent !== undefined ? { currentContent } : {}),
+        });
+      }
+    }
+  }
+  return conflicts;
+}
+
+export interface InteractiveViewConflict {
+  nodeId: string;
+  expectedRevision: string;
+  currentRevision: string;
+  currentState: InteractiveViewJsonValue;
+}
+
+function collectInteractiveViewConflicts(
+  commands: readonly CanvasCommand[],
+  prestateNodes: readonly CanvasNode[],
+): InteractiveViewConflict[] {
+  const byId = new Map(prestateNodes.map((node) => [node.id, node]));
+  const conflicts: InteractiveViewConflict[] = [];
+  for (const command of commands) {
+    if (command.type !== 'MERGE_NODE_DATA') continue;
+    for (const entry of command.patches) {
+      if (
+        entry.expectViewRev === undefined ||
+        !Object.prototype.hasOwnProperty.call(entry.patch, 'interactiveView')
+      ) {
+        continue;
+      }
+      const node = byId.get(entry.nodeId);
+      const parsed = interactiveViewDefinitionV1Schema.safeParse(
+        node?.data?.interactiveView,
+      );
+      if (!node || node.type !== 'web' || !parsed.success) continue;
+      const currentRevision = interactiveViewRevision(parsed.data);
+      if (entry.expectViewRev !== currentRevision) {
+        conflicts.push({
+          nodeId: entry.nodeId,
+          expectedRevision: entry.expectViewRev,
+          currentRevision,
+          currentState: parsed.data.state.value,
         });
       }
     }
@@ -628,6 +672,7 @@ export interface ExecuteOnServerOutput {
    * caller reconciles from `currentContent` / `currentRev`.
    */
   conflicts?: ExecuteConflict[];
+  viewConflicts?: InteractiveViewConflict[];
 }
 
 export class CanvasNotFoundError extends Error {
@@ -746,6 +791,38 @@ export async function executeOnServer(
           conflicts,
         };
       }
+    }
+
+    const viewConflicts = collectInteractiveViewConflicts(
+      commands,
+      prestateNodes,
+    );
+    if (viewConflicts.length > 0) {
+      const conflictIds = new Set(
+        viewConflicts.map((conflict) => conflict.nodeId),
+      );
+      return {
+        canvasId,
+        fromVersion,
+        toVersion: fromVersion,
+        deltas: [],
+        results: commands.map((command) => ({
+          command,
+          applied: false,
+          ...(command.type === 'MERGE_NODE_DATA' &&
+          command.patches.some((patch) => conflictIds.has(patch.nodeId))
+            ? { reason: 'conflict' as const }
+            : {}),
+        })),
+        commands,
+        pendingEffects: {
+          mutatedNodes: [],
+          deletedNodeIds: [],
+          contentEditedNodeIds: [],
+          deferredFitFrameIds: [],
+        },
+        viewConflicts,
+      };
     }
 
     const { writeResult, commandResults, pendingEffects } =

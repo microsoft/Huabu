@@ -32,6 +32,7 @@ import { renderInternalAgentInputs } from './conversation/prompt/build-prompt.js
 import { dumpAssembledPrompt } from './conversation/prompt/debug-prompt.js';
 import { type ToolScope } from './tools/index.js';
 
+import type { HuabuSubmission } from './agenetes/handle.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type { WorkloadType } from '@agenetes/protocol';
 import type { Context, Message } from '@earendil-works/pi-ai';
@@ -106,6 +107,8 @@ export interface AgentRunOptions {
    * (the legacy behaviour).
    */
   envelope?: ChatEnvelope;
+  /** Pre-rendered durable submission for non-chat host events. */
+  submission?: HuabuSubmission;
   /**
    * pi-ai Context for this run. The system prompt is host-rendered current
    * context; messages seed fresh handles and envelope-less Jobs. Durable
@@ -194,6 +197,7 @@ export async function* runAgent(
     threadId,
     canvasId,
     envelope,
+    submission: suppliedSubmission,
     context,
     origin,
     modelRole,
@@ -212,7 +216,9 @@ export async function* runAgent(
         canvasId: canvasId ?? null,
       })
     : undefined;
-  const submission = envelope ? createChatSubmission(envelope, rendered) : null;
+  const submission =
+    suppliedSubmission ??
+    (envelope ? createChatSubmission(envelope, rendered) : null);
 
   // Optional developer aid: dump the fully-assembled prompt (system +
   // prior history + this turn). No-op unless HUABU_DEBUG_PROMPT is set.

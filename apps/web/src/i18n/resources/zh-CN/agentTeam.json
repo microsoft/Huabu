@@ -6,6 +6,8 @@
   "save": "保存",
   "cancel": "取消",
   "workingDirectory": "工作目录",
+  "useDefaultWorkingDirectory": "使用默认工作目录",
+  "useDefaultWorkingDirectoryHint": "Huabu 会为此预设和 Agent 创建独立工作区。",
   "harness": "Harness",
   "pickFolder": "选择文件夹",
   "roots": "集合根目录",
