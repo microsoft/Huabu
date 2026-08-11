@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
 import fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
