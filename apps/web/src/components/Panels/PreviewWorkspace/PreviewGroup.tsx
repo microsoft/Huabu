@@ -17,7 +17,6 @@ import {
   PreviewTabStrip,
   tabElementId,
 } from './PreviewTabStrip';
-import { cn } from '../../Common/cn';
 
 import type {
   CanvasPreviewWorkspace,
@@ -32,6 +31,8 @@ type PreviewGroupProps = {
   onActivate: (tabId: string) => void;
   onClose: (tabId: string) => void;
   onPromote: (tabId: string) => void;
+  nodeFocusRequest: { tabId: string; nonce: number } | null;
+  onNodeFocusRequestHandled: (tabId: string, nonce: number) => void;
   onOpenToSide: (tabId: string) => void;
   onNewChat: () => void;
   /** Collapses the whole surface; only the last group offers it. */
@@ -46,6 +47,8 @@ export function PreviewGroup({
   onActivate,
   onClose,
   onPromote,
+  nodeFocusRequest,
+  onNodeFocusRequestHandled,
   onOpenToSide,
   onNewChat,
   onCollapse,
@@ -65,10 +68,7 @@ export function PreviewGroup({
       // focused group" rather than assuming a single instance.
       onFocusCapture={onFocus}
       onPointerDownCapture={onFocus}
-      className={cn(
-        'flex h-full min-w-0 flex-1 flex-col',
-        isFocused && workspace.groups.length > 1 && 'ring-info/40 ring-1',
-      )}
+      className="flex h-full min-w-0 flex-1 flex-col"
     >
       <PreviewTabStrip
         groupId={group.id}
@@ -96,6 +96,14 @@ export function PreviewGroup({
             target={activeTab.target}
             onClose={() => onClose(activeTab.id)}
             onCommit={() => onPromote(activeTab.id)}
+            nodeFocusRequestNonce={
+              nodeFocusRequest?.tabId === activeTab.id
+                ? nodeFocusRequest.nonce
+                : undefined
+            }
+            onNodeFocusRequestHandled={(nonce) =>
+              onNodeFocusRequestHandled(activeTab.id, nonce)
+            }
             hasFocusPriority={isFocused}
           />
         ) : (

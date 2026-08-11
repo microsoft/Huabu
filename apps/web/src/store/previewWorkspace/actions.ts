@@ -36,9 +36,10 @@ export function openPreviewNode(
       { transient: options?.transient },
       getProtectedPreviewTabIds(),
     );
-  useCanvasStore.setState((state) => ({
-    expandedNodeFocusTick: state.expandedNodeFocusTick + 1,
-  }));
+  const openedNode = canvas.nodes.find((node) => node.id === nodeId);
+  if (tabId && openedNode?.type === 'note') {
+    usePreviewWorkspaceStore.getState().requestNodeFocus(tabId);
+  }
   return tabId;
 }
 

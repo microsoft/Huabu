@@ -62,8 +62,17 @@ vi.mock('../ChatPanel', () => ({
 }));
 
 vi.mock('../../Nodes/NodePreviewContent', () => ({
-  NodePreviewContent: ({ id }: { id?: string }) => (
-    <div data-preview-node-id={id} />
+  NodePreviewContent: ({
+    id,
+    focusRequestNonce,
+  }: {
+    id?: string;
+    focusRequestNonce?: number;
+  }) => (
+    <div
+      data-preview-node-id={id}
+      data-focus-request-nonce={focusRequestNonce}
+    />
   ),
 }));
 
@@ -108,6 +117,8 @@ beforeEach(() => {
   usePreviewWorkspaceStore.setState({
     canvasId: CANVAS_ID,
     workspace: createEmptyWorkspace('g1'),
+    nodeFocusRequest: null,
+    nodeFocusRequestSeq: 0,
   });
 });
 
@@ -530,6 +541,54 @@ describe('split', () => {
     expect(mounted).toEqual(['a', 'b']);
   });
 
+  it('renders one visual divider between split groups', () => {
+    openNode('a');
+    openNode('b');
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    act(() => {
+      store().openPreviewTarget(
+        { kind: 'node', canvasId: CANVAS_ID, nodeId: 'b' },
+        { openToSide: true },
+      );
+    });
+
+    const groups = container?.querySelectorAll('[role="region"]');
+    const separator = container?.querySelector(
+      '[role="separator"][aria-valuenow]',
+    );
+    expect(
+      Array.from(groups ?? []).some((group) =>
+        group.classList.contains('ring-1'),
+      ),
+    ).toBe(false);
+    expect(separator?.children).toHaveLength(1);
+    expect(separator?.classList.contains('-mx-1')).toBe(true);
+    expect(separator?.firstElementChild?.classList.contains('w-px')).toBe(true);
+  });
+
+  it('routes an editor focus request only to its target tab', () => {
+    openNode('a');
+    const targetTabId = openNode('b');
+    store().openPreviewTarget(
+      { kind: 'node', canvasId: CANVAS_ID, nodeId: 'b' },
+      { openToSide: true },
+    );
+    store().requestNodeFocus(targetTabId);
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+
+    const previews = Array.from(
+      container?.querySelectorAll('[data-preview-node-id]') ?? [],
+    );
+    const firstFocusNonce = previews
+      .find((preview) => preview.getAttribute('data-preview-node-id') === 'a')
+      ?.getAttribute('data-focus-request-nonce');
+    const secondFocusNonce = previews
+      .find((preview) => preview.getAttribute('data-preview-node-id') === 'b')
+      ?.getAttribute('data-focus-request-nonce');
+    expect(firstFocusNonce).toBeNull();
+    expect(secondFocusNonce).toBe('1');
+  });
+
   it('nudges the split ratio from the separator keyboard', () => {
     openNode('a');
     openNode('b');
@@ -576,6 +635,75 @@ describe('split', () => {
     });
 
     expect(store().workspace.splitRatio).toBeCloseTo(0.2, 5);
+  });
+
+  it('widens the left group when the separator is dragged right', () => {
+    openNode('a');
+    openNode('b');
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    act(() => {
+      store().openPreviewTarget(
+        { kind: 'node', canvasId: CANVAS_ID, nodeId: 'b' },
+        { openToSide: true },
+      );
+    });
+
+    const separator = container?.querySelector<HTMLElement>(
+      '[role="separator"][aria-valuenow]',
+    );
+    const workspace = separator?.parentElement;
+    expect(separator).toBeDefined();
+    expect(workspace).toBeDefined();
+    vi.spyOn(workspace as HTMLElement, 'getBoundingClientRect').mockReturnValue(
+      {
+        x: 100,
+        y: 0,
+        left: 100,
+        top: 0,
+        right: 500,
+        bottom: 600,
+        width: 400,
+        height: 600,
+        toJSON: () => ({}),
+      },
+    );
+    (separator as HTMLElement).setPointerCapture = vi.fn();
+    (separator as HTMLElement).releasePointerCapture = vi.fn();
+    (separator as HTMLElement).hasPointerCapture = vi.fn(() => true);
+    vi.spyOn(separator as HTMLElement, 'getBoundingClientRect').mockReturnValue(
+      {
+        x: 296,
+        y: 0,
+        left: 296,
+        top: 0,
+        right: 304,
+        bottom: 600,
+        width: 8,
+        height: 600,
+        toJSON: () => ({}),
+      },
+    );
+
+    act(() => {
+      separator?.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          clientX: 300,
+          pointerId: 1,
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointermove', { clientX: 140, pointerId: 2 }),
+      );
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 2 }));
+      expect(store().workspace.splitRatio).toBe(0.5);
+      window.dispatchEvent(
+        new PointerEvent('pointermove', { clientX: 340, pointerId: 1 }),
+      );
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
+    });
+
+    expect(store().workspace.splitRatio).toBeCloseTo(0.6, 5);
   });
 
   it('collapses back to one group when the side group empties', () => {

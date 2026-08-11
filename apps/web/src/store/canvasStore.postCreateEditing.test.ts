@@ -26,12 +26,13 @@ function resetStore() {
     edges: [],
     canvasId: 'test-canvas',
     isLoading: true,
-    expandedNodeFocusTick: 0,
     pendingInlineEditNodeId: null,
   });
   usePreviewWorkspaceStore.setState({
     canvasId: 'test-canvas',
     workspace: createEmptyWorkspace(),
+    nodeFocusRequest: null,
+    nodeFocusRequestSeq: 0,
   });
   usePanelStore.setState({
     isRightCollapsed: true,
@@ -129,10 +130,13 @@ describe('post-create editing', () => {
       ],
     });
 
-    const state = useCanvasStore.getState();
+    const activeTabId =
+      usePreviewWorkspaceStore.getState().workspace.groups[0].activeTabId;
     expect(expandedNodeId()).toBe('node-note');
-    expect(state.expandedNodeFocusTick).toBe(1);
-    expect(state.pendingInlineEditNodeId).toBeNull();
+    expect(usePreviewWorkspaceStore.getState().nodeFocusRequest).toMatchObject({
+      tabId: activeTabId,
+    });
+    expect(useCanvasStore.getState().pendingInlineEditNodeId).toBeNull();
   });
 
   it('requests inline editing for a newly created text node', () => {

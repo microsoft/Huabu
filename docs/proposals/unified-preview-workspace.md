@@ -285,8 +285,8 @@ The workspace's outer maximum width must allow two useful groups while preservin
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `expandedNodeId`                                | **Done.** Moved. Deleted from `canvasStore`; readers derive the shown node from the workspace's active tab.                                 |
 | `expandMode`, `setExpandMode`                   | **Done.** Died with the retired replace / split mode.                                                                                       |
-| `expandedNodeFocusTick`                         | Moves. Becomes a per-tab focus signal addressed to one tab rather than to the single expanded node.                                         |
-| `openExpanded`, `closeExpanded`                 | Move. Become `openPreviewTarget` and tab close, which still invoke the settle boundary.                                                     |
+| `expandedNodeFocusTick`                         | **Done.** Replaced by a runtime-only, one-shot `{ tabId, nonce }` request that is consumed after the addressed tab focuses.                 |
+| `openExpanded`, `closeExpanded`                 | **Done.** Replaced by `openPreviewTarget` and tab close, which still invoke the settle boundary.                                            |
 | `settleNodePreprocess`                          | Stays. Preprocessing is document work; the workspace calls into it at the settle boundary.                                                  |
 | `nodes`, `edges`, `updateNodeData`, `tryRename` | Stay. A renderer reading node data from `canvasStore` is reading the document, not presentation.                                            |
 | `UiIntentResult.expandedNodeId`                 | **Done.** Moved. Renamed `openPreviewNode`; the intent carries a preview request instead of bypassing the pipeline with a direct state set. |
@@ -437,8 +437,8 @@ Before review, run the focused web tests for the touched stores and components, 
 
 | File/dir                                                                                                             | Current responsibility and migration role                                                    |
 | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| [`apps/web/src/pages/CanvasPage/MainLayout.tsx`](../../apps/web/src/pages/CanvasPage/MainLayout.tsx)                 | Owns the outer right column; will host the unified workspace.                                |
-| [`apps/web/src/pages/CanvasPage/CenterArea.tsx`](../../apps/web/src/pages/CanvasPage/CenterArea.tsx)                 | Currently owns Expanded Node layout; will return to Canvas-only presentation.                |
+| [`apps/web/src/pages/CanvasPage/MainLayout.tsx`](../../apps/web/src/pages/CanvasPage/MainLayout.tsx)                 | Owns the outer right column and mounts the unified workspace.                                |
+| [`apps/web/src/pages/CanvasPage/CenterArea.tsx`](../../apps/web/src/pages/CanvasPage/CenterArea.tsx)                 | Owns Canvas-only presentation and the floating workspace entry controls.                     |
 | [`apps/web/src/components/Panels/ChatPanel/`](../../apps/web/src/components/Panels/ChatPanel)                        | Existing conversation UI to extract into a session-scoped renderer.                          |
 | [`apps/web/src/components/Panels/ExpandedNodePanel/`](../../apps/web/src/components/Panels/ExpandedNodePanel)        | Existing node-preview behavior to extract into a workspace pane.                             |
 | [`apps/web/src/components/Nodes/NodePreviewContent.tsx`](../../apps/web/src/components/Nodes/NodePreviewContent.tsx) | Existing node-type renderer dispatch reused by node targets.                                 |

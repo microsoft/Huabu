@@ -17,6 +17,8 @@ export interface NodePreviewContentProps {
   type: string;
   data: Record<string, unknown>;
   readOnly?: boolean;
+  focusRequestNonce?: number;
+  onFocusRequestHandled?: (nonce: number) => void;
   onContentChange?: (newContent: string) => void;
   onDataChange?: (patch: Record<string, unknown>) => void;
 }

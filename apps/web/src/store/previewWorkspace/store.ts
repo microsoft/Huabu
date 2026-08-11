@@ -59,6 +59,10 @@ export type PreviewWorkspaceState = {
   /** Canvas whose layout is currently in memory; `''` before the first load. */
   canvasId: string;
   workspace: CanvasPreviewWorkspace;
+  /** One-shot request to focus the editable surface of a specific tab. */
+  nodeFocusRequest: { tabId: string; nonce: number } | null;
+  /** Runtime-only sequence that keeps focus request identities monotonic. */
+  nodeFocusRequestSeq: number;
 
   /**
    * Loads a Canvas's layout, flushing the outgoing Canvas first. Falls back
@@ -85,6 +89,8 @@ export type PreviewWorkspaceState = {
   mergeGroups: () => void;
   setActiveGroup: (groupId: string) => void;
   setSplitRatio: (ratio: number) => void;
+  requestNodeFocus: (tabId: string) => void;
+  consumeNodeFocusRequest: (tabId: string, nonce: number) => void;
   /** Drops tabs whose node no longer exists and repairs dangling ids. */
   validate: (liveNodeIds: ReadonlySet<string>) => void;
 };
@@ -93,6 +99,8 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
   (set, get) => ({
     canvasId: '',
     workspace: createEmptyWorkspace(),
+    nodeFocusRequest: null,
+    nodeFocusRequestSeq: 0,
 
     loadForCanvas: (canvasId, legacy) => {
       const current = get();
@@ -104,7 +112,7 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
         (legacy ? seedWorkspaceFromLegacyChat(canvasId, legacy) : null) ??
         createEmptyWorkspace();
 
-      set({ canvasId, workspace });
+      set({ canvasId, workspace, nodeFocusRequest: null });
     },
 
     flush: () => {
@@ -128,7 +136,13 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       return opened.tabId;
     },
 
-    closeTab: (tabId) => set({ workspace: closeTab(get().workspace, tabId) }),
+    closeTab: (tabId) =>
+      set((state) => ({
+        workspace: closeTab(state.workspace, tabId),
+        ...(state.nodeFocusRequest?.tabId === tabId
+          ? { nodeFocusRequest: null }
+          : {}),
+      })),
 
     activateTab: (tabId) =>
       set({ workspace: activateTab(get().workspace, tabId) }),
@@ -149,6 +163,23 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
 
     setSplitRatio: (ratio) =>
       set({ workspace: setSplitRatio(get().workspace, ratio) }),
+
+    requestNodeFocus: (tabId) =>
+      set((state) => {
+        const nonce = state.nodeFocusRequestSeq + 1;
+        return {
+          nodeFocusRequest: { tabId, nonce },
+          nodeFocusRequestSeq: nonce,
+        };
+      }),
+
+    consumeNodeFocusRequest: (tabId, nonce) =>
+      set((state) =>
+        state.nodeFocusRequest?.tabId === tabId &&
+        state.nodeFocusRequest.nonce === nonce
+          ? { nodeFocusRequest: null }
+          : {},
+      ),
 
     validate: (liveNodeIds) => {
       const { canvasId, workspace } = get();

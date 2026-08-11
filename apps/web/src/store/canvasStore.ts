@@ -484,16 +484,6 @@ type RFState = {
    */
   pendingForkThreadIds: Record<string, true>;
 
-  /**
-   * Monotonic counter bumped on every explicit preview-node open —
-   * including when the user re-triggers expansion on the
-   * currently-expanded node. Preview components subscribe to this
-   * tick so they can re-focus their editable surface when the user
-   * double-clicks the same node a second time (the expanded node
-   * itself doesn't change in that case, so a value-based subscriber
-   * would never re-fire).
-   */
-  expandedNodeFocusTick: number;
   pendingInlineEditNodeId: string | null;
   consumeInlineEditRequest: (nodeId: string) => void;
 
@@ -1409,7 +1399,6 @@ const useCanvasStore = create<RFState>()(
 
     pendingForkThreadIds: {},
 
-    expandedNodeFocusTick: 0,
     pendingInlineEditNodeId: null,
     consumeInlineEditRequest: (nodeId) => {
       if (get().pendingInlineEditNodeId !== nodeId) return;
@@ -1759,18 +1748,20 @@ const useCanvasStore = create<RFState>()(
               settleNodePreprocess(previousId);
             }
           }
-          usePreviewWorkspaceStore.getState().openPreviewTarget(
-            {
-              kind: 'node',
-              canvasId: get().canvasId,
-              nodeId: node.id,
-            },
-            undefined,
-            getProtectedPreviewTabIds(),
-          );
-          set((state) => ({
-            expandedNodeFocusTick: state.expandedNodeFocusTick + 1,
-          }));
+          const previewTabId = usePreviewWorkspaceStore
+            .getState()
+            .openPreviewTarget(
+              {
+                kind: 'node',
+                canvasId: get().canvasId,
+                nodeId: node.id,
+              },
+              undefined,
+              getProtectedPreviewTabIds(),
+            );
+          if (previewTabId) {
+            usePreviewWorkspaceStore.getState().requestNodeFocus(previewTabId);
+          }
         } else if (node?.type === 'text') {
           set({ pendingInlineEditNodeId: node.id });
         }

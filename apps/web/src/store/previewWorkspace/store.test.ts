@@ -57,6 +57,8 @@ beforeEach(() => {
   usePreviewWorkspaceStore.setState({
     canvasId: '',
     workspace: createEmptyWorkspace(),
+    nodeFocusRequest: null,
+    nodeFocusRequestSeq: 0,
   });
 });
 
@@ -253,6 +255,33 @@ describe('actions delegate to the model', () => {
     });
 
     expect(() => store().validate(new Set())).not.toThrow();
+  });
+});
+
+describe('node focus requests', () => {
+  it('reissues focus for the same tab and consumes only the matching request', () => {
+    store().requestNodeFocus('tab-1');
+    const firstNonce = store().nodeFocusRequest?.nonce;
+    store().requestNodeFocus('tab-1');
+
+    expect(store().nodeFocusRequest).toEqual({
+      tabId: 'tab-1',
+      nonce: (firstNonce ?? 0) + 1,
+    });
+
+    store().consumeNodeFocusRequest('tab-1', firstNonce ?? 0);
+    expect(store().nodeFocusRequest).not.toBeNull();
+
+    store().consumeNodeFocusRequest(
+      'tab-1',
+      store().nodeFocusRequest?.nonce ?? 0,
+    );
+    expect(store().nodeFocusRequest).toBeNull();
+
+    store().requestNodeFocus('tab-1');
+    expect(store().nodeFocusRequest?.nonce).toBe((firstNonce ?? 0) + 2);
+    store().closeTab('tab-1');
+    expect(store().nodeFocusRequest).toBeNull();
   });
 });
 

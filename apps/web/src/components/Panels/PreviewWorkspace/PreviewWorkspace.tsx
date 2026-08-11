@@ -21,7 +21,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { Fragment, useCallback, useRef } from 'react';
+import { Fragment, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import useCanvasStore, {
@@ -87,6 +87,10 @@ export function PreviewWorkspace({
   const { t } = useTranslation();
   const workspace = usePreviewWorkspaceStore(selectWorkspace);
   const canvasId = usePreviewWorkspaceStore((s) => s.canvasId);
+  const nodeFocusRequest = usePreviewWorkspaceStore((s) => s.nodeFocusRequest);
+  const consumeNodeFocusRequest = usePreviewWorkspaceStore(
+    (s) => s.consumeNodeFocusRequest,
+  );
   const activateTab = usePreviewWorkspaceStore((s) => s.activateTab);
   const closeTab = usePreviewWorkspaceStore((s) => s.closeTab);
   const promoteTab = usePreviewWorkspaceStore((s) => s.promoteTab);
@@ -163,6 +167,7 @@ export function PreviewWorkspace({
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const separatorDragCleanupRef = useRef<(() => void) | null>(null);
   const isSplit = workspace.groups.length > 1;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -191,24 +196,47 @@ export function PreviewWorkspace({
   const onSeparatorPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
       e.preventDefault();
+      e.stopPropagation();
+      separatorDragCleanupRef.current?.();
       const target = e.currentTarget;
-      target.setPointerCapture(e.pointerId);
+      const pointerId = e.pointerId;
+      target.setPointerCapture(pointerId);
 
       const move = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
         const bounds = containerRef.current?.getBoundingClientRect();
         if (!bounds || bounds.width === 0) return;
         setSplitRatio((ev.clientX - bounds.left) / bounds.width);
       };
-      const up = (ev: PointerEvent) => {
-        target.releasePointerCapture(ev.pointerId);
-        target.removeEventListener('pointermove', move);
-        target.removeEventListener('pointerup', up);
+      const cleanup = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', finish);
+        window.removeEventListener('pointercancel', finish);
+        if (separatorDragCleanupRef.current === cleanup) {
+          separatorDragCleanupRef.current = null;
+        }
+      };
+      const finish = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        if (target.hasPointerCapture(pointerId)) {
+          target.releasePointerCapture(pointerId);
+        }
+        cleanup();
       };
 
-      target.addEventListener('pointermove', move);
-      target.addEventListener('pointerup', up);
+      separatorDragCleanupRef.current = cleanup;
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', finish);
+      window.addEventListener('pointercancel', finish);
     },
     [setSplitRatio],
+  );
+
+  useEffect(
+    () => () => {
+      separatorDragCleanupRef.current?.();
+    },
+    [],
   );
 
   const onSeparatorKeyDown = (e: React.KeyboardEvent) => {
@@ -258,8 +286,10 @@ export function PreviewWorkspace({
                 tabIndex={0}
                 onPointerDown={onSeparatorPointerDown}
                 onKeyDown={onSeparatorKeyDown}
-                className="group hover:bg-info/30 focus-visible:outline-info flex w-1 shrink-0 cursor-col-resize items-center justify-center focus-visible:outline-1"
-              />
+                className="group focus-visible:outline-info z-10 -mx-1 flex w-2 shrink-0 cursor-col-resize touch-none items-center justify-center focus-visible:outline-1"
+              >
+                <div className="bg-edge-default group-hover:bg-info h-full w-px" />
+              </div>
             )}
             <div
               className="flex h-full min-w-0 flex-col"
@@ -277,6 +307,8 @@ export function PreviewWorkspace({
                 onActivate={activateWorkspaceTab}
                 onClose={closeWorkspaceTab}
                 onPromote={promoteTab}
+                nodeFocusRequest={nodeFocusRequest}
+                onNodeFocusRequestHandled={consumeNodeFocusRequest}
                 onOpenToSide={openToSide}
                 onNewChat={() => openNewChat(group.id)}
                 onCollapse={

@@ -30,7 +30,6 @@ beforeEach(() => {
     canvasId: 'canvas-1',
     nodes: [],
     edges: [],
-    expandedNodeFocusTick: 0,
   });
   usePreviewWorkspaceStore.setState({
     canvasId: 'canvas-1',

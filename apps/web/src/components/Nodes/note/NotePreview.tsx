@@ -81,6 +81,9 @@ export interface PreviewComponentProps {
   id?: string;
   data: Record<string, unknown>;
   readOnly?: boolean;
+  /** One-shot focus request owned by the containing preview tab. */
+  focusRequestNonce?: number;
+  onFocusRequestHandled?: (nonce: number) => void;
   /** Called with a plain string for backward-compat consumers. */
   onContentChange?: (newContent: string) => void;
   /**
@@ -95,6 +98,8 @@ export const NotePreview = ({
   id,
   data,
   readOnly,
+  focusRequestNonce,
+  onFocusRequestHandled,
   onContentChange,
   onDataChange,
 }: PreviewComponentProps) => {
@@ -366,31 +371,21 @@ export const NotePreview = ({
     editor.setBlockDecorations(decorations?.blocks ?? []);
   }, [editor, decorations]);
 
-  // Auto-focus the editor whenever the user triggers "expand this
-  // node" — covering both the first mount (e.g., double-click an
-  // unopened note) AND a repeat double-click on the already-expanded
-  // node. We drive this off `expandedNodeFocusTick`, a store counter
-  // bumped by every explicit preview-node open. The ref-tracked
-  // `lastHandledTickRef` skips redundant focuses on unrelated effect
-  // runs (e.g., toggling raw ↔ wysiwyg) so we never steal focus from
-  // an input elsewhere on the page when no expansion was requested.
-  // The sentinel `-1` guarantees the first valid run (editor ready,
-  // editable, wysiwyg) always focuses even on a fresh mount.
-  const focusTick = useCanvasStore((s) => s.expandedNodeFocusTick);
   // Needed to resolve artifact-key image srcs (e.g. `art_xxx.png`)
   // dragged in from chat so the inserted markdown carries a
   // fetchable HTTP URL rather than a bare key the renderer can't
   // dereference.
   const canvasId = useCanvasStore((s) => s.canvasId);
-  const lastHandledFocusTickRef = useRef<number>(-1);
+  // Explicit opens target one workspace tab. Consume the request after the
+  // editor focuses so remounting that tab cannot replay stale focus intent.
   useEffect(() => {
     if (!editor) return;
     if (readOnly) return;
     if (editMode !== 'wysiwyg') return;
-    if (lastHandledFocusTickRef.current === focusTick) return;
-    lastHandledFocusTickRef.current = focusTick;
+    if (focusRequestNonce === undefined) return;
     editor.focus();
-  }, [editor, readOnly, editMode, focusTick]);
+    onFocusRequestHandled?.(focusRequestNonce);
+  }, [editor, readOnly, editMode, focusRequestNonce, onFocusRequestHandled]);
 
   const handleBlockDragStart = useCallback(
     (event: MilkdownBlockDragEvent) => {

@@ -56,6 +56,9 @@ type ExpandedNodePanelProps = {
   onClose?: () => void;
   /** Reports a persistent node mutation to the owning preview surface. */
   onCommit?: () => void;
+  /** One-shot request to focus this tab's editable node surface. */
+  nodeFocusRequestNonce?: number;
+  onNodeFocusRequestHandled?: (nonce: number) => void;
   /** Uses the compact chrome shared by Preview Workspace renderers. */
   embedded?: boolean;
   /**
@@ -235,6 +238,8 @@ export const ExpandedNodePanel = ({
   nodeId,
   onClose,
   onCommit,
+  nodeFocusRequestNonce,
+  onNodeFocusRequestHandled,
   embedded = false,
   hasFocusPriority = true,
 }: ExpandedNodePanelProps = {}) => {
@@ -659,6 +664,8 @@ export const ExpandedNodePanel = ({
               type={activeItem.type}
               data={activeItem.data}
               readOnly={false}
+              focusRequestNonce={nodeFocusRequestNonce}
+              onFocusRequestHandled={onNodeFocusRequestHandled}
               onDataChange={
                 expandedNodeId
                   ? (patch) => {

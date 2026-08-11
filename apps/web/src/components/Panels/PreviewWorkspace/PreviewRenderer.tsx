@@ -63,6 +63,8 @@ export function PreviewRenderer({
   target,
   onClose,
   onCommit,
+  nodeFocusRequestNonce,
+  onNodeFocusRequestHandled,
   hasFocusPriority,
 }: {
   tabId: string;
@@ -71,6 +73,9 @@ export function PreviewRenderer({
   onClose: () => void;
   /** Promotes this tab after its target receives a persistent mutation. */
   onCommit: () => void;
+  /** One-shot request for this tab's editable node surface. */
+  nodeFocusRequestNonce?: number;
+  onNodeFocusRequestHandled: (nonce: number) => void;
   /** Whether this tab's group is the focused one (§14). */
   hasFocusPriority: boolean;
 }) {
@@ -123,6 +128,8 @@ export function PreviewRenderer({
       onCommit={onCommit}
       embedded
       hasFocusPriority={hasFocusPriority}
+      nodeFocusRequestNonce={nodeFocusRequestNonce}
+      onNodeFocusRequestHandled={onNodeFocusRequestHandled}
     />
   );
 }
