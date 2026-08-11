@@ -149,7 +149,7 @@ export const ChatInput = ({
     const raf = requestAnimationFrame(() => {
       const ta = textareaRef.current;
       if (!ta) return;
-      ta.focus();
+      ta.focus({ preventScroll: true });
       const len = ta.value.length;
       ta.selectionStart = len;
       ta.selectionEnd = len;
