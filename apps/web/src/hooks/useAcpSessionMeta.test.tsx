@@ -18,7 +18,7 @@ vi.mock('@/api/acp', () => ({
 }));
 
 vi.mock('@/hooks/useAgentStream', () => ({
-  setAcpSessionMetaSink: vi.fn(),
+  registerAcpSessionMetaSink: vi.fn(() => () => {}),
 }));
 
 const EMPTY_META = {

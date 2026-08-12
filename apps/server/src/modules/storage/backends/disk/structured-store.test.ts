@@ -77,13 +77,11 @@ describeSpaceLogsContract('Disk Space logs', () => {
   const handle = store.space('canvas-a');
   const concurrent = store.space('canvas-a');
   return {
-    events: handle.history.events,
+    events: handle.events,
     changes: handle.changes,
-    intents: handle.history.intents,
     concurrent: {
-      events: concurrent.history.events,
+      events: concurrent.events,
       changes: concurrent.changes,
-      intents: concurrent.history.intents,
     },
     cleanup: () => {
       resetStorageCache();
@@ -302,17 +300,11 @@ describe('DiskStructuredStore instance caching', () => {
     const runtime = handle as unknown as Record<string, unknown>;
 
     expect(runtime['logs']).toBeUndefined();
-    expect(Object.keys(handle.history.events)).toEqual(['read', 'append']);
+    expect(Object.keys(handle.events)).toEqual(['read', 'append']);
     expect(Object.keys(handle.changes)).toEqual(['read', 'append', 'delete']);
-    expect(Object.keys(handle.history.intents)).toEqual(['read', 'put']);
     expect(Object.keys(handle.tasks.runs)).toEqual(['create', 'update']);
 
-    for (const part of [
-      handle.history.events,
-      handle.changes,
-      handle.history.intents,
-      handle.tasks.runs,
-    ]) {
+    for (const part of [handle.events, handle.changes, handle.tasks.runs]) {
       expect(Object.isFrozen(part)).toBe(true);
       expect('store' in part).toBe(false);
     }

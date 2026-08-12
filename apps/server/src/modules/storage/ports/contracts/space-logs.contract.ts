@@ -3,7 +3,7 @@
 
 /**
  * Reusable contracts for the log-backed parts a Space carries: its history
- * (events and intents) and its pending change review.
+ * (behavioural events) and its pending change review.
  *
  * ⚠️ **Adapter-local guarantees.** As with the Space-record suite, the
  * linearizability properties asserted here belong to the adapter under test,
@@ -16,8 +16,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
 
-import type { SpaceChanges, SpaceEvents, SpaceIntents } from '../structured.js';
-import type { IntentEpisode, RecentAction } from '@huabu/shared';
+import type { SpaceChanges, SpaceEvents } from '../structured.js';
+import type { RecentAction } from '@huabu/shared';
 import type {
   CanvasChangeRecord,
   CanvasNode,
@@ -26,7 +26,6 @@ import type {
 export interface SpaceLogs {
   events: SpaceEvents;
   changes: SpaceChanges;
-  intents: SpaceIntents;
 }
 
 export interface SpaceLogsHarness extends SpaceLogs {
@@ -73,16 +72,6 @@ function change(nodeId: string, content = 'body'): CanvasChangeRecord {
     { type: 'INSERT_NODE', node: node(nodeId, content) },
   ]);
   return record;
-}
-
-function episode(id: string, chosenLabel: string): IntentEpisode {
-  return {
-    id,
-    timestamp: 1,
-    contextSummary: `ctx-${id}`,
-    candidates: [],
-    outcome: { type: 'selected', chosenIndex: 0, chosenLabel },
-  };
 }
 
 export function describeSpaceLogsContract(
@@ -244,41 +233,6 @@ export function describeSpaceLogsContract(
 
       expect((await changes.read('t1')).map((r) => r.nodeId)).toEqual([
         'node-b',
-      ]);
-    });
-
-    // ── Intent episodes ─────────────────────────────────────────────────────
-
-    it('reads no intents for a fresh Space', async () => {
-      const { intents } = await open();
-      await expect(intents.read()).resolves.toEqual([]);
-    });
-
-    it('inserts a new episode and updates an existing one by id', async () => {
-      const { intents } = await open();
-      await intents.put(episode('e1', 'first'));
-      await intents.put(episode('e2', 'second'));
-      expect(await intents.read()).toHaveLength(2);
-
-      await intents.put(episode('e1', 'revised'));
-      const stored = await intents.read();
-      expect(stored).toHaveLength(2);
-      const updated = stored.find((e) => e.id === 'e1');
-      expect(
-        updated?.outcome.type === 'selected' && updated.outcome.chosenLabel,
-      ).toBe('revised');
-    });
-
-    it('does not lose an episode under concurrent puts', async () => {
-      const { intents, concurrent } = await open();
-      await Promise.all([
-        intents.put(episode('e1', 'first')),
-        concurrent.intents.put(episode('e2', 'second')),
-      ]);
-
-      expect((await intents.read()).map((e) => e.id).sort()).toEqual([
-        'e1',
-        'e2',
       ]);
     });
   });

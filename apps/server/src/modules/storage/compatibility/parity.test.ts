@@ -127,7 +127,7 @@ describe('compatibility facade and composite handle observe each other', () => {
 
   it('shows a repository log append through the facade', async () => {
     const handle = new DiskStructuredStore().space(CANVAS_ID);
-    await handle.history.events.append([
+    await handle.events.append([
       {
         payload: {
           action: 'node_selected',
@@ -225,8 +225,6 @@ describe('cross-surface Disk invariants', () => {
       'readChanges',
       'appendChanges',
       'removeChange',
-      'readIntents',
-      'upsertIntent',
     ]) {
       expect(nodes).not.toHaveProperty(forbidden);
     }

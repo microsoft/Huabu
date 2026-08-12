@@ -5,6 +5,8 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ChatSessionProvider } from '@/hooks/useChatSession';
+
 import { ChatInput } from './ChatInput';
 
 const chatState = {
@@ -12,6 +14,12 @@ const chatState = {
   selectionAttachment: null,
   addPendingAttachment: vi.fn(),
   removePendingAttachment: vi.fn(),
+};
+
+const panelState: {
+  focusChatInputRequest: { threadId: string; nonce: number } | null;
+} = {
+  focusChatInputRequest: null,
 };
 
 vi.mock('@/store/canvasStore', () => ({
@@ -25,15 +33,15 @@ vi.mock('@/store/chatStore', () => {
     { getState: () => chatState },
   );
   return {
-    selectCurrentMessages: () => [],
+    selectThreadMessages: () => [],
+    selectThreadPendingAttachments: () => chatState.pendingAttachments,
     useChatStore,
   };
 });
 
 vi.mock('@/store/panelStore', () => ({
-  usePanelStore: (
-    selector: (state: { focusChatInputNonce: number }) => unknown,
-  ) => selector({ focusChatInputNonce: 0 }),
+  usePanelStore: (selector: (state: typeof panelState) => unknown) =>
+    selector(panelState),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -61,9 +69,47 @@ afterEach(() => {
   container?.remove();
   root = undefined;
   container = undefined;
+  panelState.focusChatInputRequest = null;
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('ChatInput', () => {
+  it('focuses a requested composer without scrolling its layout ancestors', () => {
+    panelState.focusChatInputRequest = { threadId: 'thread-test', nonce: 1 };
+    const focus = vi.spyOn(HTMLTextAreaElement.prototype, 'focus');
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root?.render(
+        <ChatSessionProvider
+          value={{
+            threadId: 'thread-test',
+            canvasId: 'canvas-test',
+            ownerCanvasId: 'canvas-test',
+            conversationView: null,
+          }}
+        >
+          <ChatInput
+            value=""
+            onChange={vi.fn()}
+            onSubmit={vi.fn()}
+            onStop={vi.fn()}
+            mode="ask"
+          />
+        </ChatSessionProvider>,
+      ),
+    );
+
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
   it('stops a running turn without submitting the preserved draft', () => {
     const onStop = vi.fn();
     const onSubmit = vi.fn();
@@ -90,7 +136,20 @@ describe('ChatInput', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    act(() => root?.render(<Harness />));
+    act(() =>
+      root?.render(
+        <ChatSessionProvider
+          value={{
+            threadId: 'thread-test',
+            canvasId: 'canvas-test',
+            ownerCanvasId: 'canvas-test',
+            conversationView: null,
+          }}
+        >
+          <Harness />
+        </ChatSessionProvider>,
+      ),
+    );
 
     const stopButton = container.querySelector<HTMLButtonElement>(
       'button[aria-label="chat.stop"]',

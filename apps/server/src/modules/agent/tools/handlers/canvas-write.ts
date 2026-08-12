@@ -77,12 +77,10 @@ const DEFAULT_ORIGIN: NodeOrigin = { type: 'ai-operate' };
  * Execute a batch of canvas commands and return the SSE-bound payload.
  *
  * `origin` controls the `NodeOrigin` stamp injected onto every CREATE /
- * MERGE command. Defaults to `{ type: 'ai-operate' }`
- * for the chat/operate agent; the sketch pipeline overrides this to
- * `{ type: 'sketch-recognized' }` so user-authored gestures are not
- * mis-tagged as AI-initiated. Provenance (`author: 'ai'`) and
- * `labelSource: 'agent'` are still injected regardless of `origin` —
- * they describe who *wrote* the content, which is the LLM in both cases.
+ * MERGE command. Defaults to `{ type: 'ai-operate' }`.
+ * Provenance (`author: 'ai'`) and `labelSource: 'agent'` are still
+ * injected regardless of `origin` — they describe who *wrote* the
+ * content, which is the LLM in every case.
  */
 export async function handleCanvasCommands(
   args: CanvasCommandsArgs,
@@ -105,24 +103,6 @@ export async function handleCanvasCommands(
   });
 
   const runId = createId('run');
-
-  // M2 sketch carve-out: the sketch pipeline still applies commands
-  // client-side via `useCanvasStore.executeCommands('agent')` after
-  // receiving the SketchCommandResponse. Running the executor here
-  // would double-apply and immediately desync local `version`. The
-  // chat agent path (default origin `ai-operate`) is the one that
-  // benefits from server-side execution today; sketch joins in M3
-  // when broadcast lands.
-  if (
-    origin.type === 'sketch-recognized' &&
-    !annotated.some((command) => command.type === 'SET_PORTAL_NODE_PINS')
-  ) {
-    return JSON.stringify({
-      source: 'agent',
-      canvasId: args.canvasId,
-      commands: annotated,
-    });
-  }
 
   try {
     const result = await executeCanvasCommandsOnHost({

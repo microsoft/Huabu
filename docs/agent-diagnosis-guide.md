@@ -5,7 +5,7 @@ Status: Living document
 > How to figure out **why an agent is slow or not behaving as expected** on a
 > Huabu Space, and how to turn that into fix-ready material. Covers both:
 >
-> - **Built-in Huabu agents** — `operate` / `ask` / `sketch` / memory, run
+> - **Built-in Huabu agents** — `operate` / `ask` / memory, run
 >   in-process by Huabu.
 > - **External ACP agents** — agentlet-spawned harnesses (e.g. `deepv`, GitHub
 >   Copilot CLI) that connect over ACP and can reach back into the canvas.

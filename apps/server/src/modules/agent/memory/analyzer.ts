@@ -45,7 +45,6 @@ import {
 import type { MemoryLogger } from './index.js';
 import type { WriteResult } from './writers.js';
 import type { Context, Message } from '@earendil-works/pi-ai';
-import type { IntentEpisode } from '@huabu/shared';
 
 /**
  * Soft caps applied while assembling the context bundle. The
@@ -57,14 +56,6 @@ const MAX_NODES_IN_SNAPSHOT = 60;
 const MAX_EVENTS_IN_DIGEST = 100;
 const MAX_CHAT_TURNS_IN_DIGEST = 12;
 const MAX_THREAD_SCAN = 6;
-/**
- * How many recent intent episodes the digest is allowed to surface in
- * detail. The aggregate counters (selected vs dismissed, top labels)
- * are always computed across every new episode regardless of this cap
- * — only the per-episode "examples" tail honours it. Keeps the bundle
- * bounded on canvases where the user smashes Cmd+I dozens of times.
- */
-const MAX_INTENT_EPISODES_IN_DIGEST = 20;
 
 /**
  * Run one memory analysis pass.
@@ -86,7 +77,6 @@ export type AnalysisPassResult =
       status: 'completed';
       results: WriteResult[];
       latestChatTs: number | null;
-      latestIntentTs: number | null;
     }
   | { status: 'skipped'; reason: 'space-not-found' };
 
@@ -147,7 +137,6 @@ export async function runAnalysisPass(
     status: 'completed',
     results: writeResults,
     latestChatTs: bundle.latestChatTs,
-    latestIntentTs: bundle.latestIntentTs,
   };
 }
 
@@ -191,13 +180,6 @@ interface ContextBundle {
    * newer turns.
    */
   latestChatTs: number | null;
-  /**
-   * Max `IntentEpisode.timestamp` folded into the intent digest, or
-   * `null` when no new episodes were seen. Worker persists this as
-   * `lastSeenIntentCursor` so each user intent pick is fed to the
-   * curator at most once.
-   */
-  latestIntentTs: number | null;
 }
 
 /**
@@ -237,10 +219,7 @@ async function assembleContext(
     });
     parts.push(`${chat.turns} chat turns`);
   }
-  const [eventRows, intentRows] = await Promise.all([
-    handle.history.events.read(MAX_EVENTS_IN_DIGEST),
-    handle.history.intents.read(),
-  ]);
+  const eventRows = await handle.events.read(MAX_EVENTS_IN_DIGEST);
   const events = readEventsDigest(eventRows);
   if (events) {
     messages.push({
@@ -249,18 +228,6 @@ async function assembleContext(
       timestamp: Date.now(),
     });
     parts.push(`${events.count} ops`);
-  }
-
-  const intent = readIntentDigest(intentRows, state.lastSeenIntentCursor);
-  if (intent) {
-    messages.push({
-      role: 'user',
-      content: `[SYSTEM Intent digest since ${
-        state.lastSeenIntentCursor ?? 'start'
-      }]\n${intent.text}`,
-      timestamp: Date.now(),
-    });
-    parts.push(`${intent.episodeCount} intents`);
   }
 
   const memorySnapshot = readMemorySnapshot(canvasId);
@@ -281,7 +248,6 @@ async function assembleContext(
     messages,
     summary: parts.join(', ') || '(empty)',
     latestChatTs: chat?.latestTs ?? null,
-    latestIntentTs: intent?.latestTs ?? null,
   };
 }
 
@@ -455,104 +421,6 @@ function readEventsDigest(events: readonly CanvasEvent[]): EventsDigest | null {
     return `- ${payload.kind ?? 'event'}: ${String(payload.description ?? '').slice(0, 120)}`;
   });
   return { text: summaries.join('\n'), count: events.length };
-}
-
-// ─── Intent digest ────────────────────────────────────────────
-// Summarize new episodes since `since`: counters + a small recent tail.
-
-interface IntentDigest {
-  text: string;
-  episodeCount: number;
-  latestTs: number | null;
-}
-
-function readIntentDigest(
-  episodes: readonly IntentEpisode[],
-  since: number | null,
-): IntentDigest | null {
-  let latestTs: number | null = null;
-  let selected = 0;
-  let dismissed = 0;
-  let executedOk = 0;
-  let executedErr = 0;
-  const chosenCounts = new Map<string, number>();
-  const dismissedCandidateCounts = new Map<string, number>();
-  const fresh: IntentEpisode[] = [];
-
-  for (const item of episodes) {
-    if (!item || typeof item !== 'object') continue;
-    const ep = item as IntentEpisode;
-    if (typeof ep.timestamp !== 'number') continue;
-    if (since !== null && ep.timestamp <= since) continue;
-    if (latestTs === null || ep.timestamp > latestTs) latestTs = ep.timestamp;
-    fresh.push(ep);
-
-    if (ep.outcome?.type === 'selected') {
-      selected++;
-      const label = ep.outcome.chosenLabel?.slice(0, 80) ?? '(blank)';
-      chosenCounts.set(label, (chosenCounts.get(label) ?? 0) + 1);
-      const exec = ep.outcome.execution;
-      if (exec?.status === 'success') executedOk++;
-      else if (exec?.status === 'error') executedErr++;
-    } else if (ep.outcome?.type === 'dismissed') {
-      dismissed++;
-      for (const c of ep.candidates ?? []) {
-        const label = c.label?.slice(0, 80) ?? '(blank)';
-        if (!label) continue;
-        dismissedCandidateCounts.set(
-          label,
-          (dismissedCandidateCounts.get(label) ?? 0) + 1,
-        );
-      }
-    }
-  }
-
-  if (fresh.length === 0 && latestTs === null) return null;
-
-  const lines: string[] = [
-    `summary: ${fresh.length} new episode(s) — ${selected} selected, ${dismissed} dismissed (executed: ${executedOk} ok, ${executedErr} error)`,
-  ];
-
-  const topChosen = topN(chosenCounts, 5);
-  if (topChosen.length > 0) {
-    lines.push('top chosen labels:');
-    for (const [label, n] of topChosen) lines.push(`  - ${label} ×${n}`);
-  }
-  const topDismissed = topN(dismissedCandidateCounts, 5);
-  if (topDismissed.length > 0) {
-    lines.push('top dismissed candidates:');
-    for (const [label, n] of topDismissed) lines.push(`  - ${label} ×${n}`);
-  }
-
-  const examples = fresh.slice(-MAX_INTENT_EPISODES_IN_DIGEST);
-  if (examples.length > 0) {
-    lines.push('recent episodes (oldest → newest):');
-    for (const ep of examples) {
-      let outcome: string;
-      if (ep.outcome?.type === 'selected') {
-        const label = ep.outcome.chosenLabel?.slice(0, 80) ?? '';
-        const exec = ep.outcome.execution;
-        const execTag = exec ? ` (exec: ${exec.status})` : '';
-        outcome = `selected "${label}"${execTag}`;
-      } else {
-        outcome = 'dismissed';
-      }
-      const ctx = ep.contextSummary
-        ? ` [ctx: ${ep.contextSummary.slice(0, 80)}]`
-        : '';
-      lines.push(`- ${outcome}${ctx}`);
-    }
-  }
-
-  return {
-    text: lines.join('\n'),
-    episodeCount: fresh.length,
-    latestTs,
-  };
-}
-
-function topN(counts: Map<string, number>, n: number): Array<[string, number]> {
-  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
 }
 
 function readMemorySnapshot(canvasId: string): string {

@@ -6,8 +6,8 @@ import { Trans, useTranslation } from 'react-i18next';
 
 import { agentApi } from '@/api/agent';
 import { Tooltip } from '@/components/Common/Tooltip';
-import useCanvasStore from '@/store/canvasStore';
-import { selectCurrentMessages, useChatStore } from '@/store/chatStore';
+import { useChatSession } from '@/hooks/useChatSession';
+import { selectThreadMessages, useChatStore } from '@/store/chatStore';
 
 /**
  * Authoritative usage reported by an external (ACP) agent itself.
@@ -78,9 +78,10 @@ export const ContextUsageRing = ({
   usageOverride,
 }: ContextUsageRingProps) => {
   const { t } = useTranslation();
-  const messages = useChatStore(selectCurrentMessages);
-  const threadId = useChatStore((s) => s.threadId);
-  const canvasId = useCanvasStore((s) => s.canvasId);
+  const { threadId, canvasId } = useChatSession();
+  const messages = useChatStore((state) =>
+    selectThreadMessages(state, threadId),
+  );
 
   const useInternalFetch = usageOverride === undefined;
 

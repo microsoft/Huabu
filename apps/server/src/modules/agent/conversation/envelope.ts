@@ -9,8 +9,8 @@
  * backend renders it. {@link buildChatEnvelope} performs all the
  * derivation with side effects (workspace-memory read, sketch/image
  * auto-snapshot, invoked-skill resolution, node-neighbourhood render);
- * the serializers (`serializeChatEnvelopeToPiAi`, and later intent /
- * ACP variants) are pure functions over the result.
+ * the serializers (`serializeChatEnvelopeToPiAi`, and later ACP
+ * variants) are pure functions over the result.
  *
  * Field grouping mirrors the orthogonal concerns the design calls
  * out:

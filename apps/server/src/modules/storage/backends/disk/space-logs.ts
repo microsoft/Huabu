@@ -2,10 +2,10 @@
 // Licensed under the MIT license.
 
 /**
- * Disk implementations of the append-structured Space parts: events,
- * change-review records, and intent episodes.
+ * Disk implementations of the append-structured Space parts: events and
+ * change-review records.
  *
- * The implementation stays co-located because all three share the same legacy
+ * The implementation stays co-located because both share the same legacy
  * per-Space object and workspace-lifetime guard. Callers receive frozen,
  * runtime-narrow facades rather than this coordinator, so no part can reach
  * unrelated methods or the legacy object.
@@ -20,11 +20,7 @@
 
 import path from 'node:path';
 
-import {
-  canvasEventInputSchema,
-  canvasEventRecordSchema,
-  type IntentEpisode,
-} from '@huabu/shared';
+import { canvasEventInputSchema, canvasEventRecordSchema } from '@huabu/shared';
 import {
   coalesceChanges,
   type CanvasChangeRecord,
@@ -36,11 +32,7 @@ import {
   readJsonLinesStrict,
   readJsonStrict,
 } from '../../../../utils/fs.js';
-import {
-  changesPath,
-  eventsPath,
-  intentPath,
-} from '../../../workspace/disk/paths.js';
+import { changesPath, eventsPath } from '../../../workspace/disk/paths.js';
 import { getWorkspacePath } from '../../../workspace.js';
 import { assertSpaceMutationAllowed } from '../../space-lifecycle-admission.js';
 
@@ -50,7 +42,6 @@ import type {
   NewCanvasEvent,
   SpaceChanges,
   SpaceEvents,
-  SpaceIntents,
 } from '../../ports/structured.js';
 import type { z } from 'zod';
 
@@ -104,7 +95,6 @@ function readJsonArray<T>(filePath: string, family: string): T[] {
 export interface DiskSpaceLogs {
   readonly events: SpaceEvents;
   readonly changes: SpaceChanges;
-  readonly intents: SpaceIntents;
 }
 
 class DiskSpaceLogCoordinator {
@@ -194,27 +184,6 @@ class DiskSpaceLogCoordinator {
     atomicWriteJson(filePath, existing);
     return removed ?? null;
   }
-
-  // ── Intent episodes ───────────────────────────────────────────────────────
-
-  async readIntents(): Promise<IntentEpisode[]> {
-    this.assertActiveWorkspace();
-    return readJsonArray<IntentEpisode>(
-      intentPath(this.#store.canvasId),
-      'intent episodes',
-    );
-  }
-
-  async putIntent(episode: IntentEpisode): Promise<void> {
-    this.assertActiveWorkspace();
-    this.requireSpace();
-    const filePath = intentPath(this.#store.canvasId);
-    const episodes = readJsonArray<IntentEpisode>(filePath, 'intent episodes');
-    const idx = episodes.findIndex((candidate) => candidate.id === episode.id);
-    if (idx >= 0) episodes[idx] = episode;
-    else episodes.push(episode);
-    atomicWriteJson(filePath, episodes);
-  }
 }
 
 /**
@@ -238,10 +207,5 @@ export function createDiskSpaceLogs(store: CanvasStore): DiskSpaceLogs {
     delete: (threadId: string, changeId: string) =>
       coordinator.deleteChange(threadId, changeId),
   });
-  const intents: SpaceIntents = Object.freeze({
-    read: () => coordinator.readIntents(),
-    put: (episode: IntentEpisode) => coordinator.putIntent(episode),
-  });
-
-  return Object.freeze({ events, changes, intents });
+  return Object.freeze({ events, changes });
 }

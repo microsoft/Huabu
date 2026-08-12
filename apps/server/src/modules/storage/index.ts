@@ -89,8 +89,6 @@ export type {
   SpaceDeleteSession,
   SpaceEvents,
   SpaceHandle,
-  SpaceHistory,
-  SpaceIntents,
   SpaceNodeMutation,
   SpaceNodes,
   SpaceRenameInput,

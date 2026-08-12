@@ -45,7 +45,6 @@ import type {
 } from '../../canvas/persistence-types.js';
 import type {
   CanvasSummary,
-  IntentEpisode,
   RecentAction,
   TaskRecord,
   TaskRunRecord,
@@ -225,25 +224,16 @@ export interface SpaceHandle {
   readonly changes: SpaceChanges;
   /** Tasks and the Runs that execute them. */
   readonly tasks: SpaceTasks;
-  /** What already happened, and what was concluded from it. */
-  readonly history: SpaceHistory;
-}
-
-/**
- * The Space's past.
- *
- * Deliberately narrow. Change-review records and Tasks share Disk's
- * `.history/` directory but are not history: pending changes drain as the user
- * accepts or rejects them, and a Run carries live `pending`/`running` status
- * that the launcher mutates in flight. Grouping them here would file live state
- * under a name that says past, and would import a Disk layout into a
- * backend-neutral contract.
- */
-export interface SpaceHistory {
-  /** What happened in this Space, as behavioural events. */
+  /**
+   * What already happened in this Space, as behavioural events.
+   *
+   * Flat, not under a `history` group. That group existed to hold events
+   * beside intent episodes — two kinds of past record, one noun over them.
+   * With intents gone it would be a single-member wrapper, and a member whose
+   * only job is to hold one other member is a level the reader pays for and
+   * learns nothing from. A second kind of past record can reintroduce it.
+   */
   readonly events: SpaceEvents;
-  /** Intent episodes the memory pass reads. */
-  readonly intents: SpaceIntents;
 }
 
 // ─── The ordered Space write ─────────────────────────────────────────────────
@@ -331,13 +321,6 @@ export interface SpaceEvents {
   /** Chronological; when `limit` is set, only the most recent `limit`. */
   read(limit?: number): Promise<CanvasEvent[]>;
   append(events: readonly NewCanvasEvent[]): Promise<void>;
-}
-
-/** Intent episodes for one Space. Puts are linearizable by episode id. */
-export interface SpaceIntents {
-  read(): Promise<IntentEpisode[]>;
-  /** Install one complete episode, replacing any episode with the same id. */
-  put(episode: IntentEpisode): Promise<void>;
 }
 
 // ─── Pending review ─────────────────────────────────────────────────────────

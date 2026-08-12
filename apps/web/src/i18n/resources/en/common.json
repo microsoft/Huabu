@@ -267,6 +267,7 @@
     "searching": "Searching"
   },
   "editor": {
+    "readOnlyContent": "Read-only content",
     "blockType": "Block type",
     "textColor": "Text color",
     "highlightColor": "Highlight color",
@@ -375,12 +376,24 @@
     "pinFailed": "Failed to update World pins",
     "pinSourceMissing": "Cannot pin: this Space no longer exists"
   },
+  "preview": {
+    "tabStrip": "Open previews",
+    "group": "Preview group",
+    "chatTab": "Chat",
+    "transientTabHint": "{{title}} — temporary preview; double-click to keep",
+    "transientTabDescription": "Temporary preview; double-click to keep",
+    "closeTab": "Close {{title}}",
+    "resizeGroups": "Resize preview groups",
+    "openToSide": "Open to the side",
+    "collapse": "Collapse previews",
+    "emptyGroup": "No preview open in this group",
+    "emptyWorkspace": "Double-click a node on the Space to preview it here",
+    "nodeUnavailable": "This node is no longer available"
+  },
   "node": {
     "untitled": "Untitled",
     "rename": "Rename node",
     "preview": "Preview",
-    "fullView": "Full view",
-    "splitView": "Split view",
     "navigateUpstream": "Navigate to a source node ({{shortcut}})",
     "navigateDownstream": "Navigate to a destination node ({{shortcut}})",
     "navigateConnected": "Navigate connected nodes",
@@ -399,9 +412,7 @@
     "removeFromCanvas": "Remove from Space",
     "aiSummary": "AI Summary",
     "pdfCapture": "PDF capture",
-    "addSelectedTextAsNote": "Add selected text as a note",
     "dragSelectedTextAsNote": "Drag selected text as a note",
-    "addCapturedAreaAsImage": "Add captured area as an image",
     "dragCapturedAreaAsImage": "Drag captured area as an image",
     "sendCapturedAreaToChat": "Send captured area to chat",
     "setCapturedAreaAsPdfCover": "Set captured area as PDF cover",
@@ -478,10 +489,6 @@
     "stopRecording": "Stop recording",
     "startRecording": "Start recording",
     "tapToRecord": "Tap to record",
-    "openRecognitionDetails": "Open recognition details in chat panel",
-    "keepChanges": "Keep changes",
-    "revertChanges": "Revert changes",
-    "holdPreviewBefore": "Hold to preview before",
     "pen": "Pen",
     "eraser": "Eraser",
     "eraserSize": "Eraser size",
@@ -505,9 +512,7 @@
     "nodeImage": "Node image",
     "noImageSource": "No Image Source",
     "videoFileMissing": "Video file missing",
-    "noVideoSource": "No Video Source",
-    "applySketch": "Apply Sketch (interpret stroke with AI)",
-    "applySketchPlural": "Apply sketches"
+    "noVideoSource": "No Video Source"
   },
   "layers": {
     "title": "Layers",
@@ -555,7 +560,6 @@
     "closePanel": "Close chat panel",
     "title": "Chat",
     "chatWith": "Chat with {{name}}",
-    "sketchRecognition": "Sketch Recognition",
     "newQuestion": "New question",
     "question": "Question",
     "backToChat": "Back to chat",
@@ -583,8 +587,8 @@
     "agentTeams": "Agent Teams",
     "externalAgents": "External Agents",
     "addAgent": "Add agent",
-    "inputPlaceholder": "Asking anything here...",
-    "operatePlaceholder": "Describe the Space change you want...",
+    "inputPlaceholder": "Asking anything here…",
+    "operatePlaceholder": "Describe the Space change you want…",
     "attachmentFallbackImage": "Image",
     "attachmentFallbackPdf": "PDF",
     "attachmentFallbackFile": "File",
@@ -804,7 +808,6 @@
       "selectFiles": "Click to select files",
       "linkDescription": "Paste URLs below (one per line)."
     },
-    "intent": "Intent",
     "size": {
       "switchManual": "Switch to manual size",
       "fitSize": "Fit size to content",
@@ -829,11 +832,6 @@
     "convertToText": "Convert to text",
     "convertToNote": "Convert to note",
     "dragBlockToCanvas": "Drag block to Space"
-  },
-  "intent": {
-    "noSuggestions": "No suggestions",
-    "placeholder": "Describe your own intent…",
-    "analyzingContext": "Analyzing context…"
   },
   "edgeToolbar": {
     "type": "Type",
@@ -913,7 +911,6 @@
       "bringFront": "Bring selected nodes to front",
       "groupFrame": "Group selected nodes into a frame",
       "copyNoteBlock": "Copy a Note block to the Space instead of moving it (the default is move — the source loses the block)",
-      "openIntent": "Open intent recognition",
       "searchCanvas": "Search the Space (or find inside the active preview when focus is in an expanded node)",
       "jumpResult": "Jump to active result / next match",
       "previousMatch": "Previous match (in preview)",

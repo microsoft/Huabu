@@ -23,9 +23,11 @@ import {
   mergeLineRects,
 } from '@/handler/pdfHighlight/highlight';
 import { scheduleScrollToMatch } from '@/hooks/searchDom';
-import useCanvasStore from '@/store/canvasStore';
+import useCanvasStore, { getProtectedPreviewTabIds } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import { usePanelStore } from '@/store/panelStore';
 import { usePreviewSearchStore } from '@/store/previewSearchStore';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
 import {
@@ -74,7 +76,6 @@ export const PDFPreview = ({
   const src = typeof data.src === 'string' ? data.src : '';
   const canvasId = useCanvasStore((s) => s.canvasId);
   const resolvedSrc = resolveArtifactUrl(src, canvasId);
-  const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
   const previewSearchNodeId = usePreviewSearchStore((s) => s.nodeId);
   const searchQuery = usePreviewSearchStore((s) => s.query);
   const isPreviewSearchOpen = usePreviewSearchStore((s) => s.isOpen);
@@ -493,11 +494,24 @@ export const PDFPreview = ({
   // ---------------------------------------------------------------------------
   // Send captured area to chat as a pending attachment
   // ---------------------------------------------------------------------------
+  // PDF capture always targets this Canvas's canonical unbound Chat.
   const handleSendToChat = useCallback(
     (attachment: ChatAttachment) => {
-      addPendingAttachment(attachment);
+      const chat = useChatStore.getState();
+      const threadId = chat.ensureCanvasThread(canvasId);
+      const { addPendingAttachment } = chat;
+      addPendingAttachment(threadId, attachment);
+      usePanelStore.getState().requestOpenRightPanel();
+      usePreviewWorkspaceStore
+        .getState()
+        .openPreviewTarget(
+          { kind: 'chat', canvasId, threadId },
+          undefined,
+          getProtectedPreviewTabIds(),
+        );
+      usePanelStore.getState().requestFocusChatInput(threadId);
     },
-    [addPendingAttachment],
+    [canvasId],
   );
 
   // ---------------------------------------------------------------------------

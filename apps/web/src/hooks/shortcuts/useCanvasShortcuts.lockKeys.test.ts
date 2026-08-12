@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * drift apart, this fails.
  */
 
-const { canvasActions, triggerIntent } = vi.hoisted(() => ({
+const { canvasActions } = vi.hoisted(() => ({
   canvasActions: {
     frameSelectedNodes: vi.fn(),
     copySelectedNodes: vi.fn(),
@@ -31,7 +31,6 @@ const { canvasActions, triggerIntent } = vi.hoisted(() => ({
     nodes: [] as unknown[],
     edges: [] as unknown[],
   },
-  triggerIntent: vi.fn(),
 }));
 
 vi.mock('../../store/canvasStore', () => {
@@ -40,10 +39,6 @@ vi.mock('../../store/canvasStore', () => {
   useCanvasStore.getState = () => canvasActions;
   return { default: useCanvasStore };
 });
-
-vi.mock('../../store/intentStore', () => ({
-  useIntentStore: { getState: () => ({ triggerIntent }) },
-}));
 
 import {
   useCanvasShortcuts,
@@ -121,8 +116,5 @@ describe('useCanvasShortcuts catalog key lock', () => {
 
     dispatchCombo('layer.bringFront');
     expect(canvasActions.sendSelectedToOrder).toHaveBeenLastCalledWith('top');
-
-    dispatchCombo('ai.openIntent');
-    expect(triggerIntent).toHaveBeenCalledTimes(1);
   });
 });

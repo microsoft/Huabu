@@ -641,10 +641,6 @@ export function SketchOverlay({
         });
       }
 
-      // Sketch is now a normal persisted node. AI recognition is no longer
-      // triggered by an idle timer — the user invokes it explicitly via the
-      // toolbar's `Apply Sketch` button (see `requestSketchRecognition`).
-
       // Keep the overlay preview painted until ReactFlow has actually
       // mounted and measured the new SketchNode (see
       // PREVIEW_CLEAR_DELAY_FRAMES). The token guard prevents a stale

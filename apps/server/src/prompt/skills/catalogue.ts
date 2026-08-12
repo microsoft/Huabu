@@ -24,7 +24,7 @@ import { listSkills, type SkillScope } from './loader.js';
  * are shipped vs. user / AI-authored vs. extended.
  *
  * Pass `scope` to filter by agent surface (e.g. `'operate'` so the
- * operate-mode prompt doesn't list sketch-only skills).
+ * operate-mode prompt doesn't list ask-only skills).
  *
  * The catalogue is intentionally instruction-free — the prompt that
  * embeds it (see each `AGENT.md`) tells the agent how to load a skill

@@ -112,22 +112,22 @@ export function useBuiltinThreadSettings({
     };
   }, [enabled, threadId, canvasId]);
 
-  // Mirror the current selection into the chat store so the send path can
+  // Mirror the current selection into the owning thread so the send path can
   // carry it on the request (applies a pre-first-message pick on thread
-  // creation). Tagged with `threadId` so the send only uses it for the
-  // matching thread. Cleared for external bindings.
-  const setChatSettings = useChatStore((s) => s.setChatSettings);
+  // creation). Cleared for external bindings.
+  const setThreadSettings = useChatStore((s) => s.setThreadSettings);
   useEffect(() => {
-    setChatSettings(
-      enabled && threadId
+    if (!threadId) return;
+    setThreadSettings(
+      threadId,
+      enabled
         ? {
-            threadId,
             modelId: settings.modelId,
             reasoningEffort: settings.reasoningEffort,
           }
-        : { threadId: null, modelId: null, reasoningEffort: null },
+        : { modelId: null, reasoningEffort: null },
     );
-  }, [enabled, threadId, settings, setChatSettings]);
+  }, [enabled, threadId, settings, setThreadSettings]);
 
   const selectModel = useCallback(
     async (modelId: string) => {

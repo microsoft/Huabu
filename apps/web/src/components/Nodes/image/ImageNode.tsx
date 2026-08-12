@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import useCanvasStore from '@/store/canvasStore.ts';
+import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
@@ -20,7 +21,6 @@ export type ImageNodeType = Node<CanvasImageNodeData, 'image'>;
 export const ImageNode = memo(
   ({ id, data, selected }: NodeProps<ImageNodeType>) => {
     const { t } = useTranslation();
-    const openExpanded = useCanvasStore((s) => s.openExpanded);
     const canvasId = useCanvasStore((s) => s.canvasId);
 
     // Track whether the underlying `<img>` element has finished loading
@@ -41,7 +41,7 @@ export const ImageNode = memo(
         title={t('node.openLargeView')}
         onClick={(e) => {
           e.stopPropagation();
-          openExpanded(id);
+          openPreviewNode(id);
         }}
       >
         <Fullscreen />

@@ -333,6 +333,7 @@ body,
    intercept a pan/tap. The link selector out-specifies the exception. */
 [data-canvas-root] .react-flow__attribution,
 [data-canvas-root] .react-flow__attribution a {
+  color: var(--fg-muted);
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;

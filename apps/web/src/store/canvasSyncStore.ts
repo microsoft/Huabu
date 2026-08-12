@@ -8,11 +8,10 @@ import { canvasSyncStreamUrl } from '@/api/canvasSync';
 import { dismissToast, toast } from '@/components/Common/Toast';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
+import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
 import type { CanvasSyncEvent } from '@huabu/shared';
-import type { AgentBinding } from '@huabu/shared';
 import type { CanvasChangeRecord, Delta } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
@@ -63,7 +62,7 @@ let conflictToastId: string | null = null;
  * node owns the thread, enter its replay; otherwise just reveal the chat
  * panel (the built-in / ACP canvas thread's change card renders there).
  */
-function openConflictThread(threadId: string, canvasId: string): void {
+function openConflictThread(threadId: string, _canvasId: string): void {
   usePanelStore.getState().requestOpenRightPanel();
   const questionNode = useCanvasStore
     .getState()
@@ -72,20 +71,7 @@ function openConflictThread(threadId: string, canvasId: string): void {
         (n.data as { threadId?: unknown } | undefined)?.threadId === threadId,
     );
   if (questionNode) {
-    const binding = (questionNode.data as { agentBinding?: AgentBinding })
-      .agentBinding;
-    useChatStore.getState().openQuestionThread(
-      {
-        presentationAnchor: { canvasId, nodeId: questionNode.id },
-        conversationOwner: {
-          canvasId,
-          nodeId: questionNode.id,
-          threadId,
-        },
-      },
-      binding,
-      canvasId,
-    );
+    openPreviewNode(questionNode.id);
   }
 }
 

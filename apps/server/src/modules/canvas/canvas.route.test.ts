@@ -709,24 +709,13 @@ describe('Space export/import persistence', () => {
       }),
     ).toMatchObject({ ok: true });
     const seededSpace = getStructuredStore().space('c1');
-    await seededSpace.history.events.append([{ payload: action('n1'), ts: 1 }]);
+    await seededSpace.events.append([{ payload: action('n1'), ts: 1 }]);
     getCanvasStore('c1').appendDeltaLogEntry({
       version: 1,
       ts: 2,
       commands: [],
       deltas: [],
       originator: { source: 'agent' },
-    });
-    await seededSpace.history.intents.put({
-      id: 'intent-1',
-      timestamp: 3,
-      contextSummary: 'Persist this intent',
-      candidates: [],
-      outcome: {
-        type: 'selected',
-        chosenIndex: 0,
-        chosenLabel: 'Keep it',
-      },
     });
     const [change] = extractCanvasChanges([
       {
@@ -785,18 +774,13 @@ describe('Space export/import persistence', () => {
       expect(reopened.readNode('n1')?.content).toBe('persisted body');
       const importedSpace = getStructuredStore().space(importedId);
       expect(
-        (await importedSpace.history.events.read()).map((event) => event.ts),
+        (await importedSpace.events.read()).map((event) => event.ts),
       ).toEqual([1]);
       expect(
         getCanvasStore(importedId)
           .readDeltaLogSince(0)
           .map((entry) => entry.version),
       ).toEqual([1]);
-      expect(
-        (await importedSpace.history.intents.read()).map(
-          (episode) => episode.id,
-        ),
-      ).toEqual(['intent-1']);
       expect(await importedSpace.changes.read('thread-export')).toEqual(
         storedChanges,
       );

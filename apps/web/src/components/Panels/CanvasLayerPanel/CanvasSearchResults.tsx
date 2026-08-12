@@ -13,7 +13,7 @@
  *     row per group with the canonical node icon (Spline for edges),
  *     and indent match rows beneath their header.
  *   - ↑ / ↓ navigates the flat (header + visible match) list, live-
- *     follows on the canvas (`fitView` + `openExpanded` when the
+ *     follows on the canvas (`fitView` + a preview open when the
  *     target has a real preview).
  *   - Enter on a header toggles collapse; Enter on a match opens the
  *     owning node without injecting search state into its preview.
@@ -41,8 +41,11 @@ import { getNodeIcon } from '../../../config/nodeIcons';
 import { scheduleScrollToMatch } from '../../../hooks/searchDom';
 import { useTextHighlight } from '../../../hooks/useTextHighlight';
 import useCanvasStore from '../../../store/canvasStore';
-import { useChatStore } from '../../../store/chatStore';
-import { usePanelStore } from '../../../store/panelStore';
+import { openPreviewNode } from '../../../store/previewWorkspace/actions';
+import {
+  selectActiveNodeId,
+  usePreviewWorkspaceStore,
+} from '../../../store/previewWorkspace/store';
 import {
   useSearchStore,
   type SearchResultRow,
@@ -50,8 +53,6 @@ import {
 import { cn } from '../../Common/cn';
 import { toast } from '../../Common/Toast';
 import { NodePreviews } from '../../Nodes/previews';
-
-import type { AgentBinding } from '@huabu/shared';
 
 const ROW_HEIGHT = 52;
 
@@ -79,18 +80,14 @@ export const CanvasSearchResults = (): React.JSX.Element => {
   const scope = useSearchStore((s) => s.scope);
 
   const selectNodes = useCanvasStore((s) => s.selectNodes);
-  const openExpanded = useCanvasStore((s) => s.openExpanded);
-  const closeExpanded = useCanvasStore((s) => s.closeExpanded);
+  const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
   const rfInstance = useCanvasStore((s) => s.rfInstance);
 
   // Conversation-tier results open the owning question node's chat
   // thread in the right panel (instead of an expanded preview), then
-  // highlight + scroll to the matched message there. `viewingQuestionThread`
+  // highlight + scroll to the matched message there. The active preview node
   // gives us a render tick when the thread mounts / swaps so we can
   // re-query the chat DOM for the highlight + scroll roots.
-  const openQuestionThread = useChatStore((s) => s.openQuestionThread);
-  const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
-  const requestOpenRightPanel = usePanelStore((s) => s.requestOpenRightPanel);
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [activeIdx, setActiveIdx] = useState(0);
@@ -112,19 +109,19 @@ export const CanvasSearchResults = (): React.JSX.Element => {
   }, [scope]);
 
   // Resolve the chat-thread scroll root whenever a question node's
-  // conversation is open. Only resolved while `viewingQuestionThread`
+  // conversation is open. Only resolved while its preview tab
   // is set so we never paint search highlights over the unrelated
   // canvas chat; cleared otherwise. Re-runs on `activeIdx` so the
   // element is re-read after the thread swaps to a different node.
   useEffect(() => {
-    if (!viewingQuestionThread) {
+    if (!expandedNodeId) {
       setChatThreadEl(null);
       return;
     }
     setChatThreadEl(
       document.querySelector<HTMLElement>('[data-chat-thread-root]') ?? null,
     );
-  }, [viewingQuestionThread, activeIdx]);
+  }, [expandedNodeId, activeIdx]);
 
   // Paint the same `::highlight(huabu-search)` ranges over node labels
   // and Milkdown bodies visible on the canvas and, for conversation
@@ -260,27 +257,14 @@ export const CanvasSearchResults = (): React.JSX.Element => {
    * gracefully when the node has no thread (e.g. it was deleted
    * mid-search). Returns whether a thread was actually opened.
    */
-  const openConversationForNode = useCallback(
-    (nodeId: string): boolean => {
-      const { nodes, canvasId } = useCanvasStore.getState();
-      const node = nodes.find((n) => n.id === nodeId);
-      const data = node?.data as
-        | { threadId?: string; agentBinding?: AgentBinding }
-        | undefined;
-      if (!data?.threadId) return false;
-      openQuestionThread(
-        {
-          presentationAnchor: { canvasId, nodeId },
-          conversationOwner: { canvasId, nodeId, threadId: data.threadId },
-        },
-        data.agentBinding,
-        canvasId || undefined,
-      );
-      requestOpenRightPanel();
-      return true;
-    },
-    [openQuestionThread, requestOpenRightPanel],
-  );
+  const openConversationForNode = useCallback((nodeId: string): boolean => {
+    const { nodes } = useCanvasStore.getState();
+    const node = nodes.find((n) => n.id === nodeId);
+    const data = node?.data as { threadId?: string } | undefined;
+    if (!data?.threadId) return false;
+    openPreviewNode(nodeId);
+    return true;
+  }, []);
 
   const jumpToResult = useCallback(
     (row: SearchResultRow) => {
@@ -302,7 +286,6 @@ export const CanvasSearchResults = (): React.JSX.Element => {
           rows: [row],
           edgeEndpoints: endpoints,
         });
-        closeExpanded();
         return;
       }
       focusNodeOnCanvas(nodeId);
@@ -311,92 +294,40 @@ export const CanvasSearchResults = (): React.JSX.Element => {
       // preview); the dedicated effect below highlights + scrolls to
       // the matched message inside it.
       if (row.match.field === 'conversation') {
-        closeExpanded();
-        openConversationForNode(nodeId);
+        if (openConversationForNode(nodeId) && query) {
+          scheduleScrollToMatch(
+            () =>
+              document.querySelector<HTMLElement>('[data-chat-thread-root]'),
+            query,
+            row.match.occurrenceIndex,
+            {
+              onTimeout: () =>
+                toast(
+                  'Match not visible in the conversation — scroll manually to find it.',
+                  { tone: 'info', duration: 4000 },
+                ),
+            },
+          );
+        }
         return;
       }
-      // Only auto-expand when the node type renders real preview
-      // content. Types without a `NodePreviews` entry (frame, group,
-      // prompt, plain text, …) would otherwise pop up the "Preview
-      // not available for {type}" placeholder, which adds nothing
-      // beyond what's already visible on the canvas and forces the
-      // user to close it before continuing. For those, close any
-      // stale preview left over from a previous result so the user
-      // is left looking at the focused node on the canvas instead of
-      // an unrelated panel.
+      // Only open when the node type renders real preview content. Types
+      // without a `NodePreviews` entry leave the user's current preview alone.
       if (hasNodePreview(nodeType)) {
-        openExpanded(nodeId);
-      } else {
-        closeExpanded();
+        // Browsing results reuses the group's inspection slot (§9.2).
+        openPreviewNode(nodeId, { transient: true });
       }
     },
-    [
-      focusNodeOnCanvas,
-      focusGroupOnCanvas,
-      openExpanded,
-      closeExpanded,
-      openConversationForNode,
-    ],
+    [focusNodeOnCanvas, focusGroupOnCanvas, openConversationForNode, query],
   );
 
-  // Live-follow the active visible row on the canvas. Both header and
-  // match rows centre the canvas on the underlying node and (when the
-  // type has a real preview) open its expanded panel, so the gesture
-  // is consistent: ↑ / ↓ always re-anchors the viewport on the row's
-  // node. Only the *match* rows also seek inside the preview (handled
-  // by the next effect).
+  // Live-follow only on the Canvas. Browsing with ↑ / ↓ must not open,
+  // replace, or close Preview Workspace tabs; Enter or click confirms a row.
   useEffect(() => {
     const v = visibleRows[activeIdx];
     if (!v) return;
     focusGroupOnCanvas(v.group);
-    // A conversation match follows into the question node's chat
-    // thread rather than an expanded preview.
-    const isConversationRow =
-      v.kind === 'match' && v.row.match.field === 'conversation';
-    if (v.group.edgeEndpoints) {
-      closeExpanded();
-    } else if (isConversationRow) {
-      closeExpanded();
-      openConversationForNode(v.group.nodeId);
-    } else if (hasNodePreview(v.group.nodeType)) {
-      openExpanded(v.group.nodeId);
-    } else {
-      closeExpanded();
-    }
-  }, [
-    visibleRows,
-    activeIdx,
-    focusGroupOnCanvas,
-    openExpanded,
-    closeExpanded,
-    openConversationForNode,
-  ]);
-
-  // Scroll-into-view follow-up for **conversation match rows** — seek
-  // to the matched message inside the open question-node chat thread.
-  // The thread mounts asynchronously (history is hydrated over the
-  // network after `openConversationForNode` switches the panel), so
-  // `scheduleScrollToMatch` retries on every chat subtree mutation
-  // until the n-th occurrence lands or the watchdog elapses.
-  useEffect(() => {
-    const v = visibleRows[activeIdx];
-    if (!v || v.kind !== 'match' || !query) return;
-    if (v.row.match.field !== 'conversation') return;
-    const nth = v.row.match.occurrenceIndex;
-    const cancel = scheduleScrollToMatch(
-      () => document.querySelector<HTMLElement>('[data-chat-thread-root]'),
-      query,
-      nth,
-      {
-        onTimeout: () =>
-          toast(
-            'Match not visible in the conversation — scroll manually to find it.',
-            { tone: 'info', duration: 4000 },
-          ),
-      },
-    );
-    return cancel;
-  }, [visibleRows, activeIdx, query]);
+  }, [visibleRows, activeIdx, focusGroupOnCanvas]);
 
   // Keyboard handling lives on `window` (not on a panel-scoped
   // `onKeyDown`) because the live-follow effect calls `selectNodes`,

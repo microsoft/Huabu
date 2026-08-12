@@ -15,6 +15,8 @@ import { createId } from '@huabu/shared';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useChatStore } from '@/store/chatStore.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
+import { openPreviewNode } from '@/store/previewWorkspace/actions.ts';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store.ts';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent.ts';
 import type {
@@ -22,6 +24,36 @@ import type {
   AgentConversationView,
   CanvasNodeId,
 } from '@huabu/shared';
+
+function initializeQuestionBinding(
+  view: AgentConversationView,
+  binding: AgentBinding | undefined,
+  canvasId: string | null,
+  inheritCanvasDefault: boolean,
+): void {
+  const chat = useChatStore.getState();
+  const ownerCanvasId = canvasId ?? view.conversationOwner.canvasId;
+  const effectiveBinding =
+    binding ??
+    (inheritCanvasDefault ? chat.bindingMap[ownerCanvasId] : undefined);
+  if (effectiveBinding) {
+    chat.setAgentBinding(view.conversationOwner.threadId, effectiveBinding);
+  }
+}
+
+/** Open an authored Question conversation in the active presentation mode. */
+export function enterQuestionConversation(
+  view: AgentConversationView,
+  binding: AgentBinding | undefined,
+  canvasId: string | null,
+  openPosition: 'last-user' | 'bottom',
+): void {
+  initializeQuestionBinding(view, binding, canvasId, false);
+  const tabId = openPreviewNode(view.presentationAnchor.nodeId);
+  if (tabId) {
+    usePreviewWorkspaceStore.getState().requestChatOpen(tabId, openPosition);
+  }
+}
 
 /**
  * Open the chat panel in compose mode for a question node's thread and
@@ -32,14 +64,11 @@ export function enterQuestionCompose(
   canvasId: string | null,
   binding?: AgentBinding,
 ): void {
-  useChatStore.getState().openQuestionCompose(view, {
-    ...(canvasId ? { canvasId } : {}),
-    ...(binding ? { binding } : {}),
-  });
+  initializeQuestionBinding(view, binding, canvasId, true);
+  openPreviewNode(view.presentationAnchor.nodeId);
   usePanelStore
     .getState()
-    .requestOpenRightPanel(view.presentationAnchor.nodeId);
-  usePanelStore.getState().requestFocusChatInput();
+    .requestFocusChatInput(view.conversationOwner.threadId);
 }
 
 /**

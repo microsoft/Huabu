@@ -53,7 +53,7 @@ export class DiskStructuredStore implements StructuredStore {
   space(canvasId: string): SpaceHandle {
     // `getCanvasStore` validates the id and owns the instance cache.
     const store = getCanvasStore(canvasId);
-    const { events, changes, intents } = createDiskSpaceLogs(store);
+    const { events, changes } = createDiskSpaceLogs(store);
     return {
       canvasId: store.canvasId,
       read: createDiskSpaceRecordReader(store),
@@ -61,7 +61,7 @@ export class DiskStructuredStore implements StructuredStore {
       nodes: new DiskSpaceNodes(store),
       changes,
       tasks: new DiskSpaceTasks(store),
-      history: { events, intents },
+      events,
     };
   }
 }

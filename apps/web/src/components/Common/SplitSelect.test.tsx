@@ -44,4 +44,28 @@ describe('SplitSelect', () => {
     act(() => buttons[0].click());
     expect(onPrimaryAction).toHaveBeenCalledWith('lasso');
   });
+
+  it('names both icon-only controls without relying on tooltip markup', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() =>
+      root?.render(
+        <SplitSelect
+          options={[{ value: 'select', label: 'Select' }]}
+          value="select"
+          onChange={vi.fn()}
+          onPrimaryAction={vi.fn()}
+          iconOnly
+          primaryTitle="Select tool"
+          menuTitle="More tools"
+        />,
+      ),
+    );
+
+    const buttons = container.querySelectorAll('button');
+    expect(buttons[0].getAttribute('aria-label')).toBe('Select tool');
+    expect(buttons[1].getAttribute('aria-label')).toBe('More tools');
+  });
 });

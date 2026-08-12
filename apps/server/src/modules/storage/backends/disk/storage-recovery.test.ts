@@ -31,11 +31,7 @@ import {
 } from './legacy/canvas-store-cache.js';
 import { DiskStructuredStore } from './structured-store.js';
 import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
-import {
-  changesPath,
-  eventsPath,
-  intentPath,
-} from '../../../workspace/disk/paths.js';
+import { changesPath, eventsPath } from '../../../workspace/disk/paths.js';
 import {
   canvasBlobs,
   createStorage,
@@ -67,20 +63,6 @@ function action(nodeId: string) {
   return {
     action: 'node_selected' as const,
     node: { id: nodeId, type: 'note' as const, label: nodeId },
-  };
-}
-
-function episode(id: string) {
-  return {
-    id,
-    timestamp: 1,
-    contextSummary: `ctx-${id}`,
-    candidates: [],
-    outcome: {
-      type: 'selected' as const,
-      chosenIndex: 0,
-      chosenLabel: id,
-    },
   };
 }
 
@@ -299,19 +281,11 @@ describe('strict structured reads', () => {
 
   it('does not replace malformed mutable JSON with an empty baseline', async () => {
     seedSpace('broken-mutable');
-    const { changes, history } = new DiskStructuredStore().space(
-      'broken-mutable',
-    );
-    const intentFile = intentPath('broken-mutable');
+    const { changes } = new DiskStructuredStore().space('broken-mutable');
     const changeFile = changesPath('broken-mutable', 'thread-1');
     mkdirSync(path.dirname(changeFile), { recursive: true });
-    writeFileSync(intentFile, '[{"id":"survivor"', 'utf8');
     writeFileSync(changeFile, '[{"id":"survivor"', 'utf8');
 
-    await expect(history.intents.read()).rejects.toBeInstanceOf(SyntaxError);
-    await expect(
-      history.intents.put(episode('replacement')),
-    ).rejects.toBeInstanceOf(SyntaxError);
     await expect(changes.read('thread-1')).rejects.toBeInstanceOf(SyntaxError);
     await expect(
       changes.append('thread-1', [change('replacement')]),
@@ -320,24 +294,20 @@ describe('strict structured reads', () => {
       SyntaxError,
     );
 
-    expect(readFileSync(intentFile, 'utf8')).toBe('[{"id":"survivor"');
     expect(readFileSync(changeFile, 'utf8')).toBe('[{"id":"survivor"');
   });
 
-  it('uses one strict array value for change and intent reads and mutations', async () => {
+  it('uses one strict array value for change reads and mutations', async () => {
     seedSpace('single-array-read');
     const handle = new DiskStructuredStore().space('single-array-read');
     const firstChange = change('n1');
     await handle.changes.append('thread-1', [firstChange]);
-    await handle.history.intents.put(episode('e1'));
 
     const store = getCanvasStore('single-array-read');
     const legacySpies = [
       vi.spyOn(store, 'readChanges'),
       vi.spyOn(store, 'appendChanges'),
       vi.spyOn(store, 'removeChange'),
-      vi.spyOn(store, 'readIntents'),
-      vi.spyOn(store, 'upsertIntent'),
     ];
     for (const spy of legacySpies) {
       spy.mockImplementation(() => {
@@ -355,16 +325,6 @@ describe('strict structured reads', () => {
       await expect(
         handle.changes.delete('thread-1', firstChange.id),
       ).resolves.toEqual(firstChange);
-      await expect(handle.history.intents.read()).resolves.toEqual([
-        episode('e1'),
-      ]);
-      await expect(
-        handle.history.intents.put(episode('e2')),
-      ).resolves.toBeUndefined();
-      await expect(handle.history.intents.read()).resolves.toEqual([
-        episode('e1'),
-        episode('e2'),
-      ]);
     } finally {
       for (const spy of legacySpies) spy.mockRestore();
     }
@@ -374,19 +334,13 @@ describe('strict structured reads', () => {
     'rejects non-array mutable JSON without overwriting it: %s',
     async (contents) => {
       seedSpace('wrong-mutable-shape');
-      const { changes, history } = new DiskStructuredStore().space(
+      const { changes } = new DiskStructuredStore().space(
         'wrong-mutable-shape',
       );
-      const intentFile = intentPath('wrong-mutable-shape');
       const changeFile = changesPath('wrong-mutable-shape', 'thread-1');
       mkdirSync(path.dirname(changeFile), { recursive: true });
-      writeFileSync(intentFile, contents, 'utf8');
       writeFileSync(changeFile, contents, 'utf8');
 
-      await expect(history.intents.read()).rejects.toBeInstanceOf(SyntaxError);
-      await expect(
-        history.intents.put(episode('replacement')),
-      ).rejects.toBeInstanceOf(SyntaxError);
       await expect(changes.read('thread-1')).rejects.toBeInstanceOf(
         SyntaxError,
       );
@@ -394,7 +348,6 @@ describe('strict structured reads', () => {
         changes.append('thread-1', [change('replacement')]),
       ).rejects.toBeInstanceOf(SyntaxError);
 
-      expect(readFileSync(intentFile, 'utf8')).toBe(contents);
       expect(readFileSync(changeFile, 'utf8')).toBe(contents);
     },
   );
@@ -403,9 +356,7 @@ describe('strict structured reads', () => {
 describe('JSONL recovery and ordering', () => {
   it('propagates an unreadable event path instead of returning an empty log', async () => {
     seedSpace('unreadable-events');
-    const { events } = new DiskStructuredStore().space(
-      'unreadable-events',
-    ).history;
+    const { events } = new DiskStructuredStore().space('unreadable-events');
     mkdirSync(eventsPath('unreadable-events'), { recursive: true });
     await expect(events.read()).rejects.toMatchObject({
       code: 'EISDIR',
@@ -414,9 +365,7 @@ describe('JSONL recovery and ordering', () => {
 
   it('rejects malformed durable JSONL rows without changing the log', async () => {
     seedSpace('malformed-jsonl');
-    const { events } = new DiskStructuredStore().space(
-      'malformed-jsonl',
-    ).history;
+    const { events } = new DiskStructuredStore().space('malformed-jsonl');
     const eventFile = eventsPath('malformed-jsonl');
     mkdirSync(path.dirname(eventFile), { recursive: true });
     const eventRaw = `${JSON.stringify({ ts: 1, payload: action('first') })}\nnot-json\n${JSON.stringify({ ts: 2, payload: action('last') })}\n`;
@@ -429,9 +378,7 @@ describe('JSONL recovery and ordering', () => {
 
   it('rejects valid JSON with an invalid event shape, including rows outside the limit', async () => {
     seedSpace('invalid-log-shapes');
-    const { events } = new DiskStructuredStore().space(
-      'invalid-log-shapes',
-    ).history;
+    const { events } = new DiskStructuredStore().space('invalid-log-shapes');
     const eventFile = eventsPath('invalid-log-shapes');
     mkdirSync(path.dirname(eventFile), { recursive: true });
     const eventRaw = `${JSON.stringify({})}\n${JSON.stringify({ ts: 2, payload: action('last') })}\n`;
@@ -444,9 +391,7 @@ describe('JSONL recovery and ordering', () => {
 
   it('validates event append inputs before touching durable bytes', async () => {
     seedSpace('invalid-log-inputs');
-    const { events } = new DiskStructuredStore().space(
-      'invalid-log-inputs',
-    ).history;
+    const { events } = new DiskStructuredStore().space('invalid-log-inputs');
     const eventFile = eventsPath('invalid-log-inputs');
     mkdirSync(path.dirname(eventFile), { recursive: true });
     const eventRaw = `${JSON.stringify({ ts: 1, payload: action('first') })}\n`;
@@ -461,7 +406,7 @@ describe('JSONL recovery and ordering', () => {
 
   it('preserves a valid unterminated tail and appends on a fresh boundary', async () => {
     seedSpace('valid-tail');
-    const { events } = new DiskStructuredStore().space('valid-tail').history;
+    const { events } = new DiskStructuredStore().space('valid-tail');
     mkdirSync(path.dirname(eventsPath('valid-tail')), { recursive: true });
     writeFileSync(
       eventsPath('valid-tail'),
@@ -477,7 +422,7 @@ describe('JSONL recovery and ordering', () => {
 
   it('removes a malformed crash tail before the next event append', async () => {
     seedSpace('broken-tail');
-    const { events } = new DiskStructuredStore().space('broken-tail').history;
+    const { events } = new DiskStructuredStore().space('broken-tail');
     mkdirSync(path.dirname(eventsPath('broken-tail')), { recursive: true });
     writeFileSync(
       eventsPath('broken-tail'),
@@ -502,9 +447,8 @@ describe('Space lifecycle guards and reopen', () => {
 
     for (const part of [
       handle.nodes,
-      handle.history.events,
+      handle.events,
       handle.changes,
-      handle.history.intents,
       handle.tasks,
       handle.tasks.runs,
     ]) {
@@ -518,11 +462,8 @@ describe('Space lifecycle guards and reopen', () => {
     const rejectedBuffer = Buffer.from('x');
 
     await expect(
-      handle.history.events.append([{ payload: action('n1'), ts: 1 }]),
+      handle.events.append([{ payload: action('n1'), ts: 1 }]),
     ).rejects.toThrow(/missing Space/);
-    await expect(handle.history.intents.put(episode('e1'))).rejects.toThrow(
-      /missing Space/,
-    );
     await expect(
       handle.changes.append('thread-1', [change('n1')]),
     ).rejects.toThrow(/missing Space/);
@@ -560,8 +501,7 @@ describe('Space lifecycle guards and reopen', () => {
       },
       nodeMutations: [],
     });
-    await first.history.events.append([{ payload: action('n1'), ts: 7 }]);
-    await first.history.intents.put(episode('e1'));
+    await first.events.append([{ payload: action('n1'), ts: 7 }]);
     const storedChanges = await first.changes.append('thread-1', [
       change('n1'),
     ]);
@@ -572,12 +512,9 @@ describe('Space lifecycle guards and reopen', () => {
 
     expect((await reopened.read())?.version).toBe(1);
     expect((await reopened.read())?.state.nodes).toEqual([{ id: 'n1' }]);
-    expect(
-      (await reopened.history.events.read()).map((event) => event.ts),
-    ).toEqual([7]);
-    expect(
-      (await reopened.history.intents.read()).map((entry) => entry.id),
-    ).toEqual(['e1']);
+    expect((await reopened.events.read()).map((event) => event.ts)).toEqual([
+      7,
+    ]);
     expect(await reopened.changes.read('thread-1')).toEqual(storedChanges);
     expect((await canvasBlobs('reopen').read('payload.bin'))?.toString()).toBe(
       'persisted',

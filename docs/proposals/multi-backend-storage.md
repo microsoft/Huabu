@@ -23,15 +23,19 @@ Last updated: 2026-08-11
 > target ports/backends/compatibility hierarchy. Phase 3 is specified in
 > §12.3 and is **implemented and merged**: `StructuredStore` gained
 > backend-neutral membership reads, and the Canvas list, Workspace World
-> lookup, thread-change read, and memory analyzer record/event/intent reads use
+> lookup, thread-change read, and memory analyzer record and event reads use
 > repositories. Cross-store composition also reads the Space record to guard
 > blob puts.
 >
 > Phase 4 is specified in §12.4 and is **implemented**. `StructuredStore`
 > now exposes structured lifecycle, async node, and ordered-writer ports. The
 > Disk adapter delegates to the existing layout and failure rollback, and the
-> structured lifecycle, node, executor, preprocessing, event, change, and
-> intent mutations enumerated in §12.4 use the new seam. This phase deliberately adds no filesystem WAL,
+> structured lifecycle, node, executor, preprocessing, event, and change
+> mutations enumerated in §12.4 use the new seam. A later review pass reverted
+> four Disk behavior changes the seam did not require and removed the surface
+> it had left uncalled (§12.4.3); merging `main` removed intent episodes from
+> the product, which flattened `history` back to `handle.events` (§12.4.4).
+> This phase deliberately adds no filesystem WAL,
 > process-crash recovery, durable tombstones, storage publication envelope,
 > shared API, or web-client protocol. The ordered writer preserves current
 > operation order. A normal in-process node → record → delta batch must
@@ -187,7 +191,7 @@ Expected Canvas-domain data includes, subject to the final repository split:
 - authored node documents and node metadata;
 - revisions and mutation deltas;
 - artifact metadata and references to BlobStore keys;
-- Canvas-owned histories, intents, and events.
+- Canvas-owned histories and events.
 
 Durable tombstones, idempotency records, and an outbox are possible future
 records, not Phase-4 contract members or persisted-format changes.
@@ -428,13 +432,7 @@ interface SpaceHandle {
   readonly nodes: SpaceNodes;
   readonly changes: SpaceChanges;
   readonly tasks: SpaceTasks;
-  readonly history: SpaceHistory;
-}
-
-/** The past only. Pending changes and live Runs are not history. */
-interface SpaceHistory {
   readonly events: SpaceEvents; // read(limit?), append(events)
-  readonly intents: SpaceIntents; // read(), put(episode)
 }
 
 interface SpaceNodes {
@@ -950,9 +948,9 @@ deferred to a later phase rather than silently expanding Phase 2.
 
 > **Renamed in Phase 4.** The composite structure below is what landed and
 > still holds; the member names are Phase-2 spelling. `record` became the
-> handle's own `read()`, `events`/`intents` moved under `history`, and the
-> per-part interfaces dropped their `Canvas`/`Repository` affixes. §12.4.2
-> records the reasoning and §7.2 carries the current shape.
+> handle's own `read()`, `deltas` and `intents` are gone, and the per-part
+> interfaces dropped their `Canvas`/`Repository` affixes. §12.4.2 records the
+> reasoning, §12.4.3–4 the later corrections, and §7.2 the current shape.
 
 ```ts
 export interface StructuredStore {
@@ -1137,8 +1135,6 @@ Disk's accidental await-free behavior:
   pair, so concurrent agents cannot lose one another's records;
 - `changes.read` and the value returned by `changes.append` are coalesced by
   canvas entity;
-- `intents.upsert` is linearizable by episode id, and `intents.read` exposes the
-  portable state consumed by memory analysis.
 
 The Disk adapter enforces these guarantees with uninterrupted synchronous
 legacy operations before returning each promise, under the same
@@ -1650,6 +1646,25 @@ that collides with another Space's _title_ is allocated `<canvasId> (2)` — the
 contract suite pins exactly that. It stays, now with the reachability argument
 written down.
 
+#### 12.4.4 `history` flattened after the intent removal — landed
+
+Merging `main` brought in `feat!: remove intent and sketch gesture
+recognition`, which deletes intent episodes from the product. `SpaceIntents`
+and the Disk intent file go with them.
+
+That leaves §12.4.2's `history` group holding one member. The group was
+justified by there being two kinds of past record — what happened, and what
+was concluded from it — and one noun that covered both. With intents gone,
+`handle.history.events` is a member whose only job is to hold one other
+member: a level the reader pays for and learns nothing from. Events move back
+to the handle as `handle.events`.
+
+The reasoning §12.4.2 gave for what stays flat is unchanged and still load
+bearing: change-review records and Tasks are not history, whatever Disk's
+`.history/` directory happens to contain. If a second kind of past record
+arrives, the group comes back — and `events` is where it was before, so
+nothing else has to move.
+
 ### 12.5 Later phases — provisional
 
 5. Add one new adapter at a time — SQLite, then Postgres, then Azure Blob —
@@ -1721,7 +1736,7 @@ written down.
 - **Repository boundaries, minimum accepted** — `SpaceRepository` (the
   collection: membership, World identity, create/delete/rename) and the
   per-Space handle — its own record read/ordered write, `SpaceNodes`,
-  `SpaceChanges`, `SpaceTasks`, and `SpaceHistory` — are implemented with
+  `SpaceChanges`, `SpaceTasks`, and `SpaceEvents` — are implemented with
   reusable contracts. Rejected in-process node → record →
   delta batches restore prestate, while title rename keeps its preceding
   best-effort boundary. This is not an aggregate crash-recovery or distributed

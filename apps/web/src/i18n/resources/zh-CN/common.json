@@ -267,6 +267,7 @@
     "searching": "正在搜索"
   },
   "editor": {
+    "readOnlyContent": "只读内容",
     "blockType": "块类型",
     "textColor": "文字颜色",
     "highlightColor": "高亮颜色",
@@ -375,12 +376,24 @@
     "pinFailed": "更新 World 固定节点失败",
     "pinSourceMissing": "无法固定：该 Space 已不存在"
   },
+  "preview": {
+    "tabStrip": "已打开的预览",
+    "group": "预览分组",
+    "chatTab": "对话",
+    "transientTabHint": "{{title}} — 临时预览；双击固定",
+    "transientTabDescription": "临时预览；双击固定",
+    "closeTab": "关闭“{{title}}”",
+    "resizeGroups": "调整预览分组宽度",
+    "openToSide": "在旁边打开",
+    "collapse": "收起预览",
+    "emptyGroup": "此分组没有打开的预览",
+    "emptyWorkspace": "在 Space 上双击节点即可在此预览",
+    "nodeUnavailable": "此节点已不存在"
+  },
   "node": {
     "untitled": "未命名",
     "rename": "重命名节点",
     "preview": "预览",
-    "fullView": "完整视图",
-    "splitView": "分屏视图",
     "navigateUpstream": "导航到来源节点（{{shortcut}}）",
     "navigateDownstream": "导航到去向节点（{{shortcut}}）",
     "navigateConnected": "导航到连接节点",
@@ -399,9 +412,7 @@
     "removeFromCanvas": "从 Space 移除",
     "aiSummary": "AI 摘要",
     "pdfCapture": "PDF 截图",
-    "addSelectedTextAsNote": "将选中文本添加为笔记",
     "dragSelectedTextAsNote": "将选中文本拖为笔记",
-    "addCapturedAreaAsImage": "将截图区域添加为图片",
     "dragCapturedAreaAsImage": "将截图区域拖为图片",
     "sendCapturedAreaToChat": "发送截图区域到聊天",
     "setCapturedAreaAsPdfCover": "设为 PDF 封面",
@@ -478,10 +489,6 @@
     "stopRecording": "停止录音",
     "startRecording": "开始录音",
     "tapToRecord": "点击录音",
-    "openRecognitionDetails": "在聊天面板中打开识别详情",
-    "keepChanges": "保留更改",
-    "revertChanges": "还原更改",
-    "holdPreviewBefore": "按住预览修改前状态",
     "pen": "画笔",
     "eraser": "橡皮擦",
     "eraserSize": "橡皮擦大小",
@@ -505,9 +512,7 @@
     "nodeImage": "节点图片",
     "noImageSource": "无图片来源",
     "videoFileMissing": "视频文件缺失",
-    "noVideoSource": "无视频来源",
-    "applySketch": "应用手绘（用 AI 解释笔画）",
-    "applySketchPlural": "应用手绘"
+    "noVideoSource": "无视频来源"
   },
   "layers": {
     "title": "图层",
@@ -555,7 +560,6 @@
     "closePanel": "关闭聊天面板",
     "title": "聊天",
     "chatWith": "与 {{name}} 聊天",
-    "sketchRecognition": "手绘识别",
     "newQuestion": "新问题",
     "question": "问题",
     "backToChat": "返回聊天",
@@ -804,7 +808,6 @@
       "selectFiles": "点击选择文件",
       "linkDescription": "在下方粘贴 URL（每行一个）。"
     },
-    "intent": "意图识别",
     "size": {
       "switchManual": "切换为手动尺寸",
       "fitSize": "适应内容尺寸",
@@ -829,11 +832,6 @@
     "convertToText": "转换为文本",
     "convertToNote": "转换为笔记",
     "dragBlockToCanvas": "拖动块到 Space"
-  },
-  "intent": {
-    "noSuggestions": "暂无建议",
-    "placeholder": "描述你的自定义意图…",
-    "analyzingContext": "正在分析上下文…"
   },
   "edgeToolbar": {
     "type": "类型",
@@ -913,7 +911,6 @@
       "bringFront": "将选中节点置于顶层",
       "groupFrame": "将选中节点组合到框架中",
       "copyNoteBlock": "将笔记块复制到 Space，而不是移动它（默认是移动，源位置会失去该块）",
-      "openIntent": "打开意图识别",
       "searchCanvas": "搜索 Space（焦点在展开节点预览中时，则在当前预览内查找）",
       "jumpResult": "跳转到当前结果 / 下一个匹配项",
       "previousMatch": "上一个匹配项（预览内）",

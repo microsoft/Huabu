@@ -176,7 +176,7 @@ describe('CanvasStore cache boundaries', () => {
     activateWorkspace('huabu-log-workspace-a-');
     createSpace('shared-id', 'First');
     const held = new DiskStructuredStore().space('shared-id');
-    await held.history.events.append([
+    await held.events.append([
       {
         payload: {
           action: 'node_selected',
@@ -189,7 +189,7 @@ describe('CanvasStore cache boundaries', () => {
     activateWorkspace('huabu-log-workspace-b-');
     createSpace('shared-id', 'Second');
     const active = new DiskStructuredStore().space('shared-id');
-    await active.history.events.append([
+    await active.events.append([
       {
         payload: {
           action: 'node_selected',
@@ -202,12 +202,8 @@ describe('CanvasStore cache boundaries', () => {
     // This read uses strict JSONL helpers directly. Without its own
     // workspace-lifetime guard, the retained A facade would silently read
     // B's same-id file instead of rejecting the stale handle.
-    await expect(held.history.events.read()).rejects.toThrow(
-      /inactive workspace/,
-    );
-    expect(
-      (await active.history.events.read()).map((event) => event.ts),
-    ).toEqual([2]);
+    await expect(held.events.read()).rejects.toThrow(/inactive workspace/);
+    expect((await active.events.read()).map((event) => event.ts)).toEqual([2]);
   });
 
   it('guards a held record repository before probing the active workspace', async () => {

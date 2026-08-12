@@ -1491,7 +1491,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       try {
-        await handle.history.events.append(parsed.data.events);
+        await handle.events.append(parsed.data.events);
       } catch (error) {
         request.log.error(
           { canvasId, error },
@@ -1541,7 +1541,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // Resolve existence and events through one handle so malformed or
     // unreadable durable state cannot be collapsed into a false 404 by the
     // compatibility facade's intentionally lenient legacy reader.
-    const events = await handle.history.events.read(limit);
+    const events = await handle.events.read(limit);
     const filtered =
       since != null ? events.filter((e) => e.ts >= since) : events;
     const trimmed = filtered.length > limit ? filtered.slice(-limit) : filtered;

@@ -21,6 +21,7 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 
@@ -32,6 +33,8 @@ import type { MilkdownBlockDragEvent } from './types';
 export interface MilkdownPreviewProps {
   markdown: string;
   className?: string;
+  /** Accessible name for the rendered read-only rich-text surface. */
+  ariaLabel?: string;
   /**
    * Canvas id used to resolve artifact-key image `src`s (e.g.
    * `art_abc.png`) into fetchable URLs for the rendered `<img>`. When
@@ -88,13 +91,16 @@ function shouldSwallowKey(e: React.KeyboardEvent): boolean {
 export function MilkdownPreview(
   props: MilkdownPreviewProps,
 ): React.JSX.Element {
+  const { t } = useTranslation();
   const {
     markdown,
     className,
+    ariaLabel,
     canvasId,
     enableBlockDrag = false,
     onBlockDragStart,
   } = props;
+  const resolvedAriaLabel = ariaLabel ?? t('editor.readOnlyContent');
 
   const containerRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<MilkdownInstance | null>(null);
@@ -107,6 +113,8 @@ export function MilkdownPreview(
   /** Track latest canvasId so the mount-only editor reads a fresh value. */
   const canvasIdRef = useRef(canvasId);
   canvasIdRef.current = canvasId;
+  const ariaLabelRef = useRef(resolvedAriaLabel);
+  ariaLabelRef.current = resolvedAriaLabel;
 
   useEffect(() => {
     let cancelled = false;
@@ -140,6 +148,7 @@ export function MilkdownPreview(
         // initiate a native drag. Input mutations are still blocked by
         // the wrapper's capture handlers below.
         editable: enableBlockDrag,
+        ariaLabel: ariaLabelRef.current,
         // Disable Crepe's edit-time chrome (Toolbar / LinkTooltip /
         // Table reorder handles) when the surface is drag-only. See
         // `MilkdownFactoryOptions.previewMode`.
@@ -156,6 +165,7 @@ export function MilkdownPreview(
         return;
       }
 
+      instance.setAriaLabel(ariaLabelRef.current);
       instanceRef.current = instance;
 
       const pending = pendingMarkdownRef.current;
@@ -188,6 +198,13 @@ export function MilkdownPreview(
     lastSyncedRef.current = next;
     instance.setMarkdown(next);
   }, [markdown]);
+
+  // The editor mounts asynchronously, so the mount path above applies the
+  // initial name. Keep the live textbox in sync when the caller overrides
+  // the label or the active language changes without remounting Milkdown.
+  useEffect(() => {
+    instanceRef.current?.setAriaLabel(resolvedAriaLabel);
+  }, [resolvedAriaLabel]);
 
   // ---- Capture handlers that suppress editing when in drag-only mode ----
   // Installed on the host div so they intercept input verbs before

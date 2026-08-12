@@ -14,11 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { parseSlashInvocations } from './parseSlashInvocations';
 
 describe('parseSlashInvocations', () => {
-  const known = new Set([
-    'canvas-memory',
-    'workspace-memory',
-    'sketch-gestures',
-  ]);
+  const known = new Set(['canvas-memory', 'workspace-memory', 'create-skill']);
 
   it('extracts a single leading token', () => {
     const r = parseSlashInvocations('/canvas-memory help me', known);

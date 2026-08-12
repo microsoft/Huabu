@@ -614,24 +614,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           >
             <NODE_ICON.question />
           </Button>
-
-          {/* Temporarily disabled because the intent feature is not yet robust enough for production use.
-          <Button
-            variant="ghost"
-            iconOnly
-            title={t('toolbar.intent')}
-            className={clsx(intentOpen && 'text-info bg-bg-default')}
-            onClick={() => {
-              const rect = intentButtonRef.current?.getBoundingClientRect();
-              if (rect) {
-                useIntentStore
-                  .getState()
-                  .triggerIntent(rect.left + rect.width / 2, rect.top);
-              }
-            }}
-          >
-            <Sprout />
-          </Button> */}
         </div>
 
         {/* Non-mouse only: Undo / Redo (Delete lives on the per-context floating toolbars) */}
@@ -718,6 +700,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       >
         <div className="mt-4 flex flex-col gap-0">
           <textarea
+            name="resource-urls"
+            autoComplete="off"
+            aria-label={t('toolbar.resources.linkDescription')}
             className="border-edge-default placeholder:text-fg-subtle focus:border-info focus:ring-info min-h-25 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
             placeholder={`https://example.com/image.png\nhttps://example.com/doc.pdf\nhttps://google.com`}
             value={linkText}

@@ -32,7 +32,6 @@ import {
   removeProfiles as removeLegacyAcpProfiles,
 } from './modules/agent/acp/profile-store.js';
 import agentRoutes from './modules/agent/agent.route.js';
-import intentRoutes from './modules/agent/intent.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
 import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js';
 import skillsRoutes from './modules/agent/skills.route.js';
@@ -264,7 +263,6 @@ app.register(syncRoutes, { prefix: '/api/canvas' });
 app.register(webRoutes, { prefix: '/api/web' });
 app.register(artifactRoute, { prefix: '/api/canvas' });
 
-app.register(intentRoutes, { prefix: '/api/intent' });
 app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(integrationsRoutes, { prefix: '/api/integrations' });
 app.register(interactiveViewRoutes, { prefix: '/api/interactive-views' });

@@ -31,6 +31,7 @@ const nodeOriginSchema = z
       'user-from-library',
       'user-from-chat',
       'user-excerpt',
+      // Legacy only; see `NodeOrigin` in types/canvas/node.ts.
       'sketch-recognized',
     ]),
     threadId: z.string().optional(),

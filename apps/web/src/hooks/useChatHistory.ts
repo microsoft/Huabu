@@ -9,7 +9,13 @@ import { agentApi } from '@/api/agent';
 import { isActivelyViewingQuestion } from '@/hooks/useActivelyViewingQuestion';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
+import {
+  selectThreadHistoryLoaded,
+  selectThreadIsLoading,
+  selectThreadLastAction,
+  selectThreadMessages,
+  useChatStore,
+} from '@/store/chatStore';
 import {
   ConversationIntegrityError,
   filterClientOwnedQuestionPatch,
@@ -18,46 +24,44 @@ import {
   resolveConversationOwnerSource,
   validateConversationView,
 } from '@/store/conversationOwner';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { handleStreamEvent } from './useAgentStream';
 
+import type { ChatSession } from './useChatSession';
 import type { ChatMessage } from '../store/chatTypes';
 import type { AgentStreamEvent } from '@huabu/shared';
+
+/**
+ * Roles the transcript renderer still understands. Anything else in a
+ * persisted transcript belongs to a removed feature and is dropped on load.
+ */
+const KNOWN_HISTORY_ROLES = new Set<string>(['user', 'assistant', 'status']);
 
 /**
  * Hook that loads chat history from the server and handles reconnection
  * to an active agent run after page refresh.
  *
+ * @param session - The conversation to load. All reads and writes are
+ *   addressed to `session.threadId`, so a reconnect on a backgrounded
+ *   thread never paints into a different renderer.
  * @param setIsLoading - Setter from useAgentStream to reflect reconnect
  *   loading state. Takes an explicit `threadId` so reconnects on a
  *   backgrounded thread don't flip loading on the visible one.
  */
 export function useChatHistory(
+  session: ChatSession,
   setIsLoading: (threadId: string, loading: boolean) => void,
+  previewTabId?: string,
 ): void {
-  const threadId = useChatStore((state) => state.threadId);
+  const { threadId, canvasId } = session;
   const isHistoryLoaded = useChatStore((state) =>
-    state.historyLoadedThreads.has(state.threadId),
+    selectThreadHistoryLoaded(state, threadId),
   );
   const addMessage = useChatStore((state) => state.addMessage);
-  const canvasId = useCanvasStore((state) => state.canvasId);
-  const conversationView = useChatStore((state) => state.viewingQuestionThread);
-  const savedReplay = useChatStore((state) =>
-    canvasId ? state.questionReplayByCanvas[canvasId]?.view : undefined,
-  );
-  const effectiveConversationView =
-    conversationView?.presentationAnchor.canvasId === canvasId
-      ? conversationView
-      : (savedReplay ?? null);
+  const effectiveConversationView = session.conversationView;
   const ownerCanvasId =
     effectiveConversationView?.conversationOwner.canvasId || canvasId;
-
-  // Switch chat thread when canvas changes
-  useEffect(() => {
-    if (canvasId) {
-      useChatStore.getState().switchToCanvas(canvasId);
-    }
-  }, [canvasId]);
 
   // Load history from server on first mount (once per thread).
   // Wait for canvasId to be available — on initial mount the canvas may
@@ -67,16 +71,14 @@ export function useChatHistory(
     // Snapshot the thread we're loading for. If the user switches threads
     // mid-fetch, we still want to land the response on the originating
     // thread (cache survives navigation) rather than the current one.
-    const tid = useChatStore.getState().threadId;
-    if (useChatStore.getState().historyLoadedThreads.has(tid)) return;
+    const tid = threadId;
+    if (selectThreadHistoryLoaded(useChatStore.getState(), tid)) return;
 
     let cancelled = false;
 
-    const {
-      lastAction: action,
-      setMessages: set,
-      setHistoryLoaded: setLoaded,
-    } = useChatStore.getState();
+    const currentState = useChatStore.getState();
+    const action = selectThreadLastAction(currentState, tid);
+    const { setMessages: set, setHistoryLoaded: setLoaded } = currentState;
 
     const fetchValidatedHistory = async () => {
       if (effectiveConversationView) {
@@ -84,18 +86,8 @@ export function useChatHistory(
           await validateConversationView(effectiveConversationView);
         } catch (error) {
           if (error instanceof ConversationIntegrityError) {
-            const current = useChatStore.getState().viewingQuestionThread;
-            if (
-              current?.presentationAnchor.canvasId ===
-                effectiveConversationView.presentationAnchor.canvasId &&
-              current.presentationAnchor.nodeId ===
-                effectiveConversationView.presentationAnchor.nodeId
-            ) {
-              useChatStore
-                .getState()
-                .closeQuestionThread(
-                  effectiveConversationView.presentationAnchor.canvasId,
-                );
+            if (previewTabId) {
+              usePreviewWorkspaceStore.getState().closeTab(previewTabId);
             }
             return;
           }
@@ -115,45 +107,39 @@ export function useChatHistory(
         const overrideTid =
           res.threadId && res.threadId !== tid ? res.threadId : null;
         const finalTid = overrideTid ?? tid;
-        if (overrideTid) {
-          const current = useChatStore.getState();
-          const currentOwnerCanvasId =
-            current.viewingQuestionThread?.conversationOwner.canvasId ||
-            useCanvasStore.getState().canvasId;
-          if (
-            current.threadId === tid &&
-            currentOwnerCanvasId === ownerCanvasId
-          ) {
-            useChatStore.setState((state) => ({
-              threadId: overrideTid,
-              threadMap: {
-                ...state.threadMap,
-                [ownerCanvasId]: overrideTid,
-              },
-            }));
-          }
+        if (overrideTid && !effectiveConversationView && previewTabId) {
+          usePreviewWorkspaceStore.getState().replaceTabTarget(previewTabId, {
+            kind: 'chat',
+            canvasId,
+            threadId: overrideTid,
+          });
+          useChatStore.setState((state) => ({
+            threadMap: {
+              ...state.threadMap,
+              [canvasId]: overrideTid,
+            },
+          }));
         }
 
-        const serverMessages: ChatMessage[] = res.messages.map(
-          (m, i): ChatMessage => {
+        const serverMessages: ChatMessage[] = res.messages.flatMap(
+          (m, i): ChatMessage[] => {
             const id = `history-${i}`;
 
-            if (m.role === 'status') {
-              return {
-                id,
-                role: 'status' as const,
-                status: m.status,
-                detail: m.detail,
-              };
-            }
+            // Transcripts written before the intent recogniser was removed
+            // still contain `intent-select` records. That role no longer has
+            // a renderer, so drop it instead of letting it fall through to
+            // the user branch and rehydrate as an empty bubble.
+            if (!KNOWN_HISTORY_ROLES.has(m.role)) return [];
 
-            if (m.role === 'intent-select') {
-              return {
-                id,
-                role: 'intent-select' as const,
-                candidates: m.candidates,
-                selectedIntent: m.selectedIntent,
-              };
+            if (m.role === 'status') {
+              return [
+                {
+                  id,
+                  role: 'status' as const,
+                  status: m.status,
+                  detail: m.detail,
+                },
+              ];
             }
 
             if (m.role === 'assistant') {
@@ -170,13 +156,15 @@ export function useChatHistory(
                 m.selectedNodeIds && m.selectedNodeIds.length > 0
                   ? { selectedNodeIds: m.selectedNodeIds }
                   : {};
-              return {
-                id,
-                role: 'assistant' as const,
-                segments: m.parts,
-                ...attachmentsField,
-                ...selectedNodesField,
-              };
+              return [
+                {
+                  id,
+                  role: 'assistant' as const,
+                  segments: m.parts,
+                  ...attachmentsField,
+                  ...selectedNodesField,
+                },
+              ];
             }
 
             // role === 'user'
@@ -196,15 +184,17 @@ export function useChatHistory(
               m.invokedSkills && m.invokedSkills.length > 0
                 ? { invokedSkills: m.invokedSkills }
                 : {};
-            return {
-              id,
-              role: 'user' as const,
-              content: m.content || '',
-              ...attachmentsField,
-              ...selectedNodesField,
-              ...selectedStrokesField,
-              ...invokedSkillsField,
-            };
+            return [
+              {
+                id,
+                role: 'user' as const,
+                content: m.content || '',
+                ...attachmentsField,
+                ...selectedNodesField,
+                ...selectedStrokesField,
+                ...invokedSkillsField,
+              },
+            ];
           },
         );
         set(finalTid, serverMessages);
@@ -219,7 +209,7 @@ export function useChatHistory(
     return () => {
       cancelled = true;
     };
-  }, [threadId, ownerCanvasId, effectiveConversationView]);
+  }, [threadId, ownerCanvasId, effectiveConversationView, previewTabId]);
 
   // Try to reconnect to an active server-side run after history is loaded.
   // This handles the page-refresh case: events buffered during the refresh
@@ -228,15 +218,15 @@ export function useChatHistory(
     if (!isHistoryLoaded || !threadId || !ownerCanvasId) return;
 
     // Only attempt reconnect if history suggests an incomplete run:
-    // the last message is from the user (or intent-select) without a
-    // following assistant response, meaning the server may still be
-    // streaming. If history is empty or ends with an assistant message,
-    // there's nothing to reconnect to — skip the request entirely to
-    // avoid a 404 in the browser console.
-    const msgs = useChatStore.getState().messagesByThread[threadId] ?? [];
+    // the last message is from the user without a following assistant
+    // response, meaning the server may still be streaming. If history is
+    // empty or ends with an assistant message, there's nothing to
+    // reconnect to — skip the request entirely to avoid a 404 in the
+    // browser console.
+    const msgs = selectThreadMessages(useChatStore.getState(), threadId);
     if (msgs.length === 0) return;
     const lastMsg = msgs[msgs.length - 1];
-    if (lastMsg.role !== 'user' && lastMsg.role !== 'intent-select') return;
+    if (lastMsg.role !== 'user') return;
 
     // This client already owns a live consumer for the thread — either the
     // POST stream `startStream` opened for the message just sent, or an
@@ -250,7 +240,7 @@ export function useChatHistory(
     // the whole lead time — seconds on a resumed ACP session, during which
     // any re-render that changes `effectiveConversationView` (e.g.
     // re-opening the same question thread) re-runs this effect.
-    if (useChatStore.getState().loadingThreadIds.has(threadId)) return;
+    if (selectThreadIsLoading(useChatStore.getState(), threadId)) return;
 
     let cancelled = false;
     const ownerThreadId = threadId;
@@ -263,16 +253,8 @@ export function useChatHistory(
           await validateConversationView(ownerView);
         } catch (error) {
           if (error instanceof ConversationIntegrityError) {
-            const current = useChatStore.getState().viewingQuestionThread;
-            if (
-              current?.presentationAnchor.canvasId ===
-                ownerView.presentationAnchor.canvasId &&
-              current.presentationAnchor.nodeId ===
-                ownerView.presentationAnchor.nodeId
-            ) {
-              useChatStore
-                .getState()
-                .closeQuestionThread(ownerView.presentationAnchor.canvasId);
+            if (previewTabId) {
+              usePreviewWorkspaceStore.getState().closeTab(previewTabId);
             }
             return;
           }
@@ -370,14 +352,13 @@ export function useChatHistory(
       // current run — the reconnect event buffer replays them fully.
       // Keep only messages up to and including the last user message.
       const clearStaleMessages = () => {
-        const current =
-          useChatStore.getState().messagesByThread[ownerThreadId] ?? [];
+        const current = selectThreadMessages(
+          useChatStore.getState(),
+          ownerThreadId,
+        );
         let lastUserIdx = -1;
         for (let i = current.length - 1; i >= 0; i--) {
-          if (
-            current[i].role === 'user' ||
-            current[i].role === 'intent-select'
-          ) {
+          if (current[i].role === 'user') {
             lastUserIdx = i;
             break;
           }
@@ -463,6 +444,7 @@ export function useChatHistory(
     threadId,
     ownerCanvasId,
     effectiveConversationView,
+    previewTabId,
     addMessage,
     setIsLoading,
   ]);

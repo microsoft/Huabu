@@ -31,6 +31,10 @@ import {
   blendedMarkRect,
   useNodeCollapseStore,
 } from '@/store/nodeCollapseStore';
+import {
+  selectIsNodeOpen,
+  usePreviewWorkspaceStore,
+} from '@/store/previewWorkspace/store';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 
@@ -54,8 +58,8 @@ interface NodeFloatingToolbarProps {
   /**
    * Group 4 — node actions.
    * Buttons that trigger operations on the node: open large/fullscreen
-   * view, apply AI sketch recognition, download, unframe, start/cancel
-   * AI runs, open conversation thread, etc.
+   * view, download, unframe, start/cancel AI runs, open conversation
+   * thread, etc.
    * Rendered as the last group before the optional delete button.
    */
   actions?: ReactNode;
@@ -78,8 +82,8 @@ interface NodeFloatingToolbarProps {
  *     rendered on the canvas — text formatting, sketch stroke controls, frame
  *     child layout, etc. Omitted when the prop is undefined.
  *  4. Actions (`actions` prop). Buttons that trigger operations — open
- *     large/fullscreen view, AI sketch recognition, download, unframe, run /
- *     cancel AI question, etc. Omitted when the prop is undefined.
+ *     large/fullscreen view, download, unframe, run / cancel AI question,
+ *     etc. Omitted when the prop is undefined.
  *
  * A trailing delete button is appended for non-mouse input (mouse users have
  * keyboard Delete / Backspace).
@@ -100,7 +104,9 @@ export const NodeFloatingToolbar = memo(
     const deleteNodes = useCanvasStore((s) => s.deleteNodes);
     const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
     const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
-    const expandedNodeId = useCanvasStore((s) => s.expandedNodeId);
+    const isOpenInPreview = usePreviewWorkspaceStore((s) =>
+      selectIsNodeOpen(s, id),
+    );
     const canvasId = useCanvasStore((s) => s.canvasId);
     const setPortalNodePins = useCanvasStore((s) => s.setPortalNodePins);
     const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
@@ -127,13 +133,12 @@ export const NodeFloatingToolbar = memo(
     // on this node (dirty editor state would otherwise overwrite the
     // conversion) or while an ingest is in flight.
     const isTypeToggleDisabled =
-      expandedNodeId === id || ingestion?.status === 'pending';
-    const typeToggleDisabledReason =
-      expandedNodeId === id
-        ? t('toolbar.closeEditorChangeType')
-        : ingestion?.status === 'pending'
-          ? t('toolbar.ingestionInProgress')
-          : null;
+      isOpenInPreview || ingestion?.status === 'pending';
+    const typeToggleDisabledReason = isOpenInPreview
+      ? t('toolbar.closeEditorChangeType')
+      : ingestion?.status === 'pending'
+        ? t('toolbar.ingestionInProgress')
+        : null;
 
     // Anchor rect in flow (canvas) coordinates. `useInternalNode`
     // gives us live position + measured size, so the toolbar follows
@@ -364,6 +369,7 @@ export const NodeFloatingToolbar = memo(
           <FloatingToolbar.NumberInput
             label="Font"
             ariaLabel="Font size"
+            name="font-size"
             value={data.style?.fontSize ?? 16}
             min={8}
             max={160}

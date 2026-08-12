@@ -60,7 +60,6 @@ import {
   chatDir,
   deltaLogPath,
   eventsPath,
-  intentPath,
   nodeFilePath,
   nodesDir,
 } from '../../../../workspace/disk/paths.js';
@@ -75,7 +74,7 @@ import type {
   DeltaLogEntry,
   NodeContent,
 } from '../../../../canvas/persistence-types.js';
-import type { IntentEpisode, RecentAction } from '@huabu/shared';
+import type { RecentAction } from '@huabu/shared';
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
 export type {
@@ -1307,27 +1306,6 @@ export class CanvasStore {
     const [removed] = existing.splice(idx, 1);
     this.writeChanges(threadId, existing);
     return removed ?? null;
-  }
-
-  // ── Intent ───────────────────────────────────────────────────────────────
-
-  readIntents(): IntentEpisode[] {
-    this.assertActiveWorkspace();
-    return readJson<IntentEpisode[]>(intentPath(this.canvasId)) ?? [];
-  }
-
-  upsertIntent(episode: IntentEpisode): void {
-    this.assertActiveWorkspace();
-    this.requireExistingSpaceForMutation('upsert an intent');
-    const list = this.readIntents();
-    const idx = list.findIndex((e) => e.id === episode.id);
-    if (idx >= 0) {
-      list[idx] = episode;
-    } else {
-      list.push(episode);
-    }
-    mkdirp(path.dirname(intentPath(this.canvasId)));
-    atomicWriteJson(intentPath(this.canvasId), list);
   }
 
   // ── Events ───────────────────────────────────────────────────────────────

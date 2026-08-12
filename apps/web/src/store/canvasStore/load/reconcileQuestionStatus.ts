@@ -22,7 +22,7 @@
  * owns a fully-persisted chat thread.
  *
  * On reload the canvas badge reads that stale status and shows nothing
- * (`status === 'idle'` hides the `StatusBadge`), so the user loses both
+ * (`status === 'idle'` hides the badge), so the user loses both
  * the visual "this ran" signal and the double-click affordance that
  * reopens the conversation.
  *

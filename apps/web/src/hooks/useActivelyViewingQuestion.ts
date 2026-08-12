@@ -3,8 +3,7 @@
 
 /**
  * "Actively viewing" a question's conversation means BOTH:
- *   1. its thread is the one the chat panel is currently pointed at
- *      (`viewingQuestionThread`), and
+ *   1. a Preview Workspace tab presents its node, and
  *   2. that panel is expanded (not collapsed).
  *
  * A collapsed panel means the user is not actually watching, so a completing
@@ -16,15 +15,30 @@
  * every call site consistent.
  */
 
-import { useChatStore } from '@/store/chatStore';
+import useCanvasStore from '@/store/canvasStore';
 import { usePanelStore } from '@/store/panelStore';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+
+import type {
+  CanvasPreviewWorkspace,
+  PreviewTab,
+} from '@/store/previewWorkspace/model';
+
+function activeTabs(workspace: CanvasPreviewWorkspace): PreviewTab[] {
+  return workspace.groups.flatMap((group) => {
+    const tab = group.activeTabId
+      ? workspace.tabs[group.activeTabId]
+      : undefined;
+    return tab ? [tab] : [];
+  });
+}
 
 /** Reactive form — use inside render logic. */
 export function useActivelyViewingQuestionNode(nodeId: string): boolean {
-  const anchored = useChatStore(
-    (s) =>
-      s.viewingQuestionThread?.presentationAnchor.nodeId === nodeId ||
-      s.viewingQuestionThread?.conversationOwner.nodeId === nodeId,
+  const anchored = usePreviewWorkspaceStore((state) =>
+    activeTabs(state.workspace).some(
+      (tab) => tab.target.kind === 'node' && tab.target.nodeId === nodeId,
+    ),
   );
   const panelExpanded = usePanelStore((s) => !s.isRightCollapsed);
   return anchored && panelExpanded;
@@ -39,13 +53,25 @@ export function isActivelyViewingQuestion(match: {
   nodeId?: string;
   threadId?: string;
 }): boolean {
-  const viewing = useChatStore.getState().viewingQuestionThread;
-  if (!viewing) return false;
-  const matches =
-    (match.nodeId !== undefined &&
-      (viewing.presentationAnchor.nodeId === match.nodeId ||
-        viewing.conversationOwner.nodeId === match.nodeId)) ||
-    (match.threadId !== undefined &&
-      viewing.conversationOwner.threadId === match.threadId);
+  const workspace = usePreviewWorkspaceStore.getState().workspace;
+  const canvas = useCanvasStore.getState();
+  const matches = activeTabs(workspace).some((tab) => {
+    if (tab.target.kind !== 'node') return false;
+    const targetNodeId = tab.target.nodeId;
+    if (match.nodeId === targetNodeId) return true;
+    if (!match.threadId) return false;
+    const node = canvas.nodes.find(
+      (candidate) => candidate.id === targetNodeId,
+    );
+    if (node?.type === 'question' && node.data.threadId === match.threadId) {
+      return true;
+    }
+    const reference = canvas.worldReferences[targetNodeId];
+    return (
+      reference?.kind === 'nodeRef' &&
+      reference.status === 'ok' &&
+      reference.source?.threadId === match.threadId
+    );
+  });
   return matches && !usePanelStore.getState().isRightCollapsed;
 }
