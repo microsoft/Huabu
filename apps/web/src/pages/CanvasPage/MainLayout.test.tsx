@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { usePanelStore } from '@/store/panelStore';
 
-import { MainLayout } from './MainLayout';
+import { MainLayout, resolveRightPanelVisible } from './MainLayout';
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -50,6 +50,16 @@ afterEach(() => {
 });
 
 describe('MainLayout Chat motion', () => {
+  it('uses persisted panel state after an interrupted startup motion settles', () => {
+    expect(
+      resolveRightPanelVisible({
+        collapsed: false,
+        moving: false,
+        animatedVisible: false,
+      }),
+    ).toBe(true);
+  });
+
   it('commits the final width once before animating compositor transforms', () => {
     act(() => {
       root?.render(
@@ -75,12 +85,14 @@ describe('MainLayout Chat motion', () => {
 
     expect(slot?.style.width).toBe('0px');
     expect(slot?.classList.contains('bg-surface')).toBe(false);
+    expect(slot?.classList.contains('overflow-hidden')).toBe(true);
     expect(content?.dataset.visible).toBeUndefined();
     expect(slot?.dataset.moving).toBeUndefined();
 
     act(() => usePanelStore.getState().toggleRightPanel());
 
     expect(slot?.style.width).toBe('420px');
+    expect(slot?.classList.contains('overflow-hidden')).toBe(false);
     expect(content?.dataset.visible).toBeUndefined();
     expect(center?.dataset.rightPanelMotion).toBe('true');
     // Promotion is committed before the transform changes so the slide does

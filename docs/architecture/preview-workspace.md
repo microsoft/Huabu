@@ -12,7 +12,7 @@ Preview Workspace owns presentation topology: open tabs, tab order, active tabs,
 
 `chatStore` owns conversation state keyed by `threadId`: messages, drafts, history status, streaming state, binding, model settings, compose mode, and pending attachments. Preview Workspace stores only the target needed to select a renderer.
 
-`panelStore` owns the outer right-column collapse state and thread-addressed composer focus requests. Opening a Preview target expands the right column; closing a tab does not delete its underlying node or conversation history.
+`panelStore` owns and persists the outer right-column collapse state and owns thread-addressed composer focus requests. Opening a Preview target expands the right column; closing a tab does not delete its underlying node or conversation history. `MainLayout` treats the persisted collapse state as authoritative whenever no panel motion is active. A settled collapsed slot is zero-width and clips overflow, while an active open/close motion temporarily releases that clipping; interrupted startup hydration therefore cannot leave translated panel content visible over the Canvas in either persisted state.
 
 ```text
 Canvas command -> canvasStore document -> Preview target resolves live node
