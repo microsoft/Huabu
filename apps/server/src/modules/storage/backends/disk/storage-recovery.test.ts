@@ -29,6 +29,7 @@ import {
   getCanvasStore,
   resetStorageCache,
 } from './legacy/canvas-store-cache.js';
+import { createDiskDeltaLog } from './space-logs.js';
 import { DiskStructuredStore } from './structured-store.js';
 import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
 import {
@@ -180,8 +181,8 @@ describe('strict structured reads', () => {
       // a human title. With no recoverable identity, the honest boundary is a
       // scan error rather than falsely reporting an arbitrary requested id as
       // missing and silently hiding the corrupt Space.
-      const repository = new DiskStructuredStore().space('unknown-id').record;
-      await expect(repository.read()).rejects.toBeInstanceOf(SyntaxError);
+      const space = new DiskStructuredStore().space('unknown-id');
+      await expect(space.read()).rejects.toBeInstanceOf(SyntaxError);
       expect(readFileSync(file, 'utf8')).toBe(contents);
     },
   );
@@ -192,9 +193,9 @@ describe('strict structured reads', () => {
     const file = path.join(root, 'broken-record', 'space.json');
 
     writeFileSync(file, '{"canvasId":', 'utf8');
-    await expect(handle.record.read()).rejects.toBeInstanceOf(SyntaxError);
+    await expect(handle.read()).rejects.toBeInstanceOf(SyntaxError);
     await expect(
-      handle.writer.apply({
+      handle.write({
         expectedVersion: 0,
         nextRecord: { ...record, version: 1, updatedAt: 2 },
         nodeMutations: [],
@@ -203,11 +204,11 @@ describe('strict structured reads', () => {
 
     rmSync(file);
     mkdirSync(file);
-    await expect(handle.record.read()).rejects.toMatchObject({
+    await expect(handle.read()).rejects.toMatchObject({
       code: 'EISDIR',
     });
     await expect(
-      handle.writer.apply({
+      handle.write({
         expectedVersion: 0,
         nextRecord: { ...record, version: 1, updatedAt: 2 },
         nodeMutations: [],
@@ -224,7 +225,7 @@ describe('strict structured reads', () => {
     };
     try {
       await expect(
-        new DiskStructuredStore().space('single-record-read').record.read(),
+        new DiskStructuredStore().space('single-record-read').read(),
       ).resolves.toEqual(record);
     } finally {
       store.read = originalRead;
@@ -235,16 +236,14 @@ describe('strict structured reads', () => {
     'rejects a present non-object Space record: %s',
     async (contents) => {
       seedSpace('wrong-record-shape');
-      const repository = new DiskStructuredStore().space(
-        'wrong-record-shape',
-      ).record;
+      const space = new DiskStructuredStore().space('wrong-record-shape');
       writeFileSync(
         path.join(root, 'wrong-record-shape', 'space.json'),
         contents,
         'utf8',
       );
 
-      await expect(repository.read()).rejects.toBeInstanceOf(SyntaxError);
+      await expect(space.read()).rejects.toBeInstanceOf(SyntaxError);
     },
   );
 
@@ -259,9 +258,9 @@ describe('strict structured reads', () => {
       const bytes = JSON.stringify(buildInvalid(record));
       writeFileSync(file, bytes, 'utf8');
 
-      await expect(handle.record.read()).rejects.toBeInstanceOf(SyntaxError);
+      await expect(handle.read()).rejects.toBeInstanceOf(SyntaxError);
       await expect(
-        handle.writer.apply({
+        handle.write({
           expectedVersion: 0,
           nextRecord: { ...record, version: 1, updatedAt: 2 },
           nodeMutations: [],
@@ -273,10 +272,8 @@ describe('strict structured reads', () => {
 
   it('strictly validates an externally renamed Space before title self-heal', async () => {
     const record = seedSpace('renamed-invalid-record');
-    const repository = new DiskStructuredStore().space(
-      'renamed-invalid-record',
-    ).record;
-    await expect(repository.read()).resolves.toMatchObject({
+    const space = new DiskStructuredStore().space('renamed-invalid-record');
+    await expect(space.read()).resolves.toMatchObject({
       canvasId: 'renamed-invalid-record',
     });
     const movedRoot = path.join(root, 'Finder Renamed');
@@ -285,7 +282,7 @@ describe('strict structured reads', () => {
     const bytes = JSON.stringify({ ...record, state: {} });
     writeFileSync(file, bytes, 'utf8');
 
-    await expect(repository.read()).rejects.toBeInstanceOf(SyntaxError);
+    await expect(space.read()).rejects.toBeInstanceOf(SyntaxError);
     expect(readFileSync(file, 'utf8')).toBe(bytes);
   });
 
@@ -298,7 +295,7 @@ describe('strict structured reads', () => {
       const bytes = readFileSync(file, 'utf8');
 
       await expect(
-        handle.writer.apply({
+        handle.write({
           expectedVersion: 0,
           nextRecord: buildInvalid({
             ...record,
@@ -314,7 +311,7 @@ describe('strict structured reads', () => {
 
   it('does not replace malformed mutable JSON with an empty baseline', async () => {
     seedSpace('broken-mutable');
-    const { changes, intents } = new DiskStructuredStore().space(
+    const { changes, history } = new DiskStructuredStore().space(
       'broken-mutable',
     );
     const intentFile = intentPath('broken-mutable');
@@ -323,15 +320,15 @@ describe('strict structured reads', () => {
     writeFileSync(intentFile, '[{"id":"survivor"', 'utf8');
     writeFileSync(changeFile, '[{"id":"survivor"', 'utf8');
 
-    await expect(intents.read()).rejects.toBeInstanceOf(SyntaxError);
-    await expect(intents.upsert(episode('replacement'))).rejects.toBeInstanceOf(
-      SyntaxError,
-    );
+    await expect(history.intents.read()).rejects.toBeInstanceOf(SyntaxError);
+    await expect(
+      history.intents.put(episode('replacement')),
+    ).rejects.toBeInstanceOf(SyntaxError);
     await expect(changes.read('thread-1')).rejects.toBeInstanceOf(SyntaxError);
     await expect(
       changes.append('thread-1', [change('replacement')]),
     ).rejects.toBeInstanceOf(SyntaxError);
-    await expect(changes.remove('thread-1', 'survivor')).rejects.toBeInstanceOf(
+    await expect(changes.delete('thread-1', 'survivor')).rejects.toBeInstanceOf(
       SyntaxError,
     );
 
@@ -344,7 +341,7 @@ describe('strict structured reads', () => {
     const handle = new DiskStructuredStore().space('single-array-read');
     const firstChange = change('n1');
     await handle.changes.append('thread-1', [firstChange]);
-    await handle.intents.upsert(episode('e1'));
+    await handle.history.intents.put(episode('e1'));
 
     const store = getCanvasStore('single-array-read');
     const legacySpies = [
@@ -368,13 +365,15 @@ describe('strict structured reads', () => {
         handle.changes.append('thread-1', [change('n2')]),
       ).resolves.toHaveLength(2);
       await expect(
-        handle.changes.remove('thread-1', firstChange.id),
+        handle.changes.delete('thread-1', firstChange.id),
       ).resolves.toEqual(firstChange);
-      await expect(handle.intents.read()).resolves.toEqual([episode('e1')]);
+      await expect(handle.history.intents.read()).resolves.toEqual([
+        episode('e1'),
+      ]);
       await expect(
-        handle.intents.upsert(episode('e2')),
+        handle.history.intents.put(episode('e2')),
       ).resolves.toBeUndefined();
-      await expect(handle.intents.read()).resolves.toEqual([
+      await expect(handle.history.intents.read()).resolves.toEqual([
         episode('e1'),
         episode('e2'),
       ]);
@@ -387,7 +386,7 @@ describe('strict structured reads', () => {
     'rejects non-array mutable JSON without overwriting it: %s',
     async (contents) => {
       seedSpace('wrong-mutable-shape');
-      const { changes, intents } = new DiskStructuredStore().space(
+      const { changes, history } = new DiskStructuredStore().space(
         'wrong-mutable-shape',
       );
       const intentFile = intentPath('wrong-mutable-shape');
@@ -396,9 +395,9 @@ describe('strict structured reads', () => {
       writeFileSync(intentFile, contents, 'utf8');
       writeFileSync(changeFile, contents, 'utf8');
 
-      await expect(intents.read()).rejects.toBeInstanceOf(SyntaxError);
+      await expect(history.intents.read()).rejects.toBeInstanceOf(SyntaxError);
       await expect(
-        intents.upsert(episode('replacement')),
+        history.intents.put(episode('replacement')),
       ).rejects.toBeInstanceOf(SyntaxError);
       await expect(changes.read('thread-1')).rejects.toBeInstanceOf(
         SyntaxError,
@@ -416,14 +415,16 @@ describe('strict structured reads', () => {
 describe('JSONL recovery and ordering', () => {
   it('propagates unreadable event and delta paths instead of returning empty logs', async () => {
     seedSpace('unreadable-events');
-    const events = new DiskStructuredStore().space('unreadable-events').events;
+    const { events } = new DiskStructuredStore().space(
+      'unreadable-events',
+    ).history;
     mkdirSync(eventsPath('unreadable-events'), { recursive: true });
     await expect(events.read()).rejects.toMatchObject({
       code: 'EISDIR',
     });
 
     seedSpace('unreadable-deltas');
-    const deltas = new DiskStructuredStore().space('unreadable-deltas').deltas;
+    const deltas = createDiskDeltaLog(getCanvasStore('unreadable-deltas'));
     mkdirSync(deltaLogPath('unreadable-deltas'), { recursive: true });
     await expect(deltas.readSince(0)).rejects.toMatchObject({
       code: 'EISDIR',
@@ -432,9 +433,10 @@ describe('JSONL recovery and ordering', () => {
 
   it('rejects malformed durable JSONL rows without changing either log', async () => {
     seedSpace('malformed-jsonl');
-    const { deltas, events } = new DiskStructuredStore().space(
+    const { events } = new DiskStructuredStore().space(
       'malformed-jsonl',
-    );
+    ).history;
+    const deltas = createDiskDeltaLog(getCanvasStore('malformed-jsonl'));
     const eventFile = eventsPath('malformed-jsonl');
     const deltaFile = deltaLogPath('malformed-jsonl');
     mkdirSync(path.dirname(eventFile), { recursive: true });
@@ -453,9 +455,10 @@ describe('JSONL recovery and ordering', () => {
 
   it('rejects valid JSON with invalid event or delta shapes, including rows outside an event limit', async () => {
     seedSpace('invalid-log-shapes');
-    const { deltas, events } = new DiskStructuredStore().space(
+    const { events } = new DiskStructuredStore().space(
       'invalid-log-shapes',
-    );
+    ).history;
+    const deltas = createDiskDeltaLog(getCanvasStore('invalid-log-shapes'));
     const eventFile = eventsPath('invalid-log-shapes');
     const deltaFile = deltaLogPath('invalid-log-shapes');
     mkdirSync(path.dirname(eventFile), { recursive: true });
@@ -474,9 +477,10 @@ describe('JSONL recovery and ordering', () => {
 
   it('validates event and delta append inputs before touching durable bytes', async () => {
     seedSpace('invalid-log-inputs');
-    const { deltas, events } = new DiskStructuredStore().space(
+    const { events } = new DiskStructuredStore().space(
       'invalid-log-inputs',
-    );
+    ).history;
+    const deltas = createDiskDeltaLog(getCanvasStore('invalid-log-inputs'));
     const eventFile = eventsPath('invalid-log-inputs');
     const deltaFile = deltaLogPath('invalid-log-inputs');
     mkdirSync(path.dirname(eventFile), { recursive: true });
@@ -498,7 +502,7 @@ describe('JSONL recovery and ordering', () => {
 
   it('preserves a valid unterminated tail and appends on a fresh boundary', async () => {
     seedSpace('valid-tail');
-    const events = new DiskStructuredStore().space('valid-tail').events;
+    const { events } = new DiskStructuredStore().space('valid-tail').history;
     mkdirSync(path.dirname(eventsPath('valid-tail')), { recursive: true });
     writeFileSync(
       eventsPath('valid-tail'),
@@ -514,7 +518,8 @@ describe('JSONL recovery and ordering', () => {
 
   it('removes a malformed crash tail before events and delta appends', async () => {
     seedSpace('broken-tail');
-    const { deltas, events } = new DiskStructuredStore().space('broken-tail');
+    const { events } = new DiskStructuredStore().space('broken-tail').history;
+    const deltas = createDiskDeltaLog(getCanvasStore('broken-tail'));
     mkdirSync(path.dirname(eventsPath('broken-tail')), { recursive: true });
     writeFileSync(
       eventsPath('broken-tail'),
@@ -546,7 +551,7 @@ describe('JSONL recovery and ordering', () => {
 
   it('uses a valid unterminated delta as the monotonicity baseline', async () => {
     seedSpace('delta-tail');
-    const deltas = new DiskStructuredStore().space('delta-tail').deltas;
+    const deltas = createDiskDeltaLog(getCanvasStore('delta-tail'));
     mkdirSync(path.dirname(deltaLogPath('delta-tail')), { recursive: true });
     writeFileSync(deltaLogPath('delta-tail'), JSON.stringify(delta(2)), 'utf8');
 
@@ -560,21 +565,21 @@ describe('JSONL recovery and ordering', () => {
 });
 
 describe('Space lifecycle guards and reopen', () => {
-  it('does not expose the legacy store through repository object properties', () => {
+  it('does not expose the legacy store through part object properties', () => {
     seedSpace('opaque-adapters');
     const handle = new DiskStructuredStore().space('opaque-adapters');
 
-    for (const repository of [
-      handle.record,
-      handle.events,
-      handle.deltas,
+    for (const part of [
+      handle.nodes,
+      handle.history.events,
+      createDiskDeltaLog(getCanvasStore(handle.canvasId)),
       handle.changes,
-      handle.intents,
+      handle.history.intents,
+      handle.tasks,
+      handle.tasks.runs,
     ]) {
-      expect('store' in repository).toBe(false);
-      expect(
-        (repository as unknown as { store?: unknown }).store,
-      ).toBeUndefined();
+      expect('store' in part).toBe(false);
+      expect((part as unknown as { store?: unknown }).store).toBeUndefined();
     }
   });
 
@@ -583,12 +588,12 @@ describe('Space lifecycle guards and reopen', () => {
     const rejectedBuffer = Buffer.from('x');
 
     await expect(
-      handle.events.append([{ payload: action('n1'), ts: 1 }]),
+      handle.history.events.append([{ payload: action('n1'), ts: 1 }]),
     ).rejects.toThrow(/missing Space/);
-    await expect(handle.deltas.append(delta(1))).rejects.toThrow(
-      /missing Space/,
-    );
-    await expect(handle.intents.upsert(episode('e1'))).rejects.toThrow(
+    await expect(
+      createDiskDeltaLog(getCanvasStore(handle.canvasId)).append(delta(1)),
+    ).rejects.toThrow(/missing Space/);
+    await expect(handle.history.intents.put(episode('e1'))).rejects.toThrow(
       /missing Space/,
     );
     await expect(
@@ -618,7 +623,7 @@ describe('Space lifecycle guards and reopen', () => {
   it('round-trips every scoped family after cache reset and reopen', async () => {
     const initial = seedSpace('reopen');
     const first = new DiskStructuredStore().space('reopen');
-    await first.writer.apply({
+    await first.write({
       expectedVersion: 0,
       nextRecord: {
         ...initial,
@@ -628,9 +633,9 @@ describe('Space lifecycle guards and reopen', () => {
       },
       nodeMutations: [],
     });
-    await first.events.append([{ payload: action('n1'), ts: 7 }]);
-    await first.deltas.append(delta(1));
-    await first.intents.upsert(episode('e1'));
+    await first.history.events.append([{ payload: action('n1'), ts: 7 }]);
+    await createDiskDeltaLog(getCanvasStore('reopen')).append(delta(1));
+    await first.history.intents.put(episode('e1'));
     const storedChanges = await first.changes.append('thread-1', [
       change('n1'),
     ]);
@@ -639,17 +644,19 @@ describe('Space lifecycle guards and reopen', () => {
     resetStorageCache();
     const reopened = new DiskStructuredStore().space('reopen');
 
-    expect((await reopened.record.read())?.version).toBe(1);
-    expect((await reopened.record.read())?.state.nodes).toEqual([{ id: 'n1' }]);
-    expect((await reopened.events.read()).map((event) => event.ts)).toEqual([
-      7,
-    ]);
+    expect((await reopened.read())?.version).toBe(1);
+    expect((await reopened.read())?.state.nodes).toEqual([{ id: 'n1' }]);
     expect(
-      (await reopened.deltas.readSince(0)).map((entry) => entry.version),
+      (await reopened.history.events.read()).map((event) => event.ts),
+    ).toEqual([7]);
+    expect(
+      (await createDiskDeltaLog(getCanvasStore('reopen')).readSince(0)).map(
+        (entry) => entry.version,
+      ),
     ).toEqual([1]);
-    expect((await reopened.intents.read()).map((entry) => entry.id)).toEqual([
-      'e1',
-    ]);
+    expect(
+      (await reopened.history.intents.read()).map((entry) => entry.id),
+    ).toEqual(['e1']);
     expect(await reopened.changes.read('thread-1')).toEqual(storedChanges);
     expect((await canvasBlobs('reopen').read('payload.bin'))?.toString()).toBe(
       'persisted',

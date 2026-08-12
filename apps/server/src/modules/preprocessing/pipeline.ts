@@ -31,14 +31,14 @@ import type {
   PreprocessDiagnostic,
   PreprocessNodeResult,
 } from './types.js';
-import type { BlobLease, BlobScope, NodeRepository } from '../storage/index.js';
+import type { BlobLease, BlobScope, SpaceNodes } from '../storage/index.js';
 import type { PreprocessNodeRequest } from '@huabu/shared';
 
 const log = getLogger('preprocessing.pipeline');
 
 /** Dependencies injected into the pipeline runner. */
 export interface PipelineDeps {
-  nodes: NodeRepository;
+  nodes: SpaceNodes;
   blobs: BlobScope;
   provider: ProviderManager;
 }

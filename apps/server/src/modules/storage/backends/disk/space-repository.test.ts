@@ -103,7 +103,7 @@ describeSpaceRepositoryContract('Disk', () => {
   const store = new DiskStructuredStore();
   return {
     repository: store.spaces(),
-    read: (canvasId: string) => store.space(canvasId).record.read(),
+    read: (canvasId: string) => store.space(canvasId).read(),
     attemptMutation: (canvasId: string) =>
       store.space(canvasId).nodes.put({
         nodeId: 'delete-fence-node',

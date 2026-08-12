@@ -14,8 +14,8 @@ import type {
   NodeDeleteResult,
   NodePutInput,
   NodePutResult,
-  NodeRepository,
   NodeSnapshot,
+  SpaceNodes,
 } from '../../ports/structured.js';
 
 /** Opaque full-record token; public content revisions remain a Canvas concern. */
@@ -30,7 +30,7 @@ function snapshotOf(record: NodeContent): NodeSnapshot {
   return { record, revision };
 }
 
-export class DiskNodeRepository implements NodeRepository {
+export class DiskSpaceNodes implements SpaceNodes {
   readonly canvasId: string;
 
   readonly #store: CanvasStore;
@@ -52,7 +52,7 @@ export class DiskNodeRepository implements NodeRepository {
     this.#assertActiveWorkspace();
     if (input.record.nodeId !== input.nodeId) {
       throw new Error(
-        `NodeRepository(${this.canvasId}) nodeId mismatch: ` +
+        `SpaceNodes(${this.canvasId}) nodeId mismatch: ` +
           `argument=${JSON.stringify(input.nodeId)} ` +
           `record=${JSON.stringify(input.record.nodeId)}`,
       );
@@ -116,7 +116,7 @@ export class DiskNodeRepository implements NodeRepository {
     const persisted = this.#store.readNode(input.nodeId);
     if (persisted === null) {
       throw new Error(
-        `NodeRepository(${this.canvasId}) wrote node ${JSON.stringify(input.nodeId)} but could not read it back`,
+        `SpaceNodes(${this.canvasId}) wrote node ${JSON.stringify(input.nodeId)} but could not read it back`,
       );
     }
     return { ok: true, ...snapshotOf(persisted) };
@@ -131,7 +131,7 @@ export class DiskNodeRepository implements NodeRepository {
   #assertActiveWorkspace(): void {
     if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
       throw new Error(
-        `NodeRepository(${this.canvasId}) belongs to an inactive workspace. ` +
+        `SpaceNodes(${this.canvasId}) belongs to an inactive workspace. ` +
           'Resolve a fresh Space handle after workspace activation.',
       );
     }

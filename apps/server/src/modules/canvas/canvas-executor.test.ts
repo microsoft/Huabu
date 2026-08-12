@@ -571,7 +571,7 @@ describe('executor tombstone resurrection', () => {
           deltas: [{ type: 'INSERT_NODE', node: restoredNode() }],
           originator: UI,
         }),
-      ).rejects.toThrow(/Ordered Space write failed.*Space does not exist/);
+      ).rejects.toThrow(/Space write failed.*Space does not exist/);
     } finally {
       store.writeNode = originalWriteNode;
     }

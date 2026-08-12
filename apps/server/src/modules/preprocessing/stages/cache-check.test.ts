@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { tryCacheShortCircuit } from './cache-check.js';
 
-import type { NodeRepository } from '../../storage/index.js';
+import type { SpaceNodes } from '../../storage/index.js';
 import type { PipelineContext, PreprocessDiagnostic } from '../types.js';
 import type { PreprocessNodeRequest } from '@huabu/shared';
 
@@ -24,7 +24,7 @@ describe('tryCacheShortCircuit remote PDF migration', () => {
     const nodes = {
       canvasId: request.canvasId,
       read: vi.fn(),
-    } as unknown as NodeRepository;
+    } as unknown as SpaceNodes;
 
     await expect(
       tryCacheShortCircuit(
@@ -62,7 +62,7 @@ describe('tryCacheShortCircuit remote PDF migration', () => {
         },
         revision: 'opaque-revision',
       }),
-    } as unknown as NodeRepository;
+    } as unknown as SpaceNodes;
 
     await expect(
       tryCacheShortCircuit(
@@ -94,7 +94,7 @@ describe('tryCacheShortCircuit remote PDF migration', () => {
     const nodes = {
       canvasId: request.canvasId,
       read: vi.fn().mockRejectedValue(new Error('corrupt sidecar')),
-    } as unknown as NodeRepository;
+    } as unknown as SpaceNodes;
 
     await expect(
       tryCacheShortCircuit(

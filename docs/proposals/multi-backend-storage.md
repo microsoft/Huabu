@@ -194,7 +194,7 @@ records, not Phase-4 contract members or persisted-format changes.
 
 The top-level name does not require one monolithic class. Concrete persistence
 ports remain owned by their domains. L1 may own repositories such as
-`SpaceRepository`, `NodeRepository`, and its Canvas log stores; Agenetes L2
+`SpaceRepository`, `SpaceNodes`, and the Space log parts; Agenetes L2
 remains the sole owner of its existing `ThreadStore`, `EventLogStore`, and
 `TurnStore` contracts. The host composition root may select one structured
 backend family and inject matching adapters into both domains, but it must not
@@ -378,8 +378,17 @@ is an adapter inefficiency, not a contract change (§12.1.1).
 The connection → scoped-handle shape and record/log members landed in phase
 2, membership reads in phase 3, and the collection lifecycle, async node, and
 weak ordered-write seams in phase 4. §§12.2–12.4 are authoritative for their
-acceptance boundaries; §12.4.1 records the trim that produced the surface
-below.
+acceptance boundaries; §12.4.1 records the trim and §12.4.2 the member
+vocabulary that together produced the surface below. Earlier phase sections
+show member names as they stood in their own phase.
+
+One verb means one thing throughout: `read` fetches one record or a part's
+contents, `list` a whole collection; `create` adds where an existing record is
+an error, `put` writes one complete record by id and replaces it if present,
+`append` adds to an ordered sequence, `update` changes part of an existing
+record, `delete` removes one record by id, and `write` is the Space's own
+ordered multi-part mutation. `worldId()` and `beginDelete()` are the
+exceptions: one names what it returns, the other opens a session.
 
 ```ts
 interface StructuredStore {
@@ -407,38 +416,57 @@ interface SpaceDeleteSession {
   abort(): Promise<void>;
 }
 
+/**
+ * The Space *is* its record, so `read`/`write` sit on the handle; the members
+ * are the parts it holds.
+ */
 interface SpaceHandle {
   readonly canvasId: string;
-  readonly record: SpaceRecordRepository;
-  readonly nodes: NodeRepository;
-  readonly writer: OrderedSpaceWriter;
-  readonly events: CanvasEventRepository;
-  readonly deltas: CanvasDeltaRepository;
-  readonly changes: CanvasChangeRepository;
-  readonly intents: CanvasIntentRepository;
-  readonly tasks: CanvasTaskRepository;
-}
-
-/** Reads only: every record write is a version-checked ordered write. */
-interface SpaceRecordRepository {
   read(): Promise<CanvasFile | null>;
+  write(input: SpaceWriteInput): Promise<SpaceWriteResult>;
+
+  readonly nodes: SpaceNodes;
+  readonly changes: SpaceChanges;
+  readonly tasks: SpaceTasks;
+  readonly history: SpaceHistory;
 }
 
-interface NodeRepository {
+/** The past only. Pending changes and live Runs are not history. */
+interface SpaceHistory {
+  readonly events: SpaceEvents; // read(limit?), append(events)
+  readonly intents: SpaceIntents; // read(), put(episode)
+}
+
+interface SpaceNodes {
   readonly canvasId: string;
   read(nodeId: string): Promise<NodeSnapshot | null>;
   put(input: NodePutInput): Promise<NodePutResult>;
   delete(nodeId: string): Promise<'deleted' | 'absent'>;
 }
 
-interface OrderedSpaceWriter {
-  apply(input: OrderedSpaceWriteInput): Promise<SpaceMutationResult>;
+interface SpaceChanges {
+  read(threadId: string): Promise<CanvasChangeRecord[]>;
+  append(
+    threadId: string,
+    records: readonly CanvasChangeRecord[],
+  ): Promise<CanvasChangeRecord[]>;
+  delete(
+    threadId: string,
+    changeId: string,
+  ): Promise<CanvasChangeRecord | null>;
+}
+
+/** One ledger: a Run is only meaningful beside the Task it executes. */
+interface SpaceTasks {
+  read(): Promise<TaskStoreSnapshot>; // Tasks and Runs in one snapshot
+  create(task: TaskRecord): Promise<void>;
+  readonly runs: SpaceTaskRuns; // create(run), update(runId, patch)
 }
 ```
 
-The minimum contract is intentionally narrower than a transaction. The writer
-checks the observed Space version and applies node mutations, the complete
-Space record, and an optional delta in that order. A
+The minimum contract is intentionally narrower than a transaction.
+`SpaceHandle.write` checks the observed Space version and applies node
+mutations, the complete Space record, and an optional delta in that order. A
 normal in-process rejection from the node → record → delta batch must
 restore that batch's prestate; Disk uses caught-error before images and a SQL
 adapter may use a native transaction. Explicit title rename remains the
@@ -919,6 +947,12 @@ implementation step requires a consumer signature or behavior change, it is
 deferred to a later phase rather than silently expanding Phase 2.
 
 #### 12.2.4 `StructuredStore` and `SpaceHandle` become composites
+
+> **Renamed in Phase 4.** The composite structure below is what landed and
+> still holds; the member names are Phase-2 spelling. `record` became the
+> handle's own `read()`, `events`/`intents` moved under `history`, and the
+> per-part interfaces dropped their `Canvas`/`Repository` affixes. §12.4.2
+> records the reasoning and §7.2 carries the current shape.
 
 ```ts
 export interface StructuredStore {
@@ -1496,6 +1530,54 @@ adapter reimplement it. The two-call sequence stays, now against one
 repository instance so a Workspace switch between the read and the create is
 rejected rather than silently retargeted.
 
+#### 12.4.2 Member vocabulary and shape — landed
+
+The same review continued into what the handle's members _are_. The trim in
+§12.4.1 removed surface; this settles how what remains is named and grouped,
+before more callers make either expensive to change. Behavior is unchanged:
+every edit is a rename, a regrouping, or a member becoming a method.
+
+1. **The record flattened into the handle.** `handle.record.read()` and
+   `handle.write(...)` put reading and writing the same record at two
+   different levels — the defect §12.4.1 removed between `record` and a
+   `writer` member, relocated. A Space _is_ its versioned record, so the pair
+   belongs on the Space: `handle.read()` / `handle.write(...)`.
+   `SpaceRecordRepository` is gone. The Disk reader keeps the captured
+   Workspace path it had as a class, so a handle retained across a Workspace
+   switch still rejects.
+2. **`history` groups the past, and only the past.** `events` and `intents`
+   are what happened and what was concluded from it, so they nest.
+   Change-review records and Tasks stay flat although Disk files all four
+   under `.history/`: pending changes drain as the user accepts or rejects,
+   and a Run carries live `pending`/`running` status the launcher mutates in
+   flight. `.history/` is a catch-all directory — `chat_v2/` sits there only
+   because it is the Agenetes `storage.root` — so grouping port members by it
+   would import a Disk layout into the backend-neutral contract.
+3. **One verb, one meaning** (§7.2). `changes.remove` → `delete`,
+   `intents.upsert` → `put`, `tasks.insertTask` → `tasks.create`. `create` and
+   `put` stay distinct because they differ on a duplicate: `create` rejects,
+   `put` replaces.
+4. **Runs nest inside the Task ledger.** `insertTask`/`insertRun` stuttered
+   because two record kinds shared one member. A Run executes a Task, so
+   `tasks.runs.create/update` reads as the domain does. `read()` stays at the
+   ledger — one file, and both `run-launcher` and the interactive-view binding
+   need Tasks and Runs from one snapshot. `runs` deliberately has no `read`: a
+   second read path would be a second representation of records the snapshot
+   already carries, and could hand a caller a Run whose Task it never
+   observed.
+5. **Per-part interfaces named for the part.** `SpaceNodes`, `SpaceChanges`,
+   `SpaceEvents`, `SpaceIntents`, `SpaceTasks`, `SpaceTaskRuns`,
+   `SpaceHistory`. The `Canvas` prefix contradicted the port's own noun, and
+   `Repository` claimed a CRUD store for what are append-only logs and a
+   ledger. `SpaceRepository` keeps its name: it is the collection, a different
+   subject at a different level. Disk files follow the types they implement
+   (`space-nodes.ts`, `space-logs.ts`, `space-record.ts`, `space-tasks.ts`),
+   as do their contract suites.
+
+`SpaceNodes.canvasId` survives the flattening although the handle carries the
+same id: `preprocessing` resolves that part per request and works with it
+detached from any handle.
+
 ### 12.5 Later phases — provisional
 
 5. Add one new adapter at a time — SQLite, then Postgres, then Azure Blob —
@@ -1565,10 +1647,10 @@ rejected rather than silently retargeted.
 - **Materialize lease lifetime** — the path is read-only and invalid once
   `release()` resolves, on every backend including Disk. (P1, §6.2)
 - **Repository boundaries, minimum accepted** — `SpaceRepository` (the
-  collection: membership, World identity, create/delete/rename),
-  `SpaceRecordRepository`, `NodeRepository`, the narrow Canvas
-  event/delta/change/intent repositories, Tasks, and `OrderedSpaceWriter` are
-  implemented with reusable contracts. Rejected in-process node → record →
+  collection: membership, World identity, create/delete/rename) and the
+  per-Space handle — its own record read/ordered write, `SpaceNodes`,
+  `SpaceChanges`, `SpaceTasks`, and `SpaceHistory` — are implemented with
+  reusable contracts. Rejected in-process node → record →
   delta batches restore prestate, while title rename keeps its preceding
   best-effort boundary. This is not an aggregate crash-recovery or distributed
   transaction. (P2–P4, §§12.2–12.4, 12.4.1)
@@ -1724,22 +1806,22 @@ Before a new backend is production-ready:
 
 ## 17. Code entry points
 
-| File/dir                                                                                                                                     | Responsibility                                                                                                                                                                      |
-| -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`apps/server/src/modules/storage/`](../../apps/server/src/modules/storage/)                                                                 | Ports, composition, adapters, compatibility, tests, and three forwarding shims — the canonical Phase-1–4 tree (§§12.1–12.4), guarded by `module-boundaries.test.ts`.                |
-| [`apps/server/src/modules/storage/ports/`](../../apps/server/src/modules/storage/ports/)                                                     | The two ports; reusable suites live in `ports/contracts/`. `blob.ts` is normative (§7.1); `structured.ts` owns catalogue/lifecycle and composite record/node/log/writer boundaries. |
-| [`apps/server/src/modules/storage/storage.ts`](../../apps/server/src/modules/storage/storage.ts)                                             | Composition root: maps profiles to adapters, guards blob puts, and holds a lifecycle deletion session across the blob-first cleanup saga.                                           |
-| [`.../storage/backends/disk/legacy/canvas-store-cache.ts`](../../apps/server/src/modules/storage/backends/disk/legacy/canvas-store-cache.ts) | Bounded LRU of legacy Disk Space objects. The single owner both the adapter and the facade resolve through, and the real limit of `space(id)` identity (§12.2.4).                   |
-| [`apps/server/src/modules/storage/profile.ts`](../../apps/server/src/modules/storage/profile.ts)                                             | Two-axis backend selection from env, and the fail-fast validation hook for unsupported combinations.                                                                                |
-| [`apps/server/src/modules/storage/backends/disk/`](../../apps/server/src/modules/storage/backends/disk/)                                     | Every Disk implementation: blob/structured stores, catalogue/lifecycle/record/node/log/writer repositories, in-process batch restoration, and the legacy class under `legacy/`.     |
-| [`.../storage/compatibility/canvas.ts`](../../apps/server/src/modules/storage/compatibility/canvas.ts)                                       | Residual Disk read surface plus direct-module lifecycle test fixtures; production structured mutations enumerated in §12.4 use the portable ports.                                  |
-| [`apps/server/src/modules/agent/memory/analyzer.ts`](../../apps/server/src/modules/agent/memory/analyzer.ts)                                 | P3 repository consumer for strict Space existence, bounded action events, and intent episodes; physical chat and memory files remain Disk-specific.                                 |
-| [`apps/server/src/modules/canvas/write-coordinator.ts`](../../apps/server/src/modules/canvas/write-coordinator.ts)                           | Canvas mutation coordinator and per-Space write lock, held across asynchronous node read, revision CAS, and put.                                                                    |
-| [`apps/server/src/modules/workspace/disk/`](../../apps/server/src/modules/workspace/disk/)                                                   | Cross-domain physical Workspace layout: paths, canvas dirs, naming, name index, dir handles, World bootstrap. `storage/paths.ts` forwards here.                                     |
-| [`apps/server/src/modules/canvas/canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts)                               | Canonical command execution; submits one ordered node/record/delta batch through `SpaceHandle.writer`.                                                                              |
-| [`apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts`](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts)             | Current real-Disk path resolution and traversal for built-in agent file tools.                                                                                                      |
-| [`apps/server/src/modules/agent/acp/capabilities/fs.ts`](../../apps/server/src/modules/agent/acp/capabilities/fs.ts)                         | Synthetic ACP `/space` read capability, currently not wired into the production driver.                                                                                             |
-| [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                         | External-agent workload assembly, profile working directory, and RFS environment injection.                                                                                         |
-| [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts)                                     | Current external-agent file/query/execute HTTP facade.                                                                                                                              |
-| [`apps/server/src/modules/canvas/external-watcher.ts`](../../apps/server/src/modules/canvas/external-watcher.ts)                             | Current Disk-only external Markdown discovery.                                                                                                                                      |
-| [`apps/server/src/modules/agent/agenetes/drivers.ts`](../../apps/server/src/modules/agent/agenetes/drivers.ts)                               | Current file-backed Agenetes thread, event, and turn stores that need future backend adapter/composition decisions while remaining L2-owned.                                        |
+| File/dir                                                                                                                                     | Responsibility                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`apps/server/src/modules/storage/`](../../apps/server/src/modules/storage/)                                                                 | Ports, composition, adapters, compatibility, tests, and three forwarding shims — the canonical Phase-1–4 tree (§§12.1–12.4), guarded by `module-boundaries.test.ts`.                                                 |
+| [`apps/server/src/modules/storage/ports/`](../../apps/server/src/modules/storage/ports/)                                                     | The two ports; reusable suites live in `ports/contracts/`. `blob.ts` is normative (§7.1); `structured.ts` owns the Space collection and the per-Space handle: record read/write, nodes, changes, Tasks, and history. |
+| [`apps/server/src/modules/storage/storage.ts`](../../apps/server/src/modules/storage/storage.ts)                                             | Composition root: maps profiles to adapters, guards blob puts, and holds a lifecycle deletion session across the blob-first cleanup saga.                                                                            |
+| [`.../storage/backends/disk/legacy/canvas-store-cache.ts`](../../apps/server/src/modules/storage/backends/disk/legacy/canvas-store-cache.ts) | Bounded LRU of legacy Disk Space objects. The single owner both the adapter and the facade resolve through, and the real limit of `space(id)` identity (§12.2.4).                                                    |
+| [`apps/server/src/modules/storage/profile.ts`](../../apps/server/src/modules/storage/profile.ts)                                             | Two-axis backend selection from env, and the fail-fast validation hook for unsupported combinations.                                                                                                                 |
+| [`apps/server/src/modules/storage/backends/disk/`](../../apps/server/src/modules/storage/backends/disk/)                                     | Every Disk implementation: blob/structured stores, the Space collection, and the per-Space record, node, log, and Task adapters, in-process batch restoration, and the legacy class under `legacy/`.                 |
+| [`.../storage/compatibility/canvas.ts`](../../apps/server/src/modules/storage/compatibility/canvas.ts)                                       | Residual Disk read surface plus direct-module lifecycle test fixtures; production structured mutations enumerated in §12.4 use the portable ports.                                                                   |
+| [`apps/server/src/modules/agent/memory/analyzer.ts`](../../apps/server/src/modules/agent/memory/analyzer.ts)                                 | P3 repository consumer for strict Space existence, bounded action events, and intent episodes; physical chat and memory files remain Disk-specific.                                                                  |
+| [`apps/server/src/modules/canvas/write-coordinator.ts`](../../apps/server/src/modules/canvas/write-coordinator.ts)                           | Canvas mutation coordinator and per-Space write lock, held across asynchronous node read, revision CAS, and put.                                                                                                     |
+| [`apps/server/src/modules/workspace/disk/`](../../apps/server/src/modules/workspace/disk/)                                                   | Cross-domain physical Workspace layout: paths, canvas dirs, naming, name index, dir handles, World bootstrap. `storage/paths.ts` forwards here.                                                                      |
+| [`apps/server/src/modules/canvas/canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts)                               | Canonical command execution; submits one ordered node/record/delta batch through `SpaceHandle.write`.                                                                                                                |
+| [`apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts`](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts)             | Current real-Disk path resolution and traversal for built-in agent file tools.                                                                                                                                       |
+| [`apps/server/src/modules/agent/acp/capabilities/fs.ts`](../../apps/server/src/modules/agent/acp/capabilities/fs.ts)                         | Synthetic ACP `/space` read capability, currently not wired into the production driver.                                                                                                                              |
+| [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                         | External-agent workload assembly, profile working directory, and RFS environment injection.                                                                                                                          |
+| [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts)                                     | Current external-agent file/query/execute HTTP facade.                                                                                                                                                               |
+| [`apps/server/src/modules/canvas/external-watcher.ts`](../../apps/server/src/modules/canvas/external-watcher.ts)                             | Current Disk-only external Markdown discovery.                                                                                                                                                                       |
+| [`apps/server/src/modules/agent/agenetes/drivers.ts`](../../apps/server/src/modules/agent/agenetes/drivers.ts)                               | Current file-backed Agenetes thread, event, and turn stores that need future backend adapter/composition decisions while remaining L2-owned.                                                                         |

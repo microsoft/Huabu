@@ -10,7 +10,7 @@ vi.mock('./stages/extract.js', () => ({ extract: extractMock }));
 import { runPipeline } from './pipeline.js';
 
 import type { ProviderManager } from './provider-manager.js';
-import type { BlobScope, NodeRepository } from '../storage/index.js';
+import type { BlobScope, SpaceNodes } from '../storage/index.js';
 import type { PreprocessNodeRequest } from '@huabu/shared';
 
 const request: PreprocessNodeRequest = {
@@ -34,7 +34,7 @@ function deps(release: () => Promise<void>) {
       nodes: {
         canvasId: request.canvasId,
         read: async () => null,
-      } as unknown as NodeRepository,
+      } as unknown as SpaceNodes,
       blobs: { materialize, put } as unknown as BlobScope,
       provider: {} as ProviderManager,
     },

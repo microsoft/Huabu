@@ -1,22 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/** Reusable behavioral contract for {@link NodeRepository}. */
+/** Reusable behavioral contract for {@link SpaceNodes}. */
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { NodeContent } from '../../../canvas/persistence-types.js';
-import type {
-  NodePutInput,
-  NodeRepository,
-  NodeSnapshot,
-} from '../structured.js';
+import type { NodePutInput, SpaceNodes, NodeSnapshot } from '../structured.js';
 
-export interface NodeRepositoryContractHarness {
+export interface SpaceNodesContractHarness {
   /** Repository for an existing Space, initially empty at contract-owned ids. */
-  readonly repository: NodeRepository;
+  readonly repository: SpaceNodes;
   /** Repository scoped to a Space whose structural record is absent. */
-  readonly missingRepository: NodeRepository;
+  readonly missingRepository: SpaceNodes;
   readonly expectedCanvasId: string;
   readonly cleanup?: () => Promise<void> | void;
 }
@@ -26,7 +22,7 @@ function note(nodeId: string, label: string, content: string): NodeContent {
 }
 
 async function putSuccessfully(
-  repository: NodeRepository,
+  repository: SpaceNodes,
   input: NodePutInput,
 ): Promise<NodeSnapshot> {
   const result = await repository.put(input);
@@ -39,16 +35,16 @@ async function putSuccessfully(
   return { record: result.record, revision: result.revision };
 }
 
-export function describeNodeRepositoryContract(
+export function describeSpaceNodesContract(
   name: string,
   createHarness: () =>
-    | Promise<NodeRepositoryContractHarness>
-    | NodeRepositoryContractHarness,
+    | Promise<SpaceNodesContractHarness>
+    | SpaceNodesContractHarness,
 ): void {
-  describe(`NodeRepository contract: ${name}`, () => {
-    let harness: NodeRepositoryContractHarness | null = null;
+  describe(`SpaceNodes contract: ${name}`, () => {
+    let harness: SpaceNodesContractHarness | null = null;
 
-    async function open(): Promise<NodeRepositoryContractHarness> {
+    async function open(): Promise<SpaceNodesContractHarness> {
       harness = await createHarness();
       return harness;
     }

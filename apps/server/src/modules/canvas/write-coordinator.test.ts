@@ -11,7 +11,7 @@ import type {
   NodeContent,
   NodePutInput,
   NodePutResult,
-  NodeRepository,
+  SpaceNodes,
   NodeSnapshot,
 } from '../storage/index.js';
 
@@ -25,7 +25,7 @@ function fakeRepository(canvasId = 'c1') {
   let putImpl: ((input: NodePutInput) => NodePutResult | undefined) | null =
     null;
 
-  const nodes: NodeRepository = {
+  const nodes: SpaceNodes = {
     canvasId,
     async read(): Promise<NodeSnapshot | null> {
       if (record === null) return null;

@@ -18,14 +18,14 @@ import {
   getCanvasStore,
   resetStorageCache,
 } from './legacy/canvas-store-cache.js';
-import { DiskNodeRepository } from './node-repository.js';
+import { DiskSpaceNodes } from './space-nodes.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { DiskStructuredStore } from './structured-store.js';
 import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
 import { nodesDir } from '../../../workspace/disk/paths.js';
 import { ensureWorldCanvasOnDisk } from '../../../workspace/disk/world-canvas.js';
 import { setWorkspacePath } from '../../../workspace.js';
-import { describeNodeRepositoryContract } from '../../ports/contracts/node-repository.contract.js';
+import { describeSpaceNodesContract } from '../../ports/contracts/space-nodes.contract.js';
 
 import type { NodeContent } from '../../../canvas/persistence-types.js';
 
@@ -42,7 +42,7 @@ function note(nodeId: string, label: string, content: string): NodeContent {
   return { nodeId, type: 'note', label, content };
 }
 
-describeNodeRepositoryContract('Disk', async () => {
+describeSpaceNodesContract('Disk', async () => {
   const root = freshWorkspace('huabu-node-contract-');
   const created = await new DiskSpaceRepository().create({
     canvasId: 'node-space',
@@ -63,7 +63,7 @@ describeNodeRepositoryContract('Disk', async () => {
   };
 });
 
-describe('DiskNodeRepository', () => {
+describe('DiskSpaceNodes', () => {
   let workspacePath: string;
 
   beforeEach(async () => {
@@ -81,7 +81,7 @@ describe('DiskNodeRepository', () => {
   });
 
   it('uses full-record node CAS and returns the exact persisted record', async () => {
-    const repository = new DiskNodeRepository(getCanvasStore('canvas-a'));
+    const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
     const first = await repository.put({
       nodeId: 'node-a',
       record: note('node-a', 'Shared', 'before'),
@@ -141,7 +141,7 @@ describe('DiskNodeRepository', () => {
       '---\nid: node-b\ntype: note\nlabel: Impostor\n---\nbody\n',
       'utf8',
     );
-    const repository = new DiskNodeRepository(getCanvasStore('canvas-a'));
+    const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
 
     await expect(repository.read('node-a')).resolves.toBeNull();
     await expect(repository.read('node-b')).resolves.toMatchObject({
@@ -150,7 +150,7 @@ describe('DiskNodeRepository', () => {
   });
 
   it('rechecks frontmatter ownership before creating an apparently absent id', async () => {
-    const repository = new DiskNodeRepository(getCanvasStore('canvas-a'));
+    const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
     const stored = await repository.put({
       nodeId: 'node-a',
       record: note('node-a', 'Node A', 'before'),
@@ -177,7 +177,7 @@ describe('DiskNodeRepository', () => {
   });
 
   it('rescans an equal-count sidecar replacement before mutating', async () => {
-    const repository = new DiskNodeRepository(getCanvasStore('canvas-a'));
+    const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
     await repository.put({
       nodeId: 'node-a',
       record: note('node-a', 'Node A', 'a'),
@@ -212,7 +212,7 @@ describe('DiskNodeRepository', () => {
         'utf8',
       );
     }
-    const repository = new DiskNodeRepository(getCanvasStore('canvas-a'));
+    const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
 
     await expect(repository.delete('node-a')).rejects.toThrow(
       /multiple sidecars claim that id/,
@@ -230,7 +230,7 @@ describe('DiskNodeRepository', () => {
       '---\nid: broken\nkeywords: [\n---\nbody',
       'utf8',
     );
-    const repository = new DiskNodeRepository(getCanvasStore('canvas-a'));
+    const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
 
     await expect(repository.read('broken')).rejects.toThrow();
   });

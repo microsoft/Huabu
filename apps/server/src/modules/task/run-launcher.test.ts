@@ -8,7 +8,7 @@ import { AgentNodeCreationError } from '../agent/agent-node.service.js';
 import { SelectableAgentProfileError } from '../agent/selectable-agent-profile.js';
 
 import type { AgentThreadInvocation } from '../agent/agent-thread.service.js';
-import type { CanvasTaskRepository } from '../storage/index.js';
+import type { SpaceTasks } from '../storage/index.js';
 import type { AgentStreamEvent, TaskRunRecord } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -38,7 +38,7 @@ function createHarness(options?: {
 }) {
   const calls: string[] = [];
   const runs: TaskRunRecord[] = [];
-  const insertRun = vi.fn(async (run: TaskRunRecord) => {
+  const createRun = vi.fn(async (run: TaskRunRecord) => {
     calls.push('insert-run');
     runs.push(run);
   });
@@ -62,10 +62,9 @@ function createHarness(options?: {
   );
   const repository = {
     read: vi.fn(async () => ({ version: 1 as const, tasks: [TASK], runs })),
-    insertTask: vi.fn(),
-    insertRun,
-    updateRun,
-  } as CanvasTaskRepository;
+    create: vi.fn(),
+    runs: { create: createRun, update: updateRun },
+  } as SpaceTasks;
   const dispose = vi.fn().mockResolvedValue(undefined);
   const invocation: AgentThreadInvocation = {
     binding: {
@@ -195,7 +194,7 @@ describe('RunLauncher', () => {
     await expect(
       missing.service.start('canvas-a', 'task-missing', {}),
     ).rejects.toMatchObject({ code: 'task_not_found' });
-    expect(missing.repository.insertRun).not.toHaveBeenCalled();
+    expect(missing.repository.runs.create).not.toHaveBeenCalled();
 
     const unavailable = createHarness({
       profileError: new SelectableAgentProfileError(
@@ -206,7 +205,7 @@ describe('RunLauncher', () => {
     await expect(
       unavailable.service.start('canvas-a', 'task-a', {}),
     ).rejects.toMatchObject({ code: 'profile_not_found' });
-    expect(unavailable.repository.insertRun).not.toHaveBeenCalled();
+    expect(unavailable.repository.runs.create).not.toHaveBeenCalled();
   });
 
   it('retains partial root identity when lineage creation fails', async () => {

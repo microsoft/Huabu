@@ -98,9 +98,11 @@ function createHandle(
     : vi.fn().mockResolvedValue(options.intents ?? []);
   const handle = {
     canvasId: 'canvas-a',
-    record: { read: recordRead },
-    events: { read: eventsRead },
-    intents: { read: intentsRead },
+    read: recordRead,
+    history: {
+      events: { read: eventsRead },
+      intents: { read: intentsRead },
+    },
   } as unknown as SpaceHandle;
   return { handle, recordRead, eventsRead, intentsRead };
 }

@@ -28,7 +28,7 @@ import canvasRoutes from '../../canvas/canvas.route.js';
 import { getStructuredStore } from '../../storage/index.js';
 import { setWorkspacePath } from '../../workspace.js';
 
-import type { NodeContent, NodeRepository } from '../../storage/index.js';
+import type { NodeContent, SpaceNodes } from '../../storage/index.js';
 import type { NormalizeResult } from '../types.js';
 
 let tmp: string;
@@ -47,7 +47,7 @@ async function seedSpace(
   canvasId: string,
   nodeId: string,
   type: string,
-): Promise<NodeRepository> {
+): Promise<SpaceNodes> {
   const structured = getStructuredStore();
   const created = await structured.spaces().create({
     canvasId,
@@ -56,7 +56,7 @@ async function seedSpace(
   if (!created.ok) throw new Error(`failed to create ${canvasId}`);
 
   const space = structured.space(canvasId);
-  const write = await space.writer.apply({
+  const write = await space.write({
     expectedVersion: 0,
     nextRecord: {
       ...created.record,
@@ -81,7 +81,7 @@ async function seedNode(
   nodeId: string,
   type: string,
   content: string,
-): Promise<NodeRepository> {
+): Promise<SpaceNodes> {
   const nodes = await seedSpace(canvasId, nodeId, type);
   const result = await nodes.put({
     nodeId,
@@ -92,7 +92,7 @@ async function seedNode(
 }
 
 async function bodyOf(
-  nodes: NodeRepository,
+  nodes: SpaceNodes,
   nodeId: string,
 ): Promise<string | undefined> {
   return (await nodes.read(nodeId))?.record.content ?? undefined;
@@ -169,7 +169,7 @@ describe('persist — authored-body CAS guard', () => {
       canvasId: 'c-deleted',
       read: async () => null,
       put: async () => ({ ok: false, reason: 'write-suppressed' as const }),
-    } as unknown as NodeRepository;
+    } as unknown as SpaceNodes;
 
     await expect(
       persist(

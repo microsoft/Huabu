@@ -579,7 +579,7 @@ describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
     const readRecord = vi.fn().mockResolvedValue({ canvasId: 'c1' });
     const readChanges = vi.fn().mockResolvedValue(expected);
     const space = vi.fn(() => ({
-      record: { read: readRecord },
+      read: readRecord,
       changes: { read: readChanges },
     }));
     vi.mocked(getStructuredStore).mockImplementationOnce(
@@ -708,16 +708,16 @@ describe('Space export/import persistence', () => {
         content: 'persisted body',
       }),
     ).toMatchObject({ ok: true });
-    const history = getStructuredStore().space('c1');
-    await history.events.append([{ payload: action('n1'), ts: 1 }]);
-    await history.deltas.append({
+    const seededSpace = getStructuredStore().space('c1');
+    await seededSpace.history.events.append([{ payload: action('n1'), ts: 1 }]);
+    getCanvasStore('c1').appendDeltaLogEntry({
       version: 1,
       ts: 2,
       commands: [],
       deltas: [],
       originator: { source: 'agent' },
     });
-    await history.intents.upsert({
+    await seededSpace.history.intents.put({
       id: 'intent-1',
       timestamp: 3,
       contextSummary: 'Persist this intent',
@@ -739,7 +739,7 @@ describe('Space export/import persistence', () => {
         },
       },
     ]);
-    const storedChanges = await history.changes.append('thread-export', [
+    const storedChanges = await seededSpace.changes.append('thread-export', [
       change,
     ]);
     const blob = Buffer.from([0, 1, 2, 3, 255]);
@@ -783,19 +783,21 @@ describe('Space export/import persistence', () => {
         `/api/canvas/${importedId}/artifact/asset.bin`,
       );
       expect(reopened.readNode('n1')?.content).toBe('persisted body');
-      const reopenedHistory = getStructuredStore().space(importedId);
+      const importedSpace = getStructuredStore().space(importedId);
       expect(
-        (await reopenedHistory.events.read()).map((event) => event.ts),
+        (await importedSpace.history.events.read()).map((event) => event.ts),
       ).toEqual([1]);
       expect(
-        (await reopenedHistory.deltas.readSince(0)).map(
-          (entry) => entry.version,
+        getCanvasStore(importedId)
+          .readDeltaLogSince(0)
+          .map((entry) => entry.version),
+      ).toEqual([1]);
+      expect(
+        (await importedSpace.history.intents.read()).map(
+          (episode) => episode.id,
         ),
-      ).toEqual([1]);
-      expect(
-        (await reopenedHistory.intents.read()).map((episode) => episode.id),
       ).toEqual(['intent-1']);
-      expect(await reopenedHistory.changes.read('thread-export')).toEqual(
+      expect(await importedSpace.changes.read('thread-export')).toEqual(
         storedChanges,
       );
       expect(await canvasBlobs(importedId).read('asset.bin')).toEqual(blob);

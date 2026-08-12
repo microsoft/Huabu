@@ -15,7 +15,7 @@
 import { getLogger } from '../../../utils/logger.js';
 import { updateNode } from '../../canvas/write-coordinator.js';
 
-import type { NodeContent, NodeRepository } from '../../storage/index.js';
+import type { NodeContent, SpaceNodes } from '../../storage/index.js';
 import type {
   BodyOwnership,
   NodeContentKind,
@@ -29,7 +29,7 @@ export async function persist(
   normalized: NormalizeResult,
   contentKind: NodeContentKind | undefined,
   bodyOwnership: BodyOwnership | undefined,
-  nodes: NodeRepository,
+  nodes: SpaceNodes,
   src?: string,
   requireExisting = false,
 ): Promise<PersistResult> {

@@ -20,6 +20,7 @@ import {
   resetStorageCache,
 } from './legacy/canvas-store-cache.js';
 import { NODE_TOMBSTONE_TTL_MS } from './legacy/node-tombstones.js';
+import { createDiskDeltaLog } from './space-logs.js';
 import { DiskStructuredStore } from './structured-store.js';
 import {
   refreshCanvasDirIndex,
@@ -187,7 +188,8 @@ describe('CanvasStore cache boundaries', () => {
     activateWorkspace('huabu-log-workspace-a-');
     createSpace('shared-id', 'First');
     const held = new DiskStructuredStore().space('shared-id');
-    await held.events.append([
+    const heldJournal = createDiskDeltaLog(getCanvasStore('shared-id'));
+    await held.history.events.append([
       {
         payload: {
           action: 'node_selected',
@@ -196,12 +198,12 @@ describe('CanvasStore cache boundaries', () => {
         ts: 1,
       },
     ]);
-    await held.deltas.append(delta(1));
+    await heldJournal.append(delta(1));
 
     activateWorkspace('huabu-log-workspace-b-');
     createSpace('shared-id', 'Second');
     const active = new DiskStructuredStore().space('shared-id');
-    await active.events.append([
+    await active.history.events.append([
       {
         payload: {
           action: 'node_selected',
@@ -210,18 +212,23 @@ describe('CanvasStore cache boundaries', () => {
         ts: 2,
       },
     ]);
-    await active.deltas.append(delta(2));
+    await createDiskDeltaLog(getCanvasStore('shared-id')).append(delta(2));
 
     // These reads use strict JSONL helpers directly. Without their own
     // workspace-lifetime guard, the retained A facades would silently read
     // B's same-id files instead of rejecting the stale handle.
-    await expect(held.events.read()).rejects.toThrow(/inactive workspace/);
-    await expect(held.deltas.readSince(0)).rejects.toThrow(
+    await expect(held.history.events.read()).rejects.toThrow(
       /inactive workspace/,
     );
-    expect((await active.events.read()).map((event) => event.ts)).toEqual([2]);
+    await expect(heldJournal.readSince(0)).rejects.toThrow(
+      /inactive workspace/,
+    );
     expect(
-      (await active.deltas.readSince(0)).map((entry) => entry.version),
+      (await active.history.events.read()).map((event) => event.ts),
+    ).toEqual([2]);
+    const activeJournal = createDiskDeltaLog(getCanvasStore('shared-id'));
+    expect(
+      (await activeJournal.readSince(0)).map((entry) => entry.version),
     ).toEqual([2]);
   });
 
@@ -229,18 +236,18 @@ describe('CanvasStore cache boundaries', () => {
     activateWorkspace('huabu-record-workspace-a-');
     const first = createSpace('shared-id', 'First');
     const held = new DiskStructuredStore().space('shared-id');
-    await expect(held.record.read()).resolves.toMatchObject({ title: 'First' });
+    await expect(held.read()).resolves.toMatchObject({ title: 'First' });
 
     activateWorkspace('huabu-record-workspace-b-');
     createSpace('shared-id', 'Second');
     const active = new DiskStructuredStore().space('shared-id');
-    await expect(active.record.read()).resolves.toMatchObject({
+    await expect(active.read()).resolves.toMatchObject({
       title: 'Second',
     });
 
-    await expect(held.record.read()).rejects.toThrow(/inactive workspace/);
+    await expect(held.read()).rejects.toThrow(/inactive workspace/);
     await expect(
-      held.writer.apply({
+      held.write({
         expectedVersion: first.version,
         nextRecord: {
           ...first,
@@ -258,7 +265,7 @@ describe('CanvasStore cache boundaries', () => {
       '{broken',
       'utf8',
     );
-    await expect(held.record.read()).rejects.toThrow(/inactive workspace/);
+    await expect(held.read()).rejects.toThrow(/inactive workspace/);
   });
 
   it('does not create a Space directory for a node write to a missing Space', async () => {

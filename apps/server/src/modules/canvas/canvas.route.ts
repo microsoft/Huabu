@@ -619,7 +619,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
     const { canvasId, nodeId } = request.params;
     const handle = getStructuredStore().space(canvasId);
-    const canvas = await handle.record.read();
+    const canvas = await handle.read();
     if (!canvas) {
       return reply.code(404).send({
         code: 'CANVAS_NOT_FOUND',
@@ -676,7 +676,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const handle = getStructuredStore().space(canvasId);
-    const canvas = await handle.record.read();
+    const canvas = await handle.read();
     if (!canvas) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
@@ -1157,7 +1157,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const structured = getStructuredStore();
     const spaces = structured.spaces();
     const handle = structured.space(canvasId);
-    const existing = await handle.record.read();
+    const existing = await handle.read();
     const serverVersion = existing?.version ?? 0;
     if (clientVersion !== serverVersion) {
       return reply.code(409).send({
@@ -1238,7 +1238,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       updatedAt: timestamp,
     };
 
-    const outcome = await handle.writer.apply({
+    const outcome = await handle.write({
       expectedVersion: serverVersion,
       nextRecord: canvasFile,
       nodeMutations: [],
@@ -1375,7 +1375,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   }>('/:canvasId/threads/:threadId/changes', async function (request, reply) {
     const { canvasId, threadId } = request.params;
     const handle = getStructuredStore().space(canvasId);
-    if (!(await handle.record.read())) {
+    if (!(await handle.read())) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
     return reply.send({ changes: await handle.changes.read(threadId) });
@@ -1389,10 +1389,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     async function (request, reply) {
       const { canvasId, threadId, changeId } = request.params;
       const handle = getStructuredStore().space(canvasId);
-      if (!(await handle.record.read())) {
+      if (!(await handle.read())) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
-      const removed = await handle.changes.remove(threadId, changeId);
+      const removed = await handle.changes.delete(threadId, changeId);
       return reply.send({ removed: !!removed });
     },
   );
@@ -1407,7 +1407,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     async function (request, reply) {
       const { canvasId, threadId, changeId } = request.params;
       const handle = getStructuredStore().space(canvasId);
-      if (!(await handle.record.read())) {
+      if (!(await handle.read())) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
       const records = await handle.changes.read(threadId);
@@ -1442,7 +1442,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         );
         return reply.code(500).send({ message: 'Failed to revert change' });
       }
-      await handle.changes.remove(threadId, changeId);
+      await handle.changes.delete(threadId, changeId);
       return reply.send({ removed: true });
     },
   );
@@ -1478,12 +1478,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       const handle = getStructuredStore().space(canvasId);
-      if (!(await handle.record.read())) {
+      if (!(await handle.read())) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
 
       try {
-        await handle.events.append(parsed.data.events);
+        await handle.history.events.append(parsed.data.events);
       } catch (error) {
         request.log.error(
           { canvasId, error },
@@ -1519,7 +1519,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const handle = getStructuredStore().space(canvasId);
-    if (!(await handle.record.read())) {
+    if (!(await handle.read())) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
@@ -1533,7 +1533,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // Resolve existence and events through one handle so malformed or
     // unreadable durable state cannot be collapsed into a false 404 by the
     // compatibility facade's intentionally lenient legacy reader.
-    const events = await handle.events.read(limit);
+    const events = await handle.history.events.read(limit);
     const filtered =
       since != null ? events.filter((e) => e.ts >= since) : events;
     const trimmed = filtered.length > limit ? filtered.slice(-limit) : filtered;

@@ -19,8 +19,8 @@ import {
   forgetCanvasStore,
   getCanvasStore,
 } from './legacy/canvas-store-cache.js';
-import { readDiskSpaceRecord } from './space-record-repository.js';
 import { readValidCanvasFile } from './space-record-validation.js';
+import { readDiskSpaceRecord } from './space-record.js';
 import {
   titleForAllocatedDirectory,
   titleVisibleAtDirectory,

@@ -18,5 +18,5 @@ export async function logIntentEpisode(
   canvasId?: string,
 ): Promise<void> {
   if (!canvasId) return;
-  return getStructuredStore().space(canvasId).intents.upsert(episode);
+  return getStructuredStore().space(canvasId).history.intents.put(episode);
 }

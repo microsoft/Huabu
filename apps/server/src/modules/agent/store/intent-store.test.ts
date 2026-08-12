@@ -35,13 +35,13 @@ function deferred(): {
   return { promise, resolve };
 }
 
-function installRepository() {
-  const upsert = vi.fn(async (_episode: IntentEpisode): Promise<void> => {});
-  const space = vi.fn(() => ({ intents: { upsert } }));
+function installIntents() {
+  const put = vi.fn(async (_episode: IntentEpisode): Promise<void> => {});
+  const space = vi.fn(() => ({ history: { intents: { put } } }));
   vi.mocked(getStructuredStore).mockReturnValue({
     space,
   } as unknown as ReturnType<typeof getStructuredStore>);
-  return { space, upsert };
+  return { space, put };
 }
 
 beforeEach(() => {
@@ -55,10 +55,10 @@ describe('logIntentEpisode', () => {
     expect(getStructuredStore).not.toHaveBeenCalled();
   });
 
-  it('writes through the structured intent repository and awaits it', async () => {
-    const { space, upsert } = installRepository();
+  it('writes through the structured intent part and awaits it', async () => {
+    const { space, put } = installIntents();
     const write = deferred();
-    upsert.mockReturnValueOnce(write.promise);
+    put.mockReturnValueOnce(write.promise);
 
     let settled = false;
     const logging = logIntentEpisode(EPISODE, 'canvas-1').then(() => {
@@ -66,7 +66,7 @@ describe('logIntentEpisode', () => {
     });
 
     expect(space).toHaveBeenCalledWith('canvas-1');
-    expect(upsert).toHaveBeenCalledWith(EPISODE);
+    expect(put).toHaveBeenCalledWith(EPISODE);
     await Promise.resolve();
     expect(settled).toBe(false);
 
@@ -75,10 +75,10 @@ describe('logIntentEpisode', () => {
     expect(settled).toBe(true);
   });
 
-  it('propagates repository failures', async () => {
-    const { upsert } = installRepository();
+  it('propagates intent write failures', async () => {
+    const { put } = installIntents();
     const error = new Error('intent write failed');
-    upsert.mockRejectedValueOnce(error);
+    put.mockRejectedValueOnce(error);
 
     await expect(logIntentEpisode(EPISODE, 'canvas-1')).rejects.toBe(error);
   });

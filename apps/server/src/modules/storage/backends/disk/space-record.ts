@@ -2,12 +2,11 @@
 // Licensed under the MIT license.
 
 /**
- * Disk implementation of {@link SpaceRecordRepository}.
+ * Disk implementation of {@link SpaceHandle.read}.
  *
  * Wraps the legacy per-Space object so reading `space.json` has a portable,
- * asynchronous contract. Record *writes* belong to
- * {@link DiskOrderedSpaceWriter}, which owns the version check and the
- * node/delta batch around it.
+ * asynchronous contract. Record *writes* belong to `createDiskSpaceWrite`,
+ * which owns the version check and the node/delta batch around it.
  */
 
 import path from 'node:path';
@@ -19,26 +18,28 @@ import { getWorkspacePath } from '../../../workspace.js';
 
 import type { CanvasStore } from './legacy/canvas-store.js';
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
-import type { SpaceRecordRepository } from '../../ports/structured.js';
+import type { SpaceHandle } from '../../ports/structured.js';
 
-export class DiskSpaceRecordRepository implements SpaceRecordRepository {
-  readonly #store: CanvasStore;
-  readonly #workspacePath: string;
-
-  constructor(store: CanvasStore) {
-    this.#store = store;
-    this.#workspacePath = path.resolve(getWorkspacePath());
-  }
-
-  async read(): Promise<CanvasFile | null> {
-    if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
+/**
+ * Bind the record read for one Space handle.
+ *
+ * The workspace active at bind time is captured here, so a handle retained
+ * across a workspace switch rejects rather than reading the newly active
+ * workspace — the same guard the other Disk parts carry.
+ */
+export function createDiskSpaceRecordReader(
+  store: CanvasStore,
+): SpaceHandle['read'] {
+  const workspacePath = path.resolve(getWorkspacePath());
+  return async function readSpaceRecord(): Promise<CanvasFile | null> {
+    if (path.resolve(getWorkspacePath()) !== workspacePath) {
       throw new Error(
-        `SpaceRecordRepository(${this.#store.canvasId}) belongs to an inactive ` +
-          'workspace. Resolve a fresh Space handle after workspace activation.',
+        `Space record(${store.canvasId}) belongs to an inactive workspace. ` +
+          'Resolve a fresh Space handle after workspace activation.',
       );
     }
-    return readDiskSpaceRecord(this.#store);
-  }
+    return readDiskSpaceRecord(store);
+  };
 }
 
 /**

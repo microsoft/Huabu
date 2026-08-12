@@ -7,10 +7,23 @@
  * The connection ({@link StructuredStore}) owns backend identity and
  * lifecycle. It vends two things: a {@link SpaceRepository} for the Space
  * collection in one backend namespace, and a {@link SpaceHandle} per Space.
- * The handle is a composite of narrow, asynchronous repositories: the
- * versioned Space record, node records, four Canvas-owned log-family
- * repositories, the canonical Task/Run repository, and the existing ordered
- * executor write sequence.
+ *
+ * A `SpaceHandle` *is* the Space record — `read()` and `write()` sit directly
+ * on the handle — and its members name the durable **parts the Space holds**:
+ * its nodes, its pending review, its Tasks, and its history. Each part carries
+ * its own operations, and no member's noun is really a verb: `write()` spans
+ * the record and the nodes, so it belongs to the Space rather than to either
+ * part.
+ *
+ * Verbs mean one thing throughout: `read` fetches one record or a part's
+ * contents; `list` fetches a whole collection; `create` adds where an existing
+ * record is an error; `put` writes one complete record by id, replacing it if
+ * present; `append` adds to an ordered sequence; `update` changes part of an
+ * existing record; `delete` removes one record by id; `write` is the Space's
+ * own ordered multi-part mutation. `create` and `put` stay distinct because
+ * they behave differently on a duplicate. `worldId()` and `beginDelete()` are
+ * the deliberate exceptions: one names what it returns, the other opens a
+ * session.
  *
  * Guarantee scope: the concurrency properties below (single-winner record
  * writes, linearizable appends) are **adapter-local**. They hold for calls
@@ -177,45 +190,67 @@ export interface SpaceRepository {
   rename(input: SpaceRenameInput): Promise<SpaceRenameResult>;
 }
 
-/** Structured records for one Space. */
+/**
+ * One Space: its own record, the parts it holds, and the write that spans them.
+ *
+ * `read` and `write` are the Space's own pair — it *is* the versioned
+ * structural record (version, title, topology), so wrapping that record in a
+ * member would put reading it and writing it at two different levels. Every
+ * other member is a durable part with its own operations.
+ *
+ * Reading is scoped deliberately: create, delete, World rules, and title
+ * mutation are collection concerns on {@link SpaceRepository}, and every record
+ * *write* goes through {@link SpaceHandle.write} — the same version-checked
+ * replacement with the node batch attached, so a second write entry point would
+ * only be a narrower spelling of one operation.
+ */
 export interface SpaceHandle {
   readonly canvasId: string;
-  readonly record: SpaceRecordRepository;
-  readonly events: CanvasEventRepository;
-  readonly deltas: CanvasDeltaRepository;
-  readonly changes: CanvasChangeRepository;
-  readonly intents: CanvasIntentRepository;
-  readonly tasks: CanvasTaskRepository;
-  readonly nodes: NodeRepository;
-  /** Existing ordered executor persistence semantics; not a transaction. */
-  readonly writer: OrderedSpaceWriter;
+  /** The current Space record, or null when the Space does not exist. */
+  read(): Promise<CanvasFile | null>;
+  /**
+   * Replace the record and mutate nodes as one ordered write.
+   *
+   * Existing executor persistence semantics; not a transaction. A method
+   * rather than a member, because it is an action over two parts and belongs
+   * to neither of them.
+   */
+  write(input: SpaceWriteInput): Promise<SpaceWriteResult>;
+  /** Complete node records, addressed by stable id. */
+  readonly nodes: SpaceNodes;
+  /** Agent-proposed changes awaiting review, per thread. */
+  readonly changes: SpaceChanges;
+  /** Tasks and the Runs that execute them. */
+  readonly tasks: SpaceTasks;
+  /** What already happened, and what was concluded from it. */
+  readonly history: SpaceHistory;
 }
-
-// ─── Space record ───────────────────────────────────────────────────────────
 
 /**
- * Read access to the versioned structural record for one Space
- * (`space.json` on Disk).
+ * The Space's past.
  *
- * Scoped deliberately: create, delete, World rules, and title mutation are
- * collection concerns, and every record *write* goes through
- * {@link OrderedSpaceWriter} — which is the same version-checked replacement
- * with the node and delta batch attached, so a second write entry point here
- * would only be a narrower spelling of one operation.
+ * Deliberately narrow. Change-review records and Tasks share Disk's
+ * `.history/` directory but are not history: pending changes drain as the user
+ * accepts or rejects them, and a Run carries live `pending`/`running` status
+ * that the launcher mutates in flight. Grouping them here would file live state
+ * under a name that says past, and would import a Disk layout into a
+ * backend-neutral contract.
  */
-export interface SpaceRecordRepository {
-  /** The current record, or null when the Space does not exist. */
-  read(): Promise<CanvasFile | null>;
+export interface SpaceHistory {
+  /** What happened in this Space, as behavioural events. */
+  readonly events: SpaceEvents;
+  /** Intent episodes the memory pass reads. */
+  readonly intents: SpaceIntents;
 }
 
-// ─── Ordered Space writes ───────────────────────────────────────────────────
+// ─── The ordered Space write ─────────────────────────────────────────────────
 
-export type SpaceMutationResult =
+export type SpaceWriteResult =
   | { ok: true }
   | { ok: false; reason: 'not-found' }
   | { ok: false; reason: 'version-conflict'; actualVersion: number };
 
-export type OrderedNodeMutation =
+export type SpaceNodeMutation =
   | {
       readonly kind: 'put';
       readonly nodeId: string;
@@ -236,24 +271,9 @@ export type OrderedNodeMutation =
     }
   | { readonly kind: 'delete'; readonly nodeId: string };
 
-export interface OrderedSpaceWriteInput {
-  /** Space version observed before preparing this write. */
-  readonly expectedVersion: number;
-  /** Complete record to install after all node mutations succeed. */
-  readonly nextRecord: CanvasFile;
-  readonly nodeMutations: readonly OrderedNodeMutation[];
-  /** Optional executor delta appended after the record write. */
-  readonly delta?: DeltaLogEntry;
-  /**
-   * Preserve the legacy implicit-create path for a write to an absent Space.
-   * Omitted or false means an absent Space returns `not-found`.
-   */
-  readonly allowCreate?: boolean;
-}
-
 /**
- * Apply one Space mutation in the observable order used by current writers:
- * node puts/deletes, Space-record replacement, then an optional delta append.
+ * One ordered Space write: node puts/deletes, then the Space record, then an
+ * optional journal row.
  *
  * The record replacement is version-checked against `expectedVersion` and
  * `nextRecord.version` must be exactly `expectedVersion + 1`. The check and
@@ -263,22 +283,39 @@ export interface OrderedSpaceWriteInput {
  * current record — title addressing is an explicit collection operation
  * outside this batch.
  *
- * Business outcomes are returned as {@link SpaceMutationResult}; malformed
- * input and operational failures reject, and never masquerade as `not-found`
- * or as a business result. A rejected node/record/delta batch must not leave
- * a visible completed prefix under continued adapter operation. This is a
- * call-level failure guarantee, not crash durability: callers receive no
- * portable guarantee for process termination, power loss, loss of the backend
- * connection while the outcome is unknown, uncoordinated multi-process
- * access, idempotent retry, or publication. A successful write only means the
- * requested storage operations completed; it does not mint or broadcast a
- * wire-protocol event.
+ * Business outcomes are returned as {@link SpaceWriteResult}; malformed input
+ * and operational failures reject, and never masquerade as `not-found` or as a
+ * business result. A rejected batch must not leave a visible completed prefix
+ * under continued adapter operation. This is a call-level failure guarantee,
+ * not crash durability: callers receive no portable guarantee for process
+ * termination, power loss, loss of the backend connection while the outcome is
+ * unknown, uncoordinated multi-process access, idempotent retry, or
+ * publication. A successful write only means the requested storage operations
+ * completed; it does not mint or broadcast a wire-protocol event.
  */
-export interface OrderedSpaceWriter {
-  apply(input: OrderedSpaceWriteInput): Promise<SpaceMutationResult>;
+export interface SpaceWriteInput {
+  /** Space version observed before preparing this write. */
+  readonly expectedVersion: number;
+  /** Complete record to install after all node mutations succeed. */
+  readonly nextRecord: CanvasFile;
+  readonly nodeMutations: readonly SpaceNodeMutation[];
+  /**
+   * Executor delta to journal after the record write.
+   *
+   * How — or whether — a backend retains this row is its own business. No port
+   * member reads the journal back: it is written as part of the executor's
+   * write, not exposed as a part of a Space, because nothing a reader of a
+   * Space needs to understand is expressed by it.
+   */
+  readonly delta?: DeltaLogEntry;
+  /**
+   * Preserve the legacy implicit-create path for a write to an absent Space.
+   * Omitted or false means an absent Space returns `not-found`.
+   */
+  readonly allowCreate?: boolean;
 }
 
-// ─── Canvas logs ────────────────────────────────────────────────────────────
+// ─── History ────────────────────────────────────────────────────────────────
 
 /** Input shape for an event append; `ts` defaults to server time. */
 export interface NewCanvasEvent {
@@ -287,58 +324,67 @@ export interface NewCanvasEvent {
 }
 
 /** Behavioural events for one Space. One append batch lands contiguously. */
-export interface CanvasEventRepository {
-  append(events: readonly NewCanvasEvent[]): Promise<void>;
+export interface SpaceEvents {
   /** Chronological; when `limit` is set, only the most recent `limit`. */
   read(limit?: number): Promise<CanvasEvent[]>;
+  append(events: readonly NewCanvasEvent[]): Promise<void>;
 }
 
-/**
- * Executor deltas for one Space.
- *
- * Versions are unique and strictly increasing; duplicate or older appends
- * reject, and reads preserve version order.
- */
-export interface CanvasDeltaRepository {
-  append(entry: DeltaLogEntry): Promise<void>;
-  /** Rows with `version` strictly greater than `fromVersion`, in order. */
-  readSince(fromVersion: number): Promise<DeltaLogEntry[]>;
+/** Intent episodes for one Space. Puts are linearizable by episode id. */
+export interface SpaceIntents {
+  read(): Promise<IntentEpisode[]>;
+  /** Install one complete episode, replacing any episode with the same id. */
+  put(episode: IntentEpisode): Promise<void>;
 }
+
+// ─── Pending review ─────────────────────────────────────────────────────────
 
 /**
  * Per-thread change-review records for one Space.
  *
- * Appends and removals are linearizable per Space/thread pair. Reads and the
+ * Appends and deletes are linearizable per Space/thread pair. Reads and the
  * value returned by `append` are coalesced by canvas entity.
  */
-export interface CanvasChangeRepository {
+export interface SpaceChanges {
   read(threadId: string): Promise<CanvasChangeRecord[]>;
   append(
     threadId: string,
     records: readonly CanvasChangeRecord[],
   ): Promise<CanvasChangeRecord[]>;
-  remove(
+  /** The deleted record, or null when the thread holds no such change. */
+  delete(
     threadId: string,
     changeId: string,
   ): Promise<CanvasChangeRecord | null>;
 }
 
-/** Intent episodes for one Space. Upserts are linearizable by episode id. */
-export interface CanvasIntentRepository {
-  read(): Promise<IntentEpisode[]>;
-  upsert(episode: IntentEpisode): Promise<void>;
-}
+// ─── Tasks ──────────────────────────────────────────────────────────────────
 
 export type TaskRunUpdate = Partial<
   Pick<TaskRunRecord, 'rootNodeId' | 'rootThreadId' | 'status' | 'startedAt'>
 >;
 
-/** Canonical Task and Run records for one Space. */
-export interface CanvasTaskRepository {
+/**
+ * The canonical Task ledger for one Space.
+ *
+ * `read` returns Tasks and Runs together: a Run is only meaningful beside the
+ * Task it executes, and the referential invariant between them has one owner
+ * here. That is also why {@link SpaceTaskRuns} has no read of its own — a
+ * second read path would be a second representation of records this snapshot
+ * already carries, and could hand a caller a Run whose Task it never observed.
+ */
+export interface SpaceTasks {
   read(): Promise<TaskStoreSnapshot>;
-  insertTask(task: TaskRecord): Promise<void>;
-  insertRun(run: TaskRunRecord): Promise<void>;
-  updateRun(runId: string, update: TaskRunUpdate): Promise<TaskRunRecord>;
+  /** Rejects a Task id that already exists. */
+  create(task: TaskRecord): Promise<void>;
+  readonly runs: SpaceTaskRuns;
+}
+
+/** Runs of this Space's Tasks. Reads come from {@link SpaceTasks.read}. */
+export interface SpaceTaskRuns {
+  /** Rejects a duplicate Run id, or a Run referencing an absent Task. */
+  create(run: TaskRunRecord): Promise<void>;
+  update(runId: string, update: TaskRunUpdate): Promise<TaskRunRecord>;
 }
 
 // ─── Node records ───────────────────────────────────────────────────────────
@@ -404,13 +450,19 @@ export type NodeDeleteResult = 'deleted' | 'absent';
  *   update, but it must refuse the `put` rather than overwrite an arbitrary
  *   representation.
  * - `write-suppressed`, for adapters that keep a deleted id fenced against
- *   late in-flight writes. See {@link OrderedNodeMutation}'s
+ *   late in-flight writes. See {@link SpaceNodeMutation}'s
  *   `authoritativeInsert`, which is how a batch re-insertion is distinguished
  *   from such a late write.
  *
  * A SQL adapter with a unique key produces neither.
  */
-export interface NodeRepository {
+export interface SpaceNodes {
+  /**
+   * The Space these nodes belong to.
+   *
+   * Retained although {@link SpaceHandle} carries the same id: preprocessing
+   * resolves this part per request and works with it detached from its handle.
+   */
   readonly canvasId: string;
   read(nodeId: string): Promise<NodeSnapshot | null>;
   put(input: NodePutInput): Promise<NodePutResult>;

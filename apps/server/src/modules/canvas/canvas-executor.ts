@@ -73,7 +73,7 @@ import {
   type CanvasStore,
   type DeltaLogEntry,
   type NodeContent,
-  type OrderedNodeMutation,
+  type SpaceNodeMutation,
 } from '../storage/index.js';
 
 const log = getLogger('canvas.executor');
@@ -974,7 +974,7 @@ export async function executeOnServer(
       (nodeId) => !finalNodeIds.has(nodeId),
     );
     const insertedIds = insertedNodeIds(deltas);
-    const nodeMutations: OrderedNodeMutation[] = [];
+    const nodeMutations: SpaceNodeMutation[] = [];
     for (const node of mutatedNodesToPersist) {
       const record = buildNodeContent(node);
       if (!record) continue;
@@ -1008,7 +1008,7 @@ export async function executeOnServer(
       deltas: deltas as unknown[],
       originator,
     };
-    const write = await handle.writer.apply({
+    const write = await handle.write({
       expectedVersion: fromVersion,
       nextRecord: nextCanvas,
       nodeMutations,
@@ -1181,7 +1181,7 @@ export async function applyDeltasOnServer(input: {
       }
     }
     const insertedIds = insertedNodeIds(deltas);
-    const nodeMutations: OrderedNodeMutation[] = [];
+    const nodeMutations: SpaceNodeMutation[] = [];
     for (const d of deltas) {
       if (d.type === 'INSERT_NODE' || d.type === 'REPLACE_NODE') {
         const node = d.type === 'INSERT_NODE' ? d.node : d.next;
@@ -1210,7 +1210,7 @@ export async function applyDeltasOnServer(input: {
       },
       updatedAt: Date.now(),
     };
-    const write = await handle.writer.apply({
+    const write = await handle.write({
       expectedVersion: fromVersion,
       nextRecord,
       nodeMutations,

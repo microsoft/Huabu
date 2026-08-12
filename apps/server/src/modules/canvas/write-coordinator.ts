@@ -15,7 +15,7 @@ import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 import type {
   NodeContent,
   NodePutResult,
-  NodeRepository,
+  SpaceNodes,
 } from '../storage/index.js';
 
 const canvasMutexChains = new Map<string, Promise<unknown>>();
@@ -78,7 +78,7 @@ function contentRevisionOf(record: NodeContent | null): string {
  * are intentionally not claimed here.
  */
 export async function updateNode(
-  nodes: NodeRepository,
+  nodes: SpaceNodes,
   nodeId: string,
   opts: UpdateNodeOptions,
 ): Promise<UpdateNodeOutcome> {

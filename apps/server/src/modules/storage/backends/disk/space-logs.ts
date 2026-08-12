@@ -2,12 +2,13 @@
 // Licensed under the MIT license.
 
 /**
- * Disk implementations of the four Canvas log-family repositories.
+ * Disk implementations of the append-structured Space parts: events, intents,
+ * change-review records, and the executor journal.
  *
- * The implementation stays co-located because all four families share the
- * same legacy per-Space object and workspace-lifetime guard. Callers receive
- * four frozen, runtime-narrow facades rather than this coordinator, so no
- * family can reach unrelated methods or the legacy object.
+ * The implementation stays co-located because all four share the same legacy
+ * per-Space object and workspace-lifetime guard. Callers receive frozen,
+ * runtime-narrow facades rather than this coordinator, so no part can reach
+ * unrelated methods or the legacy object.
  *
  * Where a port promises a synchronization property the legacy path did not
  * state — delta ordering in particular — the guarantee is enforced here
@@ -29,7 +30,7 @@ import {
   type CanvasChangeRecord,
 } from '@huabu/shared/canvas-engine';
 
-import { readDiskSpaceRecord } from './space-record-repository.js';
+import { readDiskSpaceRecord } from './space-record.js';
 import {
   atomicWriteJson,
   readJsonLinesStrict,
@@ -51,11 +52,10 @@ import type {
   DeltaLogEntry,
 } from '../../../canvas/persistence-types.js';
 import type {
-  CanvasChangeRepository,
-  CanvasDeltaRepository,
-  CanvasEventRepository,
-  CanvasIntentRepository,
   NewCanvasEvent,
+  SpaceChanges,
+  SpaceEvents,
+  SpaceIntents,
 } from '../../ports/structured.js';
 
 const deltaLogEntrySchema = z
@@ -145,14 +145,27 @@ function readJsonArray<T>(filePath: string, family: string): T[] {
   return parsed as T[];
 }
 
-export interface DiskCanvasLogRepositories {
-  readonly events: CanvasEventRepository;
-  readonly deltas: CanvasDeltaRepository;
-  readonly changes: CanvasChangeRepository;
-  readonly intents: CanvasIntentRepository;
+export interface DiskSpaceLogs {
+  readonly events: SpaceEvents;
+  readonly changes: SpaceChanges;
+  readonly intents: SpaceIntents;
 }
 
-class DiskCanvasLogCoordinator {
+/**
+ * Disk's executor journal (`delta-log.jsonl`).
+ *
+ * Not a member of `SpaceHandle`: nothing a reader of a Space needs to
+ * understand is expressed by the journal, and the write that produces a row
+ * takes it as an argument. This stays because the file is durable state whose
+ * validation and crash-fragment tolerance are worth testing directly.
+ */
+export interface DiskDeltaLog {
+  append(entry: DeltaLogEntry): Promise<void>;
+  /** Rows with `version` strictly greater than `fromVersion`, in order. */
+  readSince(fromVersion: number): Promise<DeltaLogEntry[]>;
+}
+
+class DiskSpaceLogCoordinator {
   readonly #store: CanvasStore;
   readonly #workspacePath: string;
 
@@ -164,7 +177,7 @@ class DiskCanvasLogCoordinator {
   private assertActiveWorkspace(): void {
     if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
       throw new Error(
-        `Canvas log repositories(${this.#store.canvasId}) belong to an inactive workspace. ` +
+        `Space logs(${this.#store.canvasId}) belong to an inactive workspace. ` +
           'Resolve a fresh Space handle after workspace activation.',
       );
     }
@@ -174,7 +187,7 @@ class DiskCanvasLogCoordinator {
     assertSpaceMutationAllowed(this.#workspacePath, this.#store.canvasId);
     if (!readDiskSpaceRecord(this.#store)) {
       throw new Error(
-        `Canvas log repositories(${this.#store.canvasId}) cannot write logs for a missing Space`,
+        `Space logs(${this.#store.canvasId}) cannot write logs for a missing Space`,
       );
     }
   }
@@ -218,7 +231,7 @@ class DiskCanvasLogCoordinator {
    * version, and versions strictly increase — holds only because the tail
    * read and the append run in one uninterrupted JavaScript turn, so a
    * concurrent append cannot slip between them. See the same constraint on
-   * `DiskSpaceRepository.swapIfCurrent`, which documents what the contract
+   * `createDiskSpaceWrite`, which documents what the contract
    * suite's ordering has to be to detect a violation and what a
    * connection-based adapter must do instead.
    */
@@ -232,7 +245,7 @@ class DiskCanvasLogCoordinator {
     const last = rows[rows.length - 1] ?? null;
     if (last && entry.version <= last.version) {
       throw new Error(
-        `CanvasDeltaRepository(${this.#store.canvasId}) refusing delta version ` +
+        `DiskDeltaLog(${this.#store.canvasId}) refusing delta version ` +
           `${entry.version}; the log is already at ${last.version}`,
       );
     }
@@ -266,7 +279,7 @@ class DiskCanvasLogCoordinator {
     return merged;
   }
 
-  async removeChange(
+  async deleteChange(
     threadId: string,
     changeId: string,
   ): Promise<CanvasChangeRecord | null> {
@@ -293,7 +306,7 @@ class DiskCanvasLogCoordinator {
     );
   }
 
-  async upsertIntent(episode: IntentEpisode): Promise<void> {
+  async putIntent(episode: IntentEpisode): Promise<void> {
     this.assertActiveWorkspace();
     this.requireSpace();
     const filePath = intentPath(this.#store.canvasId);
@@ -306,37 +319,40 @@ class DiskCanvasLogCoordinator {
 }
 
 /**
- * Build the four log-family repositories for one Space.
+ * Build the log-backed parts carried by one Space handle.
  *
  * Each facade is frozen and contains only its own operations. The shared
  * coordinator — and therefore its legacy store — is closure-private.
  */
-export function createDiskCanvasLogRepositories(
-  store: CanvasStore,
-): DiskCanvasLogRepositories {
-  const coordinator = new DiskCanvasLogCoordinator(store);
+export function createDiskSpaceLogs(store: CanvasStore): DiskSpaceLogs {
+  const coordinator = new DiskSpaceLogCoordinator(store);
 
-  const events: CanvasEventRepository = Object.freeze({
+  const events: SpaceEvents = Object.freeze({
+    read: (limit?: number) => coordinator.readEvents(limit),
     append: (entries: readonly NewCanvasEvent[]) =>
       coordinator.appendEvents(entries),
-    read: (limit?: number) => coordinator.readEvents(limit),
   });
-  const deltas: CanvasDeltaRepository = Object.freeze({
+  const changes: SpaceChanges = Object.freeze({
+    read: (threadId: string) => coordinator.readChanges(threadId),
+    append: (threadId: string, records: readonly CanvasChangeRecord[]) =>
+      coordinator.appendChanges(threadId, records),
+    delete: (threadId: string, changeId: string) =>
+      coordinator.deleteChange(threadId, changeId),
+  });
+  const intents: SpaceIntents = Object.freeze({
+    read: () => coordinator.readIntents(),
+    put: (episode: IntentEpisode) => coordinator.putIntent(episode),
+  });
+
+  return Object.freeze({ events, changes, intents });
+}
+
+/** Open Disk's executor journal for one Space. */
+export function createDiskDeltaLog(store: CanvasStore): DiskDeltaLog {
+  const coordinator = new DiskSpaceLogCoordinator(store);
+  return Object.freeze({
     append: (entry: DeltaLogEntry) => coordinator.appendDelta(entry),
     readSince: (fromVersion: number) =>
       coordinator.readDeltasSince(fromVersion),
   });
-  const changes: CanvasChangeRepository = Object.freeze({
-    read: (threadId: string) => coordinator.readChanges(threadId),
-    append: (threadId: string, records: readonly CanvasChangeRecord[]) =>
-      coordinator.appendChanges(threadId, records),
-    remove: (threadId: string, changeId: string) =>
-      coordinator.removeChange(threadId, changeId),
-  });
-  const intents: CanvasIntentRepository = Object.freeze({
-    read: () => coordinator.readIntents(),
-    upsert: (episode: IntentEpisode) => coordinator.upsertIntent(episode),
-  });
-
-  return Object.freeze({ events, deltas, changes, intents });
 }

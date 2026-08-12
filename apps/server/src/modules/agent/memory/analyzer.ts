@@ -95,7 +95,7 @@ export async function runAnalysisPass(
   logger?: MemoryLogger,
 ): Promise<AnalysisPassResult> {
   const handle = getStructuredStore().space(canvasId);
-  const record = await handle.record.read();
+  const record = await handle.read();
   if (!record) return { status: 'skipped', reason: 'space-not-found' };
 
   const bundle = await assembleContext(canvasId, handle, record);
@@ -238,8 +238,8 @@ async function assembleContext(
     parts.push(`${chat.turns} chat turns`);
   }
   const [eventRows, intentRows] = await Promise.all([
-    handle.events.read(MAX_EVENTS_IN_DIGEST),
-    handle.intents.read(),
+    handle.history.events.read(MAX_EVENTS_IN_DIGEST),
+    handle.history.intents.read(),
   ]);
   const events = readEventsDigest(eventRows);
   if (events) {

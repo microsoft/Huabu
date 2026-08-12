@@ -18,12 +18,12 @@ import { executeCanvasCommandsOnHost } from '../canvas/canvas-command-router.js'
 import { getStructuredStore } from '../storage/index.js';
 
 import type { ExecuteOnServerOutput } from '../canvas/canvas-executor.js';
-import type { CanvasTaskRepository } from '../storage/index.js';
+import type { SpaceTasks } from '../storage/index.js';
 
 interface TaskServiceDependencies {
   canvasExists: (canvasId: string) => Promise<boolean>;
   requireProfile: (profileId: string) => void;
-  repository: (canvasId: string) => CanvasTaskRepository;
+  repository: (canvasId: string) => SpaceTasks;
   execute: (input: {
     canvasId: string;
     commands: readonly CanvasCommand[];
@@ -34,7 +34,7 @@ interface TaskServiceDependencies {
 
 const DEFAULT_DEPENDENCIES: TaskServiceDependencies = {
   canvasExists: async (canvasId) =>
-    (await getStructuredStore().space(canvasId).record.read()) !== null,
+    (await getStructuredStore().space(canvasId).read()) !== null,
   requireProfile: (profileId) => {
     requireAvailableAgentProfile(profileId);
   },
@@ -139,7 +139,7 @@ export class TaskService {
       createdAt: this.dependencies.now(),
     };
     try {
-      await this.dependencies.repository(canvasId).insertTask(task);
+      await this.dependencies.repository(canvasId).create(task);
     } catch (error) {
       const reason = error instanceof Error ? `: ${error.message}` : '';
       throw new TaskCreationError(

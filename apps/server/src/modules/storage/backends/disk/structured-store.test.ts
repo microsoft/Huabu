@@ -21,7 +21,7 @@ import { DiskStructuredStore } from './structured-store.js';
 import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
 import { toSafeFilename } from '../../../workspace/disk/naming.js';
 import { tasksPath } from '../../../workspace/disk/paths.js';
-import { describeCanvasLogRepositoriesContract } from '../../ports/contracts/canvas-log-repository.contract.js';
+import { describeSpaceLogsContract } from '../../ports/contracts/space-logs.contract.js';
 import { describeStructuredStoreContract } from '../../ports/contracts/structured-store.contract.js';
 
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
@@ -70,22 +70,20 @@ describeStructuredStoreContract('DiskStructuredStore', () => {
   };
 });
 
-describeCanvasLogRepositoriesContract('Disk log-family repositories', () => {
+describeSpaceLogsContract('Disk Space logs', () => {
   const root = freshWorkspace('huabu-log-repo-');
   seedSpace(root, 'canvas-a', 'Canvas A');
   const store = new DiskStructuredStore();
   const handle = store.space('canvas-a');
   const concurrent = store.space('canvas-a');
   return {
-    events: handle.events,
-    deltas: handle.deltas,
+    events: handle.history.events,
     changes: handle.changes,
-    intents: handle.intents,
+    intents: handle.history.intents,
     concurrent: {
-      events: concurrent.events,
-      deltas: concurrent.deltas,
+      events: concurrent.history.events,
       changes: concurrent.changes,
-      intents: concurrent.intents,
+      intents: concurrent.history.intents,
     },
     cleanup: () => {
       resetStorageCache();
@@ -94,7 +92,7 @@ describeCanvasLogRepositoriesContract('Disk log-family repositories', () => {
   };
 });
 
-describe('Disk Canvas Task repository', () => {
+describe('Disk Space Tasks', () => {
   let root = '';
   let store: DiskStructuredStore;
 
@@ -114,7 +112,7 @@ describe('Disk Canvas Task repository', () => {
     const first = store.space('canvas-task').tasks;
     const second = store.space('canvas-task').tasks;
     await Promise.all([
-      first.insertTask({
+      first.create({
         taskId: 'task-a',
         canvasId: 'canvas-task',
         goal: 'Goal A',
@@ -122,7 +120,7 @@ describe('Disk Canvas Task repository', () => {
         anchorNodeId: 'node-a',
         createdAt: 1,
       }),
-      second.insertTask({
+      second.create({
         taskId: 'task-b',
         canvasId: 'canvas-task',
         goal: 'Goal B',
@@ -131,7 +129,7 @@ describe('Disk Canvas Task repository', () => {
         createdAt: 2,
       }),
     ]);
-    await first.insertRun({
+    await first.runs.create({
       runId: 'run-a',
       taskId: 'task-a',
       canvasIdSnapshot: 'canvas-task',
@@ -140,7 +138,7 @@ describe('Disk Canvas Task repository', () => {
       status: 'pending',
       createdAt: 3,
     });
-    const updated = await second.updateRun('run-a', {
+    const updated = await second.runs.update('run-a', {
       rootNodeId: 'node-root',
       rootThreadId: 'thread-root',
       status: 'running',
@@ -174,7 +172,7 @@ describe('Disk Canvas Task repository', () => {
 
   it('rejects mutations for a missing Space', async () => {
     await expect(
-      store.space('missing-canvas').tasks.insertTask({
+      store.space('missing-canvas').tasks.create({
         taskId: 'task-missing',
         canvasId: 'missing-canvas',
         goal: 'Missing',
@@ -299,24 +297,24 @@ describe('DiskStructuredStore instance caching', () => {
     expect(b.canvasId).toBe(a.canvasId);
   });
 
-  it('exposes four frozen, runtime-narrow log-family repositories', () => {
+  it('exposes frozen, runtime-narrow log-backed parts', () => {
     const handle = new DiskStructuredStore().space('canvas-c');
     const runtime = handle as unknown as Record<string, unknown>;
 
     expect(runtime['logs']).toBeUndefined();
-    expect(Object.keys(handle.events)).toEqual(['append', 'read']);
-    expect(Object.keys(handle.deltas)).toEqual(['append', 'readSince']);
-    expect(Object.keys(handle.changes)).toEqual(['read', 'append', 'remove']);
-    expect(Object.keys(handle.intents)).toEqual(['read', 'upsert']);
+    expect(Object.keys(handle.history.events)).toEqual(['read', 'append']);
+    expect(Object.keys(handle.changes)).toEqual(['read', 'append', 'delete']);
+    expect(Object.keys(handle.history.intents)).toEqual(['read', 'put']);
+    expect(Object.keys(handle.tasks.runs)).toEqual(['create', 'update']);
 
-    for (const repository of [
-      handle.events,
-      handle.deltas,
+    for (const part of [
+      handle.history.events,
       handle.changes,
-      handle.intents,
+      handle.history.intents,
+      handle.tasks.runs,
     ]) {
-      expect(Object.isFrozen(repository)).toBe(true);
-      expect('store' in repository).toBe(false);
+      expect(Object.isFrozen(part)).toBe(true);
+      expect('store' in part).toBe(false);
     }
   });
 });

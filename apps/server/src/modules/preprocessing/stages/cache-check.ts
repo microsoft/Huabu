@@ -17,7 +17,7 @@
  * when src is unchanged.
  */
 
-import type { NodeContent, NodeRepository } from '../../storage/index.js';
+import type { NodeContent, SpaceNodes } from '../../storage/index.js';
 import type {
   PipelineContext,
   PreprocessDiagnostic,
@@ -39,7 +39,7 @@ export async function tryCacheShortCircuit(
   resolved: ResolvedInput,
   ctx: PipelineContext,
   diagnostics: PreprocessDiagnostic[],
-  nodes: NodeRepository,
+  nodes: SpaceNodes,
 ): Promise<boolean> {
   if (request.options?.force) return false;
   if (request.nodeType !== 'web' && request.nodeType !== 'pdf') return false;

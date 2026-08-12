@@ -75,9 +75,9 @@ afterEach(() => {
 describe('compatibility facade and composite handle observe each other', () => {
   it('shows a repository record write through the facade', async () => {
     const handle = new DiskStructuredStore().space(CANVAS_ID);
-    const current = await handle.record.read();
+    const current = await handle.read();
 
-    const result = await handle.writer.apply({
+    const result = await handle.write({
       expectedVersion: current!.version,
       nextRecord: {
         ...current!,
@@ -105,7 +105,7 @@ describe('compatibility facade and composite handle observe each other', () => {
     });
 
     const handle = new DiskStructuredStore().space(CANVAS_ID);
-    const throughRepository = await handle.record.read();
+    const throughRepository = await handle.read();
     expect(throughRepository?.version).toBe(current.version + 1);
     expect(throughRepository?.state.nodes).toEqual([{ id: 'n2' }]);
   });
@@ -127,7 +127,7 @@ describe('compatibility facade and composite handle observe each other', () => {
 
   it('shows a repository log append through the facade', async () => {
     const handle = new DiskStructuredStore().space(CANVAS_ID);
-    await handle.events.append([
+    await handle.history.events.append([
       {
         payload: {
           action: 'node_selected',
@@ -164,8 +164,8 @@ describe('cross-surface Disk invariants', () => {
     // a Disk cross-surface invariant rather than a portable writer promise, so
     // it is asserted here — but it has to keep holding when the structural
     // write arrives through the port rather than the class.
-    const restored = await handle.record.read();
-    await handle.writer.apply({
+    const restored = await handle.read();
+    await handle.write({
       expectedVersion: restored!.version,
       nextRecord: {
         ...restored!,
@@ -183,8 +183,8 @@ describe('cross-surface Disk invariants', () => {
     // keeping the tombstone alive, so the assertion above passes either way.
     // If the structural write had merely been escape-hatched, the id would
     // start suppressing again the moment it left structure.
-    const emptied = await handle.record.read();
-    await handle.writer.apply({
+    const emptied = await handle.read();
+    await handle.write({
       expectedVersion: emptied!.version,
       nextRecord: {
         ...emptied!,

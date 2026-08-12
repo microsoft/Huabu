@@ -277,7 +277,7 @@ export function canvasBlobs(canvasId: string): BlobScope {
   const delegate = storage.blobs.scope({ kind: 'canvas', canvasId });
 
   async function requireSpace(): Promise<void> {
-    const record = await storage.structured.space(canvasId).record.read();
+    const record = await storage.structured.space(canvasId).read();
     if (!record) {
       throw new Error(`Cannot write blobs for missing Space "${canvasId}"`);
     }

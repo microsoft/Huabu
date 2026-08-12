@@ -17,14 +17,15 @@ import {
   getCanvasStore,
   resetStorageCache,
 } from './legacy/canvas-store-cache.js';
-import { DiskOrderedSpaceWriter } from './ordered-space-writer.js';
+import { createDiskDeltaLog } from './space-logs.js';
 import { DiskSpaceRepository } from './space-repository.js';
+import { createDiskSpaceWrite } from './space-write.js';
 import { DiskStructuredStore } from './structured-store.js';
 import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
 import { nodesDir } from '../../../workspace/disk/paths.js';
 import { ensureWorldCanvasOnDisk } from '../../../workspace/disk/world-canvas.js';
 import { setWorkspacePath } from '../../../workspace.js';
-import { describeOrderedSpaceWriterContract } from '../../ports/contracts/ordered-space-writer.contract.js';
+import { describeSpaceWriteContract } from '../../ports/contracts/space-write.contract.js';
 
 import type {
   CanvasFile,
@@ -44,7 +45,7 @@ function note(nodeId: string, label: string, content: string): NodeContent {
   return { nodeId, type: 'note', label, content };
 }
 
-describeOrderedSpaceWriterContract('Disk', async () => {
+describeSpaceWriteContract('Disk', async () => {
   const root = freshWorkspace('huabu-writer-contract-');
   const store = new DiskStructuredStore();
   const created = await store.spaces().create({
@@ -66,24 +67,13 @@ describeOrderedSpaceWriterContract('Disk', async () => {
   if (!put.ok) throw new Error(`Could not seed writer contract: ${put.reason}`);
 
   return {
-    space: {
-      writer: firstHandle.writer,
-      record: firstHandle.record,
-      nodes: firstHandle.nodes,
-      deltas: firstHandle.deltas,
-    },
-    concurrent: store.space('writer-space').writer,
-    missing: (() => {
-      const handle = store.space('missing-writer-space');
-      return {
-        writer: handle.writer,
-        record: handle.record,
-        nodes: handle.nodes,
-        deltas: handle.deltas,
-      };
-    })(),
+    space: firstHandle,
+    concurrent: store.space('writer-space'),
+    missing: store.space('missing-writer-space'),
     existingNode,
     newNode: note('contract-new-node', 'New contract node', 'after'),
+    readJournal: () =>
+      createDiskDeltaLog(getCanvasStore('writer-space')).readSince(0),
     failNextDeltaAppend: (error: Error) => {
       const spy = vi
         .spyOn(getCanvasStore('writer-space'), 'appendDeltaLogEntry')
@@ -100,7 +90,7 @@ describeOrderedSpaceWriterContract('Disk', async () => {
   };
 });
 
-describe('DiskOrderedSpaceWriter', () => {
+describe('Disk ordered Space write', () => {
   let workspacePath: string;
   let before: CanvasFile;
 
@@ -130,10 +120,10 @@ describe('DiskOrderedSpaceWriter', () => {
       );
     }
     const store = getCanvasStore('canvas-a');
-    const writer = new DiskOrderedSpaceWriter(store);
+    const write = createDiskSpaceWrite(store);
 
     await expect(
-      writer.apply({
+      write({
         expectedVersion: 0,
         nextRecord: { ...before, version: 1, updatedAt: 2 },
         nodeMutations: [{ kind: 'delete', nodeId: 'node-a' }],
@@ -156,7 +146,7 @@ describe('DiskOrderedSpaceWriter', () => {
 
   it('rolls node and record writes back when the final delta append fails', async () => {
     const store = getCanvasStore('canvas-a');
-    const writer = new DiskOrderedSpaceWriter(store);
+    const write = createDiskSpaceWrite(store);
     const failure = new Error('delta append failed');
     vi.spyOn(store, 'appendDeltaLogEntry').mockImplementationOnce(() => {
       throw failure;
@@ -172,7 +162,7 @@ describe('DiskOrderedSpaceWriter', () => {
       updatedAt: 2,
     };
     await expect(
-      writer.apply({
+      write({
         expectedVersion: 0,
         nextRecord: next,
         nodeMutations: [
