@@ -70,26 +70,6 @@ export function describeNodeRepositoryContract(
       await expect(repository.read('contract-missing')).resolves.toBeNull();
     });
 
-    it('batch-reads requested nodes, omits misses, and coalesces duplicate ids', async () => {
-      const { repository } = await open();
-      const input: NodePutInput = {
-        nodeId: 'contract-read-many',
-        record: note('contract-read-many', 'Contract batch node', 'batch'),
-      };
-      const stored = await putSuccessfully(repository, input);
-
-      await expect(repository.readMany([])).resolves.toEqual(new Map());
-      const snapshots = await repository.readMany([
-        input.nodeId,
-        'contract-missing',
-        input.nodeId,
-      ]);
-
-      expect(snapshots.size).toBe(1);
-      expect(snapshots.get(input.nodeId)).toEqual(stored);
-      expect(snapshots.has('contract-missing')).toBe(false);
-    });
-
     it('returns the exact persisted record and its matching revision from put', async () => {
       const { repository } = await open();
       const input: NodePutInput = {

@@ -5,15 +5,16 @@
  * Structured storage port — domain records, not opaque bytes.
  *
  * The connection ({@link StructuredStore}) owns backend identity and
- * lifecycle, and vends a {@link SpaceHandle} per Space. The handle is a
- * composite of narrow, asynchronous repositories: lifecycle and catalogue,
- * the versioned Space record ({@link SpaceRepository}), node records, four
- * Canvas-owned log-family repositories, the canonical Task/Run repository,
- * and the existing ordered executor write sequence.
+ * lifecycle. It vends two things: a {@link SpaceRepository} for the Space
+ * collection in one backend namespace, and a {@link SpaceHandle} per Space.
+ * The handle is a composite of narrow, asynchronous repositories: the
+ * versioned Space record, node records, four Canvas-owned log-family
+ * repositories, the canonical Task/Run repository, and the existing ordered
+ * executor write sequence.
  *
- * Guarantee scope: the concurrency properties below (single-winner CAS,
- * linearizable appends) are **adapter-local**. They hold for calls made
- * through these repositories. The compatibility facade remains a second
+ * Guarantee scope: the concurrency properties below (single-winner record
+ * writes, linearizable appends) are **adapter-local**. They hold for calls
+ * made through these repositories. The compatibility facade remains a second
  * mutation entry point until its writers migrate, so a passing contract suite
  * is not evidence that the running application has one write authority. See
  * §12.2.3.
@@ -39,7 +40,15 @@ import type {
 } from '@huabu/shared';
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
-export type StructuredBackendKind = 'disk' | 'sqlite' | 'postgres';
+/**
+ * Backends with a structured adapter today.
+ *
+ * This is what an adapter may report as its own `kind`, so it names only what
+ * exists. The wider vocabulary a profile may *request* — including families
+ * that are configurable but unimplemented — belongs to `profile.ts`, which
+ * owns rejecting them with an actionable message.
+ */
+export type StructuredBackendKind = 'disk';
 
 /** A connection to a structured backend. Process-wide; handles are derived. */
 export interface StructuredStore {
@@ -48,16 +57,14 @@ export interface StructuredStore {
   health(): Promise<StorageHealth>;
   close(): Promise<void>;
   /**
-   * Return a repository for the currently-bound Space catalogue.
+   * Return a repository for the currently-bound Space collection.
    *
-   * Catalogue handles are scoped to the backend namespace that was active
-   * when they were created. A caller that changes Workspace must resolve a
-   * fresh handle; retained Disk handles reject instead of reading the newly
-   * active Workspace.
+   * Handles are scoped to the backend namespace that was active when they
+   * were created. A caller that changes Workspace must resolve a fresh
+   * handle; retained Disk handles reject instead of reading the newly active
+   * Workspace.
    */
-  catalog(): SpaceCatalogRepository;
-  /** Create/delete membership and explicitly mutate a Space title. */
-  lifecycle(): SpaceLifecycleRepository;
+  spaces(): SpaceRepository;
   /**
    * Return the handle for one validated Space id.
    *
@@ -71,7 +78,7 @@ export interface StructuredStore {
   space(canvasId: string): SpaceHandle;
 }
 
-// ─── Space lifecycle (Phase 4 additive contract) ─────────────────────────────────────
+// ─── The Space collection ───────────────────────────────────────────────────
 
 export interface SpaceCreateInput {
   readonly canvasId: string;
@@ -86,13 +93,6 @@ export interface SpaceDeleteInput {
   readonly canvasId: string;
 }
 
-export type SpaceDeleteResult =
-  | { readonly ok: true; readonly reason: 'deleted' }
-  | {
-      readonly ok: false;
-      readonly reason: 'not-found' | 'world-forbidden';
-    };
-
 export type SpaceDeleteFinishResult =
   | { readonly ok: true; readonly reason: 'deleted' }
   | { readonly ok: false; readonly reason: 'not-found' };
@@ -101,10 +101,10 @@ export type SpaceDeleteFinishResult =
  * Exclusive structured-deletion session for one Space.
  *
  * While open, every mutation for the same Space must reject, including
- * create/rename, record CAS, nodes, ordered batches, logs, and Tasks. Reads
- * remain available so composition can identify and clean external blobs.
- * `finish` removes structured state and closes the session; `abort` leaves
- * it intact and is idempotent. A caller must invoke one terminal method.
+ * create/rename, node writes, ordered batches, logs, and Tasks. Reads remain
+ * available so composition can identify and clean external blobs. `finish`
+ * removes structured state and closes the session; `abort` leaves it intact
+ * and is idempotent. A caller must invoke one terminal method.
  */
 export interface SpaceDeleteSession {
   finish(): Promise<SpaceDeleteFinishResult>;
@@ -134,18 +134,36 @@ export type SpaceRenameResult =
     };
 
 /**
- * Backend-neutral creation, deletion, and explicit title mutation.
+ * Membership, World identity, and lifecycle for the Spaces in one backend
+ * namespace.
+ *
+ * Reads and lifecycle mutations share one repository because they share one
+ * subject and one invariant: what the collection contains, and which member
+ * is the protected World. Splitting them put the World rule in two places and
+ * left creation reading membership it could not name.
+ *
+ * `list` returns ordinary, user-visible Spaces; World is never included, and
+ * ordering is deliberately unspecified. Environmental and integrity failures
+ * reject rather than returning a partial collection.
  *
  * Creation returns the authoritative version-0 record. For a repeated
  * non-null requested title, allocation preserves the existing product rule:
  * the first record keeps the title and later records receive ` (2)`, ` (3)`,
- * ... suffixes. Deletion concerns structured state only: blob cleanup and
- * cross-store ordering remain composition-layer responsibilities. Rename is
- * deliberately separate from the ordered record/node writer: its existing
- * addressing side effect may complete before a later, independent record
- * write fails.
+ * ... suffixes. A default title for an unnamed Space is a product naming rule
+ * rather than a storage one, so it stays with the caller. Deletion concerns
+ * structured state only: blob cleanup and cross-store ordering remain
+ * composition-layer responsibilities. Rename is deliberately separate from
+ * the ordered record/node writer: its existing addressing side effect may
+ * complete before a later, independent record write fails.
  */
-export interface SpaceLifecycleRepository {
+export interface SpaceRepository {
+  list(): Promise<CanvasSummary[]>;
+  /**
+   * Return the stable id of the hidden World Space.
+   *
+   * A missing or malformed World is an integrity failure and rejects.
+   */
+  worldId(): Promise<string>;
   create(input: SpaceCreateInput): Promise<SpaceCreateResult>;
   /**
    * Fence mutations before cross-store cleanup begins.
@@ -159,27 +177,10 @@ export interface SpaceLifecycleRepository {
   rename(input: SpaceRenameInput): Promise<SpaceRenameResult>;
 }
 
-/** Read-only membership and World identity for one backend namespace. */
-export interface SpaceCatalogRepository {
-  /**
-   * List ordinary, user-visible Spaces. World is never included.
-   *
-   * Ordering is deliberately unspecified. Environmental and integrity
-   * failures reject rather than returning a partial catalogue.
-   */
-  list(): Promise<CanvasSummary[]>;
-  /**
-   * Return the stable id of the hidden World Space.
-   *
-   * A missing or malformed World is an integrity failure and rejects.
-   */
-  worldId(): Promise<string>;
-}
-
 /** Structured records for one Space. */
 export interface SpaceHandle {
   readonly canvasId: string;
-  readonly record: SpaceRepository;
+  readonly record: SpaceRecordRepository;
   readonly events: CanvasEventRepository;
   readonly deltas: CanvasDeltaRepository;
   readonly changes: CanvasChangeRepository;
@@ -192,42 +193,27 @@ export interface SpaceHandle {
 
 // ─── Space record ───────────────────────────────────────────────────────────
 
-export type SpaceWriteResult =
+/**
+ * Read access to the versioned structural record for one Space
+ * (`space.json` on Disk).
+ *
+ * Scoped deliberately: create, delete, World rules, and title mutation are
+ * collection concerns, and every record *write* goes through
+ * {@link OrderedSpaceWriter} — which is the same version-checked replacement
+ * with the node and delta batch attached, so a second write entry point here
+ * would only be a narrower spelling of one operation.
+ */
+export interface SpaceRecordRepository {
+  /** The current record, or null when the Space does not exist. */
+  read(): Promise<CanvasFile | null>;
+}
+
+// ─── Ordered Space writes ───────────────────────────────────────────────────
+
+export type SpaceMutationResult =
   | { ok: true }
   | { ok: false; reason: 'not-found' }
   | { ok: false; reason: 'version-conflict'; actualVersion: number };
-
-/**
- * The versioned structural record for one Space (`space.json` on Disk).
- *
- * Scoped deliberately: create, delete, World rules, and title mutation are
- * lifecycle concerns. This repository only replaces the record of a Space
- * that already exists.
- */
-export interface SpaceRepository {
-  /** The current record, or null when the Space does not exist. */
-  read(): Promise<CanvasFile | null>;
-  /**
-   * Replace the record iff its version is still `expectedVersion`.
-   *
-   * `next.version` must be exactly `expectedVersion + 1`, `next.canvasId`
-   * must match this handle, and the identity fields (`canvasId`, `title`,
-   * `createdAt`) must match the current record — this is not the rename or
-   * lifecycle path.
-   *
-   * The version check and the replacement are **one** operation: two
-   * concurrent calls with the same expected version cannot both succeed.
-   *
-   * Environmental IO failures reject; they never masquerade as `not-found`
-   * or as a business result.
-   */
-  compareAndSwap(
-    expectedVersion: number,
-    next: CanvasFile,
-  ): Promise<SpaceWriteResult>;
-}
-
-// ─── Canvas logs ────────────────────────────────────────────────────────────
 
 export type OrderedNodeMutation =
   | {
@@ -239,9 +225,12 @@ export type OrderedNodeMutation =
       /**
        * Marks an executor-authoritative INSERT.
        *
-       * This is intentionally batch-only. It lets an adapter distinguish a
-       * real re-insertion from a late direct write that should remain
-       * suppressed after deletion.
+       * **Adapter-shaped**, like {@link NodePutResult}'s `write-suppressed`.
+       * It exists for a backend that suppresses writes to a recently deleted
+       * id, and lets such an adapter distinguish a real re-insertion from a
+       * late direct write that should stay suppressed. It is intentionally
+       * batch-only. An adapter whose deletes are immediately final — a SQL
+       * table with a unique key — can ignore it.
        */
       readonly authoritativeInsert?: boolean;
     }
@@ -262,26 +251,34 @@ export interface OrderedSpaceWriteInput {
   readonly allowCreate?: boolean;
 }
 
-export type SpaceMutationResult = SpaceWriteResult;
-
 /**
  * Apply one Space mutation in the observable order used by current writers:
  * node puts/deletes, Space-record replacement, then an optional delta append.
  *
+ * The record replacement is version-checked against `expectedVersion` and
+ * `nextRecord.version` must be exactly `expectedVersion + 1`. The check and
+ * the replacement are **one** operation: two concurrent writes from the same
+ * observed version cannot both succeed. `nextRecord` must address this Space,
+ * and its identity fields (`canvasId`, `title`, `createdAt`) must match the
+ * current record — title addressing is an explicit collection operation
+ * outside this batch.
+ *
  * Business outcomes are returned as {@link SpaceMutationResult}; malformed
- * input and operational failures reject. A rejected node/record/delta batch
- * must not leave a visible completed prefix under continued adapter
- * operation. This is a call-level failure guarantee, not crash durability:
- * callers receive no portable guarantee for process termination, power loss,
- * loss of the backend connection while the outcome is unknown,
- * uncoordinated multi-process access, idempotent retry, or publication. Title
- * addressing is an explicit lifecycle operation outside this batch. A
- * successful write only means the requested storage operations completed; it
- * does not mint or broadcast a wire-protocol event.
+ * input and operational failures reject, and never masquerade as `not-found`
+ * or as a business result. A rejected node/record/delta batch must not leave
+ * a visible completed prefix under continued adapter operation. This is a
+ * call-level failure guarantee, not crash durability: callers receive no
+ * portable guarantee for process termination, power loss, loss of the backend
+ * connection while the outcome is unknown, uncoordinated multi-process
+ * access, idempotent retry, or publication. A successful write only means the
+ * requested storage operations completed; it does not mint or broadcast a
+ * wire-protocol event.
  */
 export interface OrderedSpaceWriter {
   apply(input: OrderedSpaceWriteInput): Promise<SpaceMutationResult>;
 }
+
+// ─── Canvas logs ────────────────────────────────────────────────────────────
 
 /** Input shape for an event append; `ts` defaults to server time. */
 export interface NewCanvasEvent {
@@ -344,7 +341,7 @@ export interface CanvasTaskRepository {
   updateRun(runId: string, update: TaskRunUpdate): Promise<TaskRunRecord>;
 }
 
-// Node records
+// ─── Node records ───────────────────────────────────────────────────────────
 
 /**
  * One complete node record and its opaque optimistic-concurrency token.
@@ -398,19 +395,24 @@ export type NodeDeleteResult = 'deleted' | 'absent';
  * may return a de-duplicated persisted label, while a strict put reports a
  * `label-conflict`. The contract intentionally says nothing about filenames
  * or physical layout. Environmental and malformed-record failures reject.
- * `duplicate-node` is an optional mutation outcome for adapters that can
- * observe conflicting physical representations of one stable id. Such an
- * adapter may return one readable representative from `read` so a caller can
- * construct the attempted update, but it must refuse the `put` rather than
- * overwrite an arbitrary representation; `readMany` may reject the ambiguous
- * batch instead. SQL adapters with a unique key never produce this outcome.
+ *
+ * Two mutation outcomes are **adapter-shaped** and optional:
+ *
+ * - `duplicate-node`, for adapters that can observe conflicting physical
+ *   representations of one stable id. Such an adapter may return one readable
+ *   representative from `read` so a caller can construct the attempted
+ *   update, but it must refuse the `put` rather than overwrite an arbitrary
+ *   representation.
+ * - `write-suppressed`, for adapters that keep a deleted id fenced against
+ *   late in-flight writes. See {@link OrderedNodeMutation}'s
+ *   `authoritativeInsert`, which is how a batch re-insertion is distinguished
+ *   from such a late write.
+ *
+ * A SQL adapter with a unique key produces neither.
  */
 export interface NodeRepository {
   readonly canvasId: string;
   read(nodeId: string): Promise<NodeSnapshot | null>;
-  readMany(
-    nodeIds: readonly string[],
-  ): Promise<ReadonlyMap<string, NodeSnapshot>>;
   put(input: NodePutInput): Promise<NodePutResult>;
   delete(nodeId: string): Promise<NodeDeleteResult>;
 }

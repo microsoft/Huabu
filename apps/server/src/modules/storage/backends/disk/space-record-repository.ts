@@ -1,0 +1,66 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
+/**
+ * Disk implementation of {@link SpaceRecordRepository}.
+ *
+ * Wraps the legacy per-Space object so reading `space.json` has a portable,
+ * asynchronous contract. Record *writes* belong to
+ * {@link DiskOrderedSpaceWriter}, which owns the version check and the
+ * node/delta batch around it.
+ */
+
+import path from 'node:path';
+
+import { readValidCanvasFile } from './space-record-validation.js';
+import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
+import { canvasJsonPath } from '../../../workspace/disk/paths.js';
+import { getWorkspacePath } from '../../../workspace.js';
+
+import type { CanvasStore } from './legacy/canvas-store.js';
+import type { CanvasFile } from '../../../canvas/persistence-types.js';
+import type { SpaceRecordRepository } from '../../ports/structured.js';
+
+export class DiskSpaceRecordRepository implements SpaceRecordRepository {
+  readonly #store: CanvasStore;
+  readonly #workspacePath: string;
+
+  constructor(store: CanvasStore) {
+    this.#store = store;
+    this.#workspacePath = path.resolve(getWorkspacePath());
+  }
+
+  async read(): Promise<CanvasFile | null> {
+    if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
+      throw new Error(
+        `SpaceRecordRepository(${this.#store.canvasId}) belongs to an inactive ` +
+          'workspace. Resolve a fresh Space handle after workspace activation.',
+      );
+    }
+    return readDiskSpaceRecord(this.#store);
+  }
+}
+
+/**
+ * Read and validate one record, refreshing the directory index once when the
+ * indexed path is absent so externally renamed Spaces remain discoverable.
+ * The already-parsed value is then reconciled by the compatibility store;
+ * there is no second, lenient disk read that could hide corruption.
+ */
+export function readDiskSpaceRecord(store: CanvasStore): CanvasFile | null {
+  let record = readValidCanvasFile(
+    canvasJsonPath(store.canvasId),
+    store.canvasId,
+  );
+  if (!record) {
+    // Preserve Finder-rename recovery, but validate the newly indexed path
+    // before the compatibility reader gets a chance to self-heal its title.
+    refreshCanvasDirIndex();
+    record = readValidCanvasFile(
+      canvasJsonPath(store.canvasId),
+      store.canvasId,
+    );
+  }
+  if (!record) return null;
+  return store.reconcileValidatedRecord(record);
+}

@@ -240,10 +240,14 @@ describe('CanvasStore cache boundaries', () => {
 
     await expect(held.record.read()).rejects.toThrow(/inactive workspace/);
     await expect(
-      held.record.compareAndSwap(first.version, {
-        ...first,
-        version: first.version + 1,
-        updatedAt: first.updatedAt + 1,
+      held.writer.apply({
+        expectedVersion: first.version,
+        nextRecord: {
+          ...first,
+          version: first.version + 1,
+          updatedAt: first.updatedAt + 1,
+        },
+        nodeMutations: [],
       }),
     ).rejects.toThrow(/inactive workspace/);
 

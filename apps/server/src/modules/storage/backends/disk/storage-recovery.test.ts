@@ -188,27 +188,29 @@ describe('strict structured reads', () => {
 
   it('does not report malformed or unreadable space.json as not-found', async () => {
     const record = seedSpace('broken-record');
-    const repository = new DiskStructuredStore().space('broken-record').record;
+    const handle = new DiskStructuredStore().space('broken-record');
     const file = path.join(root, 'broken-record', 'space.json');
 
     writeFileSync(file, '{"canvasId":', 'utf8');
-    await expect(repository.read()).rejects.toBeInstanceOf(SyntaxError);
+    await expect(handle.record.read()).rejects.toBeInstanceOf(SyntaxError);
     await expect(
-      repository.compareAndSwap(0, {
-        ...record,
-        version: 1,
-        updatedAt: 2,
+      handle.writer.apply({
+        expectedVersion: 0,
+        nextRecord: { ...record, version: 1, updatedAt: 2 },
+        nodeMutations: [],
       }),
     ).rejects.toBeInstanceOf(SyntaxError);
 
     rmSync(file);
     mkdirSync(file);
-    await expect(repository.read()).rejects.toMatchObject({ code: 'EISDIR' });
+    await expect(handle.record.read()).rejects.toMatchObject({
+      code: 'EISDIR',
+    });
     await expect(
-      repository.compareAndSwap(0, {
-        ...record,
-        version: 1,
-        updatedAt: 2,
+      handle.writer.apply({
+        expectedVersion: 0,
+        nextRecord: { ...record, version: 1, updatedAt: 2 },
+        nodeMutations: [],
       }),
     ).rejects.toMatchObject({ code: 'EISDIR' });
   });
@@ -250,19 +252,19 @@ describe('strict structured reads', () => {
     'rejects persisted Space records with %s before self-heal and preserves the bytes',
     async (_description, buildInvalid) => {
       const record = seedSpace('invalid-persisted-record');
-      const repository = new DiskStructuredStore().space(
+      const handle = new DiskStructuredStore().space(
         'invalid-persisted-record',
-      ).record;
+      );
       const file = path.join(root, 'invalid-persisted-record', 'space.json');
       const bytes = JSON.stringify(buildInvalid(record));
       writeFileSync(file, bytes, 'utf8');
 
-      await expect(repository.read()).rejects.toBeInstanceOf(SyntaxError);
+      await expect(handle.record.read()).rejects.toBeInstanceOf(SyntaxError);
       await expect(
-        repository.compareAndSwap(0, {
-          ...record,
-          version: 1,
-          updatedAt: 2,
+        handle.writer.apply({
+          expectedVersion: 0,
+          nextRecord: { ...record, version: 1, updatedAt: 2 },
+          nodeMutations: [],
         }),
       ).rejects.toBeInstanceOf(SyntaxError);
       expect(readFileSync(file, 'utf8')).toBe(bytes);
@@ -288,24 +290,23 @@ describe('strict structured reads', () => {
   });
 
   it.each(invalidRecordCases)(
-    'rejects CAS next records with %s and preserves the current bytes',
+    'rejects ordered next records with %s and preserves the current bytes',
     async (_description, buildInvalid) => {
       const record = seedSpace('invalid-next-record');
-      const repository = new DiskStructuredStore().space(
-        'invalid-next-record',
-      ).record;
+      const handle = new DiskStructuredStore().space('invalid-next-record');
       const file = path.join(root, 'invalid-next-record', 'space.json');
       const bytes = readFileSync(file, 'utf8');
 
       await expect(
-        repository.compareAndSwap(
-          0,
-          buildInvalid({
+        handle.writer.apply({
+          expectedVersion: 0,
+          nextRecord: buildInvalid({
             ...record,
             version: 1,
             updatedAt: 2,
           }) as CanvasFile,
-        ),
+          nodeMutations: [],
+        }),
       ).rejects.toBeInstanceOf(TypeError);
       expect(readFileSync(file, 'utf8')).toBe(bytes);
     },
@@ -617,11 +618,15 @@ describe('Space lifecycle guards and reopen', () => {
   it('round-trips every scoped family after cache reset and reopen', async () => {
     const initial = seedSpace('reopen');
     const first = new DiskStructuredStore().space('reopen');
-    await first.record.compareAndSwap(0, {
-      ...initial,
-      version: 1,
-      state: { nodes: [{ id: 'n1' }], edges: [] },
-      updatedAt: 2,
+    await first.writer.apply({
+      expectedVersion: 0,
+      nextRecord: {
+        ...initial,
+        version: 1,
+        state: { nodes: [{ id: 'n1' }], edges: [] },
+        updatedAt: 2,
+      },
+      nodeMutations: [],
     });
     await first.events.append([{ payload: action('n1'), ts: 7 }]);
     await first.deltas.append(delta(1));

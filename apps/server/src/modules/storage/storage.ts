@@ -49,10 +49,21 @@ import type {
 import type { StorageHealth } from './ports/common.js';
 import type {
   SpaceCreateResult,
-  SpaceDeleteResult,
+  SpaceDeleteFinishResult,
   StructuredStore,
 } from './ports/structured.js';
 import type { Readable } from 'node:stream';
+
+/**
+ * Outcome of the cross-store Space deletion this module composes.
+ *
+ * Derived from the two port results it is assembled out of — the structured
+ * fence's refusal plus whatever the terminal `finish()` reports — rather than
+ * restated by hand. It is not a port type: no repository returns it.
+ */
+export type SpaceDeleteOutcome =
+  | SpaceDeleteFinishResult
+  | { readonly ok: false; readonly reason: 'world-forbidden' };
 
 function activeWorkspacePath(): string {
   return path.resolve(getWorkspacePath());
@@ -208,13 +219,13 @@ export function createSpace(
   const workspaceLease = acquireWorkspaceOperationLease();
   return serializeSpaceCreate(async () => {
     try {
+      // One repository instance spans the read and the create, so a Workspace
+      // switch between them is rejected by the handle rather than silently
+      // creating the Space in the newly activated Workspace.
+      const spaces = structured.spaces();
       const effectiveTitle =
-        title === undefined
-          ? defaultSpaceTitle(await structured.catalog().list())
-          : title;
-      return await structured
-        .lifecycle()
-        .create({ canvasId, title: effectiveTitle });
+        title === undefined ? defaultSpaceTitle(await spaces.list()) : title;
+      return await spaces.create({ canvasId, title: effectiveTitle });
     } finally {
       workspaceLease.release();
     }
@@ -232,13 +243,11 @@ export function createSpace(
  */
 export async function deleteSpace(
   canvasId: string,
-): Promise<SpaceDeleteResult> {
+): Promise<SpaceDeleteOutcome> {
   const workspaceLease = acquireWorkspaceOperationLease();
   try {
     const storage = ensure();
-    const started = await storage.structured
-      .lifecycle()
-      .beginDelete({ canvasId });
+    const started = await storage.structured.spaces().beginDelete({ canvasId });
     if (!started.ok) return started;
     try {
       // Preserve the old retryable cleanup behavior: sweep even when the

@@ -25,8 +25,7 @@ import { createDiskCanvasLogRepositories } from './canvas-log-repository.js';
 import { getCanvasStore } from './legacy/canvas-store-cache.js';
 import { DiskNodeRepository } from './node-repository.js';
 import { DiskOrderedSpaceWriter } from './ordered-space-writer.js';
-import { DiskSpaceCatalogRepository } from './space-catalog-repository.js';
-import { DiskSpaceLifecycleRepository } from './space-lifecycle.js';
+import { DiskSpaceRecordRepository } from './space-record-repository.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { DiskCanvasTaskRepository } from './task-repository.js';
 
@@ -47,12 +46,8 @@ export class DiskStructuredStore implements StructuredStore {
 
   async close(): Promise<void> {}
 
-  catalog(): DiskSpaceCatalogRepository {
-    return new DiskSpaceCatalogRepository();
-  }
-
-  lifecycle(): DiskSpaceLifecycleRepository {
-    return new DiskSpaceLifecycleRepository();
+  spaces(): DiskSpaceRepository {
+    return new DiskSpaceRepository();
   }
 
   space(canvasId: string): SpaceHandle {
@@ -61,7 +56,7 @@ export class DiskStructuredStore implements StructuredStore {
     const logRepositories = createDiskCanvasLogRepositories(store);
     return {
       canvasId: store.canvasId,
-      record: new DiskSpaceRepository(store),
+      record: new DiskSpaceRecordRepository(store),
       ...logRepositories,
       tasks: new DiskCanvasTaskRepository(store),
       nodes: new DiskNodeRepository(store),

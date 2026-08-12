@@ -5,15 +5,30 @@
  * Disk adapter for the Canvas writer's existing ordered persistence sequence.
  *
  * This is intentionally not a journal or a portable transaction emulator.
- * Node/delta batches retain the Phase-3 in-process before-image rollback;
+ * Node/delta batches retain the pre-existing in-process before-image rollback;
  * record-only writes retain their existing single-file atomic replacement.
+ *
+ * ⚠️ Nothing between the current-version read and the write may `await`. The
+ * single-winner guarantee rests entirely on that stretch running to completion
+ * in one uninterrupted JavaScript turn — `read()` and `write()` on the legacy
+ * object are synchronous, so no other repository call can observe or overwrite
+ * the record in between. Swapping a sync call for `fs/promises` breaks it
+ * silently: two writers would capture the same version before yielding, both
+ * would find it unchanged on resume, and both would "succeed" while only one
+ * write survived. The contract suite catches exactly that by issuing its two
+ * writers from one tick against a shared baseline.
+ *
+ * This holds for the supported single-Server Disk topology. An adapter that
+ * cannot honor it structurally — SQLite, Postgres — must use a transaction or
+ * a conditional update across all of its connections, or take an explicit
+ * lock. A comment is not a mechanism.
  */
 
 import path from 'node:path';
 
 import { runCanvasPersistenceTransaction } from './canvas-persistence-transaction.js';
+import { readDiskSpaceRecord } from './space-record-repository.js';
 import { canvasFileShapeError } from './space-record-validation.js';
-import { readDiskSpaceRecord } from './space-repository.js';
 import { getWorkspacePath } from '../../../workspace.js';
 
 import type { CanvasStore } from './legacy/canvas-store.js';
@@ -81,7 +96,7 @@ export class DiskOrderedSpaceWriter implements OrderedSpaceWriter {
     if (input.nextRecord.title !== current.title) {
       throw new Error(
         `OrderedSpaceWriter(${this.#store.canvasId}) cannot change title; ` +
-          'use SpaceLifecycleRepository.rename first',
+          'use SpaceRepository.rename first',
       );
     }
     const nextRecord = input.nextRecord;

@@ -272,7 +272,7 @@ describe('deleteSpace composition', () => {
 
   it('fails closed on stale malformed World metadata before touching blobs', async () => {
     const structured = new DiskStructuredStore();
-    await structured.catalog().worldId();
+    await structured.spaces().worldId();
     writeFileSync(canvasJsonPath('canvas-world'), '{ malformed', 'utf8');
 
     await expect(deleteSpace('canvas-a')).rejects.toThrow();
@@ -284,7 +284,7 @@ describe('deleteSpace composition', () => {
 
   it('fails closed when the protected World identity disappears', async () => {
     const structured = new DiskStructuredStore();
-    await structured.catalog().worldId();
+    await structured.spaces().worldId();
     rmSync(path.dirname(canvasJsonPath('canvas-world')), {
       recursive: true,
       force: true,

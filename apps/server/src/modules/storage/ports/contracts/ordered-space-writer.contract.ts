@@ -22,12 +22,12 @@ import type {
   NodeRepository,
   OrderedSpaceWriteInput,
   OrderedSpaceWriter,
-  SpaceRepository,
+  SpaceRecordRepository,
 } from '../structured.js';
 
 export interface OrderedSpaceWriterContractScope {
   readonly writer: OrderedSpaceWriter;
-  readonly record: SpaceRepository;
+  readonly record: SpaceRecordRepository;
   readonly nodes: NodeRepository;
   readonly deltas: CanvasDeltaRepository;
 }
@@ -76,7 +76,9 @@ function deltaFor(version: number, marker: string): DeltaLogEntry {
   };
 }
 
-async function requireRecord(repository: SpaceRepository): Promise<CanvasFile> {
+async function requireRecord(
+  repository: SpaceRecordRepository,
+): Promise<CanvasFile> {
   const record = await repository.read();
   if (record === null) throw new Error('Contract fixture Space is missing');
   return record;
@@ -181,6 +183,14 @@ export function describeOrderedSpaceWriterContract(
     it('selects exactly one winner for concurrent same-baseline writes', async () => {
       const { space, concurrent } = await open();
       const current = await requireRecord(space.record);
+      // Both writers read the same baseline and are issued with **no
+      // intervening await**. This is the arrangement that actually
+      // discriminates: an adapter whose version check and write run to
+      // completion in one turn serializes them, while one that `await`s in
+      // between lets the second writer observe the stale version so both
+      // "succeed" — a lost update. Yielding before the second call instead
+      // would make this sequential and vacuous, because the second writer
+      // would simply read the already-updated record.
       const first = writeInput(current, {
         nextRecord: nextRecord(current, {
           ...current.state,
@@ -209,6 +219,70 @@ export function describeOrderedSpaceWriterContract(
       expect((await requireRecord(space.record)).version).toBe(
         current.version + 1,
       );
+    });
+
+    it('refuses a next version that is not expectedVersion + 1', async () => {
+      const { space } = await open();
+      const current = await requireRecord(space.record);
+
+      for (const version of [current.version, current.version + 2]) {
+        await expect(
+          space.writer.apply({
+            expectedVersion: current.version,
+            nextRecord: { ...current, version },
+            nodeMutations: [],
+          }),
+        ).rejects.toThrow();
+      }
+      await expect(space.record.read()).resolves.toEqual(current);
+    });
+
+    it('refuses a next record addressed at another Space', async () => {
+      const { space } = await open();
+      const current = await requireRecord(space.record);
+
+      await expect(
+        space.writer.apply(
+          writeInput(current, {
+            nextRecord: {
+              ...nextRecord(current, current.state),
+              canvasId: 'someone-else',
+            },
+          }),
+        ),
+      ).rejects.toThrow();
+      await expect(space.record.read()).resolves.toEqual(current);
+    });
+
+    it('refuses to change the identity fields through the batch', async () => {
+      const { space } = await open();
+      const current = await requireRecord(space.record);
+
+      // Title addressing is an explicit collection operation, and creation
+      // time is not a writer's to move. Both must reject rather than partially
+      // apply — a batch that renamed as a side effect would leave the record
+      // and the backend's own addressing disagreeing.
+      await expect(
+        space.writer.apply(
+          writeInput(current, {
+            nextRecord: {
+              ...nextRecord(current, current.state),
+              title: 'renamed through the record path',
+            },
+          }),
+        ),
+      ).rejects.toThrow();
+      await expect(
+        space.writer.apply(
+          writeInput(current, {
+            nextRecord: {
+              ...nextRecord(current, current.state),
+              createdAt: current.createdAt + 1000,
+            },
+          }),
+        ),
+      ).rejects.toThrow();
+      await expect(space.record.read()).resolves.toEqual(current);
     });
 
     it('reports a missing Space unless the record-only legacy create path is explicit', async () => {

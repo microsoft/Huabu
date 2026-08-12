@@ -22,7 +22,6 @@ import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
 import { toSafeFilename } from '../../../workspace/disk/naming.js';
 import { tasksPath } from '../../../workspace/disk/paths.js';
 import { describeCanvasLogRepositoriesContract } from '../../ports/contracts/canvas-log-repository.contract.js';
-import { describeSpaceRepositoryContract } from '../../ports/contracts/space-repository.contract.js';
 import { describeStructuredStoreContract } from '../../ports/contracts/structured-store.contract.js';
 
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
@@ -64,25 +63,6 @@ describeStructuredStoreContract('DiskStructuredStore', () => {
   const root = freshWorkspace('huabu-structured-');
   return {
     store: new DiskStructuredStore(),
-    cleanup: () => {
-      resetStorageCache();
-      rmSync(root, { recursive: true, force: true });
-    },
-  };
-});
-
-describeSpaceRepositoryContract('DiskSpaceRepository', () => {
-  const root = freshWorkspace('huabu-space-repo-');
-  seedSpace(root, 'canvas-a', 'Canvas A');
-  const store = new DiskStructuredStore();
-  return {
-    repository: store.space('canvas-a').record,
-    // A second composite over the same id. `space()` builds a fresh wrapper
-    // per call, so these are independent objects sharing one cached instance
-    // — which is exactly the shape the concurrency case needs.
-    concurrent: store.space('canvas-a').record,
-    missing: store.space('no-such-canvas').record,
-    missingCanvasId: 'no-such-canvas',
     cleanup: () => {
       resetStorageCache();
       rmSync(root, { recursive: true, force: true });

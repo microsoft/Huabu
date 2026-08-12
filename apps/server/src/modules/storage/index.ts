@@ -55,7 +55,7 @@ export {
   setStorageForTesting,
   storageHealth,
 } from './storage.js';
-export type { Storage } from './storage.js';
+export type { SpaceDeleteOutcome, Storage } from './storage.js';
 export {
   parseStorageProfile,
   StorageProfileError,
@@ -89,21 +89,18 @@ export type {
   OrderedNodeMutation,
   OrderedSpaceWriteInput,
   OrderedSpaceWriter,
-  SpaceHandle,
-  SpaceCatalogRepository,
   SpaceBeginDeleteResult,
   SpaceCreateInput,
   SpaceCreateResult,
   SpaceDeleteFinishResult,
   SpaceDeleteInput,
-  SpaceDeleteResult,
   SpaceDeleteSession,
-  SpaceLifecycleRepository,
+  SpaceHandle,
   SpaceMutationResult,
+  SpaceRecordRepository,
   SpaceRenameInput,
   SpaceRenameResult,
   SpaceRepository,
-  SpaceWriteResult,
   StructuredBackendKind,
   StructuredStore,
   TaskRunUpdate,

@@ -21,11 +21,11 @@ Last updated: 2026-08-11
 >
 > Phase 2 is specified in §12.2 and is **implemented**. `storage/` now has the
 > target ports/backends/compatibility hierarchy. Phase 3 is specified in
-> §12.3 and is **implemented and merged**: `StructuredStore`
-> now exposes a read-only `SpaceCatalogRepository`, and the Canvas list,
-> Workspace World lookup, thread-change read, and memory analyzer
-> record/event/intent reads use repositories. Cross-store composition also
-> reads `SpaceRepository` to guard blob puts.
+> §12.3 and is **implemented and merged**: `StructuredStore` gained
+> backend-neutral membership reads, and the Canvas list, Workspace World
+> lookup, thread-change read, and memory analyzer record/event/intent reads use
+> repositories. Cross-store composition also reads the Space record to guard
+> blob puts.
 >
 > Phase 4 is specified in §12.4 and is **implemented**. `StructuredStore`
 > now exposes structured lifecycle, async node, and ordered-writer ports. The
@@ -376,40 +376,27 @@ is an adapter inefficiency, not a contract change (§12.1.1).
 ### 7.2 StructuredStore — implemented minimum
 
 The connection → scoped-handle shape and record/log members landed in phase
-2, the read-only catalogue in phase 3, and the lifecycle, async node, and weak
-ordered-write seams in phase 4. §§12.2–12.4 are authoritative for their
-acceptance boundaries.
+2, membership reads in phase 3, and the collection lifecycle, async node, and
+weak ordered-write seams in phase 4. §§12.2–12.4 are authoritative for their
+acceptance boundaries; §12.4.1 records the trim that produced the surface
+below.
 
 ```ts
 interface StructuredStore {
-  readonly kind: StructuredBackendKind;
+  readonly kind: StructuredBackendKind; // 'disk' — implemented adapters only
+
   init(): Promise<void>;
   health(): Promise<StorageHealth>;
   close(): Promise<void>;
 
-  catalog(): SpaceCatalogRepository;
-  lifecycle(): SpaceLifecycleRepository;
+  spaces(): SpaceRepository;
   space(canvasId: string): SpaceHandle;
 }
 
-interface SpaceCatalogRepository {
+/** The Space collection in one backend namespace. */
+interface SpaceRepository {
   list(): Promise<CanvasSummary[]>;
   worldId(): Promise<string>;
-}
-
-interface SpaceHandle {
-  readonly canvasId: string;
-  readonly record: SpaceRepository;
-  readonly nodes: NodeRepository;
-  readonly writer: OrderedSpaceWriter;
-  readonly events: CanvasEventRepository;
-  readonly deltas: CanvasDeltaRepository;
-  readonly changes: CanvasChangeRepository;
-  readonly intents: CanvasIntentRepository;
-  readonly tasks: CanvasTaskRepository;
-}
-
-interface SpaceLifecycleRepository {
   create(input: SpaceCreateInput): Promise<SpaceCreateResult>;
   beginDelete(input: SpaceDeleteInput): Promise<SpaceBeginDeleteResult>;
   rename(input: SpaceRenameInput): Promise<SpaceRenameResult>;
@@ -420,12 +407,26 @@ interface SpaceDeleteSession {
   abort(): Promise<void>;
 }
 
+interface SpaceHandle {
+  readonly canvasId: string;
+  readonly record: SpaceRecordRepository;
+  readonly nodes: NodeRepository;
+  readonly writer: OrderedSpaceWriter;
+  readonly events: CanvasEventRepository;
+  readonly deltas: CanvasDeltaRepository;
+  readonly changes: CanvasChangeRepository;
+  readonly intents: CanvasIntentRepository;
+  readonly tasks: CanvasTaskRepository;
+}
+
+/** Reads only: every record write is a version-checked ordered write. */
+interface SpaceRecordRepository {
+  read(): Promise<CanvasFile | null>;
+}
+
 interface NodeRepository {
   readonly canvasId: string;
   read(nodeId: string): Promise<NodeSnapshot | null>;
-  readMany(
-    nodeIds: readonly string[],
-  ): Promise<ReadonlyMap<string, NodeSnapshot>>;
   put(input: NodePutInput): Promise<NodePutResult>;
   delete(nodeId: string): Promise<'deleted' | 'absent'>;
 }
@@ -983,6 +984,15 @@ Backend-neutral persistence DTOs come from
 
 #### 12.2.5 `SpaceRepository` — versioned record with atomic CAS
 
+> **Superseded in Phase 4.** `compareAndSwap` never acquired a production
+> caller: `OrderedSpaceWriter.apply` with an empty node batch is the same
+> version-checked replacement, so the two were one operation spelled twice.
+> Phase 4 removed the method and this suite, kept `read()` as
+> `SpaceRecordRepository`, and moved the single-winner and record-validation
+> assertions to the ordered-writer contract. §12.4.1 records the reasoning.
+> The shape below is retained because the guarantee it describes is now the
+> writer's.
+
 ```ts
 export interface SpaceRepository {
   read(): Promise<CanvasFile | null>;
@@ -1041,7 +1051,9 @@ self-heal, but that is adapter behavior—not a promise other backends reproduce
 
 No existing application writer is switched to `compareAndSwap` in Phase 2.
 The contract is correct for later adoption without changing the current PUT,
-executor, or title flow as collateral work.
+executor, or title flow as collateral work. That deferral is exactly what
+§12.4.1 later had to undo: the adoption that arrived in Phase 4 wanted the
+batch writer, not this narrower spelling of it.
 
 #### 12.2.6 Canvas log-family repositories — scoped contracts
 
@@ -1197,7 +1209,9 @@ adapter-local guarantees, for the reason given in §12.2.3:
   id, invalid next version, immutable identity/title fields, not-found and
   version-conflict results, and two concurrent writers with one winner — with
   the two writers issued from one tick against a shared baseline, which is the
-  ordering that detects a critical section spanning an `await` (§12.2.5);
+  ordering that detects a critical section spanning an `await` (§12.2.5). This
+  suite was retired in §12.4.1 and these cases now live in
+  `ordered-space-writer.contract.ts`;
 - `canvas-log-repository.contract.ts`: the four narrow repository contracts —
   event order/tail/empty append, delta filtering and duplicate rejection,
   change coalescing and concurrent append/remove behavior, and intent
@@ -1262,7 +1276,13 @@ migrate nodes or log writers, change a schema, or add a backend/profile.
 
 #### 12.3.1 Read-only catalogue contract
 
-`StructuredStore.catalog()` returns a fresh `SpaceCatalogRepository`:
+> **Merged in Phase 4.** These two reads now sit on the one `SpaceRepository`
+> returned by `StructuredStore.spaces()`, alongside create/delete/rename. The
+> read/write split described here tracked the migration phases rather than a
+> domain boundary, and it cost a duplicated World rule. §12.4.1 records the
+> reasoning; the semantics below are unchanged.
+
+`StructuredStore.catalog()` returned a fresh read-only catalogue:
 
 ```ts
 interface SpaceCatalogRepository {
@@ -1417,6 +1437,65 @@ external-note observation/claim, hydration, bootstrap/migration, and other
 physical capabilities still read or mutate Disk directly, so SQLite and
 Postgres profiles remain rejected.
 
+#### 12.4.1 Post-review trim — landed
+
+A 2026-08-12 review of the branch asked what the structured contract looks
+like at a glance and whether it shows signs of overdesign. It did, in ways
+that were cheap to correct before the surface acquired more callers. These
+changes landed with Phase 4 rather than as follow-up work, because every one
+of them removes something Phase 4 would otherwise have been the phase to
+justify.
+
+1. **`SpaceRepository.compareAndSwap` removed.** It had no production caller,
+   and a record-only `OrderedSpaceWriter.apply` is the identical operation —
+   same version precondition, same identity-field refusal, same result type,
+   which the `SpaceMutationResult = SpaceWriteResult` alias had been quietly
+   admitting. The per-Space record port is now read-only and named
+   `SpaceRecordRepository`, matching its `record` field. Its 230-line contract
+   suite is gone; the single-winner race and the next-record validation cases
+   it owned moved into the ordered-writer suite, which is where the
+   application actually depends on them. §12.2's own rule — "a repository
+   contract with no callers is a guess" — is what this applies.
+2. **`NodeRepository.readMany` removed.** Also uncalled, and its only
+   implementation read and parsed _every_ node in the Space regardless of how
+   many ids were requested, so the first real caller would have inherited a
+   full-Space scan per batch. A future batch read should be designed against a
+   caller that wants one.
+3. **`catalog()` and `lifecycle()` merged into `spaces()`.** They were the
+   same kind of object — namespace-scoped, stateless, one fresh
+   Workspace-bound instance per call — split along a read/write line that
+   tracked Phase 3 and Phase 4 rather than the domain. The split forced the
+   World rule to be resolved in two places, left `create` reading membership
+   it could not name through the port, and made composition stitch two calls
+   for one logical create. Per-Space `space(id)` is untouched: that boundary
+   is real, since `create` cannot be scoped to a Space that does not exist.
+4. **`SpaceDeleteResult` removed from the port.** No repository returned it —
+   it was the composition-level result of `deleteSpace()`, hand-written as the
+   union of the two port results it is assembled from. It now lives in
+   `storage.ts` as `SpaceDeleteOutcome`, derived rather than restated.
+5. **`StructuredBackendKind` narrowed to `'disk'`.** An adapter's self-reported
+   kind now names only kinds that exist. The wider vocabulary a profile may
+   _request_ moved to `profile.ts` as `RequestedStructuredKind`, which is what
+   preserves the actionable "not implemented yet" error for a configured
+   `sqlite` or `postgres`. `BlobBackendKind` still carries `azure` on the same
+   footing and was left alone as Phase-1 surface.
+
+Not changed, deliberately: `authoritativeInsert` and the `write-suppressed`
+put outcome remain in the portable shapes. Both exist for Disk's in-memory
+deletion fence, and neither has a portable meaning a SQL adapter would
+produce. They are now documented as adapter-shaped, the way `duplicate-node`
+already was, rather than renamed or pushed behind the adapter — the honest
+resolution needs a second adapter to say what the shared abstraction is, and
+inventing one now would be the same speculative move this trim is undoing.
+
+The review also asked composition to move default-title allocation
+("Untitled", "Untitled (1)", …) into `create`, which would have removed the
+serialization point in `createSpace`. That was declined: the suffix rule is
+product naming, not storage, and pushing it into the port would make every
+adapter reimplement it. The two-call sequence stays, now against one
+repository instance so a Workspace switch between the read and the create is
+rejected rather than silently retargeted.
+
 ### 12.5 Later phases — provisional
 
 5. Add one new adapter at a time — SQLite, then Postgres, then Azure Blob —
@@ -1485,13 +1564,14 @@ Postgres profiles remain rejected.
   write through a port that has no per-key delete. (P1, §6.2)
 - **Materialize lease lifetime** — the path is read-only and invalid once
   `release()` resolves, on every backend including Disk. (P1, §6.2)
-- **Repository boundaries, minimum accepted** — `SpaceCatalogRepository`,
-  `SpaceLifecycleRepository`, `SpaceRepository`, `NodeRepository`, the narrow
-  Canvas event/delta/change/intent repositories, Tasks, and
-  `OrderedSpaceWriter` are implemented with reusable contracts. Rejected
-  in-process node → record → delta batches restore prestate, while title
-  rename keeps its preceding best-effort boundary. This is not an aggregate
-  crash-recovery or distributed transaction. (P2–P4, §§12.2–12.4)
+- **Repository boundaries, minimum accepted** — `SpaceRepository` (the
+  collection: membership, World identity, create/delete/rename),
+  `SpaceRecordRepository`, `NodeRepository`, the narrow Canvas
+  event/delta/change/intent repositories, Tasks, and `OrderedSpaceWriter` are
+  implemented with reusable contracts. Rejected in-process node → record →
+  delta batches restore prestate, while title rename keeps its preceding
+  best-effort boundary. This is not an aggregate crash-recovery or distributed
+  transaction. (P2–P4, §§12.2–12.4, 12.4.1)
 - **Bounded repository consumers** — the events route landed in P2; P3 added
   the Canvas list, Workspace World lookup, thread-change read, and memory
   record/event/intent reads; P4 migrated the structured mutation paths named

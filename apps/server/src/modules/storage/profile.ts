@@ -11,22 +11,35 @@
  */
 
 import type { BlobBackendKind } from './ports/blob.js';
-import type { StructuredBackendKind } from './ports/structured.js';
+
+/**
+ * Structured backend families a profile may name.
+ *
+ * Wider than the port's `StructuredBackendKind`, which names only what an
+ * adapter exists for. Keeping the two apart is what lets a
+ * configured-but-unwritten backend fail with "not implemented yet" instead of
+ * "not a known backend", without the port advertising adapters that do not
+ * exist.
+ */
+export type RequestedStructuredKind = 'disk' | 'sqlite' | 'postgres';
 
 export interface StorageProfile {
-  structured: { kind: StructuredBackendKind };
+  structured: { kind: RequestedStructuredKind };
   blobs: { kind: BlobBackendKind };
 }
 
 /**
- * Backends that exist today. The port types name the full target families
- * (`sqlite`, `postgres`, `azure`) so adapters have somewhere to land, but
- * naming one before it is written must fail loudly rather than half-work.
+ * Backends that exist today. Naming one that is not written yet must fail
+ * loudly rather than half-work.
  */
-const IMPLEMENTED_STRUCTURED: readonly StructuredBackendKind[] = ['disk'];
+const IMPLEMENTED_STRUCTURED: readonly RequestedStructuredKind[] = ['disk'];
 const IMPLEMENTED_BLOBS: readonly BlobBackendKind[] = ['disk'];
 
-const STRUCTURED_KINDS: readonly string[] = ['disk', 'sqlite', 'postgres'];
+const STRUCTURED_KINDS: readonly RequestedStructuredKind[] = [
+  'disk',
+  'sqlite',
+  'postgres',
+];
 const BLOB_KINDS: readonly string[] = ['disk', 'azure'];
 
 export class StorageProfileError extends Error {
@@ -57,7 +70,7 @@ export function parseStorageProfile(
         'HUABU_STRUCTURED_BACKEND',
         env['HUABU_STRUCTURED_BACKEND'],
         STRUCTURED_KINDS,
-      ) as StructuredBackendKind,
+      ) as RequestedStructuredKind,
     },
     blobs: {
       kind: readKind(
@@ -102,7 +115,7 @@ export function validateStorageProfile(profile: StorageProfile): void {
  * callers unopened. Keeping the list here, next to the other backend facts,
  * means adding an adapter forces a decision about it.
  */
-const LAZY_SAFE_STRUCTURED: readonly StructuredBackendKind[] = ['disk'];
+const LAZY_SAFE_STRUCTURED: readonly RequestedStructuredKind[] = ['disk'];
 const LAZY_SAFE_BLOBS: readonly BlobBackendKind[] = ['disk'];
 
 /** Whether this profile may only be built through an awaited `initStorage()`. */

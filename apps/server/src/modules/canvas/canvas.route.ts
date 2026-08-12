@@ -546,7 +546,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get<{ Reply: ApiResult<ListCanvasesResponse> }>(
     '/',
     async function (_request, reply) {
-      const summaries = [...(await getStructuredStore().catalog().list())].sort(
+      const summaries = [...(await getStructuredStore().spaces().list())].sort(
         (a, b) => b.updatedAt - a.updatedAt,
       );
 
@@ -1155,7 +1155,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     };
 
     const structured = getStructuredStore();
-    const lifecycle = structured.lifecycle();
+    const spaces = structured.spaces();
     const handle = structured.space(canvasId);
     const existing = await handle.record.read();
     const serverVersion = existing?.version ?? 0;
@@ -1190,7 +1190,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     if (existing !== null && titleChange !== undefined) {
       let renamed;
       try {
-        renamed = await lifecycle.rename({ canvasId, ...titleChange });
+        renamed = await spaces.rename({ canvasId, ...titleChange });
       } catch (error) {
         request.log.error(
           { canvasId, err: toMessage(error) },

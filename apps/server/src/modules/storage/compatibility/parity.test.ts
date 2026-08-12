@@ -4,13 +4,13 @@
 /**
  * Parity between the compatibility facade and the composite handle.
  *
- * Phase 2 leaves two live views of the same Space. They must not become two
- * in-memory authorities: `DiskStructuredStore.space(id)` and
+ * The compatibility facade leaves two live views of the same Space. They must
+ * not become two in-memory authorities: `DiskStructuredStore.space(id)` and
  * `getCanvasStore(id)` resolve the same cached legacy object, so a write
  * through either is immediately visible through the other.
  *
- * That property is what makes the phase safe to ship with the facade still in
- * place, so it is asserted directly rather than left as a design claim.
+ * That property is what makes it safe to ship the ports with the facade still
+ * in place, so it is asserted directly rather than left as a design claim.
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -73,15 +73,19 @@ afterEach(() => {
 });
 
 describe('compatibility facade and composite handle observe each other', () => {
-  it('shows a repository CAS through the facade', async () => {
+  it('shows a repository record write through the facade', async () => {
     const handle = new DiskStructuredStore().space(CANVAS_ID);
     const current = await handle.record.read();
 
-    const result = await handle.record.compareAndSwap(current!.version, {
-      ...current!,
-      version: current!.version + 1,
-      state: { nodes: [{ id: 'n1' }], edges: [] },
-      updatedAt: current!.updatedAt + 1,
+    const result = await handle.writer.apply({
+      expectedVersion: current!.version,
+      nextRecord: {
+        ...current!,
+        version: current!.version + 1,
+        state: { nodes: [{ id: 'n1' }], edges: [] },
+        updatedAt: current!.updatedAt + 1,
+      },
+      nodeMutations: [],
     });
     expect(result).toEqual({ ok: true });
 
@@ -142,7 +146,7 @@ describe('compatibility facade and composite handle observe each other', () => {
 });
 
 describe('cross-surface Disk invariants', () => {
-  it('lifts the in-memory node tombstone when a structural CAS re-lists the node', async () => {
+  it('lifts the in-memory node tombstone when a structural write re-lists the node', async () => {
     const handle = new DiskStructuredStore().space(CANVAS_ID);
     const store = getCanvasStore(CANVAS_ID);
 
@@ -157,15 +161,19 @@ describe('cross-surface Disk invariants', () => {
 
     // A structural write that re-lists the id is the undo/redo path: the node
     // is alive again, so its content writes must be allowed through. This is
-    // a Disk cross-surface invariant rather than a portable SpaceRepository
-    // promise, so it is asserted here — but it has to keep holding when the
-    // structural write arrives through the repository rather than the class.
+    // a Disk cross-surface invariant rather than a portable writer promise, so
+    // it is asserted here — but it has to keep holding when the structural
+    // write arrives through the port rather than the class.
     const restored = await handle.record.read();
-    await handle.record.compareAndSwap(restored!.version, {
-      ...restored!,
-      version: restored!.version + 1,
-      state: { nodes: [{ id: 'n1' }], edges: [] },
-      updatedAt: restored!.updatedAt + 1,
+    await handle.writer.apply({
+      expectedVersion: restored!.version,
+      nextRecord: {
+        ...restored!,
+        version: restored!.version + 1,
+        state: { nodes: [{ id: 'n1' }], edges: [] },
+        updatedAt: restored!.updatedAt + 1,
+      },
+      nodeMutations: [],
     });
     expect(store.isNodeWriteSuppressed('n1')).toBe(false);
 
@@ -173,14 +181,18 @@ describe('cross-surface Disk invariants', () => {
     // This is what separates a genuinely cleared tombstone from the escape
     // hatch: presence in structure also returns false while deliberately
     // keeping the tombstone alive, so the assertion above passes either way.
-    // If the CAS had merely been escape-hatched, the id would start
-    // suppressing again the moment it left structure.
+    // If the structural write had merely been escape-hatched, the id would
+    // start suppressing again the moment it left structure.
     const emptied = await handle.record.read();
-    await handle.record.compareAndSwap(emptied!.version, {
-      ...emptied!,
-      version: emptied!.version + 1,
-      state: { nodes: [], edges: [] },
-      updatedAt: emptied!.updatedAt + 1,
+    await handle.writer.apply({
+      expectedVersion: emptied!.version,
+      nextRecord: {
+        ...emptied!,
+        version: emptied!.version + 1,
+        state: { nodes: [], edges: [] },
+        updatedAt: emptied!.updatedAt + 1,
+      },
+      nodeMutations: [],
     });
 
     expect(store.isNodeWriteSuppressed('n1')).toBe(false);
@@ -221,7 +233,7 @@ describe('cross-surface Disk invariants', () => {
 
     // And the node surface it is supposed to carry is all there.
     expect(nodes.canvasId).toBe(CANVAS_ID);
-    for (const allowed of ['read', 'readMany', 'put', 'delete']) {
+    for (const allowed of ['read', 'put', 'delete']) {
       expect(
         typeof (nodes as unknown as Record<string, unknown>)[allowed],
       ).toBe('function');

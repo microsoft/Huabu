@@ -48,27 +48,6 @@ export class DiskNodeRepository implements NodeRepository {
     return record === null ? null : snapshotOf(record);
   }
 
-  async readMany(
-    nodeIds: readonly string[],
-  ): Promise<ReadonlyMap<string, NodeSnapshot>> {
-    this.#assertActiveWorkspace();
-    const requested = new Set(nodeIds);
-    if (requested.size === 0) return new Map();
-
-    const records = await this.#store.readAllNodes({ strict: true });
-    const snapshots = new Map<string, NodeSnapshot>();
-    for (const nodeId of requested) {
-      if (this.#store.isDuplicateNode(nodeId)) {
-        throw new Error(
-          `NodeRepository(${this.canvasId}) found multiple records for ${JSON.stringify(nodeId)}`,
-        );
-      }
-      const record = records.get(nodeId);
-      if (record !== undefined) snapshots.set(nodeId, snapshotOf(record));
-    }
-    return snapshots;
-  }
-
   async put(input: NodePutInput): Promise<NodePutResult> {
     this.#assertActiveWorkspace();
     if (input.record.nodeId !== input.nodeId) {

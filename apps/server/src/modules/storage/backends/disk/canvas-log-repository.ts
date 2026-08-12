@@ -29,7 +29,7 @@ import {
   type CanvasChangeRecord,
 } from '@huabu/shared/canvas-engine';
 
-import { readDiskSpaceRecord } from './space-repository.js';
+import { readDiskSpaceRecord } from './space-record-repository.js';
 import {
   atomicWriteJson,
   readJsonLinesStrict,

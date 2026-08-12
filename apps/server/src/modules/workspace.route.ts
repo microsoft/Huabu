@@ -164,7 +164,7 @@ async function buildWorkspaceState(): Promise<WorkspaceInfo> {
     // Display label (basename). Safe to send in either mode.
     name: configured ? getWorkspaceName() : null,
     worldCanvasId: configured
-      ? await getStructuredStore().catalog().worldId()
+      ? await getStructuredStore().spaces().worldId()
       : null,
     capabilities: {
       canChangeWorkspace: !managed,

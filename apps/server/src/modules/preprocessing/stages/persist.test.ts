@@ -49,23 +49,27 @@ async function seedSpace(
   type: string,
 ): Promise<NodeRepository> {
   const structured = getStructuredStore();
-  const created = await structured.lifecycle().create({
+  const created = await structured.spaces().create({
     canvasId,
     title: null,
   });
   if (!created.ok) throw new Error(`failed to create ${canvasId}`);
 
   const space = structured.space(canvasId);
-  const write = await space.record.compareAndSwap(0, {
-    ...created.record,
-    version: 1,
-    state: {
-      nodes: [
-        { id: nodeId, type, position: { x: 0, y: 0 }, data: { label: 'A' } },
-      ],
-      edges: [],
+  const write = await space.writer.apply({
+    expectedVersion: 0,
+    nextRecord: {
+      ...created.record,
+      version: 1,
+      state: {
+        nodes: [
+          { id: nodeId, type, position: { x: 0, y: 0 }, data: { label: 'A' } },
+        ],
+        edges: [],
+      },
+      updatedAt: Date.now(),
     },
-    updatedAt: Date.now(),
+    nodeMutations: [],
   });
   if (!write.ok) throw new Error(`failed to seed topology for ${canvasId}`);
   return space.nodes;

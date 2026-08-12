@@ -33,9 +33,6 @@ function fakeRepository(canvasId = 'c1') {
       if (revision === null) throw new Error('test storage token is missing');
       return { record, revision };
     },
-    async readMany() {
-      return new Map();
-    },
     async put(input) {
       if (suppressed) return { ok: false, reason: 'write-suppressed' };
       const currentRevision = storageRevisionOf(record);

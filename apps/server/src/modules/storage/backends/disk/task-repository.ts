@@ -12,7 +12,7 @@ import {
   type TaskStoreSnapshot,
 } from '@huabu/shared';
 
-import { readDiskSpaceRecord } from './space-repository.js';
+import { readDiskSpaceRecord } from './space-record-repository.js';
 import { atomicWriteJson, readJsonStrict } from '../../../../utils/fs.js';
 import { tasksPath } from '../../../workspace/disk/paths.js';
 import { getWorkspacePath } from '../../../workspace.js';

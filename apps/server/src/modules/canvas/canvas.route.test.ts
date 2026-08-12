@@ -383,7 +383,7 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
 });
 
 describe('GET /api/canvas', () => {
-  it('lists through the catalogue and sorts a copy by updatedAt', async () => {
+  it('lists through the Space repository and sorts a copy by updatedAt', async () => {
     const source = [
       {
         canvasId: 'older',
@@ -401,12 +401,12 @@ describe('GET /api/canvas', () => {
       },
     ];
     const list = vi.fn().mockResolvedValue(source);
-    const catalog = vi.fn(() => ({
+    const spaces = vi.fn(() => ({
       list,
       worldId: vi.fn(),
     }));
     vi.mocked(getStructuredStore).mockImplementationOnce(
-      () => ({ catalog }) as unknown as ReturnType<typeof getStructuredStore>,
+      () => ({ spaces }) as unknown as ReturnType<typeof getStructuredStore>,
     );
 
     const app = await buildApp();
@@ -416,7 +416,7 @@ describe('GET /api/canvas', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ canvases: [source[1], source[0]] });
       expect(source.map((row) => row.canvasId)).toEqual(['older', 'newer']);
-      expect(catalog).toHaveBeenCalledTimes(1);
+      expect(spaces).toHaveBeenCalledTimes(1);
       expect(list).toHaveBeenCalledTimes(1);
     } finally {
       await app.close();
