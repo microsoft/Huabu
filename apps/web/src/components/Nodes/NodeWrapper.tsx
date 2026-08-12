@@ -836,7 +836,7 @@ export const NodeWrapper = memo(
           <NodeConnectionHandles
             nodeId={id}
             hovered={hovered}
-            selected={!!selected}
+            selected={!!selected && selectedCount === 1}
             isNotMouse={isNotMouse}
             dragging={isDragging}
           />
