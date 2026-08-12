@@ -488,12 +488,6 @@ export function useAcpSessionMeta({
     autoEnsureOnCacheMiss,
   ]);
 
-  // Register `applyEvent` as the module-level SSE sink so
-  // `handleStreamEvent` can forward session-meta updates here without
-  // threading callbacks through every layer. The sink is a singleton
-  // last-writer-wins (only one ChatPanel mounts at a time); always
-  // clear it on unmount so headless reconnect / tests don't leak
-  // into a stale hook instance.
   useEffect(() => {
     if (bindingKind !== 'external') return;
     setAcpSessionMetaSink(applyEvent);

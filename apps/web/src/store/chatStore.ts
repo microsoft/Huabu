@@ -16,8 +16,7 @@ import type {
 
 /**
  * Default binding for any newly opened canvas / cleared thread.
- * v1: built-in Huabu agent. External bindings only appear when the
- * user explicitly picks an agent in the NewChatMenu.
+ * External bindings only appear when the user explicitly selects an agent.
  */
 const DEFAULT_BINDING: AgentBinding = { kind: 'internal' };
 

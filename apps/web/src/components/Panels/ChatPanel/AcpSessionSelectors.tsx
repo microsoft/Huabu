@@ -2,10 +2,9 @@
 // Licensed under the MIT license.
 
 /**
- * `AcpSessionSelectors` — the dropdown "pills" rendered next to the
- * NewChatMenu when the active thread is delegated to an external agent
- * that advertises selectable knobs (mode / model / reasoning level /
- * auto-approve toggle …).
+ * `AcpSessionSelectors` — the dropdown "pills" rendered when the active
+ * thread is delegated to an external agent that advertises selectable knobs
+ * (mode / model / reasoning level / auto-approve toggle …).
  *
  * This component is presentation only. Which channel a knob arrives on
  * (legacy `availableModes` / `availableModels` vs modern `configOptions`),

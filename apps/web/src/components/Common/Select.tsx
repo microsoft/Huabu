@@ -65,9 +65,7 @@ type SelectProps<T extends string = string> = {
   /**
    * Fired exactly when the dropdown transitions from closed → open
    * (clicking the trigger while open closes it and does NOT fire this).
-   * Use this to lazily refresh dynamic option lists—e.g. the
-   * ChatPanel NewChatMenu pulls the latest ACP agents on each open
-   * instead of polling on a timer.
+   * Use this to lazily refresh dynamic option lists instead of polling.
    */
   onOpen?: () => void;
   /**

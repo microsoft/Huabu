@@ -151,16 +151,6 @@ export type AcpSessionMetaStreamEvent = Extract<
   }
 >;
 
-/**
- * Module-level sink for session-meta events. A single subscriber (the
- * ChatPanel's `useAcpSessionMeta` hook) registers itself on mount via
- * {@link setAcpSessionMetaSink} so `handleStreamEvent` can dispatch
- * meta updates without re-plumbing every event through props.
- *
- * Last-writer-wins by design — there is only ever one ChatPanel
- * mounted at a time (the canvas chat OR a question-thread view, never
- * both), so concurrent subscribers would be a bug.
- */
 type AcpSessionMetaSink = (event: AcpSessionMetaStreamEvent) => void;
 let acpSessionMetaSink: AcpSessionMetaSink | null = null;
 export function setAcpSessionMetaSink(sink: AcpSessionMetaSink | null): void {
