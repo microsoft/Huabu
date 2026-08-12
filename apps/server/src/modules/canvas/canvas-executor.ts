@@ -1328,8 +1328,9 @@ export function broadcastCanvasStatePut(input: {
   if (deltas.length === 0) return deltas;
 
   const deletedNodeIds = deltas
-    .filter((d): d is Extract<Delta, { type: 'DELETE_NODE' }> =>
-      d.type === 'DELETE_NODE',
+    .filter(
+      (d): d is Extract<Delta, { type: 'DELETE_NODE' }> =>
+        d.type === 'DELETE_NODE',
     )
     .map((d) => d.node.id);
 

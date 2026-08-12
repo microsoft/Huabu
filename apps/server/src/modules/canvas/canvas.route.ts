@@ -107,10 +107,7 @@ import type {
   PutNodeContentResponse,
   RevealNodesFolderResponse,
 } from '@huabu/shared';
-import type {
-  CanvasEdge,
-  CanvasNode,
-} from '@huabu/shared/canvas-engine';
+import type { CanvasEdge, CanvasNode } from '@huabu/shared/canvas-engine';
 import type { FastifyPluginAsync } from 'fastify';
 
 /**
