@@ -47,11 +47,10 @@
  *
  * - **SSE events** — live `session_*_update` frames are merged into
  *   the cached snapshot without a round-trip by an internal sink the
- *   hook registers via `setAcpSessionMetaSink`. Mirrored to disk on
- *   the server side (both per-thread and per-profile), so the next
- *   `/cached-meta` fetch from any client sees the freshest state.
- *   Consumers never merge frames themselves — the sink is a singleton
- *   and the hook owns it.
+ *   hook registers by thread via `registerAcpSessionMetaSink`. Mirrored
+ *   to disk on the server side (both per-thread and per-profile), so the
+ *   next `/cached-meta` fetch from any client sees the freshest state.
+ *   Consumers never merge frames themselves.
  *
  * Errors from `refresh` are stored on `error` but never thrown — meta
  * is a polish surface; a failure should degrade to no selectors rather
@@ -63,7 +62,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError } from '@/api/_client';
 import { ensureAcpSession, getAcpThreadCachedMeta } from '@/api/acp';
 import {
-  setAcpSessionMetaSink,
+  registerAcpSessionMetaSink,
   type AcpSessionMetaStreamEvent,
 } from '@/hooks/useAgentStream';
 
@@ -489,10 +488,9 @@ export function useAcpSessionMeta({
   ]);
 
   useEffect(() => {
-    if (bindingKind !== 'external') return;
-    setAcpSessionMetaSink(applyEvent);
-    return () => setAcpSessionMetaSink(null);
-  }, [bindingKind, applyEvent]);
+    if (!threadId || bindingKind !== 'external') return;
+    return registerAcpSessionMetaSink(threadId, applyEvent);
+  }, [threadId, bindingKind, applyEvent]);
 
   return {
     meta,

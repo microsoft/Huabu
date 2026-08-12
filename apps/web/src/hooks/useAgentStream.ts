@@ -152,9 +152,18 @@ export type AcpSessionMetaStreamEvent = Extract<
 >;
 
 type AcpSessionMetaSink = (event: AcpSessionMetaStreamEvent) => void;
-let acpSessionMetaSink: AcpSessionMetaSink | null = null;
-export function setAcpSessionMetaSink(sink: AcpSessionMetaSink | null): void {
-  acpSessionMetaSink = sink;
+const acpSessionMetaSinks = new Map<string, AcpSessionMetaSink>();
+
+export function registerAcpSessionMetaSink(
+  threadId: string,
+  sink: AcpSessionMetaSink,
+): () => void {
+  acpSessionMetaSinks.set(threadId, sink);
+  return () => {
+    if (acpSessionMetaSinks.get(threadId) === sink) {
+      acpSessionMetaSinks.delete(threadId);
+    }
+  };
 }
 
 /**
@@ -584,10 +593,9 @@ export function handleStreamEvent(
     event.type === 'session_usage_update'
   ) {
     // Session-meta updates have no message-list impact — they drive
-    // the ChatPanel's mode/model/config selector dropdowns. Hand off
-    // to the registered sink (see {@link setAcpSessionMetaSink}); if
-    // no panel is mounted (e.g. tests, headless reconnect), drop.
-    acpSessionMetaSink?.(event);
+    // the owning ChatPanel's mode/model/config selector dropdowns. If
+    // that thread has no mounted panel (e.g. headless reconnect), drop.
+    acpSessionMetaSinks.get(ctx.threadId)?.(event);
   }
 }
 
