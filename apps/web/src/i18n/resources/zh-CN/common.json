@@ -267,6 +267,7 @@
     "searching": "正在搜索"
   },
   "editor": {
+    "readOnlyContent": "只读内容",
     "blockType": "块类型",
     "textColor": "文字颜色",
     "highlightColor": "高亮颜色",

@@ -364,6 +364,7 @@ export const NodeFloatingToolbar = memo(
           <FloatingToolbar.NumberInput
             label="Font"
             ariaLabel="Font size"
+            name="font-size"
             value={data.style?.fontSize ?? 16}
             min={8}
             max={160}

@@ -344,7 +344,7 @@ const CanvasZoomLevel: React.FC = () => {
     <ControlButton
       className="w-6.5! p-0! text-[10px]! leading-none font-medium! tabular-nums"
       title={t('canvasControls.resetZoom')}
-      aria-label={t('canvasControls.zoomAria', { percentage })}
+      aria-label={`${multiplier}×. ${t('canvasControls.zoomAria', { percentage })}`}
       onClick={() => void zoomTo(1, { duration: 200 })}
     >
       {multiplier}×

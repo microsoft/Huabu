@@ -107,6 +107,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
       <input
         ref={fileInputRef}
         type="file"
+        name="space-import-archive"
         accept=".zip,application/zip"
         className="hidden"
         onChange={(e) => void onFileChange(e)}

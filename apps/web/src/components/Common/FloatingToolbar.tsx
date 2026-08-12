@@ -457,18 +457,19 @@ interface ToolbarSizePickerProps {
 }
 
 const SIZE_INPUT_CLASS =
-  'nodrag w-10 bg-transparent text-xs outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
+  'nodrag h-6 w-10 bg-transparent text-xs outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
 
 // Rounded filled "capsule" wrapping the label + input so `W 937`
 // reads as one solid chip (more cohesive than a hairline-bordered
 // field). Frame hug wraps its W/H pair in a single shared capsule
 // instead, so those inner inputs opt out via `unstyled`.
 const SIZE_CAPSULE_CLASS =
-  'bg-bg-default hover:bg-hover focus-within:ring-info rounded-md px-1.5 py-1 transition-colors focus-within:ring-1';
+  'bg-bg-default hover:bg-hover focus-within:ring-info rounded-md px-1.5 py-0 transition-colors focus-within:ring-1';
 
 interface ToolbarNumberInputProps {
   label: string;
   ariaLabel: string;
+  name: string;
   value: number | null;
   onApply: (value: number) => void;
   min?: number;
@@ -500,6 +501,7 @@ interface ToolbarNumberInputProps {
 function ToolbarNumberInput({
   label,
   ariaLabel,
+  name,
   value,
   onApply,
   min = 1,
@@ -513,6 +515,7 @@ function ToolbarNumberInput({
   unstyled = false,
 }: ToolbarNumberInputProps) {
   const isAuto = typeof autoText === 'string';
+  const Container: 'div' | 'label' = isAuto ? 'div' : 'label';
   const [text, setText] = useState('');
 
   useEffect(() => {
@@ -550,7 +553,7 @@ function ToolbarNumberInput({
   };
 
   return (
-    <label
+    <Container
       className={cn(
         'nodrag flex items-center gap-1',
         !unstyled && SIZE_CAPSULE_CLASS,
@@ -561,46 +564,55 @@ function ToolbarNumberInput({
         {label}
       </span>
       <div className="relative flex items-center">
-        <input
-          type={isAuto ? 'text' : 'number'}
-          inputMode={isAuto ? undefined : 'numeric'}
-          aria-label={ariaLabel}
-          min={isAuto ? undefined : min}
-          max={isAuto ? undefined : max}
-          step={isAuto ? undefined : step}
-          disabled={disabled}
-          readOnly={isAuto}
-          value={isAuto ? autoText : text}
-          placeholder={isAuto || typeof value === 'number' ? '' : '—'}
-          onChange={isAuto ? undefined : (e) => setText(e.target.value)}
-          onBlur={isAuto ? undefined : commit}
-          onMouseDown={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (isAuto) return;
-            if (e.key === 'Enter') {
-              commit();
-              (e.target as HTMLInputElement).blur();
-            } else if (e.key === 'Escape') {
-              restore();
-              (e.target as HTMLInputElement).blur();
-            }
-          }}
-          className={cn(
-            SIZE_INPUT_CLASS,
-            endAdornment && 'w-14 pr-5',
-            isAuto && 'cursor-default',
-            disabled && 'cursor-not-allowed opacity-50',
-            inputClassName,
-          )}
-        />
+        {isAuto ? (
+          <span
+            className={cn(
+              'nodrag inline-flex h-6 w-10 items-center bg-transparent text-xs',
+              endAdornment && 'w-9',
+              inputClassName,
+            )}
+          >
+            <span className="sr-only">{ariaLabel}: </span>
+            {autoText}
+          </span>
+        ) : (
+          <input
+            type="number"
+            name={name}
+            inputMode="numeric"
+            aria-label={ariaLabel}
+            min={min}
+            max={max}
+            step={step}
+            disabled={disabled}
+            value={text}
+            placeholder={typeof value === 'number' ? '' : '—'}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={commit}
+            onMouseDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') {
+                commit();
+                (e.target as HTMLInputElement).blur();
+              } else if (e.key === 'Escape') {
+                restore();
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            className={cn(
+              SIZE_INPUT_CLASS,
+              endAdornment && 'w-9',
+              disabled && 'cursor-not-allowed opacity-50',
+              inputClassName,
+            )}
+          />
+        )}
         {endAdornment && (
-          <div className="absolute right-1 flex items-center">
-            {endAdornment}
-          </div>
+          <div className="flex items-center">{endAdornment}</div>
         )}
       </div>
-    </label>
+    </Container>
   );
 }
 
@@ -675,7 +687,7 @@ function ToolbarSizePicker({
             auto.onToggle();
           }}
           className={cn(
-            'nodrag flex h-4 w-4 items-center justify-center rounded transition-colors',
+            'nodrag flex h-6 w-6 items-center justify-center rounded transition-colors',
             autoActive ? 'text-info' : 'text-fg-subtle hover:text-fg-default',
           )}
         >
@@ -689,11 +701,12 @@ function ToolbarSizePicker({
     <ToolbarNumberInput
       label="W"
       ariaLabel="Width"
+      name="node-width"
       value={width}
       min={minSize}
       unstyled={isBothAxes}
       autoText={widthIsAuto ? autoLabel : undefined}
-      inputClassName={widthIsAuto ? 'text-fg-subtle italic' : undefined}
+      inputClassName={widthIsAuto ? 'text-fg-muted italic' : undefined}
       onApply={(next) => {
         if (
           widthIsAuto ||
@@ -710,11 +723,12 @@ function ToolbarSizePicker({
     <ToolbarNumberInput
       label="H"
       ariaLabel="Height"
+      name="node-height"
       value={height}
       min={minSize}
       unstyled={isBothAxes}
       autoText={heightIsAuto ? autoLabel : undefined}
-      inputClassName={heightIsAuto ? 'text-fg-subtle italic' : undefined}
+      inputClassName={heightIsAuto ? 'text-fg-muted italic' : undefined}
       endAdornment={
         isBothAxes ? undefined : modeToggle(<UnfoldVertical size={12} />)
       }

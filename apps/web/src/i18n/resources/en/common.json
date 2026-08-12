@@ -267,6 +267,7 @@
     "searching": "Searching"
   },
   "editor": {
+    "readOnlyContent": "Read-only content",
     "blockType": "Block type",
     "textColor": "Text color",
     "highlightColor": "Highlight color",
@@ -583,8 +584,8 @@
     "agentTeams": "Agent Teams",
     "externalAgents": "External Agents",
     "addAgent": "Add agent",
-    "inputPlaceholder": "Asking anything here...",
-    "operatePlaceholder": "Describe the Space change you want...",
+    "inputPlaceholder": "Asking anything here…",
+    "operatePlaceholder": "Describe the Space change you want…",
     "attachmentFallbackImage": "Image",
     "attachmentFallbackPdf": "PDF",
     "attachmentFallbackFile": "File",

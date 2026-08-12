@@ -718,6 +718,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       >
         <div className="mt-4 flex flex-col gap-0">
           <textarea
+            name="resource-urls"
+            autoComplete="off"
+            aria-label={t('toolbar.resources.linkDescription')}
             className="border-edge-default placeholder:text-fg-subtle focus:border-info focus:ring-info min-h-25 w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm focus:outline-none"
             placeholder={`https://example.com/image.png\nhttps://example.com/doc.pdf\nhttps://google.com`}
             value={linkText}
