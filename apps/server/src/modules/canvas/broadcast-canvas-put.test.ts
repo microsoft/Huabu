@@ -21,8 +21,8 @@ import { subscribeCanvasUpdates } from './canvas-sync.js';
 import { getCanvasStore } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
-import type { CanvasSyncEvent } from '@sediment/shared';
-import type { CanvasNode } from '@sediment/shared/canvas-engine';
+import type { CanvasSyncEvent } from '@huabu/shared';
+import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
 let tmp: string;
 
