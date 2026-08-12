@@ -315,10 +315,13 @@ export const NodeFloatingToolbar = memo(
             showHeight={!isTextFlowNode}
             onApply={({ width, height }) => {
               if (!internalNode) return;
-              const resolved = resolveGeometryEdit(internalNode, {
-                width,
-                height,
-              });
+              const resolved = resolveGeometryEdit(
+                internalNode,
+                { width, height },
+                {
+                  preserveAspectRatio: type === 'image' || type === 'video',
+                },
+              );
               if (!resolved) return;
               beginGesture('SET_NODE_GEOMETRY');
               // Frame in hug mode: typing an explicit W or H is a

@@ -25,6 +25,10 @@ export interface GeometryEdit {
   height?: number;
 }
 
+export interface GeometryEditOptions {
+  preserveAspectRatio?: boolean;
+}
+
 export interface ResolvedGeometry {
   width: number;
   /**
@@ -49,10 +53,11 @@ export interface ResolvedGeometry {
 export function resolveGeometryEdit(
   node: Node,
   edit: GeometryEdit,
+  options: GeometryEditOptions = {},
 ): ResolvedGeometry | null {
   const styleWidth = node.style?.width as number | undefined;
   const styleHeight = node.style?.height as number | undefined;
-  const { width: measuredW } = getNodeSize(node);
+  const { width: measuredW, height: measuredH } = getNodeSize(node);
 
   const fallbackW =
     typeof styleWidth === 'number' && styleWidth > 0
@@ -63,6 +68,29 @@ export function resolveGeometryEdit(
   const nextW = edit.width ?? fallbackW;
   if (typeof nextW !== 'number' || !Number.isFinite(nextW) || nextW <= 0) {
     return null;
+  }
+
+  if (options.preserveAspectRatio) {
+    const fallbackH =
+      typeof styleHeight === 'number' && styleHeight > 0
+        ? styleHeight
+        : measuredH > 0
+          ? measuredH
+          : undefined;
+    if (fallbackW === undefined || fallbackH === undefined) return null;
+
+    if (edit.width !== undefined && edit.height === undefined) {
+      return {
+        width: edit.width,
+        height: edit.width * (fallbackH / fallbackW),
+      };
+    }
+    if (edit.height !== undefined && edit.width === undefined) {
+      return {
+        width: edit.height * (fallbackW / fallbackH),
+        height: edit.height,
+      };
+    }
   }
 
   if (edit.height !== undefined) {

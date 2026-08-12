@@ -74,4 +74,24 @@ describe('resolveGeometryEdit', () => {
       ),
     ).toEqual({ width: 240, height: 'auto' });
   });
+
+  it('preserves the current aspect ratio when width is edited', () => {
+    expect(
+      resolveGeometryEdit(
+        note(),
+        { width: 600 },
+        { preserveAspectRatio: true },
+      ),
+    ).toEqual({ width: 600, height: 396 });
+  });
+
+  it('preserves the current aspect ratio when height is edited', () => {
+    expect(
+      resolveGeometryEdit(
+        note(),
+        { height: 396 },
+        { preserveAspectRatio: true },
+      ),
+    ).toEqual({ width: 600, height: 396 });
+  });
 });

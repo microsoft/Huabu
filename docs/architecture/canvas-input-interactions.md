@@ -48,6 +48,8 @@ While touch or pen is the current pointer, node objects are draggable only when 
 
 Direct-manipulation gestures use a shared screen-space activation policy: touch locks after 8 CSS px, pen after 4 CSS px, and mouse after 1 CSS px. React Flow receives the distance for the current pointer for both node drag activation and click tolerance, while custom pan, Lasso, and Sketch paths choose by each event's pointer type through `canvasGestureSession` and transition from `pending` to `locked`.
 
+Image and Video nodes preserve their current aspect ratio for both direct resize-handle gestures and toolbar width/height edits. The resize session normalizes every live proposal against the gesture-start ratio before mirroring it into React Flow or committing it, and the toolbar geometry resolver derives the unedited axis from the node's current rendered size.
+
 ```mermaid
 stateDiagram-v2
   [*] --> Pending: pointer down
@@ -241,6 +243,9 @@ The distinctive choice is the automatic split: with a pen, physical pointers pro
 | [`apps/web/src/components/Nodes/sketch/SketchOverlay.tsx`](../../apps/web/src/components/Nodes/sketch/SketchOverlay.tsx)               | Route Sketch pointers and commit gesture-local draw or erase mutations.                      |
 | [`apps/web/src/components/Nodes/NodeConnectAffordance.tsx`](../../apps/web/src/components/Nodes/NodeConnectAffordance.tsx)             | Render the four connection ports and create-and-connect a node at a resolved placement.      |
 | [`apps/web/src/components/Panels/Canvas/ConnectedNodePicker.tsx`](../../apps/web/src/components/Panels/Canvas/ConnectedNodePicker.tsx) | Ask for the node type after a connect gesture that did not land on an existing node.         |
+| [`apps/web/src/components/Nodes/NodeWrapper.tsx`](../../apps/web/src/components/Nodes/NodeWrapper.tsx)                                 | Start and commit per-node resize sessions, including aspect-ratio locking.                   |
+| [`apps/web/src/handler/snap/snapSession.ts`](../../apps/web/src/handler/snap/snapSession.ts)                                           | Normalize and mirror live resize geometry while applying Smart Snap where compatible.        |
+| [`apps/web/src/utils/node/geometry.ts`](../../apps/web/src/utils/node/geometry.ts)                                                     | Resolve toolbar dimension edits, including proportional single-axis media edits.             |
 | [`apps/web/src/store/connectPortStore.ts`](../../apps/web/src/store/connectPortStore.ts)                                               | Hold the pending connect gesture shared by the canvas and every node's ports.                |
 | [`apps/web/src/components/Panels/Canvas/CanvasToolbar.tsx`](../../apps/web/src/components/Panels/Canvas/CanvasToolbar.tsx)             | Present desktop tools or the touch-first Select and Lasso tools.                             |
 | [`apps/web/src/components/Settings/sections/GeneralSettings.tsx`](../../apps/web/src/components/Settings/sections/GeneralSettings.tsx) | Present the input preference and resolved Auto value.                                        |
