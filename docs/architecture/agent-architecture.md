@@ -77,18 +77,18 @@ tools/
 
 14 tools, assigned via each agent frontmatter's `tools` array (**not** a hardcoded list in code):
 
-| Tool                                                    | Handler                                                                                       | Scope                                         |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `get_space_outline` / `inspect_nodes` / `inspect_edges` | [canvas-query.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-query.ts)         | ask/operate                                   |
-| `read`                                                  | [fs-read.ts](../../apps/server/src/modules/agent/tools/handlers/fs-read.ts)                   | ask/operate/memory                            |
-| `grep` / `find` / `ls`                                  | [fs-search.ts](../../apps/server/src/modules/agent/tools/handlers/fs-search.ts)               | ask/operate                                   |
-| `web_search`                                            | [web-search.ts](../../apps/server/src/modules/agent/tools/handlers/web-search.ts)             | ask/operate                                   |
-| `space_commands`                                        | [canvas-write.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts)         | operate                                       |
-| `fs_write`                                              | [fs-write.ts](../../apps/server/src/modules/agent/tools/handlers/fs-write.ts)                 | operate/memory                                |
-| `snapshot_nodes`                                        | [snapshot-node.ts](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts)       | operate                                       |
-| `generate_image`                                        | [image-generation.ts](../../apps/server/src/modules/agent/tools/handlers/image-generation.ts) | operate                                       |
-| `create_task`                                           | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate                                       |
-| `start_task_run`                                        | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate                                       |
+| Tool                                                    | Handler                                                                                       | Scope              |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------ |
+| `get_space_outline` / `inspect_nodes` / `inspect_edges` | [canvas-query.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-query.ts)         | ask/operate        |
+| `read`                                                  | [fs-read.ts](../../apps/server/src/modules/agent/tools/handlers/fs-read.ts)                   | ask/operate/memory |
+| `grep` / `find` / `ls`                                  | [fs-search.ts](../../apps/server/src/modules/agent/tools/handlers/fs-search.ts)               | ask/operate        |
+| `web_search`                                            | [web-search.ts](../../apps/server/src/modules/agent/tools/handlers/web-search.ts)             | ask/operate        |
+| `space_commands`                                        | [canvas-write.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts)         | operate            |
+| `fs_write`                                              | [fs-write.ts](../../apps/server/src/modules/agent/tools/handlers/fs-write.ts)                 | operate/memory     |
+| `snapshot_nodes`                                        | [snapshot-node.ts](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts)       | operate            |
+| `generate_image`                                        | [image-generation.ts](../../apps/server/src/modules/agent/tools/handlers/image-generation.ts) | operate            |
+| `create_task`                                           | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate            |
+| `start_task_run`                                        | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate            |
 
 Design principles:
 

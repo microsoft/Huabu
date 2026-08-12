@@ -945,9 +945,9 @@ export function useAgentStream(
       // network blip to block the agent call.
       await useCanvasStore.getState().flushCanvasEvents();
 
-  // Snapshot the current thread's picker binding at send time. The server
-  // uses it for selectable threads but replaces it with the persisted
-  // binding when the thread resolves to a fixed Agent Node.
+      // Snapshot the current thread's picker binding at send time. The server
+      // uses it for selectable threads but replaces it with the persisted
+      // binding when the thread resolves to a fixed Agent Node.
       const agentBinding = selectThreadBinding(
         useChatStore.getState(),
         threadId,
