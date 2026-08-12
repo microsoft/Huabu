@@ -1,18 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Sparkles } from 'lucide-react';
 import { memo, useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
 
 import { resolveAccent } from '@huabu/shared';
 import { getSketchRenderedSize } from '@huabu/shared/canvas-engine';
 
-import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { MissingFileBanner } from '@/components/Nodes/MissingFileBanner';
 import useCanvasStore from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
-import { useIntentStore } from '@/store/intentStore';
 
 import { NodeWrapper } from '../NodeWrapper';
 import { SketchControls } from './SketchControls';
@@ -59,7 +55,6 @@ const StrokePath = memo(function StrokePath({
 
 export const SketchNode = memo(
   ({ id, data, selected, width, height }: NodeProps<SketchNodeType>) => {
-    const { t } = useTranslation();
     // The explicit `style` size is the store's synchronous source of truth for
     // sizing: `SET_NODE_GEOMETRY` writes it, and a live resize mirrors onto it
     // in the same `set`. The `width`/`height` props are the *measured* size,
@@ -78,9 +73,6 @@ export const SketchNode = memo(
     const scaleY = h / (data.initialSize?.height || 1);
     const isContentMissing = data.contentMissing === true;
 
-    const requestSketchRecognition = useIntentStore(
-      (s) => s.requestSketchRecognition,
-    );
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const beginNodeDataGesture = useCanvasStore((s) => s.beginNodeDataGesture);
     const endNodeDataGesture = useCanvasStore((s) => s.endNodeDataGesture);
@@ -152,18 +144,6 @@ export const SketchNode = memo(
       />
     );
 
-    const sketchActions = (
-      <FloatingToolbar.ActionButton
-        title={t('node.applySketch')}
-        onClick={(e) => {
-          e.stopPropagation();
-          requestSketchRecognition([id]);
-        }}
-      >
-        <Sparkles />
-      </FloatingToolbar.ActionButton>
-    );
-
     return (
       <NodeWrapper
         id={id}
@@ -172,7 +152,6 @@ export const SketchNode = memo(
         selected={selected}
         resizable={true}
         toolbar={isContentMissing ? undefined : sketchToolbar}
-        actions={isContentMissing ? undefined : sketchActions}
         allowOverflow
       >
         {isContentMissing ? (

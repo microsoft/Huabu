@@ -5,7 +5,7 @@ import clsx from 'clsx';
 import { ArrowUpRight } from 'lucide-react';
 import { useRef } from 'react';
 
-import { useChatStore } from '../../../../store/chatStore';
+import { useChatSession } from '../../../../hooks/useChatSession';
 import { setDragPayload } from '../../../../utils/io/dragDrop';
 import { DragToCanvasHandleButton } from '../../../Common/DragToCanvasHandleButton';
 
@@ -27,7 +27,7 @@ export const SourceCard = ({ source }: { source: Source }) => {
   const title = (source.title ?? '').trim() || source.url;
   const hostname = getHostname(source.url);
   const cardRef = useRef<HTMLAnchorElement | null>(null);
-  const threadId = useChatStore((s) => s.threadId);
+  const { threadId } = useChatSession();
 
   return (
     <div

@@ -64,7 +64,6 @@ describe('memory worker outcomes', () => {
       status: 'completed',
       results: [{ ok: true, target: 'space', reason: 'updated' }],
       latestChatTs: 25,
-      latestIntentTs: null,
     });
     const log = logger();
 

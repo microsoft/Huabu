@@ -37,7 +37,6 @@ import type {
 } from '../../canvas/persistence-types.js';
 import type {
   CanvasSummary,
-  IntentEpisode,
   RecentAction,
   TaskRecord,
   TaskRunRecord,
@@ -99,7 +98,6 @@ export interface SpaceHandle {
   readonly events: CanvasEventRepository;
   readonly deltas: CanvasDeltaRepository;
   readonly changes: CanvasChangeRepository;
-  readonly intents: CanvasIntentRepository;
   readonly tasks: CanvasTaskRepository;
   /** Synchronous transitional surface; replaced in a later phase. */
   readonly nodes: LegacyNodeStore;
@@ -186,12 +184,6 @@ export interface CanvasChangeRepository {
     threadId: string,
     changeId: string,
   ): Promise<CanvasChangeRecord | null>;
-}
-
-/** Intent episodes for one Space. Upserts are linearizable by episode id. */
-export interface CanvasIntentRepository {
-  read(): Promise<IntentEpisode[]>;
-  upsert(episode: IntentEpisode): Promise<void>;
 }
 
 export type TaskRunUpdate = Partial<

@@ -11,8 +11,7 @@ import {
 } from '@/api/interactiveView';
 import { focusNodesOnCanvas } from '@/components/Panels/CanvasLayerPanel/focusNodesOnCanvas';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
-import { usePanelStore } from '@/store/panelStore';
+import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
 import type {
   InteractiveViewBootstrapV1,
@@ -22,7 +21,6 @@ import type {
   InteractiveViewJsonValue,
   InteractiveViewOutcomeV1,
   InteractiveViewResource,
-  AgentBinding,
 } from '@huabu/shared';
 import type { RefObject } from 'react';
 
@@ -371,22 +369,7 @@ export function useInteractiveViewBridge(input: {
           focusNodesOnCanvas(canvas.rfInstance, [targetNode.id], 400);
         }
         if (grant.kind === 'navigation.open-thread') {
-          const data = targetNode.data as {
-            agentBinding?: AgentBinding;
-          };
-          useChatStore.getState().openQuestionThread(
-            {
-              presentationAnchor: { canvasId, nodeId: targetNode.id },
-              conversationOwner: {
-                canvasId,
-                nodeId: targetNode.id,
-                threadId: targetId,
-              },
-            },
-            data.agentBinding,
-            canvasId,
-          );
-          usePanelStore.getState().requestOpenRightPanel(targetNode.id);
+          openPreviewNode(targetNode.id);
         }
         postOutcome(port, {
           type: 'huabu.view.outcome',

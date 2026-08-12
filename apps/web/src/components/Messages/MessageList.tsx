@@ -11,7 +11,6 @@ import {
 } from 'react';
 
 import { AIMessage } from './AIMessage';
-import { IntentSelectMessage } from './IntentSelectMessage';
 import { positionMessageListOnOpen } from './messageListScroll';
 import { StatusMessage } from './StatusMessage';
 import { UserMessage } from './UserMessage';
@@ -33,8 +32,6 @@ interface MessageListProps {
   isHistoryLoading?: boolean;
   /** Hide action buttons on AI messages (e.g. in operate mode). */
   hideAIActions?: boolean;
-  /** Called when user re-selects an intent from the intent-select message. */
-  onIntentReselect?: (messageId: string, intent: string) => void;
   /** Called when the user clicks retry on an interrupted status message. */
   onRetry?: () => void;
   /** Stable identity for the conversation currently rendered by the list. */
@@ -43,6 +40,9 @@ interface MessageListProps {
   isActive?: boolean;
   /** Where to position the list when the conversation opens. */
   openPosition?: MessageListPreferredPosition;
+  /** Identity of an explicit one-shot positioning request. */
+  openPositionRequestNonce?: number;
+  onOpenPositionHandled?: (nonce: number) => void;
 }
 
 export const MessageList = ({
@@ -50,17 +50,21 @@ export const MessageList = ({
   isLoading,
   isHistoryLoading,
   hideAIActions,
-  onIntentReselect,
   onRetry,
   viewKey,
   isActive = true,
   openPosition = 'bottom',
+  openPositionRequestNonce,
+  onOpenPositionHandled,
 }: MessageListProps) => {
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const prevMessageCountRef = useRef(messages.length);
   const currentMessageCountRef = useRef(messages.length);
+  const positionedViewKeyRef = useRef<string | undefined>(undefined);
+  const hasPositionedViewRef = useRef(false);
+  const handledOpenRequestRef = useRef<number | undefined>(undefined);
   currentMessageCountRef.current = messages.length;
 
   // Opening a conversation is a deliberate navigation action. Position the
@@ -70,13 +74,32 @@ export const MessageList = ({
     if (!isActive || isHistoryLoading) return;
     const container = containerRef.current;
     if (!container) return;
+    const viewChanged =
+      !hasPositionedViewRef.current || positionedViewKeyRef.current !== viewKey;
+    const hasNewRequest =
+      openPositionRequestNonce !== undefined &&
+      handledOpenRequestRef.current !== openPositionRequestNonce;
+    if (!viewChanged && !hasNewRequest) return;
 
     const position = positionMessageListOnOpen(container, openPosition);
     isAtBottomRef.current = position !== 'last-user';
 
     setHasNewMessage(false);
     prevMessageCountRef.current = currentMessageCountRef.current;
-  }, [viewKey, isActive, isHistoryLoading, openPosition]);
+    positionedViewKeyRef.current = viewKey;
+    hasPositionedViewRef.current = true;
+    if (openPositionRequestNonce !== undefined) {
+      handledOpenRequestRef.current = openPositionRequestNonce;
+      onOpenPositionHandled?.(openPositionRequestNonce);
+    }
+  }, [
+    viewKey,
+    isActive,
+    isHistoryLoading,
+    openPosition,
+    openPositionRequestNonce,
+    onOpenPositionHandled,
+  ]);
 
   // Find the in-flight assistant message for the *current* turn.
   //
@@ -181,19 +204,6 @@ export const MessageList = ({
                   segments={msg.segments}
                   isStreaming={msg.id === streamingAssistantId}
                   hideActions={hideAIActions}
-                />,
-              );
-              i++;
-              continue;
-            }
-
-            if (msg.role === 'intent-select') {
-              elements.push(
-                <IntentSelectMessage
-                  key={msg.id}
-                  candidates={msg.candidates}
-                  selectedIntent={msg.selectedIntent}
-                  onReselect={(intent) => onIntentReselect?.(msg.id, intent)}
                 />,
               );
               i++;

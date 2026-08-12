@@ -2,12 +2,13 @@
 // Licensed under the MIT license.
 
 import clsx from 'clsx';
-import { ArrowLeft, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
+import { Bookmark, ListIndentIncrease, PanelRightOpen } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 import {
+  createId,
   getQuestionNodeStatus,
   MODE_SELECTION_ID,
   MODEL_SELECTION_ID,
@@ -18,7 +19,6 @@ import {
   setAcpSessionMode,
   setAcpSessionModel,
 } from '@/api/acp';
-import { logIntentEpisode } from '@/api/intent';
 import { Button } from '@/components/Common/Button';
 import { Input } from '@/components/Common/Input';
 import { toast } from '@/components/Common/Toast';
@@ -27,14 +27,17 @@ import { useAcpProfiles } from '@/hooks/useAcpProfiles';
 import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
 import { useBuiltinThreadSettings } from '@/hooks/useBuiltinThreadSettings';
+import { ChatSessionProvider, type ChatSession } from '@/hooks/useChatSession';
 import { useInternalSlashCommands } from '@/hooks/useInternalSlashCommands';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
-  selectCurrentHistoryLoaded,
-  selectCurrentMessages,
-  selectCurrentDraft,
+  selectThreadBinding,
+  selectThreadDraft,
+  selectThreadHistoryLoaded,
+  selectThreadLastAction,
+  selectThreadMessages,
   useChatStore,
 } from '@/store/chatStore';
 import { findPendingPermissionRequest } from '@/store/chatTypes';
@@ -42,9 +45,8 @@ import {
   isHeadlessConversation,
   resolveConversationOwnerSource,
 } from '@/store/conversationOwner';
-import { useIntentStore } from '@/store/intentStore';
 import { useLLMStore } from '@/store/llmStore';
-import { usePanelStore } from '@/store/panelStore';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
 
 import {
@@ -52,69 +54,77 @@ import {
   type AcpConnectionStatus,
 } from './AcpConnectionBadge';
 import { AcpSessionSelectors } from './AcpSessionSelectors';
+import { bindingsEqual } from './agentMenu';
 import { AgentSelector, type AgentChoice } from './AgentSelector';
 import { BuiltinSessionSelectors } from './BuiltinSessionSelectors';
 import { ChangeReviewCard } from './ChangeReviewCard';
 import { ChatInput } from './ChatInput';
-import { NewChatMenu, type NewChatChoice } from './NewChatMenu';
 import { parseSlashInvocations } from './parseSlashInvocations';
-import { useSketchClusterMessages } from './useSketchClusterMessages';
+import { saveChatAsQuestion } from './saveChatAsQuestion';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
 import { SidebarPanel } from '../SidebarPanel';
 
-import type {
-  AgentIcon,
-  AgentMode,
-  IntentCandidate,
-  IntentEpisode,
-} from '@huabu/shared';
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { AgentIcon, AgentMode, CanvasNodeId } from '@huabu/shared';
 
 interface ChatPanelProps {
   isCollapsed?: boolean;
   onToggle?: () => void;
+  /** The conversation rendered by this Preview Workspace tab. */
+  session: ChatSession;
+  /** Workspace tab to convert in place when an unbound Chat is saved. */
+  previewTabId: string;
+  /** Reports a persistent thread mutation to the owning preview surface. */
+  onCommit?: () => void;
+  /** One-shot initial scroll request from Preview Workspace. */
+  openPositionRequest?: {
+    position: 'last-user' | 'bottom';
+    nonce: number;
+  };
+  onOpenPositionHandled?: (nonce: number) => void;
 }
 
-export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
+export const ChatPanel = ({
+  isCollapsed,
+  onToggle,
+  session,
+  previewTabId,
+  onCommit,
+  openPositionRequest,
+  onOpenPositionHandled,
+}: ChatPanelProps) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  // Composer draft lives in the store keyed by threadId (see chatStore
-  // `draftsByThread`) so an unsent draft stays with its own session
-  // instead of being wiped when the user switches canvas or opens a
-  // question replay. `setInput` is wired to the current thread below,
-  // once `threadId` is available.
-  const input = useChatStore(selectCurrentDraft);
   const setDraft = useChatStore((state) => state.setDraft);
-  const setLastAction = useChatStore((state) => state.setLastAction);
-
-  // Canvas-level chat mode toggle. Persisted to localStorage so a page
-  // refresh restores the last-used mode for the canvas thread; kept in
-  // sync by `useAgentStream.startStream`, which calls
-  // `setLastAction(agentMode)` on every send.
-  const lastAction = useChatStore((state) => state.lastAction);
   const canvasId = useCanvasStore((state) => state.canvasId);
 
   // When the panel is replaying a question node's thread, the mode is a
-  // property of that NODE (`data.agentMode`), not the canvas-level
-  // `lastAction` toggle (the replay view hides the mode selector). We
-  // derive it straight from the node rather than mirroring it into
-  // `lastAction` on open, so the composer + every follow-up turn stay
+  // property of that NODE (`data.agentMode`), not the thread's mutable
+  // compose mode (the replay view hides the mode selector). We derive it
+  // straight from the node, so the composer + every follow-up turn stay
   // structurally consistent with how the question itself runs: an
   // `@Agent` (operate) question keeps emitting operate turns, an `@Chat`
   // question stays in ask. External bindings have no ask/operate split
   // (their mode is ACP-managed), so they pin to ask. Falls back to ask
   // for legacy nodes that pre-date the `@` picker.
-  const viewingQuestionThread = useChatStore((s) => s.viewingQuestionThread);
-  const activeConversationView =
-    viewingQuestionThread?.presentationAnchor.canvasId === canvasId
-      ? viewingQuestionThread
-      : null;
+  const { threadId, ownerCanvasId } = session;
+  const setThreadLastAction = useChatStore(
+    (state) => state.setThreadLastAction,
+  );
+  const lastAction = useChatStore((state) =>
+    selectThreadLastAction(state, threadId),
+  );
+  const activeConversationView = session.conversationView;
+
+  // Composer draft lives in the store keyed by threadId (see chatStore
+  // `ChatThreadState.draft`) so an unsent draft stays with its own session
+  // instead of being wiped when the user switches canvas or opens a
+  // question replay.
+  const input = useChatStore((state) => selectThreadDraft(state, threadId));
+
   const viewingQuestionNodeId =
     activeConversationView?.conversationOwner.nodeId;
-  const ownerCanvasId =
-    activeConversationView?.conversationOwner.canvasId || canvasId;
   const headlessConversation = isHeadlessConversation(activeConversationView);
   const conversationOwnerSource = useCanvasStore((state) =>
     resolveConversationOwnerSource(
@@ -128,7 +138,11 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     !headlessConversation || conversationOwnerSource !== undefined;
   // "Composing" = the viewed question node has never been authored/run yet
   // (its status is still `idle`). Its binding remains mutable unless creation
-  // explicitly fixed it; the mode follows the inline pick (`lastAction`).
+  // explicitly fixed it; the mode follows this thread's inline pick rather
+  // than the node's
+  // not-yet-written `agentMode`. Derived from the node itself — the single
+  // source of truth — rather than a stored `compose` flag. Replay (already-run
+  // node) keeps deriving from the node.
   const isComposingQuestion =
     !headlessConversation &&
     !!viewingQuestionNodeId &&
@@ -185,29 +199,32 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   }, [isEditingQuestionTitle]);
 
   const mode: AgentMode =
-    viewingQuestionThread && !isComposingQuestion
+    activeConversationView && !isComposingQuestion
       ? (questionReplayMode ?? 'ask')
       : lastAction;
 
   // Agent stream hook — manages streaming and loading state
-  const { isLoading, setIsLoading, startStream, stopStream } = useAgentStream();
+  const { isLoading, setIsLoading, startStream, stopStream } = useAgentStream(
+    session,
+    previewTabId,
+  );
 
   // Chat history hook — loads history and handles reconnection
-  useChatHistory(setIsLoading);
+  useChatHistory(session, setIsLoading, previewTabId);
 
   // Persistent chat state. Messages are per-thread (see chatStore.ts);
-  // selectors pluck the slice that belongs to the currently-visible
-  // thread, so a stream running in another thread (e.g. a question
-  // node) does not paint into this list.
-  const messages = useChatStore(selectCurrentMessages);
+  // every read names this session's thread, so a stream running in another
+  // thread (e.g. a question node) does not paint into this list.
+  const messages = useChatStore((state) =>
+    selectThreadMessages(state, threadId),
+  );
   const pendingPermission = useMemo(
     () => findPendingPermissionRequest(messages),
     [messages],
   );
-  const isHistoryLoaded = useChatStore(selectCurrentHistoryLoaded);
-  const updateMessage = useChatStore((state) => state.updateMessage);
-  const clearMessages = useChatStore((state) => state.clearMessages);
-  const threadId = useChatStore((state) => state.threadId);
+  const isHistoryLoaded = useChatStore((state) =>
+    selectThreadHistoryLoaded(state, threadId),
+  );
   // Wire the composer's onChange to the current thread's draft slot. An
   // empty string clears the draft (see `setDraft`), so the existing
   // `setInput('')` on send doubles as clear-on-send.
@@ -221,11 +238,14 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   const llmInit = useLLMStore((state) => state.init);
 
   // Thread → agent binding. The binding is locked for the lifetime of
-  // a thread; the only way to change it is to start a new thread via
-  // the `NewChatMenu`. New threads default to `{kind:'internal'}`
-  // unless the user picks an external agent from the menu.
-  const agentBinding = useChatStore((state) => state.agentBinding);
+  // a thread; the only way to change it is to open a new workspace Chat.
+  const agentBinding = useChatStore((state) =>
+    selectThreadBinding(state, threadId),
+  );
   const setAgentBinding = useChatStore((state) => state.setAgentBinding);
+  const fixedAgentBinding = viewingQuestionBindingIsFixed
+    ? conversationOwnerSource?.agentBinding
+    : undefined;
   const {
     profiles: acpProfiles,
     refresh: refreshAcpProfiles,
@@ -236,12 +256,17 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       ? acpProfiles.find((profile) => profile.id === agentBinding.profileId)
       : undefined;
 
+  useEffect(() => {
+    if (!fixedAgentBinding || bindingsEqual(agentBinding, fixedAgentBinding)) {
+      return;
+    }
+    setAgentBinding(threadId, fixedAgentBinding);
+  }, [agentBinding, fixedAgentBinding, setAgentBinding, threadId]);
+
   // Auto-reset a stale external binding on an *empty* thread: the
   // persisted binding refers to a profile that no longer exists
   // (user deleted it from Settings, or imported a workspace whose
-  // profiles were never created locally). Without this, the "+"
-  // shortcut in `NewChatMenu` would try to start a new thread bound
-  // to a missing profile and reliably 404. Threads with messages
+  // profiles were never created locally). Threads with messages
   // keep the stale binding so the title still reads "Chat with
   // <alias>" — the user can recreate the profile in Settings to
   // bring the binding back to life.
@@ -256,7 +281,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       (p) => p.id === agentBinding.profileId,
     );
     if (profileExists) return;
-    setAgentBinding({ kind: 'internal' }, canvasId || undefined);
+    setAgentBinding(threadId, { kind: 'internal' }, canvasId || undefined);
   }, [
     isHistoryLoaded,
     messages.length,
@@ -267,6 +292,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     headlessConversation,
     viewingQuestionBindingIsFixed,
     setAgentBinding,
+    threadId,
   ]);
 
   // Load the persisted change-review records when a thread opens so the
@@ -463,6 +489,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       });
       try {
         await setAcpSessionMode(threadId, { modeId, ...acpSetRpcSpawnCtx });
+        onCommit?.();
       } catch (err) {
         applyAcpSessionMetaOptimistic({
           selection: { id: MODE_SELECTION_ID, value: previous },
@@ -475,7 +502,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, t],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, onCommit, t],
   );
 
   const handleAcpSelectModel = useCallback(
@@ -488,6 +515,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       });
       try {
         await setAcpSessionModel(threadId, { modelId, ...acpSetRpcSpawnCtx });
+        onCommit?.();
       } catch (err) {
         applyAcpSessionMetaOptimistic({
           selection: { id: MODEL_SELECTION_ID, value: previous },
@@ -500,7 +528,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, t],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, onCommit, t],
   );
 
   const handleAcpSelectConfigOption = useCallback(
@@ -516,6 +544,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
           value,
           ...acpSetRpcSpawnCtx,
         });
+        onCommit?.();
       } catch (err) {
         applyAcpSessionMetaOptimistic({
           selection: { id: optionId, value: previous },
@@ -528,41 +557,19 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, t],
+    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, onCommit, t],
   );
 
   // Question thread replay mode
-  const closeQuestionThread = useChatStore((s) => s.closeQuestionThread);
-  const openQuestionThreadInOwnerCanvas = useChatStore(
-    (s) => s.openQuestionThreadInOwnerCanvas,
-  );
-  // Bind canvasId so closing also drops the per-canvas replay pointer
-  // in `questionReplayByCanvas` — otherwise a refresh would re-open the
-  // replay the user just dismissed.
-  const handleCloseQuestionThread = useCallback(() => {
-    closeQuestionThread(canvasId || undefined);
-  }, [closeQuestionThread, canvasId]);
   const openOwnerSpaceForReview = useCallback(() => {
-    if (!viewingQuestionThread || !headlessConversation) return;
-    const owner = viewingQuestionThread.conversationOwner;
-    openQuestionThreadInOwnerCanvas(viewingQuestionThread, agentBinding);
-    navigate(`/canvas/${owner.canvasId}`);
-  }, [
-    agentBinding,
-    headlessConversation,
-    navigate,
-    openQuestionThreadInOwnerCanvas,
-    viewingQuestionThread,
-  ]);
-
-  // Sketch cluster inspector mode (mutually exclusive with question
-  // replay). When set, MessageList renders synthesized messages built from
-  // the live cluster state instead of the canvas chat.
-  const viewingSketchCluster = useChatStore((s) => s.viewingSketchCluster);
-  const closeSketchCluster = useChatStore((s) => s.closeSketchCluster);
-  const sketchMessages = useSketchClusterMessages(
-    viewingSketchCluster?.clusterId ?? null,
-  );
+    if (!activeConversationView || !headlessConversation) return;
+    const owner = activeConversationView.conversationOwner;
+    navigate(`/canvas/${owner.canvasId}`, {
+      state: {
+        previewNode: { canvasId: owner.canvasId, nodeId: owner.nodeId },
+      },
+    });
+  }, [headlessConversation, navigate, activeConversationView]);
 
   useEffect(() => {
     if (!llmConfig && !llmLoading) {
@@ -571,8 +578,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   }, [llmConfig, llmLoading, llmInit]);
 
   const panelTitle = useMemo(() => {
-    if (viewingSketchCluster) return t('chat.sketchRecognition');
-    if (viewingQuestionThread) {
+    if (activeConversationView) {
       // Composing a fresh node: it has no real label yet, so show a
       // neutral title instead of the auto-generated "Question N". A
       // manual sidebar rename is real authored identity and stays visible.
@@ -591,11 +597,10 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
   }, [
     agentBinding,
     t,
-    viewingQuestionThread,
+    activeConversationView,
     isComposingQuestion,
     isViewingUserNamedQuestion,
     viewingQuestionLabel,
-    viewingSketchCluster,
   ]);
 
   const commitQuestionTitle = useCallback(() => {
@@ -612,82 +617,16 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     }
     setIsEditingQuestionTitle(false);
     void tryRename('node', viewingQuestionNodeId, next).then((accepted) => {
-      if (!accepted) setDraftQuestionTitle(viewingQuestionLabel ?? '');
+      if (accepted) onCommit?.();
+      else setDraftQuestionTitle(viewingQuestionLabel ?? '');
     });
   }, [
     draftQuestionTitle,
+    onCommit,
     tryRename,
     viewingQuestionLabel,
     viewingQuestionNodeId,
   ]);
-
-  // Register intent callback — when user selects an intent in the popover,
-  // it's sent here and executed as an agent chat message.
-  useEffect(() => {
-    const handleIntentChosen = async (
-      intent: string,
-      candidates: IntentCandidate[],
-      episode: IntentEpisode,
-    ) => {
-      // Ensure the right panel is visible before running the intent.
-      usePanelStore.getState().requestOpenRightPanel();
-      // Switch mode to operate
-      setLastAction('operate');
-
-      // Run operate turn, then upsert execution outcome on the episode.
-      const writtenCanvasId = useCanvasStore.getState().canvasId || undefined;
-      try {
-        await startStream(intent, 'operate', {
-          candidates,
-          selectedIntent: intent,
-        });
-        if (episode.outcome.type === 'selected') {
-          void logIntentEpisode(
-            {
-              ...episode,
-              outcome: {
-                ...episode.outcome,
-                execution: { status: 'success' },
-              },
-            },
-            writtenCanvasId,
-          );
-        }
-      } catch (err) {
-        if (episode.outcome.type === 'selected') {
-          void logIntentEpisode(
-            {
-              ...episode,
-              outcome: {
-                ...episode.outcome,
-                execution: {
-                  status: 'error',
-                  error: err instanceof Error ? err.message : String(err),
-                },
-              },
-            },
-            writtenCanvasId,
-          );
-        }
-      }
-    };
-    useIntentStore.getState()._setOnIntentChosen(handleIntentChosen);
-    return () => {
-      useIntentStore.getState()._setOnIntentChosen(null);
-    };
-  }, [startStream, setLastAction]);
-
-  const handleIntentReselect = useCallback(
-    (messageId: string, intent: string) => {
-      // Update the intent-select message with the new selection
-      updateMessage(threadId, messageId, (m) =>
-        m.role === 'intent-select' ? { ...m, selectedIntent: intent } : m,
-      );
-      // Re-run with the new intent
-      void startStream(intent, 'operate');
-    },
-    [startStream, updateMessage, threadId],
-  );
 
   const handleSubmit = async (e: React.FormEvent, agentMode: AgentMode) => {
     e.preventDefault();
@@ -714,6 +653,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     if (!isSkillInvocationAllowed) {
       const prompt = raw.trim();
       if (!prompt) return;
+      onCommit?.();
       await startStream(prompt, agentMode);
       return;
     }
@@ -723,40 +663,22 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     );
     const prompt = message.trim();
     if (!prompt) return;
+    onCommit?.();
     await startStream(
       prompt,
       agentMode,
-      undefined,
       invokedSkills.length > 0 ? invokedSkills : undefined,
     );
   };
-
-  // Atomic "reset thread + apply (mode, binding)". Both the mode
-  // and binding land in the same zustand commit inside
-  // `clearMessages`, so the user never sees an intermediate frame
-  // with the old mode or a stale internal binding.
-  const handleStartNewChat = useCallback(
-    (choice: NewChatChoice) => {
-      if (isLoading) return;
-      clearMessages(canvasId || undefined, {
-        ...(choice.binding.kind === 'external'
-          ? { binding: choice.binding }
-          : {}),
-        lastAction: choice.mode,
-      });
-    },
-    [isLoading, canvasId, clearMessages],
-  );
 
   // Inline agent selector (left of the chat input toolbar). The binding
   // is mutable only while the thread has no user message yet — once a
   // turn is sent, 1-thread-1-binding locks it and the selector renders
   // read-only. Picking an agent rebinds the *current* (empty) thread in
-  // place; it never mints a new thread (that is `NewChatMenu`'s job).
+  // place; it never mints a new thread.
   const threadHasUserMessage = messages.some((m) => m.role === 'user');
   const agentSelectorEditable =
     !headlessConversation &&
-    !viewingSketchCluster &&
     !viewingQuestionBindingIsFixed &&
     !threadHasUserMessage &&
     !isLoading;
@@ -766,21 +688,23 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
       // The selector is already read-only then; keep this guard as defense in
       // depth in case a stale menu event arrives during the transition.
       if (isLoading || viewingQuestionBindingIsFixed) return;
-      setAgentBinding(choice.binding, canvasId || undefined);
-      setLastAction(choice.mode);
+      setAgentBinding(threadId, choice.binding, canvasId || undefined);
+      setThreadLastAction(threadId, choice.mode);
+      onCommit?.();
     },
     [
       isLoading,
+      onCommit,
       viewingQuestionBindingIsFixed,
       setAgentBinding,
-      setLastAction,
+      setThreadLastAction,
       canvasId,
+      threadId,
     ],
   );
 
   const canSave =
-    !viewingQuestionThread &&
-    !viewingSketchCluster &&
+    !activeConversationView &&
     !isLoading &&
     messages.some((m) => m.role === 'user' && m.content.trim().length > 0);
   const handleSaveChat = useCallback(() => {
@@ -792,27 +716,35 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     const content = firstUser.content.trim();
     if (!content) return;
 
-    addNode({
-      nodeType: 'question',
-      data: {
-        type: 'question',
-        content,
-        status: 'done',
-        viewed: true,
-        threadId,
-        agentBinding,
-        agentIcon: snapshotAgentIcon(
+    const questionNodeId = createId('node') as CanvasNodeId;
+    saveChatAsQuestion(
+      {
+        id: questionNodeId,
+        nodeType: 'question',
+        data: {
+          type: 'question',
+          content,
+          status: 'done',
+          viewed: true,
+          threadId,
           agentBinding,
-          useAcpProfilesStore.getState().profiles,
-        ),
-        agentMode: mode,
+          agentIcon: snapshotAgentIcon(
+            agentBinding,
+            useAcpProfilesStore.getState().profiles,
+          ),
+          agentMode: mode,
+        },
       },
-    });
-
-    clearMessages(canvasId || undefined, {
-      ...(agentBinding.kind === 'external' ? { binding: agentBinding } : {}),
-      lastAction: mode,
-    });
+      {
+        canvasId,
+        previewTabId,
+        addNode,
+        nodeExists: (nodeId) =>
+          useCanvasStore.getState().nodes.some((node) => node.id === nodeId),
+        replaceTabTarget: (tabId, target) =>
+          usePreviewWorkspaceStore.getState().replaceTabTarget(tabId, target),
+      },
+    );
   }, [
     isLoading,
     messages,
@@ -821,138 +753,112 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
     mode,
     canvasId,
     addNode,
-    clearMessages,
+    previewTabId,
   ]);
 
   return (
-    <SidebarPanel
-      title={panelTitle}
-      tabs={
-        <span className="flex min-w-0 flex-1 items-center gap-1">
-          {(viewingSketchCluster || viewingQuestionThread) && (
+    <ChatSessionProvider value={session}>
+      <SidebarPanel
+        title={panelTitle}
+        tabs={
+          <span className="flex min-w-0 flex-1 items-center gap-1">
+            {canRenameQuestion && isEditingQuestionTitle ? (
+              <Input
+                ref={questionTitleInputRef}
+                value={draftQuestionTitle}
+                aria-label={t('node.rename')}
+                placeholder={t('node.untitled')}
+                className="text-fg-default bg-bg-default border-edge-default w-64 max-w-full min-w-0 truncate rounded border px-1 py-0.5 text-sm font-semibold outline-none"
+                onChange={(event) => setDraftQuestionTitle(event.target.value)}
+                onBlur={commitQuestionTitle}
+                onKeyDown={(event) => {
+                  event.stopPropagation();
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    commitQuestionTitle();
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    setDraftQuestionTitle(viewingQuestionLabel ?? '');
+                    setIsEditingQuestionTitle(false);
+                  }
+                }}
+              />
+            ) : canRenameQuestion ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                title={t('node.rename')}
+                aria-label={t('node.rename')}
+                tooltipPlacement="bottom"
+                className={clsx(
+                  'hover:text-fg-default min-w-0 cursor-text justify-start truncate rounded border border-transparent px-1 py-0.5 text-sm font-semibold',
+                )}
+                onClick={() => setIsEditingQuestionTitle(true)}
+              >
+                {panelTitle}
+              </Button>
+            ) : (
+              <span className="min-w-0 truncate px-1 py-0.5">{panelTitle}</span>
+            )}
+            {acpConnectionStatus && agentBinding.kind === 'external' && (
+              <AcpConnectionBadge
+                status={acpConnectionStatus}
+                alias={agentBinding.alias}
+                errorMessage={acpSessionMetaError?.message ?? null}
+                errorCode={acpSessionMetaErrorCode}
+              />
+            )}
+          </span>
+        }
+        isCollapsed={isCollapsed}
+        onToggle={onToggle}
+        iconCollapsed={<PanelRightOpen size={16} />}
+        iconExpanded={<ListIndentIncrease size={16} />}
+        compactHeader
+        hideTitle={!activeConversationView}
+        tools={
+          activeConversationView ? null : (
             <Button
               variant="ghost"
+              tone="neutral"
+              size="md"
               iconOnly
-              onClick={
-                viewingSketchCluster
-                  ? closeSketchCluster
-                  : handleCloseQuestionThread
-              }
-              title={t('chat.backToChat')}
+              onClick={handleSaveChat}
+              disabled={!isHistoryLoaded || isLoading || !canSave}
+              title={t('chat.saveAsQuestion')}
               tooltipPlacement="bottom"
-              className="-ml-1 shrink-0"
             >
-              <ArrowLeft size={16} />
+              <Bookmark />
             </Button>
-          )}
-          {canRenameQuestion && isEditingQuestionTitle ? (
-            <Input
-              ref={questionTitleInputRef}
-              value={draftQuestionTitle}
-              aria-label={t('node.rename')}
-              placeholder={t('node.untitled')}
-              className="text-fg-default bg-bg-default border-edge-default w-64 max-w-full min-w-0 truncate rounded border px-1 py-0.5 text-sm font-semibold outline-none"
-              onChange={(event) => setDraftQuestionTitle(event.target.value)}
-              onBlur={commitQuestionTitle}
-              onKeyDown={(event) => {
-                event.stopPropagation();
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  commitQuestionTitle();
-                }
-                if (event.key === 'Escape') {
-                  event.preventDefault();
-                  setDraftQuestionTitle(viewingQuestionLabel ?? '');
-                  setIsEditingQuestionTitle(false);
-                }
-              }}
-            />
-          ) : (
-            <span
-              className={clsx(
-                'min-w-0 truncate rounded border border-transparent px-1 py-0.5',
-                canRenameQuestion &&
-                  'hover:text-fg-default focus-visible:outline-info cursor-text focus-visible:outline-1',
-              )}
-              title={canRenameQuestion ? t('node.rename') : panelTitle}
-              {...(canRenameQuestion
-                ? {
-                    role: 'button' as const,
-                    tabIndex: 0,
-                    onClick: () => setIsEditingQuestionTitle(true),
-                    onKeyDown: (event: ReactKeyboardEvent) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        setIsEditingQuestionTitle(true);
-                      }
-                    },
-                  }
-                : {})}
-            >
-              {panelTitle}
-            </span>
-          )}
-          {acpConnectionStatus && agentBinding.kind === 'external' && (
-            <AcpConnectionBadge
-              status={acpConnectionStatus}
-              alias={agentBinding.alias}
-              errorMessage={acpSessionMetaError?.message ?? null}
-              errorCode={acpSessionMetaErrorCode}
-            />
-          )}
-        </span>
-      }
-      isCollapsed={isCollapsed}
-      onToggle={onToggle}
-      iconCollapsed={<PanelRightOpen size={16} />}
-      iconExpanded={<ListIndentIncrease size={16} />}
-      className="border-edge-default border-l"
-      tools={
-        viewingSketchCluster || viewingQuestionThread ? null : (
-          <NewChatMenu
-            currentMode={mode}
-            currentBinding={agentBinding}
-            profiles={acpProfiles}
-            onRefreshProfiles={refreshAcpProfiles}
-            onSelect={handleStartNewChat}
-            onSave={handleSaveChat}
-            canSave={canSave}
-            disabled={!isHistoryLoaded}
-            busy={isLoading}
-          />
-        )
-      }
-    >
-      <div className="flex h-full flex-col gap-2 overflow-visible pt-3">
-        <MessageList
-          messages={viewingSketchCluster ? sketchMessages : messages}
-          isLoading={viewingSketchCluster ? false : isLoading}
-          isHistoryLoading={!viewingSketchCluster && !isHistoryLoaded}
-          viewKey={
-            viewingSketchCluster?.clusterId ??
-            `${threadId}:${viewingQuestionThread?.openSequence ?? 0}`
-          }
-          isActive={!isCollapsed}
-          openPosition={
-            pendingPermission
-              ? 'bottom'
-              : (viewingQuestionThread?.openPosition ?? 'bottom')
-          }
-          hideAIActions={!!viewingSketchCluster}
-          onIntentReselect={handleIntentReselect}
-          onRetry={() => {
-            // Find the last user message and re-send it
-            const lastUserMsg = [...messages]
-              .reverse()
-              .find((m) => m.role === 'user');
-            if (lastUserMsg && lastUserMsg.role === 'user') {
-              void startStream(lastUserMsg.content, mode);
+          )
+        }
+      >
+        <div className="flex h-full flex-col gap-2 overflow-visible pt-3">
+          <MessageList
+            messages={messages}
+            isLoading={isLoading}
+            isHistoryLoading={!isHistoryLoaded}
+            viewKey={threadId}
+            isActive={!isCollapsed}
+            openPosition={
+              pendingPermission
+                ? 'bottom'
+                : (openPositionRequest?.position ?? 'bottom')
             }
-          }}
-        />
+            openPositionRequestNonce={openPositionRequest?.nonce}
+            onOpenPositionHandled={onOpenPositionHandled}
+            onRetry={() => {
+              // Find the last user message and re-send it
+              const lastUserMsg = [...messages]
+                .reverse()
+                .find((m) => m.role === 'user');
+              if (lastUserMsg && lastUserMsg.role === 'user') {
+                void startStream(lastUserMsg.content, mode);
+              }
+            }}
+          />
 
-        {/* Input is hidden in sketch inspector mode — it's a read-only view. */}
-        {!viewingSketchCluster && (
           <div className="px-3 pb-2">
             {pendingPermission ? (
               <div className="mb-2">
@@ -984,6 +890,7 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               value={input}
               onChange={setInput}
               onSubmit={handleSubmit}
+              onCommit={onCommit}
               onStop={stopStream}
               isStreaming={isLoading}
               mode={mode}
@@ -1020,10 +927,14 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
                       builtinThreadSettings.settings.reasoningEffort
                     }
                     loading={builtinThreadSettings.loading}
-                    onSelectModel={builtinThreadSettings.selectModel}
-                    onSelectReasoningEffort={
-                      builtinThreadSettings.selectReasoningEffort
-                    }
+                    onSelectModel={async (modelId) => {
+                      await builtinThreadSettings.selectModel(modelId);
+                      onCommit?.();
+                    }}
+                    onSelectReasoningEffort={async (effort) => {
+                      await builtinThreadSettings.selectReasoningEffort(effort);
+                      onCommit?.();
+                    }}
                   />
                 )
               }
@@ -1050,8 +961,8 @@ export const ChatPanel = ({ isCollapsed, onToggle }: ChatPanelProps) => {
               disabled={!isHistoryLoaded}
             />
           </div>
-        )}
-      </div>
-    </SidebarPanel>
+        </div>
+      </SidebarPanel>
+    </ChatSessionProvider>
   );
 };

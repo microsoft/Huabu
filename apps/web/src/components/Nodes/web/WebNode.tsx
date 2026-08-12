@@ -13,6 +13,7 @@ import { getNodeIcon } from '../../../config/nodeIcons.ts';
 import { useNodeLOD } from '../../../hooks/useNodeLOD.ts';
 import { useNodeScale } from '../../../hooks/useNodeScale.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
+import { openPreviewNode } from '../../../store/previewWorkspace/actions.ts';
 import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
 import { Loading } from '../../Common/Loading';
 import { getAccentTokens } from '../accentTokens.ts';
@@ -43,7 +44,6 @@ export const WebNode = memo(
     const { t } = useTranslation();
     const scale = useNodeScale(id, 'web');
     const isMinimalLOD = useNodeLOD(id, 'web') === 'minimal';
-    const openExpanded = useCanvasStore((s) => s.openExpanded);
     const canvasId = useCanvasStore((s) => s.canvasId);
     const ingestion = useCanvasStore((state) => state.ingestionByNodeId[id]);
 
@@ -202,7 +202,7 @@ export const WebNode = memo(
           title={t('node.openLargeView')}
           onClick={(e) => {
             e.stopPropagation();
-            openExpanded(id);
+            openPreviewNode(id);
           }}
         >
           <Fullscreen />

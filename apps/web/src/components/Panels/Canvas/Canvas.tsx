@@ -83,6 +83,10 @@ import {
 } from '@/hooks/useInputMode';
 import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
 import { useSketchStrokeMove } from '@/hooks/useSketchStrokeMove';
+import {
+  closeActivePreviewNode,
+  openPreviewNode,
+} from '@/store/previewWorkspace/actions';
 import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
@@ -103,7 +107,6 @@ import {
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { StrokeSelectionToolbar } from './FloatingToolbars/StrokeSelectionToolbar.tsx';
-import { IntentPopover } from './IntentPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
 import { SelectionOutlines } from './SelectionOutlines.tsx';
 import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
@@ -115,7 +118,10 @@ import useCanvasStore from '../../../store/canvasStore.ts';
 import { useConnectPortStore } from '../../../store/connectPortStore.ts';
 import { useGesturePreviewStore } from '../../../store/gesturePreviewStore.ts';
 import { usePanelStore } from '../../../store/panelStore.ts';
-import { usePreviewStore } from '../../../store/previewStore.ts';
+import {
+  selectActiveNodeId,
+  usePreviewWorkspaceStore,
+} from '../../../store/previewWorkspace/store.ts';
 import { useToolStore } from '../../../store/toolStore.ts';
 import { useWorkspaceStore } from '../../../store/workspaceStore.ts';
 import {
@@ -136,7 +142,6 @@ import {
   CANCEL_SKETCH_GESTURE_EVENT,
   SketchOverlay,
 } from '../../Nodes/sketch/SketchOverlay.tsx';
-import { SketchProcessingOverlay } from '../../Nodes/sketch/SketchProcessingOverlay.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 import {
@@ -403,8 +408,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   // action refs, which dominated initial commit work on canvas open.
   const nodes = useCanvasStore((state) => state.nodes);
   const edges = useCanvasStore((state) => state.edges);
-  const expandedNodeId = useCanvasStore((state) => state.expandedNodeId);
-  const expandMode = useCanvasStore((state) => state.expandMode);
+  const expandedNodeId = usePreviewWorkspaceStore(selectActiveNodeId);
   const canvasId = useCanvasStore((state) => state.canvasId);
   const minimapEnabled = useCanvasStore((state) => state.minimapEnabled);
   const pendingNodeType = useToolStore((state) => state.pendingNodeType);
@@ -458,8 +462,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     setRfInstance,
     setCanvasWrapper,
     setViewport,
-    openExpanded,
-    closeExpanded,
     frameNodesInRect,
     selectNodes,
     refreshWorldReferences,
@@ -473,10 +475,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   const clearRightPanelAnchor = usePanelStore(
     (state) => state.clearRightPanelAnchor,
   );
-  const layoutAnchorNodeId =
-    expandedNodeId && expandMode === 'split'
-      ? expandedNodeId
-      : rightPanelAnchorNodeId;
+  const layoutAnchorNodeId = expandedNodeId ?? rightPanelAnchorNodeId;
   const layoutAnchorNodeIdRef = useRef(layoutAnchorNodeId);
   layoutAnchorNodeIdRef.current = layoutAnchorNodeId;
 
@@ -1168,18 +1167,11 @@ export const Canvas: React.FC<CanvasProps> = ({
       if (pendingNodeType) return;
 
       // 3. No tool active → background click closes the expanded view.
-      //    Priority preview > node mirrors ExpandedNodePanel's Escape handler.
-      const { previewType, previewData, closePreview } =
-        usePreviewStore.getState();
-      if (previewType && previewData) {
-        closePreview();
-        return;
-      }
       if (expandedNodeId) {
-        closeExpanded();
+        closeActivePreviewNode();
       }
     },
-    [pendingNodeType, expandedNodeId, closeExpanded, placePendingNode],
+    [pendingNodeType, expandedNodeId, placePendingNode],
   );
 
   // Keep layout-driven canvas resizes spatially stable. Side panels and split
@@ -1541,7 +1533,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           e.stopPropagation();
           // Expand any expandable node type on double-click.
           if (EXPANDABLE_TYPES.has(node.type ?? '')) {
-            openExpanded(node.id);
+            openPreviewNode(node.id);
           }
         }}
         onEdgeDoubleClick={(e, edge) => {
@@ -1650,7 +1642,6 @@ export const Canvas: React.FC<CanvasProps> = ({
           onSelect={handleConnectedKindPick}
           onDismiss={dismissConnectPicker}
         />
-        <IntentPopover />
         <Background color="var(--canvas-grid)" gap={GRID_SIZE} />
 
         <Controls position="bottom-left" showInteractive={false}>
@@ -1673,9 +1664,6 @@ export const Canvas: React.FC<CanvasProps> = ({
         {pendingNodeType === 'sketch' && (
           <SketchOverlay rfInstance={rfInstanceRef.current} />
         )}
-
-        {/* Sketch intent processing overlay — lives in flow space so it pans/zooms with the canvas */}
-        <SketchProcessingOverlay />
       </ReactFlow>
 
       {isInitialViewportPending && (

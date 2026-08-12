@@ -1,0 +1,166 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
+import { beforeEach, describe, expect, it } from 'vitest';
+
+import {
+  selectThreadBinding,
+  selectThreadDraft,
+  selectThreadHistoryLoaded,
+  selectThreadIsLoading,
+  selectThreadLastAction,
+  selectThreadMessages,
+  selectThreadPendingAttachments,
+  selectThreadSettings,
+  useChatStore,
+} from './chatStore';
+
+import type { ChatMessage } from './chatTypes';
+import type { AgentBinding, ChatAttachment } from '@huabu/shared';
+
+const INTERNAL: AgentBinding = { kind: 'internal' };
+const EXTERNAL: AgentBinding = {
+  kind: 'external',
+  alias: 'Claude Code',
+  profileId: 'profile-1',
+};
+const ATTACHMENT: ChatAttachment = {
+  type: 'text',
+  source: 'upload',
+  content: 'staged',
+  label: 'x',
+};
+
+function resetStore() {
+  useChatStore.setState({
+    threadsById: {},
+    lastActionByThread: {},
+    threadMap: {},
+    bindingMap: {},
+    selectionAttachment: null,
+  });
+}
+
+function userMessage(id: string, content: string): ChatMessage {
+  return { id, role: 'user', content };
+}
+
+beforeEach(resetStore);
+
+describe('chatStore thread-scoped state', () => {
+  it('isolates messages, loading, drafts, settings and attachments', () => {
+    const store = useChatStore.getState();
+    store.addMessage('thread-a', userMessage('m1', 'hello a'));
+    store.addMessage('thread-b', userMessage('m2', 'hello b'));
+    store.setHistoryLoaded('thread-a', true);
+    store.setThreadLoading('thread-b', true);
+    store.setDraft('thread-a', 'draft a');
+    store.setThreadSettings('thread-a', {
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    store.addPendingAttachment('thread-a', ATTACHMENT);
+
+    const state = useChatStore.getState();
+    expect(selectThreadMessages(state, 'thread-a')).toHaveLength(1);
+    expect(selectThreadMessages(state, 'thread-b')).toHaveLength(1);
+    expect(selectThreadHistoryLoaded(state, 'thread-a')).toBe(true);
+    expect(selectThreadIsLoading(state, 'thread-a')).toBe(false);
+    expect(selectThreadIsLoading(state, 'thread-b')).toBe(true);
+    expect(selectThreadDraft(state, 'thread-a')).toBe('draft a');
+    expect(selectThreadDraft(state, 'thread-b')).toBe('');
+    expect(selectThreadSettings(state, 'thread-a')).toEqual({
+      modelId: 'model-a',
+      reasoningEffort: 'high',
+    });
+    expect(selectThreadSettings(state, 'thread-b')).toEqual({
+      modelId: null,
+      reasoningEffort: null,
+    });
+    expect(selectThreadPendingAttachments(state, 'thread-a')).toEqual([
+      ATTACHMENT,
+    ]);
+    expect(selectThreadPendingAttachments(state, 'thread-b')).toEqual([]);
+  });
+
+  it('keeps binding and compose mode with their thread', () => {
+    const store = useChatStore.getState();
+    store.setAgentBinding('thread-a', EXTERNAL);
+    store.setThreadLastAction('thread-a', 'operate');
+
+    const state = useChatStore.getState();
+    expect(selectThreadBinding(state, 'thread-a')).toEqual(EXTERNAL);
+    expect(selectThreadBinding(state, 'thread-b')).toEqual(INTERNAL);
+    expect(selectThreadLastAction(state, 'thread-a')).toBe('operate');
+    expect(selectThreadLastAction(state, 'thread-b')).toBe('ask');
+  });
+
+  it('returns stable defaults for an uncached thread', () => {
+    const state = useChatStore.getState();
+    const first = selectThreadMessages(state, 'missing');
+    const second = selectThreadMessages(state, 'missing');
+    expect(first).toBe(second);
+    expect(first).toEqual([]);
+  });
+});
+
+describe('chatStore thread creation', () => {
+  it('creates and reuses one canonical chat thread per Canvas', () => {
+    const store = useChatStore.getState();
+    const first = store.ensureCanvasThread('canvas-1');
+    const again = store.ensureCanvasThread('canvas-1');
+    const second = store.ensureCanvasThread('canvas-2');
+
+    expect(again).toBe(first);
+    expect(second).not.toBe(first);
+    expect(useChatStore.getState().threadMap).toEqual({
+      'canvas-1': first,
+      'canvas-2': second,
+    });
+  });
+
+  it('creates a loaded thread without moving another renderer', () => {
+    const store = useChatStore.getState();
+    store.setMessages('thread-initial', [userMessage('old', 'keep')]);
+    const created = store.createThread({
+      binding: EXTERNAL,
+      lastAction: 'operate',
+    });
+
+    const state = useChatStore.getState();
+    expect(selectThreadMessages(state, 'thread-initial')).toHaveLength(1);
+    expect(selectThreadMessages(state, created)).toEqual([]);
+    expect(selectThreadHistoryLoaded(state, created)).toBe(true);
+    expect(selectThreadBinding(state, created)).toEqual(EXTERNAL);
+    expect(selectThreadLastAction(state, created)).toBe('operate');
+  });
+});
+
+describe('chatStore persistence and eviction', () => {
+  it('migrates the legacy global compose mode', async () => {
+    const migrate = useChatStore.persist.getOptions().migrate;
+    const migrated = (await migrate?.(
+      { threadId: 'thread-legacy', lastAction: 'operate' },
+      2,
+    )) as Partial<ReturnType<typeof useChatStore.getState>>;
+    expect(migrated.lastActionByThread).toEqual({
+      'thread-legacy': 'operate',
+    });
+  });
+
+  it('pins current, mapped and streaming threads', () => {
+    const store = useChatStore.getState();
+    for (const threadId of ['t1', 't2', 't3', 't4']) {
+      store.addMessage(threadId, userMessage(`m-${threadId}`, threadId));
+    }
+    useChatStore.setState({
+      threadMap: { 'canvas-1': 't1', 'canvas-2': 't3' },
+    });
+    store.setThreadLoading('t2', true);
+    store.evictInactiveThreads(1);
+
+    const state = useChatStore.getState();
+    expect(Object.keys(state.threadsById).sort()).toEqual(['t1', 't2', 't3']);
+    expect(selectThreadMessages(state, 't4')).toEqual([]);
+  });
+});

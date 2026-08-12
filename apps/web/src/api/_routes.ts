@@ -100,11 +100,6 @@ export const routes = {
   interactiveViewAction: (canvasId: string, nodeId: string, actionId: string) =>
     `/interactive-views/${enc(canvasId)}/${enc(nodeId)}/actions/${enc(actionId)}`,
 
-  // ── Intent ────────────────────────────────────────────────────────
-  intentRecognizeStream: '/intent/recognize-stream',
-  intentRecognizeSketch: '/intent/recognize-sketch',
-  intentEpisode: '/intent/episode',
-
   // ── Agent ─────────────────────────────────────────────────────────
   agent: '/agent',
   agentHistory: (threadId: string, canvasId?: string) => {

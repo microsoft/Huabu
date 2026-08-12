@@ -20,7 +20,6 @@ import { dirname, join } from 'node:path';
 
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import {
-  stream as piStream,
   complete as piComplete,
   getEnvApiKey,
   getModel,
@@ -1587,7 +1586,7 @@ export function getLLMModel(): Model<Api> {
   const apiKey = resolveApiKey(cfg.provider);
 
   // For OAuth providers, resolveApiKey may return null (async refresh needed)
-  // Sync check — the actual async resolution happens in llmStream/llmComplete
+  // Sync check — the actual async resolution happens in llmComplete
   if (!apiKey) {
     const provInfo = getProviderCatalog().find((p) => p.id === cfg.provider);
     if (provInfo?.authType !== 'oauth') {
@@ -1607,7 +1606,7 @@ export function getLLMModel(): Model<Api> {
  *
  * Exported so callers that own their own LLM call (e.g. pi-agent-core's
  * `getApiKey` callback) can reuse the same provider-aware resolution and
- * OAuth refresh logic without going through `llmStream` / `llmComplete`.
+ * OAuth refresh logic without going through `llmComplete`.
  */
 export async function ensureApiKey(): Promise<string> {
   const cfg = ensureConfig();
@@ -1666,23 +1665,6 @@ async function ensureApiKeyFor(cfg: PersistedConfig): Promise<string> {
 export interface LLMCallOptions extends ProviderStreamOptions {
   role?: ModelRole;
   hasImage?: boolean;
-}
-
-/**
- * Stream LLM responses with the model for the requested role.
- */
-export async function llmStream(context: Context, options?: LLMCallOptions) {
-  const { role = 'chat', hasImage, ...streamOptions } = options ?? {};
-  const { cfg, model } = await resolveForRoleAsync(role, { hasImage });
-  const [resolvedModel, apiKey] = await Promise.all([
-    applyCopilotAuthToModel(cfg, model),
-    ensureApiKeyFor(cfg),
-  ]);
-  return piStream(resolvedModel, context, {
-    apiKey,
-    ...getProviderSpecificOptions(cfg),
-    ...streamOptions,
-  });
 }
 
 /**

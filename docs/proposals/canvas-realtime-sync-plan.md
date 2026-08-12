@@ -105,8 +105,8 @@ is a small, independently shippable fix on top of P0.
   renders for internal bindings too) fed by the broadcast `changes`
   ([ChangeReviewCard.tsx](../../apps/web/src/components/Panels/ChatPanel/ChangeReviewCard.tsx)).
   The per-message `CanvasCommandCard` is now display-only; its dead revert path
-  was deleted. Exception: **sketch** keeps its client-side Accept/Revert overlay
-  (separate `sketch-recognized` carve-out) — deliberately not broadcast-only.
+  was deleted. (A `sketch-recognized` carve-out existed here until sketch
+  gesture recognition was removed; every writer now goes through broadcast.)
 - 🟡 **C4 / O2 — preprocessing cost deduped (full ownership deferred to P2).**
   Duplicate **work** is fixed:
   [PreprocessDispatcher](../../apps/server/src/modules/preprocessing/dispatcher.ts)

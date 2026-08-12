@@ -14,7 +14,6 @@
  *   lastSeenThreadCursor pi-ai context timestamp of the last
  *                       analysed chat turn — lets `context.ts` (PR-C)
  *                       only pull "new" turns into the analysis prompt.
- *   lastSeenIntentCursor epoch ms of the last analysed intent episode.
  *
  * Persisted at `<canvasDir>/.memory/state.json` so the counter
  * survives process restarts. The file is kept tiny (<128 B) and
@@ -47,14 +46,12 @@ export interface MemoryState {
   counter: number;
   lastAnalyzedAt: number | null;
   lastSeenThreadCursor: number | null;
-  lastSeenIntentCursor: number | null;
 }
 
 const EMPTY_STATE: MemoryState = {
   counter: 0,
   lastAnalyzedAt: null,
   lastSeenThreadCursor: null,
-  lastSeenIntentCursor: null,
 };
 
 /**
@@ -76,10 +73,6 @@ export function readMemoryState(canvasId: string): MemoryState {
     lastSeenThreadCursor:
       typeof raw.lastSeenThreadCursor === 'number'
         ? raw.lastSeenThreadCursor
-        : null,
-    lastSeenIntentCursor:
-      typeof raw.lastSeenIntentCursor === 'number'
-        ? raw.lastSeenIntentCursor
         : null,
   };
 }
@@ -147,7 +140,6 @@ export async function markAnalyzed(
   canvasId: string,
   opts: {
     lastSeenThreadCursor?: number;
-    lastSeenIntentCursor?: number;
   } = {},
 ): Promise<void> {
   await stateLock(canvasId, () => {
@@ -155,9 +147,6 @@ export async function markAnalyzed(
     state.lastAnalyzedAt = Date.now();
     if (opts.lastSeenThreadCursor !== undefined) {
       state.lastSeenThreadCursor = opts.lastSeenThreadCursor;
-    }
-    if (opts.lastSeenIntentCursor !== undefined) {
-      state.lastSeenIntentCursor = opts.lastSeenIntentCursor;
     }
     writeMemoryState(canvasId, state);
   });

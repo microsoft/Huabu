@@ -18,9 +18,7 @@ import {
 import { createPortal } from 'react-dom';
 
 import { useCanvasAttentionStore } from '@/store/canvasAttentionStore';
-import useCanvasStore from '@/store/canvasStore';
 import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
-import { usePreviewStore } from '@/store/previewStore';
 
 import { FLOATING_CHROME_PROPS } from './floatingChrome';
 
@@ -91,22 +89,6 @@ export function CanvasFloatingPopover({
   const { zoom, x: vpX, y: vpY } = useViewport();
   const domNode = useStore((s) => s.domNode);
 
-  // Hide whenever the canvas is fully replaced by the ExpandedNodePanel
-  // (node edit or preview in 'replace' mode). The canvas itself is kept
-  // mounted at 0% width in that state, so anchor rectangles still resolve
-  // to on-screen coordinates and the portal'd toolbar would otherwise
-  // leak through on top of the expanded panel.
-  const canvasReplaced = useCanvasStore(
-    (s) => s.expandedNodeId !== null && s.expandMode === 'replace',
-  );
-  const previewReplaced = usePreviewStore(
-    (s) =>
-      s.previewType !== null &&
-      s.previewData !== null &&
-      s.expandMode === 'replace',
-  );
-  const hiddenByExpandedPanel = canvasReplaced || previewReplaced;
-
   // Hide whenever an app-wide modal (Settings / Keyboard Shortcuts) is
   // open. Those modals render their own dimmed backdrop over the whole
   // window, but canvas floating toolbars portal to `document.body` at
@@ -114,8 +96,8 @@ export function CanvasFloatingPopover({
   // leaving two competing floating layers on screen at once.
   const hiddenByGlobalModal = useAnyGlobalModalOpen();
 
-  // Hide whenever the user has moved on to another surface — the chat
-  // panel, a split-mode expanded node, the layer panel. Selection is
+  // Hide whenever the user has moved on to another surface — the preview
+  // workspace, the layer panel. Selection is
   // deliberately *not* cleared in that case (coming back should resume
   // where they left off), but chrome that belongs to a surface nobody is
   // working in is pure noise. Clicking anywhere on the canvas — including
@@ -199,13 +181,7 @@ export function CanvasFloatingPopover({
     return () => observer.disconnect();
   }, [domNode, update]);
 
-  if (
-    !open ||
-    !virtualReference ||
-    hiddenByExpandedPanel ||
-    hiddenByGlobalModal ||
-    hiddenByOtherSurface
-  )
+  if (!open || !virtualReference || hiddenByGlobalModal || hiddenByOtherSurface)
     return null;
 
   return createPortal(

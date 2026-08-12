@@ -24,7 +24,6 @@ import type {
   ChatHistoryResponse,
   ContextTokensResponse,
   ForkThreadResponse,
-  IntentCandidate,
   StopThreadResponse,
 } from '@huabu/shared';
 
@@ -185,10 +184,6 @@ export const agentApi = {
       canvasContext?: AgentChatContext;
       canvasId?: string;
       attachments?: ChatAttachment[];
-      intentData?: {
-        candidates: IntentCandidate[];
-        selectedIntent: string;
-      };
       /**
        * Anchor a node-neighbourhood preamble to this node id. When
        * set, the server resolves the surrounding-canvas context from
@@ -233,7 +228,6 @@ export const agentApi = {
       attachments: options?.attachments?.length
         ? options.attachments
         : undefined,
-      intentData: options?.intentData,
       anchorNodeId: options?.anchorNodeId,
       agentBinding: options?.agentBinding,
       invokedSkills: options?.invokedSkills?.length

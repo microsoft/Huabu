@@ -77,8 +77,17 @@ import {
 import { i18n } from '@/i18n';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import {
+  ApiError,
+  getCanvas,
+  getWorldReferences,
+  postCanvasExecute,
+  putCanvas,
+} from '../api';
+import { agentApi } from '../api/agent';
+import { cloneArtifactToCanvas, resolveArtifactUrl } from '../api/artifact';
+import { CanvasConflictError } from '../api/canvas';
 import { measureMissingAutoHeights } from './canvasStore/height/measureMissingAutoHeights';
-import { createIntentActionWindow } from './canvasStore/intentActionWindow';
 import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
 import { shouldBackfillNodeLabel } from './canvasStore/load/shouldBackfillNodeLabel';
@@ -93,18 +102,14 @@ import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
 import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
+import { collectProtectedPreviewTabIds } from './previewWorkspace/protection';
+import {
+  selectActiveNodeId,
+  selectIsNodeOpen,
+  usePreviewWorkspaceStore,
+} from './previewWorkspace/store';
 import { useToolStore } from './toolStore';
 import { useWorkspaceStore } from './workspaceStore';
-import {
-  ApiError,
-  getCanvas,
-  getWorldReferences,
-  postCanvasExecute,
-  putCanvas,
-} from '../api';
-import { agentApi } from '../api/agent';
-import { cloneArtifactToCanvas, resolveArtifactUrl } from '../api/artifact';
-import { CanvasConflictError } from '../api/canvas';
 import { toast, dismissToast } from '../components/Common/Toast';
 import { seedNoteFixedHeight } from '../components/Nodes/note/autoHeight';
 import { getNoteFixedHeight } from '../components/Nodes/note/heightMemory';
@@ -130,11 +135,9 @@ import type {
   CanvasNodeMeasuredHeightUpdate,
   CanvasNodeType,
   CanvasViewport,
-  IntentContext,
   Point,
   PortalNodePinUpdate,
   RecentAction,
-  WireCanvasNode,
   WireSelectionNode,
   ResolvedWorldReference,
 } from '@huabu/shared';
@@ -416,9 +419,9 @@ function stripNodeContentForStructurePut(nodes: readonly Node[]): Node[] {
 // from persisted topology (see `apps/server/src/modules/agent/
 // node-neighbourhood.ts`); the web bundle only sends `anchorNodeId`.
 //
-// Existing UI-side proximity queries (sketch clustering, frame
-// drop targets) call shared geometry helpers directly with their own
-// React Flow nodes — no central cache is needed.
+// Existing UI-side proximity queries (frame drop targets) call shared
+// geometry helpers directly with their own React Flow nodes — no central
+// cache is needed.
 
 type RFState = {
   nodes: Node[];
@@ -480,22 +483,6 @@ type RFState = {
    * panel would load an empty conversation. Runtime-only, never persisted.
    */
   pendingForkThreadIds: Record<string, true>;
-
-  expandedNodeId: string | null;
-  expandMode: 'replace' | 'split';
-  /**
-   * Monotonic counter bumped on every `openExpanded` call —
-   * including when the user re-triggers expansion on the
-   * currently-expanded node. Preview components subscribe to this
-   * tick so they can re-focus their editable surface when the user
-   * double-clicks the same node a second time (the
-   * `expandedNodeId` itself doesn't change in that case, so a
-   * value-based subscriber would never re-fire).
-   */
-  expandedNodeFocusTick: number;
-  openExpanded: (nodeId: string) => void;
-  closeExpanded: () => void;
-  setExpandMode: (mode: 'replace' | 'split') => void;
 
   pendingInlineEditNodeId: string | null;
   consumeInlineEditRequest: (nodeId: string) => void;
@@ -919,15 +906,6 @@ type RFState = {
    * (`get_canvas_outline`, `inspect_nodes`, `inspect_edges`, `read`).
    */
   getAgentChatContext: () => AgentChatContext;
-  /**
-   * Build the rich context consumed by the intent recogniser.
-   *
-   * Carries the full canvas snapshot (nodes + edges), the recent
-   * action ring buffer, the user selection, and (when available) a
-   * viewport screenshot — the recogniser is a one-shot LLM call and
-   * cannot pull data through tools.
-   */
-  getIntentContext: () => IntentContext;
 
   /**
    * Force-flush any buffered behavioural events to the server.
@@ -1075,22 +1053,33 @@ export function settleNodePreprocess(nodeId: string): void {
   if (node) preprocessQueue.schedule(node);
 }
 
-// ─── Action-history ring ──────────────────────────────────────────────────
-//
-// The short, in-memory action trail (cap 10, no timestamps) that
-// rides on agent / intent request bodies. Deliberately kept OUTSIDE
-// the Zustand store: no React component subscribes to it, but a
-// store-resident field would force `dispatchUiIntent` to fire a
-// *second* `set({ actionHistory })` right after `executeCommands`
-// already committed nodes/edges. That second commit makes every
-// remaining store subscriber re-run its selector for a value none of
-// them care about — wasted work on every UI click.
-//
-// The full server-bound action log still flows through `canvasEvents`
-// (see above); this window is read exactly once per intent request
-// via `getIntentContext`. See `intentActionWindow.ts` for the
-// memory-pipeline cleanup path that will eventually delete it.
-const intentActionWindow = createIntentActionWindow();
+export function getProtectedPreviewTabIds(): Set<string> {
+  const canvas = useCanvasStore.getState();
+  const chat = useChatStore.getState();
+  return collectProtectedPreviewTabIds(
+    usePreviewWorkspaceStore.getState().workspace,
+    {
+      pendingNodeIds: new Set(canvas.pendingContentNodeIds()),
+      threadIdForNode: (nodeId) => {
+        const node = canvas.nodes.find((candidate) => candidate.id === nodeId);
+        if (
+          node?.type === 'question' &&
+          typeof node.data.threadId === 'string'
+        ) {
+          return node.data.threadId;
+        }
+        const reference = canvas.worldReferences[nodeId];
+        return reference?.kind === 'nodeRef' &&
+          reference.status === 'ok' &&
+          reference.source?.type === 'question'
+          ? reference.source.threadId
+          : undefined;
+      },
+      isThreadStreaming: (threadId) =>
+        chat.threadsById[threadId]?.isStreaming === true,
+    },
+  );
+}
 
 /**
  * Module-scoped resize-preview controller. Owns the rAF handle and
@@ -1131,6 +1120,7 @@ if (typeof window !== 'undefined') {
         if (s.versionConflict) return false;
         return s.isSaving || s.pendingSave;
       },
+      flushPreviewWorkspace: () => usePreviewWorkspaceStore.getState().flush(),
     }),
   );
 }
@@ -1410,48 +1400,6 @@ const useCanvasStore = create<RFState>()(
 
     pendingForkThreadIds: {},
 
-    expandedNodeId: null,
-    expandMode: 'split',
-    expandedNodeFocusTick: 0,
-    openExpanded: (nodeId) => {
-      // Switching straight from one expanded node to another does not fire
-      // `closeExpanded`, so settle the outgoing authored node here to
-      // commit its auto-derived label (the `.md` filename). See
-      // `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
-      const prev = get().expandedNodeId;
-      if (prev && prev !== nodeId) {
-        const prevNode = get().nodes.find((n) => n.id === prev);
-        if (prevNode?.type === 'note' || prevNode?.type === 'text') {
-          settleNodePreprocess(prev);
-        }
-      }
-      get().dispatchUiIntent({ type: 'EXPAND_NODE', nodeId });
-      // Bump the focus tick AFTER the intent resolves so any
-      // already-mounted preview re-focuses its editor on a
-      // repeat double-click. On the first expansion the tick is
-      // bumped before the preview mounts, but the preview's
-      // first-render effect compares against a sentinel ref and
-      // still triggers focus.
-      set((s) => ({ expandedNodeFocusTick: s.expandedNodeFocusTick + 1 }));
-    },
-    closeExpanded: () => {
-      // Exit-edit "settle" for editor-authored nodes: a `note` (and a
-      // `text` edited in the panel) is authored in the expanded editor, so
-      // closing it (X / Esc / back) is the real "done editing" boundary at
-      // which the auto-derived label (the `.md` filename) should be
-      // committed — never on every keystroke pause. See
-      // `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
-      const { expandedNodeId, nodes } = get();
-      if (expandedNodeId) {
-        const node = nodes.find((n) => n.id === expandedNodeId);
-        if (node?.type === 'note' || node?.type === 'text') {
-          settleNodePreprocess(expandedNodeId);
-        }
-      }
-      set({ expandedNodeId: null });
-    },
-    setExpandMode: (mode) => set({ expandMode: mode }),
-
     pendingInlineEditNodeId: null,
     consumeInlineEditRequest: (nodeId) => {
       if (get().pendingInlineEditNodeId !== nodeId) return;
@@ -1581,6 +1529,8 @@ const useCanvasStore = create<RFState>()(
         setNodes: (nodes) => set({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
         forgetNodeContent: nodeContentQueue.forgetNode,
+        validatePreviewNodes: (liveNodeIds) =>
+          usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
     },
 
@@ -1734,6 +1684,8 @@ const useCanvasStore = create<RFState>()(
         setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
         forgetNodeContent: nodeContentQueue.forgetNode,
+        validatePreviewNodes: (liveNodeIds) =>
+          usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
 
       return skippedNodeIds;
@@ -1784,16 +1736,12 @@ const useCanvasStore = create<RFState>()(
         const node = get().nodes.find(({ id }) => id === editNodeId);
         if (node?.type === 'note') {
           // Inline the settle-previous + expand + focus-tick sequence
-          // instead of calling `openExpanded(node.id)` on purpose:
-          // `openExpanded` re-enters `dispatchUiIntent` with an
-          // `EXPAND_NODE` intent, which would (a) recurse through the
-          // resolver in the middle of this `ADD_NODES` dispatch, and
-          // (b) record an `EXPAND_NODE` gesture in the recent-action
-          // window / event buffer that the user never performed —
-          // polluting the context handed to the agent. Opening the
-          // editor here is a silent side effect of creation, so it must
-          // not emit its own intent event.
-          const previousId = get().expandedNodeId;
+          // Opening the editor here is a silent side effect of creation,
+          // so it updates workspace presentation without emitting another
+          // user-intent event.
+          const previousId = selectActiveNodeId(
+            usePreviewWorkspaceStore.getState(),
+          );
           if (previousId && previousId !== node.id) {
             const previousNode = get().nodes.find(
               ({ id }) => id === previousId,
@@ -1805,18 +1753,23 @@ const useCanvasStore = create<RFState>()(
               settleNodePreprocess(previousId);
             }
           }
-          set((state) => ({
-            expandedNodeId: node.id,
-            expandedNodeFocusTick: state.expandedNodeFocusTick + 1,
-          }));
+          const previewTabId = usePreviewWorkspaceStore
+            .getState()
+            .openPreviewTarget(
+              {
+                kind: 'node',
+                canvasId: get().canvasId,
+                nodeId: node.id,
+              },
+              undefined,
+              getProtectedPreviewTabIds(),
+            );
+          if (previewTabId) {
+            usePreviewWorkspaceStore.getState().requestNodeFocus(previewTabId);
+          }
         } else if (node?.type === 'text') {
           set({ pendingInlineEditNodeId: node.id });
         }
-      }
-      // Apply UI-only state mutations (e.g. expand-overlay toggle) that
-      // bypass the command pipeline.
-      if (execution.expandedNodeId !== undefined) {
-        set({ expandedNodeId: execution.expandedNodeId });
       }
       // Push trace from intent resolution to the module-scoped
       // window and mirror into the server-bound event buffer. Both
@@ -1833,7 +1786,6 @@ const useCanvasStore = create<RFState>()(
       const isTransientPreview =
         intent.type === 'RESIZE_NODE' && intent.preview === true;
       if (!isTransientPreview && execution.trace.length > 0) {
-        intentActionWindow.pushMany(execution.trace);
         canvasEvents.bufferMany(get().canvasId, execution.trace);
       }
     },
@@ -1923,38 +1875,6 @@ const useCanvasStore = create<RFState>()(
       return { selectedNodes };
     },
 
-    getIntentContext: (): IntentContext => {
-      const { nodes, edges } = get();
-      const buildSelectedDetail = makeBuildSelectedDetail(nodes);
-
-      // Wire shape: raw canvas state only. The server enriches into
-      // `AgentNodeOutline` (with `filename`, `preview`,
-      // `parentFrame.label`) before any prompt rendering.
-      return {
-        nodes: nodes.map((n): WireCanvasNode => {
-          const size = getNodeSize(n);
-          const data = n.data as Record<string, unknown> | undefined;
-          const node: WireCanvasNode = {
-            id: n.id,
-            type: (n.type ?? 'note') as CanvasNodeType,
-            position: { x: n.position.x, y: n.position.y },
-            size: { width: size.width, height: size.height },
-          };
-          const label = data?.label as string | undefined;
-          if (label) node.label = label;
-          const content = data?.content as string | undefined;
-          if (content) node.content = content;
-          const src = data?.src as string | undefined;
-          if (src) node.src = src;
-          if (n.parentId) node.parentId = n.parentId;
-          return node;
-        }),
-        edges: edges.map((e) => ({ source: e.source, target: e.target })),
-        recentActions: intentActionWindow.snapshot(),
-        selectedNodes: nodes.filter((n) => n.selected).map(buildSelectedDetail),
-      };
-    },
-
     loadCanvas: async (canvasId, options) => {
       set({ isLoading: true, canvasNotFound: false, versionConflict: false });
       // Clear any stale "modified elsewhere" toast before we fetch a
@@ -1963,6 +1883,12 @@ const useCanvasStore = create<RFState>()(
       dismissVersionConflictToast();
       try {
         const targetId = canvasId ?? get().canvasId;
+        const chatThreadId = useChatStore
+          .getState()
+          .ensureCanvasThread(targetId);
+        usePreviewWorkspaceStore
+          .getState()
+          .loadForCanvas(targetId, { chatThreadId });
         canvasHistoryManager.activate(targetId, options?.resetHistory);
         if (canvasId) {
           set({ canvasId: targetId });
@@ -2105,17 +2031,6 @@ const useCanvasStore = create<RFState>()(
         // catch a concurrent (cross-tab / cross-device / agent) write.
         nodeContentQueue.seedBaselines(warmedNodes);
 
-        // If the user left a question-replay open on this canvas in a
-        // previous session and that question node has since been
-        // deleted, drop the now-dangling pointer in chatStore so the
-        // panel doesn't end up stuck on a foreign thread.
-        useChatStore
-          .getState()
-          .validateQuestionReplay(
-            targetId,
-            new Set(warmedNodes.map((n) => n.id)),
-          );
-
         // Backfill: any node with an empty label gets re-queued so the
         // server can regenerate one. The server's preprocessing
         // dispatcher decides per node profile whether there's any
@@ -2162,16 +2077,11 @@ const useCanvasStore = create<RFState>()(
       // canvas's restore effect either applies its own saved viewport
       // or, for older canvases without one, runs a one-shot fitView.
       set({
-        expandedNodeId: null,
         pendingInlineEditNodeId: null,
         collapsedFrameIds: new Set(),
         canvasNotFound: false,
         viewport: null,
       });
-      // The intent action window lives outside the store; clear it
-      // alongside the in-store reset so the new canvas doesn't
-      // inherit the previous canvas's recent-action trail.
-      intentActionWindow.clear();
       useToolStore.getState().resetForCanvasSwitch();
       useGesturePreviewStore.getState().resetCanvasScopedTransients();
       // Load the new canvas
@@ -3602,8 +3512,8 @@ const useCanvasStore = create<RFState>()(
       // otherwise be flushed back onto a node whose type just changed,
       // overwriting the conversion. The toolbar disables the toggle in this
       // state — this is a defensive backstop for programmatic callers.
-      const { expandedNodeId, ingestionByNodeId } = get();
-      if (expandedNodeId === nodeId) return;
+      if (selectIsNodeOpen(usePreviewWorkspaceStore.getState(), nodeId)) return;
+      const { ingestionByNodeId } = get();
       // Guard: don't change type mid-ingest, otherwise the in-flight ingest
       // result would land on a node that no longer matches its source type.
       if (ingestionByNodeId[nodeId]?.status === 'pending') return;
@@ -4012,7 +3922,6 @@ const useCanvasStore = create<RFState>()(
         nodes: snapshot.nodes,
         edges: snapshot.edges,
       });
-      intentActionWindow.push(action);
       canvasEvents.buffer(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(
@@ -4037,7 +3946,6 @@ const useCanvasStore = create<RFState>()(
         nodes: snapshot.nodes,
         edges: snapshot.edges,
       });
-      intentActionWindow.push(action);
       canvasEvents.buffer(canvasId, action);
 
       canvasHistoryManager.syncServerAfterRestore(

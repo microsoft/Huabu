@@ -17,12 +17,7 @@
 import { z } from 'zod';
 
 /** Agent surfaces a skill is intended for. Mirrors `SkillScope` on the server. */
-export const skillScopeSchema = z.enum([
-  'ask',
-  'operate',
-  'sketch',
-  'external',
-]);
+export const skillScopeSchema = z.enum(['ask', 'operate', 'external']);
 export type SkillScope = z.infer<typeof skillScopeSchema>;
 
 /** Where a skill came from on disk. Mirrors `SkillSource` on the server. */

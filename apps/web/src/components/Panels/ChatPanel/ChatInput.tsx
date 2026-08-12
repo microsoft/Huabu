@@ -12,8 +12,12 @@ import {
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl, uploadImage, uploadPdf } from '@/api/artifact';
-import useCanvasStore from '@/store/canvasStore';
-import { selectCurrentMessages, useChatStore } from '@/store/chatStore';
+import { useChatSession } from '@/hooks/useChatSession';
+import {
+  selectThreadMessages,
+  selectThreadPendingAttachments,
+  useChatStore,
+} from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 
 import { ContextUsageRing } from './ContextUsageRing';
@@ -31,6 +35,8 @@ interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
   onSubmit: (e: React.FormEvent, mode: AgentMode) => void;
+  /** Reports a persistent composer mutation to the owning preview surface. */
+  onCommit?: () => void;
   onStop: () => void;
   isStreaming?: boolean;
   /** Current built-in mode. Affects placeholder + the value submitted to `onSubmit`. */
@@ -98,6 +104,7 @@ export const ChatInput = ({
   value,
   onChange,
   onSubmit,
+  onCommit,
   onStop,
   isStreaming = false,
   mode,
@@ -117,34 +124,38 @@ export const ChatInput = ({
   const historyIndexRef = useRef(-1);
   const draftRef = useRef('');
 
-  // Pending attachments from the store
-  const pendingAttachments = useChatStore((s) => s.pendingAttachments);
+  // Pending attachments belong to the thread this composer is sending to.
+  const { threadId, canvasId } = useChatSession();
+  const pendingAttachments = useChatStore((s) =>
+    selectThreadPendingAttachments(s, threadId),
+  );
   const selectionAttachment = useChatStore((s) => s.selectionAttachment);
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
   const removePendingAttachment = useChatStore(
     (s) => s.removePendingAttachment,
   );
   const [isDragOver, setIsDragOver] = useState(false);
-  const canvasId = useCanvasStore((s) => s.canvasId);
 
-  // Focus the textarea whenever a surface requests it (e.g. opening a
-  // question node into compose mode). Keyed on a monotonic nonce so
-  // repeated requests re-fire even without an intervening blur.
-  const focusChatInputNonce = usePanelStore((s) => s.focusChatInputNonce);
+  // Focus the textarea when a surface asks for *this* thread's composer.
+  // Keyed on a nonce so repeated requests re-fire even without an
+  // intervening blur.
+  const focusRequest = usePanelStore((s) => s.focusChatInputRequest);
+  const focusNonce =
+    focusRequest?.threadId === threadId ? focusRequest.nonce : null;
   useEffect(() => {
-    if (focusChatInputNonce === 0) return;
+    if (focusNonce === null) return;
     // Defer to the next frame so the panel has finished expanding and the
     // textarea is mounted + interactive before we move focus to it.
     const raf = requestAnimationFrame(() => {
       const ta = textareaRef.current;
       if (!ta) return;
-      ta.focus();
+      ta.focus({ preventScroll: true });
       const len = ta.value.length;
       ta.selectionStart = len;
       ta.selectionEnd = len;
     });
     return () => cancelAnimationFrame(raf);
-  }, [focusChatInputNonce]);
+  }, [focusNonce]);
 
   // ── Slash-command typeahead ──────────────────────────────────────
   //
@@ -168,7 +179,7 @@ export const ChatInput = ({
       try {
         if (file.type.startsWith('image/')) {
           const url = await uploadImage(file, canvasId);
-          addPendingAttachment({
+          addPendingAttachment(threadId, {
             type: 'image',
             source: 'upload',
             url,
@@ -176,7 +187,7 @@ export const ChatInput = ({
           });
         } else if (file.type === 'application/pdf') {
           const url = await uploadPdf(file, canvasId);
-          addPendingAttachment({
+          addPendingAttachment(threadId, {
             type: 'pdf',
             source: 'upload',
             url,
@@ -191,7 +202,7 @@ export const ChatInput = ({
           const textContent = isText ? await file.text() : undefined;
 
           const url = await uploadImage(file, canvasId);
-          addPendingAttachment({
+          addPendingAttachment(threadId, {
             type: 'file',
             source: 'upload',
             url,
@@ -200,11 +211,12 @@ export const ChatInput = ({
             filename: file.name,
           });
         }
+        onCommit?.();
       } catch (err) {
         console.error('Failed to upload file:', err);
       }
     },
-    [addPendingAttachment, canvasId, t],
+    [addPendingAttachment, canvasId, onCommit, t, threadId],
   );
 
   // Handle paste — upload pasted images/files as attachments
@@ -326,7 +338,7 @@ export const ChatInput = ({
         (e.key === 'ArrowUp' && atStart) ||
         (e.key === 'ArrowDown' && atEnd)
       ) {
-        const history = selectCurrentMessages(useChatStore.getState())
+        const history = selectThreadMessages(useChatStore.getState(), threadId)
           .filter((m) => m.role === 'user')
           .map((m) => (m.role === 'user' ? m.content : ''));
         if (history.length === 0) return;
@@ -435,7 +447,8 @@ export const ChatInput = ({
                     // Lock the selection: promote to a regular pending attachment
                     const locked = { ...att };
                     useChatStore.getState().setSelectionAttachment(null);
-                    addPendingAttachment(locked);
+                    addPendingAttachment(threadId, locked);
+                    onCommit?.();
                   };
 
                   const tile = (
@@ -565,7 +578,8 @@ export const ChatInput = ({
                       shape="pill"
                       onClick={(e) => {
                         e.stopPropagation();
-                        removePendingAttachment(idx);
+                        removePendingAttachment(threadId, idx);
+                        onCommit?.();
                       }}
                       tooltipWrapperClassName="absolute top-0.5 right-0.5 inline-flex opacity-0 transition-opacity group-hover:opacity-100"
                       className="text-fg-inverse bg-inverse/50 enabled:hover:bg-inverse/70 p-0.5"

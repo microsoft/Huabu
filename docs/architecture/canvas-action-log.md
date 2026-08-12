@@ -57,6 +57,5 @@ So: **raw log → curator distils → long-term memory → agent reads memory**.
 
 ## 4. Loose ends
 
-- The frontend [intentActionWindow.ts](../../apps/web/src/store/canvasStore/intentActionWindow.ts) still keeps a short window (10 items, no timestamps) for the intent recogniser's immediate use — a stopgap that can later read from the persisted JSONL / curator memory instead.
 - The single `events.jsonl` has no rolling archive yet (the planned 5 MB threshold was never implemented); not a problem at current sizes.
 - `memory/journal.md` (a periodic human-readable LLM journal) was never built; kept as an optional future direction.

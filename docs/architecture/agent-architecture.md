@@ -19,7 +19,7 @@ Key runtime characteristics:
   (avoiding server-side races + SSE completion-order races).
 - **`maxIterations` soft cap**: the service counts `turn_end`; on overflow it
   calls `agent.abort()` and appends a cap-out notice. Each agent declares
-  `runtime.maxIterations` in its AGENT.md frontmatter (default 20, sketch=6).
+  `runtime.maxIterations` in its AGENT.md frontmatter (default 20).
 - **`getApiKey: () => ensureApiKey()`**: the OAuth token can be refreshed during
   long-running tools ([llm.ts](../../apps/server/src/modules/agent/llm.ts) /
   [oauth.ts](../../apps/server/src/modules/agent/oauth.ts)).
@@ -34,7 +34,7 @@ Key runtime characteristics:
 
 ## 2. Entry points & agents
 
-Five built-in agents, each with a
+Three built-in agents, each with a
 [prompt/agents/<id>/AGENT.md](../../apps/server/src/prompt/agents) (frontmatter
 declares `tools` / `skillScope` / `runtime`; loader in
 [agents/loader.ts](../../apps/server/src/prompt/agents/loader.ts)):
@@ -42,8 +42,6 @@ declares `tools` / `skillScope` / `runtime`; loader in
 | Agent             | Entry point                                                                                                                                                                  | Notes                                                                                                                                         |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ask` / `operate` | `POST /api/agent` ([agent.route.ts](../../apps/server/src/modules/agent/agent.route.ts) → [AgentThreadService](../../apps/server/src/modules/agent/agent-thread.service.ts)) | Main chat path; ask is read-only, operate can write. The service dispatches built-in or ACP Deployments and owns fixed Agent Node invocation. |
-| `sketch`          | [sketch.service.ts](../../apps/server/src/modules/agent/sketch.service.ts) `recognizeSketchCommands()`                                                                       | Gesture → `CanvasCommand[]`; same `runAgent` but with `sketch` scope + `sketch-recognized` origin, drains the generator (no SSE).             |
-| `intent`          | [intent.route.ts](../../apps/server/src/modules/agent/intent.route.ts) → [intent.service.ts](../../apps/server/src/modules/agent/intent.service.ts)                          | A single LLM call that ranks candidates, `tools: []`, no agent loop.                                                                          |
 | `memory`          | [memory/](../../apps/server/src/modules/agent/memory) background curator                                                                                                     | Triggered by the op-counter; see [agent-memory.md](./agent-memory.md).                                                                        |
 
 **External / ACP agents**: when a chat request carries a `binding` field it routes through [acp/](../../apps/server/src/modules/agent/acp) (§6) instead of the built-in `runAgent`.
@@ -79,18 +77,18 @@ tools/
 
 14 tools, assigned via each agent frontmatter's `tools` array (**not** a hardcoded list in code):
 
-| Tool                                                    | Handler                                                                                       | Scope                                         |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `get_space_outline` / `inspect_nodes` / `inspect_edges` | [canvas-query.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-query.ts)         | ask/operate/sketch                            |
-| `read`                                                  | [fs-read.ts](../../apps/server/src/modules/agent/tools/handlers/fs-read.ts)                   | ask/operate/sketch/memory                     |
-| `grep` / `find` / `ls`                                  | [fs-search.ts](../../apps/server/src/modules/agent/tools/handlers/fs-search.ts)               | ask/operate/sketch                            |
-| `web_search`                                            | [web-search.ts](../../apps/server/src/modules/agent/tools/handlers/web-search.ts)             | ask/operate                                   |
-| `space_commands`                                        | [canvas-write.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts)         | operate/sketch                                |
-| `fs_write`                                              | [fs-write.ts](../../apps/server/src/modules/agent/tools/handlers/fs-write.ts)                 | operate/memory                                |
-| `snapshot_nodes`                                        | [snapshot-node.ts](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts)       | operate (+ auto snapshot on the sketch route) |
-| `generate_image`                                        | [image-generation.ts](../../apps/server/src/modules/agent/tools/handlers/image-generation.ts) | operate                                       |
-| `create_task`                                           | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate                                       |
-| `start_task_run`                                        | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate                                       |
+| Tool                                                    | Handler                                                                                       | Scope              |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------ |
+| `get_space_outline` / `inspect_nodes` / `inspect_edges` | [canvas-query.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-query.ts)         | ask/operate        |
+| `read`                                                  | [fs-read.ts](../../apps/server/src/modules/agent/tools/handlers/fs-read.ts)                   | ask/operate/memory |
+| `grep` / `find` / `ls`                                  | [fs-search.ts](../../apps/server/src/modules/agent/tools/handlers/fs-search.ts)               | ask/operate        |
+| `web_search`                                            | [web-search.ts](../../apps/server/src/modules/agent/tools/handlers/web-search.ts)             | ask/operate        |
+| `space_commands`                                        | [canvas-write.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts)         | operate            |
+| `fs_write`                                              | [fs-write.ts](../../apps/server/src/modules/agent/tools/handlers/fs-write.ts)                 | operate/memory     |
+| `snapshot_nodes`                                        | [snapshot-node.ts](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts)       | operate            |
+| `generate_image`                                        | [image-generation.ts](../../apps/server/src/modules/agent/tools/handlers/image-generation.ts) | operate            |
+| `create_task`                                           | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate            |
+| `start_task_run`                                        | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate            |
 
 Design principles:
 
@@ -120,7 +118,6 @@ Chat context uses an **envelope-first submission boundary** (see [agent-context.
 - Agenetes owns conversation persistence per `(namespace, threadId)`: Tier 1 stores the complete submission plus streamed events, and Tier 2 stores the folded completed `AgentTurn`. The historical field remains named `request` for log compatibility but now carries the complete submission. Each driver decides how to lower that record back into its own channel: the built-in agent replays the canonical `rendered` input as native messages, ACP projects it to text, and the driver-level default (used only when a driver exposes no materializer) serializes `rendered` into a JSONL seed. All three fall back to the protocol form for older records written before `rendered` existed.
 - **On disk (Chat-V2 two-tier log).** A canvas's namespace `storage.root` is its `.history/` dir (`canvasAcpNamespace(canvasId)`), so the log lives at `.history/chat_v2/<threadId>.events.jsonl` — Tier-1 append-only `AgentStreamEvent` delta log ([`FileEventLogStore`](../../external/agenetes/packages/agenetes/src/event-log.ts)) — plus `.history/chat_v2/<threadId>.turns.jsonl` — Tier-2 folded `AgentTurn`, the **only** tier `history()` reads ([`FileTurnStore`](../../external/agenetes/packages/agenetes/src/turn-store.ts)). Durable workload records sit beside them in `.history/threads.json` ([`FileThreadStore`](../../external/agenetes/packages/agenetes/src/thread-store.ts)). The three file-backed stores plus the two drivers are wired once via `mountAgenetes` in [agenetes/drivers.ts](../../apps/server/src/modules/agent/agenetes/drivers.ts). Legacy chat files are folded into `chat_v2/` at workspace activation ([`migrate-chat-turns.ts`](../../apps/server/src/modules/storage/migrate-chat-turns.ts)).
 - Durable workload records use the strict `agenetes-v2` format. Each record stores `driverSchemaVersion`, the complete opaque `WorkloadSpec`, and `AgentStateSnapshot { driverState, metadata? }`; malformed or unsupported files fail fast. Workspace activation migrates `agenetes-v1` files before any ThreadStore writer opens them, preserving the original as `threads.json.agenetes-v1.bak` and aborting without modification on an invalid record or unknown kind. The selected driver validates its own spec and state. The chat fork endpoint is temporarily unavailable because the existing request does not identify a complete target workload; it returns `501` until #321 defines the target-agent contract.
-- Intent episodes remain in [store/intent-store.ts](../../apps/server/src/modules/agent/store/intent-store.ts).
 
 ---
 
@@ -156,7 +153,6 @@ prompt/skills/
   loader.ts      ← loadSkill / mergeSkill: merges system + user sources, mtime cache
   catalogue.ts   ← getSkillCatalogue(scope) renders the listing in the system prompt
   canvas/        ← core canvas skill (commands + references + layout recipes)
-  sketch-gestures/  ← sketch gesture recognition
   create-skill/ · update-skill/  ← skill authoring guides
   memory/        ← memory-writing strategy sub-doc (see agent-memory.md)
 ```
@@ -164,7 +160,7 @@ prompt/skills/
 - System skills live in `prompt/skills/<id>/` (shipped with the program); user
   skills live in `<workspace>/setting/skills/<id>/`, merged by matching id.
 - Frontmatter requires `id / name / description / appliesTo`
-  (`∈ {ask,operate,sketch,external}`); optional `triggers / version /
+  (`∈ {ask,operate,external}`); optional `triggers / version /
 userInvokable`.
 - The catalogue is filtered by each agent's `skillScope`; the agent self-serves
   the body via `read("skills/<id>/SKILL.md")`. The `use_skill` tool has been
@@ -203,6 +199,6 @@ To add / change a skill:
   curator.
 - [canvas-command-architecture.md](./canvas-command-architecture.md) — the
   three-layer model of `space_commands` and server-side execution.
-- [sketch-node.md](./sketch-node.md) — sketch nodes and the recognition pipeline.
+- [sketch-node.md](./sketch-node.md) — sketch nodes.
 - [agent-reachback.md](./agent-reachback.md) — the reachback channel external
   agents use to read/write the canvas.

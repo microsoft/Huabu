@@ -16,8 +16,8 @@ import { SpaceCommandCard } from './Tool/SpaceCommandCard';
 import { ToolCallCard } from './Tool/ToolCallCard';
 import { WebSearchToolDisplay } from './Tool/WebSearchToolDisplay';
 import { NODE_ICON } from '../../../config/nodeIcons';
+import { useChatSession } from '../../../hooks/useChatSession';
 import useCanvasStore from '../../../store/canvasStore';
-import { useChatStore } from '../../../store/chatStore';
 import {
   assistantMessageText,
   type AssistantSegment,
@@ -114,7 +114,7 @@ export const AIMessage = ({
 }: AIMessageProps) => {
   const { t } = useTranslation();
   const addNode = useCanvasStore((state) => state.addNode);
-  const threadId = useChatStore((s) => s.threadId);
+  const { threadId } = useChatSession();
 
   // Plain-text copy / "add as note" only includes visible text — thinking
   // is internal reasoning and shouldn't bleed into derived artifacts.

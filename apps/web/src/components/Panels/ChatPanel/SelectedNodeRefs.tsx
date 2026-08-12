@@ -5,8 +5,9 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Tooltip } from '@/components/Common/Tooltip';
+import { useChatSession } from '@/hooks/useChatSession';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
+import { isHeadlessConversation } from '@/store/conversationOwner';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 
 /**
@@ -27,17 +28,10 @@ export const SourceCount = () => {
   // The question node whose conversation is currently open. That node is
   // the subject of this very thread, so selecting it should not add it as
   // a context source — exclude it from both the count and the tooltip.
-  const viewingQuestionNodeId = useChatStore(
-    (s) => s.viewingQuestionThread?.conversationOwner.nodeId,
-  );
-  const headlessConversation = useChatStore((s) => {
-    const view = s.viewingQuestionThread;
-    return (
-      !!view &&
-      (view.presentationAnchor.canvasId !== view.conversationOwner.canvasId ||
-        view.presentationAnchor.nodeId !== view.conversationOwner.nodeId)
-    );
-  });
+  const session = useChatSession();
+  const viewingQuestionNodeId =
+    session.conversationView?.conversationOwner.nodeId;
+  const headlessConversation = isHeadlessConversation(session.conversationView);
 
   const selectedNodes = useMemo(() => {
     if (headlessConversation) return [];

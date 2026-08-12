@@ -5,38 +5,29 @@
  * Agent API wire schemas.
  *
  * Validation contracts for the unified `/api/agent` endpoint and its
- * sibling routes (chat history, context tokens, intent recognition,
- * sketch, intent episode logging). Per docs/architecture/api-design.md: schemas
- * are the single source of truth, types derived via `z.infer`.
+ * sibling routes (chat history, context tokens). Per
+ * docs/architecture/api-design.md: schemas are the single source of truth,
+ * types derived via `z.infer`.
  *
  * Wire-only node payloads (`WireNodeRef` / `WireSelectionNode` /
- * `WireCanvasNode`) and the request envelopes that wrap them
- * (`AgentChatContext`, `IntentContext`, `SketchClusterContext`)
- * have explicit zod schemas so every public HTTP boundary gets
- * field-level validation — no payload reaches business logic via a
- * trust-the-caller `z.custom`. The richer `IntentEpisode` log shape
- * still uses `z.custom` because it is replayed verbatim from
- * client-owned storage and we only check the discriminator.
+ * `WireCanvasNode`) and the request envelope that wraps them
+ * (`AgentChatContext`) have explicit zod schemas so every public HTTP
+ * boundary gets field-level validation — no payload reaches business logic
+ * via a trust-the-caller `z.custom`.
  */
 
 import { z } from 'zod';
 
-import { recentActionSchema } from './canvas-events.js';
 import { REASONING_EFFORT_VALUES } from './llm.js';
 import { CANVAS_NODE_TYPES } from '../canvas/node.js';
 
 import type { AgentBinding } from './acp.js';
-import type {
-  AgentChatContext,
-  SketchClusterContext,
-  IntentContext,
-  IntentEpisode,
-} from '../agent/index.js';
+import type { AgentChatContext } from '../agent/index.js';
 
 // ─── Wire-only node payloads ──────────────────────────────────────────────
 //
-// Wire shapes posted from the web client to `/api/agent` and
-// `/api/intent/*`. Deliberately thin: only **raw canvas state**
+// Wire shapes posted from the web client to `/api/agent`.
+// Deliberately thin: only **raw canvas state**
 // (id / type / label / content / src / parentId / position / size)
 // crosses the wire — no server-side enrichment fields like
 // `filename` (storage convention), `preview` (prompt formatting), or
@@ -63,8 +54,7 @@ export const wireNodeRefSchema = z.object({
 export type WireNodeRef = z.infer<typeof wireNodeRefSchema>;
 
 /**
- * Selection wire shape posted from the web client to `/api/agent` and
- * `/api/intent/*`.
+ * Selection wire shape posted from the web client to `/api/agent`.
  *
  * Two things make this distinct from {@link WireNodeRef}:
  *
@@ -106,8 +96,7 @@ export const wireSelectionNodeSchema: z.ZodType<WireSelectionNode> = z.lazy(
 );
 
 /**
- * Wire shape for one node inside `IntentContext.nodes` (the full
- * canvas snapshot sent to the intent recogniser). Carries the raw
+ * Wire shape for one node inside a full canvas snapshot. Carries the raw
  * canvas-state fields the server needs to enrich into an
  * `AgentNodeOutline`:
  *
@@ -160,53 +149,18 @@ export const chatAttachmentSchema = z.object({
   filename: z.string().optional(),
 });
 
-/** A single intent candidate produced by the recognizer. */
-export const intentCandidateSchema = z.object({
-  label: z.string().min(1),
-  description: z.string().optional(),
-});
-
 // ─── Request-context schemas ──────────────────────────────────────────────
 //
-// Field-level validators for the `canvasContext` / `clusterContext`
-// envelopes posted to `/api/agent` and `/api/intent/*`. Each carries
-// only wire shapes (above) plus pre-existing schemas — no runtime
-// dependency on the rich TS interfaces in `agent/context.ts` and
-// `agent/intent.ts`. The `satisfies` checks below pin the schema
-// against the canonical TS interface so any drift fails the build.
-
-const wireEdgeSchema = z.object({
-  source: z.string().min(1),
-  target: z.string().min(1),
-});
+// Field-level validator for the `canvasContext` envelope posted to
+// `/api/agent`. Carries only wire shapes (above) plus pre-existing schemas
+// — no runtime dependency on the rich TS interfaces in `agent/context.ts`.
+// The `satisfies` check below pins the schema against the canonical TS
+// interface so any drift fails the build.
 
 /** Wire shape of {@link AgentChatContext}. */
 export const agentChatContextSchema = z.object({
   selectedNodes: z.array(wireSelectionNodeSchema),
 }) satisfies z.ZodType<AgentChatContext>;
-
-/** Wire shape of {@link IntentContext}. */
-export const intentContextSchema = z.object({
-  nodes: z.array(wireCanvasNodeSchema),
-  edges: z.array(wireEdgeSchema),
-  recentActions: z.array(recentActionSchema),
-  screenshot: z.string().optional(),
-  selectedNodes: z.array(wireSelectionNodeSchema),
-}) satisfies z.ZodType<IntentContext>;
-
-/** Wire shape of {@link SketchClusterContext}. */
-export const sketchClusterContextSchema = z.object({
-  bbox: z.object({
-    x: z.number(),
-    y: z.number(),
-    width: z.number().nonnegative(),
-    height: z.number().nonnegative(),
-  }),
-  strokeCount: z.number().int().nonnegative(),
-  nearbyNodes: z.array(wireNodeRefSchema),
-  enclosedNodes: z.array(wireNodeRefSchema),
-  nearbyEdgeIds: z.array(z.string().min(1)),
-}) satisfies z.ZodType<SketchClusterContext>;
 
 /**
  * Wire shape of {@link AgentBinding}.
@@ -231,12 +185,6 @@ export const agentRequestSchema = z.object({
   canvasContext: agentChatContextSchema.optional(),
   canvasId: z.string().min(1).optional(),
   attachments: z.array(chatAttachmentSchema).optional(),
-  intentData: z
-    .object({
-      candidates: z.array(intentCandidateSchema),
-      selectedIntent: z.string().min(1),
-    })
-    .optional(),
   /**
    * Anchor a node-neighbourhood preamble to this node id. When set,
    * the server resolves the node's surrounding-canvas context (see
@@ -319,40 +267,3 @@ export interface ForkThreadResponse {
   /** False when the source thread had no persisted history to copy. */
   forked: boolean;
 }
-
-/** Body for `POST /api/intent/recognize` and `/recognize-stream`. */
-export const intentRequestSchema = z.object({
-  canvasContext: intentContextSchema,
-  /**
-   * Canvas the request was fired from. Optional so the endpoints
-   * stay backwards compatible with older web bundles, but the server
-   * uses it to fold workspace + canvas memory into the recogniser's
-   * prompt (so the candidates respect the user's saved preferences
-   * and the canvas's current goal). Without it the recogniser
-   * still runs, just with no memory preamble.
-   */
-  canvasId: z.string().min(1).optional(),
-});
-export type IntentRequest = z.infer<typeof intentRequestSchema>;
-
-/** Body for `POST /api/intent/recognize-sketch`. */
-export const sketchIntentRequestSchema = z.object({
-  screenshot: z.string().min(1, 'screenshot is required'),
-  clusterContext: sketchClusterContextSchema,
-  canvasId: z.string().min(1).optional(),
-});
-export type SketchIntentRequest = z.infer<typeof sketchIntentRequestSchema>;
-
-/** Body for `POST /api/intent/episode`. */
-export const intentEpisodeRequestSchema = z.object({
-  episode: z.custom<IntentEpisode>(
-    (v) =>
-      v !== null &&
-      typeof v === 'object' &&
-      typeof (v as { id?: unknown }).id === 'string' &&
-      (v as { id: string }).id.length > 0,
-    'episode is required',
-  ),
-  canvasId: z.string().min(1).optional(),
-});
-export type IntentEpisodeRequest = z.infer<typeof intentEpisodeRequestSchema>;

@@ -65,7 +65,7 @@ Last updated: 2026-07-21
 > **实测定调（2026-07-20）**：拿一张真实的多语言潦草手写 sketch 跑 Azure Read——英文清晰词与短问句（`why now?` / `why canvas?` / `more idea?`）可识别（60–95）；中文行草大面积部分正确但整行出错常见；**箭头/圈/框基本丢失或被误读成高置信度标点**（箭头→`-`@99、`∫f(x)`→`Estif(x)`、圈住的 `4`→`(4)`@14）。结论：OCR 文本作「搜索/触发」索引够用，作「转写/理解」不可信——故本阶段把它定位成**只读低保真索引**，理解一律交给拉取的区域图片。
 
 0. **stroke→PNG 渲染器（从 Stage 2 移入）**：复用/扩展服务端 [clusterToSvg](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts)——它已用 perfect-freehand→SVG→resvg 渲整节点/集群；加一个**可选 per-node stroke-id 过滤**以渲染子集；渲染时**捕获 flow→pixel 变换 T**（OCR 坐标对齐要用）。客户端旧 `sketchToImage.ts` 已删除、渲染已迁到服务端（见 snapshot-node.ts:413），**不要重建客户端渲染器**。
-1. **OCR 端点**：新增服务端 `ocr` 路由，复用 [sketch.service.ts](../../apps/server/src/modules/agent/sketch.service.ts) 的 vision 基座；输入 = 上面渲染器产出的区域 PNG，调 Azure Read，归一成 `{ text, lines[] }`。
+1. **OCR 端点**：新增服务端 `ocr` 路由（原方案复用已删除的 `sketch.service.ts` vision 基座，现需自建）；输入 = 上面渲染器产出的区域 PNG，调 Azure Read，归一成 `{ text, lines[] }`。
 2. **坐标对齐**：用渲染时记录的 T⁻¹ 把 Azure 像素多边形换回**区域本地 flow 坐标**。T 必须在栅格化当刻记下，是最易埋 bug 的点。
 3. **stroke ↔ line 映射**：每条笔画分配给质心 / 重叠所在的行 → `line.strokeIds`（供锚定 / 高亮，不参与拆分文本运算）。
 4. **阅读顺序**：行按 (top, then left) 排；多列延后。

@@ -56,6 +56,8 @@ export type UnloadFlushDeps = {
    * fire a forced keepalive PUT so that trailing edit isn't lost.
    */
   hasUnsavedStructure: () => boolean;
+  /** Persist the current Canvas's local Preview Workspace layout. */
+  flushPreviewWorkspace: () => void;
 };
 
 /**
@@ -64,6 +66,7 @@ export type UnloadFlushDeps = {
  */
 export function createUnloadFlush(deps: UnloadFlushDeps): () => void {
   return () => {
+    deps.flushPreviewWorkspace();
     deps.events.flushAllKeepalive();
     deps.nodeContent.flushAllKeepalive();
     deps.preprocess.flushKeepalive();

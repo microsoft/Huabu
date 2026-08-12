@@ -35,7 +35,6 @@ import {
   changesPath,
   deltaLogPath,
   eventsPath,
-  intentPath,
 } from '../../../workspace/disk/paths.js';
 import {
   canvasBlobs,
@@ -78,20 +77,6 @@ function delta(version: number) {
     commands: [],
     deltas: [],
     originator: { source: 'agent' as const },
-  };
-}
-
-function episode(id: string) {
-  return {
-    id,
-    timestamp: 1,
-    contextSummary: `ctx-${id}`,
-    candidates: [],
-    outcome: {
-      type: 'selected' as const,
-      chosenIndex: 0,
-      chosenLabel: id,
-    },
   };
 }
 
@@ -313,19 +298,11 @@ describe('strict structured reads', () => {
 
   it('does not replace malformed mutable JSON with an empty baseline', async () => {
     seedSpace('broken-mutable');
-    const { changes, intents } = new DiskStructuredStore().space(
-      'broken-mutable',
-    );
-    const intentFile = intentPath('broken-mutable');
+    const { changes } = new DiskStructuredStore().space('broken-mutable');
     const changeFile = changesPath('broken-mutable', 'thread-1');
     mkdirSync(path.dirname(changeFile), { recursive: true });
-    writeFileSync(intentFile, '[{"id":"survivor"', 'utf8');
     writeFileSync(changeFile, '[{"id":"survivor"', 'utf8');
 
-    await expect(intents.read()).rejects.toBeInstanceOf(SyntaxError);
-    await expect(intents.upsert(episode('replacement'))).rejects.toBeInstanceOf(
-      SyntaxError,
-    );
     await expect(changes.read('thread-1')).rejects.toBeInstanceOf(SyntaxError);
     await expect(
       changes.append('thread-1', [change('replacement')]),
@@ -334,24 +311,20 @@ describe('strict structured reads', () => {
       SyntaxError,
     );
 
-    expect(readFileSync(intentFile, 'utf8')).toBe('[{"id":"survivor"');
     expect(readFileSync(changeFile, 'utf8')).toBe('[{"id":"survivor"');
   });
 
-  it('uses one strict array value for change and intent reads and mutations', async () => {
+  it('uses one strict array value for change reads and mutations', async () => {
     seedSpace('single-array-read');
     const handle = new DiskStructuredStore().space('single-array-read');
     const firstChange = change('n1');
     await handle.changes.append('thread-1', [firstChange]);
-    await handle.intents.upsert(episode('e1'));
 
     const store = getCanvasStore('single-array-read');
     const legacySpies = [
       vi.spyOn(store, 'readChanges'),
       vi.spyOn(store, 'appendChanges'),
       vi.spyOn(store, 'removeChange'),
-      vi.spyOn(store, 'readIntents'),
-      vi.spyOn(store, 'upsertIntent'),
     ];
     for (const spy of legacySpies) {
       spy.mockImplementation(() => {
@@ -369,14 +342,6 @@ describe('strict structured reads', () => {
       await expect(
         handle.changes.remove('thread-1', firstChange.id),
       ).resolves.toEqual(firstChange);
-      await expect(handle.intents.read()).resolves.toEqual([episode('e1')]);
-      await expect(
-        handle.intents.upsert(episode('e2')),
-      ).resolves.toBeUndefined();
-      await expect(handle.intents.read()).resolves.toEqual([
-        episode('e1'),
-        episode('e2'),
-      ]);
     } finally {
       for (const spy of legacySpies) spy.mockRestore();
     }
@@ -386,19 +351,13 @@ describe('strict structured reads', () => {
     'rejects non-array mutable JSON without overwriting it: %s',
     async (contents) => {
       seedSpace('wrong-mutable-shape');
-      const { changes, intents } = new DiskStructuredStore().space(
+      const { changes } = new DiskStructuredStore().space(
         'wrong-mutable-shape',
       );
-      const intentFile = intentPath('wrong-mutable-shape');
       const changeFile = changesPath('wrong-mutable-shape', 'thread-1');
       mkdirSync(path.dirname(changeFile), { recursive: true });
-      writeFileSync(intentFile, contents, 'utf8');
       writeFileSync(changeFile, contents, 'utf8');
 
-      await expect(intents.read()).rejects.toBeInstanceOf(SyntaxError);
-      await expect(
-        intents.upsert(episode('replacement')),
-      ).rejects.toBeInstanceOf(SyntaxError);
       await expect(changes.read('thread-1')).rejects.toBeInstanceOf(
         SyntaxError,
       );
@@ -406,7 +365,6 @@ describe('strict structured reads', () => {
         changes.append('thread-1', [change('replacement')]),
       ).rejects.toBeInstanceOf(SyntaxError);
 
-      expect(readFileSync(intentFile, 'utf8')).toBe(contents);
       expect(readFileSync(changeFile, 'utf8')).toBe(contents);
     },
   );
@@ -568,7 +526,6 @@ describe('Space lifecycle guards and reopen', () => {
       handle.events,
       handle.deltas,
       handle.changes,
-      handle.intents,
     ]) {
       expect('store' in repository).toBe(false);
       expect(
@@ -585,9 +542,6 @@ describe('Space lifecycle guards and reopen', () => {
       handle.events.append([{ payload: action('n1'), ts: 1 }]),
     ).rejects.toThrow(/missing Space/);
     await expect(handle.deltas.append(delta(1))).rejects.toThrow(
-      /missing Space/,
-    );
-    await expect(handle.intents.upsert(episode('e1'))).rejects.toThrow(
       /missing Space/,
     );
     await expect(
@@ -625,7 +579,6 @@ describe('Space lifecycle guards and reopen', () => {
     });
     await first.events.append([{ payload: action('n1'), ts: 7 }]);
     await first.deltas.append(delta(1));
-    await first.intents.upsert(episode('e1'));
     const storedChanges = await first.changes.append('thread-1', [
       change('n1'),
     ]);
@@ -642,9 +595,6 @@ describe('Space lifecycle guards and reopen', () => {
     expect(
       (await reopened.deltas.readSince(0)).map((entry) => entry.version),
     ).toEqual([1]);
-    expect((await reopened.intents.read()).map((entry) => entry.id)).toEqual([
-      'e1',
-    ]);
     expect(await reopened.changes.read('thread-1')).toEqual(storedChanges);
     expect((await canvasBlobs('reopen').read('payload.bin'))?.toString()).toBe(
       'persisted',

@@ -13,17 +13,44 @@ const ui = { nodes: [], edges: [] };
 
 describe('resolveAddNodes', () => {
   it.each(['note', 'text'] satisfies CanvasNodeType[])(
-    'requests editing after creating one %s node',
+    'requests editing after explicitly creating one %s node',
     (nodeType) => {
       const resolution = resolveAddNodes(
         {
           type: 'ADD_NODES',
-          inputs: [{ id: 'node-new', nodeType }],
+          inputs: [
+            {
+              id: 'node-new',
+              nodeType,
+              data: { origin: { type: 'user-created' } },
+            },
+          ],
         },
         ui,
       );
 
       expect(resolution.editNodeId).toBe('node-new');
+    },
+  );
+
+  it.each(['user-excerpt', 'user-from-chat', 'user-uploaded'] as const)(
+    'does not request editing for a note created from %s content',
+    (originType) => {
+      const resolution = resolveAddNodes(
+        {
+          type: 'ADD_NODES',
+          inputs: [
+            {
+              id: 'node-new',
+              nodeType: 'note',
+              data: { origin: { type: originType } },
+            },
+          ],
+        },
+        ui,
+      );
+
+      expect(resolution.editNodeId).toBeUndefined();
     },
   );
 

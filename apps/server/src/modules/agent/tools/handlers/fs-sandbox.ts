@@ -38,7 +38,7 @@ import { canvasRoot } from '../../../storage/paths.js';
 /**
  * Directories never traversed by `grep` / `find` / `ls` / `read`.
  *
- * - `.history` — chat / intent transcripts, append-only event log.
+ * - `.history` — chat transcripts, append-only event log.
  * - `.git`, `node_modules` — defensive: should never appear under a
  *   canvas root, but cheap to skip in case a workspace happens to live
  *   inside a repo.

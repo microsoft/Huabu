@@ -11,7 +11,7 @@
  *   1. Autosave piggy-back — `saveCanvas` calls {@link CanvasEventBuffer.flush}
  *      after a successful PUT so events ride the 1s structure cadence.
  *   2. Pre-agent flush     — exposed as the store action
- *      `flushCanvasEvents` so agent / intent requests see the latest log.
+ *      `flushCanvasEvents` so agent requests see the latest log.
  *   3. Page unload         — the `beforeunload` listener fires
  *      {@link CanvasEventBuffer.flushAllKeepalive}.
  *

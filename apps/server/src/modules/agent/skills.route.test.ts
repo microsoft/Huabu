@@ -95,11 +95,9 @@ describe('GET /api/skills — listing', () => {
       const body = res.json<InjectListResponse>();
       const ids = body.skills.map((s) => s.id);
       // Catalogue-only system skills (the default for shipped
-      // skills like `space` / `sketch-gestures`) must NOT appear
-      // in the user-invokable menu — they live in the agent's
-      // `{{skillCatalogue}}` only.
+      // skills like `space`) must NOT appear in the user-invokable
+      // menu — they live in the agent's `{{skillCatalogue}}` only.
       expect(ids).not.toContain('space');
-      expect(ids).not.toContain('sketch-gestures');
       // User skills must show up.
       expect(ids).toContain('user-only-a');
       expect(ids).toContain('user-only-b');
@@ -122,7 +120,7 @@ describe('GET /api/skills — listing', () => {
   it('honours the scope query parameter', async () => {
     writeUserSkill('ask-only', ['ask']);
     writeUserSkill('operate-only', ['operate']);
-    writeUserSkill('sketch-only', ['sketch']);
+    writeUserSkill('external-only', ['external']);
 
     const app = await buildApp();
     try {
@@ -133,17 +131,17 @@ describe('GET /api/skills — listing', () => {
       const askIds = askRes.json<InjectListResponse>().skills.map((s) => s.id);
       expect(askIds).toContain('ask-only');
       expect(askIds).not.toContain('operate-only');
-      expect(askIds).not.toContain('sketch-only');
+      expect(askIds).not.toContain('external-only');
 
-      const sketchRes = await app.inject({
+      const externalRes = await app.inject({
         method: 'GET',
-        url: '/skills/?scope=sketch',
+        url: '/skills/?scope=external',
       });
-      const sketchIds = sketchRes
+      const externalIds = externalRes
         .json<InjectListResponse>()
         .skills.map((s) => s.id);
-      expect(sketchIds).toContain('sketch-only');
-      expect(sketchIds).not.toContain('ask-only');
+      expect(externalIds).toContain('external-only');
+      expect(externalIds).not.toContain('ask-only');
     } finally {
       await app.close();
     }

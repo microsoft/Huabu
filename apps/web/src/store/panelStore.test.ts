@@ -60,3 +60,38 @@ describe('panel store canvas search visibility', () => {
     });
   });
 });
+
+describe('panel store focus requests', () => {
+  beforeEach(() => {
+    usePanelStore.setState({ focusChatInputRequest: null });
+  });
+
+  it('names the thread whose composer should take focus', () => {
+    usePanelStore.getState().requestFocusChatInput('thread-a');
+
+    expect(usePanelStore.getState().focusChatInputRequest).toMatchObject({
+      threadId: 'thread-a',
+    });
+  });
+
+  it('advances the nonce so a repeat request re-fires focus', () => {
+    usePanelStore.getState().requestFocusChatInput('thread-a');
+    const first = usePanelStore.getState().focusChatInputRequest;
+
+    usePanelStore.getState().requestFocusChatInput('thread-a');
+    const second = usePanelStore.getState().focusChatInputRequest;
+
+    expect(second?.nonce).toBeGreaterThan(first?.nonce ?? 0);
+  });
+
+  it('retargets rather than queueing when another thread asks', () => {
+    usePanelStore.getState().requestFocusChatInput('thread-a');
+    usePanelStore.getState().requestFocusChatInput('thread-b');
+
+    // Only the latest request stands, so a composer that never got focus
+    // cannot claim it later out of turn.
+    expect(usePanelStore.getState().focusChatInputRequest).toMatchObject({
+      threadId: 'thread-b',
+    });
+  });
+});

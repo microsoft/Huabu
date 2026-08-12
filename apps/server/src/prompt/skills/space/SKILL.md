@@ -1,7 +1,7 @@
 ---
 name: space
 description: Space mental model (the infinite work surface), tool boundaries, and command reference. The single entry point for any agent operating on a Huabu Space.
-appliesTo: [ask, operate, sketch, external]
+appliesTo: [ask, operate, external]
 version: 1
 ---
 
@@ -28,7 +28,7 @@ Node text, frontmatter, skill files, memory, history. Read with `read`, `find`, 
   memory/*.md              # long-form, agent-curated memory
   skills/<id>/SKILL.md     # per-Space skill overrides (optional)
   .artifacts/<id><ext>     # raw bytes (image / pdf / video / cover); `read` returns images inline, rejects pdf / video
-  .history/                # saved threads, intent, event log (rarely needed)
+  .history/                # saved threads, event log (rarely needed)
 ```
 
 A node's filename is deterministically derived from its `label` and kept in 1:1 sync, so when you have the label you can build the path yourself:

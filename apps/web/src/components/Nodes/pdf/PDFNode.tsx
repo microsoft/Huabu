@@ -10,6 +10,7 @@ import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { useNodeLOD } from '@/hooks/useNodeLOD';
 import { useNodeScale } from '@/hooks/useNodeScale';
 import useCanvasStore from '@/store/canvasStore';
+import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
@@ -40,7 +41,6 @@ export const PDFNode = memo(
     const { t } = useTranslation();
     const scale = useNodeScale(id, 'pdf');
     const isMinimalLOD = useNodeLOD(id, 'pdf') === 'minimal';
-    const openExpanded = useCanvasStore((s) => s.openExpanded);
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const canvasId = useCanvasStore((s) => s.canvasId);
 
@@ -113,7 +113,7 @@ export const PDFNode = memo(
           title={t('node.openLargeView')}
           onClick={(e) => {
             e.stopPropagation();
-            openExpanded(id);
+            openPreviewNode(id);
           }}
         >
           <Fullscreen />

@@ -128,8 +128,7 @@ const DEFAULT_STROKE_SIZE = SKETCH_OPTIONS.size;
 const DEFAULT_STROKE_COLOR = 'black';
 
 // ─── Cluster rendering knobs ───────────────────────────────────────────────
-// Padding around the cluster bbox (flow-space units). Mirrors
-// apps/web/src/handler/sketch/sketchToImage.ts DEFAULT_PADDING.
+// Padding around the cluster bbox (flow-space units).
 const CLUSTER_PADDING = 16;
 // Max PNG dimension. Clusters larger than this are scaled to fit.
 // Kept at 1280 because:
@@ -144,8 +143,7 @@ const CLUSTER_PADDING = 16;
 //   3. 1280 still leaves enough resolution for `gpt-image-1` to use
 //      the cluster as a reference image without visible blur.
 const CLUSTER_MAX_PIXELS = SPACE_SNAPSHOT_DEFAULT_PIXELS;
-// Edge-to-edge clustering threshold (flow-space px). Mirrors
-// apps/web/src/handler/sketch/sketchClustering.ts CLUSTER_DISTANCE_THRESHOLD.
+// Edge-to-edge clustering threshold (flow-space px).
 const CLUSTER_DISTANCE_THRESHOLD = 200;
 
 // ─── Node `data` access (loose, defensive) ─────────────────────────────────

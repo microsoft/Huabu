@@ -20,9 +20,8 @@ import type {
   CanvasChangeRepository,
   CanvasDeltaRepository,
   CanvasEventRepository,
-  CanvasIntentRepository,
 } from '../structured.js';
-import type { IntentEpisode, RecentAction } from '@huabu/shared';
+import type { RecentAction } from '@huabu/shared';
 import type {
   CanvasChangeRecord,
   CanvasNode,
@@ -32,7 +31,6 @@ export interface CanvasLogRepositories {
   events: CanvasEventRepository;
   deltas: CanvasDeltaRepository;
   changes: CanvasChangeRepository;
-  intents: CanvasIntentRepository;
 }
 
 export interface CanvasLogRepositoriesHarness extends CanvasLogRepositories {
@@ -90,16 +88,6 @@ function change(nodeId: string, content = 'body'): CanvasChangeRecord {
     { type: 'INSERT_NODE', node: node(nodeId, content) },
   ]);
   return record;
-}
-
-function episode(id: string, chosenLabel: string): IntentEpisode {
-  return {
-    id,
-    timestamp: 1,
-    contextSummary: `ctx-${id}`,
-    candidates: [],
-    outcome: { type: 'selected', chosenIndex: 0, chosenLabel },
-  };
 }
 
 export function describeCanvasLogRepositoriesContract(
@@ -313,41 +301,6 @@ export function describeCanvasLogRepositoriesContract(
 
       expect((await changes.read('t1')).map((r) => r.nodeId)).toEqual([
         'node-b',
-      ]);
-    });
-
-    // ── Intent episodes ─────────────────────────────────────────────────────
-
-    it('reads no intents for a fresh Space', async () => {
-      const { intents } = await open();
-      await expect(intents.read()).resolves.toEqual([]);
-    });
-
-    it('inserts a new episode and updates an existing one by id', async () => {
-      const { intents } = await open();
-      await intents.upsert(episode('e1', 'first'));
-      await intents.upsert(episode('e2', 'second'));
-      expect(await intents.read()).toHaveLength(2);
-
-      await intents.upsert(episode('e1', 'revised'));
-      const stored = await intents.read();
-      expect(stored).toHaveLength(2);
-      const updated = stored.find((e) => e.id === 'e1');
-      expect(
-        updated?.outcome.type === 'selected' && updated.outcome.chosenLabel,
-      ).toBe('revised');
-    });
-
-    it('does not lose an episode under concurrent upserts', async () => {
-      const { intents, concurrent } = await open();
-      await Promise.all([
-        intents.upsert(episode('e1', 'first')),
-        concurrent.intents.upsert(episode('e2', 'second')),
-      ]);
-
-      expect((await intents.read()).map((e) => e.id).sort()).toEqual([
-        'e1',
-        'e2',
       ]);
     });
   });

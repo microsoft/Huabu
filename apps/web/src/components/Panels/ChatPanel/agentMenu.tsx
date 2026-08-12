@@ -2,16 +2,12 @@
 // Licensed under the MIT license.
 
 /**
- * Shared building blocks for the agent picker dropdown, used by both
- * `NewChatMenu` (header split-button) and `AgentSelector` (inline chip).
+ * Shared building blocks for the agent picker dropdown used by
+ * `AgentSelector`.
  *
- * The two surfaces have different triggers and different select
- * semantics (mint a new thread vs. rebind the current empty thread) but
- * render an identical option list: the built-in Chat / Agent modes, one
- * row per configured external ACP profile, and an inline "Add agent"
- * entry. This module owns that list plus the `bindingsEqual` / `INTERNAL`
- * helpers and the "Add agent" editor-modal wiring so neither caller
- * duplicates them.
+ * This module owns the built-in Chat / Agent modes, one row per configured
+ * external ACP profile, the inline "Add agent" entry, and the
+ * `bindingsEqual` / `INTERNAL` helpers.
  */
 
 import { Plus } from 'lucide-react';

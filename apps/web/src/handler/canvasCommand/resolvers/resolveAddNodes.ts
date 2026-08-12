@@ -210,6 +210,9 @@ export default function resolveAddNodes(
     if (usesFallback) staggerIndex += 1;
     return item;
   });
+  const onlyInput = creatableInputs.length === 1 ? creatableInputs[0] : null;
+  const origin = onlyInput?.data?.origin as { type?: unknown } | undefined;
+  const requestsEditing = origin?.type === 'user-created';
 
   return {
     commands: [
@@ -219,6 +222,7 @@ export default function resolveAddNodes(
       },
     ],
     ...(created.length === 1 &&
+    requestsEditing &&
     (created[0].traceNode.type === 'note' ||
       created[0].traceNode.type === 'text')
       ? { editNodeId: created[0].traceNode.id }

@@ -65,8 +65,16 @@ const CANVAS_ID = 'canvas-1';
 /** Stable identity — the effect lists it as a dependency. */
 const noopSetIsLoading = () => {};
 
+/** Stable identity — the hook derives its effect dependencies from it. */
+const SESSION = {
+  threadId: THREAD_ID,
+  canvasId: CANVAS_ID,
+  ownerCanvasId: CANVAS_ID,
+  conversationView: null,
+};
+
 function Harness() {
-  useChatHistory(noopSetIsLoading);
+  useChatHistory(SESSION, noopSetIsLoading);
   return null;
 }
 
@@ -74,17 +82,21 @@ let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
 /** History ends on a user turn: the state that arms the reconnect. */
-function seedStore(loadingThreadIds: Set<string>) {
+function seedStore(isStreaming: boolean) {
   useChatStore.setState({
-    threadId: THREAD_ID,
     threadMap: { [CANVAS_ID]: THREAD_ID },
-    historyLoadedThreads: new Set([THREAD_ID]),
-    messagesByThread: {
-      [THREAD_ID]: [{ id: 'm1', role: 'user', content: 'hi' }],
+    threadsById: {
+      [THREAD_ID]: {
+        messages: [{ id: 'm1', role: 'user', content: 'hi' }],
+        draft: '',
+        historyLoaded: true,
+        isStreaming,
+        lastAction: 'ask',
+        binding: { kind: 'internal' },
+        settings: { modelId: null, reasoningEffort: null },
+        pendingAttachments: [],
+      },
     },
-    loadingThreadIds,
-    viewingQuestionThread: null,
-    questionReplayByCanvas: {},
   });
 }
 
@@ -121,7 +133,7 @@ afterEach(() => {
 
 describe('useChatHistory reconnect', () => {
   it('skips reconnect while this client already owns a live consumer', async () => {
-    seedStore(new Set([THREAD_ID]));
+    seedStore(true);
 
     await renderHarness();
 
@@ -131,9 +143,9 @@ describe('useChatHistory reconnect', () => {
   });
 
   it('reconnects when no consumer is live, as after a page refresh', async () => {
-    // `loadingThreadIds` sits outside `partialize`, so a real refresh
-    // arrives here with it empty.
-    seedStore(new Set());
+    // The streaming flag sits outside `partialize`, so a real refresh
+    // arrives here with it false.
+    seedStore(false);
 
     await renderHarness();
 

@@ -35,7 +35,6 @@ import type {
   CanvasFile,
   SpaceHandle,
 } from '../../storage/index.js';
-import type { IntentEpisode } from '@huabu/shared';
 
 let root = '';
 
@@ -62,28 +61,12 @@ function canvasRecord(): CanvasFile {
   } as CanvasFile;
 }
 
-function episode(id: string, timestamp: number): IntentEpisode {
-  return {
-    id,
-    timestamp,
-    contextSummary: `context-${id}`,
-    candidates: [],
-    outcome: {
-      type: 'selected',
-      chosenIndex: 0,
-      chosenLabel: `choice-${id}`,
-    },
-  };
-}
-
 function createHandle(
   options: {
     record?: CanvasFile | null;
     recordError?: Error;
     events?: CanvasEvent[];
     eventsError?: Error;
-    intents?: IntentEpisode[];
-    intentsError?: Error;
   } = {},
 ) {
   const record = 'record' in options ? options.record : canvasRecord();
@@ -93,16 +76,12 @@ function createHandle(
   const eventsRead = options.eventsError
     ? vi.fn().mockRejectedValue(options.eventsError)
     : vi.fn().mockResolvedValue(options.events ?? []);
-  const intentsRead = options.intentsError
-    ? vi.fn().mockRejectedValue(options.intentsError)
-    : vi.fn().mockResolvedValue(options.intents ?? []);
   const handle = {
     canvasId: 'canvas-a',
     record: { read: recordRead },
     events: { read: eventsRead },
-    intents: { read: intentsRead },
   } as unknown as SpaceHandle;
-  return { handle, recordRead, eventsRead, intentsRead };
+  return { handle, recordRead, eventsRead };
 }
 
 function installHandle(handle: SpaceHandle) {
@@ -125,7 +104,6 @@ beforeEach(() => {
     counter: 0,
     lastAnalyzedAt: null,
     lastSeenThreadCursor: null,
-    lastSeenIntentCursor: 10,
   });
   vi.mocked(loadAgent)
     .mockReset()
@@ -143,7 +121,7 @@ afterEach(() => {
 
 describe('runAnalysisPass repository sources', () => {
   it('skips a missing Space before reading logs or starting the agent', async () => {
-    const { handle, recordRead, eventsRead, intentsRead } = createHandle({
+    const { handle, recordRead, eventsRead } = createHandle({
       record: null,
     });
     const space = installHandle(handle);
@@ -156,13 +134,12 @@ describe('runAnalysisPass repository sources', () => {
     expect(space).toHaveBeenCalledWith('canvas-a');
     expect(recordRead).toHaveBeenCalledTimes(1);
     expect(eventsRead).not.toHaveBeenCalled();
-    expect(intentsRead).not.toHaveBeenCalled();
     expect(readMemoryState).not.toHaveBeenCalled();
     expect(loadAgent).not.toHaveBeenCalled();
     expect(runAgent).not.toHaveBeenCalled();
   });
 
-  it('assembles record, event, and intent context through one handle', async () => {
+  it('assembles record and event context through one handle', async () => {
     const events: CanvasEvent[] = [
       {
         ts: 11,
@@ -181,28 +158,20 @@ describe('runAnalysisPass repository sources', () => {
         } as unknown as CanvasEvent['payload'],
       },
     ];
-    const { handle, recordRead, eventsRead, intentsRead } = createHandle({
-      events,
-      intents: [episode('old', 5), episode('fresh', 20)],
-    });
+    const { handle, recordRead, eventsRead } = createHandle({ events });
     const space = installHandle(handle);
 
     await expect(runAnalysisPass('canvas-a')).resolves.toEqual({
       status: 'completed',
       results: [],
       latestChatTs: null,
-      latestIntentTs: 20,
     });
 
     expect(space).toHaveBeenCalledTimes(1);
     expect(recordRead).toHaveBeenCalledTimes(1);
     expect(eventsRead).toHaveBeenCalledWith(100);
-    expect(intentsRead).toHaveBeenCalledTimes(1);
     expect(recordRead.mock.invocationCallOrder[0]).toBeLessThan(
       eventsRead.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    );
-    expect(recordRead.mock.invocationCallOrder[0]).toBeLessThan(
-      intentsRead.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
     const call = vi.mocked(runAgent).mock.calls[0]?.[0];
     const messages = call?.context.messages ?? [];
@@ -213,19 +182,15 @@ describe('runAnalysisPass repository sources', () => {
     expect(text).toContain('[SYSTEM Recent ops]\n- event: ');
     expect(text).toContain(`- legacy-kind: ${'x'.repeat(120)}`);
     expect(text).not.toContain(`- legacy-kind: ${'x'.repeat(121)}`);
-    expect(text).toContain('summary: 1 new episode(s)');
-    expect(text).toContain('selected "choice-fresh"');
-    expect(text).not.toContain('choice-old');
   });
 
-  it.each(['record', 'events', 'intents'] as const)(
+  it.each(['record', 'events'] as const)(
     'propagates strict %s repository failures without starting the agent',
     async (source) => {
       const error = new Error(`${source} failed`);
       const setup = createHandle({
         ...(source === 'record' ? { recordError: error } : {}),
         ...(source === 'events' ? { eventsError: error } : {}),
-        ...(source === 'intents' ? { intentsError: error } : {}),
       });
       installHandle(setup.handle);
 
@@ -233,7 +198,6 @@ describe('runAnalysisPass repository sources', () => {
       expect(runAgent).not.toHaveBeenCalled();
       if (source === 'record') {
         expect(setup.eventsRead).not.toHaveBeenCalled();
-        expect(setup.intentsRead).not.toHaveBeenCalled();
       }
     },
   );
