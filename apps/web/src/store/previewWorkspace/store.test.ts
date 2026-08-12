@@ -285,6 +285,33 @@ describe('node focus requests', () => {
   });
 });
 
+describe('Chat open requests', () => {
+  it('reissues positioning for the same tab and consumes only the matching request', () => {
+    store().requestChatOpen('tab-1', 'last-user');
+    const firstNonce = store().chatOpenRequest?.nonce;
+    store().requestChatOpen('tab-1', 'bottom');
+
+    expect(store().chatOpenRequest).toEqual({
+      tabId: 'tab-1',
+      position: 'bottom',
+      nonce: (firstNonce ?? 0) + 1,
+    });
+
+    store().consumeChatOpenRequest('tab-1', firstNonce ?? 0);
+    expect(store().chatOpenRequest).not.toBeNull();
+
+    store().consumeChatOpenRequest(
+      'tab-1',
+      store().chatOpenRequest?.nonce ?? 0,
+    );
+    expect(store().chatOpenRequest).toBeNull();
+
+    store().requestChatOpen('tab-1', 'last-user');
+    store().closeTab('tab-1');
+    expect(store().chatOpenRequest).toBeNull();
+  });
+});
+
 describe('tab cap', () => {
   it('evicts the least recently active tab past the cap', () => {
     store().loadForCanvas(CANVAS);

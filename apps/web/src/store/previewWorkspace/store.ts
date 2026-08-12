@@ -63,6 +63,14 @@ export type PreviewWorkspaceState = {
   nodeFocusRequest: { tabId: string; nonce: number } | null;
   /** Runtime-only sequence that keeps focus request identities monotonic. */
   nodeFocusRequestSeq: number;
+  /** One-shot request controlling a Chat tab's initial scroll position. */
+  chatOpenRequest: {
+    tabId: string;
+    position: 'last-user' | 'bottom';
+    nonce: number;
+  } | null;
+  /** Runtime-only sequence that keeps Chat open requests monotonic. */
+  chatOpenRequestSeq: number;
 
   /**
    * Loads a Canvas's layout, flushing the outgoing Canvas first. Falls back
@@ -91,6 +99,8 @@ export type PreviewWorkspaceState = {
   setSplitRatio: (ratio: number) => void;
   requestNodeFocus: (tabId: string) => void;
   consumeNodeFocusRequest: (tabId: string, nonce: number) => void;
+  requestChatOpen: (tabId: string, position: 'last-user' | 'bottom') => void;
+  consumeChatOpenRequest: (tabId: string, nonce: number) => void;
   /** Drops tabs whose node no longer exists and repairs dangling ids. */
   validate: (liveNodeIds: ReadonlySet<string>) => void;
 };
@@ -101,6 +111,8 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
     workspace: createEmptyWorkspace(),
     nodeFocusRequest: null,
     nodeFocusRequestSeq: 0,
+    chatOpenRequest: null,
+    chatOpenRequestSeq: 0,
 
     loadForCanvas: (canvasId, legacy) => {
       const current = get();
@@ -112,7 +124,12 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
         (legacy ? seedWorkspaceFromLegacyChat(canvasId, legacy) : null) ??
         createEmptyWorkspace();
 
-      set({ canvasId, workspace, nodeFocusRequest: null });
+      set({
+        canvasId,
+        workspace,
+        nodeFocusRequest: null,
+        chatOpenRequest: null,
+      });
     },
 
     flush: () => {
@@ -141,6 +158,9 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
         workspace: closeTab(state.workspace, tabId),
         ...(state.nodeFocusRequest?.tabId === tabId
           ? { nodeFocusRequest: null }
+          : {}),
+        ...(state.chatOpenRequest?.tabId === tabId
+          ? { chatOpenRequest: null }
           : {}),
       })),
 
@@ -178,6 +198,23 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
         state.nodeFocusRequest?.tabId === tabId &&
         state.nodeFocusRequest.nonce === nonce
           ? { nodeFocusRequest: null }
+          : {},
+      ),
+
+    requestChatOpen: (tabId, position) =>
+      set((state) => {
+        const nonce = state.chatOpenRequestSeq + 1;
+        return {
+          chatOpenRequest: { tabId, position, nonce },
+          chatOpenRequestSeq: nonce,
+        };
+      }),
+
+    consumeChatOpenRequest: (tabId, nonce) =>
+      set((state) =>
+        state.chatOpenRequest?.tabId === tabId &&
+        state.chatOpenRequest.nonce === nonce
+          ? { chatOpenRequest: null }
           : {},
       ),
 

@@ -1120,6 +1120,7 @@ if (typeof window !== 'undefined') {
         if (s.versionConflict) return false;
         return s.isSaving || s.pendingSave;
       },
+      flushPreviewWorkspace: () => usePreviewWorkspaceStore.getState().flush(),
     }),
   );
 }
@@ -1528,6 +1529,8 @@ const useCanvasStore = create<RFState>()(
         setNodes: (nodes) => set({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
         forgetNodeContent: nodeContentQueue.forgetNode,
+        validatePreviewNodes: (liveNodeIds) =>
+          usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
     },
 
@@ -1681,6 +1684,8 @@ const useCanvasStore = create<RFState>()(
         setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
         triggerPreprocessing: preprocessQueue.schedule,
         forgetNodeContent: nodeContentQueue.forgetNode,
+        validatePreviewNodes: (liveNodeIds) =>
+          usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
 
       return skippedNodeIds;

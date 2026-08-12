@@ -145,11 +145,6 @@ interface WorkspaceState {
   worldCanvasId: string | null;
   /** Whether World is exposed as the workspace landing page. */
   worldEnabled: boolean;
-  /**
-   * Whether the tabbed preview workspace replaces the single Expanded Node
-   * panel. Off by default while the surface is still being built out; see
-   * `docs/proposals/unified-preview-workspace.md`.
-   */
   /** Derived ordinary Space titles used by World Portal rendering. */
   spaceTitles: Record<string, string | null>;
   spaceTitlesLoaded: boolean;

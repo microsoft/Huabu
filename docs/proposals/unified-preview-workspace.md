@@ -1,7 +1,9 @@
 # Unified Preview Workspace
 
 Status: Shipped
-Last updated: 2026-08-10
+Last updated: 2026-08-12
+
+The shipped system is documented in [`docs/architecture/preview-workspace.md`](../architecture/preview-workspace.md). This proposal is retained as design and migration history and is not authoritative for current behavior.
 
 ## 1. Summary
 

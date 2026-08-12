@@ -19,10 +19,24 @@ import useCanvasStore from '@/store/canvasStore';
 import { usePanelStore } from '@/store/panelStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
+import type {
+  CanvasPreviewWorkspace,
+  PreviewTab,
+} from '@/store/previewWorkspace/model';
+
+function activeTabs(workspace: CanvasPreviewWorkspace): PreviewTab[] {
+  return workspace.groups.flatMap((group) => {
+    const tab = group.activeTabId
+      ? workspace.tabs[group.activeTabId]
+      : undefined;
+    return tab ? [tab] : [];
+  });
+}
+
 /** Reactive form — use inside render logic. */
 export function useActivelyViewingQuestionNode(nodeId: string): boolean {
   const anchored = usePreviewWorkspaceStore((state) =>
-    Object.values(state.workspace.tabs).some(
+    activeTabs(state.workspace).some(
       (tab) => tab.target.kind === 'node' && tab.target.nodeId === nodeId,
     ),
   );
@@ -41,7 +55,7 @@ export function isActivelyViewingQuestion(match: {
 }): boolean {
   const workspace = usePreviewWorkspaceStore.getState().workspace;
   const canvas = useCanvasStore.getState();
-  const matches = Object.values(workspace.tabs).some((tab) => {
+  const matches = activeTabs(workspace).some((tab) => {
     if (tab.target.kind !== 'node') return false;
     const targetNodeId = tab.target.nodeId;
     if (match.nodeId === targetNodeId) return true;

@@ -353,11 +353,11 @@ describe('two mounted ChatPanels', () => {
       container
         ?.querySelector('[data-panel="a"] textarea')
         ?.getAttribute('placeholder'),
-    ).toBe('Describe the Space change you want...');
+    ).toBe('Describe the Space change you want…');
     expect(
       container
         ?.querySelector('[data-panel="b"] textarea')
         ?.getAttribute('placeholder'),
-    ).toBe('Asking anything here...');
+    ).toBe('Asking anything here…');
   });
 });

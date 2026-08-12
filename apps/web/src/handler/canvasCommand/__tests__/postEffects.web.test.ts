@@ -41,15 +41,22 @@ function run(
   mutatedNodes: Node[],
   triggerPreprocessing: (n: Node) => void,
   contentEditedNodeIds: string[] = [],
+  validatePreviewNodes: (liveNodeIds: ReadonlySet<string>) => void = () =>
+    undefined,
+  deletedNodeIds: string[] = [],
 ) {
   runWebPostEffects({
-    effects: effectsWith(mutatedNodes, contentEditedNodeIds),
+    effects: {
+      ...effectsWith(mutatedNodes, contentEditedNodeIds),
+      deletedNodeIds,
+    },
     canvasId: 'c1',
     getNodes: () => [],
     getEdges: () => [],
     setNodes: () => undefined,
     triggerPreprocessing,
     forgetNodeContent: () => undefined,
+    validatePreviewNodes,
   });
 }
 
@@ -88,5 +95,13 @@ describe('runWebPostEffects — settle-triggered types skip content-edit preproc
     expect(trigger).toHaveBeenCalledTimes(1);
     expect(trigger).toHaveBeenCalledWith(web);
     expect(trigger).not.toHaveBeenCalledWith(note);
+  });
+
+  it('validates Preview Workspace against live nodes after deletion', () => {
+    const validate = vi.fn();
+    run([], vi.fn(), [], validate, ['deleted']);
+
+    expect(validate).toHaveBeenCalledOnce();
+    expect([...validate.mock.calls[0]![0]]).toEqual([]);
   });
 });

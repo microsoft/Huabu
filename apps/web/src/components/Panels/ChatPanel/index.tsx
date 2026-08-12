@@ -77,6 +77,12 @@ interface ChatPanelProps {
   previewTabId: string;
   /** Reports a persistent thread mutation to the owning preview surface. */
   onCommit?: () => void;
+  /** One-shot initial scroll request from Preview Workspace. */
+  openPositionRequest?: {
+    position: 'last-user' | 'bottom';
+    nonce: number;
+  };
+  onOpenPositionHandled?: (nonce: number) => void;
 }
 
 export const ChatPanel = ({
@@ -85,6 +91,8 @@ export const ChatPanel = ({
   session,
   previewTabId,
   onCommit,
+  openPositionRequest,
+  onOpenPositionHandled,
 }: ChatPanelProps) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -833,7 +841,13 @@ export const ChatPanel = ({
             isHistoryLoading={!isHistoryLoaded}
             viewKey={threadId}
             isActive={!isCollapsed}
-            openPosition={pendingPermission ? 'bottom' : 'bottom'}
+            openPosition={
+              pendingPermission
+                ? 'bottom'
+                : (openPositionRequest?.position ?? 'bottom')
+            }
+            openPositionRequestNonce={openPositionRequest?.nonce}
+            onOpenPositionHandled={onOpenPositionHandled}
             onRetry={() => {
               // Find the last user message and re-send it
               const lastUserMsg = [...messages]

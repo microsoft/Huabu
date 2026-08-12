@@ -57,6 +57,8 @@ export interface RunWebPostEffectsInput {
    * a back-import cycle with the canvas store.
    */
   forgetNodeContent: (nodeId: string) => void;
+  /** Remove Preview Workspace tabs whose node targets were deleted. */
+  validatePreviewNodes: (liveNodeIds: ReadonlySet<string>) => void;
 }
 
 /**
@@ -76,6 +78,7 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     setNodes,
     triggerPreprocessing,
     forgetNodeContent,
+    validatePreviewNodes,
   } = input;
 
   // 1. Trigger preprocessing for created / mutated nodes. The server
@@ -111,6 +114,9 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     // Release the node's per-node save-queue state so a long session of
     // create/delete churn doesn't leak bookkeeping keyed by dead ids.
     forgetNodeContent(nodeId);
+  }
+  if (effects.deletedNodeIds.length > 0) {
+    validatePreviewNodes(new Set(getNodes().map((node) => node.id)));
   }
 
   // 3. Refit frames whose children need a render cycle to settle their

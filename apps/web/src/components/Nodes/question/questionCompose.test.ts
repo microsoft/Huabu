@@ -4,6 +4,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import useCanvasStore from '@/store/canvasStore';
+import { selectThreadBinding, useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import {
@@ -35,6 +36,7 @@ beforeEach(() => {
     canvasId: 'canvas-1',
     workspace: createEmptyWorkspace(),
   });
+  useChatStore.setState({ threadsById: {}, bindingMap: {} });
   usePanelStore.setState({
     isRightCollapsed: true,
     rightPanelAnchorNodeId: null,
@@ -50,6 +52,9 @@ describe('Question conversation presentation', () => {
       'question-1',
     );
     expect(usePanelStore.getState().isRightCollapsed).toBe(false);
+    expect(usePreviewWorkspaceStore.getState().chatOpenRequest).toMatchObject({
+      position: 'bottom',
+    });
   });
 
   it('opens Question compose as a workspace tab and focuses its thread', () => {
@@ -60,6 +65,21 @@ describe('Question conversation presentation', () => {
     );
     expect(usePanelStore.getState().focusChatInputRequest?.threadId).toBe(
       'thread-1',
+    );
+  });
+
+  it('inherits the Canvas binding for a new Question thread', () => {
+    const binding = {
+      kind: 'external' as const,
+      profileId: 'profile-1',
+      alias: 'Research agent',
+    };
+    useChatStore.setState({ bindingMap: { 'canvas-1': binding } });
+
+    enterQuestionCompose(view, 'canvas-1');
+
+    expect(selectThreadBinding(useChatStore.getState(), 'thread-1')).toEqual(
+      binding,
     );
   });
 });

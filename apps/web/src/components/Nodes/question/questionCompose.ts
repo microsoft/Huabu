@@ -13,8 +13,10 @@
 import { createId } from '@huabu/shared';
 
 import useCanvasStore from '@/store/canvasStore.ts';
+import { useChatStore } from '@/store/chatStore.ts';
 import { usePanelStore } from '@/store/panelStore.ts';
 import { openPreviewNode } from '@/store/previewWorkspace/actions.ts';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store.ts';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent.ts';
 import type {
@@ -23,14 +25,34 @@ import type {
   CanvasNodeId,
 } from '@huabu/shared';
 
+function initializeQuestionBinding(
+  view: AgentConversationView,
+  binding: AgentBinding | undefined,
+  canvasId: string | null,
+  inheritCanvasDefault: boolean,
+): void {
+  const chat = useChatStore.getState();
+  const ownerCanvasId = canvasId ?? view.conversationOwner.canvasId;
+  const effectiveBinding =
+    binding ??
+    (inheritCanvasDefault ? chat.bindingMap[ownerCanvasId] : undefined);
+  if (effectiveBinding) {
+    chat.setAgentBinding(view.conversationOwner.threadId, effectiveBinding);
+  }
+}
+
 /** Open an authored Question conversation in the active presentation mode. */
 export function enterQuestionConversation(
   view: AgentConversationView,
-  _binding: AgentBinding | undefined,
-  _canvasId: string | null,
-  _openPosition: 'last-user' | 'bottom',
+  binding: AgentBinding | undefined,
+  canvasId: string | null,
+  openPosition: 'last-user' | 'bottom',
 ): void {
-  openPreviewNode(view.presentationAnchor.nodeId);
+  initializeQuestionBinding(view, binding, canvasId, false);
+  const tabId = openPreviewNode(view.presentationAnchor.nodeId);
+  if (tabId) {
+    usePreviewWorkspaceStore.getState().requestChatOpen(tabId, openPosition);
+  }
 }
 
 /**
@@ -39,9 +61,10 @@ export function enterQuestionConversation(
  */
 export function enterQuestionCompose(
   view: AgentConversationView,
-  _canvasId: string | null,
-  _binding?: AgentBinding,
+  canvasId: string | null,
+  binding?: AgentBinding,
 ): void {
+  initializeQuestionBinding(view, binding, canvasId, true);
   openPreviewNode(view.presentationAnchor.nodeId);
   usePanelStore
     .getState()

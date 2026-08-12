@@ -65,6 +65,8 @@ export function PreviewRenderer({
   onCommit,
   nodeFocusRequestNonce,
   onNodeFocusRequestHandled,
+  chatOpenRequest,
+  onChatOpenRequestHandled,
   hasFocusPriority,
 }: {
   tabId: string;
@@ -76,6 +78,11 @@ export function PreviewRenderer({
   /** One-shot request for this tab's editable node surface. */
   nodeFocusRequestNonce?: number;
   onNodeFocusRequestHandled: (nonce: number) => void;
+  chatOpenRequest?: {
+    position: 'last-user' | 'bottom';
+    nonce: number;
+  };
+  onChatOpenRequestHandled: (nonce: number) => void;
   /** Whether this tab's group is the focused one (§14). */
   hasFocusPriority: boolean;
 }) {
@@ -103,7 +110,13 @@ export function PreviewRenderer({
 
   if (session) {
     return (
-      <ChatPanel session={session} previewTabId={tabId} onCommit={onCommit} />
+      <ChatPanel
+        session={session}
+        previewTabId={tabId}
+        onCommit={onCommit}
+        openPositionRequest={chatOpenRequest}
+        onOpenPositionHandled={onChatOpenRequestHandled}
+      />
     );
   }
 

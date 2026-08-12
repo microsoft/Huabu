@@ -25,6 +25,7 @@ import {
 import { scheduleScrollToMatch } from '@/hooks/searchDom';
 import useCanvasStore, { getProtectedPreviewTabIds } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import { usePanelStore } from '@/store/panelStore';
 import { usePreviewSearchStore } from '@/store/previewSearchStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
@@ -500,6 +501,7 @@ export const PDFPreview = ({
       const threadId = chat.ensureCanvasThread(canvasId);
       const { addPendingAttachment } = chat;
       addPendingAttachment(threadId, attachment);
+      usePanelStore.getState().requestOpenRightPanel();
       usePreviewWorkspaceStore
         .getState()
         .openPreviewTarget(
@@ -507,6 +509,7 @@ export const PDFPreview = ({
           undefined,
           getProtectedPreviewTabIds(),
         );
+      usePanelStore.getState().requestFocusChatInput(threadId);
     },
     [canvasId],
   );

@@ -33,6 +33,12 @@ type PreviewGroupProps = {
   onPromote: (tabId: string) => void;
   nodeFocusRequest: { tabId: string; nonce: number } | null;
   onNodeFocusRequestHandled: (tabId: string, nonce: number) => void;
+  chatOpenRequest: {
+    tabId: string;
+    position: 'last-user' | 'bottom';
+    nonce: number;
+  } | null;
+  onChatOpenRequestHandled: (tabId: string, nonce: number) => void;
   onOpenToSide: (tabId: string) => void;
   onNewChat: () => void;
   /** Collapses the whole surface; only the last group offers it. */
@@ -49,6 +55,8 @@ export function PreviewGroup({
   onPromote,
   nodeFocusRequest,
   onNodeFocusRequestHandled,
+  chatOpenRequest,
+  onChatOpenRequestHandled,
   onOpenToSide,
   onNewChat,
   onCollapse,
@@ -103,6 +111,14 @@ export function PreviewGroup({
             }
             onNodeFocusRequestHandled={(nonce) =>
               onNodeFocusRequestHandled(activeTab.id, nonce)
+            }
+            chatOpenRequest={
+              chatOpenRequest?.tabId === activeTab.id
+                ? chatOpenRequest
+                : undefined
+            }
+            onChatOpenRequestHandled={(nonce) =>
+              onChatOpenRequestHandled(activeTab.id, nonce)
             }
             hasFocusPriority={isFocused}
           />

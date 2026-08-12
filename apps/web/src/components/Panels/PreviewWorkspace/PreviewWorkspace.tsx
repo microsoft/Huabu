@@ -88,8 +88,12 @@ export function PreviewWorkspace({
   const workspace = usePreviewWorkspaceStore(selectWorkspace);
   const canvasId = usePreviewWorkspaceStore((s) => s.canvasId);
   const nodeFocusRequest = usePreviewWorkspaceStore((s) => s.nodeFocusRequest);
+  const chatOpenRequest = usePreviewWorkspaceStore((s) => s.chatOpenRequest);
   const consumeNodeFocusRequest = usePreviewWorkspaceStore(
     (s) => s.consumeNodeFocusRequest,
+  );
+  const consumeChatOpenRequest = usePreviewWorkspaceStore(
+    (s) => s.consumeChatOpenRequest,
   );
   const activateTab = usePreviewWorkspaceStore((s) => s.activateTab);
   const closeTab = usePreviewWorkspaceStore((s) => s.closeTab);
@@ -309,6 +313,8 @@ export function PreviewWorkspace({
                 onPromote={promoteTab}
                 nodeFocusRequest={nodeFocusRequest}
                 onNodeFocusRequestHandled={consumeNodeFocusRequest}
+                chatOpenRequest={chatOpenRequest}
+                onChatOpenRequestHandled={consumeChatOpenRequest}
                 onOpenToSide={openToSide}
                 onNewChat={() => openNewChat(group.id)}
                 onCollapse={
