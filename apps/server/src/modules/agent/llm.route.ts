@@ -26,6 +26,7 @@ import {
   startDeviceCodeFlow,
   verifyOAuthCredentials,
 } from './oauth.js';
+import { getRootErrorMessage } from '../../utils/error-message.js';
 import { isLoopbackRequest } from '../security/peer.js';
 
 import type {
@@ -180,7 +181,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
       return reply.send(result);
     } catch (err) {
       return reply.status(500).send({
-        message: err instanceof Error ? err.message : 'OAuth flow failed',
+        message: getRootErrorMessage(err, 'OAuth flow failed'),
       });
     }
   });
@@ -207,7 +208,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
     } catch (err) {
       return reply.send({
         status: 'error',
-        error: err instanceof Error ? err.message : 'Poll failed',
+        error: getRootErrorMessage(err, 'Poll failed'),
       });
     }
   });
