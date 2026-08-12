@@ -83,57 +83,53 @@ export async function updateNode(
   opts: UpdateNodeOptions,
 ): Promise<UpdateNodeOutcome> {
   return withCanvasMutex(nodes.canvasId, async () => {
-    // Public Canvas revisions cover content + src. Repository revisions are
-    // opaque full-record tokens. Keep the two distinct so an async SQL
-    // adapter cannot lose a concurrent label/metadata edit during RMW.
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      const current = await nodes.read(nodeId);
-      const currentContentRevision = contentRevisionOf(current?.record ?? null);
+    // Public Canvas revisions cover content + src; repository revisions are
+    // opaque full-record tokens. Both are checked, and neither is retried:
+    // one pass is the whole operation. Nothing can move the record between
+    // this read and this put — the mutex is held, and the only adapter today
+    // resolves both synchronously — so a loop here would only be a retry
+    // policy for a backend that does not exist, guessing on its behalf that
+    // re-running `apply` is the right merge.
+    const current = await nodes.read(nodeId);
+    const currentContentRevision = contentRevisionOf(current?.record ?? null);
 
-      if (
-        opts.expectRev !== undefined &&
-        opts.expectRev !== currentContentRevision
-      ) {
-        return {
-          status: 'rev-conflict',
-          currentRev: currentContentRevision,
-        };
-      }
-
-      const next = opts.apply(current?.record ?? null);
-      if (next === null) return { status: 'noop' };
-
-      const result = await nodes.put({
-        nodeId,
-        record: next,
-        expectedRevision: current?.revision ?? null,
-        ...(opts.strictRename !== undefined
-          ? { strictLabel: opts.strictRename }
-          : {}),
-      });
-      if (result.ok) {
-        return {
-          status: 'ok',
-          rev: contentRevisionOf(result.record),
-          label: result.record.label,
-        };
-      }
-      if (result.reason === 'revision-conflict') {
-        // A metadata-only change can be merged by re-running the caller's
-        // pure apply function. A public content change is caught above on
-        // the next iteration.
-        continue;
-      }
-      if (result.reason === 'write-suppressed') {
-        return { status: 'skipped-deleted' };
-      }
-      return { status: 'rejected', result };
+    if (
+      opts.expectRev !== undefined &&
+      opts.expectRev !== currentContentRevision
+    ) {
+      return { status: 'rev-conflict', currentRev: currentContentRevision };
     }
 
-    const latest = await nodes.read(nodeId);
-    return {
-      status: 'rev-conflict',
-      currentRev: contentRevisionOf(latest?.record ?? null),
-    };
+    const next = opts.apply(current?.record ?? null);
+    if (next === null) return { status: 'noop' };
+
+    const result = await nodes.put({
+      nodeId,
+      record: next,
+      expectedRevision: current?.revision ?? null,
+      ...(opts.strictRename !== undefined
+        ? { strictLabel: opts.strictRename }
+        : {}),
+    });
+    if (result.ok) {
+      return {
+        status: 'ok',
+        rev: contentRevisionOf(result.record),
+        label: result.record.label,
+      };
+    }
+    if (result.reason === 'write-suppressed') {
+      return { status: 'skipped-deleted' };
+    }
+    if (result.reason === 'revision-conflict') {
+      // Someone else owns the record now. Report it in the caller's
+      // vocabulary — a public content revision, not the storage token.
+      const latest = await nodes.read(nodeId);
+      return {
+        status: 'rev-conflict',
+        currentRev: contentRevisionOf(latest?.record ?? null),
+      };
+    }
+    return { status: 'rejected', result };
   });
 }

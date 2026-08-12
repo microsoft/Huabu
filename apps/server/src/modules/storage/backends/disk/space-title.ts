@@ -8,6 +8,15 @@ import {
   toSafeFilename,
 } from '../../../workspace/disk/naming.js';
 
+/**
+ * Whether `filename` is `base` carrying an allocation suffix (` (2)`, ` (3)`).
+ *
+ * A null-titled Space is filed under its canvasId, and directory allocation
+ * de-duplicates case-insensitively across the whole namespace — so a canvasId
+ * that collides with another Space's *title* is allocated `<canvasId> (2)`.
+ * That suffix is the allocator's doing, not a rename, and must not be read
+ * back as a logical title.
+ */
 function isDedupeVariant(filename: string, base: string): boolean {
   const normalizedFilename = normalizeForCompare(filename);
   const normalizedBase = normalizeForCompare(base);
@@ -41,7 +50,12 @@ export function titleForAllocatedDirectory(
 
 /**
  * Reconcile a persisted logical title with its current directory locator.
- * A de-duplicated locator allocated for a null title is not a Finder rename.
+ *
+ * A directory that no longer matches the title it was allocated for was
+ * renamed outside the app, and the directory wins. The `persisted ===
+ * directoryName` case is not a no-op: a title the sanitizer would alter
+ * (a trailing space, say) can still name its own directory exactly, and
+ * treating that as a Finder rename would rewrite `space.json` on every read.
  */
 export function titleVisibleAtDirectory(
   persisted: string | null,

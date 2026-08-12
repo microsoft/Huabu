@@ -1578,6 +1578,78 @@ every edit is a rename, a regrouping, or a member becoming a method.
 same id: `preprocessing` resolves that part per request and works with it
 detached from any handle.
 
+#### 12.4.3 Disk-behavior corrections — landed
+
+A third review pass asked the question §12.4 answers for the _port_ about the
+_backend_: what did routing the writers through it change underneath, and does
+each change pay for itself. Four did not. The port shape is untouched by all
+of them; every correction is inside the Disk adapter or the coordinator above
+it.
+
+1. **The forced per-batch node rescan is gone.** Phase 4 had
+   `withValidatedNodeMutationTransaction` invalidate and rebuild the node
+   index at the top of every executor batch, to freeze physical ownership for
+   the synchronous run. Rebuilding that index reads and YAML-parses _every_
+   sidecar in the Space, so the cost was O(nodes) synchronous I/O inside the
+   canvas mutex, on the hottest write path in the product: a one-node mutation
+   measured 0.63 ms → 5.34 ms at 200 nodes and 1.55 ms → 19.70 ms at 1000.
+   `writeNode`'s own staleness probes already run per mutation inside the
+   batch and cost a names-only `readdir`; the rescan bought a narrower
+   ownership guarantee than they give at roughly thirteen times the price.
+2. **A hand-broken sidecar is readable again.** `readNodeStrict` parsed
+   frontmatter with `strict: true`, which made unparseable YAML a read
+   failure. `SpaceNodes.read/put/delete` are the only callers, so a node whose
+   frontmatter a user broke in an external editor answered 500 on the content
+   PUT _and_ on DELETE, while the lenient GET kept rendering it — visible,
+   unrepairable, undeletable, in a product whose premise is hand-editable
+   markdown. The method stays strict about _reachability_, which is the part
+   the port needs: only ENOENT is absence, and an unreadable path still
+   raises. Malformed content is recovered exactly as `readNode` recovers it.
+3. **Deleting a duplicated node id works again.** Phase 4 made `deleteNode`
+   throw when two sidecars claim one id. `put` must refuse that state — it
+   cannot know which representation the caller meant to update — but delete
+   has no such ambiguity, and refusing stranded the node in precisely the
+   state a user resolves by deleting. It also failed the enclosing executor
+   batch wholesale, taking every unrelated node and edge in the same command
+   with it. The indexed representative is deleted; the orphan stays and is
+   still reported by the duplicate-node surfaces.
+4. **The lifecycle World guard no longer requires a World to exist.**
+   `beginDelete` and `rename` resolved World identity through
+   `requireWorldCanvasId()`, which raises on a missing or malformed World, so
+   unrelated damage to `World/` turned every ordinary delete and rename into a 500. Those two only ask whether _this_ Space is the protected one, which a
+   namespace without a World answers with a plain no — what `isWorldCanvasId`
+   answered before Phase 4. `worldId()` still raises: reporting the identity
+   is an integrity question, and there is no honest answer.
+
+Three pieces of surface went with them, on the same rule §12.4.1 applied:
+
+- **`ownershipValidated`** on `writeNode`/`deleteNode`. Both production
+  callers bypassed the branch it guarded — the ordered write is always inside
+  a transaction, the node adapter always passed `true` — so the option existed
+  only to switch off a path nothing took.
+- **`updateNode`'s retry loop.** Its `continue` was unreachable: the mutex is
+  held across the operation and the only adapter resolves both halves
+  synchronously, so nothing can move the record mid-pass. Worse, exhausting
+  the attempts fabricated a `rev-conflict`, which the preprocessing persist
+  stage turns into a thrown `PERSIST_FAILED` — for a caller that deliberately
+  passes no `expectRev`. One pass now, with the repository's opaque conflict
+  translated into a public content revision.
+- **`DiskDeltaLog` / `createDiskDeltaLog`.** No production caller: the
+  executor journal row is appended inside the ordered Space write, which is
+  where the port says it belongs, so the repository's ordering guard and
+  schema validation never ran on the only path that writes the file. Wiring
+  the guard in instead would have put a full log read and tail repair on every
+  batch — trading correction 1's regression for a slower one. The adapter and
+  the tests that were its only consumer are deleted.
+
+One finding did not survive checking. `space-title.ts`'s `isDedupeVariant`
+looked like it guarded an unreachable state, on the reasoning that a
+null-titled Space is filed under its unique canvasId. Directory allocation
+de-duplicates case-insensitively across the whole namespace, so a canvasId
+that collides with another Space's _title_ is allocated `<canvasId> (2)` — the
+contract suite pins exactly that. It stays, now with the reachability argument
+written down.
+
 ### 12.5 Later phases — provisional
 
 5. Add one new adapter at a time — SQLite, then Postgres, then Azure Blob —

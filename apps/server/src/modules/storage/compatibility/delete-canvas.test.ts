@@ -282,7 +282,7 @@ describe('deleteSpace composition', () => {
     ).toBe(true);
   });
 
-  it('fails closed when the protected World identity disappears', async () => {
+  it('still deletes an ordinary Space when the World has disappeared', async () => {
     const structured = new DiskStructuredStore();
     await structured.spaces().worldId();
     rmSync(path.dirname(canvasJsonPath('canvas-world')), {
@@ -290,9 +290,18 @@ describe('deleteSpace composition', () => {
       force: true,
     });
 
-    await expect(deleteSpace('canvas-a')).rejects.toThrow(/no World canvas/);
-    expect(blobs.recordPresentAtSweep).toEqual([]);
-    expect(existsSync(canvasJsonPath('canvas-a'))).toBe(true);
+    // Reporting World identity is an integrity question and still raises; the
+    // delete guard only asks whether *this* Space is the protected one, and a
+    // namespace without a World answers no. Raising here instead would make an
+    // ordinary delete fail outright because of unrelated damage elsewhere.
+    await expect(structured.spaces().worldId()).rejects.toThrow(
+      /no World canvas/,
+    );
+    await expect(deleteSpace('canvas-a')).resolves.toEqual({
+      ok: true,
+      reason: 'deleted',
+    });
+    expect(existsSync(canvasJsonPath('canvas-a'))).toBe(false);
   });
 
   it('waits for an in-flight put before sweeping and destroying the Space', async () => {

@@ -29,12 +29,10 @@ import {
   getCanvasStore,
   resetStorageCache,
 } from './legacy/canvas-store-cache.js';
-import { createDiskDeltaLog } from './space-logs.js';
 import { DiskStructuredStore } from './structured-store.js';
 import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
 import {
   changesPath,
-  deltaLogPath,
   eventsPath,
   intentPath,
 } from '../../../workspace/disk/paths.js';
@@ -69,16 +67,6 @@ function action(nodeId: string) {
   return {
     action: 'node_selected' as const,
     node: { id: nodeId, type: 'note' as const, label: nodeId },
-  };
-}
-
-function delta(version: number) {
-  return {
-    version,
-    ts: 1_000 + version,
-    commands: [],
-    deltas: [],
-    originator: { source: 'agent' as const },
   };
 }
 
@@ -413,7 +401,7 @@ describe('strict structured reads', () => {
 });
 
 describe('JSONL recovery and ordering', () => {
-  it('propagates unreadable event and delta paths instead of returning empty logs', async () => {
+  it('propagates an unreadable event path instead of returning an empty log', async () => {
     seedSpace('unreadable-events');
     const { events } = new DiskStructuredStore().space(
       'unreadable-events',
@@ -422,82 +410,53 @@ describe('JSONL recovery and ordering', () => {
     await expect(events.read()).rejects.toMatchObject({
       code: 'EISDIR',
     });
-
-    seedSpace('unreadable-deltas');
-    const deltas = createDiskDeltaLog(getCanvasStore('unreadable-deltas'));
-    mkdirSync(deltaLogPath('unreadable-deltas'), { recursive: true });
-    await expect(deltas.readSince(0)).rejects.toMatchObject({
-      code: 'EISDIR',
-    });
   });
 
-  it('rejects malformed durable JSONL rows without changing either log', async () => {
+  it('rejects malformed durable JSONL rows without changing the log', async () => {
     seedSpace('malformed-jsonl');
     const { events } = new DiskStructuredStore().space(
       'malformed-jsonl',
     ).history;
-    const deltas = createDiskDeltaLog(getCanvasStore('malformed-jsonl'));
     const eventFile = eventsPath('malformed-jsonl');
-    const deltaFile = deltaLogPath('malformed-jsonl');
     mkdirSync(path.dirname(eventFile), { recursive: true });
     const eventRaw = `${JSON.stringify({ ts: 1, payload: action('first') })}\nnot-json\n${JSON.stringify({ ts: 2, payload: action('last') })}\n`;
-    const deltaRaw = `${JSON.stringify(delta(1))}\nnot-json\n${JSON.stringify(delta(2))}\n`;
     writeFileSync(eventFile, eventRaw, 'utf8');
-    writeFileSync(deltaFile, deltaRaw, 'utf8');
 
     await expect(events.read(1)).rejects.toBeInstanceOf(SyntaxError);
-    await expect(deltas.readSince(0)).rejects.toBeInstanceOf(SyntaxError);
-    await expect(deltas.append(delta(3))).rejects.toBeInstanceOf(SyntaxError);
 
     expect(readFileSync(eventFile, 'utf8')).toBe(eventRaw);
-    expect(readFileSync(deltaFile, 'utf8')).toBe(deltaRaw);
   });
 
-  it('rejects valid JSON with invalid event or delta shapes, including rows outside an event limit', async () => {
+  it('rejects valid JSON with an invalid event shape, including rows outside the limit', async () => {
     seedSpace('invalid-log-shapes');
     const { events } = new DiskStructuredStore().space(
       'invalid-log-shapes',
     ).history;
-    const deltas = createDiskDeltaLog(getCanvasStore('invalid-log-shapes'));
     const eventFile = eventsPath('invalid-log-shapes');
-    const deltaFile = deltaLogPath('invalid-log-shapes');
     mkdirSync(path.dirname(eventFile), { recursive: true });
     const eventRaw = `${JSON.stringify({})}\n${JSON.stringify({ ts: 2, payload: action('last') })}\n`;
-    const deltaRaw = `${JSON.stringify(delta(1))}\n{}\n`;
     writeFileSync(eventFile, eventRaw, 'utf8');
-    writeFileSync(deltaFile, deltaRaw, 'utf8');
 
     await expect(events.read(1)).rejects.toBeInstanceOf(SyntaxError);
-    await expect(deltas.readSince(0)).rejects.toBeInstanceOf(SyntaxError);
-    await expect(deltas.append(delta(2))).rejects.toBeInstanceOf(SyntaxError);
 
     expect(readFileSync(eventFile, 'utf8')).toBe(eventRaw);
-    expect(readFileSync(deltaFile, 'utf8')).toBe(deltaRaw);
   });
 
-  it('validates event and delta append inputs before touching durable bytes', async () => {
+  it('validates event append inputs before touching durable bytes', async () => {
     seedSpace('invalid-log-inputs');
     const { events } = new DiskStructuredStore().space(
       'invalid-log-inputs',
     ).history;
-    const deltas = createDiskDeltaLog(getCanvasStore('invalid-log-inputs'));
     const eventFile = eventsPath('invalid-log-inputs');
-    const deltaFile = deltaLogPath('invalid-log-inputs');
     mkdirSync(path.dirname(eventFile), { recursive: true });
     const eventRaw = `${JSON.stringify({ ts: 1, payload: action('first') })}\n`;
-    const deltaRaw = `${JSON.stringify(delta(1))}\n`;
     writeFileSync(eventFile, eventRaw, 'utf8');
-    writeFileSync(deltaFile, deltaRaw, 'utf8');
 
     await expect(
       events.append([{ ts: 0, payload: action('invalid') }]),
     ).rejects.toBeInstanceOf(TypeError);
-    await expect(
-      deltas.append({ ...delta(2), commands: null as unknown as unknown[] }),
-    ).rejects.toBeInstanceOf(TypeError);
 
     expect(readFileSync(eventFile, 'utf8')).toBe(eventRaw);
-    expect(readFileSync(deltaFile, 'utf8')).toBe(deltaRaw);
   });
 
   it('preserves a valid unterminated tail and appends on a fresh boundary', async () => {
@@ -516,51 +475,23 @@ describe('JSONL recovery and ordering', () => {
     expect(readFileSync(eventsPath('valid-tail'), 'utf8')).toMatch(/\n$/);
   });
 
-  it('removes a malformed crash tail before events and delta appends', async () => {
+  it('removes a malformed crash tail before the next event append', async () => {
     seedSpace('broken-tail');
     const { events } = new DiskStructuredStore().space('broken-tail').history;
-    const deltas = createDiskDeltaLog(getCanvasStore('broken-tail'));
     mkdirSync(path.dirname(eventsPath('broken-tail')), { recursive: true });
     writeFileSync(
       eventsPath('broken-tail'),
       `${JSON.stringify({ ts: 1, payload: action('first') })}\n{"ts":2`,
       'utf8',
     );
-    writeFileSync(
-      deltaLogPath('broken-tail'),
-      `${JSON.stringify(delta(5))}\n{"version":6`,
-      'utf8',
-    );
 
     await expect(events.read(1)).resolves.toMatchObject([{ ts: 1 }]);
     await events.append([{ payload: action('third'), ts: 3 }]);
-    await expect(deltas.append(delta(4))).rejects.toThrow(/already at 5/);
-    await deltas.append(delta(6));
 
     expect((await events.read()).map((event) => event.ts)).toEqual([1, 3]);
-    expect((await deltas.readSince(0)).map((entry) => entry.version)).toEqual([
-      5, 6,
-    ]);
     expect(readFileSync(eventsPath('broken-tail'), 'utf8')).not.toContain(
       '{"ts":2{"ts":3',
     );
-    expect(readFileSync(deltaLogPath('broken-tail'), 'utf8')).not.toContain(
-      '{"version":6{"version":6',
-    );
-  });
-
-  it('uses a valid unterminated delta as the monotonicity baseline', async () => {
-    seedSpace('delta-tail');
-    const deltas = createDiskDeltaLog(getCanvasStore('delta-tail'));
-    mkdirSync(path.dirname(deltaLogPath('delta-tail')), { recursive: true });
-    writeFileSync(deltaLogPath('delta-tail'), JSON.stringify(delta(2)), 'utf8');
-
-    await expect(deltas.append(delta(2))).rejects.toThrow(/already at 2/);
-    await deltas.append(delta(3));
-
-    expect((await deltas.readSince(0)).map((entry) => entry.version)).toEqual([
-      2, 3,
-    ]);
   });
 });
 
@@ -572,7 +503,6 @@ describe('Space lifecycle guards and reopen', () => {
     for (const part of [
       handle.nodes,
       handle.history.events,
-      createDiskDeltaLog(getCanvasStore(handle.canvasId)),
       handle.changes,
       handle.history.intents,
       handle.tasks,
@@ -589,9 +519,6 @@ describe('Space lifecycle guards and reopen', () => {
 
     await expect(
       handle.history.events.append([{ payload: action('n1'), ts: 1 }]),
-    ).rejects.toThrow(/missing Space/);
-    await expect(
-      createDiskDeltaLog(getCanvasStore(handle.canvasId)).append(delta(1)),
     ).rejects.toThrow(/missing Space/);
     await expect(handle.history.intents.put(episode('e1'))).rejects.toThrow(
       /missing Space/,
@@ -634,7 +561,6 @@ describe('Space lifecycle guards and reopen', () => {
       nodeMutations: [],
     });
     await first.history.events.append([{ payload: action('n1'), ts: 7 }]);
-    await createDiskDeltaLog(getCanvasStore('reopen')).append(delta(1));
     await first.history.intents.put(episode('e1'));
     const storedChanges = await first.changes.append('thread-1', [
       change('n1'),
@@ -649,11 +575,6 @@ describe('Space lifecycle guards and reopen', () => {
     expect(
       (await reopened.history.events.read()).map((event) => event.ts),
     ).toEqual([7]);
-    expect(
-      (await createDiskDeltaLog(getCanvasStore('reopen')).readSince(0)).map(
-        (entry) => entry.version,
-      ),
-    ).toEqual([1]);
     expect(
       (await reopened.history.intents.read()).map((entry) => entry.id),
     ).toEqual(['e1']);

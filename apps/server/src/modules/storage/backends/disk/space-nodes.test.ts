@@ -203,7 +203,7 @@ describe('DiskSpaceNodes', () => {
     ).resolves.toMatchObject({ ok: false, reason: 'duplicate-node' });
   });
 
-  it('refuses to delete one arbitrary representative of a duplicate node', async () => {
+  it('deletes the indexed representative of a duplicate node', async () => {
     mkdirSync(nodesDir('canvas-a'), { recursive: true });
     for (const filename of ['Node A.md', 'Duplicate A.md']) {
       writeFileSync(
@@ -214,16 +214,15 @@ describe('DiskSpaceNodes', () => {
     }
     const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
 
-    await expect(repository.delete('node-a')).rejects.toThrow(
-      /multiple sidecars claim that id/,
-    );
-    expect(readdirSync(nodesDir('canvas-a')).sort()).toEqual([
-      'Duplicate A.md',
-      'Node A.md',
-    ]);
+    // `put` refuses a duplicated id — it cannot know which representation the
+    // caller meant to update. Delete does not have that problem, and refusing
+    // it would strand the node: duplicate sidecars are exactly the state a
+    // user resolves by deleting.
+    await expect(repository.delete('node-a')).resolves.toBe('deleted');
+    expect(readdirSync(nodesDir('canvas-a'))).toEqual(['Duplicate A.md']);
   });
 
-  it('rejects malformed durable node state instead of reporting absence', async () => {
+  it('recovers a node whose frontmatter a user broke by hand', async () => {
     mkdirSync(nodesDir('canvas-a'), { recursive: true });
     writeFileSync(
       path.join(nodesDir('canvas-a'), 'broken.md'),
@@ -232,6 +231,39 @@ describe('DiskSpaceNodes', () => {
     );
     const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
 
-    await expect(repository.read('broken')).rejects.toThrow();
+    // Unparseable frontmatter is not a read failure: a sidecar is a
+    // hand-editable file, and rejecting here would leave the node visible
+    // through the lenient GET while the content PUT and the DELETE route both
+    // answered 500 — visible, unrepairable, undeletable.
+    await expect(repository.read('broken')).resolves.toMatchObject({
+      record: { nodeId: 'broken', content: 'body' },
+    });
+    await expect(
+      repository.put({
+        nodeId: 'broken',
+        record: note('broken', 'Repaired', 'body'),
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(repository.delete('broken')).resolves.toBe('deleted');
+  });
+
+  it('still surfaces an unreadable sidecar rather than reporting absence', async () => {
+    const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
+    const stored = await repository.put({
+      nodeId: 'node-a',
+      record: note('node-a', 'Node A', 'body'),
+    });
+    if (!stored.ok) throw new Error('node seed failed');
+
+    // Swap the sidecar for a directory of the same name. The filename set on
+    // disk is unchanged, so the index still claims the id — the read has to
+    // report the I/O failure rather than collapse it into "no such node".
+    const sidecar = path.join(nodesDir('canvas-a'), 'Node A.md');
+    unlinkSync(sidecar);
+    mkdirSync(sidecar);
+
+    await expect(repository.read('node-a')).rejects.toMatchObject({
+      code: 'EISDIR',
+    });
   });
 });

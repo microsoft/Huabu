@@ -130,15 +130,14 @@ describe('updateNode', () => {
     expect(fixture.get()?.content).toBe('v1+v2');
   });
 
-  it('retries a full-record CAS conflict without confusing it with the public content revision', async () => {
+  it('reports a full-record CAS conflict once, in public content revisions', async () => {
     const fixture = fakeRepository();
     fixture.seed(note('same body', 'Original label'));
     let calls = 0;
     fixture.onPut(() => {
       calls += 1;
-      if (calls !== 1) return undefined;
       fixture.seed({
-        ...note('same body', 'Concurrent label'),
+        ...note('concurrent body', 'Concurrent label'),
         summary: 'concurrent metadata',
       });
       return {
@@ -156,13 +155,17 @@ describe('updateNode', () => {
       }),
     });
 
-    expect(result.status).toBe('ok');
-    expect(calls).toBe(2);
-    expect(fixture.get()).toMatchObject({
-      label: 'Concurrent label',
-      summary: 'concurrent metadata',
-      content: 'next body',
+    // One pass, no retry: the mutex plus a synchronous adapter mean nothing
+    // can move the record mid-operation, so re-running `apply` would be a
+    // merge policy invented for a backend that does not exist.
+    expect(calls).toBe(1);
+    // The conflict is reported as a public content revision, never as the
+    // opaque storage token the repository refused on.
+    expect(result).toEqual({
+      status: 'rev-conflict',
+      currentRev: nodeRevisionOf({ content: 'concurrent body' }),
     });
+    expect(fixture.get()).toMatchObject({ content: 'concurrent body' });
   });
 
   it('does not call put when apply returns null', async () => {

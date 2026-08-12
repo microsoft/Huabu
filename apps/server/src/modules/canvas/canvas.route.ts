@@ -1181,7 +1181,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const previousTitle = existing?.title ?? null;
-    const nextTitle = title ?? previousTitle;
+    // The record write below refuses to change the title — addressing is the
+    // rename operation's business. So the title it carries must be the one
+    // rename actually installed, not the one the client asked for: the two
+    // differ whenever the backend reconciles a title against its locator, and
+    // sending the requested title would make the write throw instead of
+    // returning a business result the route can answer with.
+    let nextTitle = title ?? previousTitle;
     const titleChange =
       typeof title === 'string' && title !== previousTitle
         ? { title }
@@ -1213,6 +1219,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
               .code(403)
               .send({ message: 'World canvas cannot be renamed' });
         }
+      } else {
+        nextTitle = renamed.record.title;
       }
     }
 

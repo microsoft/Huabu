@@ -82,7 +82,6 @@ export class DiskSpaceNodes implements SpaceNodes {
     // write. That preserves the existing single-process CAS critical section.
     const result = this.#store.writeNode(input.nodeId, input.record, {
       strictRename: input.strictLabel,
-      ownershipValidated: true,
     });
     if (!result.ok) {
       switch (result.reason) {
@@ -124,8 +123,7 @@ export class DiskSpaceNodes implements SpaceNodes {
 
   async delete(nodeId: string): Promise<NodeDeleteResult> {
     this.#assertActiveWorkspace();
-    this.#store.readNodeStrict(nodeId);
-    return this.#store.deleteNode(nodeId, { ownershipValidated: true });
+    return this.#store.deleteNode(nodeId);
   }
 
   #assertActiveWorkspace(): void {

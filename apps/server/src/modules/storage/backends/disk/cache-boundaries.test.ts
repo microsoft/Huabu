@@ -20,7 +20,6 @@ import {
   resetStorageCache,
 } from './legacy/canvas-store-cache.js';
 import { NODE_TOMBSTONE_TTL_MS } from './legacy/node-tombstones.js';
-import { createDiskDeltaLog } from './space-logs.js';
 import { DiskStructuredStore } from './structured-store.js';
 import {
   refreshCanvasDirIndex,
@@ -34,7 +33,6 @@ import {
 import { setWorkspacePath } from '../../../workspace.js';
 
 import type {
-  DeltaLogEntry,
   CanvasFile,
   NodeContent,
 } from '../../../canvas/persistence-types.js';
@@ -75,16 +73,6 @@ function createSpace(canvasId: string, title: string): CanvasFile {
 
 function note(nodeId: string, label: string, content = 'body'): NodeContent {
   return { nodeId, type: 'note', label, content };
-}
-
-function delta(version: number): DeltaLogEntry {
-  return {
-    version,
-    ts: version,
-    commands: [],
-    deltas: [],
-    originator: { source: 'agent' },
-  };
 }
 
 afterEach(() => {
@@ -184,11 +172,10 @@ describe('CanvasStore cache boundaries', () => {
     expect(getCanvasStore('canvas-b').read()?.canvasId).toBe('canvas-b');
   });
 
-  it('rejects held event and delta repositories after a workspace switch', async () => {
+  it('rejects a held event repository after a workspace switch', async () => {
     activateWorkspace('huabu-log-workspace-a-');
     createSpace('shared-id', 'First');
     const held = new DiskStructuredStore().space('shared-id');
-    const heldJournal = createDiskDeltaLog(getCanvasStore('shared-id'));
     await held.history.events.append([
       {
         payload: {
@@ -198,7 +185,6 @@ describe('CanvasStore cache boundaries', () => {
         ts: 1,
       },
     ]);
-    await heldJournal.append(delta(1));
 
     activateWorkspace('huabu-log-workspace-b-');
     createSpace('shared-id', 'Second');
@@ -212,23 +198,15 @@ describe('CanvasStore cache boundaries', () => {
         ts: 2,
       },
     ]);
-    await createDiskDeltaLog(getCanvasStore('shared-id')).append(delta(2));
 
-    // These reads use strict JSONL helpers directly. Without their own
-    // workspace-lifetime guard, the retained A facades would silently read
-    // B's same-id files instead of rejecting the stale handle.
+    // This read uses strict JSONL helpers directly. Without its own
+    // workspace-lifetime guard, the retained A facade would silently read
+    // B's same-id file instead of rejecting the stale handle.
     await expect(held.history.events.read()).rejects.toThrow(
-      /inactive workspace/,
-    );
-    await expect(heldJournal.readSince(0)).rejects.toThrow(
       /inactive workspace/,
     );
     expect(
       (await active.history.events.read()).map((event) => event.ts),
-    ).toEqual([2]);
-    const activeJournal = createDiskDeltaLog(getCanvasStore('shared-id'));
-    expect(
-      (await activeJournal.readSince(0)).map((entry) => entry.version),
     ).toEqual([2]);
   });
 

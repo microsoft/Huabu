@@ -17,7 +17,6 @@ import {
   getCanvasStore,
   resetStorageCache,
 } from './legacy/canvas-store-cache.js';
-import { createDiskDeltaLog } from './space-logs.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { createDiskSpaceWrite } from './space-write.js';
 import { DiskStructuredStore } from './structured-store.js';
@@ -72,8 +71,8 @@ describeSpaceWriteContract('Disk', async () => {
     missing: store.space('missing-writer-space'),
     existingNode,
     newNode: note('contract-new-node', 'New contract node', 'after'),
-    readJournal: () =>
-      createDiskDeltaLog(getCanvasStore('writer-space')).readSince(0),
+    readJournal: async () =>
+      getCanvasStore('writer-space').readDeltaLogSince(0),
     failNextDeltaAppend: (error: Error) => {
       const spy = vi
         .spyOn(getCanvasStore('writer-space'), 'appendDeltaLogEntry')
@@ -110,7 +109,7 @@ describe('Disk ordered Space write', () => {
     rmSync(workspacePath, { recursive: true, force: true });
   });
 
-  it('refuses a batch delete when duplicate sidecars claim the node id', async () => {
+  it('commits a batch delete of a duplicated node id', async () => {
     mkdirSync(nodesDir('canvas-a'), { recursive: true });
     for (const filename of ['Node A.md', 'Duplicate A.md']) {
       writeFileSync(
@@ -122,6 +121,10 @@ describe('Disk ordered Space write', () => {
     const store = getCanvasStore('canvas-a');
     const write = createDiskSpaceWrite(store);
 
+    // Refusing here would fail the whole executor batch — every unrelated node
+    // and edge in the same command — over one Space that has a stale extra
+    // file on disk. The indexed representative goes; the orphan stays and is
+    // reported by the duplicate-node surfaces.
     await expect(
       write({
         expectedVersion: 0,
@@ -135,13 +138,10 @@ describe('Disk ordered Space write', () => {
           originator: { source: 'ui' },
         },
       }),
-    ).rejects.toThrow(/multiple sidecars claim that id/);
-    expect(store.read()).toEqual(before);
-    expect(readdirSync(nodesDir('canvas-a')).sort()).toEqual([
-      'Duplicate A.md',
-      'Node A.md',
-    ]);
-    expect(store.readDeltaLogSince(0)).toEqual([]);
+    ).resolves.toEqual({ ok: true });
+    expect(store.read()?.version).toBe(1);
+    expect(readdirSync(nodesDir('canvas-a'))).toEqual(['Duplicate A.md']);
+    expect(store.readDeltaLogSince(0).map((row) => row.version)).toEqual([1]);
   });
 
   it('rolls node and record writes back when the final delta append fails', async () => {

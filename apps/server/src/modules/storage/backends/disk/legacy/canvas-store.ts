@@ -506,10 +506,11 @@ export class CanvasStore {
       );
     }
 
-    // Freeze physical node ownership for the synchronous batch. Every node
-    // mutation below updates this fresh index in the same JavaScript turn.
-    this.invalidateNodeIndex();
-    this.nodeIndex();
+    // Physical node ownership is established by {@link writeNode}'s own
+    // staleness probes, which run per mutation inside this batch. Forcing a
+    // rescan here instead would make every executor batch read and parse
+    // every sidecar in the Space — O(nodes) synchronous I/O inside the canvas
+    // mutex, on the hottest write path there is.
 
     const tombstoneSnapshot = captureNodeTombstones(
       this.#workspacePath,
@@ -760,11 +761,20 @@ export class CanvasStore {
   }
 
   /**
-   * Strict single-record read for the backend-neutral repository.
+   * Single-record read for the backend-neutral repository.
    *
-   * Compatibility reads retain their historical missing-or-unreadable
-   * `null`; the portable repository must distinguish absence from corrupt or
-   * inaccessible durable state, so only ENOENT is treated as missing here.
+   * Strict about *reachability*, not about content. Compatibility reads
+   * collapse every failure into `null`; this one treats only ENOENT as
+   * absence, so an unreadable sidecar (EACCES, EIO, a directory in the way)
+   * surfaces instead of being reported as a missing node.
+   *
+   * Malformed frontmatter is deliberately **not** a read failure. A sidecar
+   * is a hand-editable file, and a node whose YAML a user broke must stay
+   * repairable: rejecting the read here would make that node uneditable
+   * through the content PUT and undeletable through the DELETE route, while
+   * the lenient GET kept rendering it. Recovery matches {@link readNode} —
+   * the body survives and the unparseable frontmatter is dropped.
+   *
    * Duplicate sidecars remain readable through the selected representative;
    * the following repository `put` reports the existing actionable duplicate
    * outcome instead of overwriting either file.
@@ -787,7 +797,9 @@ export class CanvasStore {
     const readOwned = (filename: string): string | null => {
       const raw = read(filename);
       if (raw === null) return null;
-      const { meta } = parseFrontmatter(raw, { strict: true });
+      // Same lenient parse the index itself uses, so ownership resolves the
+      // same way for a broken sidecar as it does during a scan.
+      const { meta } = parseFrontmatter(raw);
       const rawId = meta['id'];
       const persistedId =
         typeof rawId === 'string' && rawId
@@ -813,7 +825,7 @@ export class CanvasStore {
       raw = readOwned(filename);
       if (raw === null) return null;
     }
-    return markdownToNodeContent(nodeId, raw, true);
+    return markdownToNodeContent(nodeId, raw);
   }
 
   /**
@@ -945,7 +957,7 @@ export class CanvasStore {
   writeNode(
     nodeId: string,
     content: NodeContent,
-    opts: { strictRename?: boolean; ownershipValidated?: boolean } = {},
+    opts: { strictRename?: boolean } = {},
   ): RenameResult {
     this.assertActiveWorkspace();
     if (content.nodeId !== nodeId) {
@@ -963,16 +975,6 @@ export class CanvasStore {
       return { ok: false, reason: 'not-found' };
     }
     mkdirp(nodesDir(this.canvasId));
-
-    // Standalone mutation calls must establish current frontmatter ownership,
-    // not just compare filenames. Executor batches already performed this
-    // refresh once in withValidatedNodeMutationTransaction().
-    if (
-      this.nodeMutationTransactionDepth === 0 &&
-      opts.ownershipValidated !== true
-    ) {
-      this.invalidateNodeIndex();
-    }
 
     let idx = this.nodeIndex();
     let existing = idx.get(nodeId);
@@ -1144,10 +1146,7 @@ export class CanvasStore {
    * would leave structural state without a reference to the node while its
    * `.md` stays on disk as a permanent orphan.
    */
-  deleteNode(
-    nodeId: string,
-    options: { ownershipValidated?: boolean } = {},
-  ): 'deleted' | 'absent' {
+  deleteNode(nodeId: string): 'deleted' | 'absent' {
     this.assertActiveWorkspace();
     // Keep idempotent delete semantics, but do not retain a tombstone for an
     // id whose Space itself does not exist.
@@ -1157,18 +1156,11 @@ export class CanvasStore {
     ) {
       return 'absent';
     }
-    if (
-      this.nodeMutationTransactionDepth === 0 &&
-      options.ownershipValidated !== true
-    ) {
-      this.invalidateNodeIndex();
-    }
-    this.nodeIndex();
-    if (this.nodeDuplicateIds.has(nodeId)) {
-      throw new Error(
-        `Cannot delete node ${JSON.stringify(nodeId)} while multiple sidecars claim that id`,
-      );
-    }
+    // A duplicated id deliberately still deletes its indexed representative.
+    // Refusing would strand the node: duplicate sidecars are exactly the state
+    // a user resolves by deleting, and an executor batch containing such a
+    // delete would fail and roll back wholesale.
+    //
     // Tombstone the id up front (before any early return or throw) so a late
     // in-flight write cannot resurrect the sidecar regardless of which delete
     // branch we take. The process registry outlives an evicted LRU instance

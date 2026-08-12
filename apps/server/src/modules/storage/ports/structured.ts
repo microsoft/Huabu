@@ -162,8 +162,11 @@ export type SpaceRenameResult =
  * Creation returns the authoritative version-0 record. For a repeated
  * non-null requested title, allocation preserves the existing product rule:
  * the first record keeps the title and later records receive ` (2)`, ` (3)`,
- * ... suffixes. A default title for an unnamed Space is a product naming rule
- * rather than a storage one, so it stays with the caller. Deletion concerns
+ * ... suffixes. Choosing a title for an *unnamed* Space is a product naming
+ * rule rather than a storage one, so this port never invents one: `title:
+ * null` stays null, and the "Untitled", "Untitled (1)", ... default is
+ * allocated by `createSpace` in the composition layer, above every adapter.
+ * Deletion concerns
  * structured state only: blob cleanup and cross-store ordering remain
  * composition-layer responsibilities. Rename is deliberately separate from
  * the ordered record/node writer: its existing addressing side effect may

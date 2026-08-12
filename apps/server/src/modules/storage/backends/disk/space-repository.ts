@@ -27,6 +27,7 @@ import {
 } from './space-title.js';
 import { atomicWriteJson, mkdirp, sanitizeId } from '../../../../utils/fs.js';
 import {
+  isWorldCanvasId,
   listAllCanvasDirEntries,
   listCanvasDirEntries,
   refreshCanvasDirIndex,
@@ -134,10 +135,9 @@ export class DiskSpaceRepository implements SpaceRepository {
   async beginDelete(input: SpaceDeleteInput): Promise<SpaceBeginDeleteResult> {
     this.#assertActiveWorkspace();
     const canvasId = sanitizeId(input.canvasId, 'canvasId');
-    // Revalidate the protected World identity before a destructive session.
-    // The old composition path also refreshed this invariant before touching
-    // blobs, so a stale or malformed World fails closed.
-    if (this.#requireWorld() === canvasId) {
+    // Revalidate the protected World identity before a destructive session,
+    // as the old composition path did before touching blobs.
+    if (this.#isWorld(canvasId)) {
       return { ok: false, reason: 'world-forbidden' };
     }
 
@@ -186,7 +186,7 @@ export class DiskSpaceRepository implements SpaceRepository {
     this.#assertActiveWorkspace();
     const canvasId = sanitizeId(input.canvasId, 'canvasId');
     assertSpaceMutationAllowed(this.#workspacePath, canvasId);
-    if (this.#requireWorld() === canvasId) {
+    if (this.#isWorld(canvasId)) {
       return { ok: false, reason: 'world-forbidden' };
     }
     const store = getCanvasStore(canvasId);
@@ -233,9 +233,21 @@ export class DiskSpaceRepository implements SpaceRepository {
    * The single World resolution point for this backend namespace.
    *
    * Always rescans first: every caller either reports World identity or is
-   * about to refuse a destructive operation on it, and both must fail closed
-   * on a stale or malformed World rather than act on a cached id.
+   * about to refuse a destructive operation on it, and neither may act on a
+   * cached id.
+   *
+   * `worldId()` reports the identity, so a missing World is an integrity
+   * failure it must raise. The lifecycle guards only ask whether *this* Space
+   * is the protected one, which a namespace without a World answers with a
+   * plain no — the same answer `isWorldCanvasId` gave before Phase 4. Raising
+   * there instead would turn every ordinary delete and rename in a workspace
+   * whose World is missing or malformed into a 500.
    */
+  #isWorld(canvasId: string): boolean {
+    refreshCanvasDirIndex();
+    return isWorldCanvasId(canvasId);
+  }
+
   #requireWorld(): string {
     refreshCanvasDirIndex();
     return requireWorldCanvasId();
