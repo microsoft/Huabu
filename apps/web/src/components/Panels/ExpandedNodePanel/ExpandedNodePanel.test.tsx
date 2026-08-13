@@ -228,6 +228,28 @@ describe('ExpandedNodePanel edge navigation', () => {
     );
   });
 
+  it('lets the embedded title use the available header width', () => {
+    renderPanel(
+      [canvasNode('a', 'A title that can use the free space')],
+      [],
+      true,
+    );
+
+    const renameTitle = container?.querySelector<HTMLElement>(
+      '[aria-label="Rename node"]',
+    );
+    const tooltipWrapper = renameTitle?.parentElement;
+    const titleRegion = tooltipWrapper?.parentElement;
+    const leftHeaderRegion = titleRegion?.parentElement;
+
+    expect(leftHeaderRegion?.classList.contains('flex-1')).toBe(true);
+    expect(titleRegion?.classList.contains('flex-1')).toBe(true);
+    expect(tooltipWrapper?.classList.contains('min-w-0')).toBe(true);
+    expect(tooltipWrapper?.classList.contains('max-w-full')).toBe(true);
+    expect(renameTitle?.classList.contains('max-w-full')).toBe(true);
+    expect(renameTitle?.classList.contains('max-w-40')).toBe(false);
+  });
+
   it('keeps the full header in the legacy layout', () => {
     renderPanel([canvasNode('a', 'Alpha')], []);
 
