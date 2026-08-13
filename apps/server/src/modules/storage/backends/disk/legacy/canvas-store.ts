@@ -273,11 +273,35 @@ function addSidecarToIndex(
   idx.add({ id, filename });
 }
 
+/**
+ * Read one node sidecar under either compatibility or repository semantics.
+ * Compatibility readers preserve the legacy "missing or unreadable" `null`
+ * while retaining whether that answer proves absence. Strict repository reads
+ * treat only ENOENT as absence so a failed ownership scan cannot authorize a
+ * create over durable bytes it could not inspect.
+ */
+function readNodeSidecar(
+  filePath: string,
+  strict: boolean,
+): { raw: string | null; conclusive: boolean } {
+  try {
+    return { raw: readFileSync(filePath, 'utf8'), conclusive: true };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
+      return { raw: null, conclusive: true };
+    }
+    if (!strict) return { raw: null, conclusive: false };
+    throw error;
+  }
+}
+
 export class CanvasStore {
   readonly canvasId: string;
   /** Workspace this handle was created for; handles never follow activation. */
   readonly #workspacePath: string;
   private nodes: NameIndex<NodeFileEntry> | null = null;
+  /** Whether the cached index was built without swallowing sidecar failures. */
+  private nodeIndexIsConclusive = false;
   /** Invalidates stale async batch scans without serializing their I/O. */
   private nodeIndexGeneration = 0;
   /**
@@ -578,15 +602,27 @@ export class CanvasStore {
 
   // ── Node content ─────────────────────────────────────────────────────────
 
-  private nodeIndex(): NameIndex<NodeFileEntry> {
-    if (this.nodes) return this.nodes;
+  private nodeIndex(strict = false): NameIndex<NodeFileEntry> {
+    if (this.nodes && (!strict || this.nodeIndexIsConclusive)) {
+      return this.nodes;
+    }
+    if (strict) {
+      // A lenient compatibility scan may have skipped an unreadable sidecar.
+      // Invalidate it before a repository read relies on physical ownership.
+      // This also prevents an older asynchronous batch scan from replacing the
+      // strict result after it completes.
+      this.invalidateNodeIndex();
+    }
     const idx = new NameIndex<NodeFileEntry>();
     const duplicates = new Set<string>();
+    let indexIsConclusive = true;
     const dir = nodesDir(this.canvasId);
     if (existsSync(dir)) {
       for (const file of readdirSync(dir)) {
         if (!file.endsWith('.md')) continue;
-        const raw = readText(path.join(dir, file));
+        const read = readNodeSidecar(path.join(dir, file), strict);
+        if (!read.conclusive) indexIsConclusive = false;
+        const { raw } = read;
         if (raw == null) continue;
         const { meta } = parseFrontmatter(raw);
         const rawId = meta['id'];
@@ -598,12 +634,14 @@ export class CanvasStore {
       }
     }
     this.nodes = idx;
+    this.nodeIndexIsConclusive = indexIsConclusive;
     this.nodeDuplicateIds = duplicates;
     return idx;
   }
 
   private invalidateNodeIndex(): void {
     this.nodes = null;
+    this.nodeIndexIsConclusive = false;
     this.nodeIndexGeneration += 1;
   }
 
@@ -622,12 +660,16 @@ export class CanvasStore {
    *      sibling sidecar appeared, vanished, or was replaced since the last
    *      scan (e.g. a new duplicate or another store instance's write).
    *
+   * A strict repository read additionally upgrades a cache built by a
+   * lenient compatibility scan before applying these probes, because that
+   * scan may have omitted an unreadable physical owner.
+   *
    * Otherwise the warm cache is trusted. The probe is a names-only
    * `readdir`; per-file contents are only re-read when a rescan fires.
    */
-  revalidateNodeForRead(nodeId: string): void {
+  revalidateNodeForRead(nodeId: string, strict = false): void {
     this.assertActiveWorkspace();
-    const idx = this.nodeIndex();
+    const idx = this.nodeIndex(strict);
     if (this.nodeDuplicateIds.has(nodeId) || this.nodeIndexCountStale(idx)) {
       this.invalidateNodeIndex();
     }
@@ -780,18 +822,10 @@ export class CanvasStore {
    */
   readNodeStrict(nodeId: string): NodeContent | null {
     this.assertActiveWorkspace();
-    this.revalidateNodeForRead(nodeId);
+    this.revalidateNodeForRead(nodeId, true);
 
-    const read = (filename: string): string | null => {
-      try {
-        return readFileSync(nodeFilePath(this.canvasId, filename), 'utf8');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') {
-          return null;
-        }
-        throw error;
-      }
-    };
+    const read = (filename: string): string | null =>
+      readNodeSidecar(nodeFilePath(this.canvasId, filename), true).raw;
 
     const readOwned = (filename: string): string | null => {
       const raw = read(filename);
@@ -807,18 +841,18 @@ export class CanvasStore {
       return persistedId === nodeId ? raw : null;
     };
 
-    let filename = this.nodeIndex().get(nodeId)?.filename;
+    let filename = this.nodeIndex(true).get(nodeId)?.filename;
     if (filename === undefined) {
       // A warm filename cache cannot detect an in-place frontmatter id edit.
       // Rebuild content ownership before declaring a stable id absent.
       this.invalidateNodeIndex();
-      filename = this.nodeIndex().get(nodeId)?.filename;
+      filename = this.nodeIndex(true).get(nodeId)?.filename;
       if (filename === undefined) return null;
     }
     let raw = readOwned(filename);
     if (raw === null) {
       this.invalidateNodeIndex();
-      const retryFilename = this.nodeIndex().get(nodeId)?.filename;
+      const retryFilename = this.nodeIndex(true).get(nodeId)?.filename;
       if (retryFilename === undefined) return null;
       filename = retryFilename;
       raw = readOwned(filename);
@@ -854,6 +888,7 @@ export class CanvasStore {
     const contents = new Map<string, NodeContent>();
     const idx = new NameIndex<NodeFileEntry>();
     const duplicates = new Set<string>();
+    let indexIsConclusive = true;
     const dir = nodesDir(this.canvasId);
     if (existsSync(dir)) {
       const files = readdirSync(dir).filter((file) => file.endsWith('.md'));
@@ -867,7 +902,10 @@ export class CanvasStore {
       );
       for (let i = 0; i < files.length; i++) {
         const raw = raws[i];
-        if (raw === null) continue;
+        if (raw === null) {
+          indexIsConclusive = false;
+          continue;
+        }
         const file = files[i];
         // Mirror `nodeIndex()`'s id derivation so the keys in the
         // returned map align 1:1 with what `readNode(nodeId)` would
@@ -885,6 +923,7 @@ export class CanvasStore {
     }
     if (this.nodeIndexGeneration === generation) {
       this.nodes = idx;
+      this.nodeIndexIsConclusive = indexIsConclusive;
       this.nodeDuplicateIds = duplicates;
     }
     return contents;
@@ -919,13 +958,20 @@ export class CanvasStore {
     const contents = new Map<string, NodeContent>();
     const idx = new NameIndex<NodeFileEntry>();
     const duplicates = new Set<string>();
+    let indexIsConclusive = true;
     const dir = nodesDir(this.canvasId);
     if (existsSync(dir)) {
       const files = readdirSync(dir).filter((file) => file.endsWith('.md'));
       await mapWithConcurrency(files, NODE_READ_CONCURRENCY, async (file) => {
-        if (signal?.aborted) return;
+        if (signal?.aborted) {
+          indexIsConclusive = false;
+          return;
+        }
         const raw = await readTextAsync(path.join(dir, file));
-        if (raw === null) return;
+        if (raw === null) {
+          indexIsConclusive = false;
+          return;
+        }
         // Same id derivation as `readAllNodes()` / `nodeIndex()`.
         const { meta } = parseFrontmatter(raw);
         const rawId = meta['id'];
@@ -944,6 +990,7 @@ export class CanvasStore {
     }
     if (this.nodeIndexGeneration === generation) {
       this.nodes = idx;
+      this.nodeIndexIsConclusive = indexIsConclusive;
       this.nodeDuplicateIds = duplicates;
     }
     return contents;

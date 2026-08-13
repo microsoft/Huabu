@@ -2,8 +2,10 @@
 // Licensed under the MIT license.
 
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
   unlinkSync,
@@ -266,4 +268,50 @@ describe('DiskSpaceNodes', () => {
       code: 'EISDIR',
     });
   });
+
+  it.runIf(process.platform !== 'win32')(
+    'rejects a cold-cache unreadable sidecar without overwriting it',
+    async () => {
+      mkdirSync(nodesDir('canvas-a'), { recursive: true });
+      const sidecar = path.join(nodesDir('canvas-a'), 'Cold.md');
+      const original =
+        '---\nid: node-a\ntype: note\nlabel: Cold\n---\nsecret\n';
+      writeFileSync(sidecar, original, 'utf8');
+      chmodSync(sidecar, 0o000);
+
+      // Construct the adapter only after the unreadable file exists: no warm
+      // filename cache may hide a scan failure as an absent node.
+      const coldRepository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
+      let readError: unknown;
+      let putError: unknown;
+      try {
+        await coldRepository.read('node-a');
+      } catch (error) {
+        readError = error;
+      }
+
+      // The old CanvasStore surface remains deliberately lenient, but a
+      // portable adapter must not trust the incomplete index it populated.
+      resetStorageCache();
+      const compatibilityStore = getCanvasStore('canvas-a');
+      const compatibilityContents = await compatibilityStore.readAllNodes();
+      const repository = new DiskSpaceNodes(compatibilityStore);
+      try {
+        await repository.put({
+          nodeId: 'node-a',
+          expectedRevision: null,
+          record: note('node-a', 'Cold', 'replacement'),
+        });
+      } catch (error) {
+        putError = error;
+      } finally {
+        chmodSync(sidecar, 0o600);
+      }
+
+      expect(readError).toMatchObject({ code: 'EACCES' });
+      expect(compatibilityContents.has('node-a')).toBe(false);
+      expect(putError).toMatchObject({ code: 'EACCES' });
+      expect(readFileSync(sidecar, 'utf8')).toBe(original);
+    },
+  );
 });

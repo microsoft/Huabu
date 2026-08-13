@@ -17,7 +17,7 @@
  * when src is unchanged.
  */
 
-import type { NodeContent, SpaceNodes } from '../../storage/index.js';
+import type { SpaceNodes } from '../../storage/index.js';
 import type {
   PipelineContext,
   PreprocessDiagnostic,
@@ -60,14 +60,7 @@ export async function tryCacheShortCircuit(
     return false;
   }
 
-  let existing: NodeContent | null;
-  try {
-    existing = (await nodes.read(request.nodeId))?.record ?? null;
-  } catch {
-    // Preserve the legacy cache behavior: an unreadable/corrupt sidecar is
-    // not a usable cache hit, but it must not prevent a fresh extraction.
-    return false;
-  }
+  const existing = (await nodes.read(request.nodeId))?.record ?? null;
   if (
     !existing ||
     existing.content.length === 0 ||

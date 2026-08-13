@@ -80,7 +80,7 @@ describe('tryCacheShortCircuit remote PDF migration', () => {
     ]);
   });
 
-  it('treats an unreadable repository record as a cache miss', async () => {
+  it('propagates repository read failures instead of reporting a cache miss', async () => {
     const src = 'artifact-paper.pdf';
     const request: PreprocessNodeRequest = {
       canvasId: 'canvas-test',
@@ -91,9 +91,10 @@ describe('tryCacheShortCircuit remote PDF migration', () => {
     };
     const ctx: PipelineContext = {};
     const diagnostics: PreprocessDiagnostic[] = [];
+    const readError = new Error('storage backend unavailable');
     const nodes = {
       canvasId: request.canvasId,
-      read: vi.fn().mockRejectedValue(new Error('corrupt sidecar')),
+      read: vi.fn().mockRejectedValue(readError),
     } as unknown as SpaceNodes;
 
     await expect(
@@ -104,7 +105,9 @@ describe('tryCacheShortCircuit remote PDF migration', () => {
         diagnostics,
         nodes,
       ),
-    ).resolves.toBe(false);
+    ).rejects.toBe(readError);
+    expect(nodes.read).toHaveBeenCalledWith('pdf-1');
+    expect(ctx).toEqual({});
     expect(diagnostics).toEqual([]);
   });
 });
