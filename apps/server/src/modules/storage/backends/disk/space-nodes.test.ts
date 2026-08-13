@@ -54,8 +54,10 @@ describeSpaceNodesContract('Disk', async () => {
   if (!created.ok) throw new Error('Node contract Space already exists');
 
   const store = new DiskStructuredStore();
+  const space = store.space('node-space');
   return {
-    repository: store.space('node-space').nodes,
+    repository: space.nodes,
+    space,
     missingRepository: store.space('missing-node-space').nodes,
     expectedCanvasId: 'node-space',
     cleanup: () => {

@@ -28,6 +28,7 @@ import {
 import { DiskStructuredStore } from './structured-store.js';
 import { toSafeFilename } from '../../../../utils/naming.js';
 import { describeSpaceLogsContract } from '../../ports/contracts/space-logs.contract.js';
+import { describeSpaceTasksContract } from '../../ports/contracts/space-tasks.contract.js';
 import { describeStructuredStoreContract } from '../../ports/contracts/structured-store.contract.js';
 
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
@@ -141,68 +142,6 @@ describe('Disk Space Tasks', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('serializes Task and Run mutations across independent handles', async () => {
-    const first = store.space('canvas-task').tasks;
-    const second = store.space('canvas-task').tasks;
-    await Promise.all([
-      first.create({
-        taskId: 'task-a',
-        canvasId: 'canvas-task',
-        goal: 'Goal A',
-        defaultRootProfileId: 'profile-a',
-        anchorNodeId: 'node-a',
-        createdAt: 1,
-      }),
-      second.create({
-        taskId: 'task-b',
-        canvasId: 'canvas-task',
-        goal: 'Goal B',
-        defaultRootProfileId: 'profile-b',
-        anchorNodeId: 'node-b',
-        createdAt: 2,
-      }),
-    ]);
-    await first.runs.create({
-      runId: 'run-a',
-      taskId: 'task-a',
-      canvasIdSnapshot: 'canvas-task',
-      goalSnapshot: 'Goal A',
-      rootProfileIdSnapshot: 'profile-a',
-      status: 'pending',
-      createdAt: 3,
-    });
-    const updated = await second.runs.update('run-a', {
-      rootNodeId: 'node-root',
-      rootThreadId: 'thread-root',
-      status: 'running',
-      startedAt: 4,
-    });
-
-    expect(updated.status).toBe('running');
-    await expect(first.read()).resolves.toMatchObject({
-      version: 1,
-      tasks: [
-        expect.objectContaining({ taskId: 'task-a' }),
-        expect.objectContaining({ taskId: 'task-b' }),
-      ],
-      runs: [
-        expect.objectContaining({
-          runId: 'run-a',
-          rootNodeId: 'node-root',
-          rootThreadId: 'thread-root',
-        }),
-      ],
-    });
-  });
-
-  it('returns an empty versioned snapshot when no Task store exists', async () => {
-    await expect(store.space('canvas-empty').tasks.read()).resolves.toEqual({
-      version: 1,
-      tasks: [],
-      runs: [],
-    });
-  });
-
   it('completes a running Run atomically and keeps its message immutable', async () => {
     const runs = store.space('canvas-task').tasks.runs;
     await expect(
@@ -253,20 +192,8 @@ describe('Disk Space Tasks', () => {
     ).resolves.toEqual({ outcome: 'run_not_found' });
   });
 
-  it('rejects mutations for a missing Space', async () => {
-    await expect(
-      store.space('missing-canvas').tasks.create({
-        taskId: 'task-missing',
-        canvasId: 'missing-canvas',
-        goal: 'Missing',
-        defaultRootProfileId: 'profile-a',
-        anchorNodeId: 'node-missing',
-        createdAt: 1,
-      }),
-    ).rejects.toThrow(/cannot write a missing Space/);
-  });
-
   it('fails fast on malformed and internally inconsistent Task stores', async () => {
+    mkdirSync(path.dirname(tasksPath('canvas-task')), { recursive: true });
     writeFileSync(tasksPath('canvas-task'), '{"version":1,"tasks":{}}');
     await expect(store.space('canvas-task').tasks.read()).rejects.toThrow(
       /Invalid Task store/,
