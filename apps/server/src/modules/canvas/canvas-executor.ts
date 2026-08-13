@@ -1269,3 +1269,95 @@ export async function applyDeltasOnServer(input: {
     };
   });
 }
+
+/**
+ * P2 / Plan A — broadcast a user structure edit to other live tabs.
+ *
+ * The `PUT /:canvasId` autosave persists the *whole* (slim) canvas state
+ * and, unlike `/execute`, produces no deltas of its own. To propagate a
+ * hand-edit to other tabs we diff the pre- vs post-write topology here
+ * and publish the resulting structural deltas on the same sync channel
+ * the headless executor uses.
+ *
+ * Both sides are hydrated from the *current* `.md` sidecars before
+ * diffing: a structure PUT never touches sidecar content (that rides the
+ * separate per-node content endpoint), so hydrating both with today's
+ * sidecars yields `REPLACE_NODE` rows that differ only in geometry /
+ * parenthood — never a spurious content wipe on the receiver.
+ *
+ * `pendingEffects` is intentionally minimal (no `mutatedNodes` /
+ * `contentEditedNodeIds`) so receivers apply the structure but do NOT
+ * run preprocessing or frame-fit for a plain geometry move — only
+ * `deletedNodeIds` is surfaced so they can forget the removed sidecars.
+ *
+ * The caller MUST already hold the per-canvas mutex (the PUT route wraps
+ * its read → version-check → write → this call in `withCanvasMutex`), so
+ * this function does not re-lock. Returns the deltas it broadcast (empty
+ * when the write was a no-op / geometry-identical).
+ */
+export function broadcastCanvasStatePut(input: {
+  canvasId: string;
+  fromVersion: number;
+  toVersion: number;
+  prevNodes: readonly CanvasNode[];
+  prevEdges: readonly CanvasEdge[];
+  nextNodes: readonly CanvasNode[];
+  nextEdges: readonly CanvasEdge[];
+  clientId?: string;
+}): Delta[] {
+  const {
+    canvasId,
+    fromVersion,
+    toVersion,
+    prevNodes,
+    prevEdges,
+    nextNodes,
+    nextEdges,
+    clientId,
+  } = input;
+
+  const store = getCanvasStore(canvasId);
+  const hydratedPrev = hydrateNodes(store, prevNodes);
+  const hydratedNext = hydrateNodes(store, nextNodes);
+
+  const deltas = diffCanvasState(
+    { nodes: hydratedPrev, edges: prevEdges as CanvasEdge[] },
+    { nodes: hydratedNext, edges: nextEdges as CanvasEdge[] },
+  );
+
+  if (deltas.length === 0) return deltas;
+
+  const deletedNodeIds = deltas
+    .filter(
+      (d): d is Extract<Delta, { type: 'DELETE_NODE' }> =>
+        d.type === 'DELETE_NODE',
+    )
+    .map((d) => d.node.id);
+
+  const logEntry: DeltaLogEntry = {
+    version: toVersion,
+    ts: Date.now(),
+    commands: [],
+    deltas: deltas as unknown[],
+    originator: { source: 'ui', ...(clientId ? { tabId: clientId } : {}) },
+  };
+  store.appendDeltaLogEntry(logEntry);
+
+  publishCanvasUpdate(canvasId, {
+    type: 'update',
+    data: {
+      fromVersion,
+      toVersion,
+      deltas,
+      pendingEffects: {
+        mutatedNodes: [],
+        deletedNodeIds,
+        contentEditedNodeIds: [],
+        deferredFitFrameIds: [],
+      },
+      ...(clientId ? { originatorClientId: clientId } : {}),
+    },
+  });
+
+  return deltas;
+}

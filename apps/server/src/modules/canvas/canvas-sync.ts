@@ -12,11 +12,12 @@
  *
  * ALL canvas writes broadcast — the out-of-band HTTP `/execute` route
  * (ACP / headless) AND the built-in / question-node agents that mutate
- * in-process via `executeOnServer` (C2). The chat SSE tool result no
- * longer applies canvas state, so the initiating tab is a plain receiver
- * that applies its own change once, from this broadcast. There is no
- * per-client echo filtering yet (`clientId` is deferred to P2, needed
- * only once user hand-edits also broadcast).
+ * in-process via `executeOnServer` (C2), plus user hand-edits via the
+ * autosave PUT (P2 / Plan A, `broadcastCanvasStatePut`). The chat SSE
+ * tool result no longer applies canvas state, so the initiating tab is a
+ * plain receiver that applies its own change once, from this broadcast.
+ * User-edit broadcasts carry `originatorClientId` so the originating tab
+ * skips its own PUT echo.
  */
 
 import type { CanvasSyncEvent } from '@huabu/shared';

@@ -30,7 +30,11 @@ import {
   executeCanvasCommandsOnHost,
   MissingWorldPortalError,
 } from './canvas-command-router.js';
-import { CanvasNotFoundError, applyDeltasOnServer } from './canvas-executor.js';
+import {
+  CanvasNotFoundError,
+  applyDeltasOnServer,
+  broadcastCanvasStatePut,
+} from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import {
@@ -60,6 +64,7 @@ import {
   getStructuredStore,
   listCanvases,
   updateNode,
+  withCanvasMutex,
   type CanvasFile,
   type UpdateNodeOutcome,
 } from '../storage/index.js';
@@ -102,6 +107,7 @@ import type {
   PutNodeContentResponse,
   RevealNodesFolderResponse,
 } from '@huabu/shared';
+import type { CanvasEdge, CanvasNode } from '@huabu/shared/canvas-engine';
 import type { FastifyPluginAsync } from 'fastify';
 
 /**
@@ -1169,115 +1175,144 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(400).send({ message: 'Invalid request body' });
     }
 
-    const { version: clientVersion, state, title } = parsed.data;
-    const incomingState = state as {
-      nodes?: NodeLike[];
-      edges?: unknown[];
-      [key: string]: unknown;
-    };
+    const { version: clientVersion, state, title, clientId } = parsed.data;
 
-    const store = getCanvasStore(canvasId);
-    const existing = store.read();
-    const serverVersion = existing?.version ?? 0;
-    if (clientVersion !== serverVersion) {
-      return reply.code(409).send({
-        code: 'CANVAS_VERSION_CONFLICT',
-        message: 'Canvas version mismatch',
-        serverVersion,
-      } satisfies CanvasConflictResponse);
-    }
+    // Serialize the whole read → version-check → rename → write → broadcast
+    // against concurrent `/execute` batches (which hold the same per-canvas
+    // mutex), so a hand-edit PUT can no longer interleave with an agent
+    // write and silently lose an update. P2 / Plan A additionally diffs the
+    // pre- vs post-write topology inside this critical section and
+    // broadcasts the hand-edit to other live tabs.
+    return await withCanvasMutex(canvasId, async () => {
+      const incomingState = state as {
+        nodes?: NodeLike[];
+        edges?: unknown[];
+        [key: string]: unknown;
+      };
 
-    try {
-      assertWorldPortalTopologyAllowed(
-        canvasId,
-        (existing?.state.nodes ?? []) as NodeLike[],
-        incomingState.nodes ?? [],
-      );
-    } catch (error) {
-      if (error instanceof WorldPortalMutationError) {
-        return reply.code(409).send({ message: error.message });
-      }
-      throw error;
-    }
-
-    // Title rename (and the directory rename it implies) happens
-    // before any node persistence so a 409 doesn't half-apply changes.
-    const previousTitle = existing?.title ?? null;
-    const nextTitle = title ?? previousTitle;
-    if (typeof title === 'string' && title !== previousTitle) {
-      // Release any handle held inside this Space's directory across the
-      // rename: on Windows a live `fs.watch` handle makes `renameSync` fail
-      // with EPERM (see `withSpaceDirHandlesReleased`).
-      const renameResult = await withSpaceDirHandlesReleased(canvasId, () =>
-        store.renameSelf(title),
-      );
-      if (!renameResult.ok && renameResult.reason === 'conflict') {
-        return reply.code(409).send({
-          code: 'CANVAS_TITLE_CONFLICT',
-          message: `Another canvas already uses the directory name "${renameResult.conflictWith}"`,
-          conflictWith: renameResult.conflictWith,
-        } satisfies CanvasConflictResponse);
-      }
-      if (!renameResult.ok && renameResult.reason === 'forbidden') {
-        return reply
-          .code(403)
-          .send({ message: 'World canvas cannot be renamed' });
-      }
-      if (!renameResult.ok && renameResult.reason === 'fs-error') {
-        request.log.error(
-          { canvasId, err: renameResult.message },
-          'Failed to rename canvas directory',
-        );
-        return reply.code(500).send({ message: 'Failed to rename canvas' });
-      }
-    }
-
-    const timestamp = nowMs();
-    const nextVersion = serverVersion + 1;
-
-    const rawState = incomingState;
-
-    const slimNodes = stripNodesForCanvas(
-      (rawState?.nodes ?? []) as NodeLike[],
-    );
-
-    const canvasFile: CanvasFile = {
-      canvasId,
-      title: nextTitle,
-      version: nextVersion,
-      state: {
-        ...rawState,
-        nodes: slimNodes,
-        edges: rawState?.edges ?? [],
-      },
-      createdAt: existing?.createdAt ?? timestamp,
-      updatedAt: timestamp,
-    };
-
-    // A title rename may have yielded while an async Space deletion or a
-    // competing PUT completed. Recheck immediately before the synchronous
-    // write so a stale request that initially observed a real Space cannot
-    // recreate it after deletion (or overwrite a newer version). The legacy
-    // implicit-create path remains only for requests whose initial read was
-    // genuinely absent.
-    if (existing) {
-      const current = store.read();
-      if (!current) {
-        return reply.code(404).send({ message: 'Canvas not found' });
-      }
-      if (current.version !== existing.version) {
+      const store = getCanvasStore(canvasId);
+      const existing = store.read();
+      const serverVersion = existing?.version ?? 0;
+      if (clientVersion !== serverVersion) {
         return reply.code(409).send({
           code: 'CANVAS_VERSION_CONFLICT',
           message: 'Canvas version mismatch',
-          serverVersion: current.version,
+          serverVersion,
         } satisfies CanvasConflictResponse);
       }
-    }
-    store.write(canvasFile);
 
-    return reply.send({
-      canvasId,
-      version: nextVersion,
+      try {
+        assertWorldPortalTopologyAllowed(
+          canvasId,
+          (existing?.state.nodes ?? []) as NodeLike[],
+          incomingState.nodes ?? [],
+        );
+      } catch (error) {
+        if (error instanceof WorldPortalMutationError) {
+          return reply.code(409).send({ message: error.message });
+        }
+        throw error;
+      }
+
+      // Title rename (and the directory rename it implies) happens
+      // before any node persistence so a 409 doesn't half-apply changes.
+      const previousTitle = existing?.title ?? null;
+      const nextTitle = title ?? previousTitle;
+      if (typeof title === 'string' && title !== previousTitle) {
+        // Release any handle held inside this Space's directory across the
+        // rename: on Windows a live `fs.watch` handle makes `renameSync` fail
+        // with EPERM (see `withSpaceDirHandlesReleased`).
+        const renameResult = await withSpaceDirHandlesReleased(canvasId, () =>
+          store.renameSelf(title),
+        );
+        if (!renameResult.ok && renameResult.reason === 'conflict') {
+          return reply.code(409).send({
+            code: 'CANVAS_TITLE_CONFLICT',
+            message: `Another canvas already uses the directory name "${renameResult.conflictWith}"`,
+            conflictWith: renameResult.conflictWith,
+          } satisfies CanvasConflictResponse);
+        }
+        if (!renameResult.ok && renameResult.reason === 'forbidden') {
+          return reply
+            .code(403)
+            .send({ message: 'World canvas cannot be renamed' });
+        }
+        if (!renameResult.ok && renameResult.reason === 'fs-error') {
+          request.log.error(
+            { canvasId, err: renameResult.message },
+            'Failed to rename canvas directory',
+          );
+          return reply.code(500).send({ message: 'Failed to rename canvas' });
+        }
+      }
+
+      const timestamp = nowMs();
+      const nextVersion = serverVersion + 1;
+
+      const rawState = incomingState;
+
+      const slimNodes = stripNodesForCanvas(
+        (rawState?.nodes ?? []) as NodeLike[],
+      );
+
+      // Capture pre-write topology BEFORE overwriting so Plan A can diff
+      // old → new. The stored state is already slim; the broadcast helper
+      // hydrates both sides from the current sidecars before diffing.
+      const prevNodes = (existing?.state?.nodes ?? []) as CanvasNode[];
+      const prevEdges = (existing?.state?.edges ?? []) as CanvasEdge[];
+
+      const canvasFile: CanvasFile = {
+        canvasId,
+        title: nextTitle,
+        version: nextVersion,
+        state: {
+          ...rawState,
+          nodes: slimNodes,
+          edges: rawState?.edges ?? [],
+        },
+        createdAt: existing?.createdAt ?? timestamp,
+        updatedAt: timestamp,
+      };
+
+      // A title rename may have yielded while an async Space deletion or a
+      // competing PUT completed. Recheck immediately before the synchronous
+      // write so a stale request that initially observed a real Space cannot
+      // recreate it after deletion (or overwrite a newer version). The legacy
+      // implicit-create path remains only for requests whose initial read was
+      // genuinely absent.
+      if (existing) {
+        const current = store.read();
+        if (!current) {
+          return reply.code(404).send({ message: 'Canvas not found' });
+        }
+        if (current.version !== existing.version) {
+          return reply.code(409).send({
+            code: 'CANVAS_VERSION_CONFLICT',
+            message: 'Canvas version mismatch',
+            serverVersion: current.version,
+          } satisfies CanvasConflictResponse);
+        }
+      }
+      store.write(canvasFile);
+
+      // Plan A: broadcast the structural diff to other live tabs. No-op
+      // safe (empty diff → no publish); skips the originating tab's own
+      // echo via `originatorClientId`.
+      broadcastCanvasStatePut({
+        canvasId,
+        fromVersion: serverVersion,
+        toVersion: nextVersion,
+        prevNodes,
+        prevEdges,
+        nextNodes: slimNodes as CanvasNode[],
+        nextEdges: (rawState?.edges ?? []) as CanvasEdge[],
+        ...(clientId ? { clientId } : {}),
+      });
+
+      return reply.send({
+        canvasId,
+        version: nextVersion,
+      });
     });
   });
 

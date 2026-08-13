@@ -3,6 +3,7 @@
 
 import { ApiError, apiFetch, apiUrl } from './_client';
 import { routes } from './_routes';
+import { CLIENT_ID } from '../store/clientId';
 
 import type {
   ApiErrorBody,
@@ -170,7 +171,10 @@ export async function putCanvas(
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(request),
+    // Stamp this tab's client id so the server can echo it back on the
+    // sync broadcast (`originatorClientId`) and this tab skips its own PUT
+    // echo (P2 / Plan A). Any explicit `request.clientId` wins.
+    body: JSON.stringify({ clientId: CLIENT_ID, ...request }),
     keepalive: options?.keepalive ?? false,
   });
 
