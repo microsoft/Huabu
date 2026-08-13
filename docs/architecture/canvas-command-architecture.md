@@ -158,6 +158,8 @@ Geometry commands preserve each node type's sizing model. `text` and
 different: they may either clear top-level `style.height` for auto height or pin
 it for fixed-height notes.
 
+Agent creation adds a prompt-level sizing policy without changing executor semantics. Before emitting an explicit `CREATE_NODES.size`, an Agent inspects comparable nearby nodes and matches their representative dimensions; when no comparable peer exists it omits `size` so the engine applies the canonical type default. Long or multi-section Notes use a fixed height matching nearby Notes, or 400px when none exist; `height: "auto"` is reserved for short Notes whose complete inline expansion is intentional. The canonical procedure lives in [`layout-recipes.md`](../../apps/server/src/prompt/skills/space/references/layout-recipes.md); the executor still accepts any schema-valid size from non-Agent callers.
+
 ### IDs
 
 Node ids use `node-<uuid>`, edge ids use `edge-<uuid>`.

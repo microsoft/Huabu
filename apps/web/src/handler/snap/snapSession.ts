@@ -895,23 +895,34 @@ export function applyResizeProposal(
   const ctx = _resizeContext;
   if (_kind !== 'resize' || !ctx) return rawLocal;
 
-  // Aspect-locked media (image / video) must never be distorted. xyflow's
-  // `keepAspectRatio` already handed us proportional width/height this
-  // tick; running the per-axis snap below would nudge a single edge and
-  // break the ratio — which shows up as letterboxing (empty bars) for
-  // `object-contain` content and makes the screen-space selection outline
-  // drift off the node box. Edge-snapping is also pointless here: honouring
-  // the ratio would move the perpendicular edge back off the alignment
-  // line, so the "snap" wouldn't actually align anything. Skip snap
-  // entirely, clear any stale guides, and pass the proportional rect
-  // through unchanged so the node box, image, and outline stay in lockstep.
+  // Aspect-locked media (image / video) must never be distorted. Normalise
+  // the proposal here instead of relying solely on xyflow's
+  // `keepAspectRatio`: this is the canonical rectangle consumed by the live
+  // preview, the RF change mirror, and the resize-end commit. The axis with
+  // the larger relative change represents the user's drag intent; derive the
+  // other axis from the gesture-start ratio. Per-axis snapping is skipped
+  // because it would immediately break that ratio again.
   if (ctx.lockAspect) {
     useGesturePreviewStore.getState().clearSnapGuides();
+    const widthScale = rawLocal.width / ctx.startRect.w;
+    const heightScale = rawLocal.height / ctx.startRect.h;
+    const widthChanged = Math.abs(widthScale - 1);
+    const heightChanged = Math.abs(heightScale - 1);
+    const size =
+      widthChanged >= heightChanged
+        ? {
+            width: rawLocal.width,
+            height: rawLocal.width * (ctx.startRect.h / ctx.startRect.w),
+          }
+        : {
+            width: rawLocal.height * (ctx.startRect.w / ctx.startRect.h),
+            height: rawLocal.height,
+          };
     _lastResizeSnapped = {
       local: { x: rawLocal.x, y: rawLocal.y },
-      size: { width: rawLocal.width, height: rawLocal.height },
+      size,
     };
-    return rawLocal;
+    return { x: rawLocal.x, y: rawLocal.y, ...size };
   }
 
   const absX = ctx.parentOffset.x + rawLocal.x;

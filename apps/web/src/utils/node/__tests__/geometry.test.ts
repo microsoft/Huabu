@@ -74,4 +74,22 @@ describe('resolveGeometryEdit', () => {
       ),
     ).toEqual({ width: 240, height: 'auto' });
   });
+
+  it('preserves the current aspect ratio when width is edited', () => {
+    expect(
+      resolveGeometryEdit(
+        note({ type: 'image', data: { type: 'image', src: 'test.png' } }),
+        { width: 600 },
+      ),
+    ).toEqual({ width: 600, height: 396 });
+  });
+
+  it('preserves the current aspect ratio when height is edited', () => {
+    expect(
+      resolveGeometryEdit(
+        note({ type: 'video', data: { type: 'video', src: 'test.mp4' } }),
+        { height: 396 },
+      ),
+    ).toEqual({ width: 600, height: 396 });
+  });
 });

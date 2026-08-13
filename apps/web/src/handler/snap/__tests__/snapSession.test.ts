@@ -394,6 +394,34 @@ describe('snapSession — resize lifecycle', () => {
     });
   }
 
+  it('normalises an aspect-locked resize proposal to the starting ratio', () => {
+    const { A, B } = fixture();
+    beginSnapSession({
+      nodes: [A, B],
+      gestureIds: new Set(['B']),
+      altPressed: false,
+      kind: 'resize',
+      resizeContext: {
+        nodeId: 'B',
+        startRect: { x: 51, y: 0, w: 100, h: 50 },
+        startLocalPos: { x: 51, y: 0 },
+        parentOffset: { x: 0, y: 0 },
+        lockAspect: true,
+      },
+    });
+
+    const snapped = applyResizeProposal(
+      { x: 51, y: 0, width: 200, height: 75 },
+      1,
+    );
+
+    expect(snapped).toEqual({ x: 51, y: 0, width: 200, height: 100 });
+    expect(getResizeSnappedRect()).toEqual({
+      local: { x: 51, y: 0 },
+      size: { width: 200, height: 100 },
+    });
+  });
+
   it('applyResizeProposal snaps the moving left edge onto A.right', () => {
     const { B } = fixture();
     beginResize(B);

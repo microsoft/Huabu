@@ -13,6 +13,18 @@ interface MainLayoutProps {
   children: React.ReactNode;
 }
 
+export function resolveRightPanelVisible({
+  collapsed,
+  moving,
+  animatedVisible,
+}: {
+  collapsed: boolean;
+  moving: boolean;
+  animatedVisible: boolean;
+}): boolean {
+  return moving ? animatedVisible : !collapsed;
+}
+
 export const MainLayout = ({
   header,
   leftPanel,
@@ -93,8 +105,19 @@ export const MainLayout = ({
         window.clearTimeout(rightPanelMotionFallbackRef.current);
         rightPanelMotionFallbackRef.current = null;
       }
+      setIsRightPanelMoving(false);
     };
   }, [isRightCollapsed]);
+
+  const rightPanelVisible = resolveRightPanelVisible({
+    collapsed: isRightCollapsed,
+    moving: isRightPanelMoving,
+    animatedVisible: isRightPanelVisible,
+  });
+  const rightPanelMotionPending =
+    isRightPanelMoving ||
+    committedRightCollapsedRef.current !== isRightCollapsed;
+  const clipSettledRightPanel = isRightCollapsed && !rightPanelMotionPending;
 
   const effectiveLeftWidthPx = isLeftCollapsed
     ? COLLAPSED_LEFT_WIDTH_PX
@@ -272,12 +295,7 @@ export const MainLayout = ({
           when the left panel is collapsed. */}
       <div
         className="relative min-w-0 flex-1"
-        data-right-panel-motion={
-          isRightPanelMoving ||
-          committedRightCollapsedRef.current !== isRightCollapsed
-            ? 'true'
-            : undefined
-        }
+        data-right-panel-motion={rightPanelMotionPending ? 'true' : undefined}
       >
         {React.isValidElement(children)
           ? React.cloneElement(children as React.ReactElement<any>, {
@@ -311,7 +329,9 @@ export const MainLayout = ({
           While closing, the zero-width slot right-aligns the absolute inner
           panel so it can slide offscreen instead of disappearing immediately. */}
       <div
-        className="relative shrink-0"
+        className={`relative shrink-0 ${
+          clipSettledRightPanel ? 'overflow-hidden' : ''
+        }`}
         data-right-panel-slot
         data-collapsed={isRightCollapsed ? 'true' : undefined}
         data-moving={isRightPanelMoving ? 'true' : undefined}
@@ -323,7 +343,7 @@ export const MainLayout = ({
         <div
           className="absolute top-0 h-full"
           data-right-panel-content
-          data-visible={isRightPanelVisible ? 'true' : undefined}
+          data-visible={rightPanelVisible ? 'true' : undefined}
           style={{ width: `${rightWidthPx}px` }}
           onTransitionEnd={(event) => {
             if (

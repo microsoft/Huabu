@@ -56,6 +56,16 @@ describe('renderTemplate {{include}}', () => {
     expect(out).toContain('## Tool decision matrix');
   });
 
+  it('inlines the canonical node-sizing policy', () => {
+    const out = renderBody(
+      '{{include:skills/space/references/layout-recipes.md}}',
+    );
+
+    expect(out).toContain('nearNode: { id: "<anchorId>"');
+    expect(out).toContain('omit `size`');
+    expect(out).toContain('Reserve `height: "auto"` for short Notes');
+  });
+
   it('throws when the included path escapes PROMPT_ROOT', () => {
     expect(() => renderBody('{{include:../../etc/passwd}}')).toThrow(
       /escapes the prompt root/,

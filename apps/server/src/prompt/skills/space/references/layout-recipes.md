@@ -9,6 +9,14 @@ Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, 
 - Headers / labels can be narrower (≈250px wide).
 - **`position` is required** on every `CREATE_NODES` entry. It is **parent-local**: relative to the node's `parentId` frame, or absolute canvas coords when there is no parent (root). It is the same coordinate space as the `position` you read from `inspect_nodes` (not `absolutePosition`). There is no auto-layout — if you omit `position`, the engine falls back to `(0, 0)` (often off-screen), so always pick an explicit slot.
 
+## Choosing node size
+
+- In an existing layout, inspect the intended anchor or cluster before setting `size`. With an anchor id, the fastest path is one call: `inspect_nodes({ nearNode: { id: "<anchorId>", sameParent: true, maxCount: 5 }, byType: "<newNodeType>" })`. Results include `size`; no separate anchor inspection or whole-Space outline is needed. Match peers with the same semantic role and use their median dimensions rather than copying an outlier.
+- Without an anchor id but with an intended absolute position, use `inspect_nodes({ nearPoint: { x, y, maxCount: 5 }, byType: "<newNodeType>" })`. If neither query returns a comparable peer, do not spend another read trying to manufacture one.
+- If there is no comparable peer, omit `size` and let Huabu use the node type's canonical default. Do not invent an oversized box merely because the new node has more content.
+- For a long or multi-section `note`, prefer a fixed numeric height so the canvas remains scannable: match nearby Notes when available; otherwise use `size: { width: 400, height: 400 }`. Reserve `height: "auto"` for short Notes whose full inline expansion is intentional.
+- `text` and `question` heights are always content-driven; never set their height. For `image`, match a comparable peer's width and omit height so Huabu derives it from the source aspect ratio. For `video`, match both dimensions of a comparable Video or omit `size` entirely.
+
 ## Positioning patterns
 
 ### Hierarchical / top-to-bottom
