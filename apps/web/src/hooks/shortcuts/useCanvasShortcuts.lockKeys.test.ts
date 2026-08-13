@@ -82,8 +82,8 @@ describe('useCanvasShortcuts catalog key lock', () => {
       mousePositionRef: { current: { x: 0, y: 0 } },
     };
     function Harness() {
-      useCanvasShortcuts(refs);
-      return null;
+      const { tool } = useCanvasShortcuts(refs);
+      return createElement('div', { 'data-tool': tool });
     }
     act(() => {
       root.render(createElement(Harness));
@@ -116,5 +116,59 @@ describe('useCanvasShortcuts catalog key lock', () => {
 
     dispatchCombo('layer.bringFront');
     expect(canvasActions.sendSelectedToOrder).toHaveBeenLastCalledWith('top');
+  });
+
+  it('keeps temporary pan active until the primary pointer is released', () => {
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', cancelable: true }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          button: 0,
+          isPrimary: true,
+          pointerId: 1,
+        }),
+      );
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }));
+    });
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mouseup'));
+    });
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+  });
+
+  it('keeps temporary pan active until Space is released', () => {
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', cancelable: true }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          button: 0,
+          isPrimary: true,
+          pointerId: 1,
+        }),
+      );
+      window.dispatchEvent(new MouseEvent('mouseup'));
+    });
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }));
+    });
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+  });
+
+  it('restores temporary pan when the window loses focus', () => {
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', cancelable: true }),
+      );
+      window.dispatchEvent(new Event('blur'));
+    });
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
   });
 });
