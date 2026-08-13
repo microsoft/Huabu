@@ -90,6 +90,8 @@ The workspace contains one or two horizontal groups. Each group owns one active 
 
 Tabs can be reordered within a group or moved across groups with pointer or keyboard drag sensors. Every drop delegates to the pure `moveTab` model action, which repairs ordering, active tabs, and empty source groups.
 
+Pointer dragging keeps a faded source placeholder in the tab strip, renders a labelled tab overlay above clipped workspace content, and marks the resolved insertion edge of the hovered tab or the end of a group. The visual marker follows the same destination semantics used by `resolveTabDropDestination`.
+
 Closing an active tab selects the nearest remaining tab in the same group. Moving or closing the final tab in a secondary group removes that group. The workspace keeps one empty primary group as its valid empty state.
 
 A transient tab is one reusable inspection slot per group. Opening another transient target replaces that slot; double-clicking the tab or committing a persistent mutation through its renderer promotes it in place.

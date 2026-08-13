@@ -40,7 +40,63 @@ type PreviewTabProps = {
   onPromote: () => void;
   /** Strip-level navigation; the tab owns it because it holds the focus. */
   onNavigate: (e: React.KeyboardEvent) => void;
+  /** Marks which edge receives the active drag. */
+  dropIndicatorEdge?: 'before' | 'after';
 };
+
+type PreviewTabPresentation = {
+  title: string;
+  accessibleName: string;
+  tabDescription: string;
+  Icon: ReturnType<typeof getNodeIcon>;
+};
+
+function usePreviewTabPresentation(
+  tab: PreviewTabModel,
+): PreviewTabPresentation {
+  const { t } = useTranslation();
+  const target = tab.target;
+  const node = useCanvasStore((s) =>
+    target.kind === 'node'
+      ? s.nodes.find((candidate) => candidate.id === target.nodeId)
+      : undefined,
+  );
+  const isNode = target.kind === 'node';
+  const label =
+    isNode && typeof node?.data.label === 'string' ? node.data.label : '';
+  const title = isNode ? label || t('node.untitled') : t('preview.chatTab');
+  const Icon = isNode ? getNodeIcon(node?.type, node?.data) : MessageSquare;
+  const accessibleName = isNode
+    ? `${title} (${node?.type ?? 'node'})`
+    : t('preview.chatTab');
+
+  return {
+    title,
+    accessibleName,
+    tabDescription: tab.transient
+      ? t('preview.transientTabHint', { title })
+      : title,
+    Icon,
+  };
+}
+
+export function PreviewTabDragOverlay({ tab }: { tab: PreviewTabModel }) {
+  const { title, Icon } = usePreviewTabPresentation(tab);
+
+  return (
+    <div
+      data-testid="preview-tab-drag-overlay"
+      className={cn(
+        'bg-surface text-fg-default border-edge-default flex h-9 max-w-48 min-w-20 items-center gap-1.5 rounded border px-2.5 text-sm shadow-md',
+        tab.transient && 'italic',
+      )}
+    >
+      {Icon && <Icon size={14} className="shrink-0" />}
+      <span className="min-w-0 truncate">{title}</span>
+      <X size={13} className="ml-auto shrink-0" aria-hidden="true" />
+    </div>
+  );
+}
 
 export function PreviewTab({
   tab,
@@ -52,6 +108,7 @@ export function PreviewTab({
   onClose,
   onPromote,
   onNavigate,
+  dropIndicatorEdge,
 }: PreviewTabProps) {
   const { t } = useTranslation();
   const {
@@ -65,27 +122,8 @@ export function PreviewTab({
     id: tab.id,
     data: { type: 'preview-tab', groupId, tabId: tab.id },
   });
-  const target = tab.target;
-  const node = useCanvasStore((s) =>
-    target.kind === 'node'
-      ? s.nodes.find((n) => n.id === target.nodeId)
-      : undefined,
-  );
-
-  const isNode = target.kind === 'node';
-  const label =
-    isNode && typeof node?.data.label === 'string' ? node.data.label : '';
-  const title = isNode ? label || t('node.untitled') : t('preview.chatTab');
-  const Icon = isNode ? getNodeIcon(node?.type, node?.data) : MessageSquare;
-
-  // Two tabs may legitimately show the same label, so the accessible name
-  // carries the node type to keep screen-reader output distinguishable.
-  const accessibleName = isNode
-    ? `${title} (${node?.type ?? 'node'})`
-    : t('preview.chatTab');
-  const tabDescription = tab.transient
-    ? t('preview.transientTabHint', { title })
-    : title;
+  const { title, accessibleName, tabDescription, Icon } =
+    usePreviewTabPresentation(tab);
 
   return (
     <div
@@ -129,7 +167,11 @@ export function PreviewTab({
           : 'text-fg-muted hover:bg-hover',
         // Italic marks the reusable inspection slot, per §9.2.
         tab.transient && 'italic',
-        isDragging && 'opacity-60',
+        isDragging && 'opacity-30',
+        dropIndicatorEdge === 'before' &&
+          'before:bg-info before:absolute before:inset-y-1 before:left-0 before:z-10 before:w-0.5 before:rounded-full',
+        dropIndicatorEdge === 'after' &&
+          'after:bg-info after:absolute after:inset-y-1 after:right-0 after:z-10 after:w-0.5 after:rounded-full',
       )}
     >
       {Icon && <Icon size={14} className="shrink-0" />}

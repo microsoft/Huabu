@@ -12,6 +12,7 @@
 import {
   closestCenter,
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   pointerWithin,
@@ -19,9 +20,11 @@ import {
   useSensors,
   type CollisionDetection,
   type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { Fragment, useCallback, useEffect, useRef } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
@@ -32,7 +35,8 @@ import {
 } from '@/store/previewWorkspace/store';
 
 import { PreviewGroup } from './PreviewGroup';
-import { resolveTabDropDestination } from './tabDnd';
+import { PreviewTabDragOverlay } from './PreviewTab';
+import { resolveTabDropDestination, resolveTabDropIndicator } from './tabDnd';
 
 import type { CanvasPreviewWorkspace } from '@/store/previewWorkspace/model';
 import type { Node } from '@xyflow/react';
@@ -161,6 +165,8 @@ export function PreviewWorkspace({
 
   const containerRef = useRef<HTMLDivElement>(null);
   const separatorDragCleanupRef = useRef<(() => void) | null>(null);
+  const [activeDragTabId, setActiveDragTabId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const isSplit = workspace.groups.length > 1;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -169,8 +175,22 @@ export function PreviewWorkspace({
     }),
   );
 
+  const clearTabDrag = useCallback(() => {
+    setActiveDragTabId(null);
+    setDragOverId(null);
+  }, []);
+
+  const onTabDragStart = useCallback(({ active }: DragStartEvent) => {
+    setActiveDragTabId(String(active.id));
+  }, []);
+
+  const onTabDragOver = useCallback(({ over }: DragOverEvent) => {
+    setDragOverId(over ? String(over.id) : null);
+  }, []);
+
   const onTabDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
+      clearTabDrag();
       if (!over) return;
       const tabId = String(active.id);
       const destination = resolveTabDropDestination(
@@ -183,7 +203,16 @@ export function PreviewWorkspace({
       moveTab(tabId, destination);
       activateTab(tabId);
     },
-    [activateTab, moveTab, settleTab],
+    [activateTab, clearTabDrag, moveTab, settleTab],
+  );
+
+  const activeDragTab = activeDragTabId
+    ? workspace.tabs[activeDragTabId]
+    : undefined;
+  const tabDropIndicator = resolveTabDropIndicator(
+    workspace,
+    activeDragTabId,
+    dragOverId,
   );
 
   const onSeparatorPointerDown = useCallback(
@@ -256,7 +285,10 @@ export function PreviewWorkspace({
     <DndContext
       sensors={sensors}
       collisionDetection={tabCollisionDetection}
+      onDragStart={onTabDragStart}
+      onDragOver={onTabDragOver}
       onDragEnd={onTabDragEnd}
+      onDragCancel={clearTabDrag}
     >
       <div ref={containerRef} className="flex h-full w-full overflow-hidden">
         {workspace.groups.map((group, index) => (
@@ -306,6 +338,7 @@ export function PreviewWorkspace({
                 onChatOpenRequestHandled={consumeChatOpenRequest}
                 onOpenToSide={openToSide}
                 onNewChat={() => openNewChat(group.id)}
+                tabDropIndicator={tabDropIndicator}
                 onCollapse={
                   index === workspace.groups.length - 1 ? onCollapse : undefined
                 }
@@ -314,6 +347,9 @@ export function PreviewWorkspace({
           </Fragment>
         ))}
       </div>
+      <DragOverlay dropAnimation={null}>
+        {activeDragTab ? <PreviewTabDragOverlay tab={activeDragTab} /> : null}
+      </DragOverlay>
     </DndContext>
   );
 }

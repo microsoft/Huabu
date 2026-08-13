@@ -18,6 +18,7 @@ import {
   tabElementId,
 } from './PreviewTabStrip';
 
+import type { TabDropIndicator } from './tabDnd';
 import type {
   CanvasPreviewWorkspace,
   PreviewGroup as PreviewGroupModel,
@@ -41,6 +42,7 @@ type PreviewGroupProps = {
   onChatOpenRequestHandled: (tabId: string, nonce: number) => void;
   onOpenToSide: (tabId: string) => void;
   onNewChat: () => void;
+  tabDropIndicator: TabDropIndicator | null;
   /** Collapses the whole surface; only the last group offers it. */
   onCollapse?: () => void;
 };
@@ -59,6 +61,7 @@ export function PreviewGroup({
   onChatOpenRequestHandled,
   onOpenToSide,
   onNewChat,
+  tabDropIndicator,
   onCollapse,
 }: PreviewGroupProps) {
   const { t } = useTranslation();
@@ -88,6 +91,7 @@ export function PreviewGroup({
         onOpenToSide={onOpenToSide}
         onNewChat={onNewChat}
         canOpenToSide={workspace.groups.length < 2 && tabs.length > 1}
+        tabDropIndicator={tabDropIndicator}
         onCollapse={onCollapse}
       />
       <div
