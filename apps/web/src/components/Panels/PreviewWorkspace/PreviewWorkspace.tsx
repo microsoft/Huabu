@@ -81,9 +81,17 @@ const tabCollisionDetection: CollisionDetection = (args) => {
 
 export function PreviewWorkspace({
   onCollapse,
+  isFullscreen = false,
+  onToggleFullscreen,
+  isLayersCollapsed = false,
+  onToggleLayers,
 }: {
   /** Collapses the surface, when the host offers that. */
   onCollapse?: () => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
+  isLayersCollapsed?: boolean;
+  onToggleLayers?: () => void;
 } = {}) {
   const { t } = useTranslation();
   const workspace = usePreviewWorkspaceStore(selectWorkspace);
@@ -339,6 +347,16 @@ export function PreviewWorkspace({
                 onOpenToSide={openToSide}
                 onNewChat={() => openNewChat(group.id)}
                 tabDropIndicator={tabDropIndicator}
+                isFullscreen={isFullscreen}
+                showLayersToggle={
+                  isFullscreen && isLayersCollapsed && Boolean(onToggleLayers)
+                }
+                onToggleLayers={onToggleLayers}
+                onToggleFullscreen={
+                  index === workspace.groups.length - 1
+                    ? onToggleFullscreen
+                    : undefined
+                }
                 onCollapse={
                   index === workspace.groups.length - 1 ? onCollapse : undefined
                 }

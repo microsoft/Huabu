@@ -43,6 +43,10 @@ type PreviewGroupProps = {
   onOpenToSide: (tabId: string) => void;
   onNewChat: () => void;
   tabDropIndicator: TabDropIndicator | null;
+  isFullscreen: boolean;
+  showLayersToggle: boolean;
+  onToggleLayers?: () => void;
+  onToggleFullscreen?: () => void;
   /** Collapses the whole surface; only the last group offers it. */
   onCollapse?: () => void;
 };
@@ -62,6 +66,10 @@ export function PreviewGroup({
   onOpenToSide,
   onNewChat,
   tabDropIndicator,
+  isFullscreen,
+  showLayersToggle,
+  onToggleLayers,
+  onToggleFullscreen,
   onCollapse,
 }: PreviewGroupProps) {
   const { t } = useTranslation();
@@ -92,6 +100,10 @@ export function PreviewGroup({
         onNewChat={onNewChat}
         canOpenToSide={workspace.groups.length < 2 && tabs.length > 1}
         tabDropIndicator={tabDropIndicator}
+        isFullscreen={isFullscreen}
+        showLayersToggle={showLayersToggle}
+        onToggleLayers={onToggleLayers}
+        onToggleFullscreen={onToggleFullscreen}
         onCollapse={onCollapse}
       />
       <div

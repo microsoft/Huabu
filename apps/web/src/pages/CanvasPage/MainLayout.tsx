@@ -13,6 +13,18 @@ interface MainLayoutProps {
   children: React.ReactNode;
 }
 
+interface LayoutInjectedProps {
+  isCollapsed?: boolean;
+  isHostCollapsed?: boolean;
+  isFullscreen?: boolean;
+  isLayersCollapsed?: boolean;
+  compact?: boolean;
+  onToggle?: () => void;
+  onToggleFullscreen?: () => void;
+  onToggleLayers?: () => void;
+  onOpenChat?: typeof openChat;
+}
+
 export function resolveRightPanelVisible({
   collapsed,
   moving,
@@ -41,6 +53,10 @@ export const MainLayout = ({
   const toggleLeftPanel = usePanelStore((s) => s.toggleLeftPanel);
   const isRightCollapsed = usePanelStore((s) => s.isRightCollapsed);
   const toggleRightPanel = usePanelStore((s) => s.toggleRightPanel);
+  const isPreviewFullscreen = usePanelStore((s) => s.isPreviewFullscreen);
+  const togglePreviewFullscreen = usePanelStore(
+    (s) => s.togglePreviewFullscreen,
+  );
 
   const contentRef = useRef<HTMLDivElement | null>(null);
 
@@ -109,11 +125,13 @@ export const MainLayout = ({
     };
   }, [isRightCollapsed]);
 
-  const rightPanelVisible = resolveRightPanelVisible({
-    collapsed: isRightCollapsed,
-    moving: isRightPanelMoving,
-    animatedVisible: isRightPanelVisible,
-  });
+  const rightPanelVisible =
+    isPreviewFullscreen ||
+    resolveRightPanelVisible({
+      collapsed: isRightCollapsed,
+      moving: isRightPanelMoving,
+      animatedVisible: isRightPanelVisible,
+    });
   const rightPanelMotionPending =
     isRightPanelMoving ||
     committedRightCollapsedRef.current !== isRightCollapsed;
@@ -135,18 +153,14 @@ export const MainLayout = ({
     'h-8 w-0.5 rounded-full bg-text-faded opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100';
 
   const leftHandleDisabled = isLeftCollapsed;
-  const rightHandleDisabled = isRightCollapsed;
+  const rightHandleDisabled = isRightCollapsed || isPreviewFullscreen;
 
   const leftHandleClassName = `${resizeHandleClassName} ${
-    leftHandleDisabled
-      ? 'pointer-events-none w-0 opacity-0'
-      : 'cursor-col-resize'
+    leftHandleDisabled ? 'hidden' : 'cursor-col-resize'
   }`;
 
   const rightHandleClassName = `${resizeHandleClassName} ${
-    rightHandleDisabled
-      ? 'pointer-events-none w-0 opacity-0'
-      : 'cursor-col-resize'
+    rightHandleDisabled ? 'hidden' : 'cursor-col-resize'
   }`;
 
   const dragConstraints = useMemo(() => {
@@ -173,10 +187,12 @@ export const MainLayout = ({
       const totalWidth =
         contentRef.current?.getBoundingClientRect().width ??
         dragConstraints.totalWidth;
-      const maxLeft = Math.min(
-        totalWidth - effectiveRightWidthPx - dragConstraints.minCenter,
-        totalWidth * LEFT_MAX_RATIO,
-      );
+      const maxLeft = isPreviewFullscreen
+        ? totalWidth * LEFT_MAX_RATIO
+        : Math.min(
+            totalWidth - effectiveRightWidthPx - dragConstraints.minCenter,
+            totalWidth * LEFT_MAX_RATIO,
+          );
       const nextLeft = clamp(
         startLeft + (ev.clientX - startX),
         dragConstraints.minLeft,
@@ -233,7 +249,11 @@ export const MainLayout = ({
   };
 
   return (
-    <div ref={contentRef} className="flex h-full w-full overflow-hidden">
+    <div
+      ref={contentRef}
+      className="relative flex h-full w-full overflow-hidden"
+      data-preview-fullscreen={isPreviewFullscreen ? 'true' : undefined}
+    >
       {/* Left Column: Header on top, Left Panel below — share the same width.
           When collapsed the column shrinks to 0; the Header is rendered as a
           floating overlay in the center area below. Children are kept mounted
@@ -263,19 +283,25 @@ export const MainLayout = ({
         >
           <div className="shrink-0">
             {React.isValidElement(header)
-              ? React.cloneElement(header as React.ReactElement<any>, {
-                  isCollapsed: false,
-                  onToggle: toggleLeftPanel,
-                  compact: true,
-                })
+              ? React.cloneElement(
+                  header as React.ReactElement<LayoutInjectedProps>,
+                  {
+                    isCollapsed: false,
+                    onToggle: toggleLeftPanel,
+                    compact: true,
+                  },
+                )
               : header}
           </div>
           <div className="min-h-0 flex-1">
             {React.isValidElement(leftPanel)
-              ? React.cloneElement(leftPanel as React.ReactElement<any>, {
-                  isCollapsed: false,
-                  onToggle: toggleLeftPanel,
-                })
+              ? React.cloneElement(
+                  leftPanel as React.ReactElement<LayoutInjectedProps>,
+                  {
+                    isCollapsed: false,
+                    onToggle: toggleLeftPanel,
+                  },
+                )
               : leftPanel}
           </div>
         </div>
@@ -294,21 +320,36 @@ export const MainLayout = ({
       {/* Center Editor — hosts the canvas and the floating Header overlay
           when the left panel is collapsed. */}
       <div
-        className="relative min-w-0 flex-1"
+        ref={(element) => {
+          if (element) element.inert = isPreviewFullscreen;
+        }}
+        className={
+          isPreviewFullscreen
+            ? 'pointer-events-none invisible absolute inset-0 min-w-0'
+            : 'relative min-w-0 flex-1'
+        }
+        data-center-editor
+        aria-hidden={isPreviewFullscreen || undefined}
         data-right-panel-motion={rightPanelMotionPending ? 'true' : undefined}
       >
         {React.isValidElement(children)
-          ? React.cloneElement(children as React.ReactElement<any>, {
-              onOpenChat: openChat,
-            })
+          ? React.cloneElement(
+              children as React.ReactElement<LayoutInjectedProps>,
+              {
+                onOpenChat: openChat,
+              },
+            )
           : children}
         {isLeftCollapsed && React.isValidElement(header) && (
           <div className="pointer-events-auto absolute top-3 left-2 z-30">
-            {React.cloneElement(header as React.ReactElement<any>, {
-              isCollapsed: true,
-              onToggle: toggleLeftPanel,
-              compact: true,
-            })}
+            {React.cloneElement(
+              header as React.ReactElement<LayoutInjectedProps>,
+              {
+                isCollapsed: true,
+                onToggle: toggleLeftPanel,
+                compact: true,
+              },
+            )}
           </div>
         )}
       </div>
@@ -329,22 +370,22 @@ export const MainLayout = ({
           While closing, the zero-width slot right-aligns the absolute inner
           panel so it can slide offscreen instead of disappearing immediately. */}
       <div
-        className={`relative shrink-0 ${
-          clipSettledRightPanel ? 'overflow-hidden' : ''
-        }`}
+        className={`relative ${
+          isPreviewFullscreen ? 'min-w-0 flex-1' : 'shrink-0'
+        } ${clipSettledRightPanel ? 'overflow-hidden' : ''}`}
         data-right-panel-slot
         data-collapsed={isRightCollapsed ? 'true' : undefined}
         data-moving={isRightPanelMoving ? 'true' : undefined}
         data-resizing={isResizing ? 'true' : undefined}
         style={{
-          width: `${effectiveRightWidthPx}px`,
+          width: isPreviewFullscreen ? undefined : `${effectiveRightWidthPx}px`,
         }}
       >
         <div
           className="absolute top-0 h-full"
           data-right-panel-content
           data-visible={rightPanelVisible ? 'true' : undefined}
-          style={{ width: `${rightWidthPx}px` }}
+          style={{ width: isPreviewFullscreen ? '100%' : `${rightWidthPx}px` }}
           onTransitionEnd={(event) => {
             if (
               event.target === event.currentTarget &&
@@ -355,11 +396,18 @@ export const MainLayout = ({
           }}
         >
           {React.isValidElement(rightPanel)
-            ? React.cloneElement(rightPanel as React.ReactElement<any>, {
-                isCollapsed: false,
-                isHostCollapsed: isRightCollapsed,
-                onToggle: toggleRightPanel,
-              })
+            ? React.cloneElement(
+                rightPanel as React.ReactElement<LayoutInjectedProps>,
+                {
+                  isCollapsed: false,
+                  isHostCollapsed: isRightCollapsed,
+                  onToggle: toggleRightPanel,
+                  isFullscreen: isPreviewFullscreen,
+                  onToggleFullscreen: togglePreviewFullscreen,
+                  isLayersCollapsed: isLeftCollapsed,
+                  onToggleLayers: toggleLeftPanel,
+                },
+              )
             : rightPanel}
         </div>
       </div>

@@ -17,7 +17,14 @@ import {
   horizontalListSortingStrategy,
   SortableContext,
 } from '@dnd-kit/sortable';
-import { Columns2, ListIndentIncrease, Plus } from 'lucide-react';
+import {
+  Columns2,
+  ListIndentIncrease,
+  Maximize2,
+  Minimize2,
+  PanelLeftOpen,
+  Plus,
+} from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -42,6 +49,10 @@ type PreviewTabStripProps = {
   /** Creates a fresh Chat tab in this group. */
   onNewChat: () => void;
   tabDropIndicator: TabDropIndicator | null;
+  isFullscreen: boolean;
+  showLayersToggle: boolean;
+  onToggleLayers?: () => void;
+  onToggleFullscreen?: () => void;
   /** Collapses the whole surface; only the last group offers it. */
   onCollapse?: () => void;
 };
@@ -61,6 +72,10 @@ export function PreviewTabStrip({
   canOpenToSide,
   onNewChat,
   tabDropIndicator,
+  isFullscreen,
+  showLayersToggle,
+  onToggleLayers,
+  onToggleFullscreen,
   onCollapse,
 }: PreviewTabStripProps) {
   const { t } = useTranslation();
@@ -160,6 +175,19 @@ export function PreviewTabStrip({
         )}
       </div>
       <div className="flex shrink-0 items-center px-1">
+        {showLayersToggle && onToggleLayers && (
+          <Button
+            variant="ghost"
+            iconOnly
+            size="md"
+            data-testid="show-fullscreen-layers"
+            title={t('layers.show')}
+            tooltipPlacement="bottom"
+            onClick={onToggleLayers}
+          >
+            <PanelLeftOpen />
+          </Button>
+        )}
         <Button
           variant="ghost"
           iconOnly
@@ -170,6 +198,23 @@ export function PreviewTabStrip({
         >
           <Plus />
         </Button>
+        {onToggleFullscreen && (
+          <Button
+            variant="ghost"
+            iconOnly
+            size="md"
+            data-testid="toggle-preview-fullscreen"
+            title={t(
+              isFullscreen
+                ? 'preview.exitFullscreen'
+                : 'preview.enterFullscreen',
+            )}
+            tooltipPlacement="bottom"
+            onClick={onToggleFullscreen}
+          >
+            {isFullscreen ? <Minimize2 /> : <Maximize2 />}
+          </Button>
+        )}
         {(canOpenToSide || onCollapse) && (
           <>
             {canOpenToSide && activeTabId && (

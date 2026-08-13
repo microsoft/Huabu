@@ -900,4 +900,69 @@ describe('right panel host', () => {
         ?.classList.contains('p-1.5'),
     ).toBe(true);
   });
+
+  it('toggles fullscreen from the tab strip and exits with Escape', () => {
+    openNode('a');
+    useCanvasStore.setState({
+      nodes: [canvasNode('a', 'Alpha')],
+      canvasId: CANVAS_ID,
+    });
+    const onToggleFullscreen = vi.fn();
+    const onToggleLayers = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() =>
+      root?.render(
+        <PreviewWorkspacePanel
+          isHostCollapsed={false}
+          isFullscreen
+          onToggleFullscreen={onToggleFullscreen}
+          isLayersCollapsed
+          onToggleLayers={onToggleLayers}
+        />,
+      ),
+    );
+
+    const toggle = container.querySelector<HTMLElement>(
+      '[data-testid="toggle-preview-fullscreen"]',
+    );
+    expect(toggle?.getAttribute('aria-label')).toContain('Exit');
+    const showLayers = container.querySelector<HTMLElement>(
+      '[data-testid="show-fullscreen-layers"]',
+    );
+    expect(showLayers).not.toBeNull();
+    act(() =>
+      showLayers?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
+    );
+    expect(onToggleLayers).toHaveBeenCalledOnce();
+
+    act(() =>
+      toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
+    );
+    expect(onToggleFullscreen).toHaveBeenCalledTimes(1);
+
+    act(() =>
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })),
+    );
+    expect(onToggleFullscreen).toHaveBeenCalledTimes(2);
+
+    const consumedEscape = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      cancelable: true,
+    });
+    consumedEscape.preventDefault();
+    act(() => window.dispatchEvent(consumedEscape));
+    expect(onToggleFullscreen).toHaveBeenCalledTimes(2);
+
+    const input = document.createElement('input');
+    container.appendChild(input);
+    act(() =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      ),
+    );
+    expect(onToggleFullscreen).toHaveBeenCalledTimes(2);
+  });
 });

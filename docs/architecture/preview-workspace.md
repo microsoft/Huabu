@@ -12,7 +12,7 @@ Preview Workspace owns presentation topology: open tabs, tab order, active tabs,
 
 `chatStore` owns conversation state keyed by `threadId`: messages, drafts, history status, streaming state, binding, model settings, compose mode, and pending attachments. Preview Workspace stores only the target needed to select a renderer.
 
-`panelStore` owns and persists the outer right-column collapse state and owns thread-addressed composer focus requests. Opening a Preview target expands the right column; closing a tab does not delete its underlying node or conversation history. `MainLayout` treats the persisted collapse state as authoritative whenever no panel motion is active. A settled collapsed slot is zero-width and clips overflow, while an active open/close motion temporarily releases that clipping; interrupted startup hydration therefore cannot leave translated panel content visible over the Canvas in either persisted state.
+`panelStore` owns and persists the outer right-column collapse state, owns the transient Preview fullscreen state, and owns thread-addressed composer focus requests. Opening a Preview target expands the right column; closing a tab does not delete its underlying node or conversation history. `MainLayout` treats the persisted collapse state as authoritative whenever no panel motion is active. A settled collapsed slot is zero-width and clips overflow, while an active open/close motion temporarily releases that clipping; interrupted startup hydration therefore cannot leave translated panel content visible over the Canvas in either persisted state. Fullscreen is intentionally not persisted across reloads.
 
 ```text
 Canvas command -> canvasStore document -> Preview target resolves live node
@@ -127,6 +127,8 @@ Closing a Preview tab does not delete the Canvas node, stop a running turn, or r
 ## 8. Layout and accessibility
 
 `MainLayout` owns the resizable outer right column and mounts `PreviewWorkspace`; `CenterArea` remains Canvas-only. The outer width preserves usable Canvas space, while the internal split ratio is clamped so both groups remain usable.
+
+Preview fullscreen replaces the visible centre area with Preview Workspace while keeping the Canvas component mounted in an invisible, inert layout layer with non-zero dimensions, preserving its document, selection, and viewport state. The existing Layer List remains available at the left with its normal resize, search, rename, lock, reorder, and collapse behaviour; when collapsed, the Preview tab strip exposes a Layers button so the list can be reopened without covering tabs. The last Preview group exposes fullscreen and restore controls, `Escape` restores the ordinary layout unless an inner control consumes it, and collapsing Preview also exits fullscreen.
 
 The separator exposes a symmetric pointer target around its visible rule, tracks pointer movement on `window`, and supports keyboard resizing.
 

@@ -18,6 +18,9 @@ let container: HTMLElement | null = null;
 let nextFrame: FrameRequestCallback | null = null;
 
 const LayoutChild = () => <div />;
+const MountedCanvas = (_props: { onOpenChat?: unknown }) => (
+  <div data-testid="mounted-canvas" />
+);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -31,6 +34,7 @@ beforeEach(() => {
   usePanelStore.setState({
     isLeftCollapsed: true,
     isRightCollapsed: true,
+    isPreviewFullscreen: false,
     rightPanelAnchorNodeId: null,
   });
 
@@ -111,5 +115,49 @@ describe('MainLayout Chat motion', () => {
 
     expect(center?.dataset.rightPanelMotion).toBeUndefined();
     expect(slot?.dataset.moving).toBeUndefined();
+  });
+
+  it('keeps Canvas mounted while Preview and Layers occupy fullscreen', () => {
+    usePanelStore.setState({
+      isLeftCollapsed: true,
+      isRightCollapsed: false,
+      isPreviewFullscreen: true,
+    });
+
+    act(() => {
+      root?.render(
+        <MainLayout
+          header={<LayoutChild />}
+          leftPanel={<LayoutChild />}
+          rightPanel={<LayoutChild />}
+        >
+          <MountedCanvas />
+        </MainLayout>,
+      );
+    });
+
+    const layout = container?.querySelector('[data-preview-fullscreen]');
+    const center = container?.querySelector<HTMLElement>(
+      '[data-center-editor]',
+    );
+    const slot = container?.querySelector<HTMLElement>(
+      '[data-right-panel-slot]',
+    );
+    const content = container?.querySelector<HTMLElement>(
+      '[data-right-panel-content]',
+    );
+
+    expect(layout?.getAttribute('data-preview-fullscreen')).toBe('true');
+    expect(center?.classList.contains('invisible')).toBe(true);
+    expect(center?.inert).toBe(true);
+    expect(
+      center?.querySelector('[data-testid="mounted-canvas"]'),
+    ).not.toBeNull();
+    expect(slot?.classList.contains('flex-1')).toBe(true);
+    expect(content?.style.width).toBe('100%');
+
+    act(() => usePanelStore.getState().toggleLeftPanel());
+
+    expect(slot?.classList.contains('flex-1')).toBe(true);
   });
 });
