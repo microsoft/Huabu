@@ -29,9 +29,9 @@ import type { CanvasNode } from '@/components/Nodes/types';
  *  - Default: free-axis scaling — each axis tracks the cursor
  *    independently (W and H change with the dragged corner's actual
  *    offset from the anchor).
- *  - Shift held: uniform (equiproportional) scaling — the dragged
- *    corner is constrained to the original bounding-box diagonal via
- *    projection so the aspect ratio is preserved.
+ *  - Shift held or Image/Video present: uniform (equiproportional)
+ *    scaling — the dragged corner is constrained to the original
+ *    bounding-box diagonal via projection so aspect ratios are preserved.
  *  - The OPPOSITE corner of the dragged handle acts as the anchor and
  *    stays pinned in flow coordinates throughout the gesture.
  *  - Frame children whose parent is ALSO in the selection are skipped
@@ -53,6 +53,7 @@ type SnapshotNode = {
   parentAbs: { x: number; y: number };
   pos0Abs: { x: number; y: number };
   size0: { width: number; height: number };
+  preserveAspectRatio: boolean;
 };
 
 type ResizeSnapshot = {
@@ -66,6 +67,35 @@ type ResizeSnapshot = {
 
 /** Smallest scale we permit; prevents flipping past zero. */
 const MIN_SCALE = 0.05;
+
+export function resolveMultiSelectScale({
+  offX,
+  offY,
+  diag,
+  diagLen2,
+  uniform,
+}: {
+  offX: number;
+  offY: number;
+  diag: { x: number; y: number };
+  diagLen2: number;
+  uniform: boolean;
+}): { scaleX: number; scaleY: number } {
+  if (uniform) {
+    let scale = (offX * diag.x + offY * diag.y) / diagLen2;
+    if (!Number.isFinite(scale)) scale = 1;
+    if (scale < MIN_SCALE) scale = MIN_SCALE;
+    return { scaleX: scale, scaleY: scale };
+  }
+
+  let scaleX = diag.x === 0 ? 1 : offX / diag.x;
+  let scaleY = diag.y === 0 ? 1 : offY / diag.y;
+  if (!Number.isFinite(scaleX)) scaleX = 1;
+  if (!Number.isFinite(scaleY)) scaleY = 1;
+  if (scaleX < MIN_SCALE) scaleX = MIN_SCALE;
+  if (scaleY < MIN_SCALE) scaleY = MIN_SCALE;
+  return { scaleX, scaleY };
+}
 
 export const MultiSelectResizer = () => {
   const nodes = useCanvasStore((s) => s.nodes);
@@ -159,6 +189,7 @@ export const MultiSelectResizer = () => {
         parentAbs,
         pos0Abs: abs,
         size0: { width: width || 200, height: height || 100 },
+        preserveAspectRatio: n.type === 'image' || n.type === 'video',
       });
     }
     if (snapNodes.length === 0) return;
@@ -184,27 +215,14 @@ export const MultiSelectResizer = () => {
     const offX = cursorFlow.x - snap.anchor.x;
     const offY = cursorFlow.y - snap.anchor.y;
 
-    let scaleX: number;
-    let scaleY: number;
-    if (e.shiftKey) {
-      // Uniform mode: project the cursor onto the original diagonal so
-      // the dragged corner stays glued to it. Single shared scale.
-      let scale = (offX * snap.diag.x + offY * snap.diag.y) / snap.diagLen2;
-      if (!Number.isFinite(scale)) scale = 1;
-      if (scale < MIN_SCALE) scale = MIN_SCALE;
-      scaleX = scale;
-      scaleY = scale;
-    } else {
-      // Free-axis mode: each axis tracks the cursor independently.
-      // Matches the convention used by single-node resizing and most
-      // 2D design editors.
-      scaleX = snap.diag.x === 0 ? 1 : offX / snap.diag.x;
-      scaleY = snap.diag.y === 0 ? 1 : offY / snap.diag.y;
-      if (!Number.isFinite(scaleX)) scaleX = 1;
-      if (!Number.isFinite(scaleY)) scaleY = 1;
-      if (scaleX < MIN_SCALE) scaleX = MIN_SCALE;
-      if (scaleY < MIN_SCALE) scaleY = MIN_SCALE;
-    }
+    const { scaleX, scaleY } = resolveMultiSelectScale({
+      offX,
+      offY,
+      diag: snap.diag,
+      diagLen2: snap.diagLen2,
+      uniform:
+        e.shiftKey || snap.nodes.some((node) => node.preserveAspectRatio),
+    });
 
     const items = snap.nodes.map((n) => {
       const newAbsX = snap.anchor.x + (n.pos0Abs.x - snap.anchor.x) * scaleX;

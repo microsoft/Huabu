@@ -25,10 +25,6 @@ export interface GeometryEdit {
   height?: number;
 }
 
-export interface GeometryEditOptions {
-  preserveAspectRatio?: boolean;
-}
-
 export interface ResolvedGeometry {
   width: number;
   /**
@@ -53,7 +49,6 @@ export interface ResolvedGeometry {
 export function resolveGeometryEdit(
   node: Node,
   edit: GeometryEdit,
-  options: GeometryEditOptions = {},
 ): ResolvedGeometry | null {
   const styleWidth = node.style?.width as number | undefined;
   const styleHeight = node.style?.height as number | undefined;
@@ -70,7 +65,7 @@ export function resolveGeometryEdit(
     return null;
   }
 
-  if (options.preserveAspectRatio) {
+  if (node.type === 'image' || node.type === 'video') {
     const fallbackH =
       typeof styleHeight === 'number' && styleHeight > 0
         ? styleHeight

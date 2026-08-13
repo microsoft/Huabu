@@ -48,7 +48,7 @@ While touch or pen is the current pointer, node objects are draggable only when 
 
 Direct-manipulation gestures use a shared screen-space activation policy: touch locks after 8 CSS px, pen after 4 CSS px, and mouse after 1 CSS px. React Flow receives the distance for the current pointer for both node drag activation and click tolerance, while custom pan, Lasso, and Sketch paths choose by each event's pointer type through `canvasGestureSession` and transition from `pending` to `locked`.
 
-Image and Video nodes preserve their current aspect ratio for both direct resize-handle gestures and toolbar width/height edits. The resize session normalizes every live proposal against the gesture-start ratio before mirroring it into React Flow or committing it, and the toolbar geometry resolver derives the unedited axis from the node's current rendered size.
+Image and Video nodes preserve their current aspect ratio for direct resize-handle gestures, multi-selection resize gestures, and toolbar width/height edits. A multi-selection containing either media type uses one uniform scale for the entire selection, preserving both each node's aspect ratio and the relative selection layout. The single-node resize session normalizes every live proposal against the gesture-start ratio before mirroring it into React Flow or committing it, and the toolbar geometry resolver derives the unedited axis from each media node's current rendered size.
 
 ```mermaid
 stateDiagram-v2

@@ -78,9 +78,8 @@ describe('resolveGeometryEdit', () => {
   it('preserves the current aspect ratio when width is edited', () => {
     expect(
       resolveGeometryEdit(
-        note(),
+        note({ type: 'image', data: { type: 'image', src: 'test.png' } }),
         { width: 600 },
-        { preserveAspectRatio: true },
       ),
     ).toEqual({ width: 600, height: 396 });
   });
@@ -88,9 +87,8 @@ describe('resolveGeometryEdit', () => {
   it('preserves the current aspect ratio when height is edited', () => {
     expect(
       resolveGeometryEdit(
-        note(),
+        note({ type: 'video', data: { type: 'video', src: 'test.mp4' } }),
         { height: 396 },
-        { preserveAspectRatio: true },
       ),
     ).toEqual({ width: 600, height: 396 });
   });
