@@ -7,8 +7,8 @@ import {
   activateTab,
   activeTabOfGroup,
   closeTab,
+  conversationInOtherGroup,
   createEmptyWorkspace,
-  enforceTabLimit,
   findTabByTarget,
   groupOfTab,
   isSamePreviewTarget,
@@ -48,6 +48,49 @@ function open(
 function emptyWorkspace() {
   return createEmptyWorkspace('g1');
 }
+
+describe('conversationInOtherGroup', () => {
+  it('returns the unbound Chat visible beside the source node', () => {
+    const source = open(emptyWorkspace(), node('pdf'), 'pdf').workspace;
+    const workspace = open(source, chat('thread-chat'), 'chat', {
+      openToSide: true,
+    }).workspace;
+
+    expect(
+      conversationInOtherGroup(workspace, node('pdf'), () => undefined),
+    ).toEqual({ tabId: 'chat', threadId: 'thread-chat' });
+  });
+
+  it('resolves a Question Chat visible beside the source node', () => {
+    const source = open(emptyWorkspace(), node('pdf'), 'pdf').workspace;
+    const workspace = open(source, node('question'), 'question', {
+      openToSide: true,
+    }).workspace;
+
+    expect(
+      conversationInOtherGroup(workspace, node('pdf'), (nodeId) =>
+        nodeId === 'question' ? 'thread-question' : undefined,
+      ),
+    ).toEqual({ tabId: 'question', threadId: 'thread-question' });
+  });
+
+  it('returns null in a single group or when the other target is not Chat', () => {
+    const single = open(emptyWorkspace(), node('pdf'), 'pdf').workspace;
+    const split = open(single, node('note'), 'note', {
+      openToSide: true,
+    }).workspace;
+
+    expect(
+      conversationInOtherGroup(single, node('pdf'), () => undefined),
+    ).toBeNull();
+    expect(
+      conversationInOtherGroup(split, node('pdf'), () => undefined),
+    ).toBeNull();
+    expect(
+      conversationInOtherGroup(split, node('missing'), () => 'thread-note'),
+    ).toBeNull();
+  });
+});
 
 function tabIdsOf(workspace: CanvasPreviewWorkspace, groupIndex: number) {
   return workspace.groups[groupIndex].tabIds;
@@ -353,56 +396,6 @@ describe('validateWorkspace', () => {
     expect(validated.groups).toHaveLength(1);
     expect(validated.groups[0].tabIds).toEqual(['t1']);
     expect(validated.activeGroupId).toBe('g1');
-  });
-});
-
-describe('enforceTabLimit', () => {
-  it('closes least recently active tabs first', () => {
-    let ws = open(emptyWorkspace(), node('a'), 't1').workspace;
-    ws = open(ws, node('b'), 't2').workspace;
-    ws = open(ws, node('c'), 't3').workspace;
-    ws = activateTab(ws, 't2');
-    ws = activateTab(ws, 't3');
-
-    const capped = enforceTabLimit(ws, 2);
-    expect(Object.keys(capped.tabs).sort()).toEqual(['t2', 't3']);
-  });
-
-  it('never evicts the active tab', () => {
-    let ws = open(emptyWorkspace(), node('a'), 't1').workspace;
-    ws = open(ws, node('b'), 't2').workspace;
-    ws = open(ws, node('c'), 't3').workspace;
-    ws = activateTab(ws, 't1');
-
-    const capped = enforceTabLimit(ws, 1);
-    expect(Object.keys(capped.tabs)).toEqual(['t1']);
-  });
-
-  it('honours caller-supplied exemptions', () => {
-    let ws = open(emptyWorkspace(), node('a'), 't1').workspace;
-    ws = open(ws, node('b'), 't2').workspace;
-    ws = open(ws, node('c'), 't3').workspace;
-    ws = activateTab(ws, 't3');
-
-    const capped = enforceTabLimit(ws, 2, new Set(['t1']));
-    expect(Object.keys(capped.tabs).sort()).toEqual(['t1', 't3']);
-  });
-
-  it('applies the cap per group', () => {
-    let ws = open(emptyWorkspace(), node('a'), 't1').workspace;
-    ws = open(ws, node('b'), 't2').workspace;
-    ws = open(ws, node('c'), 't3', { openToSide: true }).workspace;
-    ws = open(ws, node('d'), 't4').workspace;
-    ws = activateTab(ws, 't2');
-    ws = activateTab(ws, 't4');
-
-    const capped = enforceTabLimit(ws, 1);
-    expect(Object.keys(capped.tabs).sort()).toEqual(['t2', 't4']);
-  });
-
-  it('is a no-op under the cap', () => {
-    const ws = open(emptyWorkspace(), node('a'), 't1').workspace;
-    expect(enforceTabLimit(ws, 5)).toBe(ws);
   });
 });
 

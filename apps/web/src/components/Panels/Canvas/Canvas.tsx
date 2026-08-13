@@ -83,10 +83,7 @@ import {
 } from '@/hooks/useInputMode';
 import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
 import { useSketchStrokeMove } from '@/hooks/useSketchStrokeMove';
-import {
-  closeActivePreviewNode,
-  openPreviewNode,
-} from '@/store/previewWorkspace/actions';
+import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
@@ -1149,9 +1146,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     ];
   }, [suppressNextPaneClick]);
 
-  // Handle click-to-place for note, text, and question; otherwise dismiss
-  // any currently expanded view (preview or node) so clicking the canvas
-  // background acts as a quick close gesture in split mode.
+  // Handle click-to-place for note, text, and question.
   const handlePaneClick = useCallback(
     (event: React.MouseEvent) => {
       if (suppressNextPaneClickRef.current) {
@@ -1165,13 +1160,8 @@ export const Canvas: React.FC<CanvasProps> = ({
       //    background click belongs to that tool — leave the expanded view
       //    alone so the user doesn't lose their context mid-gesture.
       if (pendingNodeType) return;
-
-      // 3. No tool active → background click closes the expanded view.
-      if (expandedNodeId) {
-        closeActivePreviewNode();
-      }
     },
-    [pendingNodeType, expandedNodeId, placePendingNode],
+    [pendingNodeType, placePendingNode],
   );
 
   // Keep layout-driven canvas resizes spatially stable. Side panels and split

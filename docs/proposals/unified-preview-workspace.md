@@ -41,7 +41,7 @@ This structure cannot represent multiple open previews, and rendering two Chat p
 8. Allow independent Chat sessions to remain visible and interactive in both groups without state leakage.
 9. Preserve the existing World presentation-anchor and conversation-owner distinction.
 10. Reuse the existing node preview renderers, Chat thread caches, agent runtime, and Canvas resize compensation.
-11. Keep the tab strip usable and the persisted layout bounded no matter how many nodes the user opens.
+11. Keep browsing bounded through transient-tab reuse without silently closing permanent tabs.
 
 ## 4. Non-goals
 
@@ -89,7 +89,7 @@ type PreviewTab = {
   target: PreviewTarget;
   /** Reusable inspection slot; see §9.2. */
   transient: boolean;
-  /** Activation stamp driving most-recently-used eviction. */
+  /** Activation stamp used to restore recent-target ordering. */
   lastActiveSeq: number;
 };
 
@@ -109,7 +109,7 @@ type CanvasPreviewWorkspace = {
 };
 ```
 
-Recency is a counter carried in the workspace rather than a wall-clock timestamp, so eviction order is reproducible in tests and survives serialization without depending on the device clock.
+Recency is a counter carried in the workspace rather than a wall-clock timestamp, so recent-target ordering is reproducible in tests and survives serialization without depending on the device clock.
 
 `PreviewTab.id` identifies a UI instance for focus, ordering, drag-and-drop, and close operations. The first version enforces one tab per semantic target across the entire workspace; duplicate target instances are out of scope.
 
@@ -209,7 +209,7 @@ Without a bound, double-clicking through a Canvas produces an unusable tab strip
 
 A **transient tab** is the primary defence. Opening a target for inspection reuses the group's existing transient tab instead of appending a new one, so browsing many nodes never grows the strip beyond one tab. The tab is rendered in italics and is promoted to a permanent tab by an explicit gesture — editing its content, double-clicking the tab, or Open to Side. Which entry points open transiently is deliberately narrow: Canvas search results and connected-node navigation open transiently, while Question compose, Question replay, New Chat, and explicit node open are permanent.
 
-A **most-recently-used cap** is the backstop. When a group exceeds the cap, the least recently active tab is closed. A tab is exempt from the cap while it is the active tab of a group, has a running stream, has unsettled editable content, or was explicitly pinned. Because closing a tab never stops a stream or discards server history, eviction is safe. The cap is a constant in the first version, not a user setting.
+Permanent tabs are never closed automatically. The transient inspection slot remains the browsing backstop, while explicitly opened or promoted tabs stay available until the user closes them or their target node is deleted.
 
 ## 10. Chat session isolation
 
@@ -312,7 +312,7 @@ Per-Canvas layout accumulates without bound unless it is explicitly managed. The
 
 - **Namespace per Canvas, one record each.** Keys follow the existing `huabu.<feature>.<canvasId>` convention already used by the viewport record, rather than one growing blob under a single key. A Canvas that is never reopened costs one small record and is never read.
 - **Store identity, never content.** A tab persists only its target descriptor. This is why the editor can restore hundreds of tabs cheaply: each one serializes to a type tag plus a resource reference, and any entry that fails to deserialize is silently dropped on restore rather than blocking the rest.
-- **Bound the live model, not the store.** The transient tab and the MRU cap of §9.2 are what keep the record small. Persistence inherits the bound instead of enforcing a second, different one.
+- **Keep browsing bounded without closing permanent tabs.** The transient slot of §9.2 prevents search and connected-node navigation from appending a tab per inspected target. Explicitly retained tabs remain in the per-Canvas record until the user closes them.
 - **Write on unload, not per mutation.** Layout is flushed when the page unloads or the Canvas is left, matching the editor's save-on-will-shutdown behavior, so tab switching never touches storage.
 - **Delete on Canvas delete.** Deleting a Canvas deletes its layout record in the same operation. This is the only deterministic reclamation path; do not rely on age-based expiry for records the user can still reach.
 - **Cap the index, not the records.** A separate MRU list of Canvas IDs with a fixed maximum bounds total growth. When a Canvas falls off the end of the list its layout record is deleted, and reopening that Canvas simply starts from the default single-group layout. Losing tab layout for a long-untouched Canvas is a non-destructive outcome, because no content lives in the record.
@@ -364,7 +364,7 @@ Every stage below is independently shippable. A stage may land as more than one 
 
 - Add the target, tab, and group model with semantic target equality as pure reducers: no React, no store binding, no storage.
 - Add the per-Canvas persistence layer with a versioned record, repair-on-read, a capped Canvas index, and the seed from pre-workspace Chat state.
-- Cover open, global target uniqueness, reveal without relocation, reorder, move, Open to Side, split, merge, close, transient-tab reuse, MRU eviction, validation, defensive parsing, and index capping.
+- Cover open, global target uniqueness, reveal without relocation, reorder, move, Open to Side, split, merge, close, transient-tab reuse, permanent-tab retention, validation, defensive parsing, and index capping.
 
 The zustand binding and the compatibility adapters for the existing single-panel actions are deliberately **not** part of this stage. Bound to nothing, they would sit unused through all of Stage 2 while still having to be kept correct against two moving targets. They land in Stage 3 with their first real consumer. The pure model is not idle in the same way: it is a fully tested library that Stage 3 assembles rather than code waiting for a caller.
 
@@ -423,7 +423,7 @@ Roughly 35 to 55 files and 5,000 to 8,000 lines of production change plus 1,500 
 
 ## 16. Verification
 
-Store tests must cover semantic equality without a stored `resourceKey`, global target uniqueness, repeat-open focus across groups, Open to Side movement, transient-tab reuse and promotion, MRU eviction with its exemptions, atomic thread creation/eviction, active-tab fallback, group removal, node deletion, Canvas switching, layout-record deletion on Canvas delete, Canvas-index capping, and persisted-state migration.
+Store tests must cover semantic equality without a stored `resourceKey`, global target uniqueness, repeat-open focus across groups, Open to Side movement, transient-tab reuse and promotion, permanent-tab retention, atomic thread creation/eviction, active-tab fallback, group removal, node deletion, Canvas switching, layout-record deletion on Canvas delete, Canvas-index capping, and persisted-state migration.
 
 Component tests must cover tab keyboard behavior, accessible names and relationships, title derivation and truncation for labelled, unlabelled, and unbound-chat targets, pointer and keyboard tab movement, split resizing, and renderer dispatch for ordinary nodes, Question nodes, World Question references, and unbound chats.
 

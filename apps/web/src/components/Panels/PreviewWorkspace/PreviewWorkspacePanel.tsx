@@ -13,7 +13,7 @@ import { useEffect, useRef } from 'react';
 
 import { createId } from '@huabu/shared';
 
-import useCanvasStore, { getProtectedPreviewTabIds } from '@/store/canvasStore';
+import useCanvasStore from '@/store/canvasStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { PreviewWorkspace } from './PreviewWorkspace';
@@ -48,15 +48,11 @@ export function PreviewWorkspacePanel({
     }
     if (!canvasId || isHostCollapsed || seededEmptyWorkspace.current) return;
     seededEmptyWorkspace.current = true;
-    openPreviewTarget(
-      {
-        kind: 'chat',
-        canvasId,
-        threadId: createId('thread'),
-      },
-      undefined,
-      getProtectedPreviewTabIds(),
-    );
+    openPreviewTarget({
+      kind: 'chat',
+      canvasId,
+      threadId: createId('thread'),
+    });
   }, [canvasId, isEmpty, isHostCollapsed, openPreviewTarget]);
 
   return (

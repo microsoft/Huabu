@@ -65,6 +65,24 @@ export function conversationViewFromWorldReference(
   };
 }
 
+export function conversationViewForNode(
+  node: Node,
+  canvasId: string,
+  reference: ResolvedWorldReference | undefined,
+): AgentConversationView | null {
+  if (node.type === 'question' && typeof node.data.threadId === 'string') {
+    return {
+      presentationAnchor: { canvasId, nodeId: node.id },
+      conversationOwner: {
+        canvasId,
+        nodeId: node.id,
+        threadId: node.data.threadId,
+      },
+    };
+  }
+  return conversationViewFromWorldReference(canvasId, node.id, reference);
+}
+
 export function isHeadlessConversation(
   view: AgentConversationView | null,
 ): boolean {

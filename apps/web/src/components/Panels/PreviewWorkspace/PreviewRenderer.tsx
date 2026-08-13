@@ -17,7 +17,7 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import useCanvasStore from '@/store/canvasStore';
-import { conversationViewFromWorldReference } from '@/store/conversationOwner';
+import { conversationViewForNode } from '@/store/conversationOwner';
 
 import { ChatPanel } from '../ChatPanel';
 import { ExpandedNodePanel } from '../ExpandedNodePanel/ExpandedNodePanel';
@@ -37,17 +37,7 @@ function questionSession(
   canvasId: string,
   reference: ResolvedWorldReference | undefined,
 ): ChatSession | null {
-  const conversationView =
-    node.type === 'question' && typeof node.data.threadId === 'string'
-      ? {
-          presentationAnchor: { canvasId, nodeId: node.id },
-          conversationOwner: {
-            canvasId,
-            nodeId: node.id,
-            threadId: node.data.threadId,
-          },
-        }
-      : conversationViewFromWorldReference(canvasId, node.id, reference);
+  const conversationView = conversationViewForNode(node, canvasId, reference);
   if (!conversationView) return null;
 
   return {

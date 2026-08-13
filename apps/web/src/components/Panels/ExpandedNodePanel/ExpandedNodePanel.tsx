@@ -496,10 +496,12 @@ export const ExpandedNodePanel = ({
     document.addEventListener('selectionchange', handleSelectionChange);
     return () => {
       document.removeEventListener('selectionchange', handleSelectionChange);
-      // Clear selection attachment when panel unmounts or item changes
-      useChatStore.getState().setSelectionAttachment(null);
+      const chat = useChatStore.getState();
+      if (chat.selectionAttachment?.originNodeId === expandedNodeId) {
+        chat.setSelectionAttachment(null);
+      }
     };
-  }, [handleSelectionChange]);
+  }, [expandedNodeId, handleSelectionChange]);
 
   if (!activeItem) return null;
 

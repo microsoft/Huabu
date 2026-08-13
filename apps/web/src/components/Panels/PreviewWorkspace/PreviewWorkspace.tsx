@@ -24,10 +24,7 @@ import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { Fragment, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import useCanvasStore, {
-  getProtectedPreviewTabIds,
-  settleNodePreprocess,
-} from '@/store/canvasStore';
+import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import {
   usePreviewWorkspaceStore,
@@ -143,11 +140,7 @@ export function PreviewWorkspace({
       // target, so it goes through the same open path (§8).
       if (tab) {
         settleTab(tabId);
-        openPreviewTarget(
-          tab.target,
-          { openToSide: true },
-          getProtectedPreviewTabIds(),
-        );
+        openPreviewTarget(tab.target, { openToSide: true });
       }
     },
     [openPreviewTarget, settleTab],
@@ -161,11 +154,7 @@ export function PreviewWorkspace({
         .getState()
         .workspace.groups.find((group) => group.id === groupId)?.activeTabId;
       if (activeTabId) settleTab(activeTabId);
-      openPreviewTarget(
-        { kind: 'chat', canvasId, threadId },
-        { groupId },
-        getProtectedPreviewTabIds(),
-      );
+      openPreviewTarget({ kind: 'chat', canvasId, threadId }, { groupId });
     },
     [canvasId, openPreviewTarget, settleTab],
   );

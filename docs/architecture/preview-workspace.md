@@ -78,6 +78,8 @@ Each group mounts only its active tab. Inactive tabs retain topology and store-b
 
 Every mounted `ChatPanel` receives an explicit `ChatSession` and owning preview tab ID. There is no globally current Chat thread or Question replay pointer, so two groups can render independent conversations without sharing messages, drafts, bindings, attachments, settings, loading state, or stream control.
 
+PDF area capture routes directly to a Chat or Question conversation that is active in the group beside the PDF. When no conversation is visible beside it, the capture becomes the shared dashed selection attachment and the Canvas's canonical unbound Chat opens to the side; the user explicitly claims the selection in that composer before it becomes a thread-owned pending attachment.
+
 For a World `nodeRef` that presents a source Question, the target remains the World presentation node while `AgentConversationView` carries the source Canvas, node, and thread as conversation owner. History, reconnect, agent turns, tools, lifecycle writes, binding, mode, and change records use that owner scope.
 
 An authored Question node remains authoritative for persisted agent mode and fixed binding. A new selectable Question thread inherits the Canvas's current binding unless the node supplies an explicit binding.
@@ -92,9 +94,9 @@ Closing an active tab selects the nearest remaining tab in the same group. Movin
 
 A transient tab is one reusable inspection slot per group. Opening another transient target replaces that slot; double-clicking the tab or committing a persistent mutation through its renderer promotes it in place.
 
-Each group is capped at 12 tabs by deterministic MRU eviction. Active tabs, streaming conversations, and node tabs with unsettled content are protected from eviction.
+Permanent tabs are never closed automatically. A group may retain any number of permanent tabs; users close them explicitly, while transient browsing continues to reuse the group's inspection slot.
 
-The activation sequence is an integer stored with the workspace rather than a wall-clock timestamp, making MRU ordering deterministic in tests and persistence.
+The activation sequence is an integer stored with the workspace rather than a wall-clock timestamp, making recent-target ordering deterministic in tests and persistence.
 
 ## 6. Focus and opening position
 
@@ -146,11 +148,10 @@ Document mutations remain in the Canvas command path. Preview Workspace may requ
 
 | File/dir                                                                                                                                                 | Responsibility                                                                                       |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| [`apps/web/src/store/previewWorkspace/model.ts`](../../apps/web/src/store/previewWorkspace/model.ts)                                                     | Pure target, tab, group, move, close, validation, transient, and MRU rules.                          |
+| [`apps/web/src/store/previewWorkspace/model.ts`](../../apps/web/src/store/previewWorkspace/model.ts)                                                     | Pure target, tab, group, move, close, validation, and transient rules.                               |
 | [`apps/web/src/store/previewWorkspace/store.ts`](../../apps/web/src/store/previewWorkspace/store.ts)                                                     | Zustand binding, Canvas load/flush lifecycle, and runtime tab-addressed requests.                    |
 | [`apps/web/src/store/previewWorkspace/persistence.ts`](../../apps/web/src/store/previewWorkspace/persistence.ts)                                         | Versioned per-Canvas local-storage records, repair-on-read, migration seed, and capped Canvas index. |
 | [`apps/web/src/store/previewWorkspace/actions.ts`](../../apps/web/src/store/previewWorkspace/actions.ts)                                                 | Canonical user-facing node and Chat open adapters.                                                   |
-| [`apps/web/src/store/previewWorkspace/protection.ts`](../../apps/web/src/store/previewWorkspace/protection.ts)                                           | Computes tabs protected from MRU eviction.                                                           |
 | [`apps/web/src/components/Panels/PreviewWorkspace/`](../../apps/web/src/components/Panels/PreviewWorkspace)                                              | Workspace layout, groups, tab strips, drag-and-drop, split resizing, and target rendering.           |
 | [`apps/web/src/components/Panels/ChatPanel/index.tsx`](../../apps/web/src/components/Panels/ChatPanel/index.tsx)                                         | Session-scoped conversation renderer used by Question and unbound Chat targets.                      |
 | [`apps/web/src/components/Panels/ExpandedNodePanel/ExpandedNodePanel.tsx`](../../apps/web/src/components/Panels/ExpandedNodePanel/ExpandedNodePanel.tsx) | Embedded ordinary-node preview renderer.                                                             |

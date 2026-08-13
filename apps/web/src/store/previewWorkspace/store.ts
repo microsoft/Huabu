@@ -21,7 +21,6 @@ import {
   activateTab,
   closeTab,
   createEmptyWorkspace,
-  enforceTabLimit,
   findTabByTarget,
   groupOfTab,
   mergeGroups,
@@ -42,12 +41,6 @@ import {
   seedWorkspaceFromLegacyChat,
   writeWorkspace,
 } from './persistence';
-
-/**
- * Per-group tab cap backing the most-recently-used eviction of §9.2. A
- * constant in the first version, deliberately not a user setting.
- */
-export const MAX_TABS_PER_GROUP = 12;
 
 /** Pre-workspace Chat state used to seed a Canvas opened for the first time. */
 export type LegacyChatSeed = {
@@ -84,7 +77,6 @@ export type PreviewWorkspaceState = {
   openPreviewTarget: (
     target: PreviewTarget,
     options?: OpenPreviewTargetOptions,
-    protectedTabIds?: ReadonlySet<string>,
   ) => string;
   closeTab: (tabId: string) => void;
   activateTab: (tabId: string) => void;
@@ -137,19 +129,10 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       if (canvasId) writeWorkspace(canvasId, workspace);
     },
 
-    openPreviewTarget: (target, options, protectedTabIds) => {
+    openPreviewTarget: (target, options) => {
       const opened = openTarget(get().workspace, target, options);
       if (!opened.tabId) return '';
-      // The active tab of each group is exempt, so eviction cannot remove the
-      // tab just opened. Stream and unsettled-content exemptions arrive with
-      // their renderers.
-      set({
-        workspace: enforceTabLimit(
-          opened.workspace,
-          MAX_TABS_PER_GROUP,
-          protectedTabIds,
-        ),
-      });
+      set({ workspace: opened.workspace });
       return opened.tabId;
     },
 

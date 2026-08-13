@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import {
   selectActiveNodeId,
@@ -168,6 +169,7 @@ function swipe(from: number, to: number, y = 0, target?: HTMLElement) {
 
 beforeEach(() => {
   testStorage.clear();
+  useChatStore.getState().setSelectionAttachment(null);
 });
 
 afterEach(() => {
@@ -187,6 +189,38 @@ afterEach(() => {
 });
 
 describe('ExpandedNodePanel edge navigation', () => {
+  it('does not clear a selection attachment owned by another node', () => {
+    renderPanel([canvasNode('a', 'Alpha')], [], true);
+    useChatStore.getState().setSelectionAttachment({
+      type: 'image',
+      source: 'excerpt',
+      url: 'https://example.test/capture.png',
+      originNodeId: 'pdf-node',
+    });
+
+    act(() => root?.unmount());
+    root = null;
+
+    expect(useChatStore.getState().selectionAttachment?.originNodeId).toBe(
+      'pdf-node',
+    );
+  });
+
+  it('clears a selection attachment owned by the unmounted node', () => {
+    renderPanel([canvasNode('a', 'Alpha')], [], true);
+    useChatStore.getState().setSelectionAttachment({
+      type: 'text',
+      source: 'excerpt',
+      content: 'Selected text',
+      originNodeId: 'a',
+    });
+
+    act(() => root?.unmount());
+    root = null;
+
+    expect(useChatStore.getState().selectionAttachment).toBeNull();
+  });
+
   it('reports persistent content mutations to its preview owner', () => {
     const onCommit = vi.fn();
     renderPanel([canvasNode('a', 'Alpha')], [], true, onCommit);
