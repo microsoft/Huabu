@@ -224,9 +224,6 @@ export const useLLMStore = create<LLMState>()((set, get) => ({
         await startOAuthLogin(provider);
       set({ oauthUserCode: userCode, oauthVerificationUri: verificationUri });
 
-      // Open the verification URL in a new tab
-      window.open(verificationUri, '_blank', 'noopener');
-
       // Poll until user completes or flow expires
       const pollInterval = (interval || 5) * 1000;
       const maxPolls = 60; // ~5 minutes at 5s intervals
