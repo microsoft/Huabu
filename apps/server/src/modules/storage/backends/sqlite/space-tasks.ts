@@ -11,7 +11,7 @@ import {
 } from '@huabu/shared';
 
 import { withImmediateTransaction } from './database.js';
-import { parseJson, stringifyJson } from './values.js';
+import { parseJson, stringifyJson } from './rows.js';
 
 import type { SqliteStoreContext } from './database.js';
 import type {

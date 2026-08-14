@@ -7,8 +7,9 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { SQLITE_SCHEMA_VERSION } from './database.js';
+import { collisionKeyForTitle } from './identity.js';
+import { insertSpaceRow, parseJson } from './rows.js';
 import { SqliteStructuredStore } from './structured-store.js';
-import { collisionKeyForTitle, insertSpaceRow, parseJson } from './values.js';
 
 import type {
   CanvasFile,

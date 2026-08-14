@@ -2,12 +2,12 @@
 // Licensed under the MIT license.
 
 import { SqliteStoreContext } from './database.js';
+import { readSpaceRow } from './rows.js';
 import { createSqliteSpaceLogs } from './space-logs.js';
 import { SqliteSpaceNodes } from './space-nodes.js';
 import { SqliteSpaceRepository } from './space-repository.js';
 import { SqliteSpaceTasks } from './space-tasks.js';
 import { createSqliteSpaceWrite } from './space-write.js';
-import { readSpaceRow } from './values.js';
 import { sanitizeId } from '../../../../utils/fs.js';
 
 import type { StorageHealth } from '../../ports/common.js';

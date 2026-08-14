@@ -1,12 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+/**
+ * Movement of persisted values between domain records and SQLite rows.
+ *
+ * Every column this backend stores is either JSON text or a scalar, so the
+ * codecs here are the single place that decides what a well-formed stored
+ * value looks like. Reads validate on the way out: a row that no longer
+ * matches the domain shape is a corruption report, not a silent default.
+ */
+
 import { SQLITE_WORLD_COLLISION_KEY } from './database.js';
-import {
-  dedupeName,
-  normalizeForCompare,
-  toSafeFilename,
-} from '../../../../utils/naming.js';
 import { canvasFileShapeError } from '../../../canvas/persistence-validation.js';
 
 import type {
@@ -185,40 +189,6 @@ export function validateCanvasFile(record: CanvasFile, canvasId: string): void {
   stringifyJson(record.state, `Space ${JSON.stringify(canvasId)} state`);
 }
 
-function allocatedSpaceTitle(
-  requested: string | null,
-  canvasId: string,
-  allocatedName: string,
-): string | null {
-  if (requested === null) return null;
-  const base = toSafeFilename(requested, canvasId);
-  if (allocatedName === base) return requested;
-  const candidate = `${requested}${allocatedName.slice(base.length)}`;
-  return toSafeFilename(candidate, canvasId) === allocatedName
-    ? candidate
-    : allocatedName;
-}
-
-export function allocateSpaceIdentity(
-  requestedTitle: string | null,
-  canvasId: string,
-  occupiedCollisionKeys: Iterable<string>,
-): { readonly title: string | null; readonly collisionKey: string } {
-  const base = toSafeFilename(requestedTitle, canvasId);
-  const allocated = dedupeName(base, occupiedCollisionKeys);
-  return {
-    title: allocatedSpaceTitle(requestedTitle, canvasId, allocated),
-    collisionKey: normalizeForCompare(allocated),
-  };
-}
-
-export function collisionKeyForTitle(
-  title: string | null,
-  canvasId: string,
-): string {
-  return normalizeForCompare(toSafeFilename(title, canvasId));
-}
-
 export function insertSpaceRow(
   database: DatabaseSync,
   record: CanvasFile,
@@ -319,42 +289,4 @@ export function requirePositiveRevision(
     );
   }
   return value;
-}
-
-export function allocateNodeIdentity(
-  record: NodeContent,
-  nodeId: string,
-  existingCollisionKey: string | null,
-  occupiedCollisionKeys: Iterable<string>,
-): {
-  readonly record: NodeContent;
-  readonly collisionKey: string;
-  readonly desiredCollisionKey: string;
-} {
-  const trimmedLabel =
-    typeof record.label === 'string' && record.label.trim().length > 0
-      ? record.label
-      : null;
-  if (trimmedLabel === null && existingCollisionKey !== null) {
-    return {
-      record,
-      collisionKey: existingCollisionKey,
-      desiredCollisionKey: existingCollisionKey,
-    };
-  }
-
-  const desired = toSafeFilename(trimmedLabel, nodeId);
-  const allocated = dedupeName(desired, occupiedCollisionKeys);
-  const suffix =
-    allocated.length > desired.length && allocated.startsWith(desired)
-      ? allocated.slice(desired.length)
-      : '';
-  return {
-    record:
-      suffix && trimmedLabel
-        ? { ...record, label: `${trimmedLabel}${suffix}` }
-        : record,
-    collisionKey: normalizeForCompare(allocated),
-    desiredCollisionKey: normalizeForCompare(desired),
-  };
 }

@@ -8,7 +8,7 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { withImmediateTransaction } from './database.js';
-import { parseJson, stringifyJson } from './values.js';
+import { parseJson, stringifyJson } from './rows.js';
 import { sanitizeId } from '../../../../utils/fs.js';
 
 import type { SqliteStoreContext } from './database.js';

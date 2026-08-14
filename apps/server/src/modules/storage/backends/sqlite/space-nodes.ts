@@ -2,13 +2,13 @@
 // Licensed under the MIT license.
 
 import { withImmediateTransaction } from './database.js';
+import { allocateNodeIdentity } from './identity.js';
 import {
-  allocateNodeIdentity,
   decodeNodeRecord,
   requirePositiveRevision,
   stringifyJson,
   validateNodeContent,
-} from './values.js';
+} from './rows.js';
 import { sanitizeId } from '../../../../utils/fs.js';
 
 import type { SqliteStoreContext } from './database.js';

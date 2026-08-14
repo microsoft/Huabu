@@ -2,14 +2,13 @@
 // Licensed under the MIT license.
 
 import { withImmediateTransaction } from './database.js';
+import { allocateSpaceIdentity, collisionKeyForTitle } from './identity.js';
 import {
-  allocateSpaceIdentity,
-  collisionKeyForTitle,
   decodeSpaceRow,
   insertSpaceRow,
   readSpaceRow,
   SPACE_COLUMNS,
-} from './values.js';
+} from './rows.js';
 import { sanitizeId } from '../../../../utils/fs.js';
 
 import type { SqliteStoreContext } from './database.js';

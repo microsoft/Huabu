@@ -2,16 +2,16 @@
 // Licensed under the MIT license.
 
 import { withImmediateTransaction } from './database.js';
-import { putSqliteNodeInTransaction } from './space-nodes.js';
+import { allocateSpaceIdentity } from './identity.js';
 import {
-  allocateSpaceIdentity,
   insertSpaceRow,
   readSpaceRow,
   stringifyJson,
   updateSpaceRow,
   validateCanvasFile,
   validateNodeContent,
-} from './values.js';
+} from './rows.js';
+import { putSqliteNodeInTransaction } from './space-nodes.js';
 import { sanitizeId } from '../../../../utils/fs.js';
 
 import type { SqliteStoreContext } from './database.js';
