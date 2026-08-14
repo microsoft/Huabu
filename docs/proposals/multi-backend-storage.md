@@ -1,16 +1,17 @@
 # Multi-Backend Storage
 
-Status: Phases 1–3 implemented
-Last updated: 2026-08-07
+Status: Phases 1–4 implemented
+Last updated: 2026-08-11
 
 > **Scope and decision confidence.** This proposal records the two-port
 > `StructuredStore` / `BlobStore` split and their target backend families as
 > the settled direction. The Blob contract, the structured module/repository
-> shape, the read-only Space catalogue, and the Phase-3 lifecycle semantics are
-> accepted. Exact schemas, the write-side aggregate API, migration mechanics,
-> backend-selection scope, virtual filesystem behavior, agent workspace
-> materialization, and write-back are still design space. Remaining candidate
-> interfaces below are discussion aids, not implementation instructions.
+> shape, the Space catalogue/lifecycle, async node repository, and minimal ordered
+> writer are accepted. Exact schemas, stronger transactional APIs, migration
+> mechanics, backend-selection scope, virtual filesystem behavior, agent
+> workspace materialization, and write-back are still design space. Remaining
+> candidate interfaces below are discussion aids, not implementation
+> instructions.
 >
 > **Implementation state.** Phase 1 merged to `main` in PR #416. `BlobStore`
 > is a real backend-neutral port with a Disk adapter and a reusable contract
@@ -19,21 +20,36 @@ Last updated: 2026-08-07
 > with the phase and are described in §12.1.1.
 >
 > Phase 2 is specified in §12.2 and is **implemented**. `storage/` now has the
-> target ports/backends/compatibility hierarchy. `SpaceHandle` is a composite
-> of an async version-CAS `SpaceRepository`, four narrow async log
-> repositories, and a transitional `LegacyNodeStore` whose single-node
-> primitives remain synchronous. Phase 3 is specified in §12.3 and is
-> **implemented** on `feat/multi-backend-storage-phase-3`: `StructuredStore`
-> now exposes a read-only `SpaceCatalogRepository`, and the Canvas list,
-> Workspace World lookup, thread-change read, and memory analyzer
-> record/event/intent reads use repositories. Cross-store composition also
-> reads `SpaceRepository` to guard blob puts. Structured writers, node access,
-> and lifecycle mutations remain on the compatibility facade, so repository
-> concurrency guarantees are adapter-local rather than system-wide.
+> target ports/backends/compatibility hierarchy. Phase 3 is specified in
+> §12.3 and is **implemented and merged**: `StructuredStore` gained
+> backend-neutral membership reads, and the Canvas list, Workspace World
+> lookup, thread-change read, and memory analyzer record and event reads use
+> repositories. Cross-store composition also reads the Space record to guard
+> blob puts.
+>
+> Phase 4 is specified in §12.4 and is **implemented**. `StructuredStore`
+> now exposes structured lifecycle, async node, and ordered-writer ports. The
+> Disk adapter delegates to the existing layout and failure rollback, and the
+> structured lifecycle, node, executor, preprocessing, event, and change
+> mutations enumerated in §12.4 use the new seam. A later review pass reverted
+> four Disk behavior changes the seam did not require and removed the surface
+> it had left uncalled (§12.4.3); merging `main` removed intent episodes from
+> the product, which flattened `history` back to `handle.events` (§12.4.4).
+> This phase deliberately adds no filesystem WAL,
+> process-crash recovery, durable tombstones, storage publication envelope,
+> shared API, or web-client protocol. The ordered writer preserves current
+> operation order. A normal in-process node → record → delta batch must
+> restore its prestate before rejecting, while explicit title rename retains
+> its preceding best-effort boundary. This is not a crash-recovery or
+> distributed transaction contract, and an unknown remote outcome need not be
+> determinate; stronger SQL semantics may be added by an adapter without
+> widening the minimum contract.
 > Corrections made during implementation and adversarial
 > review are recorded in place, including the CAS race ordering (§12.2.5),
 > log-family interface segregation (§12.2.6), and retained-handle Workspace
-> guards (§12.2.4). No SQLite, Postgres, or Azure adapter exists. §12 is the
+> guards (§12.2.4). Remaining Disk-only read and physical capabilities still
+> keep non-Disk profiles unselectable. No SQLite, Postgres, or Azure adapter
+> exists. §12 is the
 > authoritative phase plan; the decision table in §2 marks what each phase
 > has actually settled.
 
@@ -62,22 +78,22 @@ built above these ports, but its form is intentionally unresolved here.
 
 ## 2. Decision status
 
-| Topic                                                  | Status                     | Current position                                                                                                                                                                                                                                                                                              |
-| ------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Separate authoritative structured and blob ports       | **Accepted** (P1, merged)  | Storage is composed from `StructuredStore` and `BlobStore`; there is no single backend interface that mixes both concerns.                                                                                                                                                                                    |
-| Structured backend family                              | **Settled direction**      | Support Disk, SQLite, and Postgres implementations. Only Disk exists.                                                                                                                                                                                                                                         |
-| Blob backend family                                    | **Settled direction**      | Support Disk and Azure Blob implementations. Only Disk exists.                                                                                                                                                                                                                                                |
-| Independent composition                                | **Accepted** (P1, merged)  | `StorageProfile` has two env-parsed axes; `validateStorageProfile` fails fast on unimplemented kinds and is the extension point for combination rules. The lazy `getStorage()` path now rejects profiles whose adapters require awaited initialization (§12.1.1).                                             |
-| Blob port contract                                     | **Accepted** (P1, merged)  | Connection → scope, stream-oriented, no permanent absolute path in the common contract; `materialize()` returns a bounded lease for the one consumer needing a file. Replacement atomicity and post-release lease semantics are contract terms, not adapter accidents (§6.2, §12.1.1).                        |
-| Concrete interface shape and async migration           | Partly settled (P3 landed) | Blob is async and backend-neutral. `StructuredStore` now exposes a read-only catalogue and async record/log repositories plus a transitional node surface with synchronous single-node primitives. Bounded read consumers use the catalogue, record, event, change, and intent repositories.                  |
-| Exact structured repositories and aggregate boundaries | Partly settled (P3 landed) | `SpaceCatalogRepository`, `SpaceRepository`, and the four narrow Canvas-log repositories exist with reusable adapter-local contract suites. Catalogue reads and lifecycle semantics are accepted; lifecycle writes, `NodeRepository`, title mutation, and the cross-repository `SpaceCommit` API remain open. |
-| Node Markdown ownership                                | Proposed                   | Keep authored node content with structured node records because it participates in revision CAS, search, and node mutation. Keep opaque and large bytes in BlobStore.                                                                                                                                         |
-| Blob key, staging, deletion, and GC semantics          | Proposed / open            | Names are the existing `<artifactId><ext>` keys; `deleteAll()` covers Space destruction. Staging, reference counting, and GC remain undesigned. Per-key deletion stays out of the public port, but the absence of any cleanup path is what makes atomic replace mandatory (§6.2).                             |
-| Space-handle identity and caching                      | **Corrected** (P1)         | `space(id)` returning a stable handle is bounded by the LRU behind it, not guaranteed. In-memory tombstones and the filename index are therefore adapter-local caches, never durable state (§12.1.1, §12.2.4).                                                                                                |
-| Backend selection scope                                | Open                       | Process-global today because the profile is read from env. Per-Workspace or per-Space selection has not been fixed.                                                                                                                                                                                           |
-| Logical filesystem view                                | Open                       | A possible `SpaceFileView` above both stores; name and contract are not accepted yet.                                                                                                                                                                                                                         |
-| Real agent workspace                                   | Open                       | Materialized directory, OS mount, protocol-only access, or a combination remain under evaluation.                                                                                                                                                                                                             |
-| Agent-authored filesystem write-back                   | Open                       | Read-only projection, explicit checkout/commit, and live bidirectional sync are alternatives, not decisions.                                                                                                                                                                                                  |
+| Topic                                                  | Status                    | Current position                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Separate authoritative structured and blob ports       | **Accepted** (P1, merged) | Storage is composed from `StructuredStore` and `BlobStore`; there is no single backend interface that mixes both concerns.                                                                                                                                                                                                                                                                 |
+| Structured backend family                              | **Settled direction**     | Support Disk, SQLite, and Postgres implementations. Only Disk exists.                                                                                                                                                                                                                                                                                                                      |
+| Blob backend family                                    | **Settled direction**     | Support Disk and Azure Blob implementations. Only Disk exists.                                                                                                                                                                                                                                                                                                                             |
+| Independent composition                                | **Accepted** (P1, merged) | `StorageProfile` has two env-parsed axes; `validateStorageProfile` fails fast on unimplemented kinds and is the extension point for combination rules. The lazy `getStorage()` path now rejects profiles whose adapters require awaited initialization (§12.1.1).                                                                                                                          |
+| Blob port contract                                     | **Accepted** (P1, merged) | Connection → scope, stream-oriented, no permanent absolute path in the common contract; `materialize()` returns a bounded lease for the one consumer needing a file. Replacement atomicity and post-release lease semantics are contract terms, not adapter accidents (§6.2, §12.1.1).                                                                                                     |
+| Concrete interface shape and async migration           | **Accepted** (P4)         | Blob and portable structured repositories are async. `StructuredStore` exposes catalogue/lifecycle and scoped Space handles; the structured mutations enumerated in §12.4 use those ports. Disk-only physical capabilities remain explicit blockers for selecting another profile.                                                                                                         |
+| Exact structured repositories and aggregate boundaries | **Accepted minimum** (P4) | Catalogue, lifecycle, Space CAS, nodes, four Canvas-log families, Tasks, and the ordered writer have reusable contracts. A rejected in-process node → record → optional-delta batch restores prestate; explicit title rename remains an earlier best-effort boundary. Crash recovery, unknown remote outcomes, idempotency, publication, and multi-process serialization are not promised. |
+| Node Markdown ownership                                | **Accepted** (P4)         | Authored node content remains with structured node records because it participates in revision CAS, search, and node mutation. Opaque and large bytes remain in BlobStore.                                                                                                                                                                                                                 |
+| Blob key, staging, deletion, and GC semantics          | Proposed / open           | Names are the existing `<artifactId><ext>` keys; `deleteAll()` covers Space destruction. Staging, reference counting, and GC remain undesigned. Per-key deletion stays out of the public port, but the absence of any cleanup path is what makes atomic replace mandatory (§6.2).                                                                                                          |
+| Space-handle identity and caching                      | **Corrected** (P1)        | `space(id)` returning a stable handle is bounded by the LRU behind it, not guaranteed. In-memory tombstones and the filename index are therefore adapter-local caches, never durable state (§12.1.1, §12.2.4).                                                                                                                                                                             |
+| Backend selection scope                                | Open                      | Process-global today because the profile is read from env. Per-Workspace or per-Space selection has not been fixed.                                                                                                                                                                                                                                                                        |
+| Logical filesystem view                                | Open                      | A possible `SpaceFileView` above both stores; name and contract are not accepted yet.                                                                                                                                                                                                                                                                                                      |
+| Real agent workspace                                   | Open                      | Materialized directory, OS mount, protocol-only access, or a combination remain under evaluation.                                                                                                                                                                                                                                                                                          |
+| Agent-authored filesystem write-back                   | Open                      | Read-only projection, explicit checkout/commit, and live bidirectional sync are alternatives, not decisions.                                                                                                                                                                                                                                                                               |
 
 ## 3. Current system
 
@@ -106,9 +122,12 @@ still implements several Disk compatibility responsibilities:
 Artifact byte paths and streams are no longer among them — phase 1 moved them
 behind `BlobStore` (§12.1). Phases 2 and 3 placed repository boundaries in
 front of Space records, Canvas logs, and catalogue reads; the catalogue adapter
-uses the Workspace scanner rather than the legacy class. Remaining writers,
-nodes, create-time full-record listing, and physical capabilities still use
-the facade.
+uses the Workspace scanner rather than the legacy class. Phase 4 added
+structured lifecycle, async node, and ordered-write adapters and migrated the
+Server mutation paths named in §12.4. Compatibility reads and physical
+capabilities such as import/export, RFS, external-note observation/claim, and
+hydration still use the Disk facade or bypass it through direct filesystem
+code.
 
 Additional modules bypass or extend that facade with real filesystem
 semantics. Built-in agent tools walk directories, RFS streams local files,
@@ -151,11 +170,12 @@ Blob adapters for this data do not yet exist.
   Postgres, and Azure _cannot_ be implemented; that is not the same as
   implementing them.
 
-## 6. Settled backend split; proposed contract properties
+## 6. Settled backend split and implemented minimum contracts
 
-Only the two storage families and their target implementations are settled in
-this section. The ownership and contract properties below are proposals to be
-reviewed separately.
+The two storage families, their target implementations, and the Phase-4
+minimum contracts below are accepted. Stronger aggregate transactions,
+cross-store recovery, and the remaining filesystem-shaped capabilities are
+still open.
 
 ### 6.1 StructuredStore
 
@@ -169,43 +189,57 @@ Expected Canvas-domain data includes, subject to the final repository split:
 - Workspace and Space catalogue records;
 - Space topology, nodes, edges, geometry, and versions;
 - authored node documents and node metadata;
-- revisions, tombstones, idempotency records, and mutation deltas;
+- revisions and mutation deltas;
 - artifact metadata and references to BlobStore keys;
-- Canvas-owned histories, intents, events, and outbox records where applicable.
+- Canvas-owned histories and events.
+
+Durable tombstones, idempotency records, and an outbox are possible future
+records, not Phase-4 contract members or persisted-format changes.
 
 The top-level name does not require one monolithic class. Concrete persistence
 ports remain owned by their domains. L1 may own repositories such as
-`SpaceRepository`, `NodeRepository`, and its Canvas log stores; Agenetes L2
+`SpaceRepository`, `SpaceNodes`, and the Space log parts; Agenetes L2
 remains the sole owner of its existing `ThreadStore`, `EventLogStore`, and
 `TurnStore` contracts. The host composition root may select one structured
 backend family and inject matching adapters into both domains, but it must not
 move L2 persistence ownership back into `CanvasStore`.
 
-As a proposed requirement, every port that may be implemented by Postgres
-should become asynchronous. A synchronous Disk or SQLite implementation must
-not constrain Postgres or future remote implementations. This includes an
-explicit migration for Agenetes ports that are synchronous today; a blocking
-compatibility facade over Postgres is not an acceptable end state.
+Every current Canvas structured port is asynchronous so a synchronous Disk or
+SQLite implementation does not constrain Postgres or another remote adapter.
+The corresponding migration for Agenetes ports that are synchronous today
+remains future work; a blocking compatibility facade over Postgres is not an
+acceptable end state.
 
-**As implemented**, `StructuredStore` is only partway to this target. Phase 1
-landed it as a lifecycle and backend-selection boundary whose `SpaceHandle`
-was literally `CanvasStore` — synchronous and filename-shaped. Phase 2
-(§12.2) established the target module shape and async Space-record and
-Canvas-log repositories. Phase 3 (§12.3) added the read-only catalogue and
-migrated the Canvas list, Workspace World lookup, thread-change read, and
-memory analyzer's Space record, action-event, and intent reads. Cross-store
-composition also uses `SpaceRepository` internally to guard blob puts. Later
-phases must migrate writers and nodes and implement the accepted lifecycle
-semantics through a portable write API. Until then, the paragraphs above
-describe the target, not the complete code path.
+**As implemented**, Phase 1 landed `StructuredStore` as a backend-selection
+boundary whose handle was still synchronous and filename-shaped. Phase 2
+established the module shape and async Space-record and Canvas-log
+repositories; Phase 3 added the catalogue and bounded read migrations. Phase
+4 adds structured lifecycle, async nodes, and the weak `OrderedSpaceWriter`,
+then moves the structured Server mutation paths enumerated in §12.4 onto those ports. Cross-store
+composition continues to use `SpaceRepository` to guard blob puts and owns the
+blob-first delete saga.
 
-The public contract should express domain commits and preconditions rather
-than expose a lowest-common-denominator `withTransaction(callback)` API. The
-exact atomic aggregate is open, but likely needs to cover a Space version/CAS
-transition together with its node mutations, deltas, and durable publication
-record. This storage atomicity would apply after the executor has determined
-the accepted command subset; it does not change current command-level partial
-acceptance into an all-or-nothing transactional batch.
+Lifecycle deletion uses a two-stage repository session rather than a callback
+into `BlobStore`. `beginDelete()` acquires an exclusive fence for repository
+mutations and composed blob puts; composition sweeps blobs while reads remain available, then calls
+`finish()` to remove structured state or `abort()` after a cleanup failure.
+Disk shares one writer-preferring process coordinator with blob puts. The
+portable guarantee covers overlapping calls through one configured backend
+instance, not uncoordinated processes; a SQL adapter must implement that fence
+with its own transaction/state/locking mechanism.
+
+The ordered writer expresses the current precondition and operation order:
+observed Space version, nodes, complete record, and optional delta. If the
+node → record → delta batch rejects during a normal
+in-process call, it must restore its prestate before returning. An explicit
+title rename is the preceding ordered, best-effort boundary and is not covered
+by that restoration guarantee. The port does not expose a generic transaction
+callback or promise process-crash or power-loss recovery, a determinate result
+after an unknown remote outcome, idempotency, publication, or multi-process
+serialization. Disk implements restoration with caught-error before images; a
+SQL adapter may use a native transaction. A future aggregate transaction/
+outbox may be added if a real SQL adapter and product requirement establish its
+boundary; Phase 4 does not pre-design it.
 
 ### 6.2 BlobStore
 
@@ -343,63 +377,102 @@ question in one request. The Disk adapter currently answers it with a full
 `readdir` plus a `stat` per candidate, which is the opposite of bounded; that
 is an adapter inefficiency, not a contract change (§12.1.1).
 
-### 7.2 StructuredStore — target sketch, partly accepted
+### 7.2 StructuredStore — implemented minimum
 
-The connection → scoped-handle shape and record/log members were accepted in
-phase 2. Phase 3 accepted and implemented the read-only catalogue and
-documented portable lifecycle semantics without adding write methods. The
-asynchronous `NodeRepository`, lifecycle write API, and aggregate `commit`
-operation remain later work. §§12.2–12.3 are authoritative for the accepted
-contracts and containment boundary.
+The connection → scoped-handle shape and record/log members landed in phase
+2, membership reads in phase 3, and the collection lifecycle, async node, and
+weak ordered-write seams in phase 4. §§12.2–12.4 are authoritative for their
+acceptance boundaries; §12.4.1 records the trim and §12.4.2 the member
+vocabulary that together produced the surface below. Earlier phase sections
+show member names as they stood in their own phase.
+
+One verb means one thing throughout: `read` fetches one record or a part's
+contents, `list` a whole collection; `create` adds where an existing record is
+an error, `put` writes one complete record by id and replaces it if present,
+`append` adds to an ordered sequence, `update` changes part of an existing
+record, `delete` removes one record by id, and `write` is the Space's own
+ordered multi-part mutation. `worldId()` and `beginDelete()` are the
+exceptions: one names what it returns, the other opens a session.
 
 ```ts
 interface StructuredStore {
-  readonly kind: StructuredBackendKind;
+  readonly kind: StructuredBackendKind; // 'disk' — implemented adapters only
+
   init(): Promise<void>;
   health(): Promise<StorageHealth>;
   close(): Promise<void>;
 
-  catalog(): SpaceCatalogRepository;
+  spaces(): SpaceRepository;
   space(canvasId: string): SpaceHandle;
 }
 
-interface SpaceCatalogRepository {
+/** The Space collection in one backend namespace. */
+interface SpaceRepository {
   list(): Promise<CanvasSummary[]>;
   worldId(): Promise<string>;
+  create(input: SpaceCreateInput): Promise<SpaceCreateResult>;
+  beginDelete(input: SpaceDeleteInput): Promise<SpaceBeginDeleteResult>;
+  rename(input: SpaceRenameInput): Promise<SpaceRenameResult>;
 }
 
+interface SpaceDeleteSession {
+  finish(): Promise<SpaceDeleteFinishResult>;
+  abort(): Promise<void>;
+}
+
+/**
+ * The Space *is* its record, so `read`/`write` sit on the handle; the members
+ * are the parts it holds.
+ */
 interface SpaceHandle {
   readonly canvasId: string;
-  readonly record: SpaceRepository;
-  readonly events: CanvasEventRepository;
-  readonly deltas: CanvasDeltaRepository;
-  readonly changes: CanvasChangeRepository;
-  readonly intents: CanvasIntentRepository;
-  readonly nodes: LegacyNodeStore; // phase-2 compatibility surface
+  read(): Promise<CanvasFile | null>;
+  write(input: SpaceWriteInput): Promise<SpaceWriteResult>;
+
+  readonly nodes: SpaceNodes;
+  readonly changes: SpaceChanges;
+  readonly tasks: SpaceTasks;
+  readonly events: SpaceEvents; // read(limit?), append(events)
 }
 
-interface FutureCanvasPersistence {
-  spaces: SpaceRepository;
-  nodes: NodeRepository;
-  events: CanvasEventRepository;
-  deltas: CanvasDeltaRepository;
-  changes: CanvasChangeRepository;
-  intents: CanvasIntentRepository;
-  commit(input: SpaceCommit): Promise<SpaceCommitResult>;
+interface SpaceNodes {
+  readonly canvasId: string;
+  read(nodeId: string): Promise<NodeSnapshot | null>;
+  put(input: NodePutInput): Promise<NodePutResult>;
+  delete(nodeId: string): Promise<'deleted' | 'absent'>;
 }
 
-interface SpaceCommit {
-  spaceId: string;
-  expectedVersion: number;
-  idempotencyKey: string;
-  changes: DomainChange[];
+interface SpaceChanges {
+  read(threadId: string): Promise<CanvasChangeRecord[]>;
+  append(
+    threadId: string,
+    records: readonly CanvasChangeRecord[],
+  ): Promise<CanvasChangeRecord[]>;
+  delete(
+    threadId: string,
+    changeId: string,
+  ): Promise<CanvasChangeRecord | null>;
+}
+
+/** One ledger: a Run is only meaningful beside the Task it executes. */
+interface SpaceTasks {
+  read(): Promise<TaskStoreSnapshot>; // Tasks and Runs in one snapshot
+  create(task: TaskRecord): Promise<void>;
+  readonly runs: SpaceTaskRuns; // create(run), update(runId, patch)
 }
 ```
 
-Questions left by this sketch include the lifecycle write surface, title
-mutation, whether repositories expose snapshots or cursors, and what one
-`SpaceCommit` must atomically include. Catalogue read ownership and lifecycle
-outcomes are settled in §12.3.
+The minimum contract is intentionally narrower than a transaction.
+`SpaceHandle.write` checks the observed Space version and applies node
+mutations, the complete Space record, and an optional delta in that order. A
+normal in-process rejection from the node → record → delta batch must
+restore that batch's prestate; Disk uses caught-error before images and a SQL
+adapter may use a native transaction. Explicit title rename remains the
+preceding ordered, best-effort boundary. Process death, power loss, unknown
+remote outcomes, multi-process access, idempotent retry, and publication are
+outside the contract. Whether the product needs a future atomic aggregate/
+outbox contract remains open and must be validated against a real second
+adapter rather than inferred from Disk.
 
 ## 8. Cross-store consistency — proposed, not settled
 
@@ -407,6 +480,14 @@ Postgres and Azure Blob cannot share an ACID transaction. Portable behavior
 must not depend on stronger accidental guarantees from Disk + Disk — nor on
 Disk being the _weaker_ side, which is the case for write atomicity (§6.2).
 Both directions produce code that is correct against one adapter only.
+
+Phase 4 does not settle this problem. Create changes structured state only;
+delete keeps the existing composition-owned blob-first saga. The structured
+backend's `beginDelete()` session fences repository mutations while composition
+sweeps blobs and then calls `finish()` or `abort()`; blob puts participate in
+the same single-process coordinator. No outbox, garbage collector, or
+distributed lifecycle fence is introduced. The flows below remain candidates
+for a later multi-process or mixed-backend design.
 
 A candidate create/replace flow is:
 
@@ -574,7 +655,7 @@ explicitly:
 
 ## 12. Migration plan
 
-Phases 1–3 are accepted and specified below. Phase 4 onward keeps the
+Phases 1–4 are implemented and specified below. Phase 5 onward keeps the
 provisional character of the original outline: those entries record intended
 order, not approved designs.
 
@@ -865,6 +946,12 @@ deferred to a later phase rather than silently expanding Phase 2.
 
 #### 12.2.4 `StructuredStore` and `SpaceHandle` become composites
 
+> **Renamed in Phase 4.** The composite structure below is what landed and
+> still holds; the member names are Phase-2 spelling. `record` became the
+> handle's own `read()`, `deltas` and `intents` are gone, and the per-part
+> interfaces dropped their `Canvas`/`Repository` affixes. §12.4.2 records the
+> reasoning, §12.4.3–4 the later corrections, and §7.2 the current shape.
+
 ```ts
 export interface StructuredStore {
   readonly kind: StructuredBackendKind;
@@ -929,6 +1016,15 @@ Backend-neutral persistence DTOs come from
 
 #### 12.2.5 `SpaceRepository` — versioned record with atomic CAS
 
+> **Superseded in Phase 4.** `compareAndSwap` never acquired a production
+> caller: `OrderedSpaceWriter.apply` with an empty node batch is the same
+> version-checked replacement, so the two were one operation spelled twice.
+> Phase 4 removed the method and this suite, kept `read()` as
+> `SpaceRecordRepository`, and moved the single-winner and record-validation
+> assertions to the ordered-writer contract. §12.4.1 records the reasoning.
+> The shape below is retained because the guarantee it describes is now the
+> writer's.
+
 ```ts
 export interface SpaceRepository {
   read(): Promise<CanvasFile | null>;
@@ -987,7 +1083,9 @@ self-heal, but that is adapter behavior—not a promise other backends reproduce
 
 No existing application writer is switched to `compareAndSwap` in Phase 2.
 The contract is correct for later adoption without changing the current PUT,
-executor, or title flow as collateral work.
+executor, or title flow as collateral work. That deferral is exactly what
+§12.4.1 later had to undo: the adoption that arrived in Phase 4 wanted the
+batch writer, not this narrower spelling of it.
 
 #### 12.2.6 Canvas log-family repositories — scoped contracts
 
@@ -1037,8 +1135,6 @@ Disk's accidental await-free behavior:
   pair, so concurrent agents cannot lose one another's records;
 - `changes.read` and the value returned by `changes.append` are coalesced by
   canvas entity;
-- `intents.upsert` is linearizable by episode id, and `intents.read` exposes the
-  portable state consumed by memory analysis.
 
 The Disk adapter enforces these guarantees with uninterrupted synchronous
 legacy operations before returning each promise, under the same
@@ -1143,7 +1239,9 @@ adapter-local guarantees, for the reason given in §12.2.3:
   id, invalid next version, immutable identity/title fields, not-found and
   version-conflict results, and two concurrent writers with one winner — with
   the two writers issued from one tick against a shared baseline, which is the
-  ordering that detects a critical section spanning an `await` (§12.2.5);
+  ordering that detects a critical section spanning an `await` (§12.2.5). This
+  suite was retired in §12.4.1 and these cases now live in
+  `ordered-space-writer.contract.ts`;
 - `canvas-log-repository.contract.ts`: the four narrow repository contracts —
   event order/tail/empty append, delta filtering and duplicate rejection,
   change coalescing and concurrent append/remove behavior, and intent
@@ -1208,7 +1306,13 @@ migrate nodes or log writers, change a schema, or add a backend/profile.
 
 #### 12.3.1 Read-only catalogue contract
 
-`StructuredStore.catalog()` returns a fresh `SpaceCatalogRepository`:
+> **Merged in Phase 4.** These two reads now sit on the one `SpaceRepository`
+> returned by `StructuredStore.spaces()`, alongside create/delete/rename. The
+> read/write split described here tracked the migration phases rather than a
+> domain boundary, and it cost a duplicated World rule. §12.4.1 records the
+> reasoning; the semantics below are unchanged.
+
+`StructuredStore.catalog()` returned a fresh read-only catalogue:
 
 ```ts
 interface SpaceCatalogRepository {
@@ -1260,6 +1364,10 @@ premature write methods:
 These are design constraints for phase 4, not claims that compatibility
 create/delete/rename are backend-neutral today.
 
+Phase 4 subsequently implemented these lifecycle outcomes and chose the
+minimal `OrderedSpaceWriter` instead of the provisional `SpaceCommit` name and
+atomicity sketch; §12.4 records the accepted boundary.
+
 #### 12.3.3 Migrated read slices
 
 The implementation moves these consumers without changing their wire shapes:
@@ -1297,13 +1405,268 @@ route consumers, memory consumers, and documentation. The full Server suite,
 typecheck, lint, formatting, catalogue contracts, route regressions, and
 memory skip/failure tests form its verification boundary.
 
-### 12.4 Later phases — provisional
+### 12.4 Phase 4 — portable write seam — **implemented**
 
-4. Design `NodeRepository` and `SpaceCommit` together, including which
-   node mutations, deltas, and publication records land with a version/CAS
-   transition. Re-establish the write-coordinator invariant for async storage,
-   migrate mutation paths, and remove the legacy Canvas facade only after its
-   last consumer is gone.
+Phase 4 fixes the minimum backend-neutral write interfaces while preserving
+Phase-3 product behavior. It does not use SQL's possible transaction strength
+as a reason to build a filesystem transaction manager.
+
+The accepted additions are:
+
+- `SpaceLifecycleRepository.create/beginDelete/rename`, with an authoritative
+  version-0 create record, explicit lifecycle outcomes, and an exclusive
+  deletion session. Composition holds that session across blob cleanup before
+  calling `finish()` or `abort()`; the structured repository never calls
+  arbitrary blob I/O from inside a backend transaction.
+- `NodeRepository.read/readMany/put/delete`, fully async and expressed in
+  complete domain records plus opaque revision tokens. Filenames and paths do
+  not identify records in the portable API. Logical label allocation and
+  strict label-conflict are portable domain behavior. Only
+  `duplicate-node`—an integrity outcome for conflicting physical
+  representations—is optional for adapters such as SQL that cannot produce it.
+- The existing version-CAS `SpaceRepository`, unchanged.
+- `OrderedSpaceWriter.apply`, the narrow batch required by the existing Canvas
+  executor and legacy structural PUT. It preserves node puts/deletes → Space
+  record → optional delta order and accepts the observed Space version. It is
+  deliberately not named commit or transaction; explicit title rename is a
+  separate lifecycle operation that precedes this batch.
+
+For the node → record → delta batch, a normal in-process rejection must
+restore prestate before returning. Disk continues to use its pre-existing
+before-image rollback for caught executor failures; a SQL adapter may use a
+native transaction. Explicit title rename remains the preceding ordered,
+best-effort boundary and is not part of that restoration guarantee. The port
+does **not** guarantee process-crash or power-loss recovery, a determinate
+result after an unknown remote outcome, multi-process serialization,
+idempotent retry, a durable outbox, or SSE publication. Phase 4 adds no
+journal, commit marker, startup recovery, durable tombstone, or new persisted
+format.
+
+The Canvas create/delete and structural PUT routes, standalone node writes,
+executor and revert batches, preprocessing persistence, and event/change/
+intent mutations now enter these repositories. The application promise-chain
+mutex remains held across async node read/CAS/put; executor batches retain the
+same version increments, delta row, no-op behavior, and publish-after-persist
+timing. Shared API schemas, HTTP statuses/SSE shapes, and the web client are
+unchanged; conflict responses now carry the existing logical label/title
+rather than a Disk filename/directory locator.
+
+The delete route obtains a lifecycle deletion session before the blob sweep.
+That session fences record, node, ordered-writer, log, Task, create/rename, and
+composed blob-put mutations until structured deletion finishes or cleanup
+aborts; reads remain available. This is a backend-instance concurrency
+requirement, not a distributed transaction or a promise that two server
+processes coordinate. Direct-filesystem ZIP, RFS, external-note claim,
+bootstrap, and migration paths remain outside it.
+
+Reusable lifecycle, node, and ordered-writer suites assert only this minimum.
+The ordered-writer failure fixture requires the node, record, and delta
+prestate after a rejected in-process batch; title rename is covered separately
+as an ordered best-effort boundary. Remaining import/export, RFS,
+external-note observation/claim, hydration, bootstrap/migration, and other
+physical capabilities still read or mutate Disk directly, so SQLite and
+Postgres profiles remain rejected.
+
+#### 12.4.1 Post-review trim — landed
+
+A 2026-08-12 review of the branch asked what the structured contract looks
+like at a glance and whether it shows signs of overdesign. It did, in ways
+that were cheap to correct before the surface acquired more callers. These
+changes landed with Phase 4 rather than as follow-up work, because every one
+of them removes something Phase 4 would otherwise have been the phase to
+justify.
+
+1. **`SpaceRepository.compareAndSwap` removed.** It had no production caller,
+   and a record-only `OrderedSpaceWriter.apply` is the identical operation —
+   same version precondition, same identity-field refusal, same result type,
+   which the `SpaceMutationResult = SpaceWriteResult` alias had been quietly
+   admitting. The per-Space record port is now read-only and named
+   `SpaceRecordRepository`, matching its `record` field. Its 230-line contract
+   suite is gone; the single-winner race and the next-record validation cases
+   it owned moved into the ordered-writer suite, which is where the
+   application actually depends on them. §12.2's own rule — "a repository
+   contract with no callers is a guess" — is what this applies.
+2. **`NodeRepository.readMany` removed.** Also uncalled, and its only
+   implementation read and parsed _every_ node in the Space regardless of how
+   many ids were requested, so the first real caller would have inherited a
+   full-Space scan per batch. A future batch read should be designed against a
+   caller that wants one.
+3. **`catalog()` and `lifecycle()` merged into `spaces()`.** They were the
+   same kind of object — namespace-scoped, stateless, one fresh
+   Workspace-bound instance per call — split along a read/write line that
+   tracked Phase 3 and Phase 4 rather than the domain. The split forced the
+   World rule to be resolved in two places, left `create` reading membership
+   it could not name through the port, and made composition stitch two calls
+   for one logical create. Per-Space `space(id)` is untouched: that boundary
+   is real, since `create` cannot be scoped to a Space that does not exist.
+4. **`SpaceDeleteResult` removed from the port.** No repository returned it —
+   it was the composition-level result of `deleteSpace()`, hand-written as the
+   union of the two port results it is assembled from. It now lives in
+   `storage.ts` as `SpaceDeleteOutcome`, derived rather than restated.
+5. **`StructuredBackendKind` narrowed to `'disk'`.** An adapter's self-reported
+   kind now names only kinds that exist. The wider vocabulary a profile may
+   _request_ moved to `profile.ts` as `RequestedStructuredKind`, which is what
+   preserves the actionable "not implemented yet" error for a configured
+   `sqlite` or `postgres`. `BlobBackendKind` still carries `azure` on the same
+   footing and was left alone as Phase-1 surface.
+
+Not changed, deliberately: `authoritativeInsert` and the `write-suppressed`
+put outcome remain in the portable shapes. Both exist for Disk's in-memory
+deletion fence, and neither has a portable meaning a SQL adapter would
+produce. They are now documented as adapter-shaped, the way `duplicate-node`
+already was, rather than renamed or pushed behind the adapter — the honest
+resolution needs a second adapter to say what the shared abstraction is, and
+inventing one now would be the same speculative move this trim is undoing.
+
+The review also asked composition to move default-title allocation
+("Untitled", "Untitled (1)", …) into `create`, which would have removed the
+serialization point in `createSpace`. That was declined: the suffix rule is
+product naming, not storage, and pushing it into the port would make every
+adapter reimplement it. The two-call sequence stays, now against one
+repository instance so a Workspace switch between the read and the create is
+rejected rather than silently retargeted.
+
+#### 12.4.2 Member vocabulary and shape — landed
+
+The same review continued into what the handle's members _are_. The trim in
+§12.4.1 removed surface; this settles how what remains is named and grouped,
+before more callers make either expensive to change. Behavior is unchanged:
+every edit is a rename, a regrouping, or a member becoming a method.
+
+1. **The record flattened into the handle.** `handle.record.read()` and
+   `handle.write(...)` put reading and writing the same record at two
+   different levels — the defect §12.4.1 removed between `record` and a
+   `writer` member, relocated. A Space _is_ its versioned record, so the pair
+   belongs on the Space: `handle.read()` / `handle.write(...)`.
+   `SpaceRecordRepository` is gone. The Disk reader keeps the captured
+   Workspace path it had as a class, so a handle retained across a Workspace
+   switch still rejects.
+2. **`history` groups the past, and only the past.** `events` and `intents`
+   are what happened and what was concluded from it, so they nest.
+   Change-review records and Tasks stay flat although Disk files all four
+   under `.history/`: pending changes drain as the user accepts or rejects,
+   and a Run carries live `pending`/`running` status the launcher mutates in
+   flight. `.history/` is a catch-all directory — `chat_v2/` sits there only
+   because it is the Agenetes `storage.root` — so grouping port members by it
+   would import a Disk layout into the backend-neutral contract.
+3. **One verb, one meaning** (§7.2). `changes.remove` → `delete`,
+   `intents.upsert` → `put`, `tasks.insertTask` → `tasks.create`. `create` and
+   `put` stay distinct because they differ on a duplicate: `create` rejects,
+   `put` replaces.
+4. **Runs nest inside the Task ledger.** `insertTask`/`insertRun` stuttered
+   because two record kinds shared one member. A Run executes a Task, so
+   `tasks.runs.create/update` reads as the domain does. `read()` stays at the
+   ledger — one file, and both `run-launcher` and the interactive-view binding
+   need Tasks and Runs from one snapshot. `runs` deliberately has no `read`: a
+   second read path would be a second representation of records the snapshot
+   already carries, and could hand a caller a Run whose Task it never
+   observed.
+5. **Per-part interfaces named for the part.** `SpaceNodes`, `SpaceChanges`,
+   `SpaceEvents`, `SpaceIntents`, `SpaceTasks`, `SpaceTaskRuns`,
+   `SpaceHistory`. The `Canvas` prefix contradicted the port's own noun, and
+   `Repository` claimed a CRUD store for what are append-only logs and a
+   ledger. `SpaceRepository` keeps its name: it is the collection, a different
+   subject at a different level. Disk files follow the types they implement
+   (`space-nodes.ts`, `space-logs.ts`, `space-record.ts`, `space-tasks.ts`),
+   as do their contract suites.
+
+`SpaceNodes.canvasId` survives the flattening although the handle carries the
+same id: `preprocessing` resolves that part per request and works with it
+detached from any handle.
+
+#### 12.4.3 Disk-behavior corrections — landed
+
+A third review pass asked the question §12.4 answers for the _port_ about the
+_backend_: what did routing the writers through it change underneath, and does
+each change pay for itself. Four did not. The port shape is untouched by all
+of them; every correction is inside the Disk adapter or the coordinator above
+it.
+
+1. **The forced per-batch node rescan is gone.** Phase 4 had
+   `withValidatedNodeMutationTransaction` invalidate and rebuild the node
+   index at the top of every executor batch, to freeze physical ownership for
+   the synchronous run. Rebuilding that index reads and YAML-parses _every_
+   sidecar in the Space, so the cost was O(nodes) synchronous I/O inside the
+   canvas mutex, on the hottest write path in the product: a one-node mutation
+   measured 0.63 ms → 5.34 ms at 200 nodes and 1.55 ms → 19.70 ms at 1000.
+   `writeNode`'s own staleness probes already run per mutation inside the
+   batch and cost a names-only `readdir`; the rescan bought a narrower
+   ownership guarantee than they give at roughly thirteen times the price.
+2. **A hand-broken sidecar is readable again.** `readNodeStrict` parsed
+   frontmatter with `strict: true`, which made unparseable YAML a read
+   failure. `SpaceNodes.read/put/delete` are the only callers, so a node whose
+   frontmatter a user broke in an external editor answered 500 on the content
+   PUT _and_ on DELETE, while the lenient GET kept rendering it — visible,
+   unrepairable, undeletable, in a product whose premise is hand-editable
+   markdown. The method stays strict about _reachability_, which is the part
+   the port needs: only ENOENT is absence, and an unreadable path still
+   raises. Malformed content is recovered exactly as `readNode` recovers it.
+3. **Deleting a duplicated node id works again.** Phase 4 made `deleteNode`
+   throw when two sidecars claim one id. `put` must refuse that state — it
+   cannot know which representation the caller meant to update — but delete
+   has no such ambiguity, and refusing stranded the node in precisely the
+   state a user resolves by deleting. It also failed the enclosing executor
+   batch wholesale, taking every unrelated node and edge in the same command
+   with it. The indexed representative is deleted; the orphan stays and is
+   still reported by the duplicate-node surfaces.
+4. **The lifecycle World guard no longer requires a World to exist.**
+   `beginDelete` and `rename` resolved World identity through
+   `requireWorldCanvasId()`, which raises on a missing or malformed World, so
+   unrelated damage to `World/` turned every ordinary delete and rename into a 500. Those two only ask whether _this_ Space is the protected one, which a
+   namespace without a World answers with a plain no — what `isWorldCanvasId`
+   answered before Phase 4. `worldId()` still raises: reporting the identity
+   is an integrity question, and there is no honest answer.
+
+Three pieces of surface went with them, on the same rule §12.4.1 applied:
+
+- **`ownershipValidated`** on `writeNode`/`deleteNode`. Both production
+  callers bypassed the branch it guarded — the ordered write is always inside
+  a transaction, the node adapter always passed `true` — so the option existed
+  only to switch off a path nothing took.
+- **`updateNode`'s retry loop.** Its `continue` was unreachable: the mutex is
+  held across the operation and the only adapter resolves both halves
+  synchronously, so nothing can move the record mid-pass. Worse, exhausting
+  the attempts fabricated a `rev-conflict`, which the preprocessing persist
+  stage turns into a thrown `PERSIST_FAILED` — for a caller that deliberately
+  passes no `expectRev`. One pass now, with the repository's opaque conflict
+  translated into a public content revision.
+- **`DiskDeltaLog` / `createDiskDeltaLog`.** No production caller: the
+  executor journal row is appended inside the ordered Space write, which is
+  where the port says it belongs, so the repository's ordering guard and
+  schema validation never ran on the only path that writes the file. Wiring
+  the guard in instead would have put a full log read and tail repair on every
+  batch — trading correction 1's regression for a slower one. The adapter and
+  the tests that were its only consumer are deleted.
+
+One finding did not survive checking. `space-title.ts`'s `isDedupeVariant`
+looked like it guarded an unreachable state, on the reasoning that a
+null-titled Space is filed under its unique canvasId. Directory allocation
+de-duplicates case-insensitively across the whole namespace, so a canvasId
+that collides with another Space's _title_ is allocated `<canvasId> (2)` — the
+contract suite pins exactly that. It stays, now with the reachability argument
+written down.
+
+#### 12.4.4 `history` flattened after the intent removal — landed
+
+Merging `main` brought in `feat!: remove intent and sketch gesture
+recognition`, which deletes intent episodes from the product. `SpaceIntents`
+and the Disk intent file go with them.
+
+That leaves §12.4.2's `history` group holding one member. The group was
+justified by there being two kinds of past record — what happened, and what
+was concluded from it — and one noun that covered both. With intents gone,
+`handle.history.events` is a member whose only job is to hold one other
+member: a level the reader pays for and learns nothing from. Events move back
+to the handle as `handle.events`.
+
+The reasoning §12.4.2 gave for what stays flat is unchanged and still load
+bearing: change-review records and Tasks are not history, whatever Disk's
+`.history/` directory happens to contain. If a second kind of past record
+arrives, the group comes back — and `events` is where it was before, so
+nothing else has to move.
+
+### 12.5 Later phases — provisional
+
 5. Add one new adapter at a time — SQLite, then Postgres, then Azure Blob —
    running the same contract suites, migration fixtures, failure injection,
    and concurrency tests against each. An adapter may exist for isolated
@@ -1334,7 +1697,8 @@ memory skip/failure tests form its verification boundary.
 - Repository contracts frozen and covered by suites before any caller exercises
   them tend to be reshaped by the first real adoption, invalidating the suites
   written for them. Phases 2 and 3 buy bounded event, catalogue, change, record,
-  and intent readers against this (§§12.2.8–12.3.3).
+  and intent readers against this; Phase 4 exercises lifecycle, node, ordered
+  writer, event, change, and intent mutations (§§12.2.8–12.4).
 - Disk's physical layout for a Space is derived from a mutable title-derived
   directory name, so a blob scope's location moves on rename while its
   `canvasId` does not. No other backend reproduces this.
@@ -1354,7 +1718,7 @@ memory skip/failure tests form its verification boundary.
 
 ## 14. Open questions
 
-### Resolved or accepted by planned phases
+### Resolved or accepted by implemented phases
 
 - **Blob key shape** — not content-addressed. `name` is the scope-relative
   `<artifactId><ext>` string that is already the URL key and node `src`, so
@@ -1369,14 +1733,18 @@ memory skip/failure tests form its verification boundary.
   write through a port that has no per-key delete. (P1, §6.2)
 - **Materialize lease lifetime** — the path is read-only and invalid once
   `release()` resolves, on every backend including Disk. (P1, §6.2)
-- **Repository boundaries, partly** — `SpaceCatalogRepository`,
-  `SpaceRepository`, and the narrow Canvas event, delta, change, and intent
-  repositories are accepted. Catalogue reads and lifecycle outcomes are
-  settled; lifecycle writes, `NodeRepository`, title mutation, and the exact
-  `SpaceCommit` API remain open. (P2–P3, §§12.2–12.3)
+- **Repository boundaries, minimum accepted** — `SpaceRepository` (the
+  collection: membership, World identity, create/delete/rename) and the
+  per-Space handle — its own record read/ordered write, `SpaceNodes`,
+  `SpaceChanges`, `SpaceTasks`, and `SpaceEvents` — are implemented with
+  reusable contracts. Rejected in-process node → record →
+  delta batches restore prestate, while title rename keeps its preceding
+  best-effort boundary. This is not an aggregate crash-recovery or distributed
+  transaction. (P2–P4, §§12.2–12.4, 12.4.1)
 - **Bounded repository consumers** — the events route landed in P2; P3 added
   the Canvas list, Workspace World lookup, thread-change read, and memory
-  record/event/intent reads. (P2–P3, §§12.2.8, 12.3.3)
+  record/event/intent reads; P4 migrated the structured mutation paths named
+  in §12.4. (P2–P4, §§12.2.8, 12.3.3–12.4)
 
 ### Structured storage
 
@@ -1387,14 +1755,17 @@ memory skip/failure tests form its verification boundary.
   Agenetes ownership of Thread/Event/Turn semantics and ports?
 - Does `StructuredStore` remain only a name for the configured backend family,
   with L1 and L2 retaining separate code-level port interfaces?
-- What must one `SpaceCommit` atomically include?
+- Does a real SQL deployment require a stronger atomic aggregate/outbox API
+  than `OrderedSpaceWriter`, and which existing product operation justifies
+  that guarantee?
 - Are node bodies always structured records, and how are large extracted texts
   handled?
 - Which query/search guarantees must be portable across Disk, SQLite, and
   Postgres? Is full-text search part of the port or a separate service?
 - What is the schema migration/version negotiation model?
-- What are the single-writer and crash-recovery guarantees of
-  DiskStructuredStore?
+- Should Disk ever add process-crash recovery beyond its current caught-error
+  rollback, and is preserving independently editable files worth that
+  complexity?
 - How are currently synchronous Agenetes persistence ports migrated without
   changing their persist-before-notify, sequence, and fencing semantics?
 - Where do user memory, Space memory, memory-worker state, chat digest, and
@@ -1461,16 +1832,20 @@ Before a new backend is production-ready:
   implementation;
 - those suites contain at least one assertion for each known point where the
   implementations could diverge — lease lifetime, replacement atomicity,
-  ordering, and conflict results — because a suite is only evidence where it
-  actually asserts, and two adapters with opposite semantics can otherwise
-  both pass it (§13);
-- authoritative Space catalogue, record, and Canvas-log consumers have no
-  direct physical-file fallback outside the adapter boundary;
+  ordering, rejected-batch restoration, and conflict results — because a suite
+  is only evidence where it actually asserts, and two adapters with opposite
+  semantics can otherwise both pass it (§13);
+- authoritative Space catalogue, lifecycle, record, node, ordered-writer, and
+  Canvas-log consumers have no direct physical-file fallback outside the
+  adapter boundary;
 - application services do not branch on backend kind for ordinary domain
   behavior;
 - no common BlobStore consumer requires a permanent absolute path;
 - accepted concurrency, CAS, and conflict contracts match across structured
   implementations; if idempotency is accepted, its semantics match too;
+- injected in-process failures inside a node → record → delta batch restore
+  prestate, while explicit title rename is tested as its separate best-effort
+  boundary;
 - injected failures between blob and structured commits have tested recovery
   behavior;
 - unsupported filesystem capabilities are either backed by an accepted
@@ -1518,22 +1893,22 @@ Before a new backend is production-ready:
 
 ## 17. Code entry points
 
-| File/dir                                                                                                                                     | Responsibility                                                                                                                                                                    |
-| -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`apps/server/src/modules/storage/`](../../apps/server/src/modules/storage/)                                                                 | Ports, composition, adapters, compatibility, tests, and three forwarding shims — the canonical Phase-2/3 tree (§§12.2–12.3), guarded by `module-boundaries.test.ts`.              |
-| [`apps/server/src/modules/storage/ports/`](../../apps/server/src/modules/storage/ports/)                                                     | The two ports; reusable suites live in `ports/contracts/`. `blob.ts` is normative (§7.1); `structured.ts` owns the catalogue and composite record/log/node boundaries.            |
-| [`apps/server/src/modules/storage/storage.ts`](../../apps/server/src/modules/storage/storage.ts)                                             | Composition root: maps a validated `StorageProfile` to adapters and holds them for the process. The lazy path rejects profiles whose adapters require awaited `init()` (§12.1.1). |
-| [`.../storage/backends/disk/legacy/canvas-store-cache.ts`](../../apps/server/src/modules/storage/backends/disk/legacy/canvas-store-cache.ts) | Bounded LRU of legacy Disk Space objects. The single owner both the adapter and the facade resolve through, and the real limit of `space(id)` identity (§12.2.4).                 |
-| [`apps/server/src/modules/storage/profile.ts`](../../apps/server/src/modules/storage/profile.ts)                                             | Two-axis backend selection from env, and the fail-fast validation hook for unsupported combinations.                                                                              |
-| [`apps/server/src/modules/storage/backends/disk/`](../../apps/server/src/modules/storage/backends/disk/)                                     | Every Disk implementation: blob and structured stores, catalogue/record/log repositories, the narrow node wrapper, and the legacy class under `legacy/`.                          |
-| [`.../storage/compatibility/canvas.ts`](../../apps/server/src/modules/storage/compatibility/canvas.ts)                                       | Legacy surface: `getCanvasStore`, create, create-time full-record `listCanvases`, and async delete. Still a second mutation entry point (§12.2.3).                                |
-| [`apps/server/src/modules/agent/memory/analyzer.ts`](../../apps/server/src/modules/agent/memory/analyzer.ts)                                 | P3 repository consumer for strict Space existence, bounded action events, and intent episodes; physical chat and memory files remain Disk-specific.                               |
-| [`apps/server/src/modules/canvas/write-coordinator.ts`](../../apps/server/src/modules/canvas/write-coordinator.ts)                           | Canvas mutation coordinator and per-Space write lock. Its atomicity argument keeps the legacy single-node primitives synchronous (§12.2.7).                                       |
-| [`apps/server/src/modules/workspace/disk/`](../../apps/server/src/modules/workspace/disk/)                                                   | Cross-domain physical Workspace layout: paths, canvas dirs, naming, name index, dir handles, World bootstrap. `storage/paths.ts` forwards here.                                   |
-| [`apps/server/src/modules/canvas/canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts)                               | Canonical canvas command execution and current multi-file persistence sequence.                                                                                                   |
-| [`apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts`](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts)             | Current real-Disk path resolution and traversal for built-in agent file tools.                                                                                                    |
-| [`apps/server/src/modules/agent/acp/capabilities/fs.ts`](../../apps/server/src/modules/agent/acp/capabilities/fs.ts)                         | Synthetic ACP `/space` read capability, currently not wired into the production driver.                                                                                           |
-| [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                         | External-agent workload assembly, profile working directory, and RFS environment injection.                                                                                       |
-| [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts)                                     | Current external-agent file/query/execute HTTP facade.                                                                                                                            |
-| [`apps/server/src/modules/canvas/external-watcher.ts`](../../apps/server/src/modules/canvas/external-watcher.ts)                             | Current Disk-only external Markdown discovery.                                                                                                                                    |
-| [`apps/server/src/modules/agent/agenetes/drivers.ts`](../../apps/server/src/modules/agent/agenetes/drivers.ts)                               | Current file-backed Agenetes thread, event, and turn stores that need future backend adapter/composition decisions while remaining L2-owned.                                      |
+| File/dir                                                                                                                                     | Responsibility                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`apps/server/src/modules/storage/`](../../apps/server/src/modules/storage/)                                                                 | Ports, composition, adapters, compatibility, tests, and three forwarding shims — the canonical Phase-1–4 tree (§§12.1–12.4), guarded by `module-boundaries.test.ts`.                                                 |
+| [`apps/server/src/modules/storage/ports/`](../../apps/server/src/modules/storage/ports/)                                                     | The two ports; reusable suites live in `ports/contracts/`. `blob.ts` is normative (§7.1); `structured.ts` owns the Space collection and the per-Space handle: record read/write, nodes, changes, Tasks, and history. |
+| [`apps/server/src/modules/storage/storage.ts`](../../apps/server/src/modules/storage/storage.ts)                                             | Composition root: maps profiles to adapters, guards blob puts, and holds a lifecycle deletion session across the blob-first cleanup saga.                                                                            |
+| [`.../storage/backends/disk/legacy/canvas-store-cache.ts`](../../apps/server/src/modules/storage/backends/disk/legacy/canvas-store-cache.ts) | Bounded LRU of legacy Disk Space objects. The single owner both the adapter and the facade resolve through, and the real limit of `space(id)` identity (§12.2.4).                                                    |
+| [`apps/server/src/modules/storage/profile.ts`](../../apps/server/src/modules/storage/profile.ts)                                             | Two-axis backend selection from env, and the fail-fast validation hook for unsupported combinations.                                                                                                                 |
+| [`apps/server/src/modules/storage/backends/disk/`](../../apps/server/src/modules/storage/backends/disk/)                                     | Every Disk implementation: blob/structured stores, the Space collection, and the per-Space record, node, log, and Task adapters, in-process batch restoration, and the legacy class under `legacy/`.                 |
+| [`.../storage/compatibility/canvas.ts`](../../apps/server/src/modules/storage/compatibility/canvas.ts)                                       | Residual Disk read surface plus direct-module lifecycle test fixtures; production structured mutations enumerated in §12.4 use the portable ports.                                                                   |
+| [`apps/server/src/modules/agent/memory/analyzer.ts`](../../apps/server/src/modules/agent/memory/analyzer.ts)                                 | P3 repository consumer for strict Space existence, bounded action events, and intent episodes; physical chat and memory files remain Disk-specific.                                                                  |
+| [`apps/server/src/modules/canvas/write-coordinator.ts`](../../apps/server/src/modules/canvas/write-coordinator.ts)                           | Canvas mutation coordinator and per-Space write lock, held across asynchronous node read, revision CAS, and put.                                                                                                     |
+| [`apps/server/src/modules/workspace/disk/`](../../apps/server/src/modules/workspace/disk/)                                                   | Cross-domain physical Workspace layout: paths, canvas dirs, naming, name index, dir handles, World bootstrap. `storage/paths.ts` forwards here.                                                                      |
+| [`apps/server/src/modules/canvas/canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts)                               | Canonical command execution; submits one ordered node/record/delta batch through `SpaceHandle.write`.                                                                                                                |
+| [`apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts`](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts)             | Current real-Disk path resolution and traversal for built-in agent file tools.                                                                                                                                       |
+| [`apps/server/src/modules/agent/acp/capabilities/fs.ts`](../../apps/server/src/modules/agent/acp/capabilities/fs.ts)                         | Synthetic ACP `/space` read capability, currently not wired into the production driver.                                                                                                                              |
+| [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                         | External-agent workload assembly, profile working directory, and RFS environment injection.                                                                                                                          |
+| [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts)                                     | Current external-agent file/query/execute HTTP facade.                                                                                                                                                               |
+| [`apps/server/src/modules/canvas/external-watcher.ts`](../../apps/server/src/modules/canvas/external-watcher.ts)                             | Current Disk-only external Markdown discovery.                                                                                                                                                                       |
+| [`apps/server/src/modules/agent/agenetes/drivers.ts`](../../apps/server/src/modules/agent/agenetes/drivers.ts)                               | Current file-backed Agenetes thread, event, and turn stores that need future backend adapter/composition decisions while remaining L2-owned.                                                                         |

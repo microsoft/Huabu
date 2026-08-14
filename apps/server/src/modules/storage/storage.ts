@@ -23,12 +23,11 @@
 
 import path from 'node:path';
 
-import { getWorkspacePath } from '../workspace.js';
-import { DiskBlobStore } from './backends/disk/blob-store.js';
 import {
-  withSpaceDeleteAdmission,
-  withSpacePutAdmission,
-} from './backends/disk/legacy/space-lifecycle-admission.js';
+  acquireWorkspaceOperationLease,
+  getWorkspacePath,
+} from '../workspace.js';
+import { DiskBlobStore } from './backends/disk/blob-store.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import {
   parseStorageProfile,
@@ -37,6 +36,7 @@ import {
   validateStorageProfile,
   type StorageProfile,
 } from './profile.js';
+import { withSpacePutAdmission } from './space-lifecycle-admission.js';
 
 import type {
   BlobInfo,
@@ -47,8 +47,23 @@ import type {
   BlobStore,
 } from './ports/blob.js';
 import type { StorageHealth } from './ports/common.js';
-import type { StructuredStore } from './ports/structured.js';
+import type {
+  SpaceCreateResult,
+  SpaceDeleteFinishResult,
+  StructuredStore,
+} from './ports/structured.js';
 import type { Readable } from 'node:stream';
+
+/**
+ * Outcome of the cross-store Space deletion this module composes.
+ *
+ * Derived from the two port results it is assembled out of — the structured
+ * fence's refusal plus whatever the terminal `finish()` reports — rather than
+ * restated by hand. It is not a port type: no repository returns it.
+ */
+export type SpaceDeleteOutcome =
+  | SpaceDeleteFinishResult
+  | { readonly ok: false; readonly reason: 'world-forbidden' };
 
 function activeWorkspacePath(): string {
   return path.resolve(getWorkspacePath());
@@ -119,6 +134,28 @@ export function createStorage(profile: StorageProfile): Storage {
 // ─── Process-wide holder ────────────────────────────────────────────────────
 
 let current: Storage | null = null;
+let spaceCreateTail: Promise<void> = Promise.resolve();
+
+function defaultSpaceTitle(
+  existing: readonly { readonly title: string | null }[],
+): string {
+  const base = 'Untitled';
+  const titles = new Set(existing.map((space) => space.title));
+  if (!titles.has(base)) return base;
+
+  let suffix = 1;
+  while (titles.has(`${base} (${suffix})`)) suffix += 1;
+  return `${base} (${suffix})`;
+}
+
+function serializeSpaceCreate<T>(operation: () => Promise<T>): Promise<T> {
+  const result = spaceCreateTail.catch(() => undefined).then(operation);
+  spaceCreateTail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
 
 function ensure(): Storage {
   if (current) return current;
@@ -167,6 +204,66 @@ export function getStructuredStore(): StructuredStore {
 }
 
 /**
+ * Create one ordinary Space through the selected structured backend.
+ *
+ * Default-title allocation and lifecycle creation share one process-local
+ * serialization point. The Workspace lease is acquired before queueing, so
+ * an async catalogue read cannot strand the request in a newly activated
+ * Workspace and concurrent defaults remain Untitled, Untitled (1), ... .
+ */
+export function createSpace(
+  canvasId: string,
+  title?: string | null,
+): Promise<SpaceCreateResult> {
+  const structured = ensure().structured;
+  const workspaceLease = acquireWorkspaceOperationLease();
+  return serializeSpaceCreate(async () => {
+    try {
+      // One repository instance spans the read and the create, so a Workspace
+      // switch between them is rejected by the handle rather than silently
+      // creating the Space in the newly activated Workspace.
+      const spaces = structured.spaces();
+      const effectiveTitle =
+        title === undefined ? defaultSpaceTitle(await spaces.list()) : title;
+      return await spaces.create({ canvasId, title: effectiveTitle });
+    } finally {
+      workspaceLease.release();
+    }
+  });
+}
+
+/**
+ * Delete one Space across the independently configured stores.
+ *
+ * The structured port deliberately does not accept a callback into the blob
+ * store: that would make a database adapter hold a transaction while running
+ * arbitrary remote I/O. Composition therefore owns the existing blob-first
+ * saga. The process-local admission gate preserves today's single-server
+ * ordering; it is not advertised as a distributed transaction guarantee.
+ */
+export async function deleteSpace(
+  canvasId: string,
+): Promise<SpaceDeleteOutcome> {
+  const workspaceLease = acquireWorkspaceOperationLease();
+  try {
+    const storage = ensure();
+    const started = await storage.structured.spaces().beginDelete({ canvasId });
+    if (!started.ok) return started;
+    try {
+      // Preserve the old retryable cleanup behavior: sweep even when the
+      // structured record is already absent, so orphan blobs can be removed.
+      await storage.blobs.scope({ kind: 'canvas', canvasId }).deleteAll();
+      return await started.session.finish();
+    } catch (error) {
+      await started.session.abort();
+      throw error;
+    }
+  } finally {
+    workspaceLease.release();
+  }
+}
+
+/**
  * Blob scope for one Space — the only scope kind today.
  *
  * The raw BlobStore intentionally knows nothing about structured lifecycle,
@@ -180,7 +277,7 @@ export function canvasBlobs(canvasId: string): BlobScope {
   const delegate = storage.blobs.scope({ kind: 'canvas', canvasId });
 
   async function requireSpace(): Promise<void> {
-    const record = await storage.structured.space(canvasId).record.read();
+    const record = await storage.structured.space(canvasId).read();
     if (!record) {
       throw new Error(`Cannot write blobs for missing Space "${canvasId}"`);
     }
@@ -226,23 +323,6 @@ export function canvasBlobs(canvasId: string): BlobScope {
       return delegate.deleteAll();
     },
   };
-}
-
-/**
- * Run Space deletion exclusively against blob puts admitted for the same
- * workspace and Space. Kept here because it coordinates two otherwise
- * independent storage ports; the compatibility lifecycle facade supplies the
- * actual sweep and structured destroy operation.
- */
-export function withCanvasDeletionAdmission<T>(
-  canvasId: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const workspacePath = activeWorkspacePath();
-  return withSpaceDeleteAdmission(workspacePath, canvasId, async () => {
-    assertActiveWorkspace(workspacePath, canvasId);
-    return operation();
-  });
 }
 
 export async function storageHealth(): Promise<StorageHealth[]> {

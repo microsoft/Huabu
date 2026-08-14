@@ -58,14 +58,21 @@ export function describeStructuredStoreContract(
       expect(first.canvasId).toBe('canvas-a');
     });
 
-    it('vends fresh catalogue repository handles', async () => {
+    it('vends fresh Space collection handles', async () => {
       const store = await open();
-      const first = store.catalog();
-      const second = store.catalog();
+      const first = store.spaces();
+      const second = store.spaces();
 
       expect(second).not.toBe(first);
-      expect(first.list).toBeTypeOf('function');
-      expect(first.worldId).toBeTypeOf('function');
+      for (const method of [
+        'list',
+        'worldId',
+        'create',
+        'beginDelete',
+        'rename',
+      ] as const) {
+        expect(first[method]).toBeTypeOf('function');
+      }
     });
 
     it('scopes handles by Space id', async () => {

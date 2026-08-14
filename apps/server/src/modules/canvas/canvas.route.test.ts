@@ -30,10 +30,9 @@ vi.mock('../workspace/disk/space-dir-handles.js', async (importOriginal) => {
 });
 
 import canvasRoutes from './canvas.route.js';
+import { createCanvas, deleteCanvas } from '../storage/compatibility/canvas.js';
 import {
-  createCanvas,
   canvasBlobs,
-  deleteCanvas,
   getCanvasStore,
   getStructuredStore,
   resetStorageCache,
@@ -131,7 +130,220 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
+describe('POST /api/canvas lifecycle', () => {
+  it('allocates concurrent default titles without skipping a suffix', async () => {
+    const app = await buildApp();
+    try {
+      const [first, second] = await Promise.all([
+        app.inject({ method: 'POST', url: '/canvas', payload: {} }),
+        app.inject({ method: 'POST', url: '/canvas', payload: {} }),
+      ]);
+
+      expect(first.statusCode).toBe(201);
+      expect(second.statusCode).toBe(201);
+      expect([first.json().title, second.json().title].sort()).toEqual([
+        'Untitled',
+        'Untitled (1)',
+      ]);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('PUT /api/canvas/:canvasId lifecycle', () => {
+  it('preserves the legacy structural response, version bump, and no-delta behavior', async () => {
+    createCanvas('c1', 'Original');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: 0,
+          state: {
+            nodes: [
+              {
+                id: 'n1',
+                type: 'note',
+                position: { x: 0, y: 0 },
+                data: { label: 'Note', content: 'must stay out of space.json' },
+              },
+            ],
+            edges: [],
+          },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ canvasId: 'c1', version: 1 });
+      expect(getCanvasStore('c1').read()).toMatchObject({
+        version: 1,
+        state: {
+          nodes: [
+            expect.objectContaining({
+              id: 'n1',
+              data: { label: 'Note' },
+            }),
+          ],
+          edges: [],
+        },
+      });
+      expect(getCanvasStore('c1').readDeltaLogSince(0)).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps the legacy implicit-create path for an initially absent Space', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/canvas/implicit',
+        payload: { version: 0, state: { nodes: [], edges: [] } },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ canvasId: 'implicit', version: 1 });
+      expect(getCanvasStore('implicit').read()).toMatchObject({
+        canvasId: 'implicit',
+        version: 1,
+        state: { nodes: [], edges: [] },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps title collision as a 409 without applying the record write', async () => {
+    createCanvas('c1', 'Original');
+    createCanvas('c2', 'Taken/A');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: 0,
+          title: 'Taken:A',
+          state: { nodes: [], edges: [] },
+        },
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        code: 'CANVAS_TITLE_CONFLICT',
+        conflictWith: 'Taken/A',
+      });
+      expect(getCanvasStore('c1').read()).toMatchObject({
+        title: 'Original',
+        version: 0,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('renames only when the request explicitly supplies a new title', async () => {
+    createCanvas('c1', 'Original');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: 0,
+          title: 'Explicit rename',
+          state: { nodes: [], edges: [] },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(getCanvasStore('c1').read()).toMatchObject({
+        title: 'Explicit rename',
+        version: 1,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('persists a logical rename when both titles share one safe filename', async () => {
+    createCanvas('c1', 'A/B');
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: 0,
+          title: 'A:B',
+          state: { nodes: [], edges: [] },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(getCanvasStore('c1').read()).toMatchObject({
+        title: 'A:B',
+        version: 1,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('preserves an externally reconciled title when the request omits title', async () => {
+    createCanvas('c1', 'Original');
+    const store = getCanvasStore('c1');
+    expect(store.renameSelf('Finder rename')).toMatchObject({ ok: true });
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: { version: 0, state: { nodes: [], edges: [] } },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(getCanvasStore('c1').read()).toMatchObject({
+        title: 'Finder rename',
+        version: 1,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps filesystem rename failures behind the legacy generic 500', async () => {
+    createCanvas('c1', 'Original');
+    vi.mocked(withSpaceDirHandlesReleased).mockImplementationOnce(
+      (async () => ({
+        ok: false,
+        reason: 'fs-error',
+        message: 'sensitive filesystem detail',
+      })) as unknown as typeof withSpaceDirHandlesReleased,
+    );
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: 0,
+          title: 'Cannot rename',
+          state: { nodes: [], edges: [] },
+        },
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(response.json()).toEqual({ message: 'Failed to rename canvas' });
+      expect(response.body).not.toContain('sensitive filesystem detail');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('does not recreate a Space deleted after the initial read', async () => {
     createCanvas('c1', 'Original');
     const paused = deferred();
@@ -171,7 +383,7 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
 });
 
 describe('GET /api/canvas', () => {
-  it('lists through the catalogue and sorts a copy by updatedAt', async () => {
+  it('lists through the Space repository and sorts a copy by updatedAt', async () => {
     const source = [
       {
         canvasId: 'older',
@@ -189,12 +401,12 @@ describe('GET /api/canvas', () => {
       },
     ];
     const list = vi.fn().mockResolvedValue(source);
-    const catalog = vi.fn(() => ({
+    const spaces = vi.fn(() => ({
       list,
       worldId: vi.fn(),
     }));
     vi.mocked(getStructuredStore).mockImplementationOnce(
-      () => ({ catalog }) as unknown as ReturnType<typeof getStructuredStore>,
+      () => ({ spaces }) as unknown as ReturnType<typeof getStructuredStore>,
     );
 
     const app = await buildApp();
@@ -204,7 +416,7 @@ describe('GET /api/canvas', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ canvases: [source[1], source[0]] });
       expect(source.map((row) => row.canvasId)).toEqual(['older', 'newer']);
-      expect(catalog).toHaveBeenCalledTimes(1);
+      expect(spaces).toHaveBeenCalledTimes(1);
       expect(list).toHaveBeenCalledTimes(1);
     } finally {
       await app.close();
@@ -367,7 +579,7 @@ describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
     const readRecord = vi.fn().mockResolvedValue({ canvasId: 'c1' });
     const readChanges = vi.fn().mockResolvedValue(expected);
     const space = vi.fn(() => ({
-      record: { read: readRecord },
+      read: readRecord,
       changes: { read: readChanges },
     }));
     vi.mocked(getStructuredStore).mockImplementationOnce(
@@ -496,9 +708,9 @@ describe('Space export/import persistence', () => {
         content: 'persisted body',
       }),
     ).toMatchObject({ ok: true });
-    const history = getStructuredStore().space('c1');
-    await history.events.append([{ payload: action('n1'), ts: 1 }]);
-    await history.deltas.append({
+    const seededSpace = getStructuredStore().space('c1');
+    await seededSpace.events.append([{ payload: action('n1'), ts: 1 }]);
+    getCanvasStore('c1').appendDeltaLogEntry({
       version: 1,
       ts: 2,
       commands: [],
@@ -516,7 +728,7 @@ describe('Space export/import persistence', () => {
         },
       },
     ]);
-    const storedChanges = await history.changes.append('thread-export', [
+    const storedChanges = await seededSpace.changes.append('thread-export', [
       change,
     ]);
     const blob = Buffer.from([0, 1, 2, 3, 255]);
@@ -560,16 +772,16 @@ describe('Space export/import persistence', () => {
         `/api/canvas/${importedId}/artifact/asset.bin`,
       );
       expect(reopened.readNode('n1')?.content).toBe('persisted body');
-      const reopenedHistory = getStructuredStore().space(importedId);
+      const importedSpace = getStructuredStore().space(importedId);
       expect(
-        (await reopenedHistory.events.read()).map((event) => event.ts),
+        (await importedSpace.events.read()).map((event) => event.ts),
       ).toEqual([1]);
       expect(
-        (await reopenedHistory.deltas.readSince(0)).map(
-          (entry) => entry.version,
-        ),
+        getCanvasStore(importedId)
+          .readDeltaLogSince(0)
+          .map((entry) => entry.version),
       ).toEqual([1]);
-      expect(await reopenedHistory.changes.read('thread-export')).toEqual(
+      expect(await importedSpace.changes.read('thread-export')).toEqual(
         storedChanges,
       );
       expect(await canvasBlobs(importedId).read('asset.bin')).toEqual(blob);

@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -48,10 +49,10 @@ import {
   CanvasPersistenceRollbackError,
   runCanvasPersistenceTransaction,
 } from './canvas-persistence-transaction.js';
-import { getCanvasStore, resetStorageCache } from '../storage/index.js';
-import { setWorkspacePath } from '../workspace.js';
+import { setWorkspacePath } from '../../../workspace.js';
+import { getCanvasStore, resetStorageCache } from '../../index.js';
 
-import type { CanvasFile } from './persistence-types.js';
+import type { CanvasFile } from '../../../canvas/persistence-types.js';
 
 let workspacePath: string;
 
@@ -82,6 +83,55 @@ function canvasWithNodes(nodes: unknown[]): CanvasFile {
 }
 
 describe('runCanvasPersistenceTransaction', () => {
+  it('captures an affected sidecar missed by a stale same-count filename index', () => {
+    const store = getCanvasStore('c1');
+    const before = canvasWithNodes([
+      {
+        id: 'n1',
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: { label: 'A' },
+      },
+    ]);
+    store.write(before);
+    store.writeNode('n1', {
+      nodeId: 'n1',
+      type: 'note',
+      label: 'A',
+      content: 'before',
+    });
+    const nodesPath = path.join(workspacePath, 'c1', 'nodes');
+    renameSync(
+      path.join(nodesPath, 'A.md'),
+      path.join(nodesPath, 'Finder rename.md'),
+    );
+
+    expect(store.nodeIdForFilename('Finder rename.md')).toBeNull();
+    expect(() =>
+      runCanvasPersistenceTransaction({
+        canvasId: 'c1',
+        affectedNodeIds: new Set(['n1']),
+        nodeIdForFilename: (filename) => store.nodeIdForFilename(filename),
+        resetRecordState: () => store.write(before),
+        commit: () => {
+          store.writeNode('n1', {
+            nodeId: 'n1',
+            type: 'note',
+            label: 'Changed',
+            content: 'after',
+          });
+          throw new Error('injected after stale-index rename');
+        },
+      }),
+    ).toThrow('injected after stale-index rename');
+
+    expect(readdirSync(nodesPath)).toEqual(['Finder rename.md']);
+    expect(store.readNode('n1')).toMatchObject({
+      label: 'A',
+      content: 'before',
+    });
+  });
+
   it('skips node enumeration and body reads for a zero-affected commit', () => {
     const store = getCanvasStore('c1');
     const before = canvasWithNodes([]);

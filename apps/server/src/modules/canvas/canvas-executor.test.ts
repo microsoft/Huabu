@@ -18,7 +18,6 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -30,11 +29,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
-import { runCanvasPersistenceTransaction } from './canvas-persistence-transaction.js';
 import {
-  applyNodeUpdate,
   canvasBlobs,
   getCanvasStore,
+  getStructuredStore,
+  updateNode,
 } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
@@ -401,14 +400,12 @@ describe('executeOnServer — CREATE_NODES id echo', () => {
   });
 });
 
-describe('executeOnServer — batch node writes route through the non-locking core', () => {
+describe('executeOnServer — batch node writes use one ordered backend call', () => {
   it('persists every node in a multi-node batch without self-deadlocking on the canvas lock', async () => {
-    // The executor holds `withCanvasMutex` for the WHOLE batch and writes each
-    // mutated node's `.md` via the NON-locking `applyNodeUpdate`. The
-    // promise-chain mutex is not re-entrant, so if any per-node write went
-    // through the locking `updateNode` instead, this batch would deadlock and
-    // the test would hang until vitest's timeout. Two mutated nodes under one
-    // lock is the minimal case that pins that contract.
+    // The executor holds `withCanvasMutex` for the whole batch and hands all
+    // node mutations to one backend writer call. Two mutated nodes pin that
+    // the adapter validates and persists the aggregate once, rather than
+    // re-entering the application mutex per node.
     const store = getCanvasStore('c1');
     store.write({
       canvasId: 'c1',
@@ -574,7 +571,7 @@ describe('executor tombstone resurrection', () => {
           deltas: [{ type: 'INSERT_NODE', node: restoredNode() }],
           originator: UI,
         }),
-      ).rejects.toThrow(/writeNode rejected n1: not-found/);
+      ).rejects.toThrow(/Space write failed.*Space does not exist/);
     } finally {
       store.writeNode = originalWriteNode;
     }
@@ -619,7 +616,7 @@ describe('executor tombstone resurrection', () => {
     expect(store.isNodeWriteSuppressed('n1')).toBe(false);
   });
 
-  it('does not clear a tombstone when an unrelated write retains the node', () => {
+  it('does not clear a tombstone when an unrelated write retains the node', async () => {
     seedNote('c1', 'n1', 'before');
     const store = getCanvasStore('c1');
     expect(store.deleteNode('n1')).toBe('deleted');
@@ -638,14 +635,18 @@ describe('executor tombstone resurrection', () => {
       updatedAt: retained.updatedAt + 2,
     });
 
-    const late = applyNodeUpdate(store, 'n1', {
-      apply: () => ({
-        nodeId: 'n1',
-        type: 'note',
-        label: 'A',
-        content: 'late',
-      }),
-    });
+    const late = await updateNode(
+      getStructuredStore().space('c1').nodes,
+      'n1',
+      {
+        apply: () => ({
+          nodeId: 'n1',
+          type: 'note',
+          label: 'A',
+          content: 'late',
+        }),
+      },
+    );
     expect(late).toEqual({ status: 'skipped-deleted' });
     expect(store.readNode('n1')).toBeNull();
   });
@@ -947,42 +948,5 @@ describe('executeOnServer — persistence failure atomicity', () => {
     expect(store.readDeltaLogSince(0).map((entry) => entry.version)).toEqual([
       2,
     ]);
-  });
-
-  it('captures an affected sidecar missed by a stale same-count filename index', () => {
-    seedNote('c1', 'n1', 'before');
-    const store = getCanvasStore('c1');
-    const before = store.read();
-    if (!before) throw new Error('seeded canvas is missing');
-    const nodesPath = join(tmp, 'c1', 'nodes');
-    renameSync(join(nodesPath, 'A.md'), join(nodesPath, 'Finder rename.md'));
-
-    // The warm index still points at A.md: a pure rename preserves the file
-    // count, so the cheap count probe alone cannot discover the new name.
-    expect(store.nodeIdForFilename('Finder rename.md')).toBeNull();
-
-    expect(() =>
-      runCanvasPersistenceTransaction({
-        canvasId: 'c1',
-        affectedNodeIds: new Set(['n1']),
-        nodeIdForFilename: (filename) => store.nodeIdForFilename(filename),
-        resetRecordState: () => store.write(before),
-        commit: () => {
-          store.writeNode('n1', {
-            nodeId: 'n1',
-            type: 'note',
-            label: 'Changed',
-            content: 'after',
-          });
-          throw new Error('injected after stale-index rename');
-        },
-      }),
-    ).toThrow('injected after stale-index rename');
-
-    expect(readdirSync(nodesPath)).toEqual(['Finder rename.md']);
-    expect(store.readNode('n1')).toMatchObject({
-      label: 'A',
-      content: 'before',
-    });
   });
 });

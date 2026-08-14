@@ -48,7 +48,7 @@ import type * as WorkspaceActivationModule from './workspace-activation.js';
 import type * as WorkspaceModule from './workspace.js';
 
 const worldId = vi.fn<() => Promise<string>>();
-const catalog = vi.fn(() => ({ list: vi.fn(), worldId }));
+const spaces = vi.fn(() => ({ list: vi.fn(), worldId }));
 
 async function buildApp() {
   const app = fastify();
@@ -63,10 +63,10 @@ beforeEach(() => {
   workspaceState.path = '/tmp/sediment-workspace-route';
   workspaceState.name = 'sediment-workspace-route';
   worldId.mockReset().mockResolvedValue('world-id');
-  catalog.mockClear();
+  spaces.mockClear();
   vi.mocked(getStructuredStore)
     .mockReset()
-    .mockReturnValue({ catalog } as unknown as ReturnType<
+    .mockReturnValue({ spaces } as unknown as ReturnType<
       typeof getStructuredStore
     >);
   vi.mocked(activateWorkspacePath)
@@ -78,8 +78,8 @@ beforeEach(() => {
     });
 });
 
-describe('workspace catalogue integration', () => {
-  it('reads the configured World id from the catalogue', async () => {
+describe('workspace Space repository integration', () => {
+  it('reads the configured World id from the Space repository', async () => {
     workspaceState.configured = true;
     const app = await buildApp();
     try {
@@ -90,14 +90,14 @@ describe('workspace catalogue integration', () => {
         configured: true,
         worldCanvasId: 'world-id',
       });
-      expect(catalog).toHaveBeenCalledTimes(1);
+      expect(spaces).toHaveBeenCalledTimes(1);
       expect(worldId).toHaveBeenCalledTimes(1);
     } finally {
       await app.close();
     }
   });
 
-  it('does not resolve a catalogue before a Workspace is configured', async () => {
+  it('does not resolve a Space repository before a Workspace is configured', async () => {
     const app = await buildApp();
     try {
       const response = await app.inject({ method: 'GET', url: '/workspace' });
@@ -113,7 +113,7 @@ describe('workspace catalogue integration', () => {
     }
   });
 
-  it('awaits the catalogue World id after activating a Workspace', async () => {
+  it('awaits the World id after activating a Workspace', async () => {
     const app = await buildApp();
     try {
       const response = await app.inject({
@@ -136,7 +136,7 @@ describe('workspace catalogue integration', () => {
     }
   });
 
-  it('keeps post-activation catalogue failures inside the PUT error path', async () => {
+  it('keeps post-activation World failures inside the PUT error path', async () => {
     worldId.mockRejectedValueOnce(new Error('World record is corrupt'));
     const app = await buildApp();
     try {

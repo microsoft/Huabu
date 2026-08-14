@@ -2,154 +2,274 @@
 // Licensed under the MIT license.
 
 /**
- * Disk implementation of {@link SpaceRepository}.
+ * Disk ownership of the Space collection: membership, World identity, and
+ * ordinary create/delete/rename.
  *
- * Wraps the legacy per-Space object so the record path has a portable,
- * asynchronous, version-checked contract without changing how `space.json`
- * is read or written.
+ * Both halves rescan the directory index before answering, so external
+ * imports, deletes, and Finder renames are visible without an explicit cache
+ * invalidation call — and so creation allocates around a Space that arrived
+ * outside this process. The World rule is resolved in exactly one place here
+ * (`#requireWorld`); when reads and lifecycle were separate ports it had to be
+ * spelled out twice.
  */
 
 import path from 'node:path';
 
 import {
-  canvasFileShapeError,
-  readValidCanvasFile,
-} from './space-record-validation.js';
-import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
-import { canvasJsonPath } from '../../../workspace/disk/paths.js';
+  forgetCanvasStore,
+  getCanvasStore,
+} from './legacy/canvas-store-cache.js';
+import { readValidCanvasFile } from './space-record-validation.js';
+import { readDiskSpaceRecord } from './space-record.js';
+import {
+  titleForAllocatedDirectory,
+  titleVisibleAtDirectory,
+} from './space-title.js';
+import { atomicWriteJson, mkdirp, sanitizeId } from '../../../../utils/fs.js';
+import {
+  isWorldCanvasId,
+  listAllCanvasDirEntries,
+  listCanvasDirEntries,
+  refreshCanvasDirIndex,
+  registerCanvasDir,
+  requireWorldCanvasId,
+  suggestCanvasDir,
+} from '../../../workspace/disk/canvas-dirs.js';
+import { normalizeForCompare } from '../../../workspace/disk/naming.js';
+import {
+  canvasJsonPath,
+  SPACE_JSON_FILENAME,
+} from '../../../workspace/disk/paths.js';
+import { withSpaceDirHandlesReleased } from '../../../workspace/disk/space-dir-handles.js';
 import { getWorkspacePath } from '../../../workspace.js';
+import {
+  assertSpaceMutationAllowed,
+  beginSpaceDeleteAdmission,
+} from '../../space-lifecycle-admission.js';
 
-import type { CanvasStore } from './legacy/canvas-store.js';
+import type { RenameSelfResult } from './legacy/canvas-store.js';
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
 import type {
+  SpaceBeginDeleteResult,
+  SpaceCreateInput,
+  SpaceCreateResult,
+  SpaceDeleteInput,
+  SpaceDeleteSession,
+  SpaceRenameInput,
+  SpaceRenameResult,
   SpaceRepository,
-  SpaceWriteResult,
 } from '../../ports/structured.js';
+import type { CanvasSummary } from '@huabu/shared';
+
+type DiskRenameOperationResult =
+  | Exclude<RenameSelfResult, { ok: true }>
+  | { ok: true; record: CanvasFile };
 
 export class DiskSpaceRepository implements SpaceRepository {
-  readonly #store: CanvasStore;
   readonly #workspacePath: string;
+  readonly #now: () => number;
 
-  constructor(store: CanvasStore) {
-    this.#store = store;
+  constructor(now: () => number = Date.now) {
     this.#workspacePath = path.resolve(getWorkspacePath());
+    this.#now = now;
   }
 
-  private assertActiveWorkspace(): void {
+  async list(): Promise<CanvasSummary[]> {
+    this.#assertActiveWorkspace();
+    refreshCanvasDirIndex();
+
+    return listCanvasDirEntries().map((entry) => {
+      return {
+        canvasId: entry.id,
+        title: titleVisibleAtDirectory(entry.title, entry.id, entry.filename),
+        nodeCount: entry.nodeCount ?? 0,
+        createdAt: entry.createdAt ?? 0,
+        updatedAt: entry.updatedAt ?? 0,
+      };
+    });
+  }
+
+  async worldId(): Promise<string> {
+    this.#assertActiveWorkspace();
+    return this.#requireWorld();
+  }
+
+  async create(input: SpaceCreateInput): Promise<SpaceCreateResult> {
+    this.#assertActiveWorkspace();
+    const canvasId = sanitizeId(input.canvasId, 'canvasId');
+    assertSpaceMutationAllowed(this.#workspacePath, canvasId);
+    // Creation owns membership allocation. Refresh here rather than relying
+    // on a caller having listed first: an externally imported Space must
+    // participate in both stable-id and directory-name collision checks.
+    refreshCanvasDirIndex();
+    if (listAllCanvasDirEntries().some((entry) => entry.id === canvasId)) {
+      return { ok: false, reason: 'already-exists' };
+    }
+
+    // This method deliberately contains no `await`: same-process callers that
+    // start together cannot both pass the existence check before one publishes
+    // its record and index entry.
+    const directoryName = suggestCanvasDir(input.title, canvasId);
+    const directoryPath = path.join(this.#workspacePath, directoryName);
+    mkdirp(directoryPath);
+
+    const title = titleForAllocatedDirectory(
+      input.title,
+      canvasId,
+      directoryName,
+    );
+    const timestamp = this.#now();
+    const record: CanvasFile = {
+      canvasId,
+      title,
+      version: 0,
+      state: { nodes: [], edges: [] },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    atomicWriteJson(path.join(directoryPath, SPACE_JSON_FILENAME), record);
+    registerCanvasDir(canvasId, directoryName, title);
+    return { ok: true, record };
+  }
+
+  async beginDelete(input: SpaceDeleteInput): Promise<SpaceBeginDeleteResult> {
+    this.#assertActiveWorkspace();
+    const canvasId = sanitizeId(input.canvasId, 'canvasId');
+    // Revalidate the protected World identity before a destructive session,
+    // as the old composition path did before touching blobs.
+    if (this.#isWorld(canvasId)) {
+      return { ok: false, reason: 'world-forbidden' };
+    }
+
+    const store = getCanvasStore(canvasId);
+    const release = await beginSpaceDeleteAdmission(
+      this.#workspacePath,
+      canvasId,
+    );
+    let state: 'open' | 'finishing' | 'closed' = 'open';
+    const close = (): void => {
+      if (state === 'closed') return;
+      state = 'closed';
+      release();
+    };
+    const session: SpaceDeleteSession = Object.freeze({
+      finish: async () => {
+        if (state !== 'open') {
+          throw new Error(`Space deletion session for ${canvasId} is closed`);
+        }
+        state = 'finishing';
+        try {
+          const deleted = await withSpaceDirHandlesReleased(canvasId, () =>
+            store.destroy(),
+          );
+          forgetCanvasStore(canvasId);
+          return deleted
+            ? { ok: true as const, reason: 'deleted' as const }
+            : { ok: false as const, reason: 'not-found' as const };
+        } finally {
+          close();
+        }
+      },
+      abort: async () => {
+        if (state === 'finishing') {
+          throw new Error(
+            `Space deletion session for ${canvasId} is already finishing`,
+          );
+        }
+        close();
+      },
+    });
+    return { ok: true, session };
+  }
+
+  async rename(input: SpaceRenameInput): Promise<SpaceRenameResult> {
+    this.#assertActiveWorkspace();
+    const canvasId = sanitizeId(input.canvasId, 'canvasId');
+    assertSpaceMutationAllowed(this.#workspacePath, canvasId);
+    if (this.#isWorld(canvasId)) {
+      return { ok: false, reason: 'world-forbidden' };
+    }
+    const store = getCanvasStore(canvasId);
+    const current = readDiskSpaceRecord(store);
+    if (current === null) return { ok: false, reason: 'not-found' };
+    if (current.title === input.title) return { ok: true, record: current };
+    const renamed = await withSpaceDirHandlesReleased(
+      canvasId,
+      (): DiskRenameOperationResult => {
+        const renamed = store.renameSelf(input.title);
+        if (!renamed.ok) return renamed;
+
+        const record = readValidCanvasFile(canvasJsonPath(canvasId), canvasId);
+        if (record === null) {
+          return { ok: false, reason: 'not-found' };
+        }
+        const renamedRecord = { ...record, title: input.title };
+        store.write(renamedRecord);
+        return { ok: true, record: renamedRecord };
+      },
+    );
+    if (!renamed.ok) {
+      switch (renamed.reason) {
+        case 'not-found':
+          return { ok: false, reason: 'not-found' };
+        case 'forbidden':
+          return { ok: false, reason: 'world-forbidden' };
+        case 'conflict':
+          return {
+            ok: false,
+            reason: 'title-conflict',
+            conflictingTitle: this.#conflictingTitle(renamed.conflictWith),
+          };
+        case 'fs-error':
+          throw new Error(
+            `Could not rename Space ${JSON.stringify(canvasId)}: ${renamed.message}`,
+          );
+      }
+    }
+    return renamed;
+  }
+
+  /**
+   * The single World resolution point for this backend namespace.
+   *
+   * Always rescans first: every caller either reports World identity or is
+   * about to refuse a destructive operation on it, and neither may act on a
+   * cached id.
+   *
+   * `worldId()` reports the identity, so a missing World is an integrity
+   * failure it must raise. The lifecycle guards only ask whether *this* Space
+   * is the protected one, which a namespace without a World answers with a
+   * plain no — the same answer `isWorldCanvasId` gave before Phase 4. Raising
+   * there instead would turn every ordinary delete and rename in a workspace
+   * whose World is missing or malformed into a 500.
+   */
+  #isWorld(canvasId: string): boolean {
+    refreshCanvasDirIndex();
+    return isWorldCanvasId(canvasId);
+  }
+
+  #requireWorld(): string {
+    refreshCanvasDirIndex();
+    return requireWorldCanvasId();
+  }
+
+  #assertActiveWorkspace(): void {
     if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
       throw new Error(
-        `SpaceRepository(${this.#store.canvasId}) belongs to an inactive workspace. ` +
-          'Resolve a fresh Space handle after workspace activation.',
+        'Space repository belongs to an inactive workspace. ' +
+          'Resolve a fresh Space repository after workspace activation.',
       );
     }
   }
 
-  async read(): Promise<CanvasFile | null> {
-    this.assertActiveWorkspace();
-    return readDiskSpaceRecord(this.#store);
-  }
-
-  /**
-   * Version-checked replacement of the Space record.
-   *
-   * Validation that does not touch disk happens first, so a malformed `next`
-   * is rejected before the critical section runs.
-   */
-  async compareAndSwap(
-    expectedVersion: number,
-    next: CanvasFile,
-  ): Promise<SpaceWriteResult> {
-    this.assertActiveWorkspace();
-    if (!Number.isFinite(expectedVersion)) {
-      throw new TypeError(
-        `SpaceRepository(${this.#store.canvasId}) expectedVersion must be a finite number`,
-      );
-    }
-    const shapeError = canvasFileShapeError(next, this.#store.canvasId);
-    if (shapeError) {
-      throw new TypeError(
-        `SpaceRepository(${this.#store.canvasId}) received an invalid next record: ${shapeError}`,
-      );
-    }
-    if (next.version !== expectedVersion + 1) {
-      throw new Error(
-        `SpaceRepository(${this.#store.canvasId}) expected next.version ` +
-          `${expectedVersion + 1}, received ${next.version}`,
-      );
-    }
-    return this.swapIfCurrent(expectedVersion, next);
-  }
-
-  /**
-   * The critical section: read the current version, compare, and write.
-   *
-   * ⚠️ This method MUST NOT `await`. Its single-winner guarantee rests
-   * entirely on running to completion in one uninterrupted JavaScript turn —
-   * `read()` and `write()` on the legacy object are synchronous, so no other
-   * repository call can observe or overwrite the record between the check and
-   * the write. Someone swapping a sync call for `fs/promises` breaks that
-   * silently: both writers would capture the same version before yielding,
-   * both would find it unchanged on resume, and both would "succeed" while
-   * only one write survived.
-   *
-   * The contract suite catches exactly that by issuing its two writers from
-   * one tick against a shared baseline, with no await between them. That
-   * ordering is what discriminates: separating them with a yield makes the
-   * second writer read the already-updated record, which is a sequential
-   * stale-baseline test and passes even for a broken adapter. The suite
-   * covers that case too, but as its own assertion rather than as the race.
-   *
-   * This holds for the supported single-Server Disk topology. An adapter that
-   * cannot honor it structurally — SQLite, Postgres — must use a transaction
-   * or a conditional update across all of its connections, or take an
-   * explicit lock. A comment is not a mechanism.
-   */
-  private swapIfCurrent(
-    expectedVersion: number,
-    next: CanvasFile,
-  ): SpaceWriteResult {
-    const current = readDiskSpaceRecord(this.#store);
-    if (!current) return { ok: false, reason: 'not-found' };
-    if (current.version !== expectedVersion) {
-      return {
-        ok: false,
-        reason: 'version-conflict',
-        actualVersion: current.version,
-      };
-    }
-    // Identity and title are not this repository's to change: rename and
-    // lifecycle stay on the compatibility path this phase (§12.2.5).
-    if (next.title !== current.title || next.createdAt !== current.createdAt) {
-      throw new Error(
-        `SpaceRepository(${this.#store.canvasId}) refusing to change immutable ` +
-          `record fields; title and createdAt belong to the lifecycle path`,
-      );
-    }
-    this.#store.write(next);
-    return { ok: true };
-  }
-}
-
-/**
- * Read and validate one record, refreshing the directory index once when the
- * indexed path is absent so externally renamed Spaces remain discoverable.
- * The already-parsed value is then reconciled by the compatibility store;
- * there is no second, lenient disk read that could hide corruption.
- */
-export function readDiskSpaceRecord(store: CanvasStore): CanvasFile | null {
-  let record = readValidCanvasFile(
-    canvasJsonPath(store.canvasId),
-    store.canvasId,
-  );
-  if (!record) {
-    // Preserve Finder-rename recovery, but validate the newly indexed path
-    // before the compatibility reader gets a chance to self-heal its title.
-    refreshCanvasDirIndex();
-    record = readValidCanvasFile(
-      canvasJsonPath(store.canvasId),
-      store.canvasId,
+  #conflictingTitle(directoryName: string): string | null {
+    const entry = listAllCanvasDirEntries().find(
+      (candidate) =>
+        normalizeForCompare(candidate.filename) ===
+        normalizeForCompare(directoryName),
     );
+    return entry
+      ? titleVisibleAtDirectory(entry.title, entry.id, entry.filename)
+      : directoryName;
   }
-  if (!record) return null;
-  return store.reconcileValidatedRecord(record);
 }

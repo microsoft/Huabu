@@ -2,7 +2,8 @@
 // Licensed under the MIT license.
 
 /**
- * Reusable contracts for the four Canvas log-family repositories.
+ * Reusable contracts for the log-backed parts a Space carries: its history
+ * (behavioural events) and its pending change review.
  *
  * ⚠️ **Adapter-local guarantees.** As with the Space-record suite, the
  * linearizability properties asserted here belong to the adapter under test,
@@ -15,31 +16,24 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
 
-import type { DeltaLogEntry } from '../../../canvas/persistence-types.js';
-import type {
-  CanvasChangeRepository,
-  CanvasDeltaRepository,
-  CanvasEventRepository,
-} from '../structured.js';
+import type { SpaceChanges, SpaceEvents } from '../structured.js';
 import type { RecentAction } from '@huabu/shared';
 import type {
   CanvasChangeRecord,
   CanvasNode,
 } from '@huabu/shared/canvas-engine';
 
-export interface CanvasLogRepositories {
-  events: CanvasEventRepository;
-  deltas: CanvasDeltaRepository;
-  changes: CanvasChangeRepository;
+export interface SpaceLogs {
+  events: SpaceEvents;
+  changes: SpaceChanges;
 }
 
-export interface CanvasLogRepositoriesHarness extends CanvasLogRepositories {
+export interface SpaceLogsHarness extends SpaceLogs {
   /**
-   * A second set of repository handles for the same Space, so concurrency
-   * cases use genuinely independent objects rather than one instance called
-   * twice.
+   * A second set of parts for the same Space, so concurrency cases use
+   * genuinely independent objects rather than one instance called twice.
    */
-  concurrent: CanvasLogRepositories;
+  concurrent: SpaceLogs;
   cleanup?: () => Promise<void> | void;
 }
 
@@ -54,16 +48,6 @@ function action(nodeId: string): RecentAction {
 function actionNodeId(payload: RecentAction): string {
   return (payload as Extract<RecentAction, { action: 'node_selected' }>).node
     .id;
-}
-
-function delta(version: number): DeltaLogEntry {
-  return {
-    version,
-    ts: 1_000 + version,
-    commands: [],
-    deltas: [],
-    originator: { source: 'agent' },
-  };
 }
 
 function node(id: string, content: string): CanvasNode {
@@ -90,16 +74,14 @@ function change(nodeId: string, content = 'body'): CanvasChangeRecord {
   return record;
 }
 
-export function describeCanvasLogRepositoriesContract(
+export function describeSpaceLogsContract(
   name: string,
-  createHarness: () =>
-    | Promise<CanvasLogRepositoriesHarness>
-    | CanvasLogRepositoriesHarness,
+  createHarness: () => Promise<SpaceLogsHarness> | SpaceLogsHarness,
 ): void {
-  describe(`Canvas log repository contracts (adapter-local): ${name}`, () => {
-    let harness: CanvasLogRepositoriesHarness | null = null;
+  describe(`Space log contracts (adapter-local): ${name}`, () => {
+    let harness: SpaceLogsHarness | null = null;
 
-    async function open(): Promise<CanvasLogRepositoriesHarness> {
+    async function open(): Promise<SpaceLogsHarness> {
       harness = await createHarness();
       return harness;
     }
@@ -175,56 +157,6 @@ export function describeCanvasLogRepositoriesContract(
       expect(ids).toContain('b1,b2');
     });
 
-    // ── Delta log ───────────────────────────────────────────────────────────
-
-    it('reads an empty delta log as an empty list', async () => {
-      const { deltas } = await open();
-      await expect(deltas.readSince(0)).resolves.toEqual([]);
-    });
-
-    it('filters deltas strictly greater than the requested version', async () => {
-      const { deltas } = await open();
-      await deltas.append(delta(1));
-      await deltas.append(delta(2));
-      await deltas.append(delta(3));
-
-      expect((await deltas.readSince(0)).map((d) => d.version)).toEqual([
-        1, 2, 3,
-      ]);
-      expect((await deltas.readSince(2)).map((d) => d.version)).toEqual([3]);
-      expect(await deltas.readSince(3)).toEqual([]);
-    });
-
-    it('rejects a duplicate or out-of-order delta version', async () => {
-      const { deltas } = await open();
-      await deltas.append(delta(1));
-      await deltas.append(delta(5));
-
-      await expect(deltas.append(delta(5))).rejects.toThrow();
-      await expect(deltas.append(delta(2))).rejects.toThrow();
-
-      // The rejected appends left nothing behind.
-      expect((await deltas.readSince(0)).map((d) => d.version)).toEqual([1, 5]);
-    });
-
-    it('lets exactly one of two deltas racing from one tick claim a version', async () => {
-      const { deltas, concurrent } = await open();
-      await deltas.append(delta(1));
-
-      // Issued from one tick, with no intervening await: an adapter that
-      // `await`s between its tail read and its append lets both observe
-      // version 1 as the head and both write version 2. See the same note on
-      // the SpaceRepository suite's race case.
-      const results = await Promise.allSettled([
-        deltas.append(delta(2)),
-        concurrent.deltas.append(delta(2)),
-      ]);
-
-      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-      expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
-      expect((await deltas.readSince(0)).map((d) => d.version)).toEqual([1, 2]);
-    });
-
     // ── Change-review records ───────────────────────────────────────────────
 
     it('reads an unknown thread as an empty list', async () => {
@@ -258,7 +190,7 @@ export function describeCanvasLogRepositoriesContract(
       ]);
     });
 
-    it('removes one record by id and reports a miss as null', async () => {
+    it('deletes one record by id and reports a miss as null', async () => {
       const { changes } = await open();
       const stored = await changes.append('t1', [
         change('node-a'),
@@ -266,13 +198,13 @@ export function describeCanvasLogRepositoriesContract(
       ]);
       const target = stored.find((r) => r.nodeId === 'node-a')!;
 
-      const removed = await changes.remove('t1', target.id);
-      expect(removed?.id).toBe(target.id);
+      const deleted = await changes.delete('t1', target.id);
+      expect(deleted?.id).toBe(target.id);
       expect((await changes.read('t1')).map((r) => r.nodeId)).toEqual([
         'node-b',
       ]);
 
-      await expect(changes.remove('t1', target.id)).resolves.toBeNull();
+      await expect(changes.delete('t1', target.id)).resolves.toBeNull();
     });
 
     it('does not lose a record when two agents append concurrently', async () => {
@@ -290,12 +222,12 @@ export function describeCanvasLogRepositoriesContract(
       ]);
     });
 
-    it('does not lose a record when an append races a removal', async () => {
+    it('does not lose a record when an append races a delete', async () => {
       const { changes, concurrent } = await open();
       const [existing] = await changes.append('t1', [change('node-a')]);
 
       await Promise.all([
-        changes.remove('t1', existing.id),
+        changes.delete('t1', existing.id),
         concurrent.changes.append('t1', [change('node-b')]),
       ]);
 

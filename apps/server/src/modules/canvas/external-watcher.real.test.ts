@@ -13,7 +13,7 @@ import {
   openExternalNoteSession,
   resetExternalNoteSessions,
 } from './external-watcher.js';
-import { createCanvas, resetStorageCache } from '../storage/index.js';
+import { createSpace, resetStorageCache } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { ExternalNoteEvent } from '@huabu/shared';
@@ -34,7 +34,8 @@ afterEach(() => {
 
 describe('external note watcher — real filesystem', () => {
   it('observes nodes/ creation, deletion, and recreation in one session', async () => {
-    expect(createCanvas('canvas-live', 'Live Space')).not.toBeNull();
+    const created = await createSpace('canvas-live', 'Live Space');
+    expect(created.ok).toBe(true);
     const nodesPath = path.join(workspace, 'Live Space', 'nodes');
     const events: ExternalNoteEvent[] = [];
 

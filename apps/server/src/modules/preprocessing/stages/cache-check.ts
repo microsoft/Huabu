@@ -17,7 +17,7 @@
  * when src is unchanged.
  */
 
-import type { CanvasStore } from '../../storage/canvas-store.js';
+import type { SpaceNodes } from '../../storage/index.js';
 import type {
   PipelineContext,
   PreprocessDiagnostic,
@@ -34,13 +34,13 @@ export type CacheCheckResult = { hit: boolean };
  *
  * Callers should `return project(...)` immediately when this returns `true`.
  */
-export function tryCacheShortCircuit(
+export async function tryCacheShortCircuit(
   request: PreprocessNodeRequest,
   resolved: ResolvedInput,
   ctx: PipelineContext,
   diagnostics: PreprocessDiagnostic[],
-  store: CanvasStore,
-): boolean {
+  nodes: SpaceNodes,
+): Promise<boolean> {
   if (request.options?.force) return false;
   if (request.nodeType !== 'web' && request.nodeType !== 'pdf') return false;
 
@@ -60,7 +60,7 @@ export function tryCacheShortCircuit(
     return false;
   }
 
-  const existing = store.readNode(request.nodeId);
+  const existing = (await nodes.read(request.nodeId))?.record ?? null;
   if (
     !existing ||
     existing.content.length === 0 ||

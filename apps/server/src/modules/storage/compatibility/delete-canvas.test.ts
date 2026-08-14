@@ -19,8 +19,13 @@ import { artifactPath, canvasJsonPath } from '../../workspace/disk/paths.js';
 import { DiskBlobStore } from '../backends/disk/blob-store.js';
 import { resetStorageCache } from '../backends/disk/legacy/canvas-store-cache.js';
 import { DiskStructuredStore } from '../backends/disk/structured-store.js';
-import { deleteCanvas, getCanvasStore } from '../index.js';
-import { canvasBlobs, setStorageForTesting, type Storage } from '../storage.js';
+import { getCanvasStore } from '../index.js';
+import {
+  canvasBlobs,
+  deleteSpace,
+  setStorageForTesting,
+  type Storage,
+} from '../storage.js';
 
 import type {
   BlobInfo,
@@ -220,14 +225,17 @@ afterEach(() => {
   rmSync(workspaceState.path, { recursive: true, force: true });
 });
 
-describe('deleteCanvas', () => {
+describe('deleteSpace composition', () => {
   it('sweeps blobs while the record that names them still exists', async () => {
     mkdirSync(path.dirname(artifactPath('canvas-a', 'art_1.png')), {
       recursive: true,
     });
     writeFileSync(artifactPath('canvas-a', 'art_1.png'), 'bytes');
 
-    await expect(deleteCanvas('canvas-a')).resolves.toBe(true);
+    await expect(deleteSpace('canvas-a')).resolves.toEqual({
+      ok: true,
+      reason: 'deleted',
+    });
 
     // Blobs first: after the structured record is gone nothing names them,
     // so a failed sweep on a remote backend would strand them permanently.
@@ -237,7 +245,10 @@ describe('deleteCanvas', () => {
   });
 
   it('reports a Space that was already gone', async () => {
-    await expect(deleteCanvas('canvas-missing')).resolves.toBe(false);
+    await expect(deleteSpace('canvas-missing')).resolves.toEqual({
+      ok: false,
+      reason: 'not-found',
+    });
   });
 
   it('refuses the World canvas without touching its blobs', async () => {
@@ -246,9 +257,10 @@ describe('deleteCanvas', () => {
     });
     writeFileSync(artifactPath('canvas-world', 'art_w.png'), 'bytes');
 
-    await expect(deleteCanvas('canvas-world')).rejects.toThrow(
-      'World canvas cannot be deleted',
-    );
+    await expect(deleteSpace('canvas-world')).resolves.toEqual({
+      ok: false,
+      reason: 'world-forbidden',
+    });
 
     // The refusal has to come before the sweep: with blobs deleted first, a
     // guard that lived only in `destroy()` would already have cost the World
@@ -256,6 +268,40 @@ describe('deleteCanvas', () => {
     expect(blobs.recordPresentAtSweep).toEqual([]);
     expect(existsSync(artifactPath('canvas-world', 'art_w.png'))).toBe(true);
     expect(existsSync(canvasJsonPath('canvas-world'))).toBe(true);
+  });
+
+  it('fails closed on stale malformed World metadata before touching blobs', async () => {
+    const structured = new DiskStructuredStore();
+    await structured.spaces().worldId();
+    writeFileSync(canvasJsonPath('canvas-world'), '{ malformed', 'utf8');
+
+    await expect(deleteSpace('canvas-a')).rejects.toThrow();
+    expect(blobs.recordPresentAtSweep).toEqual([]);
+    expect(
+      existsSync(path.join(workspaceState.path, 'Project A', 'space.json')),
+    ).toBe(true);
+  });
+
+  it('still deletes an ordinary Space when the World has disappeared', async () => {
+    const structured = new DiskStructuredStore();
+    await structured.spaces().worldId();
+    rmSync(path.dirname(canvasJsonPath('canvas-world')), {
+      recursive: true,
+      force: true,
+    });
+
+    // Reporting World identity is an integrity question and still raises; the
+    // delete guard only asks whether *this* Space is the protected one, and a
+    // namespace without a World answers no. Raising here instead would make an
+    // ordinary delete fail outright because of unrelated damage elsewhere.
+    await expect(structured.spaces().worldId()).rejects.toThrow(
+      /no World canvas/,
+    );
+    await expect(deleteSpace('canvas-a')).resolves.toEqual({
+      ok: true,
+      reason: 'deleted',
+    });
+    expect(existsSync(canvasJsonPath('canvas-a'))).toBe(false);
   });
 
   it('waits for an in-flight put before sweeping and destroying the Space', async () => {
@@ -269,7 +315,7 @@ describe('deleteCanvas', () => {
     );
     await controlled.putStarted.promise;
 
-    const deleting = deleteCanvas('canvas-a');
+    const deleting = deleteSpace('canvas-a');
     await Promise.resolve();
     await Promise.resolve();
     expect(controlled.deleteCalls).toBe(0);
@@ -288,7 +334,7 @@ describe('deleteCanvas', () => {
 
     controlled.releasePuts();
     await putting;
-    await expect(deleting).resolves.toBe(true);
+    await expect(deleting).resolves.toEqual({ ok: true, reason: 'deleted' });
 
     expect(controlled.deleteCalls).toBe(1);
     expect(existsSync(canvasJsonPath('canvas-a'))).toBe(false);
@@ -300,7 +346,7 @@ describe('deleteCanvas', () => {
     controlled.blockDeletes = true;
     installBlobStore(controlled);
 
-    const deleting = deleteCanvas('canvas-a');
+    const deleting = deleteSpace('canvas-a');
     await controlled.deleteStarted.promise;
     expect(workspaceState.leaseCount).toBe(1);
     const putting = canvasBlobs('canvas-a').put(
@@ -312,7 +358,7 @@ describe('deleteCanvas', () => {
     expect(controlled.putCalls).toBe(0);
 
     controlled.releaseDeletes();
-    await expect(deleting).resolves.toBe(true);
+    await expect(deleting).resolves.toEqual({ ok: true, reason: 'deleted' });
     expect(workspaceState.leaseCount).toBe(0);
     await expect(putting).rejects.toThrow(/missing Space/);
 
@@ -326,7 +372,7 @@ describe('deleteCanvas', () => {
     controlled.blockDeletes = true;
     installBlobStore(controlled);
 
-    const deleting = deleteCanvas('canvas-a');
+    const deleting = deleteSpace('canvas-a');
     await controlled.deleteStarted.promise;
     try {
       await expect(
@@ -352,7 +398,7 @@ describe('deleteCanvas', () => {
     } finally {
       controlled.releaseDeletes();
     }
-    await expect(deleting).resolves.toBe(true);
+    await expect(deleting).resolves.toEqual({ ok: true, reason: 'deleted' });
     expect(existsSync(canvasJsonPath('canvas-a'))).toBe(false);
   });
 
@@ -362,7 +408,7 @@ describe('deleteCanvas', () => {
     installBlobStore(controlled);
     const store = getCanvasStore('canvas-a');
 
-    const deleting = deleteCanvas('canvas-a');
+    const deleting = deleteSpace('canvas-a');
     await controlled.deleteStarted.promise;
     try {
       expect(() =>
@@ -387,7 +433,7 @@ describe('deleteCanvas', () => {
     } finally {
       controlled.releaseDeletes();
     }
-    await expect(deleting).resolves.toBe(true);
+    await expect(deleting).resolves.toEqual({ ok: true, reason: 'deleted' });
 
     expect(() =>
       store.appendEvents([
@@ -434,7 +480,7 @@ describe('deleteCanvas', () => {
     controlled.blockDeletes = true;
     installBlobStore(controlled);
 
-    const deleting = deleteCanvas('canvas-a');
+    const deleting = deleteSpace('canvas-a');
     await controlled.deleteStarted.promise;
 
     await expect(
@@ -443,6 +489,6 @@ describe('deleteCanvas', () => {
     expect(existsSync(artifactPath('canvas-b', 'independent.bin'))).toBe(true);
 
     controlled.releaseDeletes();
-    await expect(deleting).resolves.toBe(true);
+    await expect(deleting).resolves.toEqual({ ok: true, reason: 'deleted' });
   });
 });

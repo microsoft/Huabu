@@ -33,7 +33,6 @@ import {
 import { setWorkspacePath } from '../../../workspace.js';
 
 import type {
-  DeltaLogEntry,
   CanvasFile,
   NodeContent,
 } from '../../../canvas/persistence-types.js';
@@ -74,16 +73,6 @@ function createSpace(canvasId: string, title: string): CanvasFile {
 
 function note(nodeId: string, label: string, content = 'body'): NodeContent {
   return { nodeId, type: 'note', label, content };
-}
-
-function delta(version: number): DeltaLogEntry {
-  return {
-    version,
-    ts: version,
-    commands: [],
-    deltas: [],
-    originator: { source: 'agent' },
-  };
 }
 
 afterEach(() => {
@@ -183,7 +172,7 @@ describe('CanvasStore cache boundaries', () => {
     expect(getCanvasStore('canvas-b').read()?.canvasId).toBe('canvas-b');
   });
 
-  it('rejects held event and delta repositories after a workspace switch', async () => {
+  it('rejects a held event repository after a workspace switch', async () => {
     activateWorkspace('huabu-log-workspace-a-');
     createSpace('shared-id', 'First');
     const held = new DiskStructuredStore().space('shared-id');
@@ -196,7 +185,6 @@ describe('CanvasStore cache boundaries', () => {
         ts: 1,
       },
     ]);
-    await held.deltas.append(delta(1));
 
     activateWorkspace('huabu-log-workspace-b-');
     createSpace('shared-id', 'Second');
@@ -210,40 +198,37 @@ describe('CanvasStore cache boundaries', () => {
         ts: 2,
       },
     ]);
-    await active.deltas.append(delta(2));
 
-    // These reads use strict JSONL helpers directly. Without their own
-    // workspace-lifetime guard, the retained A facades would silently read
-    // B's same-id files instead of rejecting the stale handle.
+    // This read uses strict JSONL helpers directly. Without its own
+    // workspace-lifetime guard, the retained A facade would silently read
+    // B's same-id file instead of rejecting the stale handle.
     await expect(held.events.read()).rejects.toThrow(/inactive workspace/);
-    await expect(held.deltas.readSince(0)).rejects.toThrow(
-      /inactive workspace/,
-    );
     expect((await active.events.read()).map((event) => event.ts)).toEqual([2]);
-    expect(
-      (await active.deltas.readSince(0)).map((entry) => entry.version),
-    ).toEqual([2]);
   });
 
   it('guards a held record repository before probing the active workspace', async () => {
     activateWorkspace('huabu-record-workspace-a-');
     const first = createSpace('shared-id', 'First');
     const held = new DiskStructuredStore().space('shared-id');
-    await expect(held.record.read()).resolves.toMatchObject({ title: 'First' });
+    await expect(held.read()).resolves.toMatchObject({ title: 'First' });
 
     activateWorkspace('huabu-record-workspace-b-');
     createSpace('shared-id', 'Second');
     const active = new DiskStructuredStore().space('shared-id');
-    await expect(active.record.read()).resolves.toMatchObject({
+    await expect(active.read()).resolves.toMatchObject({
       title: 'Second',
     });
 
-    await expect(held.record.read()).rejects.toThrow(/inactive workspace/);
+    await expect(held.read()).rejects.toThrow(/inactive workspace/);
     await expect(
-      held.record.compareAndSwap(first.version, {
-        ...first,
-        version: first.version + 1,
-        updatedAt: first.updatedAt + 1,
+      held.write({
+        expectedVersion: first.version,
+        nextRecord: {
+          ...first,
+          version: first.version + 1,
+          updatedAt: first.updatedAt + 1,
+        },
+        nodeMutations: [],
       }),
     ).rejects.toThrow(/inactive workspace/);
 
@@ -254,17 +239,19 @@ describe('CanvasStore cache boundaries', () => {
       '{broken',
       'utf8',
     );
-    await expect(held.record.read()).rejects.toThrow(/inactive workspace/);
+    await expect(held.read()).rejects.toThrow(/inactive workspace/);
   });
 
-  it('does not create a Space directory for a node write to a missing Space', () => {
+  it('does not create a Space directory for a node write to a missing Space', async () => {
     activateWorkspace('huabu-missing-node-space-');
     const handle = new DiskStructuredStore().space('missing-space');
 
-    expect(handle.nodes.writeNode('n1', note('n1', 'Orphan'))).toEqual({
-      ok: false,
-      reason: 'not-found',
-    });
+    await expect(
+      handle.nodes.put({
+        nodeId: 'n1',
+        record: note('n1', 'Orphan'),
+      }),
+    ).resolves.toEqual({ ok: false, reason: 'not-found' });
     expect(existsSync(canvasRoot('missing-space'))).toBe(false);
   });
 
@@ -312,6 +299,6 @@ describe('CanvasStore cache boundaries', () => {
 
     expect(runtime['store']).toBeUndefined();
     expect(Object.getOwnPropertyNames(nodes)).not.toContain('store');
-    expect(Object.keys(nodes)).toEqual([]);
+    expect(Object.keys(nodes)).toEqual(['canvasId']);
   });
 });

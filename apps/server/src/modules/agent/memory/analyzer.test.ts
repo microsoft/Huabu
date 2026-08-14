@@ -78,7 +78,7 @@ function createHandle(
     : vi.fn().mockResolvedValue(options.events ?? []);
   const handle = {
     canvasId: 'canvas-a',
-    record: { read: recordRead },
+    read: recordRead,
     events: { read: eventsRead },
   } as unknown as SpaceHandle;
   return { handle, recordRead, eventsRead };

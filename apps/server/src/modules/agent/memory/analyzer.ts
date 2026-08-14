@@ -85,7 +85,7 @@ export async function runAnalysisPass(
   logger?: MemoryLogger,
 ): Promise<AnalysisPassResult> {
   const handle = getStructuredStore().space(canvasId);
-  const record = await handle.record.read();
+  const record = await handle.read();
   if (!record) return { status: 'skipped', reason: 'space-not-found' };
 
   const bundle = await assembleContext(canvasId, handle, record);

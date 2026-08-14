@@ -36,7 +36,7 @@ import { buildSpatialBundle } from '../canvas/canvas-spatial.js';
 import { getStructuredStore, getCanvasStore } from '../storage/index.js';
 
 import type { ChatEnvelope } from '../agent/conversation/envelope.js';
-import type { CanvasTaskRepository } from '../storage/index.js';
+import type { SpaceTasks } from '../storage/index.js';
 import type { FastifyBaseLogger } from 'fastify';
 
 const ROOT_AGENT_HORIZONTAL_GAP = 120;
@@ -85,7 +85,7 @@ async function drainInvocation(
 }
 
 interface RunLauncherDependencies {
-  repository: (canvasId: string) => CanvasTaskRepository;
+  repository: (canvasId: string) => SpaceTasks;
   requireProfile: (profileId: string) => void;
   resolveRootPosition: (
     canvasId: string,
@@ -211,7 +211,7 @@ export class RunLauncher {
       createdAt: this.dependencies.now(),
     };
     try {
-      await repository.insertRun(run);
+      await repository.runs.create(run);
     } catch (error) {
       throw new RunLaunchError(
         'run_persistence_failed',
@@ -234,7 +234,7 @@ export class RunLauncher {
     );
 
     try {
-      await repository.updateRun(run.runId, {
+      await repository.runs.update(run.runId, {
         rootNodeId: root.nodeId,
         rootThreadId: root.threadId,
       });
@@ -273,7 +273,7 @@ export class RunLauncher {
 
     let running: TaskRunRecord;
     try {
-      running = await repository.updateRun(run.runId, {
+      running = await repository.runs.update(run.runId, {
         status: 'running',
         startedAt: this.dependencies.now(),
       });
@@ -323,7 +323,7 @@ export class RunLauncher {
   }
 
   private async resolvePosition(
-    repository: CanvasTaskRepository,
+    repository: SpaceTasks,
     task: TaskRecord,
     runId: string,
   ): Promise<Point> {
@@ -355,7 +355,7 @@ export class RunLauncher {
   }
 
   private async createRootAgent(
-    repository: CanvasTaskRepository,
+    repository: SpaceTasks,
     task: TaskRecord,
     run: TaskRunRecord,
     rootProfileId: string,
@@ -384,7 +384,7 @@ export class RunLauncher {
       let cleanupError: unknown;
       if (partial) {
         try {
-          await repository.updateRun(run.runId, {
+          await repository.runs.update(run.runId, {
             rootNodeId: partial.nodeId,
             ...(partial.threadId ? { rootThreadId: partial.threadId } : {}),
           });

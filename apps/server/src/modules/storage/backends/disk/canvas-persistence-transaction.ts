@@ -2,17 +2,16 @@
 // Licensed under the MIT license.
 
 /**
- * Failure rollback for the executor's synchronous Disk commit section.
+ * Failure rollback for Disk's ordered Space-writer implementation.
  *
- * The executor still writes through the legacy synchronous CanvasStore, so a
- * commit is three filesystem mutations rather than one storage transaction:
+ * The adapter still delegates to the synchronous CanvasStore, so a batch is
+ * three filesystem mutations rather than one storage transaction:
  * affected markdown sidecars, `space.json`, then the append-only delta log.
  * Keep a narrowly-scoped before-image of exactly those bytes so a late failure
  * (especially an append failure) does not leave a version bump or sidecar
  * mutation behind.
  *
- * This helper is intentionally Disk-era glue. It disappears when the Canvas
- * write path moves behind a backend transaction/commit port.
+ * This helper is a Disk implementation detail, not a portable guarantee.
  */
 
 import {
@@ -28,13 +27,13 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
-import { repairJsonLinesTail } from '../../utils/fs.js';
-import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
+import { repairJsonLinesTail } from '../../../../utils/fs.js';
+import { parseFrontmatter } from '../../../../utils/markdown-frontmatter.js';
 import {
   canvasJsonPath,
   deltaLogPath,
   nodesDir,
-} from '../workspace/disk/paths.js';
+} from '../../../workspace/disk/paths.js';
 
 interface FileSnapshot {
   path: string;

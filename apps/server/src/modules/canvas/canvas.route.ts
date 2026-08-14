@@ -54,18 +54,16 @@ import {
 } from '../storage/canvas-dirs.js';
 import {
   canvasBlobs,
-  createCanvas,
-  deleteCanvas,
+  createSpace,
+  deleteSpace,
   getCanvasStore,
   getStructuredStore,
-  listCanvases,
   updateNode,
   type CanvasFile,
   type UpdateNodeOutcome,
 } from '../storage/index.js';
 import { canvasRoot, nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
 import { toSafeFilename } from '../workspace/disk/naming.js';
-import { withSpaceDirHandlesReleased } from '../workspace/disk/space-dir-handles.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
@@ -117,19 +115,6 @@ interface NodeLike {
 
 function nowMs(): number {
   return Date.now();
-}
-
-/**
- * Generate a default canvas title that doesn't collide with existing ones.
- * Returns "Untitled", "Untitled (1)", "Untitled (2)", etc.
- */
-function generateDefaultTitle(existingCanvases: CanvasFile[]): string {
-  const base = 'Untitled';
-  const existingNames = new Set(existingCanvases.map((c) => c.title));
-  if (!existingNames.has(base)) return base;
-  let i = 1;
-  while (existingNames.has(`${base} (${i})`)) i++;
-  return `${base} (${i})`;
 }
 
 function toMessage(error: unknown): string {
@@ -561,7 +546,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get<{ Reply: ApiResult<ListCanvasesResponse> }>(
     '/',
     async function (_request, reply) {
-      const summaries = [...(await getStructuredStore().catalog().list())].sort(
+      const summaries = [...(await getStructuredStore().spaces().list())].sort(
         (a, b) => b.updatedAt - a.updatedAt,
       );
 
@@ -581,16 +566,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const canvasId = createId('canvas');
-    const existingCanvases = listCanvases();
-    const title = parsed.data.title ?? generateDefaultTitle(existingCanvases);
-    const canvas = createCanvas(canvasId, title);
+    const created = await createSpace(canvasId, parsed.data.title ?? undefined);
 
-    if (!canvas) {
+    if (!created.ok) {
       return reply
         .code(409)
         .send({ message: 'Canvas with this ID already exists' });
     }
 
+    const canvas = created.record;
     return reply
       .code(201)
       .send({ canvasId: canvas.canvasId, title: canvas.title });
@@ -603,21 +587,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<DeleteCanvasResponse>;
   }>('/:canvasId', async function (request, reply) {
     const { canvasId } = request.params;
-    if (isWorldCanvasId(canvasId)) {
+    const deleted = await deleteSpace(canvasId);
+
+    if (!deleted.ok && deleted.reason === 'not-found') {
+      return reply.code(404).send({ message: 'Canvas not found' });
+    }
+    if (!deleted.ok && deleted.reason === 'world-forbidden') {
       return reply
         .code(403)
         .send({ message: 'World canvas cannot be deleted' });
-    }
-    // Release any handle held inside this Space's directory across the
-    // delete: on Windows a live `fs.watch` handle makes `rmSync` fail with
-    // EPERM (same root cause as the rename path). A no-op unless the Space
-    // currently has an open external-note stream.
-    const deleted = await withSpaceDirHandlesReleased(canvasId, () =>
-      deleteCanvas(canvasId),
-    );
-
-    if (!deleted) {
-      return reply.code(404).send({ message: 'Canvas not found' });
     }
 
     return reply.send({ success: true });
@@ -640,8 +618,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<DeleteNodeResponse>;
   }>('/:canvasId/nodes/:nodeId', async function (request, reply) {
     const { canvasId, nodeId } = request.params;
-    const store = getCanvasStore(canvasId);
-    const canvas = store.read();
+    const handle = getStructuredStore().space(canvasId);
+    const canvas = await handle.read();
     if (!canvas) {
       return reply.code(404).send({
         code: 'CANVAS_NOT_FOUND',
@@ -650,7 +628,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      store.deleteNode(nodeId);
+      await handle.nodes.delete(nodeId);
     } catch (error) {
       // CanvasStoreIOError (unlink rejected by the OS, e.g. EPERM /
       // EACCES). Surface the failure so the client can revert its
@@ -697,8 +675,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    const store = getCanvasStore(canvasId);
-    const canvas = store.read();
+    const handle = getStructuredStore().space(canvasId);
+    const canvas = await handle.read();
     if (!canvas) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
@@ -796,7 +774,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       getProfile(nodeType as CanvasNodeType)?.bodyOwnership === 'authored';
     let outcome: UpdateNodeOutcome;
     try {
-      outcome = await updateNode(store, nodeId, {
+      outcome = await updateNode(handle.nodes, nodeId, {
         expectRev: isAuthored ? expectRev : undefined,
         apply,
         strictRename: labelSource === 'user',
@@ -828,29 +806,29 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
     if (outcome.status === 'rejected') {
       const result = outcome.result;
-      if (result.reason === 'conflict') {
+      if (result.reason === 'label-conflict') {
         return reply.code(409).send({
           code: 'NODE_LABEL_CONFLICT',
           message: `Another node already uses the label "${persisted?.label ?? ''}"`,
           nodeId,
-          conflictWith: result.conflictWith.filename,
+          conflictWith: result.conflictingLabel,
         } satisfies CanvasConflictResponse);
       }
-      if (result.reason === 'duplicate') {
+      if (result.reason === 'duplicate-node') {
         // Two `.md` sidecars claim this nodeId (a failed rename or an external
         // copy). Refuse rather than compound it; surface a 409 to resolve.
         request.log.warn(
-          { canvasId, nodeId, files: result.files },
+          { canvasId, nodeId, files: result.names },
           'Refusing node write: duplicate sidecars on disk',
         );
         return reply.code(409).send({
           code: 'NODE_DUPLICATE_FILES',
           message:
             `Node "${nodeId}" has multiple markdown files on disk ` +
-            `(${result.files.join(', ')}); ` +
+            `(${result.names.join(', ')}); ` +
             'resolve the duplicate before editing.',
           nodeId,
-          duplicateFiles: result.files,
+          duplicateFiles: [...result.names],
         } satisfies CanvasConflictResponse);
       }
       // `not-found` should not happen here — we just constructed the record.
@@ -888,7 +866,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       const srcForCheck =
         typeof persisted?.src === 'string' ? persisted.src : '';
       if (srcForCheck) {
-        const probe = await singleArtifactProbe(store.canvasId, srcForCheck);
+        const probe = await singleArtifactProbe(canvasId, srcForCheck);
         if (isArtifactMissing(probe, { src: srcForCheck })) {
           response.artifactMissing = true;
         }
@@ -1176,8 +1154,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       [key: string]: unknown;
     };
 
-    const store = getCanvasStore(canvasId);
-    const existing = store.read();
+    const structured = getStructuredStore();
+    const spaces = structured.spaces();
+    const handle = structured.space(canvasId);
+    const existing = await handle.read();
     const serverVersion = existing?.version ?? 0;
     if (clientVersion !== serverVersion) {
       return reply.code(409).send({
@@ -1200,35 +1180,47 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       throw error;
     }
 
-    // Title rename (and the directory rename it implies) happens
-    // before any node persistence so a 409 doesn't half-apply changes.
     const previousTitle = existing?.title ?? null;
-    const nextTitle = title ?? previousTitle;
-    if (typeof title === 'string' && title !== previousTitle) {
-      // Release any handle held inside this Space's directory across the
-      // rename: on Windows a live `fs.watch` handle makes `renameSync` fail
-      // with EPERM (see `withSpaceDirHandlesReleased`).
-      const renameResult = await withSpaceDirHandlesReleased(canvasId, () =>
-        store.renameSelf(title),
-      );
-      if (!renameResult.ok && renameResult.reason === 'conflict') {
-        return reply.code(409).send({
-          code: 'CANVAS_TITLE_CONFLICT',
-          message: `Another canvas already uses the directory name "${renameResult.conflictWith}"`,
-          conflictWith: renameResult.conflictWith,
-        } satisfies CanvasConflictResponse);
-      }
-      if (!renameResult.ok && renameResult.reason === 'forbidden') {
-        return reply
-          .code(403)
-          .send({ message: 'World canvas cannot be renamed' });
-      }
-      if (!renameResult.ok && renameResult.reason === 'fs-error') {
+    // The record write below refuses to change the title — addressing is the
+    // rename operation's business. So the title it carries must be the one
+    // rename actually installed, not the one the client asked for: the two
+    // differ whenever the backend reconciles a title against its locator, and
+    // sending the requested title would make the write throw instead of
+    // returning a business result the route can answer with.
+    let nextTitle = title ?? previousTitle;
+    const titleChange =
+      typeof title === 'string' && title !== previousTitle
+        ? { title }
+        : undefined;
+
+    if (existing !== null && titleChange !== undefined) {
+      let renamed;
+      try {
+        renamed = await spaces.rename({ canvasId, ...titleChange });
+      } catch (error) {
         request.log.error(
-          { canvasId, err: renameResult.message },
+          { canvasId, err: toMessage(error) },
           'Failed to rename canvas directory',
         );
         return reply.code(500).send({ message: 'Failed to rename canvas' });
+      }
+      if (!renamed.ok) {
+        switch (renamed.reason) {
+          case 'not-found':
+            return reply.code(404).send({ message: 'Canvas not found' });
+          case 'title-conflict':
+            return reply.code(409).send({
+              code: 'CANVAS_TITLE_CONFLICT',
+              message: `Another canvas already uses the title "${renamed.conflictingTitle ?? ''}"`,
+              conflictWith: renamed.conflictingTitle ?? '',
+            } satisfies CanvasConflictResponse);
+          case 'world-forbidden':
+            return reply
+              .code(403)
+              .send({ message: 'World canvas cannot be renamed' });
+        }
+      } else {
+        nextTitle = renamed.record.title;
       }
     }
 
@@ -1254,26 +1246,24 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       updatedAt: timestamp,
     };
 
-    // A title rename may have yielded while an async Space deletion or a
-    // competing PUT completed. Recheck immediately before the synchronous
-    // write so a stale request that initially observed a real Space cannot
-    // recreate it after deletion (or overwrite a newer version). The legacy
-    // implicit-create path remains only for requests whose initial read was
-    // genuinely absent.
-    if (existing) {
-      const current = store.read();
-      if (!current) {
-        return reply.code(404).send({ message: 'Canvas not found' });
-      }
-      if (current.version !== existing.version) {
-        return reply.code(409).send({
-          code: 'CANVAS_VERSION_CONFLICT',
-          message: 'Canvas version mismatch',
-          serverVersion: current.version,
-        } satisfies CanvasConflictResponse);
+    const outcome = await handle.write({
+      expectedVersion: serverVersion,
+      nextRecord: canvasFile,
+      nodeMutations: [],
+      allowCreate: existing === null,
+    });
+    if (!outcome.ok) {
+      switch (outcome.reason) {
+        case 'not-found':
+          return reply.code(404).send({ message: 'Canvas not found' });
+        case 'version-conflict':
+          return reply.code(409).send({
+            code: 'CANVAS_VERSION_CONFLICT',
+            message: 'Canvas version mismatch',
+            serverVersion: outcome.actualVersion,
+          } satisfies CanvasConflictResponse);
       }
     }
-    store.write(canvasFile);
 
     return reply.send({
       canvasId,
@@ -1393,7 +1383,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   }>('/:canvasId/threads/:threadId/changes', async function (request, reply) {
     const { canvasId, threadId } = request.params;
     const handle = getStructuredStore().space(canvasId);
-    if (!(await handle.record.read())) {
+    if (!(await handle.read())) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
     return reply.send({ changes: await handle.changes.read(threadId) });
@@ -1406,11 +1396,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     '/:canvasId/threads/:threadId/changes/:changeId',
     async function (request, reply) {
       const { canvasId, threadId, changeId } = request.params;
-      const store = getCanvasStore(canvasId);
-      if (!store.read()) {
+      const handle = getStructuredStore().space(canvasId);
+      if (!(await handle.read())) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
-      const removed = store.removeChange(threadId, changeId);
+      const removed = await handle.changes.delete(threadId, changeId);
       return reply.send({ removed: !!removed });
     },
   );
@@ -1424,11 +1414,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     '/:canvasId/threads/:threadId/changes/:changeId/revert',
     async function (request, reply) {
       const { canvasId, threadId, changeId } = request.params;
-      const store = getCanvasStore(canvasId);
-      if (!store.read()) {
+      const handle = getStructuredStore().space(canvasId);
+      if (!(await handle.read())) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
-      const records = store.readChanges(threadId);
+      const records = await handle.changes.read(threadId);
       const record = records.find((r) => r.id === changeId);
       if (!record) {
         return reply.send({ removed: false });
@@ -1460,7 +1450,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         );
         return reply.code(500).send({ message: 'Failed to revert change' });
       }
-      store.removeChange(threadId, changeId);
+      await handle.changes.delete(threadId, changeId);
       return reply.send({ removed: true });
     },
   );
@@ -1495,13 +1485,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      const store = getCanvasStore(canvasId);
-      if (!store.read()) {
+      const handle = getStructuredStore().space(canvasId);
+      if (!(await handle.read())) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
 
       try {
-        store.appendEvents(parsed.data.events);
+        await handle.events.append(parsed.data.events);
       } catch (error) {
         request.log.error(
           { canvasId, error },
@@ -1537,7 +1527,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const handle = getStructuredStore().space(canvasId);
-    if (!(await handle.record.read())) {
+    if (!(await handle.read())) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 

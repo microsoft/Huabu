@@ -56,7 +56,6 @@ import {
   type Delta,
 } from '@huabu/shared/canvas-engine';
 
-import { runCanvasPersistenceTransaction } from './canvas-persistence-transaction.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';
 import {
@@ -67,14 +66,14 @@ import { getLogger } from '../../utils/logger.js';
 import {
   canvasBlobs,
   getCanvasStore,
+  getStructuredStore,
   withCanvasMutex,
-  applyNodeUpdate,
   type BlobScope,
   type CanvasFile,
   type CanvasStore,
   type DeltaLogEntry,
   type NodeContent,
-  type UpdateNodeOutcome,
+  type SpaceNodeMutation,
 } from '../storage/index.js';
 
 const log = getLogger('canvas.executor');
@@ -84,23 +83,6 @@ function insertedNodeIds(deltas: readonly Delta[]): Set<string> {
     deltas.flatMap((delta) =>
       delta.type === 'INSERT_NODE' ? [delta.node.id] : [],
     ),
-  );
-}
-
-/** Executor persistence never accepts a partial/quiet sidecar outcome. */
-function requireNodeWrite(nodeId: string, outcome: UpdateNodeOutcome): void {
-  if (outcome.status === 'ok') return;
-  if (outcome.status === 'rejected') {
-    const detail =
-      outcome.result.reason === 'conflict'
-        ? `label conflicts with existing node "${outcome.result.conflictWith.filename}"`
-        : outcome.result.reason;
-    throw new Error(
-      `[canvas-executor] writeNode rejected ${nodeId}: ${detail}`,
-    );
-  }
-  throw new Error(
-    `[canvas-executor] writeNode did not commit ${nodeId}: ${outcome.status}`,
   );
 }
 
@@ -723,6 +705,7 @@ export async function executeOnServer(
 
   return await withCanvasMutex(canvasId, async () => {
     const store = getCanvasStore(canvasId);
+    const handle = getStructuredStore().space(canvasId);
     const canvas = store.read();
     if (!canvas) throw new CanvasNotFoundError(canvasId);
 
@@ -990,65 +973,55 @@ export async function executeOnServer(
     const nodeIdsToDelete = pendingEffects.deletedNodeIds.filter(
       (nodeId) => !finalNodeIds.has(nodeId),
     );
-    const affectedNodeIds = new Set<string>([
-      ...mutatedNodesToPersist.map((node) => node.id),
-      ...nodeIdsToDelete,
-    ]);
     const insertedIds = insertedNodeIds(deltas);
-    store.withValidatedNodeMutationTransaction(
-      { affectedNodeIds, insertedNodeIds: insertedIds },
-      () => {
-        runCanvasPersistenceTransaction({
-          canvasId,
-          affectedNodeIds,
-          nodeIdForFilename: (filename) => store.nodeIdForFilename(filename),
-          // Rollback restores exact record bytes without inferring a second
-          // tombstone transition; the enclosing transaction restores its
-          // captured process-local tombstone state after rollback completes.
-          resetRecordState: () => store.writeNodeMutationRollback(canvas),
-          commit: () => {
-            for (const node of mutatedNodesToPersist) {
-              const nodeContent = buildNodeContent(node);
-              if (!nodeContent) continue;
-              // Already inside `withCanvasMutex` (this whole batch holds the
-              // canvas lock), so use the non-locking core to avoid a
-              // re-entrant deadlock. The batch prestate CAS is the freshness
-              // guard.
-              const outcome = applyNodeUpdate(store, nodeContent.nodeId, {
-                apply: () => nodeContent,
-                strictRename: nodeContent['labelSource'] === 'user',
-              });
-              requireNodeWrite(nodeContent.nodeId, outcome);
-            }
-            for (const nodeId of nodeIdsToDelete) {
-              store.deleteNode(nodeId);
-            }
+    const nodeMutations: SpaceNodeMutation[] = [];
+    for (const node of mutatedNodesToPersist) {
+      const record = buildNodeContent(node);
+      if (!record) continue;
+      nodeMutations.push({
+        kind: 'put',
+        nodeId: record.nodeId,
+        record,
+        strictLabel: record['labelSource'] === 'user',
+        authoritativeInsert: insertedIds.has(record.nodeId),
+      });
+    }
+    for (const nodeId of nodeIdsToDelete) {
+      nodeMutations.push({ kind: 'delete', nodeId });
+    }
 
-            const slimNodes = stripNodesForCanvas(finalNodes);
-            const nextCanvas: CanvasFile = {
-              ...canvas,
-              version: toVersion,
-              state: {
-                ...canvas.state,
-                nodes: slimNodes,
-                edges: finalEdges,
-              },
-              updatedAt: Date.now(),
-            };
-            store.write(nextCanvas);
-            const logEntry: DeltaLogEntry = {
-              version: toVersion,
-              ts: Date.now(),
-              ...(runId ? { runId } : {}),
-              commands: commands as unknown[],
-              deltas: deltas as unknown[],
-              originator,
-            };
-            store.appendDeltaLogEntry(logEntry);
-          },
-        });
+    const nextCanvas: CanvasFile = {
+      ...canvas,
+      version: toVersion,
+      state: {
+        ...canvas.state,
+        nodes: stripNodesForCanvas(finalNodes),
+        edges: finalEdges,
       },
-    );
+      updatedAt: Date.now(),
+    };
+    const logEntry: DeltaLogEntry = {
+      version: toVersion,
+      ts: Date.now(),
+      ...(runId ? { runId } : {}),
+      commands: commands as unknown[],
+      deltas: deltas as unknown[],
+      originator,
+    };
+    const write = await handle.write({
+      expectedVersion: fromVersion,
+      nextRecord: nextCanvas,
+      nodeMutations,
+      delta: logEntry,
+    });
+    if (!write.ok) {
+      if (write.reason === 'not-found') {
+        throw new CanvasNotFoundError(canvasId);
+      }
+      throw new Error(
+        `[canvas-executor] ordered Space write rejected: ${write.reason}`,
+      );
+    }
 
     // Derive review records (ACP change cards) only when asked. Edge
     // endpoint labels are resolved against the post-state nodes.
@@ -1076,7 +1049,10 @@ export async function executeOnServer(
     let broadcastChanges = changes;
     if (originator.threadId && changes && changes.length > 0) {
       try {
-        broadcastChanges = store.appendChanges(originator.threadId, changes);
+        broadcastChanges = await handle.changes.append(
+          originator.threadId,
+          changes,
+        );
       } catch {
         /* sidecar persistence is best-effort — never fail the write */
       }
@@ -1148,6 +1124,7 @@ export async function applyDeltasOnServer(input: {
 
   return await withCanvasMutex(canvasId, async () => {
     const store = getCanvasStore(canvasId);
+    const handle = getStructuredStore().space(canvasId);
     const canvas = store.read();
     if (!canvas) throw new CanvasNotFoundError(canvasId);
 
@@ -1203,57 +1180,57 @@ export async function applyDeltasOnServer(input: {
         deletedNodeIds.push(d.node.id);
       }
     }
-    const affectedNodeIds = new Set<string>([
-      ...mutatedNodes.map((node) => node.id),
-      ...deletedNodeIds,
-    ]);
     const insertedIds = insertedNodeIds(deltas);
-    store.withValidatedNodeMutationTransaction(
-      { affectedNodeIds, insertedNodeIds: insertedIds },
-      () => {
-        runCanvasPersistenceTransaction({
-          canvasId,
-          affectedNodeIds,
-          nodeIdForFilename: (filename) => store.nodeIdForFilename(filename),
-          resetRecordState: () => store.writeNodeMutationRollback(canvas),
-          commit: () => {
-            for (const d of deltas) {
-              if (d.type === 'INSERT_NODE' || d.type === 'REPLACE_NODE') {
-                const node = d.type === 'INSERT_NODE' ? d.node : d.next;
-                const content = buildNodeContent(node);
-                if (content) {
-                  // Inside `withCanvasMutex` already → non-locking core.
-                  const outcome = applyNodeUpdate(store, content.nodeId, {
-                    apply: () => content,
-                    strictRename: content['labelSource'] === 'user',
-                  });
-                  requireNodeWrite(content.nodeId, outcome);
-                }
-              } else if (d.type === 'DELETE_NODE') {
-                store.deleteNode(d.node.id);
-              }
-            }
+    const nodeMutations: SpaceNodeMutation[] = [];
+    for (const d of deltas) {
+      if (d.type === 'INSERT_NODE' || d.type === 'REPLACE_NODE') {
+        const node = d.type === 'INSERT_NODE' ? d.node : d.next;
+        const record = buildNodeContent(node);
+        if (record) {
+          nodeMutations.push({
+            kind: 'put',
+            nodeId: record.nodeId,
+            record,
+            strictLabel: record['labelSource'] === 'user',
+            authoritativeInsert: insertedIds.has(record.nodeId),
+          });
+        }
+      } else if (d.type === 'DELETE_NODE') {
+        nodeMutations.push({ kind: 'delete', nodeId: d.node.id });
+      }
+    }
 
-            const slimNodes = stripNodesForCanvas(finalNodes);
-            store.write({
-              ...canvas,
-              version: toVersion,
-              state: { ...canvas.state, nodes: slimNodes, edges: finalEdges },
-              updatedAt: Date.now(),
-            });
-
-            store.appendDeltaLogEntry({
-              version: toVersion,
-              ts: Date.now(),
-              ...(runId ? { runId } : {}),
-              commands: [],
-              deltas: deltas as unknown[],
-              originator,
-            });
-          },
-        });
+    const nextRecord: CanvasFile = {
+      ...canvas,
+      version: toVersion,
+      state: {
+        ...canvas.state,
+        nodes: stripNodesForCanvas(finalNodes),
+        edges: finalEdges,
       },
-    );
+      updatedAt: Date.now(),
+    };
+    const write = await handle.write({
+      expectedVersion: fromVersion,
+      nextRecord,
+      nodeMutations,
+      delta: {
+        version: toVersion,
+        ts: Date.now(),
+        ...(runId ? { runId } : {}),
+        commands: [],
+        deltas: deltas as unknown[],
+        originator,
+      },
+    });
+    if (!write.ok) {
+      if (write.reason === 'not-found') {
+        throw new CanvasNotFoundError(canvasId);
+      }
+      throw new Error(
+        `[canvas-executor] ordered Space write rejected: ${write.reason}`,
+      );
+    }
 
     return {
       canvasId,

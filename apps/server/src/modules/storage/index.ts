@@ -18,11 +18,8 @@
 
 export {
   CanvasStore,
-  createCanvas,
-  deleteCanvas,
   forgetCanvasStore,
   getCanvasStore,
-  listCanvases,
   resetStorageCache,
 } from './compatibility/canvas.js';
 export type { RenameResult, RenameSelfResult } from './compatibility/canvas.js';
@@ -32,11 +29,7 @@ export {
   isWorldCanvasId,
   requireWorldCanvasId,
 } from '../workspace/disk/canvas-dirs.js';
-export {
-  withCanvasMutex,
-  updateNode,
-  applyNodeUpdate,
-} from '../canvas/write-coordinator.js';
+export { withCanvasMutex, updateNode } from '../canvas/write-coordinator.js';
 export type {
   UpdateNodeOptions,
   UpdateNodeOutcome,
@@ -52,7 +45,9 @@ export type {
 
 export {
   canvasBlobs,
+  createSpace,
   createStorage,
+  deleteSpace,
   getBlobStore,
   getStorage,
   getStructuredStore,
@@ -60,7 +55,7 @@ export {
   setStorageForTesting,
   storageHealth,
 } from './storage.js';
-export type { Storage } from './storage.js';
+export type { SpaceDeleteOutcome, Storage } from './storage.js';
 export {
   parseStorageProfile,
   StorageProfileError,
@@ -80,16 +75,28 @@ export type {
 } from './ports/blob.js';
 export type { StorageHealth } from './ports/common.js';
 export type {
-  CanvasChangeRepository,
-  CanvasDeltaRepository,
-  CanvasEventRepository,
-  CanvasTaskRepository,
-  LegacyNodeStore,
   NewCanvasEvent,
-  NodeWriteResult,
+  NodeDeleteResult,
+  NodePutInput,
+  NodePutResult,
+  NodeSnapshot,
+  SpaceBeginDeleteResult,
+  SpaceChanges,
+  SpaceCreateInput,
+  SpaceCreateResult,
+  SpaceDeleteFinishResult,
+  SpaceDeleteInput,
+  SpaceDeleteSession,
+  SpaceEvents,
   SpaceHandle,
-  SpaceCatalogRepository,
+  SpaceNodeMutation,
+  SpaceNodes,
+  SpaceRenameInput,
+  SpaceRenameResult,
   SpaceRepository,
+  SpaceTaskRuns,
+  SpaceTasks,
+  SpaceWriteInput,
   SpaceWriteResult,
   StructuredBackendKind,
   StructuredStore,

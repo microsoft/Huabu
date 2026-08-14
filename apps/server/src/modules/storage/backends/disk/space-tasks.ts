@@ -12,15 +12,16 @@ import {
   type TaskStoreSnapshot,
 } from '@huabu/shared';
 
-import { assertSpaceMutationAllowed } from './legacy/space-lifecycle-admission.js';
-import { readDiskSpaceRecord } from './space-repository.js';
+import { readDiskSpaceRecord } from './space-record.js';
 import { atomicWriteJson, readJsonStrict } from '../../../../utils/fs.js';
 import { tasksPath } from '../../../workspace/disk/paths.js';
 import { getWorkspacePath } from '../../../workspace.js';
+import { assertSpaceMutationAllowed } from '../../space-lifecycle-admission.js';
 
 import type { CanvasStore } from './legacy/canvas-store.js';
 import type {
-  CanvasTaskRepository,
+  SpaceTaskRuns,
+  SpaceTasks,
   TaskRunUpdate,
 } from '../../ports/structured.js';
 
@@ -87,45 +88,60 @@ function readTaskStore(canvasId: string): TaskStoreSnapshot {
   return parsed.data;
 }
 
-export class DiskCanvasTaskRepository implements CanvasTaskRepository {
+/**
+ * Disk implementation of the Task ledger.
+ *
+ * Tasks and Runs share one file (`tasks.json`) and one mutation mutex, so the
+ * `runs` facade is a frozen view over this same object rather than a second
+ * store: the invariant that a Run references an existing Task is checked
+ * against the snapshot both writers read.
+ */
+export class DiskSpaceTasks implements SpaceTasks {
+  readonly runs: SpaceTaskRuns;
+
   readonly #store: CanvasStore;
   readonly #workspacePath: string;
 
   constructor(store: CanvasStore) {
     this.#store = store;
     this.#workspacePath = path.resolve(getWorkspacePath());
+    this.runs = Object.freeze({
+      create: (run: TaskRunRecord) => this.#createRun(run),
+      update: (runId: string, update: TaskRunUpdate) =>
+        this.#updateRun(runId, update),
+    });
   }
 
-  private assertActiveWorkspace(): void {
+  #assertActiveWorkspace(): void {
     if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
       throw new Error(
-        `Canvas Task repository(${this.#store.canvasId}) belongs to an inactive workspace`,
+        `Space Tasks(${this.#store.canvasId}) belong to an inactive workspace`,
       );
     }
   }
 
-  private requireSpace(): void {
+  #requireSpace(): void {
     assertSpaceMutationAllowed(this.#workspacePath, this.#store.canvasId);
     if (!readDiskSpaceRecord(this.#store)) {
       throw new Error(
-        `Canvas Task repository(${this.#store.canvasId}) cannot write a missing Space`,
+        `Space Tasks(${this.#store.canvasId}) cannot write a missing Space`,
       );
     }
   }
 
   async read(): Promise<TaskStoreSnapshot> {
-    this.assertActiveWorkspace();
+    this.#assertActiveWorkspace();
     return readTaskStore(this.#store.canvasId);
   }
 
-  async insertTask(task: TaskRecord): Promise<void> {
+  async create(task: TaskRecord): Promise<void> {
     const parsed = taskRecordSchema.safeParse(task);
     if (!parsed.success || parsed.data.canvasId !== this.#store.canvasId) {
       throw new TypeError(
         `Invalid Task record for Canvas ${this.#store.canvasId}`,
       );
     }
-    await this.mutate((snapshot) => {
+    await this.#mutate((snapshot) => {
       if (
         snapshot.tasks.some(
           (candidate) => candidate.taskId === parsed.data.taskId,
@@ -137,7 +153,7 @@ export class DiskCanvasTaskRepository implements CanvasTaskRepository {
     });
   }
 
-  async insertRun(run: TaskRunRecord): Promise<void> {
+  async #createRun(run: TaskRunRecord): Promise<void> {
     const parsed = taskRunRecordSchema.safeParse(run);
     if (
       !parsed.success ||
@@ -147,7 +163,7 @@ export class DiskCanvasTaskRepository implements CanvasTaskRepository {
         `Invalid Run record for Canvas ${this.#store.canvasId}`,
       );
     }
-    await this.mutate((snapshot) => {
+    await this.#mutate((snapshot) => {
       if (
         snapshot.runs.some((candidate) => candidate.runId === parsed.data.runId)
       ) {
@@ -164,11 +180,11 @@ export class DiskCanvasTaskRepository implements CanvasTaskRepository {
     });
   }
 
-  async updateRun(
+  async #updateRun(
     runId: string,
     update: TaskRunUpdate,
   ): Promise<TaskRunRecord> {
-    return this.mutate((snapshot) => {
+    return this.#mutate((snapshot) => {
       const index = snapshot.runs.findIndex((run) => run.runId === runId);
       if (index < 0) throw new Error(`Run ${runId} does not exist`);
       const parsed = taskRunRecordSchema.safeParse({
@@ -183,14 +199,12 @@ export class DiskCanvasTaskRepository implements CanvasTaskRepository {
     });
   }
 
-  private async mutate<T>(
-    apply: (snapshot: TaskStoreSnapshot) => T,
-  ): Promise<T> {
-    this.assertActiveWorkspace();
+  async #mutate<T>(apply: (snapshot: TaskStoreSnapshot) => T): Promise<T> {
+    this.#assertActiveWorkspace();
     const key = `${this.#workspacePath}\0${this.#store.canvasId}`;
     return withTaskMutationMutex(key, () => {
-      this.assertActiveWorkspace();
-      this.requireSpace();
+      this.#assertActiveWorkspace();
+      this.#requireSpace();
       const current = readTaskStore(this.#store.canvasId);
       const next: TaskStoreSnapshot = {
         version: 1,

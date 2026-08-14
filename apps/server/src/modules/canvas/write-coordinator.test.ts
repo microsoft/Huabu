@@ -1,59 +1,78 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/**
- * `updateNode` — the serialized, rev-CAS-guarded node-write primitive.
- *
- * These tests exercise the coordinator's mechanism in isolation with a fake
- * store (no disk): the rev-CAS gate, the `apply` reconciliation, no-op /
- * rejected outcomes, and — crucially — that concurrent updates to the same
- * canvas are serialized (the second sees the first's write).
- */
-
 import { describe, expect, it } from 'vitest';
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
-import { applyNodeUpdate, updateNode } from './write-coordinator.js';
+import { updateNode } from './write-coordinator.js';
 
 import type {
-  CanvasStore,
   NodeContent,
-  RenameResult,
+  NodePutInput,
+  NodePutResult,
+  SpaceNodes,
+  NodeSnapshot,
 } from '../storage/index.js';
 
-/** A minimal in-memory stand-in for the fields `updateNode` touches. */
-function fakeStore(canvasId = 'c1') {
+function storageRevisionOf(record: NodeContent | null): string | null {
+  return record === null ? null : JSON.stringify(record);
+}
+
+function fakeRepository(canvasId = 'c1') {
   let record: NodeContent | null = null;
   let suppressed = false;
-  let writeImpl: (content: NodeContent) => RenameResult = (content) => ({
-    ok: true,
-    filename: `${content.label ?? 'Untitled'}.md`,
-    label: content.label,
-  });
+  let putImpl: ((input: NodePutInput) => NodePutResult | undefined) | null =
+    null;
 
-  const store = {
+  const nodes: SpaceNodes = {
     canvasId,
-    readNode: () => record,
-    isNodeWriteSuppressed: () => suppressed,
-    writeNode: (_id: string, content: NodeContent) => {
-      const result = writeImpl(content);
-      if (result.ok) record = content;
+    async read(): Promise<NodeSnapshot | null> {
+      if (record === null) return null;
+      const revision = storageRevisionOf(record);
+      if (revision === null) throw new Error('test storage token is missing');
+      return { record, revision };
+    },
+    async put(input) {
+      if (suppressed) return { ok: false, reason: 'write-suppressed' };
+      const currentRevision = storageRevisionOf(record);
+      if (
+        input.expectedRevision !== undefined &&
+        input.expectedRevision !== currentRevision
+      ) {
+        return {
+          ok: false,
+          reason: 'revision-conflict',
+          currentRevision,
+        };
+      }
+      const custom = putImpl?.(input);
+      if (custom !== undefined) return custom;
+      record = input.record;
+      const revision = storageRevisionOf(record);
+      if (revision === null) throw new Error('test storage token is missing');
+      return { ok: true, record, revision };
+    },
+    async delete() {
+      const result = record === null ? 'absent' : 'deleted';
+      record = null;
       return result;
     },
-  } as unknown as CanvasStore;
+  };
 
   return {
-    store,
+    nodes,
     get: () => record,
-    seed: (r: NodeContent | null) => {
-      record = r;
+    seed: (next: NodeContent | null) => {
+      record = next;
     },
-    setSuppressed: (v: boolean) => {
-      suppressed = v;
+    setSuppressed: (value: boolean) => {
+      suppressed = value;
     },
-    onWrite: (fn: (content: NodeContent) => RenameResult) => {
-      writeImpl = fn;
+    onPut: (
+      implementation: (input: NodePutInput) => NodePutResult | undefined,
+    ) => {
+      putImpl = implementation;
     },
   };
 }
@@ -62,133 +81,151 @@ function note(content: string, label: string | null = 'Note'): NodeContent {
   return { nodeId: 'n1', type: 'note', label, content };
 }
 
-describe('updateNode — serialized rev-CAS node write', () => {
-  it('writes and returns the new rev + persisted label on success', async () => {
-    const s = fakeStore();
-    const out = await updateNode(s.store, 'n1', { apply: () => note('hello') });
+describe('updateNode', () => {
+  it('writes and returns the persisted revision and label', async () => {
+    const fixture = fakeRepository();
+    const result = await updateNode(fixture.nodes, 'n1', {
+      apply: () => note('hello'),
+    });
 
-    expect(out.status).toBe('ok');
-    if (out.status !== 'ok') throw new Error('unreachable');
-    expect(out.rev).toBe(nodeRevisionOf({ content: 'hello' }));
-    expect(out.label).toBe('Note');
-    expect(s.get()?.content).toBe('hello');
+    expect(result).toEqual({
+      status: 'ok',
+      rev: nodeRevisionOf({ content: 'hello' }),
+      label: 'Note',
+    });
+    expect(fixture.get()?.content).toBe('hello');
   });
 
-  it('refuses a stale expectRev without writing (rev-conflict, no clobber)', async () => {
-    const s = fakeStore();
-    s.seed(note('disk-newer'));
+  it('refuses a stale revision without invoking the mutation', async () => {
+    const fixture = fakeRepository();
+    fixture.seed(note('disk-newer'));
+    let applied = false;
 
-    const out = await updateNode(s.store, 'n1', {
+    const result = await updateNode(fixture.nodes, 'n1', {
       expectRev: nodeRevisionOf({ content: 'stale' }),
-      apply: () => note('would-clobber'),
-    });
-
-    expect(out.status).toBe('rev-conflict');
-    if (out.status !== 'rev-conflict') throw new Error('unreachable');
-    expect(out.currentRev).toBe(nodeRevisionOf({ content: 'disk-newer' }));
-    // The newer on-disk record is preserved.
-    expect(s.get()?.content).toBe('disk-newer');
-  });
-
-  it('writes when expectRev matches the current on-disk rev', async () => {
-    const s = fakeStore();
-    s.seed(note('v1'));
-
-    const out = await updateNode(s.store, 'n1', {
-      expectRev: nodeRevisionOf({ content: 'v1' }),
-      apply: (cur) => note((cur?.content ?? '') + '+v2'),
-    });
-
-    expect(out.status).toBe('ok');
-    expect(s.get()?.content).toBe('v1+v2');
-  });
-
-  it('is a no-op when apply returns null', async () => {
-    const s = fakeStore();
-    s.seed(note('unchanged'));
-
-    const out = await updateNode(s.store, 'n1', { apply: () => null });
-
-    expect(out.status).toBe('noop');
-    expect(s.get()?.content).toBe('unchanged');
-  });
-
-  it('surfaces a writeNode rejection verbatim', async () => {
-    const s = fakeStore();
-    s.onWrite(() => ({
-      ok: false,
-      reason: 'conflict',
-      conflictWith: { id: 'other', filename: 'Taken.md' },
-    }));
-
-    const out = await updateNode(s.store, 'n1', {
-      apply: () => note('x', 'Taken'),
-    });
-
-    expect(out.status).toBe('rejected');
-    if (out.status !== 'rejected') throw new Error('unreachable');
-    expect(out.result.reason).toBe('conflict');
-  });
-
-  it('drops a write for a tombstoned node without invoking apply', async () => {
-    const s = fakeStore();
-    s.seed(note('on-disk'));
-    s.setSuppressed(true);
-    let applyCalled = false;
-
-    const out = await updateNode(s.store, 'n1', {
       apply: () => {
-        applyCalled = true;
-        return note('late-resurrection');
+        applied = true;
+        return note('would-clobber');
       },
     });
 
-    expect(out.status).toBe('skipped-deleted');
-    // `apply` must not run — callers derive their result from its side
-    // effects, so a suppressed write has to be a true no-op.
-    expect(applyCalled).toBe(false);
-    // Nothing was written; the on-disk record is untouched.
-    expect(s.get()?.content).toBe('on-disk');
-  });
-
-  it('serializes concurrent updates — the second sees the first write', async () => {
-    const s = fakeStore();
-
-    const a = updateNode(s.store, 'n1', { apply: () => note('A') });
-    const b = updateNode(s.store, 'n1', {
-      apply: (cur) => note((cur?.content ?? '') + 'B'),
+    expect(result).toEqual({
+      status: 'rev-conflict',
+      currentRev: nodeRevisionOf({ content: 'disk-newer' }),
     });
-    await Promise.all([a, b]);
-
-    // If the two interleaved, B would have read `null` and written just 'B'.
-    expect(s.get()?.content).toBe('AB');
+    expect(applied).toBe(false);
+    expect(fixture.get()?.content).toBe('disk-newer');
   });
-});
 
-describe('applyNodeUpdate — non-locking core (caller holds the lock)', () => {
-  it('runs the read → CAS → apply → write synchronously', () => {
-    const s = fakeStore();
-    s.seed(note('v1'));
+  it('writes when the expected revision matches', async () => {
+    const fixture = fakeRepository();
+    fixture.seed(note('v1'));
 
-    const out = applyNodeUpdate(s.store, 'n1', {
+    const result = await updateNode(fixture.nodes, 'n1', {
       expectRev: nodeRevisionOf({ content: 'v1' }),
-      apply: (cur) => note((cur?.content ?? '') + '+v2'),
+      apply: (current) => note(`${current?.content ?? ''}+v2`),
     });
 
-    expect(out.status).toBe('ok');
-    expect(s.get()?.content).toBe('v1+v2');
+    expect(result.status).toBe('ok');
+    expect(fixture.get()?.content).toBe('v1+v2');
   });
 
-  it('refuses a stale expectRev (rev-conflict) without writing', () => {
-    const s = fakeStore();
-    s.seed(note('disk'));
-
-    const out = applyNodeUpdate(s.store, 'n1', {
-      expectRev: nodeRevisionOf({ content: 'stale' }),
-      apply: () => note('would-clobber'),
+  it('reports a full-record CAS conflict once, in public content revisions', async () => {
+    const fixture = fakeRepository();
+    fixture.seed(note('same body', 'Original label'));
+    let calls = 0;
+    fixture.onPut(() => {
+      calls += 1;
+      fixture.seed({
+        ...note('concurrent body', 'Concurrent label'),
+        summary: 'concurrent metadata',
+      });
+      return {
+        ok: false,
+        reason: 'revision-conflict',
+        currentRevision: storageRevisionOf(fixture.get()),
+      };
     });
 
-    expect(out.status).toBe('rev-conflict');
-    expect(s.get()?.content).toBe('disk');
+    const result = await updateNode(fixture.nodes, 'n1', {
+      expectRev: nodeRevisionOf({ content: 'same body' }),
+      apply: (current) => ({
+        ...(current ?? note('same body')),
+        content: 'next body',
+      }),
+    });
+
+    // One pass, no retry: the mutex plus a synchronous adapter mean nothing
+    // can move the record mid-operation, so re-running `apply` would be a
+    // merge policy invented for a backend that does not exist.
+    expect(calls).toBe(1);
+    // The conflict is reported as a public content revision, never as the
+    // opaque storage token the repository refused on.
+    expect(result).toEqual({
+      status: 'rev-conflict',
+      currentRev: nodeRevisionOf({ content: 'concurrent body' }),
+    });
+    expect(fixture.get()).toMatchObject({ content: 'concurrent body' });
+  });
+
+  it('does not call put when apply returns null', async () => {
+    const fixture = fakeRepository();
+    fixture.seed(note('unchanged'));
+    let putCalled = false;
+    fixture.onPut(() => {
+      putCalled = true;
+      return { ok: false, reason: 'not-found' };
+    });
+
+    await expect(
+      updateNode(fixture.nodes, 'n1', { apply: () => null }),
+    ).resolves.toEqual({ status: 'noop' });
+    expect(putCalled).toBe(false);
+  });
+
+  it('surfaces a portable label rejection', async () => {
+    const fixture = fakeRepository();
+    fixture.onPut(() => ({
+      ok: false,
+      reason: 'label-conflict',
+      conflictingNodeId: 'other',
+      conflictingLabel: 'Taken',
+    }));
+
+    const result = await updateNode(fixture.nodes, 'n1', {
+      apply: () => note('body', 'Taken'),
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      result: { reason: 'label-conflict' },
+    });
+  });
+
+  it('does not persist a write suppressed after deletion', async () => {
+    const fixture = fakeRepository();
+    fixture.seed(note('on-disk'));
+    fixture.setSuppressed(true);
+
+    const result = await updateNode(fixture.nodes, 'n1', {
+      apply: () => note('late-resurrection'),
+    });
+
+    expect(result).toEqual({ status: 'skipped-deleted' });
+    expect(fixture.get()?.content).toBe('on-disk');
+  });
+
+  it('serializes concurrent updates so the second observes the first', async () => {
+    const fixture = fakeRepository();
+
+    const first = updateNode(fixture.nodes, 'n1', {
+      apply: () => note('A'),
+    });
+    const second = updateNode(fixture.nodes, 'n1', {
+      apply: (current) => note(`${current?.content ?? ''}B`),
+    });
+    await Promise.all([first, second]);
+
+    expect(fixture.get()?.content).toBe('AB');
   });
 });

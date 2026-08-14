@@ -13,7 +13,7 @@
  * field assignments over an object the existing cache returns, so there is
  * nothing to gain by caching it twice.
  *
- * Because the record, log-family, and node adapters all wrap the *same* legacy
+ * Because the record, log-backed, and node adapters all wrap the *same* legacy
  * object the compatibility facade resolves, a write through either view is
  * immediately observed through the other. That identity holds for as long as
  * the underlying cache entry lives, which is a bounded LRU — it is a
@@ -21,12 +21,13 @@
  * Space has one long-lived instance.
  */
 
-import { createDiskCanvasLogRepositories } from './canvas-log-repository.js';
 import { getCanvasStore } from './legacy/canvas-store-cache.js';
-import { DiskLegacyNodeStore } from './legacy-node-store.js';
-import { DiskSpaceCatalogRepository } from './space-catalog-repository.js';
+import { createDiskSpaceLogs } from './space-logs.js';
+import { DiskSpaceNodes } from './space-nodes.js';
+import { createDiskSpaceRecordReader } from './space-record.js';
 import { DiskSpaceRepository } from './space-repository.js';
-import { DiskCanvasTaskRepository } from './task-repository.js';
+import { DiskSpaceTasks } from './space-tasks.js';
+import { createDiskSpaceWrite } from './space-write.js';
 
 import type { StorageHealth } from '../../ports/common.js';
 import type { SpaceHandle, StructuredStore } from '../../ports/structured.js';
@@ -36,7 +37,7 @@ export class DiskStructuredStore implements StructuredStore {
 
   async init(): Promise<void> {
     // The workspace directory is prepared by `workspace-prepare.ts`; Space
-    // directories are created on demand by `createCanvas`.
+    // directories are created on demand by the lifecycle repository.
   }
 
   async health(): Promise<StorageHealth> {
@@ -45,20 +46,22 @@ export class DiskStructuredStore implements StructuredStore {
 
   async close(): Promise<void> {}
 
-  catalog(): DiskSpaceCatalogRepository {
-    return new DiskSpaceCatalogRepository();
+  spaces(): DiskSpaceRepository {
+    return new DiskSpaceRepository();
   }
 
   space(canvasId: string): SpaceHandle {
     // `getCanvasStore` validates the id and owns the instance cache.
     const store = getCanvasStore(canvasId);
-    const logRepositories = createDiskCanvasLogRepositories(store);
+    const { events, changes } = createDiskSpaceLogs(store);
     return {
       canvasId: store.canvasId,
-      record: new DiskSpaceRepository(store),
-      ...logRepositories,
-      tasks: new DiskCanvasTaskRepository(store),
-      nodes: new DiskLegacyNodeStore(store),
+      read: createDiskSpaceRecordReader(store),
+      write: createDiskSpaceWrite(store),
+      nodes: new DiskSpaceNodes(store),
+      changes,
+      tasks: new DiskSpaceTasks(store),
+      events,
     };
   }
 }
