@@ -206,19 +206,17 @@ describe('intrinsicToLayoutHeight', () => {
     );
   });
 
-  it('adds the node shell inset after scaling, not before', () => {
-    // The shell border lives outside the scaled container, so doubling
-    // the width doubles the content but not the 6px chrome. The same
-    // 6px also narrows the content box, which is why the scale at the
-    // reference width is 394/400 rather than 1.
-    expect(intrinsicToLayoutHeight(200, 'note', 400)).toBe(204);
-    expect(intrinsicToLayoutHeight(200, 'note', 800)).toBe(404);
+  it('adds fixed title and shell chrome after scaling, not before', () => {
+    // The 32px title and 6px shell live outside the scaled body. The shell
+    // still narrows the content box, so the default-width scale is 394/400.
+    expect(intrinsicToLayoutHeight(200, 'note', 400)).toBe(236);
+    expect(intrinsicToLayoutHeight(200, 'note', 800)).toBe(436);
   });
 
   it('applies the minimum before scaling', () => {
-    // Note minimum is 50 unscaled; at half width the scale clamp is 0.5.
-    expect(intrinsicToLayoutHeight(10, 'note', 400)).toBe(56);
-    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(32);
+    // Note minimum is 50 unscaled; title and shell chrome are then added.
+    expect(intrinsicToLayoutHeight(10, 'note', 400)).toBe(88);
+    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(64);
   });
 
   it('does not scale types without a reference width', () => {
@@ -233,7 +231,7 @@ describe('intrinsicToLayoutHeight', () => {
     // would render short. Semantic zoom, not this, is what keeps a tiny
     // note readable — it swaps the body for a placeholder.
     expect(contentScaleFor(getHeightPolicy('note'), 100)).toBeCloseTo(0.235);
-    expect(intrinsicToLayoutHeight(200, 'note', 100)).toBe(56);
+    expect(intrinsicToLayoutHeight(200, 'note', 100)).toBe(88);
   });
 
   it('floors the scale for manual types, whose box the user owns', () => {
@@ -391,8 +389,8 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    // 260 content, scaled by 394/400, plus 6px shell chrome, quantized.
-    expect((result.style as { height: number }).height).toBe(264);
+    // 260 content, scaled by 394/400, plus title and shell chrome, quantized.
+    expect((result.style as { height: number }).height).toBe(296);
   });
 
   it('materializes a stale hint too — a seed beats a collapse', () => {
@@ -406,7 +404,7 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    expect((result.style as { height: number }).height).toBe(264);
+    expect((result.style as { height: number }).height).toBe(296);
   });
 
   it('leaves fixed nodes alone', () => {
@@ -448,7 +446,7 @@ describe('materializeAutoHeight', () => {
         },
       }),
     );
-    expect(result.measured?.height).toBe(264);
+    expect(result.measured?.height).toBe(296);
     expect(result.measured?.width).toBe(400);
   });
 

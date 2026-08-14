@@ -7,7 +7,11 @@ import { ChevronsDown, Fullscreen } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { autoHeightKey } from '@huabu/shared/canvas-engine';
+import {
+  NOTE_MIN_HEIGHT,
+  NOTE_TITLE_HEIGHT,
+  autoHeightKey,
+} from '@huabu/shared/canvas-engine';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Loading } from '@/components/Common/Loading';
@@ -151,6 +155,10 @@ export const NoteNode = memo(
     );
 
     const markdown = typeof data.content === 'string' ? data.content : '';
+    const title =
+      typeof data.label === 'string' && data.label.trim()
+        ? data.label.trim()
+        : t('node.untitled');
 
     // Measurement is shared with the offscreen measurer via
     // `readNoteIntrinsicHeight`, so the two surfaces cannot answer
@@ -403,6 +411,7 @@ export const NoteNode = memo(
         selected={selected}
         actions={isContentMissing ? undefined : NoteActions}
         keepAspectRatio={false}
+        minHeight={NOTE_MIN_HEIGHT}
         // Active drop-target highlight: thick `--info-light` ring on
         // the wrapper's true outer edge plus a translucent
         // `--info-light` wash over the whole node — same hue family
@@ -412,29 +421,44 @@ export const NoteNode = memo(
           isDropTarget ? 'ring-info-light bg-info-light/60 ring-4' : undefined
         }
       >
-        {isContentMissing ? (
-          <MissingFileBanner nodeId={id} />
-        ) : (
-          <>
-            <div
-              className={clsx(
-                'relative h-full w-full overflow-hidden',
-                !hasAccent && 'bg-surface',
-              )}
-              onDragEnter={handleNoteDragEnter}
-              onDragOver={handleNoteDragOver}
-              onDragLeave={handleNoteDragLeave}
-              onDrop={handleNoteDrop}
-            >
+        <div
+          className={clsx(
+            'relative flex h-full w-full flex-col overflow-hidden',
+            !hasAccent && 'bg-surface',
+          )}
+          onDragEnter={handleNoteDragEnter}
+          onDragOver={handleNoteDragOver}
+          onDragLeave={handleNoteDragLeave}
+          onDrop={handleNoteDrop}
+        >
+          <div
+            data-note-title=""
+            className="border-edge-default flex shrink-0 items-center border-b px-2"
+            style={{ height: NOTE_TITLE_HEIGHT }}
+          >
+            <span className="text-fg-default min-w-0 truncate text-sm font-medium">
+              {title}
+            </span>
+          </div>
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            {isContentMissing ? (
+              <MissingFileBanner nodeId={id} />
+            ) : (
               <div
-                style={{
-                  transform: `scale(${scale})`,
-                  transformOrigin: 'top left',
-                  width: `${100 / scale}%`,
-                  height: `${100 / scale}%`,
-                }}
+                className={clsx(
+                  'relative h-full w-full overflow-hidden',
+                  !hasAccent && 'bg-surface',
+                )}
               >
-                {/*
+                <div
+                  style={{
+                    transform: `scale(${scale})`,
+                    transformOrigin: 'top left',
+                    width: `${100 / scale}%`,
+                    height: `${100 / scale}%`,
+                  }}
+                >
+                  {/*
                   This card surface is render-only — the expanded editor
                   opened via the toolbar's Expand button is where the
                   user actually types. `MilkdownPreview` mounts Milkdown
@@ -442,75 +466,75 @@ export const NoteNode = memo(
                   KaTeX styles are already scoped under `.milkdown` (see
                   `milkdown-overrides.css`) so no extra isolation is
                   required.
-                */}
-                <div
-                  ref={previewHostRef}
-                  // Stable hook for the auto-height end-to-end assertion.
-                  // The box this marks is the one a measurement is taken
-                  // from, so a test that checks "content fits" has to
-                  // find exactly it — not a utility class that a restyle
-                  // could rename out from under it.
-                  data-note-content-host=""
-                  className={clsx(
-                    NOTE_CONTENT_HOST_CLASS,
-                    'h-full',
-                    !hasAccent && 'bg-surface',
-                  )}
-                >
-                  {hydrated ? (
-                    <MilkdownPreview
-                      markdown={markdown}
-                      canvasId={canvasId ?? undefined}
-                      className="pointer-events-none w-full select-none"
-                    />
-                  ) : (
-                    // Lightweight placeholder while the editor mount is
-                    // deferred. The host already constrains to the node's
-                    // layout height in both modes, so filling it is enough —
-                    // the footprint comes from `style.height`, never from
-                    // anything measured here.
-                    <div
-                      className="flex h-full w-full items-center justify-center"
-                      aria-hidden
-                    >
-                      {/* No shimmer in minimal LOD — the content is
+                  */}
+                  <div
+                    ref={previewHostRef}
+                    // Stable hook for the auto-height end-to-end assertion.
+                    // The box this marks is the one a measurement is taken
+                    // from, so a test that checks "content fits" has to
+                    // find exactly it — not a utility class that a restyle
+                    // could rename out from under it.
+                    data-note-content-host=""
+                    className={clsx(
+                      NOTE_CONTENT_HOST_CLASS,
+                      'h-full',
+                      !hasAccent && 'bg-surface',
+                    )}
+                  >
+                    {hydrated ? (
+                      <MilkdownPreview
+                        markdown={markdown}
+                        canvasId={canvasId ?? undefined}
+                        className="pointer-events-none w-full select-none"
+                      />
+                    ) : (
+                      // Lightweight placeholder while the editor mount is
+                      // deferred. The host already constrains to the node's
+                      // layout height in both modes, so filling it is enough —
+                      // the footprint comes from `style.height`, never from
+                      // anything measured here.
+                      <div
+                        className="flex h-full w-full items-center justify-center"
+                        aria-hidden
+                      >
+                        {/* No shimmer in minimal LOD — the content is
                           hidden behind the SemanticPlaceholder, so an
                           animated placeholder would just be wasted work. */}
-                      {!isMinimalLOD && (
-                        <Loading
-                          variant="skeleton"
-                          layout="bare"
-                          className="w-full max-w-xs"
-                        />
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-              {isTruncated && (
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute right-0 bottom-0 left-0 flex h-10 items-end justify-center pb-1"
-                >
-                  {/* Fade gradient */}
-                  <div
-                    aria-hidden
-                    className="from-fg-subtle/30 absolute inset-0 bg-linear-to-t to-transparent"
-                  />
-                  <div
-                    className="text-fg-subtle relative z-10"
-                    style={{
-                      transform: `scale(${counterZoomScale})`,
-                      transformOrigin: 'bottom center',
-                    }}
-                  >
-                    <ChevronsDown size={14} />
+                        {!isMinimalLOD && (
+                          <Loading
+                            variant="skeleton"
+                            layout="bare"
+                            className="w-full max-w-xs"
+                          />
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
-            </div>
-          </>
-        )}
+                {isTruncated && (
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute right-0 bottom-0 left-0 flex h-10 items-end justify-center pb-1"
+                  >
+                    <div
+                      aria-hidden
+                      className="from-fg-subtle/30 absolute inset-0 bg-linear-to-t to-transparent"
+                    />
+                    <div
+                      className="text-fg-subtle relative z-10"
+                      style={{
+                        transform: `scale(${counterZoomScale})`,
+                        transformOrigin: 'bottom center',
+                      }}
+                    >
+                      <ChevronsDown size={14} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </NodeWrapper>
     );
   },

@@ -29,11 +29,11 @@ Inline text and background colors persist as HTML spans with `data-huabu-text-co
 
 **Creation** — notes have no creation path of their own. They go through the generic `ADD_NODES` UI intent, which resolves to a `CREATE_NODES` command; paste, canvas drop and agent-issued creation all funnel through it. See [canvas-command-architecture.md](./canvas-command-architecture.md).
 
-**Rendering** — the canvas card mounts the read-only `MilkdownPreview`; the expanded panel mounts the editable `MilkdownEditor`, which also offers a raw-Markdown source mode alongside WYSIWYG. See §4.
+**Rendering** — the canvas card always reserves a single-line title row for `data.label`, then mounts the read-only `MilkdownPreview` in the remaining body area; the expanded panel mounts the editable `MilkdownEditor`, which also offers a raw-Markdown source mode alongside WYSIWYG. The title row is non-shrinking, so a fixed-height note clips its body before sacrificing its identity. At minimal LOD the generic semantic placeholder replaces the full card and renders the same label. See §4 and [canvas-zoom-rendering.md](./canvas-zoom-rendering.md).
 
 **Saving** — an edit calls `updateNodeData(id, { content })`, which dispatches `UPDATE_NODE_DATA` → `MERGE_NODE_DATA`. There is **no debounce**: every editor `onChange` writes through. Concurrency is handled at the server by rev-CAS, which rejects a stale write with `409 NODE_CONTENT_CONFLICT` rather than merging it.
 
-**Height** — a note's height is `auto` or `fixed` (`setNoteHeightMode`); measurement, freshness keys and the layout conversion are owned by [node-auto-height.md](./node-auto-height.md).
+**Height** — a note's height is `auto` or `fixed` (`setNoteHeightMode`); measurement, freshness keys and the layout conversion are owned by [node-auto-height.md](./node-auto-height.md). The fixed canvas-space title row is height chrome outside the width-scaled Markdown measurement.
 
 ---
 
@@ -130,7 +130,7 @@ These exist only for notes, and none of them are guessable from the node model a
 | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | [`createMilkdown.ts`](../../apps/web/src/components/Milkdown/createMilkdown.ts)                   | Sole owner of Crepe/ProseMirror wiring: `tabContext`, `indentSelection`, `outdentSelection`, `handleLinkClick`, `normalizeSafeLinkHref`. |
 | [`node.ts`](../../packages/shared/src/types/canvas/node.ts)                                       | `NoteNodeData` and the `isNoteNode` guard.                                                                                               |
-| [`NoteNode.tsx`](../../apps/web/src/components/Nodes/note/NoteNode.tsx)                           | Canvas card: layout shell, height-mode toggle, drop handling.                                                                            |
+| [`NoteNode.tsx`](../../apps/web/src/components/Nodes/note/NoteNode.tsx)                           | Canvas card: persistent title row, Markdown body, height-mode toggle, drop handling.                                                     |
 | [`NotePreview.tsx`](../../apps/web/src/components/Nodes/note/NotePreview.tsx)                     | Expanded surface: `MilkdownEditor`, WYSIWYG/raw toggle, provenance overlay, write-through to `updateNodeData`.                           |
 | [`blockProvenance.ts`](../../apps/web/src/utils/blockProvenance.ts)                               | Block keys and provenance realignment.                                                                                                   |
 | [`MilkdownEditor.tsx`](../../apps/web/src/components/Milkdown/MilkdownEditor.tsx)                 | Editable surface; reconciles the `editable` toggle onto a mounted instance.                                                              |

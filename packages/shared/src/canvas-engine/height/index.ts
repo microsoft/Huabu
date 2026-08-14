@@ -17,6 +17,8 @@ export {
   type HeightKind,
   type HeightMode,
   type HeightPolicy,
+  NOTE_MIN_HEIGHT,
+  NOTE_TITLE_HEIGHT,
   NODE_SHELL_INSET,
   getHeightPolicy,
   getHeightRefWidth,

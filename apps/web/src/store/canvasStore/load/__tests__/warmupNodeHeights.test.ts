@@ -26,7 +26,7 @@ function note(overrides: Partial<Node> = {}): Node {
     id: 'n1',
     type: 'note',
     position: { x: 0, y: 0 },
-    style: { width: 400, height: 56 },
+    style: { width: 400, height: 88 },
     data: { type: 'note', content: CONTENT, heightMode: 'auto' },
     ...overrides,
   } as Node;
