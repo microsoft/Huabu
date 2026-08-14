@@ -48,6 +48,7 @@ vi.mock('../agent/agenetes/drivers.js', () => ({
 }));
 
 import rfsRoutes from './rfs.route.js';
+import { toSafeFilename } from '../../utils/naming.js';
 import { agentNodeService } from '../agent/agent-node.service.js';
 import { agentThreadResolver } from '../agent/agent-thread-resolver.js';
 import {
@@ -62,7 +63,6 @@ import {
 } from '../task/run-completion.service.js';
 import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
 import { taskService } from '../task/task.service.js';
-import { toSafeFilename } from '../workspace/disk/naming.js';
 import { canvasRoot } from '../workspace/disk/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 

@@ -18,8 +18,8 @@ import {
   resetStorageCache,
 } from './legacy/canvas-store-cache.js';
 import { DiskStructuredStore } from './structured-store.js';
+import { toSafeFilename } from '../../../../utils/naming.js';
 import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
-import { toSafeFilename } from '../../../workspace/disk/naming.js';
 import { tasksPath } from '../../../workspace/disk/paths.js';
 import { describeSpaceLogsContract } from '../../ports/contracts/space-logs.contract.js';
 import { describeStructuredStoreContract } from '../../ports/contracts/structured-store.contract.js';

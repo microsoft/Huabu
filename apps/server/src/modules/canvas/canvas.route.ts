@@ -43,6 +43,7 @@ import {
   WorldReferenceResolutionError,
 } from './world-reference-resolver.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
+import { toSafeFilename } from '../../utils/naming.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
@@ -63,7 +64,6 @@ import {
   type UpdateNodeOutcome,
 } from '../storage/index.js';
 import { canvasRoot, nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
-import { toSafeFilename } from '../workspace/disk/naming.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';

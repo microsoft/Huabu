@@ -21,11 +21,11 @@ import {
 } from './legacy/canvas-store-cache.js';
 import { NODE_TOMBSTONE_TTL_MS } from './legacy/node-tombstones.js';
 import { DiskStructuredStore } from './structured-store.js';
+import { toSafeFilename } from '../../../../utils/naming.js';
 import {
   refreshCanvasDirIndex,
   registerCanvasDir,
 } from '../../../workspace/disk/canvas-dirs.js';
-import { toSafeFilename } from '../../../workspace/disk/naming.js';
 import {
   canvasRoot,
   SPACE_JSON_FILENAME,

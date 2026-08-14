@@ -8,8 +8,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { handleRead } from './fs-read.js';
+import { toSafeFilename } from '../../../../utils/naming.js';
 import { getCanvasStore } from '../../../storage/index.js';
-import { toSafeFilename } from '../../../workspace/disk/naming.js';
 import { setWorkspacePath } from '../../../workspace.js';
 
 interface ReadResult {

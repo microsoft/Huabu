@@ -1,15 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/**
- * Filesystem-safe naming primitives. Pure functions; no I/O.
- *
- * Server-only: dedup helpers depend on `node:path`, and the
- * single-name `toSafeFilename` rule is also confined here so the web
- * bundle never has to apply it (it never sends `nodes/<file>.md`
- * paths to the server — the server enriches refs into `AgentNodeRef`
- * with the pre-computed filename before any prompt rendering).
- */
+/** Pure naming primitives shared by storage adapters and filesystem views. */
 
 import path from 'node:path';
 
@@ -20,12 +12,9 @@ const WIN_RESERVED_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 export const MAX_FILENAME_LENGTH = 120;
 
 /**
- * Turn a free-form display name into a filesystem-safe filename.
- *
- * Replaces only `\ / : * ? " < > |` and ASCII control characters with
- * `_`. Spaces, hyphens, dots, parentheses and other characters are
- * preserved verbatim — the LLM expects this because the rule is
- * documented in `apps/server/src/prompt/skills/space/SKILL.md`.
+ * Normalize a logical label into the collision key used by today's Disk
+ * layout. SQL adapters use the same pure rule so title and label allocation
+ * remain portable without importing a filesystem backend.
  */
 export function toSafeFilename(
   name?: string | null,
@@ -36,8 +25,9 @@ export function toSafeFilename(
   safe = safe.replace(/^[.\s]+|[.\s]+$/g, '');
   if (!safe) return fallback;
   if (WIN_RESERVED_RE.test(safe)) safe = `_${safe}`;
-  if (safe.length > MAX_FILENAME_LENGTH)
+  if (safe.length > MAX_FILENAME_LENGTH) {
     safe = safe.slice(0, MAX_FILENAME_LENGTH);
+  }
   return safe;
 }
 
@@ -52,7 +42,7 @@ export function dedupeName(base: string, existing: Iterable<string>): string {
   for (const name of existing) taken.add(normalizeForCompare(name));
   if (!taken.has(normalizeForCompare(base))) return base;
   let i = 2;
-  while (taken.has(normalizeForCompare(`${base} (${i})`))) i++;
+  while (taken.has(normalizeForCompare(`${base} (${i})`))) i += 1;
   return `${base} (${i})`;
 }
 
@@ -71,6 +61,6 @@ export function dedupeArtifactFilename(
   }
   if (!stemTaken.has(normalizeForCompare(stem))) return filename;
   let i = 2;
-  while (stemTaken.has(normalizeForCompare(`${stem} (${i})`))) i++;
+  while (stemTaken.has(normalizeForCompare(`${stem} (${i})`))) i += 1;
   return `${stem} (${i})${ext}`;
 }

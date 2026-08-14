@@ -25,8 +25,8 @@ vi.mock('../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
 }));
 
+import { toSafeFilename } from '../../../utils/naming.js';
 import { refreshCanvasDirIndex } from '../../workspace/disk/canvas-dirs.js';
-import { toSafeFilename } from '../../workspace/disk/naming.js';
 import {
   getCanvasStore,
   resetStorageCache,

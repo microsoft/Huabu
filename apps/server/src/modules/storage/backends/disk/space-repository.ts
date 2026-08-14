@@ -26,6 +26,7 @@ import {
   titleVisibleAtDirectory,
 } from './space-title.js';
 import { atomicWriteJson, mkdirp, sanitizeId } from '../../../../utils/fs.js';
+import { normalizeForCompare } from '../../../../utils/naming.js';
 import {
   isWorldCanvasId,
   listAllCanvasDirEntries,
@@ -35,7 +36,6 @@ import {
   requireWorldCanvasId,
   suggestCanvasDir,
 } from '../../../workspace/disk/canvas-dirs.js';
-import { normalizeForCompare } from '../../../workspace/disk/naming.js';
 import {
   canvasJsonPath,
   SPACE_JSON_FILENAME,

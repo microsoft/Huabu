@@ -21,13 +21,13 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { atomicWriteJson, mkdirp, sanitizeId } from '../../../utils/fs.js';
+import { toSafeFilename } from '../../../utils/naming.js';
 import {
   listCanvasDirEntries,
   refreshCanvasDirIndex,
   registerCanvasDir,
   suggestCanvasDir,
 } from '../../workspace/disk/canvas-dirs.js';
-import { toSafeFilename } from '../../workspace/disk/naming.js';
 import {
   canvasJsonPath,
   SPACE_JSON_FILENAME,

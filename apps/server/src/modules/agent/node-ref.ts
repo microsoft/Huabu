@@ -32,7 +32,7 @@
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
-import { toSafeFilename } from '../workspace/disk/naming.js';
+import { toSafeFilename } from '../../utils/naming.js';
 
 import type { CanvasNodeType, WireNodeRef } from '@huabu/shared';
 

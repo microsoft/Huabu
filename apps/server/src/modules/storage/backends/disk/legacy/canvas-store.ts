@@ -43,6 +43,7 @@ import {
   parseFrontmatter,
   toFrontmatter,
 } from '../../../../../utils/markdown-frontmatter.js';
+import { toSafeFilename } from '../../../../../utils/naming.js';
 import {
   patchCanvasDirTitle,
   refreshCanvasDirIndex,
@@ -52,7 +53,6 @@ import {
   unregisterCanvasDir,
 } from '../../../../workspace/disk/canvas-dirs.js';
 import { NameIndex } from '../../../../workspace/disk/name-index.js';
-import { toSafeFilename } from '../../../../workspace/disk/naming.js';
 import {
   canvasJsonPath,
   canvasRoot,

@@ -24,8 +24,8 @@ vi.mock('../../../workspace.js', () => ({
 import { resetStorageCache } from './legacy/canvas-store-cache.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { DiskStructuredStore } from './structured-store.js';
+import { toSafeFilename } from '../../../../utils/naming.js';
 import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
-import { toSafeFilename } from '../../../workspace/disk/naming.js';
 import { WORLD_CANVAS_DIR_NAME } from '../../../workspace/disk/paths.js';
 import { describeSpaceRepositoryContract } from '../../ports/contracts/space-repository.contract.js';
 
