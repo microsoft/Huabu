@@ -502,6 +502,8 @@ export const PDFPreview = ({
   // ---------------------------------------------------------------------------
   const handleSendToChat = useCallback(
     (attachment: ChatAttachment) => {
+      if (!id) return;
+
       const chat = useChatStore.getState();
       const canvas = useCanvasStore.getState();
       const preview = usePreviewWorkspaceStore.getState();
