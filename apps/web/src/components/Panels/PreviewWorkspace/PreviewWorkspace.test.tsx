@@ -19,7 +19,11 @@ import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { PreviewTabDragOverlay } from './PreviewTab';
-import { PreviewWorkspace, settleActivePreviewTab } from './PreviewWorkspace';
+import {
+  PreviewTabDragOverlayPortal,
+  PreviewWorkspace,
+  settleActivePreviewTab,
+} from './PreviewWorkspace';
 import { PreviewWorkspacePanel } from './PreviewWorkspacePanel';
 import {
   groupDropId,
@@ -153,6 +157,21 @@ describe('tab strip', () => {
     );
     expect(overlay?.textContent).toContain('Alpha');
     expect(overlay?.classList.contains('shadow-md')).toBe(true);
+  });
+
+  it('hosts the drag overlay portal outside Preview layout transforms', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() => root?.render(<PreviewTabDragOverlayPortal tab={undefined} />));
+
+    const portal = document.querySelector(
+      '[data-testid="preview-tab-drag-portal"]',
+    );
+    expect(portal).not.toBeNull();
+    expect(container.contains(portal)).toBe(false);
+    expect(portal?.parentElement).toBe(document.body);
   });
 
   it('renders an unbound Chat session with compact workspace chrome', () => {
@@ -908,7 +927,6 @@ describe('right panel host', () => {
       canvasId: CANVAS_ID,
     });
     const onToggleFullscreen = vi.fn();
-    const onToggleLayers = vi.fn();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -919,8 +937,6 @@ describe('right panel host', () => {
           isHostCollapsed={false}
           isFullscreen
           onToggleFullscreen={onToggleFullscreen}
-          isLayersCollapsed
-          onToggleLayers={onToggleLayers}
         />,
       ),
     );
@@ -929,14 +945,6 @@ describe('right panel host', () => {
       '[data-testid="toggle-preview-fullscreen"]',
     );
     expect(toggle?.getAttribute('aria-label')).toContain('Exit');
-    const showLayers = container.querySelector<HTMLElement>(
-      '[data-testid="show-fullscreen-layers"]',
-    );
-    expect(showLayers).not.toBeNull();
-    act(() =>
-      showLayers?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
-    );
-    expect(onToggleLayers).toHaveBeenCalledOnce();
 
     act(() =>
       toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true })),

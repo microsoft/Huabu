@@ -25,6 +25,7 @@ import {
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
@@ -45,6 +46,23 @@ import type { Node } from '@xyflow/react';
 const RATIO_STEP = 0.05;
 
 const selectWorkspace = (s: PreviewWorkspaceState) => s.workspace;
+
+export function PreviewTabDragOverlayPortal({
+  tab,
+}: {
+  tab: CanvasPreviewWorkspace['tabs'][string] | undefined;
+}) {
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div className="contents" data-testid="preview-tab-drag-portal">
+      <DragOverlay dropAnimation={null}>
+        {tab ? <PreviewTabDragOverlay tab={tab} /> : null}
+      </DragOverlay>
+    </div>,
+    document.body,
+  );
+}
 
 export function settleActivePreviewTab(
   workspace: CanvasPreviewWorkspace,
@@ -83,15 +101,11 @@ export function PreviewWorkspace({
   onCollapse,
   isFullscreen = false,
   onToggleFullscreen,
-  isLayersCollapsed = false,
-  onToggleLayers,
 }: {
   /** Collapses the surface, when the host offers that. */
   onCollapse?: () => void;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
-  isLayersCollapsed?: boolean;
-  onToggleLayers?: () => void;
 } = {}) {
   const { t } = useTranslation();
   const workspace = usePreviewWorkspaceStore(selectWorkspace);
@@ -348,10 +362,6 @@ export function PreviewWorkspace({
                 onNewChat={() => openNewChat(group.id)}
                 tabDropIndicator={tabDropIndicator}
                 isFullscreen={isFullscreen}
-                showLayersToggle={
-                  isFullscreen && isLayersCollapsed && Boolean(onToggleLayers)
-                }
-                onToggleLayers={onToggleLayers}
                 onToggleFullscreen={
                   index === workspace.groups.length - 1
                     ? onToggleFullscreen
@@ -365,9 +375,7 @@ export function PreviewWorkspace({
           </Fragment>
         ))}
       </div>
-      <DragOverlay dropAnimation={null}>
-        {activeDragTab ? <PreviewTabDragOverlay tab={activeDragTab} /> : null}
-      </DragOverlay>
+      <PreviewTabDragOverlayPortal tab={activeDragTab} />
     </DndContext>
   );
 }

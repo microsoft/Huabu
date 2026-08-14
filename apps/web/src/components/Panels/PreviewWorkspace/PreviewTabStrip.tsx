@@ -22,7 +22,6 @@ import {
   ListIndentIncrease,
   Maximize2,
   Minimize2,
-  PanelLeftOpen,
   Plus,
 } from 'lucide-react';
 import { useEffect } from 'react';
@@ -50,8 +49,6 @@ type PreviewTabStripProps = {
   onNewChat: () => void;
   tabDropIndicator: TabDropIndicator | null;
   isFullscreen: boolean;
-  showLayersToggle: boolean;
-  onToggleLayers?: () => void;
   onToggleFullscreen?: () => void;
   /** Collapses the whole surface; only the last group offers it. */
   onCollapse?: () => void;
@@ -73,8 +70,6 @@ export function PreviewTabStrip({
   onNewChat,
   tabDropIndicator,
   isFullscreen,
-  showLayersToggle,
-  onToggleLayers,
   onToggleFullscreen,
   onCollapse,
 }: PreviewTabStripProps) {
@@ -175,19 +170,6 @@ export function PreviewTabStrip({
         )}
       </div>
       <div className="flex shrink-0 items-center px-1">
-        {showLayersToggle && onToggleLayers && (
-          <Button
-            variant="ghost"
-            iconOnly
-            size="md"
-            data-testid="show-fullscreen-layers"
-            title={t('layers.show')}
-            tooltipPlacement="bottom"
-            onClick={onToggleLayers}
-          >
-            <PanelLeftOpen />
-          </Button>
-        )}
         <Button
           variant="ghost"
           iconOnly

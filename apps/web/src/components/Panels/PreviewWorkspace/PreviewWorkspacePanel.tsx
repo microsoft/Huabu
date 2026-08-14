@@ -24,8 +24,6 @@ type PreviewWorkspacePanelProps = {
   isHostCollapsed?: boolean;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
-  isLayersCollapsed?: boolean;
-  onToggleLayers?: () => void;
 };
 
 export function PreviewWorkspacePanel({
@@ -33,8 +31,6 @@ export function PreviewWorkspacePanel({
   isHostCollapsed = false,
   isFullscreen = false,
   onToggleFullscreen,
-  isLayersCollapsed = false,
-  onToggleLayers,
 }: PreviewWorkspacePanelProps) {
   const canvasId = useCanvasStore((s) => s.canvasId);
   const isEmpty = usePreviewWorkspaceStore(
@@ -91,8 +87,6 @@ export function PreviewWorkspacePanel({
         onCollapse={onToggle}
         isFullscreen={isFullscreen}
         onToggleFullscreen={onToggleFullscreen}
-        isLayersCollapsed={isLayersCollapsed}
-        onToggleLayers={onToggleLayers}
       />
     </div>
   );
