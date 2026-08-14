@@ -156,6 +156,11 @@ describe('storage dependency direction', () => {
     const violations: string[] = [];
     for (const file of sourceFiles) {
       if (file.startsWith('modules/storage/')) continue;
+      // Same exemption, and the same reason, as the composition-root rule
+      // below: exercising an adapter means naming it. A production file that
+      // names one has bound the application to a backend, which is the thing
+      // being prevented; a test that names one is choosing its subject.
+      if (file.endsWith('.test.ts')) continue;
       for (const spec of specifiersOf(file)) {
         const target = resolveSpecifier(file, spec);
         if (target?.includes('modules/storage/backends')) {
@@ -199,6 +204,76 @@ describe('storage dependency direction', () => {
       'modules/storage/paths.ts',
       'modules/storage/storage.ts',
     ]);
+  });
+});
+
+/**
+ * Phase 4.5's outcome, guarded (proposal §12.5).
+ *
+ * The workspace module used to hold a `disk/` segment containing the Disk
+ * record layout, the `space.json`-derived directory index, and pure naming
+ * rules — so "where is a Space" was answered outside the storage boundary, in
+ * a module whose name asserted the substrate. These pin the correction: what
+ * remains describes the workspace as a place, and anything needing a real
+ * Space directory asks for it by capability.
+ */
+describe('workspace module names no backend', () => {
+  const workspaceFiles = sourceFiles.filter((f) =>
+    f.startsWith('modules/workspace/'),
+  );
+
+  it('has no substrate segment', () => {
+    const substrate = workspaceFiles.filter((f) =>
+      f.startsWith('modules/workspace/disk/'),
+    );
+    expect(substrate).toEqual([]);
+    expect(workspaceFiles.length).toBeGreaterThan(0);
+  });
+
+  it('never imports a storage backend', () => {
+    const violations: string[] = [];
+    for (const file of workspaceFiles) {
+      for (const spec of specifiersOf(file)) {
+        const target = resolveSpecifier(file, spec);
+        if (target?.includes('modules/storage/backends')) {
+          violations.push(`${file} → ${spec}`);
+        }
+      }
+    }
+    // A Space's directory comes from `spaceDirectory()` on the facade, which
+    // is the capability; reaching a backend for it would restore exactly the
+    // coupling this phase removed.
+    expect(violations).toEqual([]);
+  });
+
+  it('names no Disk record or blob layout symbol', () => {
+    // These are the members that moved to `backends/disk/layout.ts`. Their
+    // reappearance here would mean the workspace had started describing how a
+    // backend stores things again, whatever the import path said.
+    const DISK_LAYOUT = [
+      'SPACE_JSON_FILENAME',
+      'canvasJsonPath',
+      'nodesDir',
+      'nodeFilePath',
+      'artifactsDir',
+      'artifactPath',
+      'tasksPath',
+      'eventsPath',
+      'deltaLogPath',
+      'changesPath',
+      'canvasRoot',
+    ];
+    const violations: string[] = [];
+    for (const file of workspaceFiles) {
+      if (file.startsWith('modules/workspace/migrations/')) continue;
+      const source = read(file);
+      for (const symbol of DISK_LAYOUT) {
+        if (new RegExp(`\\b${symbol}\\b`).test(source)) {
+          violations.push(`${file} → ${symbol}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
   });
 });
 
@@ -346,7 +421,6 @@ describe('root forwarding shims', () => {
       'modules/agent/memory/analyzer.test.ts',
       'modules/canvas/canvas-content-cas.test.ts',
       'modules/canvas/canvas.route.test.ts',
-      'modules/workspace/disk/world-canvas.ts',
       'modules/workspace/migrations/migrate-acp-sessions.ts',
     ],
   };

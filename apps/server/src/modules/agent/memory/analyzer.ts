@@ -36,7 +36,7 @@ import {
 import {
   canvasMemoryPath,
   workspaceMemoryPath,
-} from '../../workspace/disk/paths.js';
+} from '../../workspace/paths.js';
 import { runAgent } from '../agent.service.js';
 
 import type { MemoryLogger } from './index.js';

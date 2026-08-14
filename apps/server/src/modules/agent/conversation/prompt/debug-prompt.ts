@@ -18,7 +18,7 @@ import { appendFileSync } from 'node:fs';
 
 import { mkdirp } from '../../../../utils/fs.js';
 import { chatDir } from '../../../storage/paths.js';
-import { chatPromptLogPath } from '../../../workspace/disk/paths.js';
+import { chatPromptLogPath } from '../../../workspace/paths.js';
 
 import type { Context } from '@earendil-works/pi-ai';
 import type { FastifyBaseLogger } from 'fastify';

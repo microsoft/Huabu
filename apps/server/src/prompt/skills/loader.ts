@@ -49,7 +49,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { userSkillsDir } from '../../modules/workspace/disk/paths.js';
+import { userSkillsDir } from '../../modules/workspace/paths.js';
 import { getWorkspacePath } from '../../modules/workspace.js';
 import { getLogger } from '../../utils/logger.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
@@ -140,7 +140,7 @@ export const SYSTEM_SKILLS_DIR = existsSync(BUNDLED_SKILLS_DIR)
 // `skills/<id>/SKILL.md` path) lives in the memory module — see
 // `modules/agent/memory/sandbox.ts` + `writers.ts`. Keeping it out of
 // the loader means the loader does not need to expose write paths; the
-// user-side root is owned by `userSkillsDir()` in `workspace/disk/paths.ts`.
+// user-side root is owned by `userSkillsDir()` in `workspace/paths.ts`.
 
 // ─── Validation ─────────────────────────────────────────────────────────────
 

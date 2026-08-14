@@ -30,7 +30,7 @@ import {
   canvasMemoryPath,
   userSkillsDir,
   workspaceMemoryPath,
-} from '../../../workspace/disk/paths.js';
+} from '../../../workspace/paths.js';
 import { setWorkspacePath } from '../../../workspace.js';
 
 interface ParsedResult {
@@ -51,7 +51,8 @@ beforeEach(() => {
   setWorkspacePath(tmp);
   // `canvasRoot(canvasId)` falls back to `<workspace>/<canvasId>` when the
   // canvas-dir index has no entry for the id (see `canvasDirName` in
-  // `workspace/disk/canvas-dirs.ts`). We just need the directory to exist so
+  // `storage/backends/disk/canvas-dirs.ts`). We just need the directory to
+  // exist so
   // writes can land in it.
   mkdirSync(join(tmp, canvasId), { recursive: true });
 });

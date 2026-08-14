@@ -15,8 +15,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { importForeignNodeSources } from './import-node-src.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
-import { canvasBlobs, getCanvasStore } from '../storage/index.js';
-import { canvasRoot } from '../storage/paths.js';
+import {
+  canvasBlobs,
+  getCanvasStore,
+  spaceDirectory,
+} from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { CanvasCommand } from '@huabu/shared';
@@ -45,7 +48,7 @@ afterEach(() => {
 
 /** Stage a file under the canvas's hidden `.upload/` scratch dir. */
 function stageUpload(canvasId: string, name: string, body: string): string {
-  const uploadDir = path.join(canvasRoot(canvasId), '.upload');
+  const uploadDir = path.join(spaceDirectory(canvasId), '.upload');
   mkdirSync(uploadDir, { recursive: true });
   const abs = path.join(uploadDir, name);
   writeFileSync(abs, body);

@@ -16,7 +16,7 @@ vi.mock('../../../prompt/index.js', () => ({
   listSkills: vi.fn(),
 }));
 vi.mock('../../storage/index.js', () => ({ getStructuredStore: vi.fn() }));
-vi.mock('../../workspace/disk/paths.js', () => ({
+vi.mock('../../workspace/paths.js', () => ({
   canvasMemoryPath: (canvasId: string) =>
     `${physicalState.root}/${canvasId}/.memory/space.md`,
   workspaceMemoryPath: () => `${physicalState.root}/setting/user.md`,

@@ -25,7 +25,7 @@ import {
 import { DiskSpaceNodes } from './space-nodes.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { DiskStructuredStore } from './structured-store.js';
-import { ensureWorldCanvasOnDisk } from '../../../workspace/disk/world-canvas.js';
+import { ensureWorldCanvasOnDisk } from './world-canvas.js';
 import { setWorkspacePath } from '../../../workspace.js';
 import { describeSpaceNodesContract } from '../../ports/contracts/space-nodes.contract.js';
 

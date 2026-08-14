@@ -1673,7 +1673,7 @@ bearing: change-review records and Tasks are not history, whatever Disk's
 arrives, the group comes back — and `events` is where it was before, so
 nothing else has to move.
 
-### 12.5 Phase 4.5 — storage-owned layout moves inside the boundary — **planned**
+### 12.5 Phase 4.5 — storage-owned layout moves inside the boundary — **implemented**
 
 Phase 5 adds a second structured backend. Before it does, the layout knowledge
 that belongs to the _Disk_ backend has to stop living outside `storage/`.
@@ -1840,6 +1840,16 @@ scope by definition.
 
 Phase 5 rebases onto this and drops its `utils/naming.ts` extraction, its
 `workspace/disk/naming.ts` shim, and the corresponding roadmap edits.
+
+**Landed.** `modules/workspace/` is flat and holds `paths.ts` plus
+`migrations/`; the Disk record layout, blob layout, directory index, name
+index, directory-handle coordination, and World bootstrap all sit under
+`storage/backends/disk/`. Consumers needing a real Space directory call
+`spaceDirectory()`; the two Disk capabilities the application still needs —
+directory-handle release and World bootstrap — are re-exported from the facade
+rather than reached by path. Three guards in `module-boundaries.test.ts` pin
+the result: the workspace module has no substrate segment, imports no backend,
+and names no Disk layout symbol.
 
 #### 12.5.7 Findings from step 5, and one follow-up
 

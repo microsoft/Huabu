@@ -11,7 +11,7 @@
 
 import { mkdirSync } from 'node:fs';
 
-import { ensureWorldCanvasOnDisk } from './workspace/disk/world-canvas.js';
+import { ensureWorldCanvasOnDisk } from './storage/index.js';
 import { migrateLegacyAcpSessions } from './workspace/migrations/migrate-acp-sessions.js';
 import {
   migrateLegacyAgenetesThreads,

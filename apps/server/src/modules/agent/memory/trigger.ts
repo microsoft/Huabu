@@ -27,10 +27,7 @@ import { existsSync } from 'node:fs';
 import { atomicWriteJson, mkdirp, readJson } from '../../../utils/fs.js';
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
 import { spaceDirectory } from '../../storage/index.js';
-import {
-  memoryStatePath,
-  canvasMemoryDir,
-} from '../../workspace/disk/paths.js';
+import { memoryStatePath, canvasMemoryDir } from '../../workspace/paths.js';
 
 /** Op-count threshold that triggers a memory analysis pass. */
 export const OP_THRESHOLD = 50;

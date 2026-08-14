@@ -21,15 +21,22 @@ vi.mock('../storage/index.js', async (importOriginal) => {
   };
 });
 
-vi.mock('../workspace/disk/space-dir-handles.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof SpaceDirHandlesModule>();
-  return {
-    ...actual,
-    withSpaceDirHandlesReleased: vi.fn(actual.withSpaceDirHandlesReleased),
-  };
-});
+// Mocked at the module the Disk repository imports, not at the facade: these
+// cases force a Space-directory rename to fail, which is Disk behavior, and a
+// facade mock would not intercept the adapter's own import.
+vi.mock(
+  '../storage/backends/disk/space-dir-handles.js',
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof SpaceDirHandlesModule>();
+    return {
+      ...actual,
+      withSpaceDirHandlesReleased: vi.fn(actual.withSpaceDirHandlesReleased),
+    };
+  },
+);
 
 import canvasRoutes from './canvas.route.js';
+import { withSpaceDirHandlesReleased } from '../storage/backends/disk/space-dir-handles.js';
 import { createCanvas, deleteCanvas } from '../storage/compatibility/canvas.js';
 import {
   canvasBlobs,
@@ -38,11 +45,10 @@ import {
   resetStorageCache,
 } from '../storage/index.js';
 import { changesPath } from '../storage/paths.js';
-import { withSpaceDirHandlesReleased } from '../workspace/disk/space-dir-handles.js';
 import { setWorkspacePath } from '../workspace.js';
 
+import type * as SpaceDirHandlesModule from '../storage/backends/disk/space-dir-handles.js';
 import type * as StorageModule from '../storage/index.js';
-import type * as SpaceDirHandlesModule from '../workspace/disk/space-dir-handles.js';
 import type { RecentAction } from '@huabu/shared';
 
 let tmp: string;

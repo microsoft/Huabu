@@ -22,7 +22,7 @@ import {
   getCanvasStore,
   resetStorageCache,
 } from '../storage/index.js';
-import { canvasAcpNamespace } from '../workspace/disk/paths.js';
+import { canvasAcpNamespace } from '../workspace/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
 let workspace: string;

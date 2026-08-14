@@ -22,7 +22,7 @@ import {
 import { DiskSpaceRepository } from './space-repository.js';
 import { createDiskSpaceWrite } from './space-write.js';
 import { DiskStructuredStore } from './structured-store.js';
-import { ensureWorldCanvasOnDisk } from '../../../workspace/disk/world-canvas.js';
+import { ensureWorldCanvasOnDisk } from './world-canvas.js';
 import { setWorkspacePath } from '../../../workspace.js';
 import { describeSpaceWriteContract } from '../../ports/contracts/space-write.contract.js';
 

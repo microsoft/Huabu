@@ -43,7 +43,7 @@ vi.mock('../agent/agenetes/drivers.js', () => ({
   },
 }));
 
-vi.mock('../workspace/disk/paths.js', async (importActual) => ({
+vi.mock('../workspace/paths.js', async (importActual) => ({
   ...((await importActual()) as Record<string, unknown>),
   canvasAcpNamespace: (canvasId: string) => ({ name: canvasId, root: '' }),
 }));

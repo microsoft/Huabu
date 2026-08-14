@@ -29,6 +29,7 @@ import {
   forgetCanvasStore,
   getCanvasStore,
 } from './legacy/canvas-store-cache.js';
+import { withSpaceDirHandlesReleased } from './space-dir-handles.js';
 import { readValidCanvasFile } from './space-record-validation.js';
 import { readDiskSpaceRecord } from './space-record.js';
 import {
@@ -37,7 +38,6 @@ import {
 } from './space-title.js';
 import { atomicWriteJson, mkdirp, sanitizeId } from '../../../../utils/fs.js';
 import { normalizeForCompare } from '../../../../utils/naming.js';
-import { withSpaceDirHandlesReleased } from '../../../workspace/disk/space-dir-handles.js';
 import { getWorkspacePath } from '../../../workspace.js';
 import {
   assertSpaceMutationAllowed,

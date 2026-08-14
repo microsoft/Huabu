@@ -35,10 +35,12 @@
 
 import path from 'node:path';
 
-import { spaceDirectory } from '../../storage/index.js';
-import { getWorkspacePath } from '../../workspace.js';
+import { sanitizeId } from '../../utils/fs.js';
+import { spaceDirectory } from '../storage/index.js';
+import { getWorkspacePath } from '../workspace.js';
 
 import type { Namespace } from '@agenetes/protocol';
+
 /**
  * The `.history/` tier is named by the Disk backend, which owns most of what
  * is in it. The families below sit there only because they were written next

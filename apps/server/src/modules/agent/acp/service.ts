@@ -31,7 +31,7 @@ import { getProfileSessionPreferences } from './profile-session-preferences.js';
 import { getProfile as getLegacyProfile } from './profile-store.js';
 import { buildReachbackEnv } from './reachback-env.js';
 import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
-import { canvasAcpNamespace } from '../../workspace/disk/paths.js';
+import { canvasAcpNamespace } from '../../workspace/paths.js';
 import {
   agenetes,
   EXTERNAL_DRIVER_KIND,
