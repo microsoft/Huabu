@@ -135,7 +135,12 @@ describe('useCanvasShortcuts catalog key lock', () => {
     expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
 
     act(() => {
-      window.dispatchEvent(new MouseEvent('mouseup'));
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 2 }));
+    });
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
     });
     expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
   });
@@ -152,7 +157,7 @@ describe('useCanvasShortcuts catalog key lock', () => {
           pointerId: 1,
         }),
       );
-      window.dispatchEvent(new MouseEvent('mouseup'));
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
     });
     expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
 

@@ -129,8 +129,8 @@ export function useCanvasShortcuts(
       if (!temporaryPanRef.current || e.button !== 0 || !e.isPrimary) return;
       temporaryPanPointerRef.current = e.pointerId;
     };
-    const onMouseUp = () => {
-      if (temporaryPanPointerRef.current === null) return;
+    const onPointerUp = (e: PointerEvent) => {
+      if (temporaryPanPointerRef.current !== e.pointerId) return;
       temporaryPanPointerRef.current = null;
       if (!spacePressedRef.current) restoreTemporaryPan();
     };
@@ -144,7 +144,7 @@ export function useCanvasShortcuts(
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('pointerdown', onPointerDown, true);
-    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('pointerup', onPointerUp, true);
     window.addEventListener('pointercancel', onPointerCancel, true);
     window.addEventListener('blur', restoreTemporaryPan);
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -152,7 +152,7 @@ export function useCanvasShortcuts(
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('pointerdown', onPointerDown, true);
-      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('pointerup', onPointerUp, true);
       window.removeEventListener('pointercancel', onPointerCancel, true);
       window.removeEventListener('blur', restoreTemporaryPan);
       document.removeEventListener('visibilitychange', onVisibilityChange);
