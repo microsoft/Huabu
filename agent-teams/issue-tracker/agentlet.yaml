@@ -12,3 +12,5 @@ require:
   copies:
     - from: assets/issue-tracker.html
       to: issue-tracker.html
+    - from: references/fixing-agent-preamble.md
+      to: fixing-agent-preamble.md
