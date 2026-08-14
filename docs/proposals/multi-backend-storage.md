@@ -893,6 +893,14 @@ the legacy class import; the other two preserve physical-Disk capability
 imports. Lower-fanout imports are updated directly. No forwarding file may
 contain logic, and no new call site may import one.
 
+> **Superseded in part by §12.5.** The row moving `paths.ts` and
+> `canvas-dirs.ts` to `modules/workspace/disk/` is justified above by those
+> files serving "non-storage domains". That reason is inverted: a storage
+> detail with consumers outside `storage/` is describing a leak, not earning a
+> home outside the boundary. The move was right for the files that describe
+> the Workspace _as a place_ and wrong for the files that describe _how the
+> Disk backend stores Spaces_. Phase 4.5 separates the two.
+
 #### 12.2.3 Compatibility boundary and blast-radius budget
 
 In Phase 2, `storage/compatibility/canvas.ts` owns the legacy
@@ -1665,7 +1673,129 @@ bearing: change-review records and Tasks are not history, whatever Disk's
 arrives, the group comes back — and `events` is where it was before, so
 nothing else has to move.
 
-### 12.5 Later phases — provisional
+### 12.5 Phase 4.5 — storage-owned layout moves inside the boundary — **planned**
+
+Phase 5 adds a second structured backend. Before it does, the layout knowledge
+that belongs to the _Disk_ backend has to stop living outside `storage/`.
+Otherwise every later backend inherits a module named `disk` as the ambient
+description of where Spaces are, and each one pays to migrate the same callers
+again.
+
+The rule this phase restores: **outside `storage/`, nothing knows how Spaces
+are stored.** A domain may know a Space is _materialized_ somewhere — that is a
+declared capability with real consumers — but not that its record is
+`space.json`, nor that its events are a JSONL file.
+
+#### 12.5.1 What the census shows
+
+Measured on `6b43798a`. Non-storage **production** files importing
+`modules/workspace/disk/`:
+
+| File                              | Symbols                                   | Kind              |
+| --------------------------------- | ----------------------------------------- | ----------------- |
+| `agent/acp/service.ts`            | `canvasAcpNamespace`                      | materialization   |
+| `agent/agent-thread.service.ts`   | `canvasAcpNamespace`                      | materialization   |
+| `agent/memory/analyzer.ts`        | `canvasMemoryPath`, `workspaceMemoryPath` | materialization   |
+| `agent/memory/analyzer.ts`        | `chatDir`                                 | **storage-owned** |
+| `agent/node-ref.ts`               | `toSafeFilename`                          | pure naming       |
+| `canvas/canvas.route.ts`          | `toSafeFilename`                          | pure naming       |
+| `canvas/external-watcher.ts`      | `registerSpaceDirHandleOwner`             | materialization   |
+| `preprocessing/stages/project.ts` | `normalizeForCompare`                     | pure naming       |
+| `workspace-prepare.ts`            | `ensureWorldCanvasOnDisk`                 | materialization   |
+
+Six test files add `nodesDir`, `changesPath`, `canvasRoot`, and
+`withSpaceDirHandlesReleased`.
+
+This is a smaller consumer leak than the raw import count suggests: most
+`workspace/disk/` imports come from `storage/` itself, which is the permitted
+direction. Exactly **one** production site outside `storage/` reads a
+storage-owned path (`chatDir`). The problem is therefore not mass violation by
+consumers — it is that the module they import is _mixed_, and its name and
+location assert an answer the port layer exists to keep open.
+
+#### 12.5.2 `paths.ts` holds three populations, not one
+
+| Population             | Members                                                                                                                                                                     | Belongs to                      |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| Disk structured layout | `SPACE_JSON_FILENAME`, `canvasJsonPath`, `nodesDir`, `nodeFilePath`, `historyDir`, `chatDir`, `changesPath`, `tasksPath`, `eventsPath`, `deltaLogPath`                      | `storage/backends/disk/`        |
+| Blob layout            | `ARTIFACTS_DIR_NAME`, `artifactsDir`, `artifactPath`                                                                                                                        | `storage/backends/disk/` (blob) |
+| Workspace-as-a-place   | `canvasRoot`, `settingDir`, `userSkillsDir`, `workspaceMemoryPath`, `canvasMemoryDir`, `canvasMemoryPath`, `memoryStatePath`, `canvasAcpNamespace`, `WORLD_CANVAS_DIR_NAME` | `modules/workspace/`            |
+
+`canvas-dirs.ts` is not ambiguous at all: it builds its index by reading
+`space.json` from every directory. It is Disk structured-backend state that
+currently lives outside the storage boundary, and it is the reason a SQLite
+profile would silently fall back to id-named artifact directories (§13).
+
+`naming.ts` is misfiled in a third way — it is pure string logic with no I/O,
+already re-exported rather than owned. Phase 5 extracts it to `utils/naming.ts`
+as a side effect of needing it in a second backend; that extraction belongs
+here instead, where it is the point rather than a side effect.
+
+#### 12.5.3 Path families with no owner
+
+Cross-referencing the families above against the Phase 5 schema surfaces a gap
+this phase must record even though it does not close it. Six families map to
+tables — spaces, nodes, events, changes, tasks, delta log. These do not map to
+anything, and no port describes them:
+
+- `chatPromptLogPath` — per-thread prompt logs
+- `acpSessionsPath` — ACP session state
+- `canvasMemoryDir`, `canvasMemoryPath`, `memoryStatePath` — per-Space memory
+
+Under any non-Disk structured profile they remain files with no owner, which
+would split one Space's state across two substrates without anyone deciding
+that. Phase 4.5 assigns each family an owner — port, materialization
+capability, or explicitly Disk-only — so that Phase 5's non-selectability has a
+written reason rather than an accident.
+
+#### 12.5.4 Materialization becomes declared, not ambient
+
+The consumers marked _materialization_ above cannot be served by a structured
+port and should not be. An ACP agent, a file watcher, and RFS need a real
+directory; that is a product requirement, not a leak.
+
+What is wrong today is that they get it by reading an ambient layout module.
+The port layer already has the right shape one level down — `BlobScope`
+exposes `materialize()` for "consumers that genuinely need a real filename"
+(§7). This phase gives Space trees the same treatment: an explicit capability a
+consumer depends on by name and a profile can decline to offer, rather than a
+path helper that is always simply there.
+
+#### 12.5.5 Scope
+
+In:
+
+- Relocate the Disk structured and blob layout families, and `canvas-dirs.ts`,
+  into `storage/backends/disk/`.
+- Extract pure naming to `utils/naming.ts` (moved out of Phase 5).
+- Keep the Workspace-as-a-place families in `modules/workspace/`, without a
+  `disk` segment asserting the substrate.
+- Introduce the Space materialization capability and move the four
+  materialization consumers onto it.
+- Move `agent/memory/analyzer.ts` off `chatDir` and onto the change/log port.
+- Assign an owner to every §12.5.3 family; implement none of them.
+- Extend the module-boundary test to fail when a non-storage file imports a
+  storage-owned layout symbol — the guard that stops this recurring.
+
+Out:
+
+- Any SQLite work, schema, or adapter.
+- Changing the blob scope's _identity_ (title-derived vs `canvasId`). This
+  phase records the decision point; §13 owns the hazard.
+- Agenetes persistence, RFS/file-tool contracts, import/export, product UI.
+
+#### 12.5.6 Sequence and verification
+
+The moves preserve symbol names and runtime logic, as in §12.2.2. Tests move
+with their subjects. Verification is `pnpm run check` plus the extended
+boundary test; behavior parity is asserted by the existing Disk suites, which
+must pass unchanged — a diff that alters a Disk test's expectations is out of
+scope by definition.
+
+Phase 5 rebases onto this and drops its `utils/naming.ts` extraction, its
+`workspace/disk/naming.ts` shim, and the corresponding roadmap edits.
+
+### 12.6 Later phases — provisional
 
 5. Add one new adapter at a time — SQLite, then Postgres, then Azure Blob —
    running the same contract suites, migration fixtures, failure injection,
