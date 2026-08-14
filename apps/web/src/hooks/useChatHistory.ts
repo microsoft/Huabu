@@ -11,7 +11,6 @@ import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
   selectThreadHistoryLoaded,
-  selectThreadIsLoading,
   selectThreadLastAction,
   selectThreadMessages,
   useChatStore,
@@ -26,17 +25,93 @@ import {
 } from '@/store/conversationOwner';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
+import { claimAgentStream } from './agentStreamCoordinator';
 import { handleStreamEvent } from './useAgentStream';
 
 import type { ChatSession } from './useChatSession';
 import type { ChatMessage } from '../store/chatTypes';
-import type { AgentStreamEvent } from '@huabu/shared';
+import type { AgentStreamEvent, ChatHistoryResponse } from '@huabu/shared';
 
 /**
  * Roles the transcript renderer still understands. Anything else in a
  * persisted transcript belongs to a removed feature and is dropped on load.
  */
 const KNOWN_HISTORY_ROLES = new Set<string>(['user', 'assistant', 'status']);
+const INITIAL_ATTACH_RETRY_MS = 500;
+const MAX_ATTACH_RETRY_MS = 10_000;
+const attachRetryDelayByThread = new Map<string, number>();
+
+function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    };
+    const onAbort = () => {
+      window.clearTimeout(timeout);
+      finish();
+    };
+    const timeout = window.setTimeout(finish, delayMs);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function historyResponseToMessages(
+  response: ChatHistoryResponse,
+): ChatMessage[] {
+  return response.messages.flatMap((message, index): ChatMessage[] => {
+    const id = `history-${index}`;
+    if (!KNOWN_HISTORY_ROLES.has(message.role)) return [];
+
+    if (message.role === 'status') {
+      return [
+        {
+          id,
+          role: 'status',
+          status: message.status,
+          detail: message.detail,
+        },
+      ];
+    }
+
+    const attachments =
+      message.attachments && message.attachments.length > 0
+        ? { attachments: message.attachments }
+        : {};
+    const selectedNodeIds =
+      message.selectedNodeIds && message.selectedNodeIds.length > 0
+        ? { selectedNodeIds: message.selectedNodeIds }
+        : {};
+
+    if (message.role === 'assistant') {
+      return [
+        {
+          id,
+          role: 'assistant',
+          segments: message.parts,
+          ...attachments,
+          ...selectedNodeIds,
+        },
+      ];
+    }
+
+    return [
+      {
+        id,
+        role: 'user',
+        content: message.content || '',
+        ...attachments,
+        ...selectedNodeIds,
+        ...(message.selectedStrokeIds && message.selectedStrokeIds.length > 0
+          ? { selectedStrokeIds: message.selectedStrokeIds }
+          : {}),
+        ...(message.invokedSkills && message.invokedSkills.length > 0
+          ? { invokedSkills: message.invokedSkills }
+          : {}),
+      },
+    ];
+  });
+}
 
 /**
  * Hook that loads chat history from the server and handles reconnection
@@ -62,6 +137,13 @@ export function useChatHistory(
   const effectiveConversationView = session.conversationView;
   const ownerCanvasId =
     effectiveConversationView?.conversationOwner.canvasId || canvasId;
+  const ownerNodeId =
+    effectiveConversationView?.conversationOwner.nodeId ?? null;
+  const ownerStatus = useCanvasStore((state) => {
+    if (!ownerNodeId || state.canvasId !== ownerCanvasId) return undefined;
+    const owner = state.nodes.find((node) => node.id === ownerNodeId);
+    return (owner?.data as { status?: unknown } | undefined)?.status;
+  });
 
   // Load history from server on first mount (once per thread).
   // Wait for canvasId to be available — on initial mount the canvas may
@@ -121,82 +203,7 @@ export function useChatHistory(
           }));
         }
 
-        const serverMessages: ChatMessage[] = res.messages.flatMap(
-          (m, i): ChatMessage[] => {
-            const id = `history-${i}`;
-
-            // Transcripts written before the intent recogniser was removed
-            // still contain `intent-select` records. That role no longer has
-            // a renderer, so drop it instead of letting it fall through to
-            // the user branch and rehydrate as an empty bubble.
-            if (!KNOWN_HISTORY_ROLES.has(m.role)) return [];
-
-            if (m.role === 'status') {
-              return [
-                {
-                  id,
-                  role: 'status' as const,
-                  status: m.status,
-                  detail: m.detail,
-                },
-              ];
-            }
-
-            if (m.role === 'assistant') {
-              // Wire shape mirrors the runtime AssistantSegment union
-              // (see chatTypes.ts) — the server already produces the
-              // correct text/thinking/tool/plan/status part order; we
-              // pass it through unchanged so live streaming and
-              // rehydration share one renderer dispatch.
-              const attachmentsField =
-                m.attachments && m.attachments.length > 0
-                  ? { attachments: m.attachments }
-                  : {};
-              const selectedNodesField =
-                m.selectedNodeIds && m.selectedNodeIds.length > 0
-                  ? { selectedNodeIds: m.selectedNodeIds }
-                  : {};
-              return [
-                {
-                  id,
-                  role: 'assistant' as const,
-                  segments: m.parts,
-                  ...attachmentsField,
-                  ...selectedNodesField,
-                },
-              ];
-            }
-
-            // role === 'user'
-            const attachmentsField =
-              m.attachments && m.attachments.length > 0
-                ? { attachments: m.attachments }
-                : {};
-            const selectedNodesField =
-              m.selectedNodeIds && m.selectedNodeIds.length > 0
-                ? { selectedNodeIds: m.selectedNodeIds }
-                : {};
-            const selectedStrokesField =
-              m.selectedStrokeIds && m.selectedStrokeIds.length > 0
-                ? { selectedStrokeIds: m.selectedStrokeIds }
-                : {};
-            const invokedSkillsField =
-              m.invokedSkills && m.invokedSkills.length > 0
-                ? { invokedSkills: m.invokedSkills }
-                : {};
-            return [
-              {
-                id,
-                role: 'user' as const,
-                content: m.content || '',
-                ...attachmentsField,
-                ...selectedNodesField,
-                ...selectedStrokesField,
-                ...invokedSkillsField,
-              },
-            ];
-          },
-        );
+        const serverMessages = historyResponseToMessages(res);
         set(finalTid, serverMessages);
         setLoaded(finalTid, true);
       })
@@ -209,7 +216,13 @@ export function useChatHistory(
     return () => {
       cancelled = true;
     };
-  }, [threadId, ownerCanvasId, effectiveConversationView, previewTabId]);
+  }, [
+    threadId,
+    ownerCanvasId,
+    effectiveConversationView,
+    previewTabId,
+    canvasId,
+  ]);
 
   // Try to reconnect to an active server-side run after history is loaded.
   // This handles the page-refresh case: events buffered during the refresh
@@ -217,35 +230,16 @@ export function useChatHistory(
   useEffect(() => {
     if (!isHistoryLoaded || !threadId || !ownerCanvasId) return;
 
-    // Only attempt reconnect if history suggests an incomplete run:
-    // the last message is from the user without a following assistant
-    // response, meaning the server may still be streaming. If history is
-    // empty or ends with an assistant message, there's nothing to
-    // reconnect to — skip the request entirely to avoid a 404 in the
-    // browser console.
     const msgs = selectThreadMessages(useChatStore.getState(), threadId);
-    if (msgs.length === 0) return;
-    const lastMsg = msgs[msgs.length - 1];
-    if (lastMsg.role !== 'user') return;
-
-    // This client already owns a live consumer for the thread — either the
-    // POST stream `startStream` opened for the message just sent, or an
-    // earlier reconnect that is still pumping. Attaching a second consumer
-    // would replay the same in-flight turn under a fresh `assistantId` and
-    // render the answer twice. `loadingThreadIds` is never persisted, so a
-    // page refresh (the case this reconnect exists for) still passes.
-    //
-    // The window matters most right after a send: the assistant message
-    // does not exist until the first event, so `lastMsg` stays `user` for
-    // the whole lead time — seconds on a resumed ACP session, during which
-    // any re-render that changes `effectiveConversationView` (e.g.
-    // re-opening the same question thread) re-runs this effect.
-    if (selectThreadIsLoading(useChatStore.getState(), threadId)) return;
+    const historyLooksIncomplete =
+      msgs.length > 0 && msgs[msgs.length - 1]?.role === 'user';
+    if (ownerStatus !== 'running' && !historyLooksIncomplete) return;
 
     let cancelled = false;
     const ownerThreadId = threadId;
     const ownerView = effectiveConversationView;
-    const abortController = new AbortController();
+    const claim = claimAgentStream(ownerCanvasId, ownerThreadId, 'attach');
+    if (!claim) return;
 
     const tryReconnect = async () => {
       if (ownerView) {
@@ -262,6 +256,16 @@ export function useChatHistory(
         }
       }
       if (cancelled) return;
+
+      const refreshed = await agentApi.fetchHistory(
+        ownerThreadId,
+        ownerCanvasId,
+      );
+      if (cancelled) return;
+      useChatStore
+        .getState()
+        .setMessages(ownerThreadId, historyResponseToMessages(refreshed));
+      useChatStore.getState().setHistoryLoaded(ownerThreadId, true);
 
       const assistantId = createId('message');
       // Flag set to true once we know the server has an active run
@@ -370,7 +374,7 @@ export function useChatHistory(
         }
       };
 
-      const connected = await agentApi.reconnectStream(
+      const result = await agentApi.reconnectStream(
         ownerThreadId,
         ownerCanvasId,
         {
@@ -386,7 +390,6 @@ export function useChatHistory(
           },
           onError: (err) => {
             if (cancelled) return;
-            clearStaleMessages();
             addMessage(ownerThreadId, {
               id: createId('status'),
               role: 'status',
@@ -423,26 +426,69 @@ export function useChatHistory(
             });
           },
         },
-        abortController.signal,
+        claim.signal,
       );
 
-      if (connected && !cancelled) {
-        // Reconnection was successful — events were processed above
+      if (result.status === 'inactive' && !cancelled) {
+        const finalHistory = await agentApi.fetchHistory(
+          ownerThreadId,
+          ownerCanvasId,
+        );
+        if (!cancelled) {
+          useChatStore
+            .getState()
+            .setMessages(
+              ownerThreadId,
+              historyResponseToMessages(finalHistory),
+            );
+          useChatStore.getState().setHistoryLoaded(ownerThreadId, true);
+          setIsLoading(ownerThreadId, false);
+        }
+      }
+      if (result.status !== 'aborted') {
+        attachRetryDelayByThread.delete(ownerThreadId);
       }
     };
 
-    void tryReconnect();
+    void tryReconnect()
+      .catch(async (error) => {
+        if (cancelled || claim.signal.aborted) return;
+        console.error('[useChatHistory] reconnect failed', error);
+        const current = useCanvasStore.getState();
+        const ownerStillRunning =
+          !!ownerNodeId &&
+          current.canvasId === ownerCanvasId &&
+          (
+            current.nodes.find((node) => node.id === ownerNodeId)?.data as
+              | { status?: unknown }
+              | undefined
+          )?.status === 'running';
+        if (ownerStillRunning || historyLooksIncomplete) {
+          const delay =
+            attachRetryDelayByThread.get(ownerThreadId) ??
+            INITIAL_ATTACH_RETRY_MS;
+          attachRetryDelayByThread.set(
+            ownerThreadId,
+            Math.min(delay * 2, MAX_ATTACH_RETRY_MS),
+          );
+          await waitForRetry(delay, claim.signal);
+        }
+        if (cancelled || claim.signal.aborted) return;
+        useChatStore.getState().setHistoryLoaded(ownerThreadId, false);
+        setIsLoading(ownerThreadId, false);
+      })
+      .finally(() => claim.release());
 
     return () => {
       cancelled = true;
-      // Release the HTTP stream (and the server-side tail behind it) so a
-      // superseded attempt doesn't keep draining the run's event log.
-      abortController.abort();
+      claim.release();
     };
   }, [
     isHistoryLoaded,
     threadId,
     ownerCanvasId,
+    ownerNodeId,
+    ownerStatus,
     effectiveConversationView,
     previewTabId,
     addMessage,

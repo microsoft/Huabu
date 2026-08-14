@@ -38,6 +38,11 @@ export interface AgentStreamCallbacks {
   onComplete: () => void;
 }
 
+export type AgentStreamAttachResult =
+  | { status: 'completed' }
+  | { status: 'inactive' }
+  | { status: 'aborted' };
+
 /**
  * Drive `callbacks` from a streaming SSE Response. Centralised so
  * `streamMessage` and `reconnectStream` share the same parsing rules.
@@ -51,25 +56,28 @@ async function pumpAgentStream(
   callbacks: AgentStreamCallbacks,
   signal?: AbortSignal,
   options?: { suppressMeta?: boolean },
-): Promise<boolean> {
-  let terminated = false;
+): Promise<'done' | 'end' | 'error' | null> {
+  let terminal: 'done' | 'end' | 'error' | null = null;
 
   await readTypedSSEStream<AgentStreamEvent>(
     response,
     (event) => {
-      if (terminated) return;
+      if (terminal === 'end' || terminal === 'error') return;
 
       if (event.type === AGENT_SSE_EVENTS.End) {
-        terminated = true;
+        terminal = 'end';
         callbacks.onComplete();
         return;
       }
       if (event.type === AGENT_SSE_EVENTS.Error) {
-        terminated = true;
+        terminal = 'error';
         callbacks.onError(
           new Error(event.data.error || 'Unknown server error'),
         );
         return;
+      }
+      if (event.type === AGENT_SSE_EVENTS.Done) {
+        terminal = 'done';
       }
       if (options?.suppressMeta && event.type === AGENT_SSE_EVENTS.Meta) {
         return;
@@ -80,7 +88,7 @@ async function pumpAgentStream(
     signal,
   );
 
-  return terminated;
+  return terminal;
 }
 
 // ==================== API ====================
@@ -142,14 +150,15 @@ export const agentApi = {
 
   /**
    * Reconnect to an active agent run after page refresh.
-   * Returns false if no active run exists (404), otherwise streams events.
+   * Distinguishes inactivity and intentional abort from completed replay.
+   * Unexpected HTTP, transport, parse, or premature-EOF failures reject.
    */
   reconnectStream: async (
     threadId: string,
     canvasId: string | undefined,
     callbacks: AgentStreamCallbacks,
     signal?: AbortSignal,
-  ): Promise<boolean> => {
+  ): Promise<AgentStreamAttachResult> => {
     try {
       const response = await fetch(
         apiUrl(routes.agentStream(threadId, canvasId)),
@@ -158,16 +167,22 @@ export const agentApi = {
         },
       );
 
-      if (response.status === 404) return false;
-      if (!response.ok || !response.body) return false;
+      if (response.status === 404) return { status: 'inactive' };
+      if (!response.ok || !response.body) {
+        throw new Error(`Agent stream failed with HTTP ${response.status}`);
+      }
 
-      const terminated = await pumpAgentStream(response, callbacks, signal, {
+      const terminal = await pumpAgentStream(response, callbacks, signal, {
         suppressMeta: true,
       });
-      if (!terminated) callbacks.onComplete();
-      return true;
-    } catch {
-      return false;
+      if (!terminal) {
+        throw new Error('Agent stream ended before a terminal event');
+      }
+      if (terminal === 'done') callbacks.onComplete();
+      return { status: 'completed' };
+    } catch (error) {
+      if (signal?.aborted) return { status: 'aborted' };
+      throw error;
     }
   },
 
@@ -258,12 +273,12 @@ export const agentApi = {
         throw new Error('Response body is null');
       }
 
-      const terminated = await pumpAgentStream(
+      const terminal = await pumpAgentStream(
         response,
         callbacks,
         options?.signal,
       );
-      if (!terminated) callbacks.onComplete();
+      if (!terminal) callbacks.onComplete();
     } catch (error) {
       // Treat any error while the signal is aborted as an intentional stop
       if (options?.signal?.aborted) {

@@ -67,30 +67,6 @@ function writeSSE(
 // ==================== Route ====================
 
 /**
- * State for an active agent run. Reconnecting clients now replay from
- * L2's Tier-1 event log (`agenetes.tail`), so the host keeps only the
- * completion flag needed by `/stream`; AgentThreadService owns stop handles.
- */
-interface ActiveRun {
-  /** Whether the run has finished (success, error, or abort). */
-  completed: boolean;
-}
-
-/**
- * Tracks active (and recently completed) agent runs by threadId.
- * Enables client reconnection after page refresh.
- */
-const activeRuns = new Map<string, ActiveRun>();
-
-/** Remove a completed run after a grace period. */
-function scheduleRunCleanup(threadId: string, delayMs = 60_000): void {
-  setTimeout(() => {
-    const run = activeRuns.get(threadId);
-    if (run?.completed) activeRuns.delete(threadId);
-  }, delayMs);
-}
-
-/**
  * Dispatch a {@link ControlMsg} to a built-in (internal) chat thread's
  * durable handle. Reuses the live Deployment handle when present, otherwise
  * rehydrates from the persisted record so the selection is still applied +
@@ -181,7 +157,12 @@ const agentRoutes: FastifyPluginAsync = async (
     }
 
     const namespace = canvasAcpNamespace(canvasId ?? '');
-    const { turns } = agenetes.history(namespace, threadId);
+    if (agentThreadService.isActive(threadId, canvasId)) {
+      await agentThreadService.waitForTurnStart(threadId, canvasId);
+    }
+    const { turns } = agenetes.history(namespace, threadId, {
+      withTail: true,
+    });
     if (turns.length === 0) {
       // No folded turns → empty/new thread.
       return reply.send({ threadId, messages: [] });
@@ -282,12 +263,11 @@ const agentRoutes: FastifyPluginAsync = async (
       });
     }
     const { canvasId } = parsedQuery.data;
-    const run = activeRuns.get(threadId);
-
-    // Only reconnect to runs that are still in progress. Completed runs
-    // are fully folded into the Tier-2 log, so the history endpoint
-    // returns complete data — no need to replay a live tail.
-    if (!run || run.completed) {
+    if (
+      !agentThreadService.isActive(threadId, canvasId) ||
+      !(await agentThreadService.waitForTurnStart(threadId, canvasId)) ||
+      !agentThreadService.isActive(threadId, canvasId)
+    ) {
       return reply.code(404).send({ message: 'No active run' });
     }
 
@@ -619,9 +599,6 @@ const agentRoutes: FastifyPluginAsync = async (
       logger: request.log,
     };
 
-    // Abort controller — only triggered by the explicit /stop endpoint,
-    // NOT by client disconnect (so page refreshes don't interrupt the run).
-    const abortController = new AbortController();
     let invocation;
     try {
       invocation = await agentThreadService.invoke({
@@ -634,7 +611,6 @@ const agentRoutes: FastifyPluginAsync = async (
         fixedTarget,
         modelId,
         reasoningEffort,
-        signal: abortController.signal,
         logger: request.log,
         debugPrompt,
       });
@@ -648,9 +624,6 @@ const agentRoutes: FastifyPluginAsync = async (
       throw error;
     }
 
-    const run: ActiveRun = {
-      completed: false,
-    };
     try {
       // SSE streaming
       reply.hijack();
@@ -670,7 +643,6 @@ const agentRoutes: FastifyPluginAsync = async (
         data: { threadId: resolvedThreadId, mode },
       };
       writeSSE(reply.raw, metaEvent);
-      activeRuns.set(resolvedThreadId, run);
     } catch (error) {
       await invocation.dispose(error);
       throw error;
@@ -725,8 +697,6 @@ const agentRoutes: FastifyPluginAsync = async (
         emit({ type: AGENT_SSE_EVENTS.Error, data: { error: errorMsg } });
       }
     } finally {
-      run.completed = true;
-      scheduleRunCleanup(resolvedThreadId);
       reply.raw.removeListener('close', onDisconnect);
       socket?.removeListener('close', onDisconnect);
       if (clientConnected) {

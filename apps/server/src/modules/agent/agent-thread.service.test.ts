@@ -88,15 +88,17 @@ function createHarness(options?: {
     ? vi.fn().mockRejectedValue(options.finishError)
     : vi.fn().mockResolvedValue(undefined);
   const failLifecycle = vi.fn().mockResolvedValue(undefined);
-  const runExternal = vi.fn(() =>
-    events(
+  const runExternal = vi.fn((runOptions: { onTurnStarted?: () => void }) => {
+    runOptions.onTurnStarted?.();
+    return events(
       options?.externalEvents ?? [
         { type: 'text_delta', data: { content: 'Result' } },
         { type: 'done', data: { message: 'Done' } },
       ],
-    ),
-  );
-  const runInternal = vi.fn(() => {
+    );
+  });
+  const runInternal = vi.fn((runOptions: { onTurnStarted?: () => void }) => {
+    runOptions.onTurnStarted?.();
     async function* emptyInternalStream(): ReturnType<typeof runAgent> {
       yield* [];
       return [];
@@ -343,5 +345,56 @@ describe('AgentThreadService', () => {
     expect(invocation.signal.aborted).toBe(true);
     expect(harness.service.stop('thread-a')).toBe(false);
     await invocation.dispose();
+  });
+
+  it('registers before lifecycle start and exposes durable turn readiness', async () => {
+    const startLifecycle = vi.fn(async () => {
+      expect(service.isActive('thread-a', 'canvas-a')).toBe(true);
+    });
+    const runExternal = vi.fn((runOptions: { onTurnStarted?: () => void }) => {
+      runOptions.onTurnStarted?.();
+      return events([{ type: 'done', data: { message: 'Done' } }]);
+    });
+    const service = new AgentThreadService({
+      resolveFixedAgentNode: () => TARGET,
+      resolvePersistedExternalBinding: () => null,
+      waitForTurnRelease: vi.fn().mockResolvedValue(undefined),
+      acquireTurn: vi.fn(() => vi.fn()),
+      startLifecycle,
+      finishLifecycle: vi.fn().mockResolvedValue(undefined),
+      failLifecycle: vi.fn().mockResolvedValue(undefined),
+      runExternal,
+      runInternal: vi.fn(),
+      closeHandle: vi.fn(),
+    });
+
+    const invocation = await service.invoke(invocationOptions());
+    expect(service.isActive('thread-a', 'canvas-b')).toBe(false);
+    let readinessSettled = false;
+    void service.waitForTurnStart('thread-a', 'canvas-a').then(() => {
+      readinessSettled = true;
+    });
+    await Promise.resolve();
+    expect(readinessSettled).toBe(false);
+
+    const iterator = invocation.events[Symbol.asyncIterator]();
+    await iterator.next();
+
+    await expect(
+      service.waitForTurnStart('thread-a', 'canvas-a'),
+    ).resolves.toBe(true);
+    await iterator.next();
+    expect(service.isActive('thread-a', 'canvas-a')).toBe(false);
+  });
+
+  it('settles readiness as false when disposed before dispatch starts', async () => {
+    const harness = createHarness();
+    const invocation = await harness.service.invoke(invocationOptions());
+    const readiness = harness.service.waitForTurnStart('thread-a', 'canvas-a');
+
+    await invocation.dispose(new Error('SSE setup failed'));
+
+    await expect(readiness).resolves.toBe(false);
+    expect(harness.service.isActive('thread-a', 'canvas-a')).toBe(false);
   });
 });

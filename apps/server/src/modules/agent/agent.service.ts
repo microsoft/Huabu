@@ -166,6 +166,8 @@ export interface AgentRunOptions {
     mode: string;
     logger: FastifyBaseLogger;
   };
+  /** Called after Agenetes has synchronously persisted this turn's start. */
+  onTurnStarted?: () => void;
 }
 
 // ==================== Agent Loop ====================
@@ -206,6 +208,7 @@ export async function* runAgent(
     workloadType = 'Job',
     logger,
     debugPrompt,
+    onTurnStarted,
   } = options;
 
   const rendered = envelope
@@ -312,6 +315,7 @@ export async function* runAgent(
     logger,
     onRendered,
   });
+  onTurnStarted?.();
 
   while (true) {
     const next = await iterator.next();
