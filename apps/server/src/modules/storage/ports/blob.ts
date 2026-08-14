@@ -116,6 +116,21 @@ export interface BlobScope {
   materialize(name: string): Promise<BlobLease | null>;
 
   /**
+   * Whether an absolute local path is already stored by this scope.
+   *
+   * The question a local-import path asks before copying a file in: a
+   * source that is *already* a managed blob needs no import. Answering it
+   * by rebuilding the scope's directory is what made callers reach for the
+   * Disk layout, so the scope answers for itself.
+   *
+   * Pure and synchronous — a path comparison, never I/O, and it says
+   * nothing about whether the blob exists. A backend that stores nothing
+   * locally always returns `false`, which is the correct answer there: no
+   * local path it was handed can already be one of its blobs.
+   */
+  owns(absolutePath: string): boolean;
+
+  /**
    * Remove every blob in this scope.
    *
    * The only deletion this port offers, because deleting a Space is the

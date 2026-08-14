@@ -41,7 +41,6 @@ import {
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
 import { canvasBlobs } from '../storage/index.js';
-import { artifactsDir } from '../storage/paths.js';
 
 import type { CanvasStore } from '../storage/index.js';
 
@@ -266,17 +265,10 @@ async function resolveImportedSrc(
     return null;
   }
 
-  // Already inside `.artifacts/` (or a bare artifact key that resolves there)
-  // — nothing to import. This inspects the real local filesystem, as the
-  // whole local-import branch does; only the write below goes through the
-  // blob port.
-  const artifactsRoot = artifactsDir(canvasId);
-  if (
-    absPath === artifactsRoot ||
-    absPath.startsWith(artifactsRoot + path.sep)
-  ) {
-    return null;
-  }
+  // Already a managed blob (or a bare artifact key that resolves there)
+  // — nothing to import. The scope answers for its own storage rather than
+  // this module rebuilding the Disk artifacts path.
+  if (canvasBlobs(canvasId).owns(absPath)) return null;
 
   // A bare key like `art_abc.png` resolves under the canvas root but has no
   // file on disk there — leave it so the web resolver builds the artifact URL.

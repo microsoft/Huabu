@@ -1706,12 +1706,26 @@ Measured on `6b43798a`. Non-storage **production** files importing
 Six test files add `nodesDir`, `changesPath`, `canvasRoot`, and
 `withSpaceDirHandlesReleased`.
 
-This is a smaller consumer leak than the raw import count suggests: most
+**Corrected.** The table above was built by searching for `workspace/disk/`,
+which misses every consumer that reaches the same symbols through the
+deprecated `storage/paths.js` shim. Counting both paths, the production files
+outside `storage/` that read a **storage-owned** symbol are six, not one:
+
+| File                                        | Symbol                            | Resolution                                 |
+| ------------------------------------------- | --------------------------------- | ------------------------------------------ |
+| `canvas/canvas.route.ts`                    | `nodesDir`, `SPACE_JSON_FILENAME` | import/export bundle format; own constant  |
+| `canvas/external-watcher.ts`                | `SPACE_JSON_FILENAME`             | Disk-only feature; declare materialization |
+| `canvas/world-target-access.ts`             | `SPACE_JSON_FILENAME`             | catalogue read; `SpaceRepository.list()`   |
+| `canvas/import-node-src.ts`                 | `artifactsDir`                    | `BlobScope.owns()` (§12.5.7)               |
+| `agent/conversation/prompt/debug-prompt.ts` | `chatDir`                         | writes its own debug log; own path         |
+| `agent/memory/analyzer.ts`                  | `chatDir`                         | dead code; removed (§12.5.7)               |
+
+Even at six this is a smaller leak than the raw import count suggests: most
 `workspace/disk/` imports come from `storage/` itself, which is the permitted
-direction. Exactly **one** production site outside `storage/` reads a
-storage-owned path (`chatDir`). The problem is therefore not mass violation by
-consumers — it is that the module they import is _mixed_, and its name and
-location assert an answer the port layer exists to keep open.
+direction. The problem is not mass violation by consumers — it is that the
+module they import is _mixed_, and its name and location assert an answer the
+port layer exists to keep open. Note also that only one of the six wants a new
+port capability; the rest are dead, misfiled, or already served.
 
 #### 12.5.2 The test that decides ownership
 
@@ -1826,6 +1840,44 @@ scope by definition.
 
 Phase 5 rebases onto this and drops its `utils/naming.ts` extraction, its
 `workspace/disk/naming.ts` shim, and the corresponding roadmap edits.
+
+#### 12.5.7 Findings from step 5, and one follow-up
+
+Working the six consumers of §12.5.1 individually produced four different
+answers, only one of which was a missing port capability.
+
+**`BlobScope.owns(absolutePath)` — added.** `import-node-src.ts` asked whether
+a resolved path was already inside `.artifacts/`, and answered it by
+rebuilding the Disk artifacts directory. The scope can answer for itself. Pure
+and synchronous — a path comparison, never I/O — and a backend that stores
+nothing locally returns `false`, which is correct there rather than a
+degradation. It sits on the blob axis, so it constrains no structured backend.
+Covered in the shared blob contract, so both answers are pinned for every
+adapter.
+
+**The memory analyzer's chat digest — removed, not ported.** `readChatDigest`
+scanned `<canvas>/.history/chat/*.json` for a `{ messages: [] }` shape. Two
+migrations retired it: `migrate-chat-threads` renamed `<threadId>.json` to
+`.json.bak` and wrote `.turns.jsonl`; `migrate-chat-turns` folded those into
+the Agenetes Tier-2 store under `chat_v2/`. The only live `.json` writer left
+in that directory is the change-review sidecar, whose payload is an array with
+no `messages` key, so every file failed the guard. The reader had returned
+nothing in any migrated workspace, and its own test pointed it at a directory
+that does not exist, so nothing caught it.
+
+Adding a `SpaceChats.list()` port to serve it would have been the wrong repair
+twice over: it would give the storage ports authority over data storage does
+not own — `legacy/canvas-store.ts` states plainly that threads and turns
+belong to the agent runtime — and would oblige every future structured backend
+to model Agenetes' turn log, which is the two-authorities hazard in §13.
+
+**Follow-up (open):** decide whether the memory agent should see conversation
+turns at all, and if so reinstate the digest against `agenetes.history()` —
+the call `canvas-search.ts` already uses for exactly this data. That is a
+behavior change and deliberately outside this phase, whose parity rule is that
+no working behavior moves. The `latestChatTs` field and its
+`lastSeenThreadCursor` plumbing survive the removal because they are the
+resume point such a digest would need.
 
 ### 12.6 Later phases — provisional
 

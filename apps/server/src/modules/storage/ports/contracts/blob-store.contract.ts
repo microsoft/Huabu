@@ -286,6 +286,26 @@ export function describeBlobStoreContract(
       );
     });
 
+    it('claims a materialized path and disclaims an unrelated one', async () => {
+      const blobs = await scope();
+      await blobs.put('owned.txt', Buffer.from('mine'));
+
+      // A backend that hands out a real path must recognize it again;
+      // one that materializes nothing locally owns no local path at all.
+      // Both are correct, and the two answers must not be mixed within a
+      // single implementation — that is what this pins.
+      const lease = await blobs.materialize('owned.txt');
+      if (lease) {
+        expect(blobs.owns(lease.path)).toBe(true);
+        await lease.release();
+      }
+
+      expect(blobs.owns('/definitely/not/this/scope/owned.txt')).toBe(false);
+      // Absence is not the question `owns` answers: a path that would belong
+      // to the scope still belongs to it before anything is written there.
+      expect(typeof blobs.owns('/tmp/never-written.txt')).toBe('boolean');
+    });
+
     it('deleteAll empties the scope and is idempotent', async () => {
       const blobs = await scope();
       await blobs.put('i1.txt', Buffer.from('x'));

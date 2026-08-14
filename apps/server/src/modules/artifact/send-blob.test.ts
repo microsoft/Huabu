@@ -50,6 +50,7 @@ function fakeScope(blobs: Record<string, Buffer>): BlobScope {
     async materialize() {
       return null;
     },
+    owns: () => false,
     async deleteAll() {},
   };
 }

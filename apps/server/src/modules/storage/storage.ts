@@ -320,6 +320,9 @@ export function canvasBlobs(canvasId: string): BlobScope {
     materialize(name: string): Promise<BlobLease | null> {
       return delegate.materialize(name);
     },
+    owns(absolutePath: string): boolean {
+      return delegate.owns(absolutePath);
+    },
     deleteAll(): Promise<void> {
       return delegate.deleteAll();
     },
