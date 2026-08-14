@@ -28,6 +28,7 @@ interface CanvasHeaderProps {
    * (`h-8 w-8`) is used on standalone pages such as the canvas list.
    */
   compact?: boolean;
+  vertical?: boolean;
   /**
    * Opens the Keyboard Shortcuts modal. Forwarded to the default
    * `<CanvasMenu />` so the dropdown can host the entry alongside
@@ -46,6 +47,7 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
   isCollapsed,
   onToggle,
   compact = false,
+  vertical = false,
   onOpenShortcuts,
 }) => {
   const { t } = useTranslation();
@@ -56,22 +58,29 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
   return (
     <header
       className={clsx(
-        'bg-surface flex items-center gap-1 overflow-hidden px-2',
+        'bg-surface flex items-center gap-1 overflow-hidden',
         // In-column variant connects to the left panel below via shared
         // borders. Floating variant matches the CanvasToolbar chrome
         // (soft bottom shadow, no border, lg-rounded card) and caps its
         // width so long canvas titles don't stretch the overlay across
         // the canvas.
-        isCollapsed
-          ? 'shadow-bottom h-10 max-w-[18rem] rounded-lg border-0'
-          : 'border-edge-default h-12 border-r border-b',
+        vertical
+          ? 'border-edge-default h-full w-12 flex-col border-r px-2 py-1'
+          : isCollapsed
+            ? 'shadow-bottom h-10 max-w-[18rem] rounded-lg border-0'
+            : 'border-edge-default h-12 border-r border-b',
+        !vertical && 'px-2',
       )}
     >
-      <AppMenu compact={compact} />
+      {!vertical && (
+        <>
+          <AppMenu compact={compact} />
 
-      <div className="min-w-0 flex-1">
-        {children ?? <CanvasMenu onOpenShortcuts={onOpenShortcuts} />}
-      </div>
+          <div className="min-w-0 flex-1">
+            {children ?? <CanvasMenu onOpenShortcuts={onOpenShortcuts} />}
+          </div>
+        </>
+      )}
 
       {onToggle && (
         <Button

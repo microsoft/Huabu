@@ -1,8 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
+import { Loading } from '@/components/Common/Loading';
 import { usePanelStore } from '@/store/panelStore';
 import { openChat } from '@/store/previewWorkspace/actions';
 
@@ -17,11 +24,10 @@ interface LayoutInjectedProps {
   isCollapsed?: boolean;
   isHostCollapsed?: boolean;
   isFullscreen?: boolean;
-  isLayersCollapsed?: boolean;
   compact?: boolean;
+  vertical?: boolean;
   onToggle?: () => void;
   onToggleFullscreen?: () => void;
-  onToggleLayers?: () => void;
   onOpenChat?: typeof openChat;
 }
 
@@ -70,10 +76,9 @@ export const MainLayout = ({
   const RIGHT_MIN_WIDTH_PX = 264;
   const CENTER_MIN_WIDTH_PX = 100;
 
-  // Maximum side panel widths as ratios of the available content width.
-  // This mirrors the previous maxSize behavior when using react-resizable-panels.
+  // Layers keeps a ratio cap. Preview instead uses all space left after the
+  // Layers column and minimum Canvas width, allowing wide document browsing.
   const LEFT_MAX_RATIO = 0.3;
-  const RIGHT_MAX_RATIO = 0.5;
 
   const LEFT_DEFAULT_WIDTH_PX = 260;
   const RIGHT_DEFAULT_WIDTH_PX = 420;
@@ -86,8 +91,40 @@ export const MainLayout = ({
   const [isRightPanelVisible, setIsRightPanelVisible] =
     useState(!isRightCollapsed);
   const [isRightPanelMoving, setIsRightPanelMoving] = useState(false);
+  const [isRestoringCanvas, setIsRestoringCanvas] = useState(false);
   const committedRightCollapsedRef = useRef(isRightCollapsed);
   const rightPanelMotionFallbackRef = useRef<number | null>(null);
+  const restoreCanvasFrameRef = useRef<number | null>(null);
+
+  const displayedPreviewFullscreen = isPreviewFullscreen && !isRestoringCanvas;
+
+  const handleTogglePreviewFullscreen = () => {
+    if (!isPreviewFullscreen) {
+      togglePreviewFullscreen();
+      return;
+    }
+    if (isRestoringCanvas) return;
+
+    setIsRestoringCanvas(true);
+    // Let the ordinary layout and loading indicator reach the screen before
+    // React synchronously rebuilds the expensive Canvas/React Flow subtree.
+    restoreCanvasFrameRef.current = requestAnimationFrame(() => {
+      restoreCanvasFrameRef.current = requestAnimationFrame(() => {
+        restoreCanvasFrameRef.current = null;
+        togglePreviewFullscreen();
+      });
+    });
+  };
+
+  useEffect(() => {
+    if (!isPreviewFullscreen) setIsRestoringCanvas(false);
+    return () => {
+      if (restoreCanvasFrameRef.current !== null) {
+        cancelAnimationFrame(restoreCanvasFrameRef.current);
+        restoreCanvasFrameRef.current = null;
+      }
+    };
+  }, [isPreviewFullscreen]);
 
   const finishRightPanelMotion = () => {
     if (rightPanelMotionFallbackRef.current !== null) {
@@ -126,7 +163,7 @@ export const MainLayout = ({
   }, [isRightCollapsed]);
 
   const rightPanelVisible =
-    isPreviewFullscreen ||
+    displayedPreviewFullscreen ||
     resolveRightPanelVisible({
       collapsed: isRightCollapsed,
       moving: isRightPanelMoving,
@@ -153,7 +190,8 @@ export const MainLayout = ({
     'h-8 w-0.5 rounded-full bg-text-faded opacity-0 transition-all duration-300 group-hover:h-12 group-hover:opacity-100';
 
   const leftHandleDisabled = isLeftCollapsed;
-  const rightHandleDisabled = isRightCollapsed || isPreviewFullscreen;
+  const rightHandleDisabled =
+    isRightCollapsed || displayedPreviewFullscreen || isRestoringCanvas;
 
   const leftHandleClassName = `${resizeHandleClassName} ${
     leftHandleDisabled ? 'hidden' : 'cursor-col-resize'
@@ -187,7 +225,7 @@ export const MainLayout = ({
       const totalWidth =
         contentRef.current?.getBoundingClientRect().width ??
         dragConstraints.totalWidth;
-      const maxLeft = isPreviewFullscreen
+      const maxLeft = displayedPreviewFullscreen
         ? totalWidth * LEFT_MAX_RATIO
         : Math.min(
             totalWidth - effectiveRightWidthPx - dragConstraints.minCenter,
@@ -225,10 +263,8 @@ export const MainLayout = ({
       const totalWidth =
         contentRef.current?.getBoundingClientRect().width ??
         dragConstraints.totalWidth;
-      const maxRight = Math.min(
-        totalWidth - effectiveLeftWidthPx - dragConstraints.minCenter,
-        totalWidth * RIGHT_MAX_RATIO,
-      );
+      const maxRight =
+        totalWidth - effectiveLeftWidthPx - dragConstraints.minCenter;
       // Dragging right handle to the right makes the right panel smaller.
       const nextRight = clamp(
         startRight - (ev.clientX - startX),
@@ -252,7 +288,8 @@ export const MainLayout = ({
     <div
       ref={contentRef}
       className="relative flex h-full w-full overflow-hidden"
-      data-preview-fullscreen={isPreviewFullscreen ? 'true' : undefined}
+      data-preview-fullscreen={displayedPreviewFullscreen ? 'true' : undefined}
+      data-canvas-restoring={isRestoringCanvas ? 'true' : undefined}
     >
       {/* Left Column: Header on top, Left Panel below — share the same width.
           When collapsed the column shrinks to 0; the Header is rendered as a
@@ -317,42 +354,58 @@ export const MainLayout = ({
         <div className={resizeHandleInnerClassName} />
       </div>
 
-      {/* Center Editor — hosts the canvas and the floating Header overlay
-          when the left panel is collapsed. */}
-      <div
-        ref={(element) => {
-          if (element) element.inert = isPreviewFullscreen;
-        }}
-        className={
-          isPreviewFullscreen
-            ? 'pointer-events-none invisible absolute inset-0 min-w-0'
-            : 'relative min-w-0 flex-1'
-        }
-        data-center-editor
-        aria-hidden={isPreviewFullscreen || undefined}
-        data-right-panel-motion={rightPanelMotionPending ? 'true' : undefined}
-      >
-        {React.isValidElement(children)
-          ? React.cloneElement(
+      {/* Fullscreen Preview unmounts Canvas entirely. Hiding React Flow with
+          CSS leaves portals and compositor layers alive, which can leak stale
+          canvas pixels over Preview or Layers. Canvas restores its viewport
+          from canvasStore when this subtree mounts again. */}
+      {!displayedPreviewFullscreen && (
+        <div
+          className="relative min-w-0 flex-1"
+          data-center-editor
+          data-right-panel-motion={rightPanelMotionPending ? 'true' : undefined}
+        >
+          {isPreviewFullscreen ? (
+            <Loading layout="block" className="bg-bg-default" />
+          ) : React.isValidElement(children) ? (
+            React.cloneElement(
               children as React.ReactElement<LayoutInjectedProps>,
               {
                 onOpenChat: openChat,
               },
             )
-          : children}
-        {isLeftCollapsed && React.isValidElement(header) && (
-          <div className="pointer-events-auto absolute top-3 left-2 z-30">
+          ) : (
+            children
+          )}
+          {isLeftCollapsed && React.isValidElement(header) && (
+            <div className="pointer-events-auto absolute top-3 left-2 z-30">
+              {React.cloneElement(
+                header as React.ReactElement<LayoutInjectedProps>,
+                {
+                  isCollapsed: true,
+                  onToggle: toggleLeftPanel,
+                  compact: true,
+                },
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {displayedPreviewFullscreen &&
+        isLeftCollapsed &&
+        React.isValidElement(header) && (
+          <div className="h-full w-12 shrink-0" data-fullscreen-header-rail>
             {React.cloneElement(
               header as React.ReactElement<LayoutInjectedProps>,
               {
                 isCollapsed: true,
                 onToggle: toggleLeftPanel,
                 compact: true,
+                vertical: true,
               },
             )}
           </div>
         )}
-      </div>
 
       {/* Right Resize Handle */}
       <div
@@ -371,21 +424,25 @@ export const MainLayout = ({
           panel so it can slide offscreen instead of disappearing immediately. */}
       <div
         className={`relative ${
-          isPreviewFullscreen ? 'min-w-0 flex-1' : 'shrink-0'
-        } ${clipSettledRightPanel ? 'overflow-hidden' : ''}`}
+          displayedPreviewFullscreen ? 'min-w-0 flex-1' : 'shrink-0'
+        } ${displayedPreviewFullscreen || clipSettledRightPanel ? 'overflow-hidden' : ''}`}
         data-right-panel-slot
         data-collapsed={isRightCollapsed ? 'true' : undefined}
         data-moving={isRightPanelMoving ? 'true' : undefined}
         data-resizing={isResizing ? 'true' : undefined}
         style={{
-          width: isPreviewFullscreen ? undefined : `${effectiveRightWidthPx}px`,
+          width: displayedPreviewFullscreen
+            ? undefined
+            : `${effectiveRightWidthPx}px`,
         }}
       >
         <div
           className="absolute top-0 h-full"
           data-right-panel-content
           data-visible={rightPanelVisible ? 'true' : undefined}
-          style={{ width: isPreviewFullscreen ? '100%' : `${rightWidthPx}px` }}
+          style={{
+            width: displayedPreviewFullscreen ? '100%' : `${rightWidthPx}px`,
+          }}
           onTransitionEnd={(event) => {
             if (
               event.target === event.currentTarget &&
@@ -402,10 +459,8 @@ export const MainLayout = ({
                   isCollapsed: false,
                   isHostCollapsed: isRightCollapsed,
                   onToggle: toggleRightPanel,
-                  isFullscreen: isPreviewFullscreen,
-                  onToggleFullscreen: togglePreviewFullscreen,
-                  isLayersCollapsed: isLeftCollapsed,
-                  onToggleLayers: toggleLeftPanel,
+                  isFullscreen: displayedPreviewFullscreen,
+                  onToggleFullscreen: handleTogglePreviewFullscreen,
                 },
               )
             : rightPanel}
