@@ -31,7 +31,7 @@ import {
 import { buildChatEnvelope } from '../agent/conversation/envelope.js';
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
-import { canvasAcpNamespace } from '../storage/paths.js';
+import { canvasAcpNamespace } from '../workspace/disk/paths.js';
 
 import type { ControlMsg, Namespace } from '@agenetes/protocol';
 import type {

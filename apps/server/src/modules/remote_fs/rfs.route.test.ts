@@ -56,14 +56,17 @@ import {
   agentThreadService,
 } from '../agent/agent-thread.service.js';
 import * as selectableProfiles from '../agent/selectable-agent-profile.js';
-import { getCanvasStore, resetStorageCache } from '../storage/index.js';
+import {
+  getCanvasStore,
+  resetStorageCache,
+  spaceDirectory,
+} from '../storage/index.js';
 import {
   RunCompletionError,
   runCompletionService,
 } from '../task/run-completion.service.js';
 import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
 import { taskService } from '../task/task.service.js';
-import { canvasRoot } from '../workspace/disk/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { FixedAgentNodeTarget } from '../agent/agent-thread-resolver.js';
@@ -156,7 +159,7 @@ describe('GET /api/rfs/:canvasId/skill', () => {
   it('returns only the bundled root guide without authorization', async () => {
     seedNote('c1', 'node-1', 'Anchor', 'content');
     writeFileSync(
-      join(canvasRoot('c1'), 'skill.md'),
+      join(spaceDirectory('c1'), 'skill.md'),
       '# Private Space Override',
       'utf8',
     );

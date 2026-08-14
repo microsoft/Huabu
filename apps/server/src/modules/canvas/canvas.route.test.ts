@@ -37,7 +37,7 @@ import {
   getStructuredStore,
   resetStorageCache,
 } from '../storage/index.js';
-import { changesPath } from '../workspace/disk/paths.js';
+import { changesPath } from '../storage/paths.js';
 import { withSpaceDirHandlesReleased } from '../workspace/disk/space-dir-handles.js';
 import { setWorkspacePath } from '../workspace.js';
 

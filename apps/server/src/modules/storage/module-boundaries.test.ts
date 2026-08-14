@@ -185,7 +185,20 @@ describe('storage dependency direction', () => {
       );
 
     const nonAdapter = importers.filter((f) => !inLayer(f, 'backends'));
-    expect(nonAdapter).toEqual(['modules/storage/storage.ts']);
+    // `storage.ts` selects the backend. The rest reach a *named* Disk module
+    // because the Disk layout and its directory index moved inside the
+    // boundary in Phase 4.5 (§12.5.2): the barrel re-exports the Disk World
+    // helpers, the two shims forward Disk-capability imports, and the
+    // compatibility facade is Disk-coupled by construction. Each entry
+    // disappears as its consumers move onto ports and the materialization
+    // capability (§12.5.5 step 5).
+    expect(nonAdapter).toEqual([
+      'modules/storage/canvas-dirs.ts',
+      'modules/storage/compatibility/canvas.ts',
+      'modules/storage/index.ts',
+      'modules/storage/paths.ts',
+      'modules/storage/storage.ts',
+    ]);
   });
 });
 
@@ -325,6 +338,16 @@ describe('root forwarding shims', () => {
       'modules/remote_fs/rfs.route.ts',
       'modules/remote_fs/skill.ts',
       'prompt/skills/loader.ts',
+      // Phase 4.5 relocations, not new couplings. Each of these already read
+      // a Disk-owned path; it read it from `workspace/disk/paths.js`, which
+      // this phase emptied of Disk layout (§12.5.2). The same call site now
+      // names the shim instead. Fourteen entries left this list in the same
+      // change, because their symbols turned out to be workspace-owned.
+      'modules/agent/memory/analyzer.test.ts',
+      'modules/canvas/canvas-content-cas.test.ts',
+      'modules/canvas/canvas.route.test.ts',
+      'modules/workspace/disk/world-canvas.ts',
+      'modules/workspace/migrations/migrate-acp-sessions.ts',
     ],
   };
 

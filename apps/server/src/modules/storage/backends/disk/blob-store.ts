@@ -26,8 +26,8 @@ import {
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
+import { artifactsDir } from './layout.js';
 import { renameOverWithRetry } from '../../../../utils/fs.js';
-import { artifactsDir } from '../../../workspace/disk/paths.js';
 import { getWorkspacePath } from '../../../workspace.js';
 import { createBlobLease, normalizeBlobName } from '../../ports/blob.js';
 

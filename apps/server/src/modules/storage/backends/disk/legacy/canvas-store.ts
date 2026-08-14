@@ -44,6 +44,8 @@ import {
   toFrontmatter,
 } from '../../../../../utils/markdown-frontmatter.js';
 import { toSafeFilename } from '../../../../../utils/naming.js';
+import { getWorkspacePath } from '../../../../workspace.js';
+import { assertSpaceMutationAllowed } from '../../../space-lifecycle-admission.js';
 import {
   patchCanvasDirTitle,
   refreshCanvasDirIndex,
@@ -51,8 +53,7 @@ import {
   renameCanvasDirOnDisk,
   isWorldCanvasId,
   unregisterCanvasDir,
-} from '../../../../workspace/disk/canvas-dirs.js';
-import { NameIndex } from '../../../../workspace/disk/name-index.js';
+} from '../canvas-dirs.js';
 import {
   canvasJsonPath,
   canvasRoot,
@@ -62,9 +63,8 @@ import {
   eventsPath,
   nodeFilePath,
   nodesDir,
-} from '../../../../workspace/disk/paths.js';
-import { getWorkspacePath } from '../../../../workspace.js';
-import { assertSpaceMutationAllowed } from '../../../space-lifecycle-admission.js';
+} from '../layout.js';
+import { NameIndex } from '../name-index.js';
 import { readValidCanvasFile } from '../space-record-validation.js';
 import { titleVisibleAtDirectory } from '../space-title.js';
 

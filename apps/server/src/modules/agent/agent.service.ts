@@ -18,8 +18,6 @@
  *    themselves and pull the relevant `tool_result` payload.
  */
 
-import { loadAgent, type AgentId } from '../../prompt/index.js';
-import { canvasAcpNamespace } from '../storage/paths.js';
 import {
   agenetes,
   INTERNAL_DRIVER_KIND,
@@ -28,6 +26,8 @@ import {
 } from './agenetes/drivers.js';
 import { createChatSubmission } from './agenetes/handle.js';
 import { buildHuabuPiWorkloadSpec } from './agenetes/pi-driver.js';
+import { loadAgent, type AgentId } from '../../prompt/index.js';
+import { canvasAcpNamespace } from '../workspace/disk/paths.js';
 import { renderInternalAgentInputs } from './conversation/prompt/build-prompt.js';
 import { dumpAssembledPrompt } from './conversation/prompt/debug-prompt.js';
 import { type ToolScope } from './tools/index.js';

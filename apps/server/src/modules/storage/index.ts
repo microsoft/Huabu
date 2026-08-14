@@ -28,7 +28,7 @@ export {
   getWorldCanvasId,
   isWorldCanvasId,
   requireWorldCanvasId,
-} from '../workspace/disk/canvas-dirs.js';
+} from './backends/disk/canvas-dirs.js';
 export { withCanvasMutex, updateNode } from '../canvas/write-coordinator.js';
 export type {
   UpdateNodeOptions,
@@ -53,6 +53,7 @@ export {
   getStructuredStore,
   initStorage,
   setStorageForTesting,
+  spaceDirectory,
   storageHealth,
 } from './storage.js';
 export type { SpaceDeleteOutcome, Storage } from './storage.js';

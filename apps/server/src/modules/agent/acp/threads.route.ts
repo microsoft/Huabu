@@ -50,7 +50,7 @@ import { buildReachbackEnv } from './reachback-env.js';
 import { getExternalAgentRuntimeConfig } from './runtime-config.js';
 import { resolveBindingRecipe } from './service.js';
 import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
-import { canvasAcpNamespace } from '../../storage/paths.js';
+import { canvasAcpNamespace } from '../../workspace/disk/paths.js';
 import {
   agenetes,
   EXTERNAL_DRIVER_KIND,

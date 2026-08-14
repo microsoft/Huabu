@@ -45,7 +45,7 @@ import { agentMetadataSchema } from '@agenetes/protocol';
 
 import { parseMigratableV3Records } from './legacy/acp-sessions-v3.js';
 import { readJson } from '../../../utils/fs.js';
-import { SPACE_JSON_FILENAME } from '../disk/paths.js';
+import { SPACE_JSON_FILENAME } from '../../storage/paths.js';
 
 import type { AcpWorkloadSpec } from '../../agent/agenetes/drivers.js';
 import type { AgentStateSnapshot, Namespace } from '@agenetes/protocol';

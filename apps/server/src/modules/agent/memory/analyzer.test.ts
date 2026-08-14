@@ -19,9 +19,14 @@ vi.mock('../../storage/index.js', () => ({ getStructuredStore: vi.fn() }));
 vi.mock('../../workspace/disk/paths.js', () => ({
   canvasMemoryPath: (canvasId: string) =>
     `${physicalState.root}/${canvasId}/.memory/space.md`,
+  workspaceMemoryPath: () => `${physicalState.root}/setting/user.md`,
+}));
+// `chatDir` is Disk record layout, so it moved inside the storage boundary
+// (proposal §12.5.2). The chat digest still reads it directly — the last
+// storage-owned path this module touches, tracked as §12.5.5 step 5.
+vi.mock('../../storage/paths.js', () => ({
   chatDir: (canvasId: string) =>
     `${physicalState.root}/${canvasId}/.history/chat`,
-  workspaceMemoryPath: () => `${physicalState.root}/setting/user.md`,
 }));
 
 import { runAgent } from '../agent.service.js';

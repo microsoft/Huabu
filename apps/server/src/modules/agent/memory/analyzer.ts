@@ -36,9 +36,9 @@ import {
   type CanvasFile,
   type SpaceHandle,
 } from '../../storage/index.js';
+import { chatDir } from '../../storage/paths.js';
 import {
   canvasMemoryPath,
-  chatDir,
   workspaceMemoryPath,
 } from '../../workspace/disk/paths.js';
 

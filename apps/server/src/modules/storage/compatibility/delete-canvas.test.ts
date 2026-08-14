@@ -14,9 +14,9 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { executeOnServer } from '../../canvas/canvas-executor.js';
-import { refreshCanvasDirIndex } from '../../workspace/disk/canvas-dirs.js';
-import { artifactPath, canvasJsonPath } from '../../workspace/disk/paths.js';
 import { DiskBlobStore } from '../backends/disk/blob-store.js';
+import { refreshCanvasDirIndex } from '../backends/disk/canvas-dirs.js';
+import { artifactPath, canvasJsonPath } from '../backends/disk/layout.js';
 import { resetStorageCache } from '../backends/disk/legacy/canvas-store-cache.js';
 import { DiskStructuredStore } from '../backends/disk/structured-store.js';
 import { getCanvasStore } from '../index.js';

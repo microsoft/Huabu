@@ -27,13 +27,9 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
+import { canvasJsonPath, deltaLogPath, nodesDir } from './layout.js';
 import { repairJsonLinesTail } from '../../../../utils/fs.js';
 import { parseFrontmatter } from '../../../../utils/markdown-frontmatter.js';
-import {
-  canvasJsonPath,
-  deltaLogPath,
-  nodesDir,
-} from '../../../workspace/disk/paths.js';
 
 interface FileSnapshot {
   path: string;

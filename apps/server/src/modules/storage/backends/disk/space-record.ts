@@ -11,9 +11,9 @@
 
 import path from 'node:path';
 
+import { refreshCanvasDirIndex } from './canvas-dirs.js';
+import { canvasJsonPath } from './layout.js';
 import { readValidCanvasFile } from './space-record-validation.js';
-import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
-import { canvasJsonPath } from '../../../workspace/disk/paths.js';
 import { getWorkspacePath } from '../../../workspace.js';
 
 import type { CanvasStore } from './legacy/canvas-store.js';

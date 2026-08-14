@@ -19,7 +19,7 @@ import {
   dedupeArtifactFilename,
   dedupeName,
   normalizeForCompare,
-} from '../../../utils/naming.js';
+} from '../../../../utils/naming.js';
 
 export interface NameIndexEntry {
   /** Stable identifier — never written to disk as a filename. */

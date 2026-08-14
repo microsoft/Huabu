@@ -30,7 +30,7 @@ import {
   canvasMemoryPath,
   userSkillsDir,
   workspaceMemoryPath,
-} from '../../../storage/paths.js';
+} from '../../../workspace/disk/paths.js';
 import { setWorkspacePath } from '../../../workspace.js';
 
 interface ParsedResult {

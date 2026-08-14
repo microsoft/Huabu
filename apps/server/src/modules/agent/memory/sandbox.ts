@@ -31,7 +31,7 @@ import {
   userSkillsDir,
   canvasMemoryDir,
   canvasMemoryPath,
-} from '../../storage/paths.js';
+} from '../../workspace/disk/paths.js';
 
 /** Thrown by every resolver below on out-of-sandbox attempts. */
 export class MemorySandboxError extends Error {

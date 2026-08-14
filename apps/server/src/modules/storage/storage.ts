@@ -28,6 +28,7 @@ import {
   getWorkspacePath,
 } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
+import { canvasRoot } from './backends/disk/layout.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import {
   parseStorageProfile,
@@ -328,6 +329,25 @@ export function canvasBlobs(canvasId: string): BlobScope {
 export async function storageHealth(): Promise<StorageHealth[]> {
   const storage = ensure();
   return Promise.all([storage.structured.health(), storage.blobs.health()]);
+}
+
+/**
+ * The real directory backing a Space — the materialization capability.
+ *
+ * Some consumers genuinely need a filesystem path rather than a record: an
+ * ACP agent needs a working directory, the external watcher needs something
+ * to watch, RFS exposes a tree. That is a product requirement, not a leak
+ * (proposal §12.5.4), and it is the Space-level counterpart to
+ * `BlobScope.materialize()`.
+ *
+ * It lives in the composition root because only this module may ask a named
+ * backend where anything is. Every profile selectable today materializes, so
+ * this resolves unconditionally; a backend that stores Spaces without a
+ * directory would refuse here rather than hand back a path that does not
+ * exist.
+ */
+export function spaceDirectory(canvasId: string): string {
+  return canvasRoot(canvasId);
 }
 
 /**

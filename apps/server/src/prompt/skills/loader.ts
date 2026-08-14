@@ -49,7 +49,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { userSkillsDir } from '../../modules/storage/paths.js';
+import { userSkillsDir } from '../../modules/workspace/disk/paths.js';
 import { getWorkspacePath } from '../../modules/workspace.js';
 import { getLogger } from '../../utils/logger.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';

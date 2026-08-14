@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const workspaceState = vi.hoisted(() => ({ path: '' }));
 
-vi.mock('../../workspace.js', () => ({
+vi.mock('../../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
 }));
 
@@ -29,7 +29,7 @@ import {
   renameCanvasDirOnDisk,
   suggestCanvasDir,
 } from './canvas-dirs.js';
-import { CanvasStore } from '../../storage/index.js';
+import { CanvasStore } from '../../index.js';
 
 function writeCanvas(
   root: string,

@@ -16,6 +16,16 @@
 import path from 'node:path';
 
 import {
+  isWorldCanvasId,
+  listAllCanvasDirEntries,
+  listCanvasDirEntries,
+  refreshCanvasDirIndex,
+  registerCanvasDir,
+  requireWorldCanvasId,
+  suggestCanvasDir,
+} from './canvas-dirs.js';
+import { canvasJsonPath, SPACE_JSON_FILENAME } from './layout.js';
+import {
   forgetCanvasStore,
   getCanvasStore,
 } from './legacy/canvas-store-cache.js';
@@ -27,19 +37,6 @@ import {
 } from './space-title.js';
 import { atomicWriteJson, mkdirp, sanitizeId } from '../../../../utils/fs.js';
 import { normalizeForCompare } from '../../../../utils/naming.js';
-import {
-  isWorldCanvasId,
-  listAllCanvasDirEntries,
-  listCanvasDirEntries,
-  refreshCanvasDirIndex,
-  registerCanvasDir,
-  requireWorldCanvasId,
-  suggestCanvasDir,
-} from '../../../workspace/disk/canvas-dirs.js';
-import {
-  canvasJsonPath,
-  SPACE_JSON_FILENAME,
-} from '../../../workspace/disk/paths.js';
 import { withSpaceDirHandlesReleased } from '../../../workspace/disk/space-dir-handles.js';
 import { getWorkspacePath } from '../../../workspace.js';
 import {

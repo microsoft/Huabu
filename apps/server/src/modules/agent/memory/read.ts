@@ -15,7 +15,10 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 
-import { workspaceMemoryPath, canvasMemoryPath } from '../../storage/paths.js';
+import {
+  workspaceMemoryPath,
+  canvasMemoryPath,
+} from '../../workspace/disk/paths.js';
 
 /**
  * Read the user memory body.

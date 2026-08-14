@@ -10,4 +10,4 @@
  * site may import it (enforced by the module-boundary test).
  */
 
-export * from '../workspace/disk/canvas-dirs.js';
+export * from './backends/disk/canvas-dirs.js';

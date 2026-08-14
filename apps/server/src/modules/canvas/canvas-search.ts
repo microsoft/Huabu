@@ -44,7 +44,7 @@ import {
 
 import { agenetes } from '../agent/agenetes/drivers.js';
 import { chatEnvelopeFromSubmission } from '../agent/agenetes/handle.js';
-import { canvasAcpNamespace } from '../storage/paths.js';
+import { canvasAcpNamespace } from '../workspace/disk/paths.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type { AgentTurn } from '@agenetes/protocol';

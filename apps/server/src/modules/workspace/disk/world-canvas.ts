@@ -6,8 +6,11 @@ import path from 'node:path';
 
 import { createId } from '@huabu/shared';
 
-import { SPACE_JSON_FILENAME, WORLD_CANVAS_DIR_NAME } from './paths.js';
 import { atomicWriteJson, readJson, sanitizeId } from '../../../utils/fs.js';
+import {
+  SPACE_JSON_FILENAME,
+  WORLD_CANVAS_DIR_NAME,
+} from '../../storage/paths.js';
 
 import type { CanvasFile } from '../../canvas/persistence-types.js';
 
