@@ -30,7 +30,7 @@ export type PreviewTab = {
    * to permanent by an explicit gesture (edit, double-click, Open to Side).
    */
   transient: boolean;
-  /** Monotonic activation stamp driving most-recently-used eviction. */
+  /** Monotonic activation stamp used to restore recent-target ordering. */
   lastActiveSeq: number;
 };
 
@@ -130,6 +130,28 @@ export function activeTabOfGroup(
   return activeTabId ? (workspace.tabs[activeTabId] ?? null) : null;
 }
 
+export function conversationInOtherGroup(
+  workspace: CanvasPreviewWorkspace,
+  sourceTarget: PreviewTarget,
+  threadIdForNode: (nodeId: string) => string | undefined,
+): { tabId: string; threadId: string } | null {
+  if (workspace.groups.length !== 2) return null;
+
+  const sourceTab = findTabByTarget(workspace, sourceTarget);
+  const sourceGroup = sourceTab ? groupOfTab(workspace, sourceTab.id) : null;
+  if (!sourceGroup) return null;
+  const otherGroup = workspace.groups.find(
+    (group) => group.id !== sourceGroup.id,
+  );
+  const tab = otherGroup ? activeTabOfGroup(workspace, otherGroup.id) : null;
+  if (!tab) return null;
+  const threadId =
+    tab.target.kind === 'chat'
+      ? tab.target.threadId
+      : threadIdForNode(tab.target.nodeId);
+  return threadId ? { tabId: tab.id, threadId } : null;
+}
+
 function mapGroup(
   workspace: CanvasPreviewWorkspace,
   groupId: string,
@@ -140,7 +162,7 @@ function mapGroup(
 
 /**
  * Marks a tab active in its own group and focuses that group. Bumps the
- * activation stamp so most-recently-used eviction has a total order.
+ * activation stamp so recent-target lookups have a deterministic order.
  */
 export function activateTab(
   workspace: CanvasPreviewWorkspace,
@@ -480,42 +502,6 @@ export function validateWorkspace(
       ? next.activeGroupId
       : groups[0].id,
   });
-
-  return next;
-}
-
-/**
- * Closes least-recently-active tabs until each group is within `max`.
- *
- * A group's active tab is never evicted, and callers pass `protectedTabIds`
- * for tabs the model cannot reason about — a running stream or unsettled
- * editable content. Eviction is safe because closing a tab neither stops a
- * stream nor discards server history.
- */
-export function enforceTabLimit(
-  workspace: CanvasPreviewWorkspace,
-  max: number,
-  protectedTabIds: ReadonlySet<string> = new Set(),
-): CanvasPreviewWorkspace {
-  if (max <= 0) return workspace;
-
-  let next = workspace;
-  for (const group of workspace.groups) {
-    let current = next.groups.find((g) => g.id === group.id);
-    if (!current) continue;
-
-    const evictable = current.tabIds
-      .filter((id) => id !== current?.activeTabId && !protectedTabIds.has(id))
-      .sort((a, b) => next.tabs[a].lastActiveSeq - next.tabs[b].lastActiveSeq);
-
-    let overflow = current.tabIds.length - max;
-    for (const tabId of evictable) {
-      if (overflow <= 0) break;
-      next = closeTab(next, tabId);
-      overflow -= 1;
-      current = next.groups.find((g) => g.id === group.id);
-    }
-  }
 
   return next;
 }

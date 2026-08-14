@@ -18,9 +18,18 @@ import useCanvasStore from '@/store/canvasStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
-import { PreviewWorkspace, settleActivePreviewTab } from './PreviewWorkspace';
+import { PreviewTabDragOverlay } from './PreviewTab';
+import {
+  PreviewTabDragOverlayPortal,
+  PreviewWorkspace,
+  settleActivePreviewTab,
+} from './PreviewWorkspace';
 import { PreviewWorkspacePanel } from './PreviewWorkspacePanel';
-import { groupDropId, resolveTabDropDestination } from './tabDnd';
+import {
+  groupDropId,
+  resolveTabDropDestination,
+  resolveTabDropIndicator,
+} from './tabDnd';
 
 import type { Node } from '@xyflow/react';
 
@@ -131,6 +140,40 @@ afterEach(() => {
 });
 
 describe('tab strip', () => {
+  it('renders a labelled tab ghost while dragging', () => {
+    openNode('a');
+    const tab = Object.values(store().workspace.tabs)[0];
+    useCanvasStore.setState({
+      nodes: [canvasNode('a', 'Alpha')],
+      canvasId: CANVAS_ID,
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root?.render(<PreviewTabDragOverlay tab={tab} />));
+
+    const overlay = container.querySelector(
+      '[data-testid="preview-tab-drag-overlay"]',
+    );
+    expect(overlay?.textContent).toContain('Alpha');
+    expect(overlay?.classList.contains('shadow-md')).toBe(true);
+  });
+
+  it('hosts the drag overlay portal outside Preview layout transforms', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() => root?.render(<PreviewTabDragOverlayPortal tab={undefined} />));
+
+    const portal = document.querySelector(
+      '[data-testid="preview-tab-drag-portal"]',
+    );
+    expect(portal).not.toBeNull();
+    expect(container.contains(portal)).toBe(false);
+    expect(portal?.parentElement).toBe(document.body);
+  });
+
   it('renders an unbound Chat session with compact workspace chrome', () => {
     store().openPreviewTarget({
       kind: 'chat',
@@ -282,6 +325,52 @@ describe('tab strip', () => {
     const panel = container?.querySelector('[role="tabpanel"]');
     expect(panel?.id).toBe(panelId);
     expect(panel?.getAttribute('aria-labelledby')).toBe(tabs()[0].id);
+  });
+});
+
+describe('tab drag feedback', () => {
+  const workspaceWithTabs = () => store().workspace;
+  const tabIdForNode = (nodeId: string) =>
+    Object.values(workspaceWithTabs().tabs).find(
+      (tab) => tab.target.kind === 'node' && tab.target.nodeId === nodeId,
+    )?.id ?? '';
+
+  it('shows an insertion marker before a hovered tab when moving left', () => {
+    openNode('a');
+    openNode('b');
+    const a = tabIdForNode('a');
+    const b = tabIdForNode('b');
+    expect(resolveTabDropIndicator(workspaceWithTabs(), b, a)).toEqual({
+      type: 'tab',
+      tabId: a,
+      edge: 'before',
+    });
+  });
+
+  it('shows an insertion marker after a hovered tab when moving right', () => {
+    openNode('a');
+    openNode('b');
+    const a = tabIdForNode('a');
+    const b = tabIdForNode('b');
+    expect(resolveTabDropIndicator(workspaceWithTabs(), a, b)).toEqual({
+      type: 'tab',
+      tabId: b,
+      edge: 'after',
+    });
+  });
+
+  it('shows an append marker when hovering empty strip space', () => {
+    openNode('a');
+    const a = tabIdForNode('a');
+    expect(
+      resolveTabDropIndicator(workspaceWithTabs(), a, groupDropId('g1')),
+    ).toEqual({ type: 'group-end', groupId: 'g1' });
+  });
+
+  it('does not mark the dragged tab as its own destination', () => {
+    openNode('a');
+    const a = tabIdForNode('a');
+    expect(resolveTabDropIndicator(workspaceWithTabs(), a, a)).toBeNull();
   });
 });
 
@@ -829,5 +918,59 @@ describe('right panel host', () => {
         ?.querySelector('[data-testid="collapse-preview"]')
         ?.classList.contains('p-1.5'),
     ).toBe(true);
+  });
+
+  it('toggles fullscreen from the tab strip and exits with Escape', () => {
+    openNode('a');
+    useCanvasStore.setState({
+      nodes: [canvasNode('a', 'Alpha')],
+      canvasId: CANVAS_ID,
+    });
+    const onToggleFullscreen = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    act(() =>
+      root?.render(
+        <PreviewWorkspacePanel
+          isHostCollapsed={false}
+          isFullscreen
+          onToggleFullscreen={onToggleFullscreen}
+        />,
+      ),
+    );
+
+    const toggle = container.querySelector<HTMLElement>(
+      '[data-testid="toggle-preview-fullscreen"]',
+    );
+    expect(toggle?.getAttribute('aria-label')).toContain('Exit');
+
+    act(() =>
+      toggle?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
+    );
+    expect(onToggleFullscreen).toHaveBeenCalledTimes(1);
+
+    act(() =>
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })),
+    );
+    expect(onToggleFullscreen).toHaveBeenCalledTimes(2);
+
+    const consumedEscape = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      cancelable: true,
+    });
+    consumedEscape.preventDefault();
+    act(() => window.dispatchEvent(consumedEscape));
+    expect(onToggleFullscreen).toHaveBeenCalledTimes(2);
+
+    const input = document.createElement('input');
+    container.appendChild(input);
+    act(() =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      ),
+    );
+    expect(onToggleFullscreen).toHaveBeenCalledTimes(2);
   });
 });

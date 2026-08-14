@@ -82,6 +82,9 @@ export function useCanvasShortcuts(
   // --- Tool state (select / lasso / pan) ---
   const [tool, setTool] = useState<CanvasTool>('select');
   const previousToolRef = useRef<Exclude<CanvasTool, 'pan'>>('select');
+  const temporaryPanRef = useRef(false);
+  const temporaryPanPointerRef = useRef<number | null>(null);
+  const spacePressedRef = useRef(false);
 
   useEffect(() => {
     if (tool !== 'pan') {
@@ -93,6 +96,14 @@ export function useCanvasShortcuts(
   useEffect(() => {
     if (disabled) return;
 
+    const restoreTemporaryPan = () => {
+      if (!temporaryPanRef.current) return;
+      temporaryPanRef.current = false;
+      temporaryPanPointerRef.current = null;
+      spacePressedRef.current = false;
+      setTool((prev) => (prev === 'pan' ? previousToolRef.current : prev));
+    };
+
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== ' ' || e.repeat) return;
       if (isEditableTarget(e.target)) return;
@@ -101,21 +112,51 @@ export function useCanvasShortcuts(
       // keydown listener for the duration of the drag). Skip the
       // pan-tool switch so the two interpretations don't fight.
       if (isSnapSessionActive()) return;
+      spacePressedRef.current = true;
       setTool((prev) => {
         if (prev === 'pan') return prev;
         e.preventDefault();
+        temporaryPanRef.current = true;
         return 'pan';
       });
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key !== ' ') return;
-      setTool((prev) => (prev === 'pan' ? previousToolRef.current : prev));
+      spacePressedRef.current = false;
+      if (temporaryPanPointerRef.current === null) restoreTemporaryPan();
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      if (!temporaryPanRef.current || e.button !== 0 || !e.isPrimary) return;
+      temporaryPanPointerRef.current = e.pointerId;
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (temporaryPanPointerRef.current !== e.pointerId) return;
+      temporaryPanPointerRef.current = null;
+      if (!spacePressedRef.current) restoreTemporaryPan();
+    };
+    const onPointerCancel = (e: PointerEvent) => {
+      if (temporaryPanPointerRef.current !== e.pointerId) return;
+      restoreTemporaryPan();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') restoreTemporaryPan();
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('pointerup', onPointerUp, true);
+    window.addEventListener('pointercancel', onPointerCancel, true);
+    window.addEventListener('blur', restoreTemporaryPan);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('pointerup', onPointerUp, true);
+      window.removeEventListener('pointercancel', onPointerCancel, true);
+      window.removeEventListener('blur', restoreTemporaryPan);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      restoreTemporaryPan();
     };
   }, [disabled]);
 

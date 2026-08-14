@@ -12,7 +12,7 @@ Preview Workspace owns presentation topology: open tabs, tab order, active tabs,
 
 `chatStore` owns conversation state keyed by `threadId`: messages, drafts, history status, streaming state, binding, model settings, compose mode, and pending attachments. Preview Workspace stores only the target needed to select a renderer.
 
-`panelStore` owns and persists the outer right-column collapse state and owns thread-addressed composer focus requests. Opening a Preview target expands the right column; closing a tab does not delete its underlying node or conversation history. `MainLayout` treats the persisted collapse state as authoritative whenever no panel motion is active. A settled collapsed slot is zero-width and clips overflow, while an active open/close motion temporarily releases that clipping; interrupted startup hydration therefore cannot leave translated panel content visible over the Canvas in either persisted state.
+`panelStore` owns and persists the outer right-column collapse state, owns the transient Preview fullscreen state, and owns thread-addressed composer focus requests. Opening a Preview target expands the right column; closing a tab does not delete its underlying node or conversation history. `MainLayout` treats the persisted collapse state as authoritative whenever no panel motion is active. A settled collapsed slot is zero-width and clips overflow, while an active open/close motion temporarily releases that clipping; interrupted startup hydration therefore cannot leave translated panel content visible over the Canvas in either persisted state. Fullscreen is intentionally not persisted across reloads.
 
 ```text
 Canvas command -> canvasStore document -> Preview target resolves live node
@@ -78,6 +78,8 @@ Each group mounts only its active tab. Inactive tabs retain topology and store-b
 
 Every mounted `ChatPanel` receives an explicit `ChatSession` and owning preview tab ID. There is no globally current Chat thread or Question replay pointer, so two groups can render independent conversations without sharing messages, drafts, bindings, attachments, settings, loading state, or stream control.
 
+PDF area capture routes directly to a Chat or Question conversation that is active in the group beside the PDF. When no conversation is visible beside it, the Canvas's canonical unbound Chat opens to the side and the capture is staged immediately as that thread's pending attachment. The explicit Send to Chat action always produces a thread-owned attachment; the shared dashed selection attachment remains reserved for passive browser text selection.
+
 For a World `nodeRef` that presents a source Question, the target remains the World presentation node while `AgentConversationView` carries the source Canvas, node, and thread as conversation owner. History, reconnect, agent turns, tools, lifecycle writes, binding, mode, and change records use that owner scope.
 
 An authored Question node remains authoritative for persisted agent mode and fixed binding. A new selectable Question thread inherits the Canvas's current binding unless the node supplies an explicit binding.
@@ -88,13 +90,15 @@ The workspace contains one or two horizontal groups. Each group owns one active 
 
 Tabs can be reordered within a group or moved across groups with pointer or keyboard drag sensors. Every drop delegates to the pure `moveTab` model action, which repairs ordering, active tabs, and empty source groups.
 
+Pointer dragging keeps a faded source placeholder in the tab strip, portals a labelled tab overlay to `document.body` so transformed panel ancestors cannot offset it from the pointer, and marks the resolved insertion edge of the hovered tab or the end of a group. The visual marker follows the same destination semantics used by `resolveTabDropDestination`.
+
 Closing an active tab selects the nearest remaining tab in the same group. Moving or closing the final tab in a secondary group removes that group. The workspace keeps one empty primary group as its valid empty state.
 
 A transient tab is one reusable inspection slot per group. Opening another transient target replaces that slot; double-clicking the tab or committing a persistent mutation through its renderer promotes it in place.
 
-Each group is capped at 12 tabs by deterministic MRU eviction. Active tabs, streaming conversations, and node tabs with unsettled content are protected from eviction.
+Permanent tabs are never closed automatically. A group may retain any number of permanent tabs; users close them explicitly, while transient browsing continues to reuse the group's inspection slot.
 
-The activation sequence is an integer stored with the workspace rather than a wall-clock timestamp, making MRU ordering deterministic in tests and persistence.
+The activation sequence is an integer stored with the workspace rather than a wall-clock timestamp, making recent-target ordering deterministic in tests and persistence.
 
 ## 6. Focus and opening position
 
@@ -122,7 +126,9 @@ Closing a Preview tab does not delete the Canvas node, stop a running turn, or r
 
 ## 8. Layout and accessibility
 
-`MainLayout` owns the resizable outer right column and mounts `PreviewWorkspace`; `CenterArea` remains Canvas-only. The outer width preserves usable Canvas space, while the internal split ratio is clamped so both groups remain usable.
+`MainLayout` owns the resizable outer right column and mounts `PreviewWorkspace`; `CenterArea` remains Canvas-only. The outer width may grow beyond half the layout for wide document browsing and is capped only by the expanded Layers width plus the minimum Canvas width; the internal split ratio is clamped so both groups remain usable.
+
+Preview fullscreen replaces the visible centre area with Preview Workspace and unmounts the Canvas subtree entirely. Canvas document and selection remain in `canvasStore`, while its locally persisted viewport is restored by `useInitialCanvasViewport` when Canvas remounts after fullscreen; unmounting also guarantees that React Flow portals and compositor layers cannot leak stale Canvas pixels into Preview. Exiting fullscreen is deliberately two-phase: `MainLayout` first paints the ordinary split layout with a Canvas loading placeholder, then remounts Canvas after that feedback has reached one frame, preventing synchronous React Flow construction from making the restore control appear unresponsive. The fullscreen Preview slot clips renderer overflow so content cannot cover the Layer List when that list expands and narrows Preview. The existing Layer List remains available at the left with its normal resize, search, rename, lock, reorder, and collapse behaviour; an unmodified row click opens or activates that node in Preview while fullscreen, whereas modifier clicks retain Layer List multi-selection semantics. When the list is collapsed, `MainLayout` renders the existing Canvas header as a narrow vertical rail containing only the Layer List expansion control. The last Preview group exposes fullscreen and restore controls, `Escape` restores the ordinary layout unless an inner control consumes it, and collapsing Preview also exits fullscreen.
 
 The separator exposes a symmetric pointer target around its visible rule, tracks pointer movement on `window`, and supports keyboard resizing.
 
@@ -146,11 +152,10 @@ Document mutations remain in the Canvas command path. Preview Workspace may requ
 
 | File/dir                                                                                                                                                 | Responsibility                                                                                       |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| [`apps/web/src/store/previewWorkspace/model.ts`](../../apps/web/src/store/previewWorkspace/model.ts)                                                     | Pure target, tab, group, move, close, validation, transient, and MRU rules.                          |
+| [`apps/web/src/store/previewWorkspace/model.ts`](../../apps/web/src/store/previewWorkspace/model.ts)                                                     | Pure target, tab, group, move, close, validation, and transient rules.                               |
 | [`apps/web/src/store/previewWorkspace/store.ts`](../../apps/web/src/store/previewWorkspace/store.ts)                                                     | Zustand binding, Canvas load/flush lifecycle, and runtime tab-addressed requests.                    |
 | [`apps/web/src/store/previewWorkspace/persistence.ts`](../../apps/web/src/store/previewWorkspace/persistence.ts)                                         | Versioned per-Canvas local-storage records, repair-on-read, migration seed, and capped Canvas index. |
 | [`apps/web/src/store/previewWorkspace/actions.ts`](../../apps/web/src/store/previewWorkspace/actions.ts)                                                 | Canonical user-facing node and Chat open adapters.                                                   |
-| [`apps/web/src/store/previewWorkspace/protection.ts`](../../apps/web/src/store/previewWorkspace/protection.ts)                                           | Computes tabs protected from MRU eviction.                                                           |
 | [`apps/web/src/components/Panels/PreviewWorkspace/`](../../apps/web/src/components/Panels/PreviewWorkspace)                                              | Workspace layout, groups, tab strips, drag-and-drop, split resizing, and target rendering.           |
 | [`apps/web/src/components/Panels/ChatPanel/index.tsx`](../../apps/web/src/components/Panels/ChatPanel/index.tsx)                                         | Session-scoped conversation renderer used by Question and unbound Chat targets.                      |
 | [`apps/web/src/components/Panels/ExpandedNodePanel/ExpandedNodePanel.tsx`](../../apps/web/src/components/Panels/ExpandedNodePanel/ExpandedNodePanel.tsx) | Embedded ordinary-node preview renderer.                                                             |

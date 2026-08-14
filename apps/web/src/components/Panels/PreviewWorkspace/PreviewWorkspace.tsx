@@ -12,6 +12,7 @@
 import {
   closestCenter,
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   pointerWithin,
@@ -19,15 +20,15 @@ import {
   useSensors,
   type CollisionDetection,
   type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { Fragment, useCallback, useEffect, useRef } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
-import useCanvasStore, {
-  getProtectedPreviewTabIds,
-  settleNodePreprocess,
-} from '@/store/canvasStore';
+import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import {
   usePreviewWorkspaceStore,
@@ -35,7 +36,8 @@ import {
 } from '@/store/previewWorkspace/store';
 
 import { PreviewGroup } from './PreviewGroup';
-import { resolveTabDropDestination } from './tabDnd';
+import { PreviewTabDragOverlay } from './PreviewTab';
+import { resolveTabDropDestination, resolveTabDropIndicator } from './tabDnd';
 
 import type { CanvasPreviewWorkspace } from '@/store/previewWorkspace/model';
 import type { Node } from '@xyflow/react';
@@ -44,6 +46,23 @@ import type { Node } from '@xyflow/react';
 const RATIO_STEP = 0.05;
 
 const selectWorkspace = (s: PreviewWorkspaceState) => s.workspace;
+
+export function PreviewTabDragOverlayPortal({
+  tab,
+}: {
+  tab: CanvasPreviewWorkspace['tabs'][string] | undefined;
+}) {
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div className="contents" data-testid="preview-tab-drag-portal">
+      <DragOverlay dropAnimation={null}>
+        {tab ? <PreviewTabDragOverlay tab={tab} /> : null}
+      </DragOverlay>
+    </div>,
+    document.body,
+  );
+}
 
 export function settleActivePreviewTab(
   workspace: CanvasPreviewWorkspace,
@@ -80,9 +99,13 @@ const tabCollisionDetection: CollisionDetection = (args) => {
 
 export function PreviewWorkspace({
   onCollapse,
+  isFullscreen = false,
+  onToggleFullscreen,
 }: {
   /** Collapses the surface, when the host offers that. */
   onCollapse?: () => void;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 } = {}) {
   const { t } = useTranslation();
   const workspace = usePreviewWorkspaceStore(selectWorkspace);
@@ -143,11 +166,7 @@ export function PreviewWorkspace({
       // target, so it goes through the same open path (§8).
       if (tab) {
         settleTab(tabId);
-        openPreviewTarget(
-          tab.target,
-          { openToSide: true },
-          getProtectedPreviewTabIds(),
-        );
+        openPreviewTarget(tab.target, { openToSide: true });
       }
     },
     [openPreviewTarget, settleTab],
@@ -161,17 +180,15 @@ export function PreviewWorkspace({
         .getState()
         .workspace.groups.find((group) => group.id === groupId)?.activeTabId;
       if (activeTabId) settleTab(activeTabId);
-      openPreviewTarget(
-        { kind: 'chat', canvasId, threadId },
-        { groupId },
-        getProtectedPreviewTabIds(),
-      );
+      openPreviewTarget({ kind: 'chat', canvasId, threadId }, { groupId });
     },
     [canvasId, openPreviewTarget, settleTab],
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const separatorDragCleanupRef = useRef<(() => void) | null>(null);
+  const [activeDragTabId, setActiveDragTabId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const isSplit = workspace.groups.length > 1;
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -180,8 +197,22 @@ export function PreviewWorkspace({
     }),
   );
 
+  const clearTabDrag = useCallback(() => {
+    setActiveDragTabId(null);
+    setDragOverId(null);
+  }, []);
+
+  const onTabDragStart = useCallback(({ active }: DragStartEvent) => {
+    setActiveDragTabId(String(active.id));
+  }, []);
+
+  const onTabDragOver = useCallback(({ over }: DragOverEvent) => {
+    setDragOverId(over ? String(over.id) : null);
+  }, []);
+
   const onTabDragEnd = useCallback(
     ({ active, over }: DragEndEvent) => {
+      clearTabDrag();
       if (!over) return;
       const tabId = String(active.id);
       const destination = resolveTabDropDestination(
@@ -194,7 +225,16 @@ export function PreviewWorkspace({
       moveTab(tabId, destination);
       activateTab(tabId);
     },
-    [activateTab, moveTab, settleTab],
+    [activateTab, clearTabDrag, moveTab, settleTab],
+  );
+
+  const activeDragTab = activeDragTabId
+    ? workspace.tabs[activeDragTabId]
+    : undefined;
+  const tabDropIndicator = resolveTabDropIndicator(
+    workspace,
+    activeDragTabId,
+    dragOverId,
   );
 
   const onSeparatorPointerDown = useCallback(
@@ -267,7 +307,10 @@ export function PreviewWorkspace({
     <DndContext
       sensors={sensors}
       collisionDetection={tabCollisionDetection}
+      onDragStart={onTabDragStart}
+      onDragOver={onTabDragOver}
       onDragEnd={onTabDragEnd}
+      onDragCancel={clearTabDrag}
     >
       <div ref={containerRef} className="flex h-full w-full overflow-hidden">
         {workspace.groups.map((group, index) => (
@@ -317,6 +360,13 @@ export function PreviewWorkspace({
                 onChatOpenRequestHandled={consumeChatOpenRequest}
                 onOpenToSide={openToSide}
                 onNewChat={() => openNewChat(group.id)}
+                tabDropIndicator={tabDropIndicator}
+                isFullscreen={isFullscreen}
+                onToggleFullscreen={
+                  index === workspace.groups.length - 1
+                    ? onToggleFullscreen
+                    : undefined
+                }
                 onCollapse={
                   index === workspace.groups.length - 1 ? onCollapse : undefined
                 }
@@ -325,6 +375,7 @@ export function PreviewWorkspace({
           </Fragment>
         ))}
       </div>
+      <PreviewTabDragOverlayPortal tab={activeDragTab} />
     </DndContext>
   );
 }

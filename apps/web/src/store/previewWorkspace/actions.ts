@@ -1,10 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import useCanvasStore, {
-  getProtectedPreviewTabIds,
-  settleNodePreprocess,
-} from '../canvasStore';
+import useCanvasStore, { settleNodePreprocess } from '../canvasStore';
 import { useChatStore } from '../chatStore';
 import { usePanelStore } from '../panelStore';
 import {
@@ -34,7 +31,6 @@ export function openPreviewNode(
     .openPreviewTarget(
       { kind: 'node', canvasId: canvas.canvasId, nodeId },
       { transient: options?.transient },
-      getProtectedPreviewTabIds(),
     );
   const openedNode = canvas.nodes.find((node) => node.id === nodeId);
   if (tabId && openedNode?.type === 'note') {
@@ -60,11 +56,7 @@ export function openChat(): string {
       : useChatStore.getState().createThread();
 
   usePanelStore.getState().requestOpenRightPanel();
-  const tabId = preview.openPreviewTarget(
-    { kind: 'chat', canvasId, threadId },
-    undefined,
-    getProtectedPreviewTabIds(),
-  );
+  const tabId = preview.openPreviewTarget({ kind: 'chat', canvasId, threadId });
   usePanelStore.getState().requestFocusChatInput(threadId);
   return tabId;
 }

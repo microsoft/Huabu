@@ -13,7 +13,8 @@ import { useEffect, useRef } from 'react';
 
 import { createId } from '@huabu/shared';
 
-import useCanvasStore, { getProtectedPreviewTabIds } from '@/store/canvasStore';
+import { isEditableTarget } from '@/hooks/shortcuts/isEditableTarget';
+import useCanvasStore from '@/store/canvasStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { PreviewWorkspace } from './PreviewWorkspace';
@@ -21,11 +22,15 @@ import { PreviewWorkspace } from './PreviewWorkspace';
 type PreviewWorkspacePanelProps = {
   onToggle?: () => void;
   isHostCollapsed?: boolean;
+  isFullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 };
 
 export function PreviewWorkspacePanel({
   onToggle,
   isHostCollapsed = false,
+  isFullscreen = false,
+  onToggleFullscreen,
 }: PreviewWorkspacePanelProps) {
   const canvasId = useCanvasStore((s) => s.canvasId);
   const isEmpty = usePreviewWorkspaceStore(
@@ -48,20 +53,41 @@ export function PreviewWorkspacePanel({
     }
     if (!canvasId || isHostCollapsed || seededEmptyWorkspace.current) return;
     seededEmptyWorkspace.current = true;
-    openPreviewTarget(
-      {
-        kind: 'chat',
-        canvasId,
-        threadId: createId('thread'),
-      },
-      undefined,
-      getProtectedPreviewTabIds(),
-    );
+    openPreviewTarget({
+      kind: 'chat',
+      canvasId,
+      threadId: createId('thread'),
+    });
   }, [canvasId, isEmpty, isHostCollapsed, openPreviewTarget]);
+
+  useEffect(() => {
+    if (!isFullscreen || !onToggleFullscreen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const target = event.target;
+      if (isEditableTarget(target)) return;
+      if (
+        target instanceof Element &&
+        target.closest('[role="dialog"], [role="menu"], [role="combobox"]')
+      ) {
+        return;
+      }
+      if (document.querySelector('[role="dialog"], [role="menu"]')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onToggleFullscreen();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [isFullscreen, onToggleFullscreen]);
 
   return (
     <div className="bg-surface h-full shadow-[-1px_0_0_var(--edge-default)]">
-      <PreviewWorkspace onCollapse={onToggle} />
+      <PreviewWorkspace
+        onCollapse={onToggle}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={onToggleFullscreen}
+      />
     </div>
   );
 }

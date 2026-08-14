@@ -23,10 +23,16 @@ import {
   mergeLineRects,
 } from '@/handler/pdfHighlight/highlight';
 import { scheduleScrollToMatch } from '@/hooks/searchDom';
-import useCanvasStore, { getProtectedPreviewTabIds } from '@/store/canvasStore';
+import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import { conversationViewForNode } from '@/store/conversationOwner';
 import { usePanelStore } from '@/store/panelStore';
 import { usePreviewSearchStore } from '@/store/previewSearchStore';
+import {
+  conversationInOtherGroup,
+  findTabByTarget,
+  groupOfTab,
+} from '@/store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
@@ -494,24 +500,53 @@ export const PDFPreview = ({
   // ---------------------------------------------------------------------------
   // Send captured area to chat as a pending attachment
   // ---------------------------------------------------------------------------
-  // PDF capture always targets this Canvas's canonical unbound Chat.
   const handleSendToChat = useCallback(
     (attachment: ChatAttachment) => {
+      if (!id) return;
+
       const chat = useChatStore.getState();
-      const threadId = chat.ensureCanvasThread(canvasId);
-      const { addPendingAttachment } = chat;
-      addPendingAttachment(threadId, attachment);
+      const canvas = useCanvasStore.getState();
+      const preview = usePreviewWorkspaceStore.getState();
+      const pdfTarget = { kind: 'node', canvasId, nodeId: id } as const;
+      const adjacentConversation = conversationInOtherGroup(
+        preview.workspace,
+        pdfTarget,
+        (nodeId) => {
+          const node = canvas.nodes.find(
+            (candidate) => candidate.id === nodeId,
+          );
+          if (!node) return undefined;
+          return (
+            conversationViewForNode(
+              node,
+              canvasId,
+              canvas.worldReferences[nodeId],
+            )?.conversationOwner.threadId ?? undefined
+          );
+        },
+      );
+
       usePanelStore.getState().requestOpenRightPanel();
-      usePreviewWorkspaceStore
-        .getState()
-        .openPreviewTarget(
-          { kind: 'chat', canvasId, threadId },
-          undefined,
-          getProtectedPreviewTabIds(),
-        );
-      usePanelStore.getState().requestFocusChatInput(threadId);
+      if (adjacentConversation) {
+        chat.addPendingAttachment(adjacentConversation.threadId, attachment);
+        preview.promoteTab(adjacentConversation.tabId);
+        usePanelStore
+          .getState()
+          .requestFocusChatInput(adjacentConversation.threadId);
+        return;
+      }
+
+      const fallbackThreadId = chat.ensureCanvasThread(canvasId);
+      const pdfTab = findTabByTarget(preview.workspace, pdfTarget);
+      const pdfGroup = pdfTab ? groupOfTab(preview.workspace, pdfTab.id) : null;
+      chat.addPendingAttachment(fallbackThreadId, attachment);
+      preview.openPreviewTarget(
+        { kind: 'chat', canvasId, threadId: fallbackThreadId },
+        { groupId: pdfGroup?.id, openToSide: true },
+      );
+      usePanelStore.getState().requestFocusChatInput(fallbackThreadId);
     },
-    [canvasId],
+    [canvasId, id],
   );
 
   // ---------------------------------------------------------------------------

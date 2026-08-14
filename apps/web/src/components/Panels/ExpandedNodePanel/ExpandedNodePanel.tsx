@@ -496,10 +496,12 @@ export const ExpandedNodePanel = ({
     document.addEventListener('selectionchange', handleSelectionChange);
     return () => {
       document.removeEventListener('selectionchange', handleSelectionChange);
-      // Clear selection attachment when panel unmounts or item changes
-      useChatStore.getState().setSelectionAttachment(null);
+      const chat = useChatStore.getState();
+      if (chat.selectionAttachment?.originNodeId === expandedNodeId) {
+        chat.setSelectionAttachment(null);
+      }
     };
-  }, [handleSelectionChange]);
+  }, [expandedNodeId, handleSelectionChange]);
 
   if (!activeItem) return null;
 
@@ -544,7 +546,7 @@ export const ExpandedNodePanel = ({
         {/* Left: connected-node navigation and rename editing. The workspace
           tab already shows node identity, so embedded previews expose an
           icon until editing begins instead of repeating the title. */}
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           {connectedNodeGroups.length > 0 && (
             <ConnectedNodeMenu
               groups={connectedNodeGroups}
@@ -565,7 +567,7 @@ export const ExpandedNodePanel = ({
             />
           )}
 
-          <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <div className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium">
             {canEditTitle && isEditingTitle ? (
               <Input
                 ref={titleInputRef}
@@ -597,10 +599,11 @@ export const ExpandedNodePanel = ({
                 title={t('node.rename')}
                 aria-label={t('node.rename')}
                 tooltipPlacement="bottom"
+                tooltipWrapperClassName="inline-flex min-w-0 max-w-full"
                 className={clsx(
-                  'hover:text-fg-default max-w-lg cursor-text justify-start truncate rounded border border-transparent py-0.5',
+                  'hover:text-fg-default max-w-full cursor-text justify-start truncate rounded border border-transparent py-0.5',
                   embedded
-                    ? 'text-fg-subtle hover:bg-hover max-w-40 px-1.5 text-xs font-normal'
+                    ? 'text-fg-subtle hover:bg-hover px-1.5 text-xs font-normal'
                     : 'text-fg-muted px-1 text-sm font-medium',
                 )}
                 onClick={() => setIsEditingTitle(true)}
@@ -616,7 +619,7 @@ export const ExpandedNodePanel = ({
         </div>
 
         {/* Right: node-specific actions followed by view-level controls. */}
-        <div className="text-fg-muted flex items-center gap-1">
+        <div className="text-fg-muted flex shrink-0 items-center gap-1">
           <div
             ref={setHeaderSlotEl}
             className="peer flex items-center gap-1 empty:hidden"

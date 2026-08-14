@@ -33,6 +33,34 @@ describe('panel store viewport anchor', () => {
   });
 });
 
+describe('panel store preview fullscreen', () => {
+  beforeEach(() => {
+    usePanelStore.setState({
+      isRightCollapsed: true,
+      isPreviewFullscreen: false,
+    });
+  });
+
+  it('opens Preview when entering fullscreen', () => {
+    usePanelStore.getState().setPreviewFullscreen(true);
+
+    expect(usePanelStore.getState()).toMatchObject({
+      isRightCollapsed: false,
+      isPreviewFullscreen: true,
+    });
+  });
+
+  it('exits fullscreen when Preview collapses', () => {
+    usePanelStore.getState().setPreviewFullscreen(true);
+    usePanelStore.getState().toggleRightPanel();
+
+    expect(usePanelStore.getState()).toMatchObject({
+      isRightCollapsed: true,
+      isPreviewFullscreen: false,
+    });
+  });
+});
+
 describe('panel store canvas search visibility', () => {
   beforeEach(() => {
     usePanelStore.setState({

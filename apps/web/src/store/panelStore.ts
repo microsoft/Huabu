@@ -43,6 +43,10 @@ interface PanelState {
    * first-time users.
    */
   isRightCollapsed: boolean;
+  /** Transient presentation mode; fullscreen never survives a reload. */
+  isPreviewFullscreen: boolean;
+  setPreviewFullscreen: (fullscreen: boolean) => void;
+  togglePreviewFullscreen: () => void;
   /** Node explicitly associated with the action that opened Chat. */
   rightPanelAnchorNodeId: string | null;
   clearRightPanelAnchor: () => void;
@@ -90,16 +94,29 @@ export const usePanelStore = create<PanelState>()(
         })),
 
       isRightCollapsed: true,
+      isPreviewFullscreen: false,
+      setPreviewFullscreen: (fullscreen) =>
+        set({
+          isPreviewFullscreen: fullscreen,
+          ...(fullscreen ? { isRightCollapsed: false } : {}),
+        }),
+      togglePreviewFullscreen: () =>
+        set((s) => ({
+          isPreviewFullscreen: !s.isPreviewFullscreen,
+          ...(!s.isPreviewFullscreen ? { isRightCollapsed: false } : {}),
+        })),
       rightPanelAnchorNodeId: null,
       clearRightPanelAnchor: () => set({ rightPanelAnchorNodeId: null }),
       setRightCollapsed: (collapsed) =>
         set({
           isRightCollapsed: collapsed,
+          ...(collapsed ? { isPreviewFullscreen: false } : {}),
           rightPanelAnchorNodeId: null,
         }),
       toggleRightPanel: () =>
         set((s) => ({
           isRightCollapsed: !s.isRightCollapsed,
+          ...(!s.isRightCollapsed ? { isPreviewFullscreen: false } : {}),
           rightPanelAnchorNodeId: null,
         })),
       requestOpenRightPanel: (anchorNodeId) =>

@@ -102,7 +102,6 @@ import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
 import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
-import { collectProtectedPreviewTabIds } from './previewWorkspace/protection';
 import {
   selectActiveNodeId,
   selectIsNodeOpen,
@@ -1053,34 +1052,6 @@ export function settleNodePreprocess(nodeId: string): void {
   if (node) preprocessQueue.schedule(node);
 }
 
-export function getProtectedPreviewTabIds(): Set<string> {
-  const canvas = useCanvasStore.getState();
-  const chat = useChatStore.getState();
-  return collectProtectedPreviewTabIds(
-    usePreviewWorkspaceStore.getState().workspace,
-    {
-      pendingNodeIds: new Set(canvas.pendingContentNodeIds()),
-      threadIdForNode: (nodeId) => {
-        const node = canvas.nodes.find((candidate) => candidate.id === nodeId);
-        if (
-          node?.type === 'question' &&
-          typeof node.data.threadId === 'string'
-        ) {
-          return node.data.threadId;
-        }
-        const reference = canvas.worldReferences[nodeId];
-        return reference?.kind === 'nodeRef' &&
-          reference.status === 'ok' &&
-          reference.source?.type === 'question'
-          ? reference.source.threadId
-          : undefined;
-      },
-      isThreadStreaming: (threadId) =>
-        chat.threadsById[threadId]?.isStreaming === true,
-    },
-  );
-}
-
 /**
  * Module-scoped resize-preview controller. Owns the rAF handle and
  * the free-frame child snapshot used during resize gestures; the
@@ -1755,15 +1726,11 @@ const useCanvasStore = create<RFState>()(
           }
           const previewTabId = usePreviewWorkspaceStore
             .getState()
-            .openPreviewTarget(
-              {
-                kind: 'node',
-                canvasId: get().canvasId,
-                nodeId: node.id,
-              },
-              undefined,
-              getProtectedPreviewTabIds(),
-            );
+            .openPreviewTarget({
+              kind: 'node',
+              canvasId: get().canvasId,
+              nodeId: node.id,
+            });
           if (previewTabId) {
             usePreviewWorkspaceStore.getState().requestNodeFocus(previewTabId);
           }

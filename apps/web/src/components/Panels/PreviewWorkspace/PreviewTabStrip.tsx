@@ -17,7 +17,13 @@ import {
   horizontalListSortingStrategy,
   SortableContext,
 } from '@dnd-kit/sortable';
-import { Columns2, ListIndentIncrease, Plus } from 'lucide-react';
+import {
+  Columns2,
+  ListIndentIncrease,
+  Maximize2,
+  Minimize2,
+  Plus,
+} from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -25,6 +31,7 @@ import { PreviewTab } from './PreviewTab';
 import { groupDropId } from './tabDnd';
 import { Button } from '../../Common/Button';
 
+import type { TabDropIndicator } from './tabDnd';
 import type { PreviewTab as PreviewTabModel } from '@/store/previewWorkspace/model';
 
 type PreviewTabStripProps = {
@@ -40,6 +47,9 @@ type PreviewTabStripProps = {
   canOpenToSide: boolean;
   /** Creates a fresh Chat tab in this group. */
   onNewChat: () => void;
+  tabDropIndicator: TabDropIndicator | null;
+  isFullscreen: boolean;
+  onToggleFullscreen?: () => void;
   /** Collapses the whole surface; only the last group offers it. */
   onCollapse?: () => void;
 };
@@ -58,6 +68,9 @@ export function PreviewTabStrip({
   onOpenToSide,
   canOpenToSide,
   onNewChat,
+  tabDropIndicator,
+  isFullscreen,
+  onToggleFullscreen,
   onCollapse,
 }: PreviewTabStripProps) {
   const { t } = useTranslation();
@@ -65,6 +78,9 @@ export function PreviewTabStrip({
     id: groupDropId(groupId),
     data: { type: 'preview-group', groupId },
   });
+  const isAppendTarget =
+    tabDropIndicator?.type === 'group-end' &&
+    tabDropIndicator.groupId === groupId;
 
   useEffect(() => {
     if (!activeTabId) return;
@@ -137,9 +153,21 @@ export function PreviewTabStrip({
               onClose={() => onClose(tab.id)}
               onPromote={() => onPromote(tab.id)}
               onNavigate={handleKeyDown}
+              dropIndicatorEdge={
+                tabDropIndicator?.type === 'tab' &&
+                tabDropIndicator.tabId === tab.id
+                  ? tabDropIndicator.edge
+                  : undefined
+              }
             />
           ))}
         </SortableContext>
+        {isAppendTarget && (
+          <div
+            data-testid="preview-tab-append-indicator"
+            className="bg-info my-1 w-0.5 shrink-0 rounded-full"
+          />
+        )}
       </div>
       <div className="flex shrink-0 items-center px-1">
         <Button
@@ -152,6 +180,23 @@ export function PreviewTabStrip({
         >
           <Plus />
         </Button>
+        {onToggleFullscreen && (
+          <Button
+            variant="ghost"
+            iconOnly
+            size="md"
+            data-testid="toggle-preview-fullscreen"
+            title={t(
+              isFullscreen
+                ? 'preview.exitFullscreen'
+                : 'preview.enterFullscreen',
+            )}
+            tooltipPlacement="bottom"
+            onClick={onToggleFullscreen}
+          >
+            {isFullscreen ? <Minimize2 /> : <Maximize2 />}
+          </Button>
+        )}
         {(canOpenToSide || onCollapse) && (
           <>
             {canOpenToSide && activeTabId && (

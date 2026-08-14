@@ -20,6 +20,8 @@ import { MissingFileBanner } from '@/components/Nodes/MissingFileBanner.tsx';
 import { NodeWrapper } from '@/components/Nodes/NodeWrapper.tsx';
 import useCanvasStore from '@/store/canvasStore.ts';
 
+import { shouldPreserveFrameAspectRatio } from './frameResizePolicy.ts';
+
 import type { CanvasFrameNodeData } from '@/components/Nodes/types.ts';
 import type { Node, NodeProps } from '@xyflow/react';
 
@@ -92,6 +94,13 @@ export const FrameNode = memo(
     // itself changes.
     const childCount = useCanvasStore(
       (state) => state.nodes.filter((n) => n.parentId === id).length,
+    );
+    const hasMediaChild = useCanvasStore((state) =>
+      state.nodes.some(
+        (node) =>
+          node.parentId === id &&
+          (node.type === 'image' || node.type === 'video'),
+      ),
     );
 
     const layoutMode: FrameLayoutMode = data.layoutMode ?? 'free';
@@ -547,7 +556,10 @@ export const FrameNode = memo(
         overlayVisible={labelSemanticallyVisible}
         overlayInteractionPriority={isEditingLabel ? 3 : selected ? 2 : 0}
         overlayMaxWidth={Math.max(LABEL_MIN_SCREEN_WIDTH, nodeWidth * zoom)}
-        keepAspectRatio={false}
+        keepAspectRatio={shouldPreserveFrameAspectRatio({
+          sizing: data.sizing,
+          hasMediaChild,
+        })}
         // Resize is enabled for every layout mode and shares one
         // content-driven path: dragging the frame scales every direct
         // child proportionally (both axes) about the frame origin.

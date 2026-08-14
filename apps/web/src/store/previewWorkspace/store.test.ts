@@ -13,7 +13,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEmptyWorkspace, openTarget, type PreviewTarget } from './model';
 import { readWorkspace, writeWorkspace } from './persistence';
 import {
-  MAX_TABS_PER_GROUP,
   selectActiveNodeId,
   selectActiveTab,
   selectGroupOfTab,
@@ -312,35 +311,15 @@ describe('Chat open requests', () => {
   });
 });
 
-describe('tab cap', () => {
-  it('evicts the least recently active tab past the cap', () => {
+describe('tab retention', () => {
+  it('keeps permanent tabs beyond the former per-group limit', () => {
     store().loadForCanvas(CANVAS);
-    const opened = Array.from({ length: MAX_TABS_PER_GROUP + 1 }, (_, i) =>
-      store().openPreviewTarget(node(`n${i}`)),
+    const opened = Array.from({ length: 20 }, (_, index) =>
+      store().openPreviewTarget(node(`n${index}`)),
     );
 
-    expect(store().workspace.groups[0].tabIds).toHaveLength(MAX_TABS_PER_GROUP);
-    // The first tab opened is the least recently active, so it goes first.
-    expect(store().workspace.tabs[opened[0]]).toBeUndefined();
-    // The tab just opened is its group's active tab and is therefore exempt.
-    expect(store().workspace.tabs[opened.at(-1) as string]).toBeDefined();
-  });
-
-  it('does not evict a protected inactive tab', () => {
-    store().loadForCanvas(CANVAS);
-    const protectedTab = store().openPreviewTarget(node('protected'));
-    for (let i = 1; i < MAX_TABS_PER_GROUP; i += 1) {
-      store().openPreviewTarget(node(`n${i}`));
-    }
-
-    store().openPreviewTarget(
-      node('overflow'),
-      undefined,
-      new Set([protectedTab]),
-    );
-
-    expect(store().workspace.tabs[protectedTab]).toBeDefined();
-    expect(store().workspace.groups[0].tabIds).toHaveLength(MAX_TABS_PER_GROUP);
+    expect(store().workspace.groups[0].tabIds).toEqual(opened);
+    expect(Object.keys(store().workspace.tabs)).toHaveLength(20);
   });
 });
 
