@@ -114,7 +114,6 @@ class OrderRecordingBlobStore implements BlobStore {
         scope.hasMany(names),
       list: (): Promise<BlobInfo[]> => scope.list(),
       materialize: (name: string) => scope.materialize(name),
-      owns: (absolutePath: string): boolean => scope.owns(absolutePath),
       deleteAll: async (): Promise<void> => {
         seen.push(existsSync(canvasJsonPath(ref.canvasId)));
         await scope.deleteAll();
@@ -181,7 +180,6 @@ class ControllableBlobStore implements BlobStore {
         scope.hasMany(names),
       list: (): Promise<BlobInfo[]> => scope.list(),
       materialize: (name: string) => scope.materialize(name),
-      owns: (absolutePath: string): boolean => scope.owns(absolutePath),
       deleteAll: async (): Promise<void> => {
         this.deleteCalls += 1;
         this.deleteStarted.resolve();

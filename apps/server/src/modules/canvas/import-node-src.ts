@@ -38,6 +38,7 @@ import {
 import { getLogger } from '../../utils/logger.js';
 import {
   safeResolve,
+  isArtifactsRel,
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
 import { canvasBlobs } from '../storage/index.js';
@@ -265,10 +266,10 @@ async function resolveImportedSrc(
     return null;
   }
 
-  // Already a managed blob (or a bare artifact key that resolves there)
-  // — nothing to import. The scope answers for its own storage rather than
-  // this module rebuilding the Disk artifacts path.
-  if (canvasBlobs(canvasId).owns(absPath)) return null;
+  // Already an artifact ref (or a bare artifact key, which `toPhysicalRel`
+  // maps into `.artifacts/`) — nothing to import. Asked of the ref rather
+  // than of a resolved path, so no storage layout is involved.
+  if (isArtifactsRel(physicalRel)) return null;
 
   // A bare key like `art_abc.png` resolves under the canvas root but has no
   // file on disk there — leave it so the web resolver builds the artifact URL.

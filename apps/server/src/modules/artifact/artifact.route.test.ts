@@ -99,7 +99,6 @@ function installDeleteBlock(canvasId: string): {
         hasMany: (names) => delegate.hasMany(names),
         list: () => delegate.list(),
         materialize: (name) => delegate.materialize(name),
-        owns: (absolutePath: string) => delegate.owns(absolutePath),
         async deleteAll() {
           if (ref.canvasId === canvasId) {
             started.resolve();

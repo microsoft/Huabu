@@ -1716,7 +1716,7 @@ outside `storage/` that read a **storage-owned** symbol are six, not one:
 | `canvas/canvas.route.ts`                    | `nodesDir`, `SPACE_JSON_FILENAME` | import/export bundle format; own constant  |
 | `canvas/external-watcher.ts`                | `SPACE_JSON_FILENAME`             | Disk-only feature; declare materialization |
 | `canvas/world-target-access.ts`             | `SPACE_JSON_FILENAME`             | catalogue read; `SpaceRepository.list()`   |
-| `canvas/import-node-src.ts`                 | `artifactsDir`                    | `BlobScope.owns()` (§12.5.7)               |
+| `canvas/import-node-src.ts`                 | `artifactsDir`                    | ref-level `isArtifactsRel` (§12.5.7)       |
 | `agent/conversation/prompt/debug-prompt.ts` | `chatDir`                         | writes its own debug log; own path         |
 | `agent/memory/analyzer.ts`                  | `chatDir`                         | dead code; removed (§12.5.7)               |
 
@@ -1846,14 +1846,37 @@ Phase 5 rebases onto this and drops its `utils/naming.ts` extraction, its
 Working the six consumers of §12.5.1 individually produced four different
 answers, only one of which was a missing port capability.
 
-**`BlobScope.owns(absolutePath)` — added.** `import-node-src.ts` asked whether
-a resolved path was already inside `.artifacts/`, and answered it by
-rebuilding the Disk artifacts directory. The scope can answer for itself. Pure
-and synchronous — a path comparison, never I/O — and a backend that stores
-nothing locally returns `false`, which is correct there rather than a
-degradation. It sits on the blob axis, so it constrains no structured backend.
-Covered in the shared blob contract, so both answers are pinned for every
-adapter.
+**No new port capability — a rejected design, recorded because the reasoning
+generalizes.** `import-node-src.ts` asked whether a resolved path was already
+inside `.artifacts/`, and answered by rebuilding the Disk artifacts directory.
+The first fix added `BlobScope.owns(absolutePath): boolean`, letting the scope
+answer for itself. That was wrong, in the same way this phase exists to
+correct.
+
+`materialize()` runs port → filesystem: the port _renders_ a real path as a
+service, and any backend can satisfy it by spooling a temp copy.
+`owns(absolutePath)` runs the other way — it hands the port a path in a
+vocabulary only a local backend can interpret and asks it to adjudicate. The
+`false` a remote backend would return is not a neutral implementation but an
+admission that the question is meaningless there. The net effect would have
+been to remove a Disk-layout import from one consumer by moving the Disk
+assumption into the port, where it constrains every future backend.
+
+**Test for the next such proposal:** a port method must be answerable by every
+backend in the port's own vocabulary. If one backend's honest implementation
+is a constant, the method is describing that backend, not the port.
+
+The caller never needed storage at all. `toPhysicalRel` already maps the
+virtual `artifacts/` prefix onto the hidden directory, so "is this ref already
+an artifact?" is a question about the _ref_, answered by `isArtifactsRel` in
+`fs-sandbox.ts` — the module that owns virtual↔physical ref mapping.
+Resolving against a synthetic root keeps it free of workspace, canvas
+directory, and filesystem, while still collapsing `..`.
+
+Writing its test surfaced a limitation worth pinning: the virtual alias is
+applied as a prefix, so `nodes/../artifacts/x` is not treated as an artifact.
+The pre-existing check behaved identically, so the test records the behavior
+rather than widening it.
 
 **The memory analyzer's chat digest — removed, not ported.** `readChatDigest`
 scanned `<canvas>/.history/chat/*.json` for a `{ messages: [] }` shape. Two

@@ -228,11 +228,6 @@ class DiskBlobScope implements BlobScope {
     return createBlobLease(blobPath(dir, info.name), async () => {});
   }
 
-  owns(absolutePath: string): boolean {
-    const dir = this.#resolveDir();
-    return absolutePath === dir || absolutePath.startsWith(dir + path.sep);
-  }
-
   async deleteAll(): Promise<void> {
     await rm(this.#resolveDir(), { recursive: true, force: true });
   }

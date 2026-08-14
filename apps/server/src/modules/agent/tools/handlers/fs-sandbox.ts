@@ -73,6 +73,25 @@ const VIRTUAL_PREFIX: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /**
+ * Whether a canvas-relative ref denotes something already under `.artifacts/`.
+ *
+ * A question about the *ref*, not about storage: a node `src` that already
+ * points at an artifact needs no import, whatever backend holds the bytes.
+ * Resolving against a synthetic root keeps it that way — no workspace, no
+ * canvas directory, no filesystem — while still collapsing any `..` that
+ * would slip past a bare prefix test, the same normalization
+ * {@link safeResolve} relies on.
+ *
+ * Takes the *physical* form, so pass {@link toPhysicalRel} output.
+ */
+export function isArtifactsRel(physicalRel: string): boolean {
+  const [, artifactsPhysical] = VIRTUAL_PREFIX[0];
+  const root = path.resolve('/', artifactsPhysical);
+  const target = path.resolve('/', physicalRel);
+  return target === root || target.startsWith(root + path.sep);
+}
+
+/**
  * Rewrite a request path's virtual prefix (`artifacts/`, `upload/`) to its
  * hidden on-disk counterpart. Idempotent: an already-physical `.upload/…`
  * path, `nodes/…`, `space.json`, etc. pass through unchanged.
