@@ -537,7 +537,7 @@ export const PDFPreview = ({
       const fallbackThreadId = chat.ensureCanvasThread(canvasId);
       const pdfTab = findTabByTarget(preview.workspace, pdfTarget);
       const pdfGroup = pdfTab ? groupOfTab(preview.workspace, pdfTab.id) : null;
-      chat.setSelectionAttachment(attachment);
+      chat.addPendingAttachment(fallbackThreadId, attachment);
       preview.openPreviewTarget(
         { kind: 'chat', canvasId, threadId: fallbackThreadId },
         { groupId: pdfGroup?.id, openToSide: true },

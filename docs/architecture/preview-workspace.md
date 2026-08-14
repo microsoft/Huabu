@@ -78,7 +78,7 @@ Each group mounts only its active tab. Inactive tabs retain topology and store-b
 
 Every mounted `ChatPanel` receives an explicit `ChatSession` and owning preview tab ID. There is no globally current Chat thread or Question replay pointer, so two groups can render independent conversations without sharing messages, drafts, bindings, attachments, settings, loading state, or stream control.
 
-PDF area capture routes directly to a Chat or Question conversation that is active in the group beside the PDF. When no conversation is visible beside it, the capture becomes the shared dashed selection attachment and the Canvas's canonical unbound Chat opens to the side; the user explicitly claims the selection in that composer before it becomes a thread-owned pending attachment.
+PDF area capture routes directly to a Chat or Question conversation that is active in the group beside the PDF. When no conversation is visible beside it, the Canvas's canonical unbound Chat opens to the side and the capture is staged immediately as that thread's pending attachment. The explicit Send to Chat action always produces a thread-owned attachment; the shared dashed selection attachment remains reserved for passive browser text selection.
 
 For a World `nodeRef` that presents a source Question, the target remains the World presentation node while `AgentConversationView` carries the source Canvas, node, and thread as conversation owner. History, reconnect, agent turns, tools, lifecycle writes, binding, mode, and change records use that owner scope.
 
