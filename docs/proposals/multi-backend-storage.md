@@ -1713,69 +1713,101 @@ storage-owned path (`chatDir`). The problem is therefore not mass violation by
 consumers — it is that the module they import is _mixed_, and its name and
 location assert an answer the port layer exists to keep open.
 
-#### 12.5.2 `paths.ts` holds three populations, not one
+#### 12.5.2 The test that decides ownership
 
-| Population             | Members                                                                                                                                                                     | Belongs to                      |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| Disk structured layout | `SPACE_JSON_FILENAME`, `canvasJsonPath`, `nodesDir`, `nodeFilePath`, `historyDir`, `chatDir`, `changesPath`, `tasksPath`, `eventsPath`, `deltaLogPath`                      | `storage/backends/disk/`        |
-| Blob layout            | `ARTIFACTS_DIR_NAME`, `artifactsDir`, `artifactPath`                                                                                                                        | `storage/backends/disk/` (blob) |
-| Workspace-as-a-place   | `canvasRoot`, `settingDir`, `userSkillsDir`, `workspaceMemoryPath`, `canvasMemoryDir`, `canvasMemoryPath`, `memoryStatePath`, `canvasAcpNamespace`, `WORLD_CANVAS_DIR_NAME` | `modules/workspace/`            |
+A symbol belongs outside `storage/` only if it is **still useful, unchanged,
+when the structured backend becomes SQLite**. Applied one symbol at a time,
+that question sorts `paths.ts` into four groups — not the three an eyeball
+reading suggests.
+
+| Outcome under a SQLite structured profile      | Members                                                                                                                                                              | Belongs to                                   |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Meaningless — the state became a table         | `SPACE_JSON_FILENAME`, `canvasJsonPath`, `nodesDir`, `nodeFilePath`, `historyDir`, `changesPath`, `tasksPath`, `eventsPath`, `deltaLogPath`, `WORLD_CANVAS_DIR_NAME` | `storage/backends/disk/`                     |
+| Still useful — belongs to the _other_ axis     | `ARTIFACTS_DIR_NAME`, `artifactsDir`, `artifactPath`                                                                                                                 | `storage/backends/disk/` (blob)              |
+| Still useful — concept survives, body does not | `canvasRoot`, `chatDir`                                                                                                                                              | re-founded on the materialization capability |
+| Still useful, untouched                        | `settingDir`, `userSkillsDir`, `workspaceMemoryPath`                                                                                                                 | `modules/workspace/`                         |
+
+Two corrections the test forces against a looser reading:
+
+- `WORLD_CANVAS_DIR_NAME` is a _directory name_. SQLite encodes World as
+  `is_world = 1` with its own reserved collision key, and the portable concept
+  already exists as `SpaceRepository.worldId()`. The constant is Disk's.
+- `canvasRoot` cannot simply move. Its body resolves through `canvasDirName()`,
+  which reads an index built from `space.json`, so under SQLite it silently
+  falls back to id-named directories. It is the materialization anchor and has
+  to be re-founded on something that does not consult the structured backend —
+  which is also the fix for the blob-scope hazard in §13.
 
 `canvas-dirs.ts` is not ambiguous at all: it builds its index by reading
 `space.json` from every directory. It is Disk structured-backend state that
-currently lives outside the storage boundary, and it is the reason a SQLite
-profile would silently fall back to id-named artifact directories (§13).
+currently lives outside the storage boundary. `space-dir-handles.ts` looks
+substrate-specific but fails the test for the same reason — it exists so
+Windows can rename a Space _directory_ safely, and under SQLite there is no
+such rename.
 
-`naming.ts` is misfiled in a third way — it is pure string logic with no I/O,
-already re-exported rather than owned. Phase 5 extracts it to `utils/naming.ts`
-as a side effect of needing it in a second backend; that extraction belongs
-here instead, where it is the point rather than a side effect.
+`naming.ts` is misfiled in a different way: pure string logic with no I/O,
+already re-exported rather than owned. It passes the test trivially (a second
+backend needs the identical rules) but has no business behind a `disk`
+segment. Phase 5 extracts it to `utils/naming.ts` as a side effect of needing
+it twice; that extraction belongs here, where it is the point.
 
-#### 12.5.3 Path families with no owner
+Because the residue that survives the test is three setting helpers and
+`getWorkspacePath()` itself — none of it filesystem-specific — the target is a
+**flat `modules/workspace/`** with no substrate segment.
 
-Cross-referencing the families above against the Phase 5 schema surfaces a gap
-this phase must record even though it does not close it. Six families map to
-tables — spaces, nodes, events, changes, tasks, delta log. These do not map to
-anything, and no port describes them:
+#### 12.5.3 `.history/` conflates two populations
 
-- `chatPromptLogPath` — per-thread prompt logs
-- `acpSessionsPath` — ACP session state
-- `canvasMemoryDir`, `canvasMemoryPath`, `memoryStatePath` — per-Space memory
+The directory holds the Disk structured backend's files — `events.jsonl`,
+`tasks.json`, `delta-log.jsonl`, `<thread>.changes.json` — and, sharing the
+same parent for no stated reason beyond travelling together in export bundles,
+per-Space state owned by other domains:
 
-Under any non-Disk structured profile they remain files with no owner, which
-would split one Space's state across two substrates without anyone deciding
-that. Phase 4.5 assigns each family an owner — port, materialization
-capability, or explicitly Disk-only — so that Phase 5's non-selectability has a
-written reason rather than an accident.
+| Family                                                   | Owner under the test                                                                                                                                                                            |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `acpSessionsPath`, `canvasAcpNamespace`                  | Agent domain. It is Agenetes' own store — the namespace hands the ACP driver `storage.root` and the driver persists there. Survives the switch; its address inside `.history/` is the accident. |
+| `chatPromptLogPath`                                      | Debug artifact. Written only under `HUABU_DEBUG_PROMPT` and, per its own comment, never read by the app. Needs a location, not an owner.                                                        |
+| `canvasMemoryDir`, `canvasMemoryPath`, `memoryStatePath` | Agent domain, materialized. AI-private Markdown an agent reads and writes as files.                                                                                                             |
+
+Under SQLite the first population evaporates and the second still needs a
+home. Phase 4.5 assigns each an owner so that the split is a decision rather
+than a leftover; it implements none of them beyond the relocation.
 
 #### 12.5.4 Materialization becomes declared, not ambient
 
-The consumers marked _materialization_ above cannot be served by a structured
-port and should not be. An ACP agent, a file watcher, and RFS need a real
-directory; that is a product requirement, not a leak.
+The consumers above cannot be served by a structured port and should not be.
+An ACP agent, a file watcher, and RFS need a real directory; that is a product
+requirement, not a leak.
 
-What is wrong today is that they get it by reading an ambient layout module.
-The port layer already has the right shape one level down — `BlobScope`
-exposes `materialize()` for "consumers that genuinely need a real filename"
-(§7). This phase gives Space trees the same treatment: an explicit capability a
-consumer depends on by name and a profile can decline to offer, rather than a
-path helper that is always simply there.
+What is wrong today is that they get it by reading an ambient layout module
+whose name asserts the substrate. The port layer already has the right shape
+one level down — `BlobScope` exposes `materialize()` for "consumers that
+genuinely need a real filename" (§7). This phase gives Space trees the same
+treatment: an explicit capability a consumer depends on by name and a profile
+can decline to offer, rather than a path helper that is always simply there.
+
+Note the dependency direction this settles. `modules/workspace/` owns _which_
+directory is active; `storage/` owns what the Disk backend puts inside it.
+Consumers needing a Space's real directory ask `storage/`, so the current
+`storage → workspace/disk` edge inverts to `workspace ← storage` plus an
+explicit capability — instead of every domain reaching into a shared layout.
 
 #### 12.5.5 Scope
 
 In:
 
-- Relocate the Disk structured and blob layout families, and `canvas-dirs.ts`,
-  into `storage/backends/disk/`.
-- Extract pure naming to `utils/naming.ts` (moved out of Phase 5).
-- Keep the Workspace-as-a-place families in `modules/workspace/`, without a
-  `disk` segment asserting the substrate.
-- Introduce the Space materialization capability and move the four
-  materialization consumers onto it.
-- Move `agent/memory/analyzer.ts` off `chatDir` and onto the change/log port.
-- Assign an owner to every §12.5.3 family; implement none of them.
-- Extend the module-boundary test to fail when a non-storage file imports a
-  storage-owned layout symbol — the guard that stops this recurring.
+1. Extract pure naming to `utils/naming.ts` and delete `workspace/disk/naming.ts`
+   outright — no shim, since every call site is updated in the same step.
+2. Relocate the Disk structured and blob layout families, plus
+   `canvas-dirs.ts`, `name-index.ts`, `space-dir-handles.ts`, and
+   `world-canvas.ts`, into `storage/backends/disk/`.
+3. Leave `settingDir`, `userSkillsDir`, and `workspaceMemoryPath` in a flat
+   `modules/workspace/`, with no substrate segment.
+4. Introduce the Space materialization capability, re-found `canvasRoot` on it,
+   and move the ACP, watcher, memory, and World-bootstrap consumers onto it.
+5. Move `agent/memory/analyzer.ts` off `chatDir`, and relocate the agent-owned
+   families of §12.5.3 into the agent domain.
+6. Extend the module-boundary test to fail when a non-storage file imports a
+   storage-owned layout symbol — the guard that stops this recurring.
 
 Out:
 
