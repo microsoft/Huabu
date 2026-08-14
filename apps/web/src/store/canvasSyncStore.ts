@@ -6,8 +6,10 @@ import { create } from 'zustand';
 import { readTypedSSEStream } from '@/api/_sse';
 import { canvasSyncStreamUrl } from '@/api/canvasSync';
 import { dismissToast, toast } from '@/components/Common/Toast';
+import { hasAgentStreamClaim } from '@/hooks/agentStreamCoordinator';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
@@ -41,6 +43,8 @@ interface CanvasSyncState {
 }
 
 let abortController: AbortController | null = null;
+const INITIAL_RECONNECT_DELAY_MS = 500;
+const MAX_RECONNECT_DELAY_MS = 10_000;
 
 type SyncPendingEffects = {
   mutatedNodes: Node[];
@@ -109,6 +113,24 @@ function notifySkippedAgentWrites(
   });
 }
 
+function invalidateUnclaimedAgentHistories(
+  canvasId: string,
+  nodes: readonly Node[],
+): void {
+  for (const node of nodes) {
+    const data = node.data as
+      | { status?: unknown; threadId?: unknown }
+      | undefined;
+    if (
+      typeof data?.threadId !== 'string' ||
+      hasAgentStreamClaim(canvasId, data.threadId)
+    ) {
+      continue;
+    }
+    useChatStore.getState().setHistoryLoaded(data.threadId, false);
+  }
+}
+
 export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
   canvasId: null,
 
@@ -120,84 +142,138 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
     set({ canvasId });
 
     void (async () => {
-      try {
-        const response = await fetch(canvasSyncStreamUrl(canvasId), { signal });
-        if (!response.ok) return;
-        await readTypedSSEStream<CanvasSyncEvent>(
-          response,
-          (event) => {
-            // Ignore late frames after a canvas switch / disconnect.
-            if (get().canvasId !== canvasId) return;
-            const canvasStore = useCanvasStore.getState();
-            if (canvasStore.canvasId !== canvasId) return;
+      let reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
+      while (!signal.aborted && get().canvasId === canvasId) {
+        try {
+          const response = await fetch(canvasSyncStreamUrl(canvasId), {
+            signal,
+          });
+          if (!response.ok || !response.body) {
+            throw new Error(`Canvas sync failed with HTTP ${response.status}`);
+          }
+          await readTypedSSEStream<CanvasSyncEvent>(
+            response,
+            (event) => {
+              reconnectDelay = INITIAL_RECONNECT_DELAY_MS;
+              // Ignore late frames after a canvas switch / disconnect.
+              if (get().canvasId !== canvasId) return;
+              const canvasStore = useCanvasStore.getState();
+              if (canvasStore.canvasId !== canvasId) return;
 
-            if (event.type === 'snapshot') {
-              // Skip the catch-up reload while an initial/primary load is
-              // still in flight. On fresh open the CanvasPage mount load
-              // is already fetching the latest state, but it hasn't set
-              // `version` yet when this snapshot arrives — without this
-              // guard the stale-version comparison below fires a second,
-              // redundant `loadCanvas` that races the mount load and
-              // leaks a spurious structure PUT (resetting `updatedAt` to
-              // the open time). The in-flight load already brings the
-              // freshest state, so a snapshot-driven reload is only
-              // meaningful once we've settled.
-              if (canvasStore.isLoading) return;
-              if (event.data.version !== canvasStore.version) {
-                void canvasStore.loadCanvas(canvasId, { resetHistory: true });
+              if (event.type === 'snapshot') {
+                // Skip the catch-up reload while an initial/primary load is
+                // still in flight. On fresh open the CanvasPage mount load
+                // is already fetching the latest state, but it hasn't set
+                // `version` yet when this snapshot arrives — without this
+                // guard the stale-version comparison below fires a second,
+                // redundant `loadCanvas` that races the mount load and
+                // leaks a spurious structure PUT (resetting `updatedAt` to
+                // the open time). The in-flight load already brings the
+                // freshest state, so a snapshot-driven reload is only
+                // meaningful once we've settled.
+                if (canvasStore.isLoading) return;
+                if (event.data.version !== canvasStore.version) {
+                  void canvasStore
+                    .loadCanvas(canvasId, { resetHistory: true })
+                    .then(() => {
+                      const current = useCanvasStore.getState();
+                      if (current.canvasId === canvasId) {
+                        invalidateUnclaimedAgentHistories(
+                          canvasId,
+                          current.nodes,
+                        );
+                      }
+                    });
+                }
+                return;
               }
-              return;
-            }
 
-            // event.type === 'update'
-            const { fromVersion, toVersion, deltas, pendingEffects } =
-              event.data;
-            let skippedNodeIds: string[] = [];
-            if (fromVersion === canvasStore.version) {
-              skippedNodeIds = canvasStore.applyDeltasFromAgent(
-                deltas as Delta[],
-                toVersion,
-                pendingEffects as SyncPendingEffects,
-              );
-            } else if (toVersion > canvasStore.version) {
-              // Gap (missed an earlier update). A blind `loadCanvas` would
-              // clobber un-persisted local edits, so skip it while the user
-              // is mid-editing and let autosave's 409 path arbitrate (C3).
-              // Incremental gap-heal (delta-log backfill) is deferred to P2.
-              if (canvasStore.pendingContentNodeIds().length === 0) {
-                void canvasStore.loadCanvas(canvasId, { resetHistory: true });
-              }
-            }
-            // else: stale/older update — ignore.
-
-            // Draw the user's attention *at the moment* an agent write was
-            // dropped because they were editing that node — a passive card
-            // badge alone is easy to miss mid-edit.
-            notifySkippedAgentWrites(
-              skippedNodeIds,
-              event.data.threadId,
-              canvasId,
-            );
-
-            // Attribute change-review records to the originating ACP
-            // conversation's card. `skippedNodeIds` marks the rows whose
-            // agent write was blocked by a local edit, so the card
-            // can flag them as conflicts instead of silently listing them
-            // as applied.
-            if (event.data.threadId && Array.isArray(event.data.changes)) {
-              useAcpThreadChangesStore
-                .getState()
-                .replaceFromBroadcast(
-                  event.data.threadId,
-                  event.data.changes as CanvasChangeRecord[],
-                  skippedNodeIds,
+              // event.type === 'update'
+              const { fromVersion, toVersion, deltas, pendingEffects } =
+                event.data;
+              let skippedNodeIds: string[] = [];
+              if (fromVersion === canvasStore.version) {
+                skippedNodeIds = canvasStore.applyDeltasFromAgent(
+                  deltas as Delta[],
+                  toVersion,
+                  pendingEffects as SyncPendingEffects,
                 );
-            }
-          },
-          signal,
-        );
-      } catch {
-        /* aborted or network error — ignore */
+              } else if (toVersion > canvasStore.version) {
+                // Gap (missed an earlier update). A blind `loadCanvas` would
+                // clobber un-persisted local edits, so skip it while the user
+                // is mid-editing and let autosave's 409 path arbitrate (C3).
+                // Incremental gap-heal (delta-log backfill) is deferred to P2.
+                if (canvasStore.pendingContentNodeIds().length === 0) {
+                  void canvasStore
+                    .loadCanvas(canvasId, { resetHistory: true })
+                    .then(() => {
+                      const current = useCanvasStore.getState();
+                      if (current.canvasId === canvasId) {
+                        invalidateUnclaimedAgentHistories(
+                          canvasId,
+                          current.nodes,
+                        );
+                      }
+                    });
+                }
+              }
+              // else: stale/older update — ignore.
+
+              // Draw the user's attention *at the moment* an agent write was
+              // dropped because they were editing that node — a passive card
+              // badge alone is easy to miss mid-edit.
+              notifySkippedAgentWrites(
+                skippedNodeIds,
+                event.data.threadId,
+                canvasId,
+              );
+
+              // Attribute change-review records to the originating ACP
+              // conversation's card. `skippedNodeIds` marks the rows whose
+              // agent write was blocked by a local edit, so the card
+              // can flag them as conflicts instead of silently listing them
+              // as applied.
+              if (event.data.threadId && Array.isArray(event.data.changes)) {
+                useAcpThreadChangesStore
+                  .getState()
+                  .replaceFromBroadcast(
+                    event.data.threadId,
+                    event.data.changes as CanvasChangeRecord[],
+                    skippedNodeIds,
+                  );
+              }
+              invalidateUnclaimedAgentHistories(
+                canvasId,
+                (pendingEffects as SyncPendingEffects).mutatedNodes.filter(
+                  (node) =>
+                    (node.data as { status?: unknown } | undefined)?.status ===
+                    'running',
+                ),
+              );
+            },
+            signal,
+          );
+          if (!signal.aborted) {
+            throw new Error('Canvas sync stream ended unexpectedly');
+          }
+        } catch (error) {
+          if (signal.aborted || get().canvasId !== canvasId) return;
+          console.warn('[canvasSync] reconnecting after stream failure', error);
+        }
+
+        await new Promise<void>((resolve) => {
+          const finish = () => {
+            signal.removeEventListener('abort', onAbort);
+            resolve();
+          };
+          const onAbort = () => {
+            window.clearTimeout(timeout);
+            finish();
+          };
+          const timeout = window.setTimeout(finish, reconnectDelay);
+          signal.addEventListener('abort', onAbort, { once: true });
+        });
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
       }
     })();
   },

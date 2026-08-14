@@ -118,6 +118,8 @@ export interface RunAcpAgentOptions {
     mode: string;
     logger: FastifyBaseLogger;
   };
+  /** Called after Agenetes has synchronously persisted this turn's start. */
+  onTurnStarted?: () => void;
 }
 
 /**
@@ -312,10 +314,12 @@ export async function* runAcpAgent(
   // (I9.7). Idempotent per thread — subscribing before `run()` so the
   // handle's initial state up-report is captured.
   ensureProfileCacheSubscription(threadId, binding.profileId);
-  yield* handle.run(submission, {
+  const iterator = handle.run(submission, {
     overlay,
     signal,
     logger,
     onPrepared,
   });
+  opts.onTurnStarted?.();
+  yield* iterator;
 }

@@ -208,22 +208,15 @@ Broadcast applies take **one** undo snapshot per batch (via
   geometry but keeps its **live** `data` (thread binding, answer) — that payload
   is system-driven, so rewinding a move must not wipe it.
 
-## Known reliability gaps
+## Stream reliability
 
-Consistent with the sibling `external.route.ts`, and acceptable for the
-single-process, `127.0.0.1` desktop topology — but tracked:
+The sync route subscribes before reading the initial Canvas version, buffers updates committed during that read, sends the snapshot first, and then flushes the buffered updates. This closes the snapshot/subscribe loss window while preserving snapshot-before-update ordering.
 
-- **No SSE heartbeat.** The stream sends `: ok` once on connect and then only on
-  updates; there is no periodic ping. Behind an idle-timeout proxy the
-  connection could be dropped.
-- **No client auto-reconnect.** `canvasSyncStore.connect()` uses `fetch` +
-  `readTypedSSEStream` (not native `EventSource`), so a dropped stream is not
-  re-established until the canvas is switched / reloaded. Reconnect would piggy-
-  back on the existing snapshot-on-connect reconcile to heal the gap.
-- **Revert-route TOCTOU.** The revert handler reads the record and removes it
-  outside the per-canvas mutex (only `applyDeltasOnServer` is inside), so two
-  concurrent reverts of the same change could double-apply. Negligible on
-  single-user desktop; folded away by P3's unified write path.
+The server emits a heartbeat comment every 15 seconds. `canvasSyncStore.connect()` treats non-OK responses, malformed events, network errors, and unexpected EOF as failures and reconnects with exponential backoff capped at 10 seconds. An intentional Canvas switch or disconnect aborts the current request and pending delay, while every successful event resets the backoff. The reconnect snapshot/version handshake remains the convergence mechanism.
+
+## Known reliability gap
+
+- **Revert-route TOCTOU.** The revert handler reads the record and removes it outside the per-canvas mutex (only `applyDeltasOnServer` is inside), so two concurrent reverts of the same change could double-apply. Negligible on single-user desktop; folded away by P3's unified write path.
 
 ## Code entry points
 

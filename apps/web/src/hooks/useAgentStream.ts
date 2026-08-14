@@ -44,6 +44,11 @@ import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
 
+import {
+  abortAgentStreamClaim,
+  claimAgentStream,
+} from './agentStreamCoordinator';
+
 import type { AssistantSegment } from '../store/chatTypes';
 import type { ChatSession } from '@/hooks/useChatSession';
 import type { AgentMode, AgentStreamEvent } from '@huabu/shared';
@@ -795,6 +800,13 @@ export function useAgentStream(
       const mergedAttachments = [...allPending];
       const attachments =
         mergedAttachments.length > 0 ? mergedAttachments : undefined;
+      const streamClaim = claimAgentStream(
+        requestScope.canvasId,
+        threadId,
+        'post',
+      );
+      if (!streamClaim) return;
+
       // Both are consumed by the send, and they are cleared separately
       // because they are owned differently: staged attachments belong to this
       // thread, while the excerpt is the one shared selection. Spending it
@@ -839,6 +851,7 @@ export function useAgentStream(
         if (abortControllersRef.current.get(threadId) === abortController) {
           abortControllersRef.current.delete(threadId);
         }
+        streamClaim.release();
       };
 
       // ── Question-node follow-up bookkeeping ─────────────────────────
@@ -1100,7 +1113,10 @@ export function useAgentStream(
                 reasoningEffort: settings.reasoningEffort ?? undefined,
               };
             })(),
-            signal: abortController.signal,
+            signal: AbortSignal.any([
+              abortController.signal,
+              streamClaim.signal,
+            ]),
           },
         );
       } catch (err) {
@@ -1194,6 +1210,10 @@ export function useAgentStream(
     // subscription so callbacks stop firing.
     const tid = threadId;
     void agentApi.stopThread(tid);
+    abortAgentStreamClaim(
+      conversationRequestScope(conversationView, canvasId).canvasId,
+      tid,
+    );
 
     const controller = abortControllersRef.current.get(tid);
     if (controller) {
@@ -1231,7 +1251,14 @@ export function useAgentStream(
         };
       });
     }
-  }, [addMessage, updateMessage, setThreadLoading, threadId]);
+  }, [
+    addMessage,
+    updateMessage,
+    setThreadLoading,
+    threadId,
+    conversationView,
+    canvasId,
+  ]);
 
   // `useChatHistory` reconnect flips loading on/off explicitly for the
   // owner thread of the reconnect attempt. We simply re-expose

@@ -127,6 +127,13 @@ export interface ExternalAgentThreadTarget {
   fixedTarget: FixedAgentNodeTarget | null;
 }
 
+interface ActiveAgentInvocation {
+  canvasId?: string;
+  abortController: AbortController;
+  turnStarted: Promise<boolean>;
+  resolveTurnStarted: (started: boolean) => void;
+}
+
 function buildAgentSystemPrompt(params: {
   canvasId: string | undefined;
   mode: Parameters<typeof loadAgent>[0];
@@ -147,7 +154,7 @@ function errorMessage(error: unknown): string {
 }
 
 export class AgentThreadService {
-  private readonly abortControllers = new Map<string, AbortController>();
+  private readonly activeInvocations = new Map<string, ActiveAgentInvocation>();
 
   constructor(
     private readonly dependencies: AgentThreadServiceDependencies = DEFAULT_DEPENDENCIES,
@@ -199,24 +206,39 @@ export class AgentThreadService {
     const releaseTurn = this.dependencies.acquireTurn(options.threadId);
     if (!releaseTurn) throw new AgentThreadBusyError(options.threadId);
 
+    const abortController = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, abortController.signal])
+      : abortController.signal;
+    let resolveTurnStarted!: (started: boolean) => void;
+    const turnStarted = new Promise<boolean>((resolve) => {
+      resolveTurnStarted = resolve;
+    });
+    const active: ActiveAgentInvocation = {
+      canvasId: options.canvasId,
+      abortController,
+      turnStarted,
+      resolveTurnStarted,
+    };
+    this.activeInvocations.set(options.threadId, active);
+
     try {
       if (fixedTarget) {
         await this.dependencies.startLifecycle(fixedTarget, options.content);
       }
     } catch (error) {
+      resolveTurnStarted(false);
+      if (this.activeInvocations.get(options.threadId) === active) {
+        this.activeInvocations.delete(options.threadId);
+      }
       releaseTurn();
       throw error;
     }
 
-    const abortController = new AbortController();
-    const signal = options.signal
-      ? AbortSignal.any([options.signal, abortController.signal])
-      : abortController.signal;
     const effectiveOptions: EffectiveAgentThreadInvocationOptions = {
       ...options,
       signal,
     };
-    this.abortControllers.set(options.threadId, abortController);
 
     let settled = false;
     const settle = async (
@@ -225,6 +247,10 @@ export class AgentThreadService {
     ): Promise<void> => {
       if (settled) return;
       settled = true;
+      resolveTurnStarted(false);
+      if (this.activeInvocations.get(options.threadId) === active) {
+        this.activeInvocations.delete(options.threadId);
+      }
       try {
         if (fixedTarget) {
           if (terminal === 'error') {
@@ -237,9 +263,6 @@ export class AgentThreadService {
           }
         }
       } finally {
-        if (this.abortControllers.get(options.threadId) === abortController) {
-          this.abortControllers.delete(options.threadId);
-        }
         releaseTurn();
       }
     };
@@ -252,6 +275,7 @@ export class AgentThreadService {
         effectiveOptions,
         binding,
         fixedTarget,
+        () => resolveTurnStarted(true),
         settle,
       ),
       dispose: (error) =>
@@ -263,16 +287,34 @@ export class AgentThreadService {
   }
 
   stop(threadId: string): boolean {
-    const controller = this.abortControllers.get(threadId);
+    const controller = this.activeInvocations.get(threadId)?.abortController;
     if (!controller || controller.signal.aborted) return false;
     controller.abort();
     return true;
+  }
+
+  isActive(threadId: string, canvasId?: string): boolean {
+    const active = this.activeInvocations.get(threadId);
+    if (!active) return false;
+    return active.canvasId === canvasId;
+  }
+
+  async waitForTurnStart(
+    threadId: string,
+    canvasId?: string,
+  ): Promise<boolean> {
+    const active = this.activeInvocations.get(threadId);
+    if (!active || (canvasId !== undefined && active.canvasId !== canvasId)) {
+      return false;
+    }
+    return active.turnStarted;
   }
 
   private async *runInvocation(
     options: EffectiveAgentThreadInvocationOptions,
     binding: AgentBinding,
     fixedTarget: FixedAgentNodeTarget | null,
+    onTurnStarted: () => void,
     settle: (terminal: 'done' | 'error', message?: string) => Promise<void>,
   ): AsyncGenerator<AgentStreamEvent, void> {
     let runError: unknown;
@@ -280,7 +322,12 @@ export class AgentThreadService {
     let sawDone = false;
 
     try {
-      const stream = this.createDispatchStream(options, binding, fixedTarget);
+      const stream = this.createDispatchStream(
+        options,
+        binding,
+        fixedTarget,
+        onTurnStarted,
+      );
       try {
         for await (const event of stream) {
           if (event.type === AGENT_SSE_EVENTS.Done) sawDone = true;
@@ -310,6 +357,7 @@ export class AgentThreadService {
     options: EffectiveAgentThreadInvocationOptions,
     binding: AgentBinding,
     fixedTarget: FixedAgentNodeTarget | null,
+    onTurnStarted: () => void,
   ): AsyncGenerator<AgentStreamEvent, unknown> {
     if (binding.kind === 'external') {
       return this.dependencies.runExternal({
@@ -325,6 +373,7 @@ export class AgentThreadService {
         signal: options.signal,
         logger: options.logger,
         debugPrompt: options.debugPrompt,
+        onTurnStarted,
       });
     }
 
@@ -360,6 +409,7 @@ export class AgentThreadService {
       signal: options.signal,
       logger: options.logger,
       debugPrompt: options.debugPrompt,
+      onTurnStarted,
     });
   }
 }
