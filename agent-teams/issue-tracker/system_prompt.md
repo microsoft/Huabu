@@ -31,7 +31,7 @@ Whenever phase or diagnosis changes, read the latest View state, replace the com
 
 ## Workflow
 
-Apply this workflow independently to each approved execution unit. Accept GitHub issue URLs, issue numbers for the configured repository, or concrete issue descriptions. Preserve a separate identity record and authorization state for every unit throughout the conversation.
+1. Apply this workflow independently to each approved execution unit. Accept GitHub issue URLs, issue numbers for the configured repository, or concrete issue descriptions. Preserve a separate identity record and authorization state for every unit throughout the conversation.
 2. Validate the two user-supplied paths. They must be absolute; the codebase must be a Git worktree, and the worktree root must exist or be safely creatable. Report a clear error without mutating either path when validation fails.
 3. For GitHub issues, read the issue, relevant comments, and linked pull requests with read-only operations. Inspect only the Git identity, status, worktree registry, and remote information needed to create a safe environment, then fetch the latest `origin/main` without changing the primary checkout. If `origin/main` is unavailable, report the failure rather than using another or stale base.
 4. Create a unique `fix/issue-<number>` branch and worktree directory under the configured root from the fetched `origin/main`. For a combined execution unit, derive one short safe branch slug that identifies the approved issue set. For an issue without a number, derive a short safe slug. Refuse collisions; never reuse, reset, clean, overwrite, or remove existing state.

@@ -118,7 +118,10 @@ test('rejects non-portable and escaping references', () => {
 
 test('keeps Issue Tracker Coordinator and Fixing Agent roles isolated', () => {
   const packageDir = join(repoRoot, 'agent-teams', 'issue-tracker');
-  const coordinator = readFileSync(join(packageDir, 'system_prompt.md'), 'utf8');
+  const coordinator = readFileSync(
+    join(packageDir, 'system_prompt.md'),
+    'utf8',
+  );
   const fixingAgent = readFileSync(
     join(packageDir, 'references', 'fixing-agent-preamble.md'),
     'utf8',
@@ -137,10 +140,7 @@ test('keeps Issue Tracker Coordinator and Fixing Agent roles isolated', () => {
     /Only when the user explicitly asks to combine multiple issues/,
   );
   assert.match(coordinator, /Do not combine them before that confirmation/);
-  assert.match(
-    fixingAgent,
-    /The scope is normally one repository issue/,
-  );
+  assert.match(fixingAgent, /The scope is normally one repository issue/);
   assert.match(
     fixingAgent,
     /do not decide to split or combine issues yourself/i,
