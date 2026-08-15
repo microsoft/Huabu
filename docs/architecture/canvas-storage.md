@@ -100,7 +100,13 @@ The Task Note and Task record deliberately remain separate persistence domains r
 
 The launcher creates the fixed root Agent Node through `AgentNodeService`, records its node and thread ids, and prepares the first turn through `AgentThreadService`. Because the invocation stream is lazy, the launcher persists `running` and `startedAt` before it begins background draining; a failure to persist that transition disposes the prepared invocation so Agent execution does not start.
 
-Phase 1 deliberately has no compensation transaction or terminal Run state. A launch failure leaves the Run `pending`, while any root node or thread ids already created are retained in the Run record when available and returned on `RunLaunchError` for explicit recovery.
+The launch path deliberately has no compensation transaction. A launch failure leaves the Run `pending`, while any root node or thread ids already created are retained in the Run record when available and returned on `RunLaunchError` for explicit recovery.
+
+### 3.3 Task Run completion
+
+`RunCompletionService.complete()` validates the shared request and delegates the guarded transition to `SpaceTaskRuns.complete()`. The Disk adapter performs lookup, `running → completed`, and persistence under the existing per-Canvas Task mutation mutex, so HTTP and built-in-tool callers share one atomic transition rather than performing a read-then-update race.
+
+A completed Run stores immutable `completion.completedAt` and an optional trimmed caller-owned `completion.message`. The platform treats the message as untrusted text and does not interpret issue, pull-request, or URL semantics. A retry with the same normalized message is idempotent and preserves the original timestamp; a different message conflicts. A `pending` Run cannot complete, and Agent turn termination never implies Run completion.
 
 ## 4. Portable write seam and application ordering
 

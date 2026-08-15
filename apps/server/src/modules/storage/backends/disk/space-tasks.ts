@@ -5,9 +5,11 @@ import path from 'node:path';
 
 import {
   taskRecordSchema,
+  taskRunCompletionSchema,
   taskRunRecordSchema,
   taskStoreSnapshotSchema,
   type TaskRecord,
+  type TaskRunCompletion,
   type TaskRunRecord,
   type TaskStoreSnapshot,
 } from '@huabu/shared';
@@ -22,6 +24,7 @@ import type { CanvasStore } from './legacy/canvas-store.js';
 import type {
   SpaceTaskRuns,
   SpaceTasks,
+  TaskRunCompletionResult,
   TaskRunUpdate,
 } from '../../ports/structured.js';
 
@@ -109,6 +112,11 @@ export class DiskSpaceTasks implements SpaceTasks {
       create: (run: TaskRunRecord) => this.#createRun(run),
       update: (runId: string, update: TaskRunUpdate) =>
         this.#updateRun(runId, update),
+      complete: (
+        taskId: string,
+        runId: string,
+        completion: TaskRunCompletion,
+      ) => this.#completeRun(taskId, runId, completion),
     });
   }
 
@@ -196,6 +204,46 @@ export class DiskSpaceTasks implements SpaceTasks {
       }
       snapshot.runs[index] = parsed.data;
       return parsed.data;
+    });
+  }
+
+  async #completeRun(
+    taskId: string,
+    runId: string,
+    completion: TaskRunCompletion,
+  ): Promise<TaskRunCompletionResult> {
+    const parsedCompletion = taskRunCompletionSchema.safeParse(completion);
+    if (!parsedCompletion.success) {
+      throw new TypeError(`Invalid completion for Run ${runId}`);
+    }
+    return this.#mutate((snapshot) => {
+      if (!snapshot.tasks.some((task) => task.taskId === taskId)) {
+        return { outcome: 'task_not_found' };
+      }
+      const index = snapshot.runs.findIndex((run) => run.runId === runId);
+      if (index < 0 || snapshot.runs[index]?.taskId !== taskId) {
+        return { outcome: 'run_not_found' };
+      }
+      const current = snapshot.runs[index];
+      if (!current) return { outcome: 'run_not_found' };
+      if (current.status === 'completed') {
+        return current.completion?.message === parsedCompletion.data.message
+          ? { outcome: 'unchanged', run: current }
+          : { outcome: 'completion_conflict', run: current };
+      }
+      if (current.status !== 'running') {
+        return { outcome: 'run_not_running', run: current };
+      }
+      const parsedRun = taskRunRecordSchema.safeParse({
+        ...current,
+        status: 'completed',
+        completion: parsedCompletion.data,
+      });
+      if (!parsedRun.success) {
+        throw new TypeError(`Invalid completion update for Run ${runId}`);
+      }
+      snapshot.runs[index] = parsedRun.data;
+      return { outcome: 'completed', run: parsedRun.data };
     });
   }
 

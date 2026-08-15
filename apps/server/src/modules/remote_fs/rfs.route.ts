@@ -19,6 +19,7 @@
  * - `POST   agent/:threadId/prompt` — submit a turn to an existing Agent.
  * - `POST   task/create`     — create a durable Task and static Task Note.
  * - `POST   task/:taskId/run/create` — create and start one Task Run.
+ * - `POST   task/:taskId/run/:runId/complete` — complete one running Task Run.
  * - `GET    agent/profiles`  — list available Agent Profiles.
  * - `GET    skill`           — pull the canvas-access guide (per-canvas
  *   override → bundled default).
@@ -41,6 +42,7 @@ import {
   RFS_HEARTBEAT_MAX_SEC,
   RFS_HEARTBEAT_MIN_SEC,
   createTaskRequestSchema,
+  completeTaskRunRequestSchema,
   createInteractiveViewRequestSchema,
   HUABU_AGENT_PROFILE_ID,
   interactiveViewLookupQuerySchema,
@@ -55,6 +57,7 @@ import {
   spaceQuerySchema,
   startTaskRunRequestSchema,
   type CreateTaskResponse,
+  type CompleteTaskRunResponse,
   type CreateInteractiveViewRequest,
   type RfsAgentEventMode,
   type RfsAgentCreateResponse,
@@ -109,6 +112,10 @@ import {
   InteractiveViewServiceError,
   interactiveViewService,
 } from '../interactive-view/interactive-view.service.js';
+import {
+  RunCompletionError,
+  runCompletionService,
+} from '../task/run-completion.service.js';
 import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
 import { TaskCreationError, taskService } from '../task/task.service.js';
 
@@ -908,6 +915,58 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       }
     },
   );
+
+  app.post<{
+    Params: { canvasId: string; taskId: string; runId: string };
+  }>('/:canvasId/task/:taskId/run/:runId/complete', async (request, reply) => {
+    const body = Buffer.isBuffer(request.body)
+      ? request.body.toString('utf8')
+      : '';
+    let json: unknown;
+    try {
+      json = JSON.parse(body || '{}');
+    } catch {
+      return reply
+        .code(400)
+        .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
+    }
+    const parsed = completeTaskRunRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return reply
+        .code(400)
+        .send(
+          rfsError(
+            parsed.error.issues[0]?.message ??
+              'Invalid Run completion request.',
+            'validation_failed',
+          ),
+        );
+    }
+
+    try {
+      const run = await runCompletionService.complete(
+        request.params.canvasId,
+        request.params.taskId,
+        request.params.runId,
+        parsed.data,
+      );
+      const response: CompleteTaskRunResponse = { run };
+      return reply.send(response);
+    } catch (error) {
+      if (error instanceof RunCompletionError) {
+        const status =
+          error.code === 'invalid_input'
+            ? 400
+            : ['task_not_found', 'run_not_found'].includes(error.code)
+              ? 404
+              : ['run_not_running', 'completion_conflict'].includes(error.code)
+                ? 409
+                : 500;
+        return reply.code(status).send(rfsError(error.message, error.code));
+      }
+      throw error;
+    }
+  });
 
   // ── POST /:canvasId/agent ──
   app.post<{ Params: { canvasId: string } }>(

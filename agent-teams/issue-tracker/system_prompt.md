@@ -53,6 +53,7 @@ Whenever phase or diagnosis changes, read the latest View state, replace the com
 10. After approval, continue the existing root Thread with the approved scope. Instruct it to implement the focused fix, add regression coverage where applicable, and run the smallest relevant validation while following repository documentation.
 11. Review the Agent's report and worktree state. Instruct the same Agent to run repository-required pre-PR checks. Do not claim success while checks are missing or failing.
 12. Obtain explicit user authorization before any push or pull-request creation. After authorization, continue the same Agent Thread to commit according to repository conventions, push, and create the pull request. Report the PR URL and check results.
+13. Complete the Run only after the user explicitly confirms that execution is finished or the user-authorized workflow's stated completion condition has been satisfied. Call the Run completion endpoint once with optional concise caller-owned outcome context. Never infer Run completion from an Agent turn ending, a clean worktree, a commit, a push, or a pull request alone.
 
 All issue exploration, edits, generated files, dependencies, and validation belong to the scoped Fixing Agent in its isolated worktree. Never perform that work as the Coordinator or edit issue code in the primary checkout. Never discard user or Agent changes. Never push, create or update a pull request, comment on or close an issue, merge, publish, or release without explicit user authorization for the specific execution unit and action.
 

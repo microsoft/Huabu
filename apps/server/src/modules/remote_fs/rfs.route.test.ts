@@ -56,6 +56,10 @@ import {
 } from '../agent/agent-thread.service.js';
 import * as selectableProfiles from '../agent/selectable-agent-profile.js';
 import { getCanvasStore, resetStorageCache } from '../storage/index.js';
+import {
+  RunCompletionError,
+  runCompletionService,
+} from '../task/run-completion.service.js';
 import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
 import { taskService } from '../task/task.service.js';
 import { toSafeFilename } from '../workspace/disk/naming.js';
@@ -318,6 +322,68 @@ describe('Task RFS adapters', () => {
         },
         { logger: expect.anything() },
       );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('completes a Task Run through RunCompletionService', async () => {
+    const run = {
+      runId: 'run-a',
+      taskId: 'task-a',
+      canvasIdSnapshot: 'c1',
+      goalSnapshot: 'Investigate',
+      rootProfileIdSnapshot: 'profile-b',
+      status: 'completed' as const,
+      rootNodeId: 'node-root',
+      rootThreadId: 'thread-root',
+      createdAt: 1,
+      startedAt: 2,
+      completion: { completedAt: 3, message: 'PR merged' },
+    };
+    const complete = vi
+      .spyOn(runCompletionService, 'complete')
+      .mockResolvedValue(run);
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/task/task-a/run/run-a/complete',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({ message: 'PR merged' }),
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ run });
+      expect(complete).toHaveBeenCalledWith('c1', 'task-a', 'run-a', {
+        message: 'PR merged',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it.each([
+    ['task_not_found', 404],
+    ['run_not_found', 404],
+    ['run_not_running', 409],
+    ['completion_conflict', 409],
+  ] as const)('maps %s completion errors to HTTP %s', async (code, status) => {
+    vi.spyOn(runCompletionService, 'complete').mockRejectedValue(
+      new RunCompletionError(code, `Completion failed: ${code}`),
+    );
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/task/task-a/run/run-a/complete',
+        headers: { 'content-type': 'application/json' },
+        payload: '{}',
+      });
+
+      expect(res.statusCode).toBe(status);
+      expect(res.json()).toMatchObject({ code });
+      expect(res.json().message).toContain(`Completion failed: ${code}`);
     } finally {
       await app.close();
     }

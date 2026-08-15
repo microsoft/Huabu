@@ -266,6 +266,7 @@ export class InteractiveViewService {
             ...(run.rootThreadId ? { rootThreadId: run.rootThreadId } : {}),
             createdAt: run.createdAt,
             ...(run.startedAt ? { startedAt: run.startedAt } : {}),
+            ...(run.completion ? { completion: run.completion } : {}),
           })),
         };
         for (const task of snapshot.tasks) {

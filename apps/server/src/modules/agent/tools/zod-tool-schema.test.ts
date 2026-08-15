@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canvasCommandsTool,
   createTaskTool,
+  completeTaskRunTool,
   inspectNodesTool,
   snapshotNodesTool,
   startTaskRunTool,
@@ -108,6 +109,7 @@ describe('shared Zod tool schemas', () => {
   it('validates the canonical Task tool contracts', () => {
     expect(TOOL_REGISTRY.create_task).toBe(createTaskTool);
     expect(TOOL_REGISTRY.start_task_run).toBe(startTaskRunTool);
+    expect(TOOL_REGISTRY.complete_task_run).toBe(completeTaskRunTool);
 
     expect(
       validateToolArguments(createTaskTool, {
@@ -133,6 +135,19 @@ describe('shared Zod tool schemas', () => {
         },
       }),
     ).toMatchObject({ taskId: 'task-a' });
+
+    expect(
+      validateToolArguments(completeTaskRunTool, {
+        type: 'toolCall',
+        id: 'call-run-complete',
+        name: 'complete_task_run',
+        arguments: {
+          taskId: 'task-a',
+          runId: 'run-a',
+          message: 'PR merged',
+        },
+      }),
+    ).toMatchObject({ taskId: 'task-a', runId: 'run-a' });
   });
 
   it('accepts World targets only on non-materializing read schemas', () => {

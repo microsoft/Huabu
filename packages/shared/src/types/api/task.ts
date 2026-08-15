@@ -18,21 +18,47 @@ export const taskRecordSchema = z.object({
 });
 export type TaskRecord = z.infer<typeof taskRecordSchema>;
 
-export const taskRunStatusSchema = z.enum(['pending', 'running']);
+export const taskRunStatusSchema = z.enum(['pending', 'running', 'completed']);
 export type TaskRunStatus = z.infer<typeof taskRunStatusSchema>;
 
-export const taskRunRecordSchema = z.object({
-  runId: z.string().min(1),
-  taskId: z.string().min(1),
-  canvasIdSnapshot: z.string().min(1),
-  goalSnapshot: z.string().min(1),
-  rootProfileIdSnapshot: z.string().min(1),
-  status: taskRunStatusSchema,
-  rootNodeId: z.string().min(1).optional(),
-  rootThreadId: z.string().min(1).optional(),
-  createdAt: z.number().int().nonnegative(),
-  startedAt: z.number().int().nonnegative().optional(),
-});
+export const taskRunCompletionSchema = z
+  .object({
+    completedAt: z.number().int().nonnegative(),
+    message: z.string().trim().min(1).max(4_096).optional(),
+  })
+  .strict();
+export type TaskRunCompletion = z.infer<typeof taskRunCompletionSchema>;
+
+export const taskRunRecordSchema = z
+  .object({
+    runId: z.string().min(1),
+    taskId: z.string().min(1),
+    canvasIdSnapshot: z.string().min(1),
+    goalSnapshot: z.string().min(1),
+    rootProfileIdSnapshot: z.string().min(1),
+    status: taskRunStatusSchema,
+    rootNodeId: z.string().min(1).optional(),
+    rootThreadId: z.string().min(1).optional(),
+    createdAt: z.number().int().nonnegative(),
+    startedAt: z.number().int().nonnegative().optional(),
+    completion: taskRunCompletionSchema.optional(),
+  })
+  .superRefine((run, context) => {
+    if (run.status === 'completed' && !run.completion) {
+      context.addIssue({
+        code: 'custom',
+        path: ['completion'],
+        message: 'completed Runs require completion metadata',
+      });
+    }
+    if (run.status !== 'completed' && run.completion) {
+      context.addIssue({
+        code: 'custom',
+        path: ['completion'],
+        message: 'only completed Runs may carry completion metadata',
+      });
+    }
+  });
 export type TaskRunRecord = z.infer<typeof taskRunRecordSchema>;
 
 export const taskStoreSnapshotSchema = z.object({
@@ -101,3 +127,36 @@ export const startTaskRunResponseSchema = z.object({
   run: taskRunRecordSchema,
 });
 export type StartTaskRunResponse = z.infer<typeof startTaskRunResponseSchema>;
+
+export const completeTaskRunRequestSchema = z
+  .object({
+    message: z
+      .string()
+      .trim()
+      .min(1)
+      .max(4_096)
+      .optional()
+      .describe(
+        'Optional immutable caller-authored completion message. The platform stores it as untrusted text without interpreting issue, pull-request, or URL semantics.',
+      ),
+  })
+  .strict();
+export type CompleteTaskRunRequest = z.infer<
+  typeof completeTaskRunRequestSchema
+>;
+
+export const completeTaskRunToolParamsSchema =
+  completeTaskRunRequestSchema.extend({
+    taskId: z.string().trim().min(1),
+    runId: z.string().trim().min(1),
+  });
+export type CompleteTaskRunToolParams = z.infer<
+  typeof completeTaskRunToolParamsSchema
+>;
+
+export const completeTaskRunResponseSchema = z.object({
+  run: taskRunRecordSchema,
+});
+export type CompleteTaskRunResponse = z.infer<
+  typeof completeTaskRunResponseSchema
+>;

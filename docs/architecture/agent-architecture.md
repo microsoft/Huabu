@@ -75,7 +75,7 @@ tools/
   handlers/        ← individual tool implementations
 ```
 
-14 tools, assigned via each agent frontmatter's `tools` array (**not** a hardcoded list in code):
+15 tools, assigned via each agent frontmatter's `tools` array (**not** a hardcoded list in code):
 
 | Tool                                                    | Handler                                                                                       | Scope              |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------ |
@@ -89,6 +89,7 @@ tools/
 | `generate_image`                                        | [image-generation.ts](../../apps/server/src/modules/agent/tools/handlers/image-generation.ts) | operate            |
 | `create_task`                                           | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate            |
 | `start_task_run`                                        | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate            |
+| `complete_task_run`                                     | [task.ts](../../apps/server/src/modules/agent/tools/handlers/task.ts)                         | operate            |
 
 Design principles:
 

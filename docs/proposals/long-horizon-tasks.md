@@ -2,7 +2,7 @@
 
 > Define the minimum platform capability for a Canvas-scoped task to start one visible Agent thread, let that Agent recursively create and invoke more visible Agent threads, and exchange durable information through conversations and Space nodes.
 >
-> Status: **Partly shipped** · Last updated: 2026-08-09
+> Status: **Partly shipped** · Last updated: 2026-08-15
 
 ---
 
@@ -16,7 +16,7 @@ The defining product promise is:
 
 This proposal deliberately focuses on the bottom-layer capability and information pipeline rather than a complete task product. The first implementation creates a Canvas-scoped Task and static Task Note, starts a Run through one root Agent Node and thread, lets any participating Agent recursively create and invoke more Agent Nodes and threads, and reuses the existing RFS query, execution, artifact, and Agent streaming surfaces for communication.
 
-The first implementation does not attempt to define when a Run is semantically complete, build a workflow engine, or solve scheduling, cancellation, approvals, notifications, cross-Space execution, or a complete Task UI.
+The first implementation did not attempt to define when a Run is semantically complete, build a workflow engine, or solve scheduling, cancellation, approvals, notifications, cross-Space execution, or a complete Task UI. A later completion slice added an explicit guarded `running → completed` transition without deriving completion from Agent turn termination.
 
 ## 2. Design principles
 
@@ -415,6 +415,10 @@ Add the `TaskStore` port and Disk adapter, shared Task/Run schemas, static Task 
 ### 14.5 End-to-end validation and documentation
 
 Validate recursive Agent creation, Question Node replay and continuation, an auto-research handoff, and an issue-fixer worktree cwd override without adding workflow lifecycle features.
+
+### 14.6 Explicit Run completion
+
+Add `RunCompletionService` and an atomic `SpaceTaskRuns.complete()` transition shared by the built-in `complete_task_run` tool and `POST /api/rfs/:canvasId/task/:taskId/run/:runId/complete`. Completion is an explicit caller decision, accepts optional immutable caller-owned context, treats same-message retries as idempotent, and does not infer completion from Agent turn lifecycle. Cancellation, recovery, waiting-for-user, and richer workflow semantics remain separate slices.
 
 ## 15. Code entry points
 
