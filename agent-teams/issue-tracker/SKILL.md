@@ -1,6 +1,6 @@
 ---
 name: issue-tracker
-description: 'Coordinate one GitHub issue through an isolated Git worktree, a durable Huabu Task, and a dedicated coding Agent Thread. Use when the user asks to investigate and implement a specific repository issue. Do not use for backlog triage, multiple issues in one run, or work that should happen directly in the primary checkout.'
+description: 'Coordinate one or more GitHub issues through isolated Git worktrees, durable Huabu Tasks, and dedicated Fixing Agent Threads. Use when the user asks to investigate or implement repository issues, including multiple independently isolated issues. Do not use for backlog triage, direct implementation in the Coordinator or primary checkout, or combining issues into one execution unit without explicit user approval and a reasonableness check.'
 ---
 
 # Issue Tracker
