@@ -6,9 +6,8 @@
  * RapidAPI). Mounted under `/api/integrations`.
  *
  * `GET /config` returns the masked read model (booleans only). `PUT
- * /config` is loopback-only (same guard as the LLM routes) since it
- * writes secrets to disk — a remote client must never be able to plant
- * or overwrite credentials.
+ * /config` requires the owner (same guard as the LLM routes) because it
+ * writes secrets to disk.
  */
 
 import { integrationsConfigUpdateSchema } from '@huabu/shared';
@@ -17,7 +16,7 @@ import {
   getIntegrationsConfig,
   setIntegrationsConfig,
 } from './integrations.js';
-import { isLoopbackRequest } from '../security/peer.js';
+import { isOwnerRequest } from '../security/owner.js';
 
 import type {
   ApiResult,
@@ -32,15 +31,14 @@ const integrationsRoutes: FastifyPluginAsync = async (app) => {
     return getIntegrationsConfig();
   });
 
-  // PUT /api/integrations/config — save API keys (loopback only)
+  // PUT /api/integrations/config — save API keys (owner only)
   app.put<{
     Body: IntegrationsConfigUpdate;
     Reply: ApiResult<IntegrationsConfig>;
   }>('/config', async (request, reply) => {
-    if (!isLoopbackRequest(request)) {
+    if (!isOwnerRequest(request)) {
       return reply.status(403).send({
-        message:
-          'Forbidden: integration keys can only be changed from localhost',
+        message: 'Forbidden: integration keys require owner authorization',
       });
     }
 

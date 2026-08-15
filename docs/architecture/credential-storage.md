@@ -47,6 +47,8 @@ Every mutation constructs a new encrypted snapshot, atomically replaces the file
 
 The standalone server may run without `HUABU_SECRET_KEY` when it has no encrypted file. This environment-only mode supports headless and container deployments but deliberately rejects Settings writes. If an encrypted file exists without a key, startup fails with an actionable error instead of silently discarding credentials.
 
+The deployment readiness endpoint exposes only whether the selected backend is writable and the stable `secret-key-required` reason for environment-only mode. Settings uses that capability to disable API-key and OAuth mutations before they fail; backend kind, key material, credential values, and environment fallbacks remain private. See [`deployment-security.md`](./deployment-security.md).
+
 ## Code entry points
 
 | File                                                                                                                       | Responsibility                                                                |

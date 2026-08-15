@@ -24,6 +24,8 @@ interface ApiKeyRowProps {
   placeholder: string;
   /** Whether a save request is in flight. */
   saving?: boolean;
+  /** Disable credential mutations when the active store is read-only. */
+  disabled?: boolean;
   /** Persist a new key when the editor is submitted. */
   onSave: (key: string) => void;
   /** Remove the key stored by Huabu. Omit for credentials that cannot be removed. */
@@ -46,6 +48,7 @@ export const ApiKeyRow: React.FC<ApiKeyRowProps> = ({
   saved,
   placeholder,
   saving = false,
+  disabled = false,
   onSave,
   onRemove,
   density = 'default',
@@ -109,7 +112,9 @@ export const ApiKeyRow: React.FC<ApiKeyRowProps> = ({
                 tone="neutral"
                 size="sm"
                 onClick={commitValue}
-                disabled={saving || (!value.trim() && !(saved && onRemove))}
+                disabled={
+                  saving || disabled || (!value.trim() && !(saved && onRemove))
+                }
               >
                 {saving ? t('settings.saving') : t('actions.save')}
               </Button>
@@ -135,7 +140,7 @@ export const ApiKeyRow: React.FC<ApiKeyRowProps> = ({
               tone="neutral"
               size="sm"
               onClick={() => setEditing(true)}
-              disabled={saving}
+              disabled={saving || disabled}
             >
               {saved ? t('settings.updateKey') : t('settings.setApiKey')}
             </Button>

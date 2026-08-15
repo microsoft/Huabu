@@ -6,6 +6,7 @@ import './setup-proxy.js';
 import { app } from './app.js';
 import { resolveBindHost } from './bind-host.js';
 import { prewarmOAuthCredentials } from './modules/agent/oauth.js';
+import { resolveDeploymentConfig } from './modules/security/deployment-config.js';
 import { initStorage } from './modules/storage/index.js';
 import { initializeSecretStore } from './security/secret-store.js';
 import { getLogger } from './utils/logger.js';
@@ -24,6 +25,13 @@ const HOST = resolveBindHost();
 
 async function start(): Promise<void> {
   try {
+    const deployment = resolveDeploymentConfig();
+    if (deployment.bindScope === 'network') {
+      log.warn(
+        'Remote access is enabled over operator-managed transport. Use HTTPS or a trusted private network.',
+      );
+    }
+
     // Before anything serves: an unknown or unimplemented backend must
     // fail here with an actionable message, not on the first upload.
     const storage = await initStorage();

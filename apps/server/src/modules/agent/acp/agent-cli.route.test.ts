@@ -5,6 +5,7 @@ import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createAcpAgentCliRoutes } from './agent-cli.route.js';
+import { markBasicAuthenticated } from '../../security/owner.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -70,5 +71,25 @@ describe('ACP agent CLI route', () => {
 
     expect(response.statusCode).toBe(403);
     expect(detect).not.toHaveBeenCalled();
+  });
+
+  it('allows the authenticated remote owner to probe the host', async () => {
+    const detect = vi.fn(async () => []);
+    app = Fastify({ logger: false });
+    app.addHook('onRequest', async (request) => {
+      markBasicAuthenticated(request);
+    });
+    await app.register(createAcpAgentCliRoutes(detect), {
+      prefix: '/api/acp',
+    });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/acp/agent-cli',
+      remoteAddress: '192.0.2.10',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(detect).toHaveBeenCalledOnce();
   });
 });

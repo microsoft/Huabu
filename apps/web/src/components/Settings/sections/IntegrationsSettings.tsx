@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from '@/components/Common/Toast';
 import { ApiKeyRow } from '@/components/Settings/Common/ApiKeyRow';
 import { SettingSection } from '@/components/Settings/Common/SettingSection';
+import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
 import { useIntegrationsStore } from '@/store/integrationsStore';
 
 /**
@@ -21,6 +22,9 @@ export const IntegrationsSettings: React.FC = () => {
   const error = useIntegrationsStore((s) => s.error);
   const init = useIntegrationsStore((s) => s.init);
   const updateConfig = useIntegrationsStore((s) => s.updateConfig);
+  const credentialWritesDisabled = useDeploymentReadinessStore(
+    (s) => s.readiness?.credentials.writable === false,
+  );
 
   useEffect(() => {
     void init();
@@ -42,6 +46,7 @@ export const IntegrationsSettings: React.FC = () => {
         saved={config?.hasTavilyKey ?? false}
         placeholder="tvly-…"
         saving={saving}
+        disabled={credentialWritesDisabled}
         onSave={(key) => void updateConfig({ tavilyApiKey: key })}
         onRemove={() => void updateConfig({ tavilyApiKey: null })}
       />
@@ -51,6 +56,7 @@ export const IntegrationsSettings: React.FC = () => {
         saved={config?.hasRapidApiKey ?? false}
         placeholder="rapidapi-…"
         saving={saving}
+        disabled={credentialWritesDisabled}
         onSave={(key) => void updateConfig({ rapidApiKey: key })}
         onRemove={() => void updateConfig({ rapidApiKey: null })}
       />

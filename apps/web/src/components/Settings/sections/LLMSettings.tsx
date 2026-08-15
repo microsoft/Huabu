@@ -15,6 +15,7 @@ import { SettingControl } from '@/components/Settings/Common/SettingControl';
 import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { SettingSection } from '@/components/Settings/Common/SettingSection';
+import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
 import { useLLMStore } from '@/store/llmStore';
 
 import { OAuthDeviceCodePrompt } from './OAuthDeviceCodePrompt';
@@ -91,6 +92,9 @@ export const LLMSettings: React.FC = () => {
   const llmError = useLLMStore((s) => s.error);
   const llmLoadModels = useLLMStore((s) => s.loadModels);
   const llmUpdateConfig = useLLMStore((s) => s.updateConfig);
+  const credentialWritesDisabled = useDeploymentReadinessStore(
+    (s) => s.readiness?.credentials.writable === false,
+  );
 
   // Utility-tier model
   const utilityConfig = useLLMStore((s) => s.utilityConfig);
@@ -334,6 +338,7 @@ export const LLMSettings: React.FC = () => {
               }
               saved={llmConfig?.authenticated ?? false}
               placeholder="Azure key"
+              disabled={credentialWritesDisabled}
               saving={llmSaving}
               onSave={(key) => saveChat({ apiKey: key })}
             />
@@ -349,6 +354,7 @@ export const LLMSettings: React.FC = () => {
                 tone="neutral"
                 size="sm"
                 onClick={() => void llmLogoutOAuth()}
+                disabled={credentialWritesDisabled}
               >
                 <LogOut />
                 {t('settings.logout')}
@@ -359,7 +365,7 @@ export const LLMSettings: React.FC = () => {
                 tone="info"
                 size="sm"
                 onClick={() => void startOAuth()}
-                disabled={oauthPending}
+                disabled={oauthPending || credentialWritesDisabled}
               >
                 <LogIn />
                 {t('settings.login')}
@@ -388,6 +394,7 @@ export const LLMSettings: React.FC = () => {
             }
             saved={llmConfig.authenticated}
             placeholder="sk-…"
+            disabled={credentialWritesDisabled}
             saving={llmSaving}
             onSave={handleSaveChatKey}
           />
@@ -526,7 +533,7 @@ export const LLMSettings: React.FC = () => {
                     tone="info"
                     size="sm"
                     onClick={() => void startOAuth()}
-                    disabled={oauthPending}
+                    disabled={oauthPending || credentialWritesDisabled}
                   >
                     <LogIn />
                     {t('settings.login')}
@@ -544,6 +551,7 @@ export const LLMSettings: React.FC = () => {
                   }
                   saved={utilityConfig.authenticated}
                   placeholder="sk-…"
+                  disabled={credentialWritesDisabled}
                   saving={utilitySaving}
                   onSave={handleSaveUtilityKey}
                 />

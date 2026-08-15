@@ -21,7 +21,11 @@ afterEach(() => {
   container = null;
 });
 
-function renderRow(onSave = vi.fn(), onRemove: (() => void) | null = vi.fn()) {
+function renderRow(
+  onSave = vi.fn(),
+  onRemove: (() => void) | null = vi.fn(),
+  disabled = false,
+) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -31,6 +35,7 @@ function renderRow(onSave = vi.fn(), onRemove: (() => void) | null = vi.fn()) {
         title="API Key"
         saved
         placeholder="secret"
+        disabled={disabled}
         onSave={onSave}
         onRemove={onRemove ?? undefined}
       />,
@@ -102,5 +107,16 @@ describe('ApiKeyRow', () => {
       (button) => button.textContent === 'actions.save',
     )!;
     expect(saveButton.disabled).toBe(true);
+  });
+
+  it('prevents editing when credential storage is read-only', () => {
+    renderRow(vi.fn(), vi.fn(), true);
+    const updateButton = Array.from(container!.querySelectorAll('button')).find(
+      (button) => button.textContent === 'settings.updateKey',
+    )!;
+
+    expect(updateButton.disabled).toBe(true);
+    act(() => updateButton.click());
+    expect(container?.querySelector('input')).toBeNull();
   });
 });

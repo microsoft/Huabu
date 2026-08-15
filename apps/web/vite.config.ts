@@ -8,31 +8,49 @@ import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 
+import { decideViteAccess } from './vite-access';
+
 /**
- * Minimal HTTP Basic Auth gate for the dev server.
- * Protects every request reaching Vite (including /api proxied to Fastify),
- * but does NOT cover the HMR WebSocket upgrade (which only carries hot
- * reload payloads, no app data) — so HMR keeps working without creds.
+ * Single-owner access gate for the dev server. Loopback keeps its
+ * zero-configuration workflow; remote HTTP requests must pass Basic Auth
+ * before receiving assets or reaching the API proxy. The gate does NOT cover
+ * the HMR WebSocket upgrade (which carries hot reload payloads, no app data).
  *
  * Note: this is plaintext over HTTP. Combine with a firewall / VPN for
  * anything beyond a quick team share on a trusted network.
  */
-function basicAuthPlugin(user: string, pass: string): Plugin {
+function accessGatePlugin(user?: string, pass?: string): Plugin {
   const expected =
-    'Basic ' + Buffer.from(`${user}:${pass}`, 'utf8').toString('base64');
-  return {
-    name: 'huabu-basic-auth',
-    configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        // CORS preflight never carries credentials — let it through.
-        if (req.method === 'OPTIONS') return next();
-        if (req.headers.authorization === expected) return next();
-        res.statusCode = 401;
-        res.setHeader('WWW-Authenticate', 'Basic realm="Huabu"');
-        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-        res.end('Authentication required');
+    user && pass
+      ? 'Basic ' + Buffer.from(`${user}:${pass}`, 'utf8').toString('base64')
+      : null;
+  const install: NonNullable<Plugin['configureServer']> = (server) => {
+    server.middlewares.use((req, res, next) => {
+      if (req.method === 'OPTIONS') return next();
+      const decision = decideViteAccess({
+        peer: req.socket.remoteAddress,
+        expectedAuthorization: expected,
+        receivedAuthorization: req.headers.authorization,
       });
-    },
+      if (decision === 'allow') return next();
+      if (decision === 'remote-auth-configuration-required') {
+        res.statusCode = 403;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end(
+          'Remote Vite access requires HUABU_BASIC_AUTH_USER and HUABU_BASIC_AUTH_PASS',
+        );
+        return;
+      }
+      res.statusCode = 401;
+      res.setHeader('WWW-Authenticate', 'Basic realm="Huabu"');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.end('Authentication required');
+    });
+  };
+  return {
+    name: 'huabu-access-gate',
+    configureServer: install,
+    configurePreviewServer: install,
   };
 }
 
@@ -61,6 +79,11 @@ export default defineConfig(({ mode }) => {
 
   const authUser = env.HUABU_BASIC_AUTH_USER;
   const authPass = env.HUABU_BASIC_AUTH_PASS;
+  if (Boolean(authUser) !== Boolean(authPass)) {
+    throw new Error(
+      'HUABU_BASIC_AUTH_USER and HUABU_BASIC_AUTH_PASS must be configured together',
+    );
+  }
   const authEnabled = Boolean(authUser && authPass);
   if (authEnabled) {
     console.log('[huabu] Vite dev server: Basic Auth enabled');
@@ -76,12 +99,7 @@ export default defineConfig(({ mode }) => {
   const appVersion = desktopPkg.version ?? '0.0.0';
 
   return {
-    plugins: [
-      react(),
-      ...(authEnabled
-        ? [basicAuthPlugin(authUser as string, authPass as string)]
-        : []),
-    ],
+    plugins: [react(), accessGatePlugin(authUser, authPass)],
     define: {
       __APP_VERSION__: JSON.stringify(appVersion),
       // Milkdown/Crepe mounts Vue components internally. Declare Vue's

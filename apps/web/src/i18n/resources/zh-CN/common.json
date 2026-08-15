@@ -253,7 +253,10 @@
     "imageQuality": "图片质量",
     "optional": "可选",
     "deploymentOptional": "仅当 Azure 部署名称不同于上方模型时填写",
-    "imageApiVersionPlaceholder": "使用 2025-04-01-preview 或更新版本"
+    "imageApiVersionPlaceholder": "使用 2025-04-01-preview 或更新版本",
+    "readinessUnavailable": "无法加载部署就绪状态，凭据操作可能失败。",
+    "credentialStoreReadOnly": "凭据存储为只读。请设置 HUABU_SECRET_KEY 并重启 Huabu，以保存凭据或使用 OAuth。",
+    "remoteTransportUnverified": "此远程连接使用运维方管理的传输。请使用 HTTPS 或可信私有网络。"
   },
   "status": {
     "loading": "正在加载",

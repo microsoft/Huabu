@@ -235,6 +235,8 @@ The handbook is owned, built, and deployed from the public [microsoft/Huabu repo
 
 `pnpm start:web` serves the compiled SPA and API from one production-style Fastify process. Before importing the Server bundle, its launcher selects the first available port at or above `SERVER_PORT`/`PORT` (default 3001) and writes the resolved value to `SERVER_PORT`; the shared port probe also protects `dev` and `dev:desktop` from loopback-versus-wildcard binding conflicts.
 
+Network deployment follows the single-owner boundary in [`deployment-security.md`](./deployment-security.md). Non-loopback `start:web` binds fail closed unless allowed hosts and complete Basic Auth are configured. Vite keeps zero-configuration loopback development but rejects non-loopback clients before serving assets or proxying APIs unless they pass the same Basic Auth gate. Settings reads the redacted deployment readiness endpoint and disables credential mutations when the standalone secret store is read-only.
+
 ## 9. Desktop troubleshooting actions
 
 The packaged desktop app exposes three support actions without granting the renderer general filesystem or Electron access: reveal the canonical Server log, open Chromium Developer Tools, and copy non-sensitive system information (Huabu version, OS release, CPU architecture, and Electron version). The sandboxed preload bridge exposes only these fixed operations under `electronBridge.diagnostics`; filesystem paths and shell calls remain in the main process. Packaged builds resolve the log below Electron's `userData/data`; `dev:desktop` passes the source Server's `apps/server/data` location to both processes through `HUABU_DATA_DIR`, so the same action always reveals the log written by the active Server.

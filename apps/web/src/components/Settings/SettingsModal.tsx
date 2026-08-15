@@ -9,6 +9,7 @@ import { Button } from '@/components/Common/Button';
 import { SettingSection } from '@/components/Settings/Common/SettingSection';
 import { getElectronBridge } from '@/hooks/useElectron';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
+import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
 import { useLLMStore } from '@/store/llmStore';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
 
@@ -16,6 +17,7 @@ import {
   ExternalAgentsSettings,
   type ExternalAgentsNavigation,
 } from './agent-team/ExternalAgentsSettings';
+import { DeploymentReadinessNotice } from './DeploymentReadinessNotice';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { ImageProviderSettings } from './sections/ImageProviderSettings';
 import { IntegrationsSettings } from './sections/IntegrationsSettings';
@@ -65,6 +67,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const { t } = useTranslation();
   const llmInit = useLLMStore((s) => s.init);
   const acpInit = useAcpProfilesStore((s) => s.init);
+  const loadDeploymentReadiness = useDeploymentReadinessStore((s) => s.load);
   const requestedTab = useSettingsUiStore((s) => s.requestedTab);
   const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
   const [activeTab, setActiveTab] = useState<SettingsTab>(TABS[0].id);
@@ -96,6 +99,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       clearRequestedTab();
     }
   }, [isOpen, requestedTab, clearRequestedTab]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void loadDeploymentReadiness();
+  }, [isOpen, loadDeploymentReadiness]);
 
   // Load each registry only when its owning tab is visible.
   useEffect(() => {
@@ -239,6 +247,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            <DeploymentReadinessNotice />
             {activeTab === 'general' && (
               <SettingSection>
                 <GeneralSettings />

@@ -30,3 +30,5 @@
 export { hostGuardPlugin, resolveAllowedHostnames } from './host-guard.js';
 export { originGuardPlugin } from './origin-guard.js';
 export { isLoopbackRequest } from './peer.js';
+export { isOwnerRequest, markBasicAuthenticated } from './owner.js';
+export { resolveDeploymentConfig } from './deployment-config.js';

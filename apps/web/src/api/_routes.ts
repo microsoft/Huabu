@@ -14,6 +14,9 @@
 const enc = encodeURIComponent;
 
 export const routes = {
+  // ── Deployment ────────────────────────────────────────────────────
+  deploymentReadiness: '/deployment/readiness',
+
   // ── Workspace ─────────────────────────────────────────────────────
   workspace: '/workspace',
   workspacePickFolder: '/workspace/pick-folder',
