@@ -510,7 +510,9 @@ export const FrameNode = memo(
           tooltipOffset={0}
           size={1}
           className={clsx(
-            'nodrag col-start-1 row-start-1 w-full min-w-0! bg-transparent px-1.5 text-xs font-medium outline-none',
+            // `text-ellipsis` only paints on an unfocused input, so the
+            // idle label shows "…" while editing still scrolls normally.
+            'nodrag col-start-1 row-start-1 w-full min-w-0! bg-transparent px-1.5 text-xs font-medium text-ellipsis outline-none',
             isEditingLabel
               ? 'text-fg-default cursor-text'
               : 'text-fg-muted hover:text-fg-default cursor-pointer',

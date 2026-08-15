@@ -102,7 +102,7 @@ When frame labels collide, the higher-priority label wins:
 
 The first three interaction states force the affected label to remain visible and use matching overlay layers in descending order. With no interaction, the outer frame wins because zoomed-out views prioritize structural context over nested detail; the inner label returns after sufficient screen-space separation.
 
-Frame label width is capped to the transformed frame width with a 48 px usability floor. Overflowing names truncate visually while the input title retains access to the complete name.
+Frame label width is capped to the transformed frame width with a 48 px usability floor. An overflowing name truncates with an ellipsis so the clipped remainder is visible as such; the ellipsis disappears while the label is being edited, where the input scrolls instead.
 
 `FrameNode` owns the hierarchy and collision policy because it is frame-specific. `NodeWrapper` remains generic: it converts node coordinates to screen coordinates, applies owner-provided semantic visibility and width, handles interaction reveal, and performs opacity/FLIP transitions.
 
