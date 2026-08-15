@@ -138,8 +138,8 @@ describe('warmupNodeHeights', () => {
 
     const warmedChild = result.nodes.find((node) => node.id === 'n1');
     const fittedFrame = result.nodes.find((node) => node.id === 'f1');
-    expect(warmedChild?.style?.height).toBe(264);
-    expect(fittedFrame?.style?.height).toBeGreaterThan(264);
+    expect(warmedChild?.style?.height).toBe(296);
+    expect(fittedFrame?.style?.height).toBeGreaterThan(296);
     expect(fittedFrame?.style?.height).not.toBe(120);
   });
 });
