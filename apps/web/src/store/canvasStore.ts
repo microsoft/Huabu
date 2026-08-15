@@ -97,6 +97,10 @@ import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
 import { createNodeContentQueue } from './canvasStore/save/nodeContentQueue';
 import { createPreprocessQueue } from './canvasStore/save/preprocessQueue';
 import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDetector';
+import {
+  isCoveredCanvasVersionConflict,
+  reconcileCanvasVersion,
+} from './canvasStore/save/structureSaveReconciliation';
 import { createStructureScheduler } from './canvasStore/save/structureScheduler';
 import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
@@ -450,10 +454,15 @@ type RFState = {
    * True when the server has rejected a save with `CANVAS_VERSION_CONFLICT`
    * (another tab / device / agent advanced the canvas behind our back).
    * While set, `saveCanvas` short-circuits so we don't pile up failing
-   * autosaves on top of stale state. Cleared by `loadCanvas` once the
-   * client is re-synced to the latest server snapshot.
+   * autosaves on top of stale state. Cleared by `loadCanvas` or when Canvas
+   * Sync reaches the server version reported by the conflict.
    */
   versionConflict: boolean;
+  /**
+   * Server version reported by the rejected structure PUT. Canvas Sync clears
+   * the conflict and retries once an incoming update reaches this version.
+   */
+  versionConflictServerVersion: number | null;
 
   /**
    * Apply a partial state update without triggering autosave or the
@@ -1269,6 +1278,7 @@ const useCanvasStore = create<RFState>()(
     isSaving: false,
     pendingSave: false,
     versionConflict: false,
+    versionConflictServerVersion: null,
 
     refreshWorldReferences: async () => {
       const generation = ++worldReferenceRefreshGeneration;
@@ -1520,6 +1530,28 @@ const useCanvasStore = create<RFState>()(
      *      the legacy full-state snapshot boundary.
      */
     applyDeltasFromAgent: (deltas, toVersion, pendingEffects) => {
+      const reconcileIncomingVersion = (): void => {
+        const current = get();
+        const reconciled = reconcileCanvasVersion(
+          current.version,
+          toVersion,
+          current.versionConflictServerVersion,
+        );
+        get()._setStateNoAutosave({
+          version: reconciled.version,
+          ...(reconciled.conflictResolved
+            ? {
+                versionConflict: false,
+                versionConflictServerVersion: null,
+              }
+            : {}),
+        });
+        if (reconciled.conflictResolved) {
+          dismissVersionConflictToast();
+          structureScheduler.schedule();
+        }
+      };
+
       // Never let an incoming agent write clobber a
       // node the user is mid-editing. Skip REPLACE/DELETE deltas that
       // target a node with un-persisted local content edits (INSERT is a
@@ -1560,9 +1592,7 @@ const useCanvasStore = create<RFState>()(
         // Nothing to apply locally (empty batch, or every row protected).
         // Still reconcile the version so the next local edit's autosave
         // doesn't 409 against our stale view of server state.
-        if (get().version !== toVersion) {
-          get()._setStateNoAutosave({ version: toVersion });
-        }
+        reconcileIncomingVersion();
         return skippedNodeIds;
       }
 
@@ -1612,9 +1642,9 @@ const useCanvasStore = create<RFState>()(
       get()._setStateNoAutosave({
         nodes: orderedNodes as Node[],
         edges: applied.edges as Edge[],
-        version: toVersion,
         ...(isPortalPinMutation ? { canUndo: false, canRedo: false } : {}),
       });
+      reconcileIncomingVersion();
 
       // Re-seed the content-CAS baseline for the nodes this agent write
       // actually applied. Skipped mid-edit nodes had their baseline adopted
@@ -1843,7 +1873,12 @@ const useCanvasStore = create<RFState>()(
     },
 
     loadCanvas: async (canvasId, options) => {
-      set({ isLoading: true, canvasNotFound: false, versionConflict: false });
+      set({
+        isLoading: true,
+        canvasNotFound: false,
+        versionConflict: false,
+        versionConflictServerVersion: null,
+      });
       // Clear any stale "modified elsewhere" toast before we fetch a
       // fresh baseline — the warning is bound to the old version we're
       // about to replace.
@@ -2025,6 +2060,7 @@ const useCanvasStore = create<RFState>()(
         isLoading: true,
         canvasNotFound: false,
         versionConflict: false,
+        versionConflictServerVersion: null,
       });
       // Same rationale as `loadCanvas`: the persistent conflict toast
       // is bound to the outgoing canvas; clear it so it doesn't bleed
@@ -2056,10 +2092,9 @@ const useCanvasStore = create<RFState>()(
     },
 
     saveCanvas: async (options) => {
-      // Once the server has rejected a save with a version mismatch, our
-      // local `version` is permanently stale until the user reloads. Skip
-      // further attempts so we don't generate a 409 on every autosave tick
-      // (and don't clobber the surfaced toast with more failures).
+      // Pause structure saves after an unresolved version mismatch so we do
+      // not pile up 409s. Canvas Sync automatically clears this gate and
+      // retries once it reaches the server version reported by the conflict.
       if (get().versionConflict) return;
 
       const { isSaving } = get();
@@ -2105,11 +2140,36 @@ const useCanvasStore = create<RFState>()(
           },
           { keepalive: options?.keepalive },
         );
-        set({ version: response.version });
+        const reconciled = reconcileCanvasVersion(
+          get().version,
+          response.version,
+          get().versionConflictServerVersion,
+        );
+        set({
+          version: reconciled.version,
+          ...(reconciled.conflictResolved
+            ? {
+                versionConflict: false,
+                versionConflictServerVersion: null,
+              }
+            : {}),
+        });
+        if (reconciled.conflictResolved) {
+          dismissVersionConflictToast();
+        }
         saveSucceeded = true;
       } catch (error) {
         if (error instanceof CanvasConflictError) {
           if (error.code === 'CANVAS_VERSION_CONFLICT') {
+            if (
+              isCoveredCanvasVersionConflict(get().version, error.serverVersion)
+            ) {
+              // Canvas Sync already delivered the winning write. Retry the
+              // latest local structure against that fresh baseline instead
+              // of turning this delayed response into a global conflict.
+              set({ pendingSave: true });
+              return;
+            }
             // Server is ahead of us (another tab / device / agent wrote
             // first). Stop the autosave loop and surface a persistent
             // toast (with a Reload action) so the user knows their edits
@@ -2118,7 +2178,10 @@ const useCanvasStore = create<RFState>()(
             // first; `loadCanvas` clears the flag (and the toast) once
             // the client re-syncs.
             if (!get().versionConflict) {
-              set({ versionConflict: true });
+              set({
+                versionConflict: true,
+                versionConflictServerVersion: error.serverVersion ?? null,
+              });
               showVersionConflictToast();
             }
             return;

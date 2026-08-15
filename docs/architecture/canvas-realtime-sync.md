@@ -108,6 +108,7 @@ otherwise                → apply
   `loadCanvas` — but **only when there are no dirty nodes**. With local dirty
   state a blind `loadCanvas` would lose the edit, so the tab defers to autosave's
   409 path (existing sticky "modified elsewhere" toast + Reload) instead.
+- Structure-save acknowledgements reconcile monotonically with Canvas Sync: a delayed HTTP success cannot lower the local version, and a delayed 409 whose reported server version has already arrived over SSE is retried against that fresh baseline instead of opening the global conflict state. If the 409 arrives first, the client records its server version; a later SSE update that reaches that version clears the warning and schedules the latest structure for retry.
 - **Scope:** content only. Same-node _structure_ conflicts (geometry / parent)
   stay coarse — there is no per-node structure-dirty tracking yet.
 

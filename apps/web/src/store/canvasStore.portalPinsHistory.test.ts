@@ -89,6 +89,7 @@ beforeEach(() => {
     pendingSave: false,
     isLoading: true,
     versionConflict: false,
+    versionConflictServerVersion: null,
     worldReferences: {},
     worldReferenceError: null,
     pinnedSourceNodeIds: {},
