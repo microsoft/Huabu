@@ -146,6 +146,23 @@ test('keeps Issue Tracker Coordinator and Fixing Agent roles isolated', () => {
     coordinator,
     /The Frame is a presentation and navigation boundary, not an authorization or runtime identity/,
   );
+  assert.match(
+    coordinator,
+    /concise issue-content title that summarizes the problem itself/,
+  );
+  assert.match(
+    coordinator,
+    /exclude workflow terms, Agent roles, and lifecycle states/,
+  );
+  assert.match(
+    coordinator,
+    /The body starts with `# <issue-content title>`, followed by a blank line and the complete investigation goal/,
+  );
+  assert.match(
+    coordinator,
+    /Submit only the Markdown body and use `expectRev`/,
+  );
+  assert.doesNotMatch(coordinator, /concise execution-unit title/);
   assert.match(fixingAgent, /The scope is normally one repository issue/);
   assert.match(
     fixingAgent,
