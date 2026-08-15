@@ -140,6 +140,12 @@ test('keeps Issue Tracker Coordinator and Fixing Agent roles isolated', () => {
     /Only when the user explicitly asks to combine multiple issues/,
   );
   assert.match(coordinator, /Do not combine them before that confirmation/);
+  assert.match(coordinator, /Give each execution unit one dedicated Frame/);
+  assert.match(coordinator, /independently handled issues never share a Frame/);
+  assert.match(
+    coordinator,
+    /The Frame is a presentation and navigation boundary, not an authorization or runtime identity/,
+  );
   assert.match(fixingAgent, /The scope is normally one repository issue/);
   assert.match(
     fixingAgent,
