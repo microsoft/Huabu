@@ -37,7 +37,12 @@ import type { Namespace } from '@agenetes/protocol';
 
 export function canvasRoot(canvasId: string): string {
   const safeId = sanitizeId(canvasId, 'canvasId');
-  return path.join(getWorkspacePath(), canvasDirName(safeId));
+  const workspaceRoot = path.resolve(getWorkspacePath());
+  const resolved = path.resolve(workspaceRoot, canvasDirName(safeId));
+  if (!resolved.startsWith(`${workspaceRoot}${path.sep}`)) {
+    throw new Error(`Canvas path escapes the active Workspace: "${canvasId}"`);
+  }
+  return resolved;
 }
 
 /**
