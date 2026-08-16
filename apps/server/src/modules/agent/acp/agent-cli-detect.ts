@@ -16,8 +16,8 @@
  *
  * This module performs no caching — detection is cheap (a couple of
  * spawn syscalls) and a stale cache would mislead users who just
- * installed a CLI. The route layer is loopback-only and unauthenticated
- * past the loopback check.
+ * installed a CLI. The route layer restricts this host-side probe to the
+ * locally trusted or Basic-authenticated owner.
  */
 
 import { execFile } from 'node:child_process';

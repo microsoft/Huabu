@@ -30,3 +30,4 @@ export * from './agent-team.js';
 export * from './agent-profile.js';
 export * from './task.js';
 export * from './interactive-view.js';
+export * from './deployment.js';

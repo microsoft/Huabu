@@ -118,3 +118,8 @@ export function getSecretStoreKind(): string {
   assertInitialized();
   return primaryStore?.kind ?? environmentStore.kind;
 }
+
+export function isSecretStoreWritable(): boolean {
+  assertInitialized();
+  return primaryStore?.writable ?? environmentStore.writable;
+}

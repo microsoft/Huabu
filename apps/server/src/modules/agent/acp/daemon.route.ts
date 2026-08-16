@@ -10,13 +10,13 @@
  * UI can render a single troubleshooting affordance when the
  * supervisor's auto-restart budget is exhausted.
  *
- * Both verbs are loopback-only — exposing a "restart worker" button
- * to a remote browser would be a trivial DoS.
+ * Both verbs require the owner because restarting the worker disrupts
+ * active agent operations.
  */
 
 import { getDaemonSupervisor } from '@agenetes/agentlet-host';
 
-import { isLoopbackRequest } from '../../security/peer.js';
+import { isOwnerRequest } from '../../security/owner.js';
 
 import type {
   AcpAgentletRestartResponse,
@@ -29,9 +29,9 @@ const acpAgentletRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Reply: ApiResult<AcpAgentletStatusResponse> }>(
     '/agentlet',
     async (request, reply) => {
-      if (!isLoopbackRequest(request)) {
+      if (!isOwnerRequest(request)) {
         return reply.status(403).send({
-          message: 'Forbidden: agentlet status is loopback-only',
+          message: 'Forbidden: agentlet status requires owner authorization',
         });
       }
       return getDaemonSupervisor().getStatus();
@@ -41,9 +41,9 @@ const acpAgentletRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Reply: ApiResult<AcpAgentletRestartResponse> }>(
     '/agentlet/restart',
     async (request, reply) => {
-      if (!isLoopbackRequest(request)) {
+      if (!isOwnerRequest(request)) {
         return reply.status(403).send({
-          message: 'Forbidden: agentlet restart is loopback-only',
+          message: 'Forbidden: agentlet restart requires owner authorization',
         });
       }
       return getDaemonSupervisor().restart();

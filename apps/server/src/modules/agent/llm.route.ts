@@ -27,7 +27,7 @@ import {
   verifyOAuthCredentials,
 } from './oauth.js';
 import { getRootErrorMessage } from '../../utils/error-message.js';
-import { isLoopbackRequest } from '../security/peer.js';
+import { isOwnerRequest } from '../security/owner.js';
 
 import type {
   ApiResult,
@@ -59,7 +59,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   app.put<{ Body: LLMConfigUpdate; Reply: ApiResult<LLMConfig> }>(
     '/config',
     async (request, reply) => {
-      if (!isLoopbackRequest(request)) {
+      if (!isOwnerRequest(request)) {
         return reply.status(403).send({
           message: 'Forbidden: LLM settings can only be changed from localhost',
         });
@@ -86,7 +86,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   app.put<{ Body: LLMImageConfigUpdate; Reply: ApiResult<LLMImageConfig> }>(
     '/image-config',
     async (request, reply) => {
-      if (!isLoopbackRequest(request)) {
+      if (!isOwnerRequest(request)) {
         return reply.status(403).send({
           message: 'Forbidden: LLM settings can only be changed from localhost',
         });
@@ -116,7 +116,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
   app.put<{ Body: LLMUtilityConfigUpdate; Reply: ApiResult<LLMUtilityConfig> }>(
     '/utility-config',
     async (request, reply) => {
-      if (!isLoopbackRequest(request)) {
+      if (!isOwnerRequest(request)) {
         return reply.status(403).send({
           message: 'Forbidden: LLM settings can only be changed from localhost',
         });
@@ -165,7 +165,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
     Body: OAuthProviderBody;
     Reply: ApiResult<OAuthDeviceCodeResponse>;
   }>('/oauth/device-code', async (request, reply) => {
-    if (!isLoopbackRequest(request)) {
+    if (!isOwnerRequest(request)) {
       return reply.status(403).send({ message: 'Forbidden' });
     }
 
@@ -191,7 +191,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
     Body: OAuthProviderBody;
     Reply: ApiResult<OAuthPollResponse>;
   }>('/oauth/poll', async (request, reply) => {
-    if (!isLoopbackRequest(request)) {
+    if (!isOwnerRequest(request)) {
       return reply.status(403).send({ message: 'Forbidden' });
     }
 
@@ -234,7 +234,7 @@ const llmRoutes: FastifyPluginAsync = async (app) => {
     Body: OAuthProviderBody;
     Reply: ApiResult<OAuthLogoutResponse>;
   }>('/oauth/logout', async (request, reply) => {
-    if (!isLoopbackRequest(request)) {
+    if (!isOwnerRequest(request)) {
       return reply.status(403).send({ message: 'Forbidden' });
     }
 

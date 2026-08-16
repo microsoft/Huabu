@@ -18,6 +18,7 @@ import { SettingControl } from '@/components/Settings/Common/SettingControl';
 import { SettingLabel } from '@/components/Settings/Common/SettingLabel';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { SettingSection } from '@/components/Settings/Common/SettingSection';
+import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
 import { useLLMStore } from '@/store/llmStore';
 
 import { useDebouncedSave } from '../utils';
@@ -48,6 +49,9 @@ export const ImageProviderSettings: React.FC = () => {
   const llmImageConfig = useLLMStore((s) => s.imageConfig);
   const llmImageSaving = useLLMStore((s) => s.imageSaving);
   const llmUpdateImageConfig = useLLMStore((s) => s.updateImageConfig);
+  const credentialWritesDisabled = useDeploymentReadinessStore(
+    (s) => s.readiness?.credentials.writable === false,
+  );
 
   const [imgEndpoint, setImgEndpoint] = useState('');
   const [imgDeployment, setImgDeployment] = useState('');
@@ -219,6 +223,7 @@ export const ImageProviderSettings: React.FC = () => {
         }
         saved={llmImageConfig?.authenticated ?? false}
         placeholder="Azure key"
+        disabled={credentialWritesDisabled}
         saving={llmImageSaving}
         onSave={(key) => saveImage({ apiKey: key })}
         onRemove={() => saveImage({ apiKey: null })}

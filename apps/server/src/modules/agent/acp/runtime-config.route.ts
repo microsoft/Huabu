@@ -7,7 +7,7 @@ import {
   getExternalAgentRuntimeConfig,
   setExternalAgentRuntimeConfig,
 } from './runtime-config.js';
-import { isLoopbackRequest } from '../../security/peer.js';
+import { isOwnerRequest } from '../../security/owner.js';
 
 import type { ApiResult, ExternalAgentRuntimeConfig } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -16,9 +16,10 @@ const externalAgentRuntimeConfigRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Reply: ApiResult<ExternalAgentRuntimeConfig> }>(
     '/runtime-config',
     async (request, reply) => {
-      if (!isLoopbackRequest(request)) {
+      if (!isOwnerRequest(request)) {
         return reply.status(403).send({
-          message: 'Forbidden: external-agent runtime config is loopback-only',
+          message:
+            'Forbidden: external-agent runtime config requires owner authorization',
         });
       }
       return getExternalAgentRuntimeConfig();
@@ -29,9 +30,10 @@ const externalAgentRuntimeConfigRoutes: FastifyPluginAsync = async (app) => {
     Body: ExternalAgentRuntimeConfig;
     Reply: ApiResult<ExternalAgentRuntimeConfig>;
   }>('/runtime-config', async (request, reply) => {
-    if (!isLoopbackRequest(request)) {
+    if (!isOwnerRequest(request)) {
       return reply.status(403).send({
-        message: 'Forbidden: external-agent runtime config is loopback-only',
+        message:
+          'Forbidden: external-agent runtime config requires owner authorization',
       });
     }
     const parsed = externalAgentRuntimeConfigSchema.safeParse(request.body);

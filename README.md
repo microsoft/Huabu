@@ -65,6 +65,21 @@ pnpm run dev:desktop
 
 This launches the desktop app (recommended), starting the server, the web client, and the shared package in watch mode, then opening Huabu in its own desktop window.
 
+### Standalone web access
+
+`pnpm start:web` serves the compiled web application and API from one Fastify process. It remains loopback-only by default. To make the single-owner application reachable on a network, configure the bind address, every hostname or IP used in the browser, and complete Basic Auth:
+
+```dotenv
+HUABU_BIND_HOST=0.0.0.0
+HUABU_ALLOWED_HOSTS=huabu.example.com
+HUABU_BASIC_AUTH_USER=owner
+HUABU_BASIC_AUTH_PASS=<strong-password>
+```
+
+Then run `pnpm start:web`. Huabu rejects a non-loopback bind when allowed hosts or either Basic Auth value is missing. The authenticated owner can use all features, including Settings, OAuth, and External Agents. `pnpm dev` applies the same requirement to non-loopback browser clients while preserving zero-configuration local development.
+
+Huabu currently serves HTTP. Use a trusted private network or terminate HTTPS with deployment infrastructure such as Caddy, Nginx, Tailscale Serve, or a cloud load balancer. Do not put a Basic Auth deployment on an untrusted network without transport encryption.
+
 ### Local quality checks (optional)
 
 The repository ships opt-in git hooks that give you fast feedback before

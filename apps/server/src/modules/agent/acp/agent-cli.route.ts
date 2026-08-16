@@ -13,13 +13,12 @@
  * longer any pairing / clipboard step \u2014 the wrapper script and on-PATH
  * agentlet check were removed in the daemon-mode refactor.
  *
- * Security: loopback-only. Detection shells out to `which` / `where` and
- * `<binary> --version`; both are local-only operations and must never
- * be triggerable from a remote browser.
+ * Security: owner-only. Detection shells out to `which` / `where` and
+ * `<binary> --version`, so unauthenticated callers must not trigger it.
  */
 
 import { detectAgentClis } from './agent-cli-detect.js';
-import { isLoopbackRequest } from '../../security/peer.js';
+import { isOwnerRequest } from '../../security/owner.js';
 
 import type { AcpAgentCliListResponse, ApiResult } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -31,10 +30,10 @@ export function createAcpAgentCliRoutes(
     app.get<{ Reply: ApiResult<AcpAgentCliListResponse> }>(
       '/agent-cli',
       async (request, reply) => {
-        if (!isLoopbackRequest(request)) {
+        if (!isOwnerRequest(request)) {
           return reply.status(403).send({
             message:
-              'Forbidden: agent CLI detection is loopback-only (host-side probe)',
+              'Forbidden: agent CLI detection requires owner authorization',
           });
         }
         return {

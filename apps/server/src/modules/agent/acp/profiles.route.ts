@@ -9,9 +9,9 @@
  *                                        threads keep running off their
  *                                        own binding-recipe snapshots)
  *
- * Loopback-only on every verb. Profiles contain a fully-resolved
- * command line that the daemon will execute on this machine; allowing
- * remote writes would be a trivial RCE.
+ * Owner-only on every verb. Profiles contain a fully-resolved command line
+ * that the daemon will execute on this machine, so unauthenticated callers
+ * must never read or mutate them.
  *
  * The response shape includes a snapshot of {@link AcpAgentletStatus}
  * on the list endpoint so the UI can render the agentlet health banner
@@ -41,7 +41,7 @@ import {
   deleteProfile as deleteLegacyProfile,
   getProfile as getLegacyProfile,
 } from './profile-store.js';
-import { isLoopbackRequest } from '../../security/peer.js';
+import { isOwnerRequest } from '../../security/owner.js';
 
 import type { AcpCommandProfile, AgentProfile } from '@agenetes/agentlet-host';
 import type {
@@ -52,7 +52,7 @@ import type {
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
 function denyRemote(request: FastifyRequest, reply: FastifyReply): boolean {
-  if (isLoopbackRequest(request)) return false;
+  if (isOwnerRequest(request)) return false;
   reply.status(403).send({
     message:
       'Forbidden: external agent profiles can only be managed from localhost',

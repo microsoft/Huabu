@@ -253,7 +253,10 @@
     "imageQuality": "Image Quality",
     "optional": "Optional",
     "deploymentOptional": "Override only if your Azure deployment name differs from the model above.",
-    "imageApiVersionPlaceholder": "Use 2025-04-01-preview or later."
+    "imageApiVersionPlaceholder": "Use 2025-04-01-preview or later.",
+    "readinessUnavailable": "Deployment readiness could not be loaded. Credential actions may fail.",
+    "credentialStoreReadOnly": "Credential storage is read-only. Set HUABU_SECRET_KEY and restart Huabu to save credentials or use OAuth.",
+    "remoteTransportUnverified": "This remote connection uses operator-managed transport. Use HTTPS or a trusted private network."
   },
   "status": {
     "loading": "Loading",

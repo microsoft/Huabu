@@ -49,8 +49,10 @@ import integrationsRoutes from './modules/integrations/integrations.route.js';
 import interactiveViewRoutes from './modules/interactive-view/interactive-view.route.js';
 import { isPublicRfsSkillBootstrapRequest } from './modules/remote_fs/public-skill.js';
 import rfsRoutes from './modules/remote_fs/rfs.route.js';
+import deploymentRoutes from './modules/security/deployment.route.js';
 import {
   hostGuardPlugin,
+  markBasicAuthenticated,
   originGuardPlugin,
   resolveAllowedHostnames,
 } from './modules/security/index.js';
@@ -182,7 +184,10 @@ if (basicAuthUser && basicAuthPass) {
     }
 
     // Basic Auth (browser / Vite proxy)
-    if (authHeader === expectedBasic) return;
+    if (authHeader === expectedBasic) {
+      markBasicAuthenticated(request);
+      return;
+    }
 
     // Bearer token (agentlet RFS)
     if (authHeader.startsWith('Bearer ')) {
@@ -246,6 +251,7 @@ app.addHook('preHandler', async (request, reply) => {
     url.startsWith('/api') &&
     !publicSkillBootstrap &&
     !url.startsWith('/api/workspace') &&
+    !url.startsWith('/api/deployment') &&
     !url.startsWith('/api/llm') &&
     !url.startsWith('/api/integrations')
   ) {
@@ -265,6 +271,7 @@ app.register(artifactRoute, { prefix: '/api/canvas' });
 
 app.register(llmRoutes, { prefix: '/api/llm' });
 app.register(integrationsRoutes, { prefix: '/api/integrations' });
+app.register(deploymentRoutes, { prefix: '/api/deployment' });
 app.register(interactiveViewRoutes, { prefix: '/api/interactive-views' });
 app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });

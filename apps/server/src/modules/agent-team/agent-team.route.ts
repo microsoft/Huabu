@@ -20,7 +20,7 @@ import {
 } from '@huabu/shared';
 
 import { getDataDir } from '../../data-dir.js';
-import { isLoopbackRequest } from '../security/peer.js';
+import { isOwnerRequest } from '../security/owner.js';
 
 import type {
   AgentProfileParams,
@@ -71,7 +71,7 @@ export function defaultAgentTeamWorkingDir(input: {
 }
 
 function denyRemote(request: FastifyRequest, reply: FastifyReply): boolean {
-  if (isLoopbackRequest(request)) return false;
+  if (isOwnerRequest(request)) return false;
   reply.status(403).send({
     message: 'Forbidden: Agent Team Settings are only available on localhost',
     code: 'loopback_required',
