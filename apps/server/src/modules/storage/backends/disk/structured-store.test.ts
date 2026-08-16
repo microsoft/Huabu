@@ -168,6 +168,56 @@ describe('Disk Space Tasks', () => {
     });
   });
 
+  it('completes a running Run atomically and keeps its message immutable', async () => {
+    const runs = store.space('canvas-task').tasks.runs;
+    await expect(
+      runs.complete('task-a', 'run-a', {
+        completedAt: 5,
+        message: 'PR merged',
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'completed',
+      run: {
+        status: 'completed',
+        completion: { completedAt: 5, message: 'PR merged' },
+      },
+    });
+    await expect(
+      runs.complete('task-a', 'run-a', {
+        completedAt: 6,
+        message: 'PR merged',
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'unchanged',
+      run: { completion: { completedAt: 5, message: 'PR merged' } },
+    });
+    await expect(
+      runs.complete('task-a', 'run-a', {
+        completedAt: 7,
+        message: 'Different result',
+      }),
+    ).resolves.toMatchObject({ outcome: 'completion_conflict' });
+
+    await runs.create({
+      runId: 'run-pending',
+      taskId: 'task-b',
+      canvasIdSnapshot: 'canvas-task',
+      goalSnapshot: 'Goal B',
+      rootProfileIdSnapshot: 'profile-b',
+      status: 'pending',
+      createdAt: 8,
+    });
+    await expect(
+      runs.complete('task-b', 'run-pending', { completedAt: 9 }),
+    ).resolves.toMatchObject({ outcome: 'run_not_running' });
+    await expect(
+      runs.complete('missing-task', 'run-a', { completedAt: 9 }),
+    ).resolves.toEqual({ outcome: 'task_not_found' });
+    await expect(
+      runs.complete('task-a', 'missing-run', { completedAt: 9 }),
+    ).resolves.toEqual({ outcome: 'run_not_found' });
+  });
+
   it('rejects mutations for a missing Space', async () => {
     await expect(
       store.space('missing-canvas').tasks.create({
@@ -302,7 +352,11 @@ describe('DiskStructuredStore instance caching', () => {
     expect(runtime['logs']).toBeUndefined();
     expect(Object.keys(handle.events)).toEqual(['read', 'append']);
     expect(Object.keys(handle.changes)).toEqual(['read', 'append', 'delete']);
-    expect(Object.keys(handle.tasks.runs)).toEqual(['create', 'update']);
+    expect(Object.keys(handle.tasks.runs)).toEqual([
+      'create',
+      'update',
+      'complete',
+    ]);
 
     for (const part of [handle.events, handle.changes, handle.tasks.runs]) {
       expect(Object.isFrozen(part)).toBe(true);

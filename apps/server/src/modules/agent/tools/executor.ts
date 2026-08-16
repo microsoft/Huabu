@@ -56,8 +56,10 @@ import {
   type SnapshotNodesArgs,
 } from './handlers/snapshot-node.js';
 import {
+  handleCompleteTaskRun,
   handleCreateTask,
   handleStartTaskRun,
+  type CompleteTaskRunArgs,
   type CreateTaskArgs,
   type StartTaskRunArgs,
 } from './handlers/task.js';
@@ -185,6 +187,11 @@ export async function executeTool(
     case 'start_task_run':
       return handleStartTaskRun(
         withCanvasId<StartTaskRunArgs>(args, 'start_task_run'),
+      );
+
+    case 'complete_task_run':
+      return handleCompleteTaskRun(
+        withCanvasId<CompleteTaskRunArgs>(args, 'complete_task_run'),
       );
 
     case 'fs_write':

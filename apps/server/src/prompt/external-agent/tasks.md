@@ -44,6 +44,22 @@ curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
 
 The response contains the canonical Run after its visible root Agent Node is created and its first turn begins.
 
-Phase 1 Run status is only `pending` or `running`. A failed launch may intentionally retain an inspectable `pending` Run and return its Run, root node, or root thread IDs in the error. Do not blindly retry: inspect the returned identities and visible Space state first.
+A failed launch may intentionally retain an inspectable `pending` Run and return its Run, root node, or root thread IDs in the error. Do not blindly retry: inspect the returned identities and visible Space state first.
+
+## 4. Complete a Run
+
+Completion is an explicit workflow decision; an Agent turn ending does not complete its Run. Only a `running` Run can become `completed`.
+
+```bash
+RUN_ID="run-..."
+curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  --data-binary '{
+    "message": "PR #100 created: https://github.com/microsoft/Huabu/pull/100"
+  }' "$HUABU_RFS_URL/task/$TASK_ID/run/$RUN_ID/complete"
+```
+
+`message` is optional caller-owned context, trimmed by the server, and stored as untrusted text without interpreting issue, pull-request, or URL semantics. The response is `{ "run": { ... } }` with `status: "completed"` and immutable `completion.completedAt` plus the optional `completion.message`.
+
+Repeating the request with the same normalized message is idempotent and preserves the original completion timestamp. Completing a `pending` Run or retrying a completed Run with a different message returns `409 Conflict`.
 
 For delegation performed by the root Agent, load `GET skill/agents`.

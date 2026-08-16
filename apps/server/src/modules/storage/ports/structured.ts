@@ -47,6 +47,7 @@ import type {
   CanvasSummary,
   RecentAction,
   TaskRecord,
+  TaskRunCompletion,
   TaskRunRecord,
   TaskStoreSnapshot,
 } from '@huabu/shared';
@@ -347,8 +348,18 @@ export interface SpaceChanges {
 // ─── Tasks ──────────────────────────────────────────────────────────────────
 
 export type TaskRunUpdate = Partial<
-  Pick<TaskRunRecord, 'rootNodeId' | 'rootThreadId' | 'status' | 'startedAt'>
->;
+  Pick<TaskRunRecord, 'rootNodeId' | 'rootThreadId' | 'startedAt'>
+> & {
+  status?: Exclude<TaskRunRecord['status'], 'completed'>;
+};
+
+export type TaskRunCompletionResult =
+  | { outcome: 'completed' | 'unchanged'; run: TaskRunRecord }
+  | { outcome: 'task_not_found' | 'run_not_found' }
+  | {
+      outcome: 'run_not_running' | 'completion_conflict';
+      run: TaskRunRecord;
+    };
 
 /**
  * The canonical Task ledger for one Space.
@@ -371,6 +382,15 @@ export interface SpaceTaskRuns {
   /** Rejects a duplicate Run id, or a Run referencing an absent Task. */
   create(run: TaskRunRecord): Promise<void>;
   update(runId: string, update: TaskRunUpdate): Promise<TaskRunRecord>;
+  /**
+   * Atomically completes one running Run. Repeating the same completion
+   * message is idempotent; a different message conflicts.
+   */
+  complete(
+    taskId: string,
+    runId: string,
+    completion: TaskRunCompletion,
+  ): Promise<TaskRunCompletionResult>;
 }
 
 // ─── Node records ───────────────────────────────────────────────────────────

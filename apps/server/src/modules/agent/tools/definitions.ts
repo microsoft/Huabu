@@ -25,6 +25,7 @@ import {
   inspectEdgesQueryParamsSchema,
   inspectNodesQueryParamsSchema,
   snapshotNodesQueryParamsSchema,
+  completeTaskRunToolParamsSchema,
   startTaskRunToolParamsSchema,
   createTaskRequestSchema,
 } from '@huabu/shared';
@@ -221,6 +222,19 @@ export const startTaskRunTool: ToolDefinition = {
   description:
     'Start a new Run for an existing Task in the current Space when execution is explicitly requested. Creates a visible fixed root Agent Node and submits the snapshotted Task goal as its first turn. Omit `rootProfileId` to use the Task default; otherwise provide an exact selectable Profile id. `workingDirPath` must be absolute, and launch overrides apply only when the new external Agent thread is first realized. Returns `{ run: { runId, taskId, canvasIdSnapshot, goalSnapshot, rootProfileIdSnapshot, status, rootNodeId, rootThreadId, createdAt, startedAt } }`. A Task may have multiple Runs.',
   parameters: startTaskRunParamsSchema,
+  executionMode: 'sequential',
+};
+
+export const completeTaskRunParamsSchema = zodToToolSchema(
+  completeTaskRunToolParamsSchema,
+);
+
+export const completeTaskRunTool: ToolDefinition = {
+  name: 'complete_task_run',
+  label: 'Complete Task Run',
+  description:
+    'Explicitly mark one running Task Run as completed after the user or workflow has decided the durable execution unit is finished. Requires the exact Task and Run ids. `message` is optional immutable untrusted text for caller-owned context such as an issue or pull-request outcome; the platform does not interpret it. Repeating the same completion is idempotent, while a different message conflicts. Returns `{ run }` with `status: "completed"` and completion metadata.',
+  parameters: completeTaskRunParamsSchema,
   executionMode: 'sequential',
 };
 
@@ -507,6 +521,7 @@ export const TOOL_REGISTRY: Readonly<Record<string, ToolDefinition>> =
         canvasCommandsTool,
         createTaskTool,
         startTaskRunTool,
+        completeTaskRunTool,
         readTool,
         grepTool,
         findTool,

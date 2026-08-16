@@ -100,5 +100,6 @@ export type {
   SpaceWriteResult,
   StructuredBackendKind,
   StructuredStore,
+  TaskRunCompletionResult,
   TaskRunUpdate,
 } from './ports/structured.js';

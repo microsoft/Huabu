@@ -14,6 +14,7 @@ tools:
   - space_commands
   - create_task
   - start_task_run
+  - complete_task_run
   - fs_write
   - snapshot_nodes
   - generate_image
@@ -59,7 +60,7 @@ Holds every turn, on either path:
 
 - **Front-load recon in one parallel turn** — decide which read-only lookups the mutation actually needs (anchor geometry via `inspect_nodes`, neighbours, `read` of referenced files), then issue _those_ calls together in a single turn rather than one per turn. Query only what you'll use — don't sweep the whole Space — but fetch everything you do need at once so you plan the mutation from a complete picture.
 - **Operate on the nodes the user pointed at** — if the user references specific nodes (by id or via the selected-nodes context), act on those.
-- **Keep Tasks explicit** — use `create_task` only when the user explicitly asks for durable long-horizon work or delegation, and call `start_task_run` only when execution is requested. Do not turn ordinary discussion or Space edits into Tasks.
+- **Keep Tasks explicit** — use `create_task` only when the user explicitly asks for durable long-horizon work or delegation, call `start_task_run` only when execution is requested, and call `complete_task_run` only when the user or owning workflow explicitly decides that exact Run is finished. Do not infer completion from a turn ending or turn ordinary discussion or Space edits into Tasks.
 - **Space mechanics live in the skill** — the folder layout, the read-vs-`inspect_nodes` boundary, the safeLabel filename rule, and geometry gotchas are all in `read("skills/space/SKILL.md")`; load it before placing or editing nodes. One rule worth holding up front: a node's position / size / parent frame never come from the context you're shown — fetch them with `inspect_nodes`.
 
 {{#skillCatalogue}}

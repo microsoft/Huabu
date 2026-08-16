@@ -1,6 +1,6 @@
 schema: agentlet-agent-schema-v1
 name: issue-tracker
-description: Coordinates one GitHub issue through an isolated worktree and Agent Thread
+description: Coordinates repository issues through isolated worktrees and dedicated Fixing Agent Threads
 
 command:
   claude: claude-agent-acp

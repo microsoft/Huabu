@@ -63,7 +63,11 @@ function createHarness(options?: {
   const repository = {
     read: vi.fn(async () => ({ version: 1 as const, tasks: [TASK], runs })),
     create: vi.fn(),
-    runs: { create: createRun, update: updateRun },
+    runs: {
+      create: createRun,
+      update: updateRun,
+      complete: vi.fn(),
+    },
   } as SpaceTasks;
   const dispose = vi.fn().mockResolvedValue(undefined);
   const invocation: AgentThreadInvocation = {

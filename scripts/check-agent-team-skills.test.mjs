@@ -2,14 +2,22 @@
 // Licensed under the MIT license.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { validateSkillPackage } from './check-agent-team-skills.mjs';
 
 const temporaryDirectories = [];
+const repoRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
 function createPackage(skillContent) {
   const root = mkdtempSync(join(tmpdir(), 'agent-team-skill-'));
@@ -106,4 +114,63 @@ test('rejects non-portable and escaping references', () => {
   const errors = validateSkillPackage(packageDir).join('\n');
   assert.match(errors, /non-portable/);
   assert.match(errors, /escapes the skill folder/);
+});
+
+test('keeps Issue Tracker Coordinator and Fixing Agent roles isolated', () => {
+  const packageDir = join(repoRoot, 'agent-teams', 'issue-tracker');
+  const coordinator = readFileSync(
+    join(packageDir, 'system_prompt.md'),
+    'utf8',
+  );
+  const fixingAgent = readFileSync(
+    join(packageDir, 'references', 'fixing-agent-preamble.md'),
+    'utf8',
+  );
+  const skill = readFileSync(join(packageDir, 'SKILL.md'), 'utf8');
+
+  assert.doesNotMatch(coordinator, /exactly one issue per conversation/i);
+  assert.match(coordinator, /never act as a Fixing Agent/);
+  assert.match(coordinator, /one or more GitHub issues/);
+  assert.match(
+    coordinator,
+    /never mix their identities, environments, Agent threads, decisions, or authorization/,
+  );
+  assert.match(
+    coordinator,
+    /Only when the user explicitly asks to combine multiple issues/,
+  );
+  assert.match(coordinator, /Do not combine them before that confirmation/);
+  assert.match(coordinator, /Give each execution unit one dedicated Frame/);
+  assert.match(coordinator, /independently handled issues never share a Frame/);
+  assert.match(
+    coordinator,
+    /The Frame is a presentation and navigation boundary, not an authorization or runtime identity/,
+  );
+  assert.match(
+    coordinator,
+    /concise issue-content title that summarizes the problem itself/,
+  );
+  assert.match(
+    coordinator,
+    /exclude workflow terms, Agent roles, and lifecycle states/,
+  );
+  assert.match(
+    coordinator,
+    /The body starts with `# <issue-content title>`, followed by a blank line and the complete investigation goal/,
+  );
+  assert.match(
+    coordinator,
+    /Submit only the Markdown body and use `expectRev`/,
+  );
+  assert.doesNotMatch(coordinator, /concise execution-unit title/);
+  assert.match(fixingAgent, /The scope is normally one repository issue/);
+  assert.match(
+    fixingAgent,
+    /do not decide to split or combine issues yourself/i,
+  );
+  assert.match(skill, /one or more GitHub issues/);
+  assert.match(
+    skill,
+    /without explicit user approval and a reasonableness check/,
+  );
 });
