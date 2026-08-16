@@ -513,6 +513,10 @@
     "imageFileMissing": "图片文件缺失",
     "nodeImage": "节点图片",
     "noImageSource": "无图片来源",
+    "copyImage": "复制图片",
+    "imageCopied": "图片已复制",
+    "copyImageFailed": "无法复制此图片，请改用下载。",
+    "downloadImage": "下载图片",
     "videoFileMissing": "视频文件缺失",
     "noVideoSource": "无视频来源"
   },

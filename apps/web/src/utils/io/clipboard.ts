@@ -203,25 +203,73 @@ async function fetchImageAsPng(src: string): Promise<Blob> {
   const source = await response.blob();
   if (source.type === 'image/png') return source;
 
-  const bitmap = await createImageBitmap(source);
-  try {
+  const encodePng = (
+    image: CanvasImageSource,
+    width: number,
+    height: number,
+  ): Promise<Blob> => {
+    if (width <= 0 || height <= 0) {
+      throw new Error('Clipboard image has no intrinsic dimensions');
+    }
     const canvas = document.createElement('canvas');
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
+    canvas.width = width;
+    canvas.height = height;
 
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Canvas 2D context is unavailable');
-    context.drawImage(bitmap, 0, 0);
+    context.drawImage(image, 0, 0);
 
-    return await new Promise<Blob>((resolve, reject) => {
+    return new Promise<Blob>((resolve, reject) => {
       canvas.toBlob((blob) => {
         if (blob) resolve(blob);
         else reject(new Error('Failed to encode clipboard image'));
       }, 'image/png');
     });
-  } finally {
-    bitmap.close();
+  };
+
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(source);
+      try {
+        return await encodePng(bitmap, bitmap.width, bitmap.height);
+      } finally {
+        bitmap.close();
+      }
+    } catch {
+      // Some browsers cannot decode SVG blobs through createImageBitmap.
+    }
   }
+
+  const objectUrl = URL.createObjectURL(source);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () =>
+        reject(new Error('Failed to decode clipboard image'));
+      element.src = objectUrl;
+    });
+    return await encodePng(image, image.naturalWidth, image.naturalHeight);
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+/**
+ * Copy only an image's pixels to the system clipboard.
+ *
+ * Non-PNG sources, including SVG when the browser can decode it, are
+ * rasterized to PNG because image/png is the interoperable Clipboard API
+ * representation. The caller owns user-visible error and download fallback
+ * handling.
+ */
+export async function copyImageToClipboard(src: string): Promise<void> {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+    throw new Error('Image clipboard writes are unavailable');
+  }
+
+  const png = fetchImageAsPng(src);
+  await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
 }
 
 /** Escape text for interpolation into HTML text content or an attribute. */

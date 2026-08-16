@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   copyCanvasClipboard,
+  copyImageToClipboard,
   parseHuabuClipboard,
   parseHuabuClipboardHtml,
   parseHuabuImageClipboard,
@@ -124,6 +125,92 @@ describe('Huabu clipboard parsing', () => {
     // The payload rides along in text/html and survives a round trip.
     const html = await new Response(await item.values['text/html']).text();
     expect(parseHuabuClipboardHtml(html)).toBe(payload);
+  });
+
+  it('copies image pixels without Huabu metadata for the explicit image action', async () => {
+    const imageBlob = new Blob(['png'], { type: 'image/png' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(imageBlob, { status: 200 })),
+    );
+    const write = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('ClipboardItem', TestClipboardItem);
+    vi.spyOn(navigator, 'clipboard', 'get').mockReturnValue({
+      write,
+    } as unknown as Clipboard);
+
+    await copyImageToClipboard('/image.png');
+
+    const item = write.mock.calls[0][0][0] as TestClipboardItem;
+    expect(Object.keys(item.values)).toEqual(['image/png']);
+    const copied = await item.values['image/png'];
+    expect(copied.type).toBe('image/png');
+    expect(await copied.text()).toBe('png');
+  });
+
+  it('rejects explicit image copy when image clipboard writes are unavailable', async () => {
+    vi.stubGlobal('ClipboardItem', undefined);
+    vi.spyOn(navigator, 'clipboard', 'get').mockReturnValue({
+      writeText: vi.fn(),
+    } as unknown as Clipboard);
+
+    await expect(copyImageToClipboard('/image.svg')).rejects.toThrow(
+      'Image clipboard writes are unavailable',
+    );
+  });
+
+  it('falls back to an image element when createImageBitmap cannot decode SVG', async () => {
+    const svg = new Blob(
+      ['<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"/>'],
+      { type: 'image/svg+xml' },
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(svg, { status: 200 })),
+    );
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn().mockRejectedValue(new Error('unsupported')),
+    );
+    vi.stubGlobal(
+      'Image',
+      class {
+        naturalWidth = 20;
+        naturalHeight = 10;
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+
+        set src(_value: string) {
+          queueMicrotask(() => this.onload?.());
+        }
+      },
+    );
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-svg');
+    const revokeObjectUrl = vi
+      .spyOn(URL, 'revokeObjectURL')
+      .mockImplementation(() => {});
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage,
+    } as unknown as CanvasRenderingContext2D);
+    const png = new Blob(['converted'], { type: 'image/png' });
+    vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(
+      (callback) => callback(png),
+    );
+    const write = vi
+      .fn()
+      .mockImplementation(async (items: TestClipboardItem[]) => {
+        await Promise.all(Object.values(items[0].values));
+      });
+    vi.stubGlobal('ClipboardItem', TestClipboardItem);
+    vi.spyOn(navigator, 'clipboard', 'get').mockReturnValue({
+      write,
+    } as unknown as Clipboard);
+
+    await copyImageToClipboard('/image.svg');
+
+    expect(drawImage).toHaveBeenCalledOnce();
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:test-svg');
   });
 
   it('copies non-image nodes as readable text plus the html payload', async () => {

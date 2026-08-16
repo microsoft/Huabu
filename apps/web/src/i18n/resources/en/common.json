@@ -513,6 +513,10 @@
     "imageFileMissing": "Image file missing",
     "nodeImage": "Node image",
     "noImageSource": "No Image Source",
+    "copyImage": "Copy image",
+    "imageCopied": "Image copied",
+    "copyImageFailed": "This image could not be copied. Download it instead.",
+    "downloadImage": "Download image",
     "videoFileMissing": "Video file missing",
     "noVideoSource": "No Video Source"
   },

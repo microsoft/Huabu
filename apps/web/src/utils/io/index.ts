@@ -4,6 +4,7 @@
 export {
   copyToClipboard,
   copyCanvasClipboard,
+  copyImageToClipboard,
   parseHuabuClipboard,
   parseHuabuImageClipboard,
   type CanvasClipboardCopy,

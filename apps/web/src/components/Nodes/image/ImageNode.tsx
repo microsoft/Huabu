@@ -1,14 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Fullscreen, Image as ImageIcon } from 'lucide-react';
-import { memo, useEffect, useState } from 'react';
+import { Copy, Download, Fullscreen, Image as ImageIcon } from 'lucide-react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { toast } from '@/components/Common/Toast';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
+import { copyImageToClipboard } from '@/utils/io/clipboard';
 
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
@@ -36,16 +38,67 @@ export const ImageNode = memo(
       setImgLoaded(false);
     }, [src]);
 
+    const downloadImage = useCallback(() => {
+      if (!src) return;
+      const link = document.createElement('a');
+      link.href = resolveArtifactUrl(src, canvasId);
+      link.download = data.label || src.split('/').pop() || 'image';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }, [canvasId, data.label, src]);
+
+    const handleCopyImage = useCallback(
+      (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!src) return;
+        void copyImageToClipboard(resolveArtifactUrl(src, canvasId))
+          .then(() => {
+            toast(t('node.imageCopied'), { tone: 'success' });
+          })
+          .catch((error: unknown) => {
+            console.error('[clipboard] explicit image copy failed', error);
+            toast(t('node.copyImageFailed'), {
+              tone: 'danger',
+              action: {
+                label: t('node.downloadImage'),
+                onClick: downloadImage,
+              },
+            });
+          });
+      },
+      [canvasId, downloadImage, src, t],
+    );
+
     const ImageActions = (
-      <FloatingToolbar.ActionButton
-        title={t('node.openLargeView')}
-        onClick={(e) => {
-          e.stopPropagation();
-          openPreviewNode(id);
-        }}
-      >
-        <Fullscreen />
-      </FloatingToolbar.ActionButton>
+      <>
+        <FloatingToolbar.ActionButton
+          title={t('node.openLargeView')}
+          onClick={(e) => {
+            e.stopPropagation();
+            openPreviewNode(id);
+          }}
+        >
+          <Fullscreen />
+        </FloatingToolbar.ActionButton>
+        <FloatingToolbar.ActionButton
+          title={t('node.copyImage')}
+          onClick={handleCopyImage}
+          disabled={!src}
+        >
+          <Copy />
+        </FloatingToolbar.ActionButton>
+        <FloatingToolbar.ActionButton
+          title={t('node.downloadImage')}
+          disabled={!src}
+          onClick={(e) => {
+            e.stopPropagation();
+            downloadImage();
+          }}
+        >
+          <Download />
+        </FloatingToolbar.ActionButton>
+      </>
     );
 
     return (
