@@ -28,6 +28,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
+import { forgetMessageListScrollPosition } from '@/components/Messages/messageListScroll';
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import {
@@ -46,6 +47,18 @@ import type { Node } from '@xyflow/react';
 const RATIO_STEP = 0.05;
 
 const selectWorkspace = (s: PreviewWorkspaceState) => s.workspace;
+
+export function subscribeToTabDragDeactivation(clear: () => void): () => void {
+  const clearOnHidden = () => {
+    if (document.visibilityState === 'hidden') clear();
+  };
+  window.addEventListener('blur', clear);
+  document.addEventListener('visibilitychange', clearOnHidden);
+  return () => {
+    window.removeEventListener('blur', clear);
+    document.removeEventListener('visibilitychange', clearOnHidden);
+  };
+}
 
 export function PreviewTabDragOverlayPortal({
   tab,
@@ -148,10 +161,13 @@ export function PreviewWorkspace({
   );
 
   const closeWorkspaceTab = (tabId: string) => {
-    const isFinalTab =
-      Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs).length ===
-      1;
+    const currentWorkspace = usePreviewWorkspaceStore.getState().workspace;
+    const isFinalTab = Object.keys(currentWorkspace.tabs).length === 1;
+    const target = currentWorkspace.tabs[tabId]?.target;
     settleTab(tabId);
+    if (target?.kind === 'chat') {
+      forgetMessageListScrollPosition(`${target.canvasId}:${target.threadId}`);
+    }
     closeTab(tabId);
     if (isFinalTab) onCollapse?.();
   };
@@ -201,6 +217,11 @@ export function PreviewWorkspace({
     setActiveDragTabId(null);
     setDragOverId(null);
   }, []);
+
+  useEffect(() => {
+    if (!activeDragTabId) return;
+    return subscribeToTabDragDeactivation(clearTabDrag);
+  }, [activeDragTabId, clearTabDrag]);
 
   const onTabDragStart = useCallback(({ active }: DragStartEvent) => {
     setActiveDragTabId(String(active.id));

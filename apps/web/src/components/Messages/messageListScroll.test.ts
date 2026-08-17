@@ -3,7 +3,12 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { positionMessageListOnOpen } from './messageListScroll';
+import {
+  forgetMessageListScrollPosition,
+  positionMessageListOnOpen,
+  rememberMessageListScrollPosition,
+  restoreMessageListScrollPosition,
+} from './messageListScroll';
 
 function rect(top: number, height: number): DOMRect {
   return {
@@ -42,5 +47,52 @@ describe('positionMessageListOnOpen', () => {
 
     expect(positionMessageListOnOpen(container, 'bottom')).toBe('bottom');
     expect(container.scrollTop).toBe(900);
+  });
+});
+
+describe('per-view scroll positions', () => {
+  it('restores the exact position saved for a thread', () => {
+    const container = document.createElement('div');
+    rememberMessageListScrollPosition('thread-1', 240);
+
+    expect(restoreMessageListScrollPosition(container, 'thread-1')).toBe(true);
+    expect(container.scrollTop).toBe(240);
+  });
+
+  it('keeps positions isolated between threads', () => {
+    const container = document.createElement('div');
+    rememberMessageListScrollPosition('isolated-thread-2', 120);
+
+    expect(
+      restoreMessageListScrollPosition(container, 'isolated-thread-1'),
+    ).toBe(false);
+    expect(container.scrollTop).toBe(0);
+  });
+
+  it('forgets the position when a conversation view is closed', () => {
+    const container = document.createElement('div');
+    rememberMessageListScrollPosition('closed-thread', 360);
+
+    forgetMessageListScrollPosition('closed-thread');
+
+    expect(restoreMessageListScrollPosition(container, 'closed-thread')).toBe(
+      false,
+    );
+  });
+
+  it('retains positions when more than 50 conversations are visited', () => {
+    for (let index = 0; index <= 50; index += 1) {
+      rememberMessageListScrollPosition(`retained-thread-${index}`, index);
+    }
+    const container = document.createElement('div');
+
+    expect(
+      restoreMessageListScrollPosition(container, 'retained-thread-0'),
+    ).toBe(true);
+    expect(container.scrollTop).toBe(0);
+    expect(
+      restoreMessageListScrollPosition(container, 'retained-thread-50'),
+    ).toBe(true);
+    expect(container.scrollTop).toBe(50);
   });
 });

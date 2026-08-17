@@ -119,6 +119,46 @@ describe('defensive parsing', () => {
     expect(restored?.groups[0].activeTabId).toBe('good');
   });
 
+  it('drops chat targets from another Canvas and empty thread ids', () => {
+    testStorage.storage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        workspace: {
+          tabs: {
+            good: {
+              id: 'good',
+              target: { kind: 'chat', canvasId: CANVAS, threadId: 'thread-1' },
+            },
+            wrongCanvas: {
+              id: 'wrongCanvas',
+              target: {
+                kind: 'chat',
+                canvasId: 'canvas-2',
+                threadId: 'thread-2',
+              },
+            },
+            empty: {
+              id: 'empty',
+              target: { kind: 'chat', canvasId: CANVAS, threadId: '' },
+            },
+          },
+          groups: [{ id: 'g1', tabIds: ['good', 'wrongCanvas', 'empty'] }],
+          activeGroupId: 'g1',
+        },
+      }),
+    );
+
+    const restored = readWorkspace(CANVAS);
+    expect(Object.keys(restored?.tabs ?? {})).toEqual(['good']);
+    expect(restored?.groups[0].tabIds).toEqual(['good']);
+    expect(restored?.tabs.good.target).toEqual({
+      kind: 'chat',
+      canvasId: CANVAS,
+      threadId: 'thread-1',
+    });
+  });
+
   it('repairs a dangling active tab and a bad split ratio', () => {
     testStorage.storage.setItem(
       KEY,

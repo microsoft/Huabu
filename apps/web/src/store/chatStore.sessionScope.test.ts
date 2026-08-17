@@ -35,6 +35,8 @@ function resetStore() {
   useChatStore.setState({
     threadsById: {},
     lastActionByThread: {},
+    bindingByThread: {},
+    settingsByThread: {},
     threadMap: {},
     bindingMap: {},
     selectionAttachment: null,
@@ -137,6 +139,34 @@ describe('chatStore thread creation', () => {
 });
 
 describe('chatStore persistence and eviction', () => {
+  it('restores independent thread binding and settings after reload', () => {
+    useChatStore.setState({
+      threadsById: {},
+      bindingByThread: { 'thread-secondary': EXTERNAL },
+      settingsByThread: {
+        'thread-secondary': {
+          modelId: 'model-1',
+          reasoningEffort: 'high',
+        },
+      },
+    });
+
+    const state = useChatStore.getState();
+    expect(selectThreadBinding(state, 'thread-secondary')).toEqual(EXTERNAL);
+    expect(selectThreadSettings(state, 'thread-secondary')).toEqual({
+      modelId: 'model-1',
+      reasoningEffort: 'high',
+    });
+
+    const partialize = useChatStore.persist.getOptions().partialize;
+    const persisted = partialize?.(state) as Partial<typeof state>;
+    expect(persisted.bindingByThread?.['thread-secondary']).toEqual(EXTERNAL);
+    expect(persisted.settingsByThread?.['thread-secondary']).toEqual({
+      modelId: 'model-1',
+      reasoningEffort: 'high',
+    });
+  });
+
   it('migrates the legacy global compose mode', async () => {
     const migrate = useChatStore.persist.getOptions().migrate;
     const migrated = (await migrate?.(
@@ -145,6 +175,21 @@ describe('chatStore persistence and eviction', () => {
     )) as Partial<ReturnType<typeof useChatStore.getState>>;
     expect(migrated.lastActionByThread).toEqual({
       'thread-legacy': 'operate',
+    });
+  });
+
+  it('migrates a v4 Canvas binding to its canonical thread', async () => {
+    const migrate = useChatStore.persist.getOptions().migrate;
+    const migrated = (await migrate?.(
+      {
+        threadMap: { 'canvas-1': 'thread-canonical' },
+        bindingMap: { 'canvas-1': EXTERNAL },
+      },
+      4,
+    )) as Partial<ReturnType<typeof useChatStore.getState>>;
+
+    expect(migrated.bindingByThread).toEqual({
+      'thread-canonical': EXTERNAL,
     });
   });
 
