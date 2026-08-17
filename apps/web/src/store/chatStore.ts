@@ -70,7 +70,7 @@ export interface ChatState {
    * without colliding when the user navigates away mid-stream.
    */
   threadsById: Record<string, ChatThreadState>;
-  /** Bounded persistence projection for thread-local compose modes. */
+  /** Persisted compose mode for every independent thread. */
   lastActionByThread: Record<string, AgentMode>;
   /** Persisted binding identity for independent Preview Workspace threads. */
   bindingByThread: Record<string, AgentBinding>;
@@ -199,8 +199,6 @@ export interface ChatState {
  * refetch on re-visit is cheap.
  */
 const MAX_CACHED_THREADS = 10;
-const MAX_PERSISTED_THREAD_ACTIONS = 50;
-const MAX_PERSISTED_THREAD_METADATA = 50;
 
 /** Stable empty array so selectors that miss the cache don't trigger renders. */
 const EMPTY_MESSAGES: ChatMessage[] = [];
@@ -234,14 +232,7 @@ function rememberLastAction(
   action: AgentMode,
 ): Record<string, AgentMode> {
   const entries = { ...state.lastActionByThread };
-  delete entries[threadId];
   entries[threadId] = action;
-  const overflow = Object.keys(entries).length - MAX_PERSISTED_THREAD_ACTIONS;
-  if (overflow > 0) {
-    for (const key of Object.keys(entries).slice(0, overflow)) {
-      delete entries[key];
-    }
-  }
   return entries;
 }
 
@@ -250,14 +241,7 @@ function rememberThreadValue<T>(
   threadId: string,
   value: T,
 ): Record<string, T> {
-  const next = { ...entries };
-  delete next[threadId];
-  next[threadId] = value;
-  const overflow = Object.keys(next).length - MAX_PERSISTED_THREAD_METADATA;
-  if (overflow > 0) {
-    for (const key of Object.keys(next).slice(0, overflow)) delete next[key];
-  }
-  return next;
+  return { ...entries, [threadId]: value };
 }
 
 function normalizeThreadSettings(value: unknown): ChatThreadState['settings'] {

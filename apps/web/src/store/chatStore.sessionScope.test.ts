@@ -167,6 +167,31 @@ describe('chatStore persistence and eviction', () => {
     });
   });
 
+  it('retains metadata for more than 50 independent threads', () => {
+    const store = useChatStore.getState();
+    for (let index = 0; index <= 50; index += 1) {
+      const threadId = `thread-${index}`;
+      store.setAgentBinding(threadId, EXTERNAL);
+      store.setThreadSettings(threadId, {
+        modelId: `model-${index}`,
+        reasoningEffort: 'high',
+      });
+      store.setThreadLastAction(threadId, 'operate');
+    }
+
+    useChatStore.setState({ threadsById: {} });
+    const state = useChatStore.getState();
+    expect(selectThreadBinding(state, 'thread-0')).toEqual(EXTERNAL);
+    expect(selectThreadSettings(state, 'thread-0')).toEqual({
+      modelId: 'model-0',
+      reasoningEffort: 'high',
+    });
+    expect(selectThreadLastAction(state, 'thread-0')).toBe('operate');
+    expect(Object.keys(state.bindingByThread)).toHaveLength(51);
+    expect(Object.keys(state.settingsByThread)).toHaveLength(51);
+    expect(Object.keys(state.lastActionByThread)).toHaveLength(51);
+  });
+
   it('migrates the legacy global compose mode', async () => {
     const migrate = useChatStore.persist.getOptions().migrate;
     const migrated = (await migrate?.(
