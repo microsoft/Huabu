@@ -139,6 +139,10 @@ export function useCanvasShortcuts(
     const onPointerUp = (e: PointerEvent) => {
       if (temporaryPanPointerRef.current !== e.pointerId) return;
       temporaryPanPointerRef.current = null;
+      if (e.pointerType !== 'mouse') {
+        if (!spacePressedRef.current) restoreTemporaryPan();
+        return;
+      }
       temporaryPanMouseUpPendingRef.current = true;
     };
     const onMouseUp = () => {
