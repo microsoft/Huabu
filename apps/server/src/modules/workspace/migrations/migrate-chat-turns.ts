@@ -24,10 +24,9 @@
  *
  * ### Idempotent, launch-only
  *
- * Skips any thread whose `chat_v2` log already exists or whose oldest
- * same-thread `.json` Context remains unresolved or unreadable, and renames
- * each consumed source log to `.bak` on success, so a re-run never
- * double-writes. One bad thread never aborts the batch. The frozen
+ * Skips any thread whose `chat_v2` log already exists, and renames each
+ * consumed source log to `.bak` on success, so a re-run never double-writes.
+ * One bad thread never aborts the batch. The frozen
  * {@link LegacyChatTurnRecord} descriptor (never the live chat-store types)
  * is the only dependency on the old shape.
  */
@@ -39,27 +38,12 @@ import { FileTurnStore } from '@agenetes/agenetes';
 
 import { isLegacyChatTurnRecord } from './legacy/chat-turn-record.js';
 import { legacyChatTurnToAgentTurn } from './legacy/fold-legacy-turn.js';
-import { isLegacyChatContext } from './migrate-chat-threads.js';
-import { readJsonLines, readJsonStrict } from '../../../utils/fs.js';
+import { readJsonLines } from '../../../utils/fs.js';
 
 import type { PersistedTurn } from '@agenetes/agenetes';
 import type { Namespace } from '@agenetes/protocol';
 
 const LEGACY_SUFFIX = '.turns.jsonl';
-
-/**
- * Whether hop 2 must preserve a turn log for hop 1 to reconcile later.
- * Malformed or unreadable JSON is treated as unresolved durable state; a
- * parsed value only blocks when it is a Context shape hop 1 can consume.
- */
-function hasUnresolvedLegacyContext(contextPath: string): boolean {
-  try {
-    const candidate = readJsonStrict<unknown>(contextPath);
-    return candidate !== null && isLegacyChatContext(candidate);
-  } catch {
-    return true;
-  }
-}
 
 /**
  * Migrate one legacy `<threadId>.turns.jsonl` into the thread's `chat_v2`
@@ -138,12 +122,10 @@ export function migrateLegacyChatTurns(workspace: string): void {
       // sidecar, already-retired `.bak` files, and anything else.
       if (!file.endsWith(LEGACY_SUFFIX)) continue;
       const threadId = file.slice(0, -LEGACY_SUFFIX.length);
-      // Hop 1 leaves the oldest Context in place when coexistence cannot be
-      // reconciled safely. Do not consume its paired turn log: preserving both
-      // formats lets a later workspace activation retry the pair.
-      if (hasUnresolvedLegacyContext(path.join(chatDir, `${threadId}.json`))) {
-        continue;
-      }
+      // No same-thread `.json` check: hop 1 owns the coexistence decision and
+      // always terminates it, so a Context still sitting here is one hop 1
+      // could not read. Folding this log anyway is what keeps the thread's
+      // history reachable; the unreadable Context stays on disk untouched.
       try {
         migrateLegacyTurnFile(
           turnStore,

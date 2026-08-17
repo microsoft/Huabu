@@ -27,6 +27,7 @@ import {
   readJsonStrict,
   readJsonLinesStrict,
 } from '../../../utils/fs.js';
+import { getLogger } from '../../../utils/logger.js';
 import { buildAgentNodePreview } from '../../agent/node-ref.js';
 
 import type { LegacyChatTurnRecord as ChatTurnRecord } from './legacy/chat-turn-record.js';
@@ -36,25 +37,22 @@ import type { CanvasNodeType } from '@huabu/shared';
 
 type PiMessage = Context['messages'][number];
 
-/** Whether a parsed value has the legacy Context shape this migration uses. */
-export function isLegacyChatContext(value: unknown): value is Context {
+const log = getLogger('migrate-chat-threads');
+
+/**
+ * Whether a parsed value carries the legacy Context's message array.
+ *
+ * Deliberately shallow. These files were written by *older* builds against
+ * older pi-ai versions, so a row that does not match today's `Message` union
+ * is the expected case, not a corruption signal — and
+ * {@link legacyContextToTurns} already tolerates unrecognised rows (it copies
+ * them into the open turn's transcript verbatim). Validating every row instead
+ * would make one unfamiliar message discard the whole thread's history, which
+ * is the opposite of what a migration is for.
+ */
+function isLegacyChatContext(value: unknown): value is Context {
   if (typeof value !== 'object' || value === null) return false;
-  const messages = (value as { messages?: unknown }).messages;
-  if (!Array.isArray(messages)) return false;
-  return messages.every((message) => {
-    if (typeof message !== 'object' || message === null) return false;
-    const candidate = message as { role?: unknown; content?: unknown };
-    if (candidate.role === 'user') {
-      return (
-        typeof candidate.content === 'string' ||
-        Array.isArray(candidate.content)
-      );
-    }
-    if (candidate.role === 'assistant' || candidate.role === 'toolResult') {
-      return Array.isArray(candidate.content);
-    }
-    return false;
-  });
+  return Array.isArray((value as { messages?: unknown }).messages);
 }
 
 /** Trailing tag carrying the explicitly-selected top-level ids. */
@@ -108,7 +106,12 @@ export function legacyContextToTurns(ctx: Context): ChatTurnRecord[] {
   let cur: ChatTurnRecord | null = null;
   let pendingSelection: { id: string; type: string; label?: string }[] = [];
 
-  for (const msg of ctx.messages) {
+  for (const row of ctx.messages as readonly unknown[]) {
+    // The admission gate only checked that `messages` is an array, so a row
+    // that is not an object at all reaches here. Skip it: one junk row must
+    // not cost the thread its remaining turns.
+    if (typeof row !== 'object' || row === null) continue;
+    const msg = row as PiMessage;
     if (msg.role === 'user') {
       const text = userText(msg);
       const trimmed = text.trim();
@@ -162,14 +165,33 @@ function encodeTurns(turns: readonly ChatTurnRecord[]): string {
 }
 
 /**
+ * Suffix for a legacy Context that coexists with a turn log it does not
+ * explain. Distinct from `.bak` so the two retirement reasons stay legible on
+ * disk: `.bak` means "converted, superseded", this means "kept verbatim,
+ * never converted".
+ */
+const UNRESOLVED_SUFFIX = '.unresolved';
+
+/**
  * Migrate one thread file in place. Returns true when the legacy source was
  * retired.
  *
- * A previous launch may have written some turns and then failed before
- * renaming the source. Reconcile that coexistence only when one log is a
- * prefix of the other: complete a partial converted prefix atomically, or
- * preserve a newer tail that follows the complete conversion. Divergent logs
- * are left untouched because their ordering cannot be inferred safely.
+ * Three coexistence cases, all of which must terminate — a thread that keeps
+ * both formats forever is a thread whose history never reaches `chat_v2`:
+ *
+ *   - The existing log is a prefix of the conversion (a launch that wrote some
+ *     turns and then died before the rename): complete it atomically.
+ *   - The conversion is a prefix of the existing log (a newer tail followed a
+ *     complete conversion): leave the log alone.
+ *   - Neither is a prefix of the other. The two logs are independent
+ *     representations — the `.turns.jsonl` was written by the live app, not
+ *     derived from this Context — so their combined ordering cannot be
+ *     inferred, and guessing it would silently corrupt the transcript. The
+ *     live log wins because it is the one the app has been appending to; the
+ *     Context is preserved beside it under {@link UNRESOLVED_SUFFIX} and the
+ *     divergence is logged. Its extra turns stay off the canvas, which is
+ *     also what happened before this reconciliation existed — but the bytes
+ *     remain, and the turn log is now free to fold into `chat_v2`.
  */
 export function migrateLegacyThreadFile(jsonPath: string): boolean {
   const turnsPath = jsonPath.replace(/\.json$/, '.turns.jsonl');
@@ -188,9 +210,14 @@ export function migrateLegacyThreadFile(jsonPath: string): boolean {
       commonPrefix += 1;
     }
     if (commonPrefix < overlap) {
-      throw new Error(
-        `Existing turn log diverges from legacy context at turn ${commonPrefix + 1}: ${turnsPath}`,
+      const preserved = `${jsonPath}${UNRESOLVED_SUFFIX}`;
+      log.warn(
+        { jsonPath, turnsPath, preserved, divergedAtTurn: commonPrefix + 1 },
+        'Legacy chat Context diverges from its turn log; preserving the ' +
+          'Context unconverted and keeping the turn log as written',
       );
+      renameSync(jsonPath, preserved);
+      return true;
     }
     if (existing.length < turns.length) {
       atomicWriteText(turnsPath, encodeTurns(turns));
@@ -231,12 +258,19 @@ export function migrateLegacyChatThreads(workspace: string): void {
       ) {
         continue;
       }
+      const jsonPath = path.join(chatDir, file);
       try {
-        migrateLegacyThreadFile(path.join(chatDir, file));
-      } catch {
-        // Tolerant per-file migration: leave an unresolved pair in place for a
-        // later activation. Hop 2 skips it while the same-thread `.json`
-        // remains, so neither copy is consumed or overwritten.
+        migrateLegacyThreadFile(jsonPath);
+      } catch (err) {
+        // Tolerant per-file migration: one damaged thread never aborts the
+        // batch. The Context stays on disk untouched, and hop 2 still folds
+        // any turn log beside it, so the thread keeps whatever history it
+        // already had in the new format. Logged because the alternative is a
+        // thread that silently never migrates.
+        log.warn(
+          { err, jsonPath },
+          'Legacy chat thread could not be migrated; leaving it in place',
+        );
       }
     }
   }
