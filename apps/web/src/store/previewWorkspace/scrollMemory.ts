@@ -77,6 +77,27 @@ export function registerMessageListScrollTarget(
   if (previous) removeReference(previous.viewKey);
 }
 
+export function reconcileMessageListScrollTargets(
+  canvasId: string,
+  registrations: ReadonlyArray<{
+    target: PreviewTarget;
+    viewKey: string;
+  }>,
+): void {
+  const retainedTargetKeys = new Set<string>();
+  for (const { target, viewKey } of registrations) {
+    retainedTargetKeys.add(previewTargetKey(target));
+    registerMessageListScrollTarget(target, viewKey);
+  }
+
+  for (const [key, registration] of registrationByTarget) {
+    if (registration.canvasId === canvasId && !retainedTargetKeys.has(key)) {
+      registrationByTarget.delete(key);
+      removeReference(registration.viewKey);
+    }
+  }
+}
+
 export function forgetMessageListScrollPosition(
   viewKey: string | undefined,
 ): void {

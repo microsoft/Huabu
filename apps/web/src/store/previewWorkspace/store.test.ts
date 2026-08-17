@@ -13,11 +13,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEmptyWorkspace, openTarget, type PreviewTarget } from './model';
 import { readWorkspace, writeWorkspace } from './persistence';
 import {
-  registerMessageListScrollTarget,
-  rememberMessageListScrollPosition,
-  restoreMessageListScrollPosition,
-} from './scrollMemory';
-import {
   selectActiveNodeId,
   selectActiveTab,
   selectGroupOfTab,
@@ -173,39 +168,11 @@ describe('actions delegate to the model', () => {
   });
 
   it('closes a tab', () => {
-    const target = node('a');
-    const tabId = store().openPreviewTarget(target);
-    registerMessageListScrollTarget(target, 'canvas-1:question-a');
-    rememberMessageListScrollPosition('canvas-1:question-a', 120);
+    const tabId = store().openPreviewTarget(node('a'));
 
     store().closeTab(tabId);
 
     expect(store().workspace.tabs[tabId]).toBeUndefined();
-    expect(
-      restoreMessageListScrollPosition(
-        document.createElement('div'),
-        'canvas-1:question-a',
-      ),
-    ).toBe(false);
-  });
-
-  it('forgets the target replaced in a transient inspection tab', () => {
-    const first = node('transient-a');
-    const tabId = store().openPreviewTarget(first, { transient: true });
-    registerMessageListScrollTarget(first, 'canvas-1:transient-thread');
-    rememberMessageListScrollPosition('canvas-1:transient-thread', 160);
-
-    const reused = store().openPreviewTarget(node('transient-b'), {
-      transient: true,
-    });
-
-    expect(reused).toBe(tabId);
-    expect(
-      restoreMessageListScrollPosition(
-        document.createElement('div'),
-        'canvas-1:transient-thread',
-      ),
-    ).toBe(false);
   });
 
   it('activates a tab', () => {
@@ -237,28 +204,11 @@ describe('actions delegate to the model', () => {
   });
 
   it('replaces a tab target in place', () => {
-    const target = chat('thread-1');
-    const tabId = store().openPreviewTarget(target);
-    registerMessageListScrollTarget(target, 'canvas-1:thread-1');
-    rememberMessageListScrollPosition('canvas-1:thread-1', 180);
+    const tabId = store().openPreviewTarget(chat('thread-1'));
 
     store().replaceTabTarget(tabId, node('question-1'));
 
     expect(store().workspace.tabs[tabId].target).toEqual(node('question-1'));
-    expect(
-      restoreMessageListScrollPosition(
-        document.createElement('div'),
-        'canvas-1:thread-1',
-      ),
-    ).toBe(true);
-
-    store().closeTab(tabId);
-    expect(
-      restoreMessageListScrollPosition(
-        document.createElement('div'),
-        'canvas-1:thread-1',
-      ),
-    ).toBe(false);
   });
 
   it('merges groups', () => {

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   forgetMessageListScrollCanvas,
   forgetMessageListScrollTarget,
+  reconcileMessageListScrollTargets,
   registerMessageListScrollTarget,
   replaceMessageListScrollTarget,
 } from '@/store/previewWorkspace/scrollMemory';
@@ -142,6 +143,35 @@ describe('per-view scroll positions', () => {
     ).toBe(true);
 
     forgetMessageListScrollTarget(second);
+    expect(
+      restoreMessageListScrollPosition(document.createElement('div'), viewKey),
+    ).toBe(false);
+  });
+
+  it('retains a shared conversation when the remaining target never mounted', () => {
+    const viewKey = 'source-canvas:unmounted-shared-thread';
+    const mounted = {
+      kind: 'node' as const,
+      canvasId: 'world-shared',
+      nodeId: 'mounted-question-ref',
+    };
+    const unmounted = {
+      kind: 'node' as const,
+      canvasId: 'world-shared',
+      nodeId: 'unmounted-question-ref',
+    };
+    registerMessageListScrollTarget(mounted, viewKey);
+    rememberMessageListScrollPosition(viewKey, 230);
+
+    reconcileMessageListScrollTargets('world-shared', [
+      { target: unmounted, viewKey },
+    ]);
+
+    expect(
+      restoreMessageListScrollPosition(document.createElement('div'), viewKey),
+    ).toBe(true);
+
+    reconcileMessageListScrollTargets('world-shared', []);
     expect(
       restoreMessageListScrollPosition(document.createElement('div'), viewKey),
     ).toBe(false);

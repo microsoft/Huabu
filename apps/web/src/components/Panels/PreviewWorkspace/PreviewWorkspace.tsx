@@ -24,12 +24,24 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import { conversationViewForNode } from '@/store/conversationOwner';
+import {
+  messageListViewKey,
+  reconcileMessageListScrollTargets,
+} from '@/store/previewWorkspace/scrollMemory';
 import {
   usePreviewWorkspaceStore,
   type PreviewWorkspaceState,
@@ -39,7 +51,10 @@ import { PreviewGroup } from './PreviewGroup';
 import { PreviewTabDragOverlay } from './PreviewTab';
 import { resolveTabDropDestination, resolveTabDropIndicator } from './tabDnd';
 
-import type { CanvasPreviewWorkspace } from '@/store/previewWorkspace/model';
+import type {
+  CanvasPreviewWorkspace,
+  PreviewTarget,
+} from '@/store/previewWorkspace/model';
 import type { Node } from '@xyflow/react';
 
 /** Keyboard nudge per Arrow press on the separator. */
@@ -122,6 +137,8 @@ export function PreviewWorkspace({
   const { t } = useTranslation();
   const workspace = usePreviewWorkspaceStore(selectWorkspace);
   const canvasId = usePreviewWorkspaceStore((s) => s.canvasId);
+  const nodes = useCanvasStore((s) => s.nodes);
+  const worldReferences = useCanvasStore((s) => s.worldReferences);
   const nodeFocusRequest = usePreviewWorkspaceStore((s) => s.nodeFocusRequest);
   const chatOpenRequest = usePreviewWorkspaceStore((s) => s.chatOpenRequest);
   const consumeNodeFocusRequest = usePreviewWorkspaceStore(
@@ -136,6 +153,44 @@ export function PreviewWorkspace({
   const moveTab = usePreviewWorkspaceStore((s) => s.moveTab);
   const setActiveGroup = usePreviewWorkspaceStore((s) => s.setActiveGroup);
   const setSplitRatio = usePreviewWorkspaceStore((s) => s.setSplitRatio);
+
+  const scrollRegistrations = useMemo(() => {
+    const registrations: Array<{
+      target: PreviewTarget;
+      viewKey: string;
+    }> = [];
+    for (const { target } of Object.values(workspace.tabs)) {
+      if (target.kind === 'chat') {
+        registrations.push({
+          target,
+          viewKey: messageListViewKey(target.canvasId, target.threadId),
+        });
+        continue;
+      }
+
+      const node = nodes.find((candidate) => candidate.id === target.nodeId);
+      if (!node) continue;
+      const view = conversationViewForNode(
+        node,
+        target.canvasId,
+        worldReferences[target.nodeId],
+      );
+      if (view) {
+        registrations.push({
+          target,
+          viewKey: messageListViewKey(
+            view.conversationOwner.canvasId,
+            view.conversationOwner.threadId,
+          ),
+        });
+      }
+    }
+    return registrations;
+  }, [nodes, workspace.tabs, worldReferences]);
+
+  useEffect(() => {
+    reconcileMessageListScrollTargets(canvasId, scrollRegistrations);
+  }, [canvasId, scrollRegistrations]);
 
   const settleTab = useCallback((tabId: string) => {
     settleActivePreviewTab(

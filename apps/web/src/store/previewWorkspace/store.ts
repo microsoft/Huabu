@@ -41,25 +41,6 @@ import {
   seedWorkspaceFromLegacyChat,
   writeWorkspace,
 } from './persistence';
-import {
-  forgetMessageListScrollTarget,
-  previewTargetKey,
-  replaceMessageListScrollTarget,
-} from './scrollMemory';
-
-function cleanupRemovedTargets(
-  previous: CanvasPreviewWorkspace,
-  next: CanvasPreviewWorkspace,
-): void {
-  const nextTargetKeys = new Set(
-    Object.values(next.tabs).map((tab) => previewTargetKey(tab.target)),
-  );
-  for (const tab of Object.values(previous.tabs)) {
-    if (!nextTargetKeys.has(previewTargetKey(tab.target))) {
-      forgetMessageListScrollTarget(tab.target);
-    }
-  }
-}
 
 /** Pre-workspace Chat state used to seed a Canvas opened for the first time. */
 export type LegacyChatSeed = {
@@ -149,10 +130,8 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
     },
 
     openPreviewTarget: (target, options) => {
-      const previous = get().workspace;
-      const opened = openTarget(previous, target, options);
+      const opened = openTarget(get().workspace, target, options);
       if (!opened.tabId) return '';
-      cleanupRemovedTargets(previous, opened.workspace);
       set({ workspace: opened.workspace });
       return opened.tabId;
     },
@@ -160,7 +139,6 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
     closeTab: (tabId) => {
       const state = get();
       const workspace = closeTab(state.workspace, tabId);
-      cleanupRemovedTargets(state.workspace, workspace);
       set({
         workspace,
         ...(state.nodeFocusRequest?.tabId === tabId
@@ -182,14 +160,7 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       set({ workspace: moveTab(get().workspace, tabId, destination) }),
 
     replaceTabTarget: (tabId, target) => {
-      const previous = get().workspace;
-      const workspace = replaceTabTarget(previous, tabId, target);
-      const previousTarget = previous.tabs[tabId]?.target;
-      const nextTarget = workspace.tabs[tabId]?.target;
-      if (previousTarget && nextTarget) {
-        replaceMessageListScrollTarget(previousTarget, nextTarget);
-      }
-      set({ workspace });
+      set({ workspace: replaceTabTarget(get().workspace, tabId, target) });
     },
 
     mergeGroups: () => set({ workspace: mergeGroups(get().workspace) }),
@@ -238,7 +209,6 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       const { canvasId, workspace } = get();
       if (!canvasId) return;
       const validated = validateWorkspace(workspace, canvasId, liveNodeIds);
-      cleanupRemovedTargets(workspace, validated);
       set({ workspace: validated });
     },
   }),

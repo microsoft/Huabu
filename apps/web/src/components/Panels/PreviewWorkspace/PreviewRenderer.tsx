@@ -13,15 +13,11 @@
  * current.
  */
 
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import useCanvasStore from '@/store/canvasStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
-import {
-  messageListViewKey,
-  registerMessageListScrollTarget,
-} from '@/store/previewWorkspace/scrollMemory';
 
 import { ChatPanel } from '../ChatPanel';
 import { ExpandedNodePanel } from '../ExpandedNodePanel/ExpandedNodePanel';
@@ -101,14 +97,6 @@ export function PreviewRenderer({
     }
     return node ? questionSession(node, target.canvasId, reference) : null;
   }, [target, node, reference]);
-
-  useEffect(() => {
-    if (!session) return;
-    registerMessageListScrollTarget(
-      target,
-      messageListViewKey(session.ownerCanvasId, session.threadId),
-    );
-  }, [session, target]);
 
   if (session) {
     return (
