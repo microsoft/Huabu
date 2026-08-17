@@ -14,6 +14,10 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  rememberMessageListScrollPosition,
+  restoreMessageListScrollPosition,
+} from '@/components/Messages/messageListScroll';
 import useCanvasStore from '@/store/canvasStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
@@ -23,6 +27,7 @@ import {
   PreviewTabDragOverlayPortal,
   PreviewWorkspace,
   settleActivePreviewTab,
+  subscribeToTabDragDeactivation,
 } from './PreviewWorkspace';
 import { PreviewWorkspacePanel } from './PreviewWorkspacePanel';
 import {
@@ -140,6 +145,35 @@ afterEach(() => {
 });
 
 describe('tab strip', () => {
+  it('forgets a Chat scroll position when its tab is explicitly closed', () => {
+    const threadId = 'thread-close-scroll';
+    const viewKey = `${CANVAS_ID}:${threadId}`;
+    store().openPreviewTarget({ kind: 'chat', canvasId: CANVAS_ID, threadId });
+    rememberMessageListScrollPosition(viewKey, 420);
+    render([]);
+
+    const closeButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label^="Close "]',
+    );
+    expect(closeButton).not.toBeNull();
+    act(() => closeButton?.click());
+
+    const messageList = document.createElement('div');
+    expect(restoreMessageListScrollPosition(messageList, viewKey)).toBe(false);
+  });
+
+  it('clears an active tab drag when the window loses focus', () => {
+    const clear = vi.fn();
+    const unsubscribe = subscribeToTabDragDeactivation(clear);
+
+    window.dispatchEvent(new Event('blur'));
+    expect(clear).toHaveBeenCalledOnce();
+
+    unsubscribe();
+    window.dispatchEvent(new Event('blur'));
+    expect(clear).toHaveBeenCalledOnce();
+  });
+
   it('renders a labelled tab ghost while dragging', () => {
     openNode('a');
     const tab = Object.values(store().workspace.tabs)[0];

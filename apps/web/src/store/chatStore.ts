@@ -72,6 +72,13 @@ export interface ChatState {
   threadsById: Record<string, ChatThreadState>;
   /** Bounded persistence projection for thread-local compose modes. */
   lastActionByThread: Record<string, AgentMode>;
+  /** Persisted binding identity for independent Preview Workspace threads. */
+  bindingByThread: Record<string, AgentBinding>;
+  /** Persisted built-in model settings for independent threads. */
+  settingsByThread: Record<
+    string,
+    { modelId: string | null; reasoningEffort: string | null }
+  >;
   /** Map of canvasId → threadId, persisted so each canvas keeps its own thread. */
   threadMap: Record<string, string>;
 
@@ -193,6 +200,7 @@ export interface ChatState {
  */
 const MAX_CACHED_THREADS = 10;
 const MAX_PERSISTED_THREAD_ACTIONS = 50;
+const MAX_PERSISTED_THREAD_METADATA = 50;
 
 /** Stable empty array so selectors that miss the cache don't trigger renders. */
 const EMPTY_MESSAGES: ChatMessage[] = [];
@@ -214,6 +222,8 @@ function threadOf(state: ChatState, threadId: string): ChatThreadState {
     state.threadsById[threadId] ?? {
       ...EMPTY_THREAD,
       lastAction: state.lastActionByThread[threadId] ?? 'ask',
+      binding: state.bindingByThread[threadId] ?? DEFAULT_BINDING,
+      settings: state.settingsByThread[threadId] ?? EMPTY_THREAD.settings,
     }
   );
 }
@@ -233,6 +243,37 @@ function rememberLastAction(
     }
   }
   return entries;
+}
+
+function rememberThreadValue<T>(
+  entries: Record<string, T>,
+  threadId: string,
+  value: T,
+): Record<string, T> {
+  const next = { ...entries };
+  delete next[threadId];
+  next[threadId] = value;
+  const overflow = Object.keys(next).length - MAX_PERSISTED_THREAD_METADATA;
+  if (overflow > 0) {
+    for (const key of Object.keys(next).slice(0, overflow)) delete next[key];
+  }
+  return next;
+}
+
+function normalizeThreadSettings(value: unknown): ChatThreadState['settings'] {
+  if (!value || typeof value !== 'object') return EMPTY_THREAD.settings;
+  const candidate = value as Record<string, unknown>;
+  return {
+    modelId:
+      typeof candidate.modelId === 'string' || candidate.modelId === null
+        ? candidate.modelId
+        : null,
+    reasoningEffort:
+      typeof candidate.reasoningEffort === 'string' ||
+      candidate.reasoningEffort === null
+        ? candidate.reasoningEffort
+        : null,
+  };
 }
 
 /** Immutably patches one thread entry, creating it when absent. */
@@ -256,6 +297,8 @@ export const useChatStore = create<ChatState>()(
       draftsByThread: {},
       threadsById: {},
       lastActionByThread: {},
+      bindingByThread: {},
+      settingsByThread: {},
       threadMap: {},
       bindingMap: {},
       selectionAttachment: null,
@@ -327,6 +370,11 @@ export const useChatStore = create<ChatState>()(
             lastAction,
           }),
           lastActionByThread: rememberLastAction(state, threadId, lastAction),
+          bindingByThread: rememberThreadValue(
+            state.bindingByThread,
+            threadId,
+            binding,
+          ),
         }));
         return threadId;
       },
@@ -342,6 +390,11 @@ export const useChatStore = create<ChatState>()(
           ...patchThread(state, threadId, { binding }),
           threadMap: { ...state.threadMap, [canvasId]: threadId },
           bindingMap: { ...state.bindingMap, [canvasId]: binding },
+          bindingByThread: rememberThreadValue(
+            state.bindingByThread,
+            threadId,
+            binding,
+          ),
         });
         return threadId;
       },
@@ -350,6 +403,11 @@ export const useChatStore = create<ChatState>()(
         const state = get();
         set({
           ...patchThread(state, threadId, { binding }),
+          bindingByThread: rememberThreadValue(
+            state.bindingByThread,
+            threadId,
+            binding,
+          ),
           bindingMap: canvasId
             ? { ...state.bindingMap, [canvasId]: binding }
             : state.bindingMap,
@@ -365,7 +423,14 @@ export const useChatStore = create<ChatState>()(
           ) {
             return {};
           }
-          return patchThread(state, threadId, { settings });
+          return {
+            ...patchThread(state, threadId, { settings }),
+            settingsByThread: rememberThreadValue(
+              state.settingsByThread,
+              threadId,
+              settings,
+            ),
+          };
         }),
 
       addPendingAttachment: (threadId, attachment) =>
@@ -427,26 +492,47 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'huabu-chat',
-      version: 4,
+      version: 5,
       migrate: (persisted) => {
         const state = persisted as Partial<ChatState> & {
           lastAction?: AgentMode;
           threadId?: string;
         };
         const legacyThreadId = state.threadId;
+        const threadMap = state.threadMap ?? {};
+        const bindingMap = state.bindingMap ?? {};
+        const bindingByThread = { ...(state.bindingByThread ?? {}) };
+        for (const [canvasId, threadId] of Object.entries(threadMap)) {
+          const binding = bindingMap[canvasId];
+          if (threadId && binding && !bindingByThread[threadId]) {
+            bindingByThread[threadId] = binding;
+          }
+        }
+        const settingsByThread = Object.fromEntries(
+          Object.entries(state.settingsByThread ?? {}).map(
+            ([threadId, settings]) => [
+              threadId,
+              normalizeThreadSettings(settings),
+            ],
+          ),
+        );
         return {
-          threadMap: state.threadMap ?? {},
+          threadMap,
           lastActionByThread:
             state.lastActionByThread ??
             (state.lastAction && legacyThreadId
               ? { [legacyThreadId]: state.lastAction }
               : {}),
-          bindingMap: state.bindingMap ?? {},
+          bindingByThread,
+          settingsByThread,
+          bindingMap,
         };
       },
       partialize: (state) => ({
         threadMap: state.threadMap,
         lastActionByThread: state.lastActionByThread,
+        bindingByThread: state.bindingByThread,
+        settingsByThread: state.settingsByThread,
         bindingMap: state.bindingMap,
       }),
     },

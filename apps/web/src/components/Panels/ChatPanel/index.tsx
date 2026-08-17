@@ -839,7 +839,7 @@ export const ChatPanel = ({
             messages={messages}
             isLoading={isLoading}
             isHistoryLoading={!isHistoryLoaded}
-            viewKey={threadId}
+            viewKey={`${ownerCanvasId}:${threadId}`}
             isActive={!isCollapsed}
             openPosition={
               pendingPermission

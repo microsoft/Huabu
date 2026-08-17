@@ -10,7 +10,7 @@ Preview Workspace owns presentation topology: open tabs, tab order, active tabs,
 
 `canvasStore` owns Canvas document state and the command pipeline. Preview renderers read live nodes from that store rather than copying node content or labels into tabs.
 
-`chatStore` owns conversation state keyed by `threadId`: messages, drafts, history status, streaming state, binding, model settings, compose mode, and pending attachments. Preview Workspace stores only the target needed to select a renderer.
+`chatStore` owns conversation state keyed by `threadId`: messages, drafts, history status, streaming state, binding, model settings, compose mode, and pending attachments. It persists a bounded projection of thread identity metadata (binding, built-in settings, and compose mode) so independent Chat tabs rehydrate with the same agent after reload; messages, drafts, history status, streaming state, and attachments remain runtime-only. Preview Workspace stores only the target needed to select a renderer.
 
 `panelStore` owns and persists the outer right-column collapse state, owns the transient Preview fullscreen state, and owns thread-addressed composer focus requests. Opening a Preview target expands the right column; closing a tab does not delete its underlying node or conversation history. `MainLayout` treats the persisted collapse state as authoritative whenever no panel motion is active. A settled collapsed slot is zero-width and clips overflow, while an active open/close motion temporarily releases that clipping; interrupted startup hydration therefore cannot leave translated panel content visible over the Canvas in either persisted state. Fullscreen is intentionally not persisted across reloads.
 
@@ -104,7 +104,7 @@ The activation sequence is an integer stored with the workspace rather than a wa
 
 Editor focus is a runtime-only `{ tabId, nonce }` request. Only the addressed active tab receives it, and its renderer consumes it after focus succeeds so remounting cannot replay stale intent.
 
-Question conversation positioning is a runtime-only `{ tabId, position, nonce }` request where `position` is `last-user` or `bottom`. `MessageList` consumes the request after history hydration and successful positioning.
+Question conversation positioning is a runtime-only `{ tabId, position, nonce }` request where `position` is `last-user` or `bottom`. `MessageList` consumes the request after history hydration and successful positioning. Each mounted Chat also keeps its latest scroll offset in a runtime cache keyed by conversation-owner Canvas plus `threadId`, restoring and recalibrating that offset when the user switches back to the thread; visiting additional conversations cannot silently discard an earlier reading position, while explicitly closing a Chat tab deletes its cached offset so reopening follows the requested or default opening position. A thread without a saved offset uses the requested opening position.
 
 Inactive tabs never count as actively viewed. A Question is actively viewed only when its tab is the active tab of a rendered group and the outer right panel is expanded; this rule controls the Canvas open indicator and whether stream completion marks a result as viewed.
 
