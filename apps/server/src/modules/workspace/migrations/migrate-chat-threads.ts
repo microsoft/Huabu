@@ -19,8 +19,14 @@
 
 import { existsSync, readdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
-import { appendJsonLine, mkdirp, readJson } from '../../../utils/fs.js';
+import {
+  atomicWriteText,
+  mkdirp,
+  readJsonStrict,
+  readJsonLinesStrict,
+} from '../../../utils/fs.js';
 import { buildAgentNodePreview } from '../../agent/node-ref.js';
 
 import type { LegacyChatTurnRecord as ChatTurnRecord } from './legacy/chat-turn-record.js';
@@ -29,6 +35,27 @@ import type { Context } from '@earendil-works/pi-ai';
 import type { CanvasNodeType } from '@huabu/shared';
 
 type PiMessage = Context['messages'][number];
+
+/** Whether a parsed value has the legacy Context shape this migration uses. */
+export function isLegacyChatContext(value: unknown): value is Context {
+  if (typeof value !== 'object' || value === null) return false;
+  const messages = (value as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) return false;
+  return messages.every((message) => {
+    if (typeof message !== 'object' || message === null) return false;
+    const candidate = message as { role?: unknown; content?: unknown };
+    if (candidate.role === 'user') {
+      return (
+        typeof candidate.content === 'string' ||
+        Array.isArray(candidate.content)
+      );
+    }
+    if (candidate.role === 'assistant' || candidate.role === 'toolResult') {
+      return Array.isArray(candidate.content);
+    }
+    return false;
+  });
+}
 
 /** Trailing tag carrying the explicitly-selected top-level ids. */
 const SELECTED_IDS_RE = /\n?\[SYSTEM selectedNodeIds:(\[[^\]]*\])\]\s*$/;
@@ -129,14 +156,49 @@ export function legacyContextToTurns(ctx: Context): ChatTurnRecord[] {
   return turns;
 }
 
-/** Migrate one thread file in place. Returns true when migrated. */
+function encodeTurns(turns: readonly ChatTurnRecord[]): string {
+  if (turns.length === 0) return '';
+  return `${turns.map((turn) => JSON.stringify(turn)).join('\n')}\n`;
+}
+
+/**
+ * Migrate one thread file in place. Returns true when the legacy source was
+ * retired.
+ *
+ * A previous launch may have written some turns and then failed before
+ * renaming the source. Reconcile that coexistence only when one log is a
+ * prefix of the other: complete a partial converted prefix atomically, or
+ * preserve a newer tail that follows the complete conversion. Divergent logs
+ * are left untouched because their ordering cannot be inferred safely.
+ */
 export function migrateLegacyThreadFile(jsonPath: string): boolean {
   const turnsPath = jsonPath.replace(/\.json$/, '.turns.jsonl');
-  if (existsSync(turnsPath)) return false; // already on new format
-  const ctx = readJson<Context>(jsonPath);
-  if (!ctx || !Array.isArray(ctx.messages)) return false;
+  const ctx = readJsonStrict<unknown>(jsonPath);
+  if (!isLegacyChatContext(ctx)) return false;
   const turns = legacyContextToTurns(ctx);
-  for (const t of turns) appendJsonLine(turnsPath, t);
+
+  if (existsSync(turnsPath)) {
+    const existing = readJsonLinesStrict<unknown>(turnsPath);
+    const overlap = Math.min(existing.length, turns.length);
+    let commonPrefix = 0;
+    while (
+      commonPrefix < overlap &&
+      isDeepStrictEqual(existing[commonPrefix], turns[commonPrefix])
+    ) {
+      commonPrefix += 1;
+    }
+    if (commonPrefix < overlap) {
+      throw new Error(
+        `Existing turn log diverges from legacy context at turn ${commonPrefix + 1}: ${turnsPath}`,
+      );
+    }
+    if (existing.length < turns.length) {
+      atomicWriteText(turnsPath, encodeTurns(turns));
+    }
+  } else {
+    atomicWriteText(turnsPath, encodeTurns(turns));
+  }
+
   renameSync(jsonPath, `${jsonPath}.bak`);
   return true;
 }
@@ -172,7 +234,9 @@ export function migrateLegacyChatThreads(workspace: string): void {
       try {
         migrateLegacyThreadFile(path.join(chatDir, file));
       } catch {
-        // tolerant: one bad thread never aborts the batch
+        // Tolerant per-file migration: leave an unresolved pair in place for a
+        // later activation. Hop 2 skips it while the same-thread `.json`
+        // remains, so neither copy is consumed or overwritten.
       }
     }
   }

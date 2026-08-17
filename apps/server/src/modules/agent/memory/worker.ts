@@ -89,23 +89,13 @@ async function runOnce(canvasId: string, logger?: MemoryLogger): Promise<void> {
       );
       return;
     }
-    const { results, latestChatTs } = outcome;
+    const { results } = outcome;
     // markAnalyzed is intentionally always called when the pass finished
     // without throwing — even if individual writers rejected (e.g. a
     // create-rationale violation). The bookkeeping records "we tried",
     // not "we wrote". This avoids hammering the threshold with retries
     // when the LLM keeps producing rejected outputs.
-    //
-    // `latestChatTs` advances the chat cursor so the next pass's digest
-    // only includes strictly newer rows. `null` means that source saw
-    // nothing new past the existing cursor — in which case we leave the
-    // cursor untouched (handled by markAnalyzed when the field is
-    // omitted).
-    const cursorUpdate: {
-      lastSeenThreadCursor?: number;
-    } = {};
-    if (latestChatTs !== null) cursorUpdate.lastSeenThreadCursor = latestChatTs;
-    markAnalyzed(canvasId, cursorUpdate).catch((err: unknown) => {
+    markAnalyzed(canvasId).catch((err: unknown) => {
       // markAnalyzed is now async (it shares the per-canvas state
       // lock with bumpOpCounter). A bookkeeping write failure does
       // not invalidate the pass — log and continue.

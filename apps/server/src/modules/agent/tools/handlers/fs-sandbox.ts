@@ -72,21 +72,22 @@ const VIRTUAL_PREFIX: ReadonlyArray<readonly [string, string]> = [
 ];
 
 /**
- * Whether a canvas-relative ref denotes something already under `.artifacts/`.
+ * Whether an already-resolved, Space-relative physical path denotes something
+ * under `.artifacts/`.
  *
- * A question about the *ref*, not about storage: a node `src` that already
- * points at an artifact needs no import, whatever backend holds the bytes.
- * Resolving against a synthetic root keeps it that way — no workspace, no
- * canvas directory, no filesystem — while still collapsing any `..` that
- * would slip past a bare prefix test, the same normalization
- * {@link safeResolve} relies on.
+ * Callers must first resolve the original ref with {@link safeResolve}, then
+ * make that absolute target relative to the actual Space root. The second
+ * step matters for refs such as `../Canvas/.artifacts/pic.png`, which leave
+ * and re-enter the same Space before resolving inside `.artifacts/`.
  *
- * Takes the *physical* form, so pass {@link toPhysicalRel} output.
+ * Resolving the resulting relative path against a synthetic root keeps this
+ * membership check independent of storage while preserving segment-aware
+ * normalization and sibling-prefix protection.
  */
-export function isArtifactsRel(physicalRel: string): boolean {
+export function isArtifactsRel(resolvedPhysicalRel: string): boolean {
   const [, artifactsPhysical] = VIRTUAL_PREFIX[0];
   const root = path.resolve('/', artifactsPhysical);
-  const target = path.resolve('/', physicalRel);
+  const target = path.resolve('/', resolvedPhysicalRel);
   return target === root || target.startsWith(root + path.sep);
 }
 

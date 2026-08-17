@@ -1818,8 +1818,10 @@ In:
    `modules/workspace/`, with no substrate segment.
 4. Introduce the Space materialization capability, re-found `canvasRoot` on it,
    and move the ACP, watcher, memory, and World-bootstrap consumers onto it.
-5. Move `agent/memory/analyzer.ts` off `chatDir`, and relocate the agent-owned
-   families of §12.5.3 into the agent domain.
+5. Move `agent/memory/analyzer.ts` off `chatDir`. Keep the agent-owned path
+   families of §12.5.3 in `modules/workspace/paths.ts` as a transitional
+   materialization surface; moving them into their owning domains remains
+   follow-up work.
 6. Extend the module-boundary test to fail when a non-storage file imports a
    storage-owned layout symbol — the guard that stops this recurring.
 
@@ -1841,15 +1843,17 @@ scope by definition.
 Phase 5 rebases onto this and drops its `utils/naming.ts` extraction, its
 `workspace/disk/naming.ts` shim, and the corresponding roadmap edits.
 
-**Landed.** `modules/workspace/` is flat and holds `paths.ts` plus
-`migrations/`; the Disk record layout, blob layout, directory index, name
-index, directory-handle coordination, and World bootstrap all sit under
-`storage/backends/disk/`. Consumers needing a real Space directory call
-`spaceDirectory()`; the two Disk capabilities the application still needs —
-directory-handle release and World bootstrap — are re-exported from the facade
-rather than reached by path. Three guards in `module-boundaries.test.ts` pin
-the result: the workspace module has no substrate segment, imports no backend,
-and names no Disk layout symbol.
+**Landed for the Workspace-to-storage substrate move.** `modules/workspace/`
+is flat and holds `paths.ts` plus `migrations/`; the Disk record layout, blob
+layout, directory index, name index, directory-handle coordination, and World
+bootstrap all sit under `storage/backends/disk/`. Consumers that need only a
+real Space directory call `spaceDirectory()`; directory-handle release and
+World bootstrap are re-exported from the facade rather than reached by path.
+This does not close every application-to-Disk read: `canvas.route.ts`,
+`external-watcher.ts`, and `world-target-access.ts` intentionally retain
+compatibility-shim reads, alongside migration and test callers. Three guards
+in `module-boundaries.test.ts` pin the Workspace move: the workspace module
+has no substrate segment, imports no backend, and names no Disk layout symbol.
 
 #### 12.5.7 Findings from step 5, and one follow-up
 
@@ -2151,7 +2155,7 @@ Before a new backend is production-ready:
 | [`.../storage/compatibility/canvas.ts`](../../apps/server/src/modules/storage/compatibility/canvas.ts)                                       | Residual Disk read surface plus direct-module lifecycle test fixtures; production structured mutations enumerated in §12.4 use the portable ports.                                                                   |
 | [`apps/server/src/modules/agent/memory/analyzer.ts`](../../apps/server/src/modules/agent/memory/analyzer.ts)                                 | P3 repository consumer for strict Space existence, bounded action events, and intent episodes; physical chat and memory files remain Disk-specific.                                                                  |
 | [`apps/server/src/modules/canvas/write-coordinator.ts`](../../apps/server/src/modules/canvas/write-coordinator.ts)                           | Canvas mutation coordinator and per-Space write lock, held across asynchronous node read, revision CAS, and put.                                                                                                     |
-| [`apps/server/src/modules/workspace/disk/`](../../apps/server/src/modules/workspace/disk/)                                                   | Cross-domain physical Workspace layout: paths, canvas dirs, naming, name index, dir handles, World bootstrap. `storage/paths.ts` forwards here.                                                                      |
+| [`apps/server/src/modules/workspace/`](../../apps/server/src/modules/workspace/)                                                             | Workspace-owned and transitional materialization paths plus migrations. Disk layout and directory-index code now live under `storage/backends/disk/`.                                                                |
 | [`apps/server/src/modules/canvas/canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts)                               | Canonical command execution; submits one ordered node/record/delta batch through `SpaceHandle.write`.                                                                                                                |
 | [`apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts`](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts)             | Current real-Disk path resolution and traversal for built-in agent file tools.                                                                                                                                       |
 | [`apps/server/src/modules/agent/acp/capabilities/fs.ts`](../../apps/server/src/modules/agent/acp/capabilities/fs.ts)                         | Synthetic ACP `/space` read capability, currently not wired into the production driver.                                                                                                                              |

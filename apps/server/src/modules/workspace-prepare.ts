@@ -40,7 +40,9 @@ export function prepareWorkspaceOnDisk(workspacePath: string): void {
   migrateLegacyChatThreads(workspacePath);
   // Second hop (M6.9 row 2): fold legacy `.history/chat/*.turns.jsonl` turns
   // into the Agenetes two-tier log (`chat_v2/`). MUST run AFTER the pi-ai
-  // `.json` -> `.turns.jsonl` hop above.
+  // `.json` -> `.turns.jsonl` hop above. A same-thread Context left by an
+  // unresolved hop-1 migration, including unreadable JSON, keeps its turn log
+  // out of this hop until a later activation can reconcile the pair.
   migrateLegacyChatTurns(workspacePath);
   // Convert the strict workload/state boundary before any writer opens the
   // namespace. Keeps the original v1 file as `.agenetes-v1.bak`.

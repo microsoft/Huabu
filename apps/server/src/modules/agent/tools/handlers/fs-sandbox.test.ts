@@ -6,10 +6,10 @@ import { describe, expect, it } from 'vitest';
 import { isArtifactsRel, toPhysicalRel } from './fs-sandbox.js';
 
 /**
- * `isArtifactsRel` decides whether a node `src` already points at an
- * artifact, which is what stops the import hook copying a file that is
- * already stored. It answers from the ref alone — no workspace, no canvas
- * directory, no backend — so these cases need no fixture.
+ * `isArtifactsRel` applies the segment-aware membership rules after a node
+ * `src` has been safely resolved relative to its actual Space. The import-hook
+ * tests cover that filesystem resolution; these pure cases pin the remaining
+ * path classification without a fixture.
  */
 describe('isArtifactsRel', () => {
   it('accepts both the virtual and physical spellings', () => {

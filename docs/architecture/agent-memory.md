@@ -1,7 +1,7 @@
 # Agent Memory
 
 > Status: Shipped
-> Last updated: 2026-08-07
+> Last updated: 2026-08-17
 
 Lets the agent remember, across sessions and canvases, "who the user is, what
 this canvas is about, and which approaches are reusable". The whole mechanism is
@@ -40,13 +40,13 @@ Two independent write paths:
 - Then a **per-canvas single-flight** worker runs ([memory/worker.ts](../../apps/server/src/modules/agent/memory/worker.ts)): an already-running pass just sets a pending flag, no queue.
 - `setImmediate` dispatch — the route responds to the client first; the curator starts on the next tick.
 - Failures only `warn`, never throw; the next trigger naturally retries.
-- If the Space record no longer exists, the pass is skipped before reading memory state/chat files or calling the model, and `markAnalyzed` is not advanced.
+- If the Space record no longer exists, the pass is skipped before reading memory files or calling the model, and `markAnalyzed` is not advanced.
 - The curator uses [agents/memory/AGENT.md](../../apps/server/src/prompt/agents/memory/AGENT.md), max 5 iterations, sequential tool calls.
 - The curator runs with the `memory` model role, which resolves through the Utility Model and, when Utility is not configured, defaults to the cheapest eligible model in the chat provider (ultimately the Chat Model).
 
 ### 2.2 Explicit requests in chat
 
-Normal ask / operate turns do not write memory directly. Ask is read-only, and operate reserves `fs_write` for an explicitly invoked `/create-skill` or `/update-skill`; a plain-language "remember this" request instead enters the chat digest and becomes a high-confidence candidate when the background curator next runs. This path is delayed until the canvas reaches the automatic-curation threshold, and the curator may still choose not to write.
+Normal ask / operate turns do not write memory directly. Ask is read-only, and operate reserves `fs_write` for an explicitly invoked `/create-skill` or `/update-skill`. The background curator no longer scans chat files; its evidence is the current Space snapshot, recent action events, and existing memory. A plain-language "remember this" request therefore becomes a curation candidate only when it is also reflected in those Space-owned sources.
 
 User Skill creation and updates are explicit slash-command flows on the built-in operate surface. `/create-skill` checks the catalogue for near matches but does not silently switch to an update; `/update-skill` resolves and reads an existing user or merged Skill before writing it.
 
@@ -135,7 +135,7 @@ The curator AGENT.md points at all three sub-docs. The operate Agent receives Sk
 | overwrite + replace_string primitives                   | [memory/writers.ts](../../apps/server/src/modules/agent/memory/writers.ts)                                                                                                                                                                                                                              |
 | Dual-root path check                                    | [memory/sandbox.ts](../../apps/server/src/modules/agent/memory/sandbox.ts)                                                                                                                                                                                                                              |
 | Read entry                                              | [memory/read.ts](../../apps/server/src/modules/agent/memory/read.ts)                                                                                                                                                                                                                                    |
-| Path helpers                                            | [storage/paths.ts](../../apps/server/src/modules/storage/paths.ts)                                                                                                                                                                                                                                      |
+| Path helpers                                            | [workspace/paths.ts](../../apps/server/src/modules/workspace/paths.ts)                                                                                                                                                                                                                                  |
 | `fs_write` tool def                                     | [tools/definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts)                                                                                                                                                                                                                        |
 | fs_write handler                                        | [tools/handlers/fs-write.ts](../../apps/server/src/modules/agent/tools/handlers/fs-write.ts)                                                                                                                                                                                                            |
 | fs_read handler                                         | [tools/handlers/fs-read.ts](../../apps/server/src/modules/agent/tools/handlers/fs-read.ts)                                                                                                                                                                                                              |
@@ -148,7 +148,7 @@ The curator AGENT.md points at all three sub-docs. The operate Agent receives Sk
 
 ## 6. Relationship to existing systems
 
-- The curator reads Space existence, the bounded `events.jsonl` action tail, and intents through structured repositories. Chat digests and memory body/state files remain physical Disk capabilities; the storage migration changes no file format.
+- The curator reads Space existence and the bounded action-event tail through the structured repository. Memory body/state files remain materialized workspace capabilities. Chat history is owned by Agenetes and is not part of the curator bundle.
 - `<canvas>/.memory/` is in `ALWAYS_SKIP` ([fs-sandbox.ts](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts)) — invisible to grep / find / ls; reachable only through the controlled `read("memory/space.md")` path.
 - The skill loader uses mtime + 2s TTL + `invalidateUserSkill(id)` for write-then-read freshness. System skills are cached once-and-done.
 
@@ -158,5 +158,5 @@ The curator AGENT.md points at all three sub-docs. The operate Agent receives Sk
 
 - Every write path goes through `MemorySandboxError` validation.
 - Within a single Node process, per-canvas single-flight keeps the curator from concurrently writing the same canvas; workspace memory is serialised across canvases by an in-module `workspaceMemoryLock`. Multi-process deployment needs separate design; single-process is assumed today.
-- `markAnalyzed` advances `lastSeenThreadCursor`, so the next chat digest only sees new turns and never re-scans history.
+- `markAnalyzed` records only the completion timestamp. The legacy `lastSeenThreadCursor` key is preserved when old `state.json` files are rewritten, but current passes do not advance or consume it.
 - A failed write (rationale too short, cap exceeded, non-unique `oldString`, …) → `WriteResult.ok=false`; the worker logs it into the summary and the next trigger retries.

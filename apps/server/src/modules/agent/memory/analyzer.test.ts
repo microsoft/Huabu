@@ -10,7 +10,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const physicalState = vi.hoisted(() => ({ root: '' }));
 
 vi.mock('../agent.service.js', () => ({ runAgent: vi.fn() }));
-vi.mock('./trigger.js', () => ({ readMemoryState: vi.fn() }));
 vi.mock('../../../prompt/index.js', () => ({
   loadAgent: vi.fn(),
   listSkills: vi.fn(),
@@ -24,7 +23,6 @@ vi.mock('../../workspace/paths.js', () => ({
 
 import { runAgent } from '../agent.service.js';
 import { runAnalysisPass } from './analyzer.js';
-import { readMemoryState } from './trigger.js';
 import { loadAgent, listSkills } from '../../../prompt/index.js';
 import { getStructuredStore } from '../../storage/index.js';
 
@@ -98,11 +96,6 @@ beforeEach(() => {
     .mockReturnValue(
       emptyAgentStream() as unknown as ReturnType<typeof runAgent>,
     );
-  vi.mocked(readMemoryState).mockReset().mockReturnValue({
-    counter: 0,
-    lastAnalyzedAt: null,
-    lastSeenThreadCursor: null,
-  });
   vi.mocked(loadAgent)
     .mockReset()
     .mockReturnValue({
@@ -132,7 +125,6 @@ describe('runAnalysisPass repository sources', () => {
     expect(space).toHaveBeenCalledWith('canvas-a');
     expect(recordRead).toHaveBeenCalledTimes(1);
     expect(eventsRead).not.toHaveBeenCalled();
-    expect(readMemoryState).not.toHaveBeenCalled();
     expect(loadAgent).not.toHaveBeenCalled();
     expect(runAgent).not.toHaveBeenCalled();
   });
@@ -162,7 +154,6 @@ describe('runAnalysisPass repository sources', () => {
     await expect(runAnalysisPass('canvas-a')).resolves.toEqual({
       status: 'completed',
       results: [],
-      latestChatTs: null,
     });
 
     expect(space).toHaveBeenCalledTimes(1);

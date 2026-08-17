@@ -97,7 +97,7 @@ This is the first-version implementation contract. It preserves the current sing
 
 Workspace preparation should run an idempotent `ensureWorldCanvasOnDisk(workspacePath)` after existing migrations. A workspace without `.world/space.json` receives an empty World with a newly generated stable `canvasId`; subsequent activations reuse the persisted identity.
 
-The hidden directory is deliberately outside the ordinary Space index. The current scanner in [`canvas-dirs.ts`](../../apps/server/src/modules/workspace/disk/canvas-dirs.ts) already skips dot-prefixed entries; it should read `.world/space.json` into a separate World entry without returning it from `listCanvasDirEntries()`. `canvasDirName(worldCanvasId)` should resolve that entry to `.world`, allowing the existing `getCanvasStore(worldCanvasId)` and all canvas-relative path helpers to continue operating unchanged.
+The hidden directory is deliberately outside the ordinary Space index. The current scanner in [`canvas-dirs.ts`](../../apps/server/src/modules/storage/backends/disk/canvas-dirs.ts) already skips dot-prefixed entries; it should read `.world/space.json` into a separate World entry without returning it from `listCanvasDirEntries()`. `canvasDirName(worldCanvasId)` should resolve that entry to `.world`, allowing the existing `getCanvasStore(worldCanvasId)` and all canvas-relative path helpers to continue operating unchanged.
 
 The World must use a generated ID rather than a fixed `canvasId = "world"`. Frontend viewport persistence is keyed only by canvas ID, and Agenetes uses canvas ID as its namespace name; a generated ID prevents different workspaces from sharing those identities.
 

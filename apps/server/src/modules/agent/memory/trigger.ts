@@ -11,9 +11,9 @@
  *                       enqueued when this crosses {@link OP_THRESHOLD}.
  *   lastAnalyzedAt      epoch ms of the last successful analysis;
  *                       null until the first pass lands.
- *   lastSeenThreadCursor pi-ai context timestamp of the last
- *                       analysed chat turn — lets `context.ts` (PR-C)
- *                       only pull "new" turns into the analysis prompt.
+ *   lastSeenThreadCursor retained compatibility field from the removed
+ *                       legacy chat digest. Existing state files preserve it,
+ *                       but current analysis passes do not advance it.
  *
  * Persisted at `<canvasDir>/.memory/state.json` so the counter
  * survives process restarts. The file is kept tiny (<128 B) and

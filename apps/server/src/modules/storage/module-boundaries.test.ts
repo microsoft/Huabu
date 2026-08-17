@@ -219,7 +219,7 @@ describe('storage dependency direction', () => {
  */
 describe('workspace module names no backend', () => {
   const workspaceFiles = sourceFiles.filter((f) =>
-    f.startsWith('modules/workspace/'),
+    /^modules\/workspace(?:[./-])/.test(f),
   );
 
   it('has no substrate segment', () => {
@@ -252,11 +252,16 @@ describe('workspace module names no backend', () => {
     // backend stores things again, whatever the import path said.
     const DISK_LAYOUT = [
       'SPACE_JSON_FILENAME',
+      'WORLD_CANVAS_DIR_NAME',
       'canvasJsonPath',
       'nodesDir',
       'nodeFilePath',
+      'ARTIFACTS_DIR_NAME',
       'artifactsDir',
       'artifactPath',
+      'HISTORY_DIR_NAME',
+      'historyDir',
+      'chatDir',
       'tasksPath',
       'eventsPath',
       'deltaLogPath',
@@ -351,15 +356,9 @@ describe('root forwarding shims', () => {
     expect(body[0]).toMatch(/^export \* from '\.[^']+\.js';$/);
   });
 
-  /**
-   * Frozen snapshot of the call sites that already imported these paths when
-   * the shims were installed. The lists may shrink as consumers migrate;
-   * a new entry means someone added an importer of a deprecated path, which
-   * is what the shims exist to stop.
-   */
-  const ALLOWED_IMPORTERS: Record<string, readonly string[]> = {
+  /** Exact snapshot of the remaining deprecated-path importers. */
+  const EXPECTED_IMPORTERS: Record<string, readonly string[]> = {
     'storage/canvas-store.js': [
-      'modules/agent/sketch.service.ts',
       'modules/canvas/canvas-search.test.ts',
       'modules/canvas/canvas-search.ts',
       'modules/canvas/canvas-spatial.ts',
@@ -368,10 +367,6 @@ describe('root forwarding shims', () => {
       'modules/canvas/node-prompt.ts',
       'modules/canvas/world-reference-resolver.ts',
       'modules/canvas/world-target-access.ts',
-      'modules/preprocessing/pipeline.test.ts',
-      'modules/preprocessing/pipeline.ts',
-      'modules/preprocessing/stages/cache-check.ts',
-      'modules/preprocessing/stages/persist.ts',
     ],
     'storage/canvas-dirs.js': [
       'modules/agent/tools/world-target-read.test.ts',
@@ -389,44 +384,17 @@ describe('root forwarding shims', () => {
       'modules/workspace.ts',
     ],
     'storage/paths.js': [
-      'modules/agent/acp/service.ts',
-      'modules/agent/acp/threads.route.ts',
-      'modules/agent/agent.route.ts',
-      'modules/agent/agent.service.ts',
-      'modules/agent/conversation/prompt/debug-prompt.ts',
-      'modules/agent/memory/analyzer.ts',
-      'modules/agent/memory/read.ts',
-      'modules/agent/memory/sandbox.ts',
-      'modules/agent/memory/trigger.ts',
-      'modules/agent/skills.route.test.ts',
-      'modules/agent/tools/handlers/fs-sandbox.ts',
-      'modules/agent/tools/handlers/fs-write.test.ts',
-      'modules/agent/tools/handlers/fs-write.ts',
-      'modules/canvas/canvas-search.test.ts',
-      'modules/canvas/canvas-search.ts',
-      'modules/canvas/canvas.route.ts',
-      'modules/canvas/external-watcher.ts',
-      'modules/canvas/external.route.ts',
-      'modules/canvas/import-node-src.test.ts',
-      'modules/canvas/import-node-src.ts',
-      'modules/canvas/world-target-access.ts',
-      'modules/remote_fs/rfs.route.ts',
-      'modules/remote_fs/skill.ts',
-      'prompt/skills/loader.ts',
-      // Phase 4.5 relocations, not new couplings. Each of these already read
-      // a Disk-owned path; it read it from `workspace/disk/paths.js`, which
-      // this phase emptied of Disk layout (§12.5.2). The same call site now
-      // names the shim instead. Fourteen entries left this list in the same
-      // change, because their symbols turned out to be workspace-owned.
-      'modules/agent/memory/analyzer.test.ts',
       'modules/canvas/canvas-content-cas.test.ts',
       'modules/canvas/canvas.route.test.ts',
+      'modules/canvas/canvas.route.ts',
+      'modules/canvas/external-watcher.ts',
+      'modules/canvas/world-target-access.ts',
       'modules/workspace/migrations/migrate-acp-sessions.ts',
     ],
   };
 
-  it.each(Object.keys(ALLOWED_IMPORTERS))(
-    'gains no new importer of %s',
+  it.each(Object.keys(EXPECTED_IMPORTERS))(
+    'keeps the exact importer snapshot for %s',
     (shimPath) => {
       const importers = sourceFiles
         .filter((file) => !file.startsWith('modules/storage/'))
@@ -435,14 +403,7 @@ describe('root forwarding shims', () => {
         )
         .sort();
 
-      const added = importers.filter(
-        (f) => !ALLOWED_IMPORTERS[shimPath].includes(f),
-      );
-      expect(added).toEqual([]);
-      // Shrinking is the goal, so the snapshot is a ceiling, not an equality.
-      expect(importers.length).toBeLessThanOrEqual(
-        ALLOWED_IMPORTERS[shimPath].length,
-      );
+      expect(importers).toEqual(EXPECTED_IMPORTERS[shimPath]);
     },
   );
 });

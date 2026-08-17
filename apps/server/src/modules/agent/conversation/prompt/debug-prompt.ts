@@ -15,9 +15,9 @@
  */
 
 import { appendFileSync } from 'node:fs';
+import path from 'node:path';
 
 import { mkdirp } from '../../../../utils/fs.js';
-import { chatDir } from '../../../storage/paths.js';
 import { chatPromptLogPath } from '../../../workspace/paths.js';
 
 import type { Context } from '@earendil-works/pi-ai';
@@ -167,12 +167,9 @@ export function dumpAssembledPrompt(params: DumpPromptParams): void {
     });
     out.push('', '');
 
-    mkdirp(chatDir(canvasId));
-    appendFileSync(
-      chatPromptLogPath(canvasId, params.threadId),
-      out.join('\n'),
-      'utf-8',
-    );
+    const logPath = chatPromptLogPath(canvasId, params.threadId);
+    mkdirp(path.dirname(logPath));
+    appendFileSync(logPath, out.join('\n'), 'utf-8');
   } catch (err) {
     params.logger.warn(
       { err: String(err) },

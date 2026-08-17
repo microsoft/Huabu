@@ -41,7 +41,7 @@ import {
   isArtifactsRel,
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
-import { canvasBlobs } from '../storage/index.js';
+import { canvasBlobs, spaceDirectory } from '../storage/index.js';
 
 import type { CanvasStore } from '../storage/index.js';
 
@@ -266,10 +266,21 @@ async function resolveImportedSrc(
     return null;
   }
 
-  // Already an artifact ref (or a bare artifact key, which `toPhysicalRel`
-  // maps into `.artifacts/`) — nothing to import. Asked of the ref rather
-  // than of a resolved path, so no storage layout is involved.
-  if (isArtifactsRel(physicalRel)) return null;
+  // A direct artifact child needs no copy, but it still needs the canonical
+  // bare-key spelling the web resolver serves. Classify the path after
+  // sandbox resolution so a ref that leaves and re-enters the current Space
+  // is judged by where it actually lands, while the helper still owns the
+  // virtual/physical `.artifacts` vocabulary. A nested path is not a blob key,
+  // so it falls through and is copied into the artifact root below.
+  const resolvedPhysicalRel = path.relative(spaceDirectory(canvasId), absPath);
+  if (isArtifactsRel(resolvedPhysicalRel)) {
+    const key = path.basename(absPath);
+    const canonicalPath = safeResolve(
+      canvasId,
+      toPhysicalRel(`artifacts/${key}`),
+    );
+    if (absPath === canonicalPath) return key;
+  }
 
   // A bare key like `art_abc.png` resolves under the canvas root but has no
   // file on disk there — leave it so the web resolver builds the artifact URL.

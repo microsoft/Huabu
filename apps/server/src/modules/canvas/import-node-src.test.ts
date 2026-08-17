@@ -37,6 +37,7 @@ beforeEach(() => {
     'c-web-merge-local',
     'c-web-merge-remote',
     'c-image-local',
+    'c-image-reentered',
   ]) {
     createCanvas(canvasId);
   }
@@ -268,5 +269,37 @@ describe('importForeignNodeSources — media nodes (regression)', () => {
     expect(src).toBeDefined();
     if (src === undefined) throw new Error('Expected a rewritten image src');
     expect(await canvasBlobs(canvasId).head(src)).not.toBeNull();
+  });
+
+  it('canonicalizes an artifact path that leaves and re-enters the Space', async () => {
+    const canvasId = 'c-image-reentered';
+    const store = getCanvasStore(canvasId);
+    const spaceDir = spaceDirectory(canvasId);
+    const artifactsDir = path.join(spaceDir, '.artifacts');
+    mkdirSync(artifactsDir, { recursive: true });
+    writeFileSync(path.join(artifactsDir, 'pic.png'), 'existing artifact');
+    const src = path.join(
+      '..',
+      path.basename(spaceDir),
+      '.artifacts',
+      'pic.png',
+    );
+
+    const commands: CanvasCommand[] = [
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            nodeType: 'image',
+            data: { src },
+            position: { x: 0, y: 0 },
+          },
+        ],
+      },
+    ];
+
+    const out = await importForeignNodeSources(store, canvasId, commands);
+
+    expect(firstSrc(out)).toBe('pic.png');
   });
 });

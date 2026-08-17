@@ -59,17 +59,11 @@ const MAX_EVENTS_IN_DIGEST = 100;
  * does NOT call `markAnalyzed` (so the next trigger retries). Writer
  * rejections are *not* errors — they come back as `ok:false` tool
  * results which we surface in the returned summary.
- *
- * `latestChatTs` is always `null` since the chat digest was removed; see
- * {@link ContextBundle}. The worker still persists it as
- * `lastSeenThreadCursor`, which is the resume point a reinstated digest
- * would need.
  */
 export type AnalysisPassResult =
   | {
       status: 'completed';
       results: WriteResult[];
-      latestChatTs: number | null;
     }
   | { status: 'skipped'; reason: 'space-not-found' };
 
@@ -129,7 +123,6 @@ export async function runAnalysisPass(
   return {
     status: 'completed',
     results: writeResults,
-    latestChatTs: bundle.latestChatTs,
   };
 }
 
@@ -166,21 +159,6 @@ function parseWriteResult(raw: string): WriteResult | null {
 interface ContextBundle {
   messages: Message[];
   summary: string;
-  /**
-   * Always `null`. The chat digest that produced it read
-   * `<canvas>/.history/chat/*.json` for a `{ messages: [] }` shape that two
-   * migrations retired — turns moved to `.turns.jsonl` and then into the
-   * Agenetes Tier-2 store under `chat_v2/`, so the only files left matching
-   * that glob are change-record arrays with no `messages` key. The reader
-   * had therefore returned nothing for some time, in production and in a
-   * test that pointed it at a non-existent directory.
-   *
-   * The field and its `lastSeenThreadCursor` plumbing survive the removal
-   * because they are the resume point any reinstated digest needs; the
-   * turns themselves belong to the agent runtime and are read through
-   * `agenetes.history()`, not through storage. See proposal §12.5.7.
-   */
-  latestChatTs: number | null;
 }
 
 /**
@@ -236,7 +214,6 @@ async function assembleContext(
   return {
     messages,
     summary: parts.join(', ') || '(empty)',
-    latestChatTs: null,
   };
 }
 
