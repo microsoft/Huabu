@@ -167,6 +167,123 @@ export function describeSpaceTasksContract(
       });
     });
 
+    it('completes only a running Run and keeps the first completion immutable', async () => {
+      const { tasks, concurrent, canvasId } = await open();
+      const owner = task(canvasId, 'task-complete', 1);
+      const other = task(canvasId, 'task-complete-other', 2);
+      const original = run(canvasId, owner.taskId, 'run-complete', 3);
+      await tasks.create(owner);
+      await tasks.create(other);
+      await tasks.runs.create(original);
+
+      await expect(
+        tasks.runs.complete(owner.taskId, original.runId, { completedAt: 4 }),
+      ).resolves.toMatchObject({ outcome: 'run_not_running', run: original });
+
+      await tasks.runs.update(original.runId, {
+        status: 'running',
+        startedAt: 5,
+      });
+      await expect(
+        tasks.runs.complete(owner.taskId, original.runId, {
+          completedAt: 6,
+          message: 'Done',
+        }),
+      ).resolves.toMatchObject({
+        outcome: 'completed',
+        run: {
+          status: 'completed',
+          completion: { completedAt: 6, message: 'Done' },
+        },
+      });
+      await expect(
+        tasks.runs.complete(owner.taskId, original.runId, {
+          completedAt: 7,
+          message: 'Done',
+        }),
+      ).resolves.toMatchObject({
+        outcome: 'unchanged',
+        run: { completion: { completedAt: 6, message: 'Done' } },
+      });
+      await expect(
+        tasks.runs.complete(owner.taskId, original.runId, {
+          completedAt: 8,
+          message: 'Different',
+        }),
+      ).resolves.toMatchObject({ outcome: 'completion_conflict' });
+      await expect(
+        tasks.runs.complete('task-missing', original.runId, { completedAt: 9 }),
+      ).resolves.toEqual({ outcome: 'task_not_found' });
+      await expect(
+        tasks.runs.complete(other.taskId, original.runId, { completedAt: 9 }),
+      ).resolves.toEqual({ outcome: 'run_not_found' });
+      await expect(
+        tasks.runs.complete(owner.taskId, 'run-missing', { completedAt: 9 }),
+      ).resolves.toEqual({ outcome: 'run_not_found' });
+      await expect(concurrent.read()).resolves.toEqual({
+        version: 1,
+        tasks: [owner, other],
+        runs: [
+          {
+            ...original,
+            status: 'completed',
+            startedAt: 5,
+            completion: { completedAt: 6, message: 'Done' },
+          },
+        ],
+      });
+    });
+
+    it('serializes competing completions and persists exactly one winner', async () => {
+      const { tasks, concurrent, canvasId } = await open();
+      const owner = task(canvasId, 'task-competing-completion', 1);
+      const original = run(
+        canvasId,
+        owner.taskId,
+        'run-competing-completion',
+        2,
+      );
+      await tasks.create(owner);
+      await tasks.runs.create(original);
+      await tasks.runs.update(original.runId, {
+        status: 'running',
+        startedAt: 3,
+      });
+
+      const results = await Promise.all([
+        tasks.runs.complete(owner.taskId, original.runId, {
+          completedAt: 4,
+          message: 'First candidate',
+        }),
+        concurrent.runs.complete(owner.taskId, original.runId, {
+          completedAt: 5,
+          message: 'Second candidate',
+        }),
+      ]);
+      expect(results.map((result) => result.outcome).sort()).toEqual([
+        'completed',
+        'completion_conflict',
+      ]);
+      const completed = results.find(
+        (result) => result.outcome === 'completed',
+      );
+      const conflict = results.find(
+        (result) => result.outcome === 'completion_conflict',
+      );
+      if (completed?.outcome !== 'completed') {
+        throw new Error('Expected one completion winner');
+      }
+      if (conflict?.outcome !== 'completion_conflict') {
+        throw new Error('Expected one completion conflict');
+      }
+      expect(conflict.run).toEqual(completed.run);
+      await expect(concurrent.read()).resolves.toEqual({
+        version: 1,
+        tasks: [owner],
+        runs: [completed.run],
+      });
+    });
+
     it('rejects Task and Run records scoped to another Space', async () => {
       const { tasks, canvasId } = await open();
       const owner = task(canvasId, 'task-scope', 1);
@@ -201,6 +318,11 @@ export function describeSpaceTasksContract(
       await tasks.runs.create(ownedRun);
       await expect(
         tasks.runs.update(ownedRun.runId, { startedAt: -1 }),
+      ).rejects.toThrow();
+      await expect(
+        tasks.runs.complete(owner.taskId, ownedRun.runId, {
+          completedAt: -1,
+        }),
       ).rejects.toThrow();
       await expect(tasks.read()).resolves.toEqual({
         version: 1,
@@ -272,6 +394,11 @@ export function describeSpaceTasksContract(
       await expect(
         missing.runs.update(ownedRun.runId, { status: 'running' }),
       ).rejects.toThrow();
+      await expect(
+        missing.runs.complete(owner.taskId, ownedRun.runId, {
+          completedAt: 3,
+        }),
+      ).rejects.toThrow();
     });
 
     it('rejects mutations while structured deletion is fenced', async () => {
@@ -292,6 +419,11 @@ export function describeSpaceTasksContract(
         ).rejects.toThrow();
         await expect(
           tasks.runs.update(original.runId, { status: 'running' }),
+        ).rejects.toThrow();
+        await expect(
+          tasks.runs.complete(owner.taskId, original.runId, {
+            completedAt: 5,
+          }),
         ).rejects.toThrow();
         await expect(tasks.read()).resolves.toEqual(before);
       } finally {

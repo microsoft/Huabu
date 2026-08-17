@@ -144,8 +144,9 @@ external-note discovery watches `nodes/`, and export archives the entire Space
 directory. Therefore wrapping `CanvasStore` in a database adapter would not by
 itself make the application backend-neutral.
 
-Canvas/Space persistence is currently Disk-only. SQLite, Postgres, and Azure
-Blob adapters for this data do not yet exist.
+Runtime Canvas/Space persistence remains Disk-only. An isolated SQLite
+structured adapter exists for contract and integration tests, while Postgres
+and Azure Blob adapters do not yet exist.
 
 ## 4. Goals
 
@@ -175,9 +176,9 @@ Blob adapters for this data do not yet exist.
   their product semantics are defined.
 - Implementing online backend migration, replication, backup, or disaster
   recovery.
-- Shipping any non-Disk adapter. The phases in §12 remove reasons why SQLite,
-  Postgres, and Azure _cannot_ be implemented; that is not the same as
-  implementing them.
+- Making a non-Disk adapter runtime-selectable. Phase 5 proves an isolated
+  adapter against the contracts without registering it in composition or
+  changing product capabilities.
 
 ## 6. Settled backend split and implemented minimum contracts
 
@@ -301,8 +302,9 @@ into place makes the failed write invisible instead of unremovable.
 
 ### 6.3 Composition
 
-Configuration has two axes. The current shape carries only a backend kind per
-axis, because no adapter yet needs more:
+Configuration has two axes. The runtime-selectable profile carries only a
+backend kind per axis. The isolated SQLite preview receives its explicit
+database filename directly and is not constructed from this profile:
 
 ```ts
 interface StorageProfile {
@@ -325,7 +327,8 @@ node-local DiskBlob implementation is unsafe in a multi-replica deployment
 unless the path is a deliberately shared and supported filesystem. SQLite on a
 network filesystem has different correctness and availability constraints from
 local SQLite. `validateStorageProfile()` is where such rules live; today it
-rejects kinds that are named but not implemented, so an unsupported profile
+rejects recognized kinds that are unavailable or deliberately unselectable,
+including SQLite's preview-specific diagnostic, so an unsupported profile
 fails at startup with an actionable message rather than nondeterministically
 while serving data.
 
@@ -684,7 +687,7 @@ exceptions: one names what it returns, the other opens a session.
 
 ```ts
 interface StructuredStore {
-  readonly kind: StructuredBackendKind; // 'disk' — implemented adapters only
+  readonly kind: StructuredBackendKind; // 'disk' | 'sqlite'; only Disk is selectable
 
   init(): Promise<void>;
   health(): Promise<StorageHealth>;
@@ -746,7 +749,7 @@ interface SpaceChanges {
 interface SpaceTasks {
   read(): Promise<TaskStoreSnapshot>; // Tasks and Runs in one snapshot
   create(task: TaskRecord): Promise<void>;
-  readonly runs: SpaceTaskRuns; // create(run), update(runId, patch)
+  readonly runs: SpaceTaskRuns; // create, update, and atomic complete
 }
 ```
 
