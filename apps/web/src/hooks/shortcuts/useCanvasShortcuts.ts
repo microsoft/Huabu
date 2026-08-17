@@ -84,6 +84,7 @@ export function useCanvasShortcuts(
   const previousToolRef = useRef<Exclude<CanvasTool, 'pan'>>('select');
   const temporaryPanRef = useRef(false);
   const temporaryPanPointerRef = useRef<number | null>(null);
+  const temporaryPanMouseUpPendingRef = useRef(false);
   const spacePressedRef = useRef(false);
 
   useEffect(() => {
@@ -100,6 +101,7 @@ export function useCanvasShortcuts(
       if (!temporaryPanRef.current) return;
       temporaryPanRef.current = false;
       temporaryPanPointerRef.current = null;
+      temporaryPanMouseUpPendingRef.current = false;
       spacePressedRef.current = false;
       setTool((prev) => (prev === 'pan' ? previousToolRef.current : prev));
     };
@@ -123,7 +125,12 @@ export function useCanvasShortcuts(
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key !== ' ') return;
       spacePressedRef.current = false;
-      if (temporaryPanPointerRef.current === null) restoreTemporaryPan();
+      if (
+        temporaryPanPointerRef.current === null &&
+        !temporaryPanMouseUpPendingRef.current
+      ) {
+        restoreTemporaryPan();
+      }
     };
     const onPointerDown = (e: PointerEvent) => {
       if (!temporaryPanRef.current || e.button !== 0 || !e.isPrimary) return;
@@ -132,6 +139,11 @@ export function useCanvasShortcuts(
     const onPointerUp = (e: PointerEvent) => {
       if (temporaryPanPointerRef.current !== e.pointerId) return;
       temporaryPanPointerRef.current = null;
+      temporaryPanMouseUpPendingRef.current = true;
+    };
+    const onMouseUp = () => {
+      if (!temporaryPanMouseUpPendingRef.current) return;
+      temporaryPanMouseUpPendingRef.current = false;
       if (!spacePressedRef.current) restoreTemporaryPan();
     };
     const onPointerCancel = (e: PointerEvent) => {
@@ -146,6 +158,7 @@ export function useCanvasShortcuts(
     window.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('pointerup', onPointerUp, true);
     window.addEventListener('pointercancel', onPointerCancel, true);
+    window.addEventListener('mouseup', onMouseUp);
     window.addEventListener('blur', restoreTemporaryPan);
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
@@ -154,6 +167,7 @@ export function useCanvasShortcuts(
       window.removeEventListener('pointerdown', onPointerDown, true);
       window.removeEventListener('pointerup', onPointerUp, true);
       window.removeEventListener('pointercancel', onPointerCancel, true);
+      window.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('blur', restoreTemporaryPan);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       restoreTemporaryPan();

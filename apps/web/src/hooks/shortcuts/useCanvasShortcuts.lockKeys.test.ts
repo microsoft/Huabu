@@ -142,6 +142,11 @@ describe('useCanvasShortcuts catalog key lock', () => {
     act(() => {
       window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
     });
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mouseup'));
+    });
     expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
   });
 
@@ -158,11 +163,35 @@ describe('useCanvasShortcuts catalog key lock', () => {
         }),
       );
       window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
+      window.dispatchEvent(new MouseEvent('mouseup'));
     });
     expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
 
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }));
+    });
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+  });
+
+  it('does not restore temporary pan between pointerup and mouseup', () => {
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', cancelable: true }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          button: 0,
+          isPrimary: true,
+          pointerId: 1,
+        }),
+      );
+      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }));
+    });
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mouseup'));
     });
     expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
   });
