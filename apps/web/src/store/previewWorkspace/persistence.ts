@@ -21,6 +21,7 @@ import {
   type PreviewTab,
   type PreviewTarget,
 } from './model';
+import { forgetMessageListScrollCanvas } from './scrollMemory';
 
 const WORKSPACE_VERSION = 1;
 
@@ -227,7 +228,10 @@ function writeIndex(canvasIds: string[]): void {
 function touchIndex(canvasId: string): void {
   const next = [canvasId, ...readIndex().filter((id) => id !== canvasId)];
   const evicted = next.slice(MAX_PERSISTED_CANVASES);
-  for (const id of evicted) removeRaw(workspaceStorageKey(id));
+  for (const id of evicted) {
+    removeRaw(workspaceStorageKey(id));
+    forgetMessageListScrollCanvas(id);
+  }
   writeIndex(next.slice(0, MAX_PERSISTED_CANVASES));
 }
 
@@ -254,6 +258,7 @@ export function writeWorkspace(
 export function deleteWorkspace(canvasId: string): void {
   if (!canvasId) return;
   removeRaw(workspaceStorageKey(canvasId));
+  forgetMessageListScrollCanvas(canvasId);
   const next = readIndex().filter((id) => id !== canvasId);
   writeIndex(next);
 }

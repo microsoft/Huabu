@@ -4,33 +4,11 @@
 export type MessageListOpenPosition = 'last-user' | 'bottom';
 export type MessageListPreferredPosition = 'last-user' | 'bottom';
 
-const scrollTopByViewKey = new Map<string, number>();
-
-export function rememberMessageListScrollPosition(
-  viewKey: string | undefined,
-  scrollTop: number,
-): void {
-  if (!viewKey || !Number.isFinite(scrollTop)) return;
-  scrollTopByViewKey.set(viewKey, Math.max(0, scrollTop));
-}
-
-export function restoreMessageListScrollPosition(
-  container: HTMLElement,
-  viewKey: string | undefined,
-): boolean {
-  if (!viewKey) return false;
-  const scrollTop = scrollTopByViewKey.get(viewKey);
-  if (scrollTop === undefined) return false;
-  container.scrollTop = scrollTop;
-  return true;
-}
-
-export function forgetMessageListScrollPosition(
-  viewKey: string | undefined,
-): void {
-  if (!viewKey) return;
-  scrollTopByViewKey.delete(viewKey);
-}
+export {
+  forgetMessageListScrollPosition,
+  rememberMessageListScrollPosition,
+  restoreMessageListScrollPosition,
+} from '@/store/previewWorkspace/scrollMemory';
 
 /** Position an opened conversation without scrolling any page ancestors. */
 export function positionMessageListOnOpen(

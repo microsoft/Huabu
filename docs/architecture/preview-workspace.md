@@ -104,7 +104,7 @@ The activation sequence is an integer stored with the workspace rather than a wa
 
 Editor focus is a runtime-only `{ tabId, nonce }` request. Only the addressed active tab receives it, and its renderer consumes it after focus succeeds so remounting cannot replay stale intent.
 
-Question conversation positioning is a runtime-only `{ tabId, position, nonce }` request where `position` is `last-user` or `bottom`. `MessageList` consumes the request after history hydration and successful positioning. Each mounted Chat also keeps its latest scroll offset in a runtime cache keyed by conversation-owner Canvas plus `threadId`, restoring and recalibrating that offset when the user switches back to the thread; visiting additional conversations cannot silently discard an earlier reading position, while explicitly closing a Chat tab deletes its cached offset so reopening follows the requested or default opening position. A thread without a saved offset uses the requested opening position.
+Question conversation positioning is a runtime-only `{ tabId, position, nonce }` request where `position` is `last-user` or `bottom`. `MessageList` consumes the request after history hydration and successful positioning. Each mounted Chat also keeps its latest scroll offset in a runtime cache keyed by conversation-owner Canvas plus `threadId`, restoring and recalibrating that offset when the user switches back to the thread; visiting additional conversations cannot silently discard an earlier reading position. When an unread-opening request finds a saved offset above the latest messages, the list preserves that reading position and exposes the New message action instead of scrolling automatically. The cache registers each Preview target against its resolved conversation owner, removes an offset after the final target is closed, replaced, or invalidated, and clears unreferenced offsets when a Canvas layout is deleted or evicted from the persisted MRU index. A thread without a saved offset uses the requested opening position.
 
 Inactive tabs never count as actively viewed. A Question is actively viewed only when its tab is the active tab of a rendered group and the outer right panel is expanded; this rule controls the Canvas open indicator and whether stream completion marks a result as viewed.
 
@@ -122,7 +122,7 @@ Persisted input is parsed defensively. Invalid targets, dangling tab IDs, duplic
 
 After a command deletes nodes, the web post-effect validates the workspace against the committed live node IDs. Tabs targeting deleted nodes are removed and active IDs or empty groups are repaired by `validateWorkspace`.
 
-Closing a Preview tab does not delete the Canvas node, stop a running turn, or remove server-side Chat history. Successful Canvas deletion calls `deleteWorkspace(canvasId)` to remove its layout; unreachable layout records are also reclaimed when they fall out of the capped Canvas MRU index.
+Closing a Preview tab does not delete the Canvas node, stop a running turn, or remove server-side Chat history. Successful Canvas deletion calls `deleteWorkspace(canvasId)` to remove its layout and runtime scroll-memory ownership; unreachable layout records are also reclaimed when they fall out of the capped Canvas MRU index.
 
 ## 8. Layout and accessibility
 

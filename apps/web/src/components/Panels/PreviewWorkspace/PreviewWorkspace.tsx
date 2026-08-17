@@ -28,7 +28,6 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
-import { forgetMessageListScrollPosition } from '@/components/Messages/messageListScroll';
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import {
@@ -163,11 +162,7 @@ export function PreviewWorkspace({
   const closeWorkspaceTab = (tabId: string) => {
     const currentWorkspace = usePreviewWorkspaceStore.getState().workspace;
     const isFinalTab = Object.keys(currentWorkspace.tabs).length === 1;
-    const target = currentWorkspace.tabs[tabId]?.target;
     settleTab(tabId);
-    if (target?.kind === 'chat') {
-      forgetMessageListScrollPosition(`${target.canvasId}:${target.threadId}`);
-    }
     closeTab(tabId);
     if (isFinalTab) onCollapse?.();
   };

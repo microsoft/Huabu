@@ -4,6 +4,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  forgetMessageListScrollCanvas,
+  forgetMessageListScrollTarget,
+  registerMessageListScrollTarget,
+  replaceMessageListScrollTarget,
+} from '@/store/previewWorkspace/scrollMemory';
+
+import {
   forgetMessageListScrollPosition,
   positionMessageListOnOpen,
   rememberMessageListScrollPosition,
@@ -94,5 +101,126 @@ describe('per-view scroll positions', () => {
       restoreMessageListScrollPosition(container, 'retained-thread-50'),
     ).toBe(true);
     expect(container.scrollTop).toBe(50);
+  });
+
+  it('forgets a Question target by its conversation-owner view key', () => {
+    const target = {
+      kind: 'node' as const,
+      canvasId: 'world-canvas',
+      nodeId: 'question-ref',
+    };
+    const viewKey = 'source-canvas:question-thread';
+    registerMessageListScrollTarget(target, viewKey);
+    rememberMessageListScrollPosition(viewKey, 180);
+
+    forgetMessageListScrollTarget(target);
+
+    expect(
+      restoreMessageListScrollPosition(document.createElement('div'), viewKey),
+    ).toBe(false);
+  });
+
+  it('retains a shared conversation until its final target is removed', () => {
+    const viewKey = 'source-canvas:shared-thread';
+    const first = {
+      kind: 'node' as const,
+      canvasId: 'world-a',
+      nodeId: 'question-ref-a',
+    };
+    const second = {
+      kind: 'node' as const,
+      canvasId: 'world-b',
+      nodeId: 'question-ref-b',
+    };
+    registerMessageListScrollTarget(first, viewKey);
+    registerMessageListScrollTarget(second, viewKey);
+    rememberMessageListScrollPosition(viewKey, 220);
+
+    forgetMessageListScrollTarget(first);
+    expect(
+      restoreMessageListScrollPosition(document.createElement('div'), viewKey),
+    ).toBe(true);
+
+    forgetMessageListScrollTarget(second);
+    expect(
+      restoreMessageListScrollPosition(document.createElement('div'), viewKey),
+    ).toBe(false);
+  });
+
+  it('forgets the previous owner when a target resolves to a new thread', () => {
+    const target = {
+      kind: 'node' as const,
+      canvasId: 'world-rebound',
+      nodeId: 'question-ref-rebound',
+    };
+    const previousViewKey = 'source-canvas:previous-thread';
+    registerMessageListScrollTarget(target, previousViewKey);
+    rememberMessageListScrollPosition(previousViewKey, 240);
+
+    registerMessageListScrollTarget(target, 'source-canvas:next-thread');
+
+    expect(
+      restoreMessageListScrollPosition(
+        document.createElement('div'),
+        previousViewKey,
+      ),
+    ).toBe(false);
+  });
+
+  it('moves a registration when a tab target is replaced', () => {
+    const previous = {
+      kind: 'chat' as const,
+      canvasId: 'canvas-replace',
+      threadId: 'thread-replace',
+    };
+    const next = {
+      kind: 'node' as const,
+      canvasId: 'canvas-replace',
+      nodeId: 'question-replace',
+    };
+    const viewKey = 'canvas-replace:thread-replace';
+    registerMessageListScrollTarget(previous, viewKey);
+    rememberMessageListScrollPosition(viewKey, 260);
+
+    replaceMessageListScrollTarget(previous, next);
+    forgetMessageListScrollTarget(previous);
+    expect(
+      restoreMessageListScrollPosition(document.createElement('div'), viewKey),
+    ).toBe(true);
+
+    forgetMessageListScrollTarget(next);
+    expect(
+      restoreMessageListScrollPosition(document.createElement('div'), viewKey),
+    ).toBe(false);
+  });
+
+  it('forgets every unreferenced position owned or presented by a Canvas', () => {
+    const directViewKey = 'canvas-delete:chat-thread';
+    const sourceViewKey = 'source-canvas:question-thread-delete';
+    registerMessageListScrollTarget(
+      {
+        kind: 'node',
+        canvasId: 'canvas-delete',
+        nodeId: 'question-ref-delete',
+      },
+      sourceViewKey,
+    );
+    rememberMessageListScrollPosition(directViewKey, 100);
+    rememberMessageListScrollPosition(sourceViewKey, 200);
+
+    forgetMessageListScrollCanvas('canvas-delete');
+
+    expect(
+      restoreMessageListScrollPosition(
+        document.createElement('div'),
+        directViewKey,
+      ),
+    ).toBe(false);
+    expect(
+      restoreMessageListScrollPosition(
+        document.createElement('div'),
+        sourceViewKey,
+      ),
+    ).toBe(false);
   });
 });

@@ -85,17 +85,24 @@ export const MessageList = ({
       handledOpenRequestRef.current !== openPositionRequestNonce;
     if (!viewChanged && !hasNewRequest) return;
 
-    const restored =
-      !hasNewRequest && restoreMessageListScrollPosition(container, viewKey);
+    const restored = restoreMessageListScrollPosition(container, viewKey);
+    const restoredAtBottom =
+      restored &&
+      container.scrollTop >=
+        container.scrollHeight - container.clientHeight - 50;
     const position = restored
-      ? container.scrollTop >=
-        container.scrollHeight - container.clientHeight - 50
+      ? restoredAtBottom
         ? 'bottom'
         : 'restored'
       : positionMessageListOnOpen(container, openPosition);
     isAtBottomRef.current = position !== 'last-user' && position !== 'restored';
 
-    setHasNewMessage(false);
+    setHasNewMessage(
+      restored &&
+        !restoredAtBottom &&
+        hasNewRequest &&
+        openPosition === 'last-user',
+    );
     prevMessageCountRef.current = currentMessageCountRef.current;
     positionedViewKeyRef.current = viewKey;
     hasPositionedViewRef.current = true;
