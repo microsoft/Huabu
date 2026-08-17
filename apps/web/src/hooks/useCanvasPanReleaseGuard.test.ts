@@ -8,20 +8,11 @@ import { attachCanvasPanReleaseGuard } from './useCanvasPanReleaseGuard';
 describe('attachCanvasPanReleaseGuard', () => {
   let wrapper: HTMLDivElement;
   let detach: (() => void) | null;
-  let frameCallback: FrameRequestCallback | null;
 
   beforeEach(() => {
     wrapper = document.createElement('div');
     document.body.appendChild(wrapper);
     detach = null;
-    frameCallback = null;
-    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
-      frameCallback = callback;
-      return 1;
-    });
-    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {
-      frameCallback = null;
-    });
   });
 
   afterEach(() => {
@@ -33,7 +24,7 @@ describe('attachCanvasPanReleaseGuard', () => {
   const pointer = (type: 'pointerdown' | 'pointerup', init: PointerEventInit) =>
     new PointerEvent(type, { bubbles: true, ...init });
 
-  it('lets the native mouseup finish the pan without a fallback', () => {
+  it('allows the native mouseup after the synchronous fallback', () => {
     const mouseUp = vi.fn();
     window.addEventListener('mouseup', mouseUp);
     detach = attachCanvasPanReleaseGuard(wrapper, () => true);
@@ -45,9 +36,8 @@ describe('attachCanvasPanReleaseGuard', () => {
       pointer('pointerup', { pointerId: 1, pointerType: 'mouse', button: 0 }),
     );
     window.dispatchEvent(new MouseEvent('mouseup'));
-    frameCallback?.(16);
 
-    expect(mouseUp).toHaveBeenCalledTimes(1);
+    expect(mouseUp).toHaveBeenCalledTimes(2);
     window.removeEventListener('mouseup', mouseUp);
   });
 
@@ -68,7 +58,6 @@ describe('attachCanvasPanReleaseGuard', () => {
         clientY: 30,
       }),
     );
-    frameCallback?.(16);
 
     expect(mouseUp).toHaveBeenCalledTimes(1);
     expect(mouseUp.mock.calls[0]?.[0]).toMatchObject({
@@ -111,7 +100,6 @@ describe('attachCanvasPanReleaseGuard', () => {
       pointer('pointerup', { pointerId: 1, pointerType: 'mouse', button: 0 }),
     );
 
-    expect(frameCallback).toBeNull();
     expect(mouseUp).not.toHaveBeenCalled();
     window.removeEventListener('mouseup', mouseUp);
   });
@@ -127,7 +115,6 @@ describe('attachCanvasPanReleaseGuard', () => {
     window.dispatchEvent(
       pointer('pointerup', { pointerId: 1, pointerType: 'mouse', button: 1 }),
     );
-    frameCallback?.(16);
 
     expect(mouseUp).toHaveBeenCalledTimes(1);
     expect(mouseUp.mock.calls[0]?.[0]).toMatchObject({ button: 1 });

@@ -17,22 +17,13 @@ export function attachCanvasPanReleaseGuard(
 ): () => void {
   let activePointerId: number | null = null;
   let releaseInit: MouseReleaseInit | null = null;
-  let fallbackFrame: number | null = null;
-
-  const cancelFallback = () => {
-    if (fallbackFrame === null) return;
-    cancelAnimationFrame(fallbackFrame);
-    fallbackFrame = null;
-  };
 
   const clear = () => {
-    cancelFallback();
     activePointerId = null;
     releaseInit = null;
   };
 
   const dispatchFallbackMouseUp = () => {
-    fallbackFrame = null;
     if (activePointerId === null || !releaseInit) return;
     const init = releaseInit;
     activePointerId = null;
@@ -53,7 +44,6 @@ export function attachCanvasPanReleaseGuard(
     if (event.button !== 1 && !(event.button === 0 && isLeftDragPanEnabled())) {
       return;
     }
-    cancelFallback();
     activePointerId = event.pointerId;
     releaseInit = {
       button: event.button,
@@ -73,8 +63,7 @@ export function attachCanvasPanReleaseGuard(
       screenX: event.screenX,
       screenY: event.screenY,
     };
-    cancelFallback();
-    fallbackFrame = requestAnimationFrame(dispatchFallbackMouseUp);
+    dispatchFallbackMouseUp();
   };
 
   const onPointerMove = (event: PointerEvent) => {
