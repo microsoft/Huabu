@@ -360,7 +360,7 @@ function ToolbarColorPicker({
                 ref={refs.setFloating}
                 role="presentation"
                 {...FLOATING_CHROME_PROPS}
-                className={FLOATING_TOOLBAR_POPOVER_CLASS}
+                className={cn(FLOATING_TOOLBAR_POPOVER_CLASS, 'px-1.5 py-1')}
                 style={{
                   ...floatingStyles,
                   visibility: isPositioned ? 'visible' : 'hidden',

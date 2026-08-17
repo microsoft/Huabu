@@ -39,7 +39,7 @@ export const ColorPicker = ({
   onSelect,
 }: ColorPickerProps) => {
   return (
-    <div className="flex gap-2">
+    <div className="flex gap-0">
       {colors.map((c) => {
         const isTransparent = c.value === 'transparent' || !c.value;
         return (
@@ -49,29 +49,32 @@ export const ColorPicker = ({
             iconOnly
             size="sm"
             onClick={() => onSelect(c.token)}
-            className={clsx(
-              'h-4 w-4 rounded-full border-2 border-solid p-0 transition-transform hover:scale-110',
-              activeToken === c.token
-                ? 'border-info scale-110'
-                : 'border-edge-default',
-            )}
-            style={
-              isTransparent
-                ? {
-                    // Checkerboard pattern: makes "no fill" instantly
-                    // recognisable instead of looking like a white swatch.
-                    backgroundColor: 'var(--bg-surface)',
-                    backgroundImage:
-                      'linear-gradient(45deg, var(--fg-subtle) 25%, transparent 25%, transparent 75%, var(--fg-subtle) 75%), linear-gradient(45deg, var(--fg-subtle) 25%, transparent 25%, transparent 75%, var(--fg-subtle) 75%)',
-                    backgroundSize: '6px 6px',
-                    backgroundPosition: '0 0, 3px 3px',
-                  }
-                : { backgroundColor: c.value }
-            }
+            className="group h-6 w-6 rounded-full p-0 enabled:hover:bg-transparent"
             title={c.name}
             aria-label={c.name}
           >
-            <span className="sr-only">{c.name}</span>
+            <span
+              aria-hidden
+              className={clsx(
+                'h-3.5 w-3.5 shrink-0 rounded-full border-2 border-solid transition-transform group-hover:scale-110',
+                activeToken === c.token
+                  ? 'border-info scale-110'
+                  : 'border-edge-default',
+              )}
+              style={
+                isTransparent
+                  ? {
+                      // Checkerboard pattern: makes "no fill" instantly
+                      // recognisable instead of looking like a white swatch.
+                      backgroundColor: 'var(--bg-surface)',
+                      backgroundImage:
+                        'linear-gradient(45deg, var(--fg-subtle) 25%, transparent 25%, transparent 75%, var(--fg-subtle) 75%), linear-gradient(45deg, var(--fg-subtle) 25%, transparent 25%, transparent 75%, var(--fg-subtle) 75%)',
+                      backgroundSize: '6px 6px',
+                      backgroundPosition: '0 0, 3px 3px',
+                    }
+                  : { backgroundColor: c.value }
+              }
+            />
           </Button>
         );
       })}

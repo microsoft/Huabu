@@ -59,7 +59,20 @@ describe('FloatingToolbar.ColorPicker', () => {
       'button[aria-label="Red"]',
     ) as HTMLButtonElement | null;
     expect(redSwatch).not.toBeNull();
-    expect(redSwatch?.classList.contains('border-solid')).toBe(true);
+    expect(redSwatch?.closest('div.flex.gap-0')).not.toBeNull();
+    expect(redSwatch?.classList.contains('h-6')).toBe(true);
+    expect(redSwatch?.classList.contains('min-h-6')).toBe(true);
+    expect(redSwatch?.classList.contains('w-6')).toBe(true);
+    expect(redSwatch?.classList.contains('min-w-6')).toBe(true);
+    expect(redSwatch?.classList.contains('enabled:hover:bg-transparent')).toBe(
+      true,
+    );
+    expect(redSwatch?.classList.contains('enabled:hover:bg-hover')).toBe(false);
+
+    const redDot = redSwatch?.querySelector('span[aria-hidden]');
+    expect(redDot?.classList.contains('border-solid')).toBe(true);
+    expect(redDot?.classList.contains('h-3.5')).toBe(true);
+    expect(redDot?.classList.contains('w-3.5')).toBe(true);
 
     act(() => {
       redSwatch?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
