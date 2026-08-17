@@ -122,7 +122,7 @@ Persisted input is parsed defensively. Invalid targets, dangling tab IDs, duplic
 
 After a command deletes nodes, the web post-effect validates the workspace against the committed live node IDs. Tabs targeting deleted nodes are removed and active IDs or empty groups are repaired by `validateWorkspace`.
 
-Closing a Preview tab does not delete the Canvas node, stop a running turn, or remove server-side Chat history. Persistence exposes `deleteWorkspace(canvasId)`, but Canvas deletion does not currently call it in production; unreachable layout records are reclaimed when they fall out of the capped Canvas MRU index.
+Closing a Preview tab does not delete the Canvas node, stop a running turn, or remove server-side Chat history. Successful Canvas deletion calls `deleteWorkspace(canvasId)` to remove its layout; unreachable layout records are also reclaimed when they fall out of the capped Canvas MRU index.
 
 ## 8. Layout and accessibility
 
