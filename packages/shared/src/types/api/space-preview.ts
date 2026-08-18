@@ -6,6 +6,8 @@ import { z } from 'zod';
 export const SPACE_PREVIEW_MAX_NODES = 250;
 export const SPACE_PREVIEW_MAX_EDGES = 400;
 export const SPACE_PREVIEW_MAX_RESPONSE_BYTES = 1024 * 1024;
+export const SPACE_PREVIEW_MAX_TEXT_LENGTH = 2000;
+export const SPACE_PREVIEW_MAX_IMAGE_SRC_LENGTH = 2048;
 
 const canvasIdSchema = z.string().regex(/^canvas-.+$/);
 const nodeIdSchema = z.string().regex(/^node-.+$/);
@@ -28,6 +30,8 @@ export const spacePreviewSceneNodeSchema = z
     width: z.number().finite().positive(),
     height: z.number().finite().positive(),
     label: z.string().max(160).optional(),
+    previewText: z.string().max(SPACE_PREVIEW_MAX_TEXT_LENGTH).optional(),
+    imageSrc: z.string().max(SPACE_PREVIEW_MAX_IMAGE_SRC_LENGTH).optional(),
   })
   .strict();
 

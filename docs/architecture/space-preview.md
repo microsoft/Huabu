@@ -15,13 +15,13 @@ Legacy `canvasRef`, `frameRef`, `nodeRef`, and Pin data remain readable for comp
 
 `GET /api/canvas/:canvasId/preview-scene` accepts only an ordinary Space in the active workspace. The server converts topology and node sidecars into the shared zod contract in `packages/shared/src/types/api/space-preview.ts`; missing targets return `404` and malformed target records return `422`.
 
-The response contains identity, title, Canvas version, absolute node geometry, safe visual kinds, whitespace-normalized plain-text labels, eligible edges, scene bounds, and explicit truncation flags. It excludes authored bodies, prompts, chat and Agent state, Interactive View state, executable URLs, artifact bytes, handles, selection, and mutation metadata.
+The response contains identity, title, Canvas version, absolute node geometry, safe visual kinds, whitespace-normalized labels, bounded plain-text excerpts for Note and Text nodes, bounded Image source references, eligible edges, scene bounds, and explicit truncation flags. Markdown is flattened before projection; inline `data:` and renderer-local `blob:` image sources are excluded. The response never includes complete rich-editor state, prompts, chat and Agent state, Interactive View state, artifact bytes, handles, selection, or mutation metadata.
 
 Projection keeps deterministic source order and is bounded to 250 nodes, 400 edges, and 1 MiB serialized JSON. `spacePreview` and `canvasRef` source nodes become inert `nested-preview` placeholders, so projection has exactly one live scene depth and cannot recurse through self-reference or cycles.
 
 ## 3. Web rendering and freshness
 
-The web renderer draws the bounded scene as static SVG geometry. Cache entries are keyed by target Canvas, share in-flight requests across duplicate previews, remain fresh for ten seconds, revalidate on focus and while a preview is near the browser viewport, and keep the last successful scene with a stale indicator after transient refresh failure. One tab admits at most two target requests concurrently.
+The web renderer draws bounded scene geometry, clipped Image thumbnails, and overflow-clamped plain-text Note and Text excerpts through static SVG and `foreignObject` content. These visual elements inherit `pointer-events: none`; they never mount the source node component or become an independent interaction target. Cache entries are keyed by target Canvas, share in-flight requests across duplicate previews, remain fresh for ten seconds, revalidate on focus and while a preview is near the browser viewport, and keep the last successful scene with a stale indicator after transient refresh failure. One tab admits at most two target requests concurrently.
 
 An `IntersectionObserver` with a 300 px margin suspends fetch timers and the SVG viewport for distant previews. This makes World the scale acceptance surface without giving each offscreen Space an active renderer or poller.
 

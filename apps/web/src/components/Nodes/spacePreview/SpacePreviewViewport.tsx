@@ -2,9 +2,18 @@
 // Licensed under the MIT license.
 
 import { Minus, Plus, RotateCcw } from 'lucide-react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { resolveArtifactUrl } from '@/api/artifact';
 import { Button } from '@/components/Common/Button';
 
 import {
@@ -33,6 +42,7 @@ export const SpacePreviewViewport = memo(
     previewNodeId: string;
   }) => {
     const { t } = useTranslation();
+    const clipPrefix = useId().replaceAll(':', '');
     const rootRef = useRef<HTMLDivElement>(null);
     const dragRef = useRef<{
       pointerId: number;
@@ -182,6 +192,21 @@ export const SpacePreviewViewport = memo(
           preserveAspectRatio="xMidYMid meet"
           aria-hidden="true"
         >
+          <defs>
+            {scene.nodes.map((node, index) =>
+              node.imageSrc ? (
+                <clipPath id={`${clipPrefix}-image-${index}`} key={node.id}>
+                  <rect
+                    x={node.x}
+                    y={node.y}
+                    width={node.width}
+                    height={node.height}
+                    rx={10}
+                  />
+                </clipPath>
+              ) : null,
+            )}
+          </defs>
           {scene.edges.map((edge) => {
             const source = nodeById.get(edge.source);
             const target = nodeById.get(edge.target);
@@ -198,7 +223,7 @@ export const SpacePreviewViewport = memo(
               />
             );
           })}
-          {scene.nodes.map((node) => (
+          {scene.nodes.map((node, index) => (
             <g key={node.id}>
               <rect
                 x={node.x}
@@ -218,7 +243,28 @@ export const SpacePreviewViewport = memo(
                   node.kind === 'nested-preview' ? '6 4' : undefined
                 }
               />
-              {node.label && (
+              {node.imageSrc ? (
+                <image
+                  href={resolveArtifactUrl(node.imageSrc, scene.canvasId)}
+                  x={node.x}
+                  y={node.y}
+                  width={node.width}
+                  height={node.height}
+                  preserveAspectRatio="xMidYMid meet"
+                  clipPath={`url(#${clipPrefix}-image-${index})`}
+                />
+              ) : node.previewText ? (
+                <foreignObject
+                  x={node.x + 12}
+                  y={node.y + 12}
+                  width={Math.max(1, node.width - 24)}
+                  height={Math.max(1, node.height - 24)}
+                >
+                  <div className="text-fg-default h-full overflow-hidden text-sm leading-snug break-words whitespace-pre-wrap">
+                    {node.previewText}
+                  </div>
+                </foreignObject>
+              ) : node.label ? (
                 <text
                   x={node.x + 10}
                   y={node.y + 20}
@@ -226,7 +272,7 @@ export const SpacePreviewViewport = memo(
                 >
                   {node.label}
                 </text>
-              )}
+              ) : null}
             </g>
           ))}
         </svg>

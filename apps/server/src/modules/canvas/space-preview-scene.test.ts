@@ -37,7 +37,8 @@ function seed(
       nodeId: id,
       type: String(node.type),
       label: typeof data.label === 'string' ? data.label : null,
-      content: '',
+      content: typeof data.content === 'string' ? data.content : '',
+      ...(typeof data.src === 'string' ? { src: data.src } : {}),
     });
   }
 }
@@ -151,6 +152,48 @@ describe('Space Preview scene projection', () => {
     expect(scene.nodes).toHaveLength(SPACE_PREVIEW_MAX_NODES);
     expect(scene.nodes.at(-1)?.id).toBe(`node-${SPACE_PREVIEW_MAX_NODES - 1}`);
     expect(scene.truncated.nodes).toBe(true);
+  });
+
+  it('includes bounded inert Note text and Image sources', async () => {
+    seed([
+      {
+        id: 'node-note',
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: {
+          label: 'Plan',
+          content: '# Heading\n\nA **read-only** preview.',
+        },
+      },
+      {
+        id: 'node-image',
+        type: 'image',
+        position: { x: 500, y: 0 },
+        data: { label: 'Diagram', src: 'artifact-diagram.png' },
+      },
+      {
+        id: 'node-inline-image',
+        type: 'image',
+        position: { x: 900, y: 0 },
+        data: { src: 'data:image/png;base64,unsafe-inline-payload' },
+      },
+    ]);
+
+    const scene = await getSpacePreviewScene('canvas-target');
+
+    expect(scene.nodes).toEqual([
+      expect.objectContaining({
+        id: 'node-note',
+        previewText: 'Heading\n\nA read-only preview.',
+      }),
+      expect.objectContaining({
+        id: 'node-image',
+        imageSrc: 'artifact-diagram.png',
+      }),
+      expect.not.objectContaining({
+        imageSrc: expect.anything(),
+      }),
+    ]);
   });
 
   it('rejects missing and malformed target Spaces explicitly', async () => {

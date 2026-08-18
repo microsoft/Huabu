@@ -3,8 +3,10 @@
 
 import {
   SPACE_PREVIEW_MAX_EDGES,
+  SPACE_PREVIEW_MAX_IMAGE_SRC_LENGTH,
   SPACE_PREVIEW_MAX_NODES,
   SPACE_PREVIEW_MAX_RESPONSE_BYTES,
+  SPACE_PREVIEW_MAX_TEXT_LENGTH,
   type GetSpacePreviewSceneResponse,
   type SpacePreviewSceneNode,
 } from '@huabu/shared';
@@ -13,6 +15,7 @@ import {
   getNodeDefaultSize,
   indexById,
   type NestableNode,
+  stripMarkdown,
 } from '@huabu/shared/canvas-engine';
 
 import { getCanvasStore, getStructuredStore } from '../storage/index.js';
@@ -57,6 +60,31 @@ function boundedLabel(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const normalized = value.replace(/\s+/g, ' ').trim();
   return normalized ? normalized.slice(0, 160) : undefined;
+}
+
+function boundedPreviewText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = stripMarkdown(value)
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return normalized
+    ? normalized.slice(0, SPACE_PREVIEW_MAX_TEXT_LENGTH)
+    : undefined;
+}
+
+function boundedImageSrc(value: unknown): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    !value ||
+    value.length > SPACE_PREVIEW_MAX_IMAGE_SRC_LENGTH ||
+    value.startsWith('data:') ||
+    value.startsWith('blob:')
+  ) {
+    return undefined;
+  }
+  return value;
 }
 
 function sceneKind(type: string | undefined): SpacePreviewSceneNode['kind'] {
@@ -148,6 +176,14 @@ export async function getSpacePreviewScene(
     if (!position || !node.type) continue;
     const defaults = getNodeDefaultSize(node.type);
     const content = contentByNodeId.get(node.id);
+    const previewText =
+      node.type === 'note' || node.type === 'text'
+        ? boundedPreviewText(content?.content ?? node.data?.content)
+        : undefined;
+    const imageSrc =
+      node.type === 'image'
+        ? boundedImageSrc(content?.src ?? node.data?.src)
+        : undefined;
     nodes.push({
       id: node.id as `node-${string}`,
       kind: sceneKind(node.type),
@@ -162,6 +198,8 @@ export async function getSpacePreviewScene(
       ...(boundedLabel(content?.label ?? node.data?.label) !== undefined
         ? { label: boundedLabel(content?.label ?? node.data?.label) }
         : {}),
+      ...(previewText !== undefined ? { previewText } : {}),
+      ...(imageSrc !== undefined ? { imageSrc } : {}),
     });
   }
 

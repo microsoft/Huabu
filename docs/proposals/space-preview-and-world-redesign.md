@@ -74,7 +74,7 @@ The Server projects a target Space into one zod-defined wire contract under `pac
 
 The response contains target identity, title, Canvas version, scene bounds, sanitized nodes, sanitized edges, truncation metadata, and a cache validator. Scene nodes contain only geometry, hierarchy, a safe visual kind, a plain-text label, and bounded presentation hints required by the static renderer.
 
-The scene excludes authored bodies, prompts, chat state, Agent state, Interactive View definitions and state, raw Web content, artifact bytes, executable URLs, selection, drag state, handles, and mutation metadata.
+The scene includes bounded plain-text excerpts for Note and Text nodes and bounded Image source references so the preview communicates authored content rather than only topology. Markdown is flattened and inline `data:` or renderer-local `blob:` image sources are omitted. It excludes complete rich-editor bodies, prompts, chat state, Agent state, Interactive View definitions and state, raw Web content, artifact bytes, executable behavior, selection, drag state, handles, and mutation metadata.
 
 The initial hard limits are 250 scene nodes, 400 scene edges, and a 1 MiB serialized response. Projection preserves deterministic Canvas order and reports truncation instead of silently pretending the complete Space was rendered.
 
@@ -92,7 +92,7 @@ World is the performance acceptance surface: many previews must share target cac
 
 ## 7. Rendering and recursion
 
-The renderer draws inert structural geometry, frames, labels, and edges through lightweight SVG and DOM. It does not mount `ReactFlow`, `NodeWrapper`, source node components, media viewers, editors, iframes, Agent UI, or target sync subscribers.
+The renderer draws inert structural geometry, frames, labels, clipped Image thumbnails, bounded Note and Text excerpts, and edges through lightweight SVG and DOM. It does not mount `ReactFlow`, `NodeWrapper`, source node components, media viewers, editors, iframes, Agent UI, or target sync subscribers.
 
 Preview rendering has one live scene depth. A source `spacePreview` or legacy `canvasRef` inside the projected target becomes a labelled nested-preview placeholder and never starts another scene request. This single-depth rule deterministically handles self-reference, `A → B → A`, and deeper cycles without carrying a recursive render stack.
 
