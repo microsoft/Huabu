@@ -28,8 +28,10 @@
  * scroll, and resize.
  */
 
-import { diffWords } from 'diff';
+import { diffArrays, diffWords } from 'diff';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { topLevelListItemMarkdown } from '@huabu/shared/canvas-engine';
 
 import { Button } from '@/components/Common/Button';
 
@@ -98,6 +100,25 @@ function computeWordDiff(oldText: string, newText: string): DiffSegment[] {
     type: change.added ? 'added' : change.removed ? 'removed' : 'same',
     text: change.value,
   }));
+}
+
+export function computeDisplayDiffs(
+  oldText: string,
+  newText: string,
+): DiffSegment[][] {
+  const oldItems = topLevelListItemMarkdown(oldText);
+  const newItems = topLevelListItemMarkdown(newText);
+  if (!oldItems || !newItems) return [computeWordDiff(oldText, newText)];
+
+  return diffArrays(oldItems, newItems).flatMap((change) => {
+    if (change.added) {
+      return change.value.map((item) => computeWordDiff('', item));
+    }
+    if (change.removed) {
+      return change.value.map((item) => computeWordDiff(item, ''));
+    }
+    return change.value.map((item) => computeWordDiff(item, item));
+  });
 }
 
 /** Pixel offset of the gutter bar from the block's right edge. */
@@ -467,7 +488,7 @@ function DiffPopover({
   // concatenate every entry's baseline (rendered as one strike-through
   // block per entry inside the popover body).
   const segments = useMemo<
-    | { kind: 'diff'; segments: DiffSegment[] }
+    | { kind: 'diff'; rows: DiffSegment[][] }
     | { kind: 'tomb'; entries: ReadonlyArray<DeletedBlockInfo> }
   >(() => {
     if (slot.kind === 'block') {
@@ -476,7 +497,7 @@ function DiffPopover({
         slot.entry.baselineMarkdown;
       return {
         kind: 'diff',
-        segments: computeWordDiff(slot.entry.baselineMarkdown, live),
+        rows: computeDisplayDiffs(slot.entry.baselineMarkdown, live),
       };
     }
     return { kind: 'tomb', entries: slot.entries };
@@ -501,19 +522,26 @@ function DiffPopover({
     >
       <div className="text-fg-muted mb-2 text-xs leading-relaxed">
         {segments.kind === 'diff'
-          ? segments.segments.map((seg, i) => (
-              <span
-                key={i}
-                className={
-                  seg.type === 'removed'
-                    ? 'bg-diff-removed-bg text-diff-removed-text line-through'
-                    : seg.type === 'added'
-                      ? 'bg-diff-added-bg text-diff-added-text'
-                      : ''
-                }
+          ? segments.rows.map((row, rowIndex) => (
+              <div
+                key={rowIndex}
+                className={rowIndex > 0 ? 'mt-1 border-t pt-1' : ''}
               >
-                {seg.text}
-              </span>
+                {row.map((seg, segmentIndex) => (
+                  <span
+                    key={segmentIndex}
+                    className={
+                      seg.type === 'removed'
+                        ? 'bg-diff-removed-bg text-diff-removed-text line-through'
+                        : seg.type === 'added'
+                          ? 'bg-diff-added-bg text-diff-added-text'
+                          : ''
+                    }
+                  >
+                    {seg.text}
+                  </span>
+                ))}
+              </div>
             ))
           : segments.entries.map((entry, i) => (
               <div

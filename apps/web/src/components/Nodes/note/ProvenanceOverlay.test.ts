@@ -3,7 +3,32 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { isPointInEditedBlockGutter } from './ProvenanceOverlay';
+import {
+  computeDisplayDiffs,
+  isPointInEditedBlockGutter,
+} from './ProvenanceOverlay';
+
+describe('computeDisplayDiffs', () => {
+  it('renders top-level bullet items as separate rows', () => {
+    const rows = computeDisplayDiffs('- alpha\n- beta', '- alpha\n- gamma');
+
+    expect(rows).toHaveLength(3);
+    expect(rows.map((row) => row.map((segment) => segment.type))).toEqual([
+      ['same'],
+      ['removed'],
+      ['added'],
+    ]);
+    expect(
+      rows.map((row) => row.map((segment) => segment.text).join('')),
+    ).toEqual(['- alpha', '- beta', '- gamma']);
+  });
+
+  it('keeps non-list markdown in one row', () => {
+    expect(computeDisplayDiffs('old paragraph', 'new paragraph')).toHaveLength(
+      1,
+    );
+  });
+});
 
 describe('isPointInEditedBlockGutter', () => {
   const slot = { top: 20, right: 200, height: 40 };
