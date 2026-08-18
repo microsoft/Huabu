@@ -20,6 +20,12 @@ import {
 
 import type { CanvasNode } from '@/components/Nodes/types';
 
+export function selectOutlinedNodes(
+  nodes: readonly CanvasNode[],
+): CanvasNode[] {
+  return nodes.filter((node) => node.selected || node.dragging);
+}
+
 /**
  * Per-node selection outlines, rendered above all canvas content.
  *
@@ -52,19 +58,19 @@ export const SelectionOutlines = () => {
   // would box a stretch of empty canvas beside the mark that replaced it.
   const marks = useNodeCollapseStore((s) => s.marks);
 
-  const selectedNodes = useMemo(
-    () => nodes.filter((n) => n.selected) as CanvasNode[],
+  const outlinedNodes = useMemo(
+    () => selectOutlinedNodes(nodes as CanvasNode[]),
     [nodes],
   );
 
-  if (selectedNodes.length === 0 || !domNode) return null;
+  if (outlinedNodes.length === 0 || !domNode) return null;
 
   // Corner radius of the node body (`rounded-lg` in NodeWrapper). Kept
   // in lockstep with the Tailwind class — if NodeWrapper ever switches
   // to a different radius, update this constant too.
   const NODE_RADIUS_PX = 8;
 
-  const outlines = selectedNodes.map((n) => {
+  const outlines = outlinedNodes.map((n) => {
     const mark = marks[n.id];
     const abs =
       getAbsolutePosition(nodes as NestableNode[], n.id) ?? n.position;

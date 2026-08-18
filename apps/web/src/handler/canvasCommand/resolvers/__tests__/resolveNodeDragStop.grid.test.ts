@@ -171,6 +171,81 @@ describe('resolveNodeDragStop Grid cells', () => {
     ).toMatchObject({ nodeIds: ['dragged'], parentId: 'outer' });
   });
 
+  it('keeps a Hug child Frame on its outer structured track after entry', () => {
+    const outer = {
+      id: 'outer',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { layoutMode: 'grid', gridCount: 2, sizing: 'manual' },
+      style: { width: 600, height: 300 },
+      measured: { width: 600, height: 300 },
+    } as Node;
+    const peer = {
+      id: 'peer',
+      type: 'frame',
+      parentId: 'outer',
+      position: { x: 0, y: 0 },
+      data: { frameColumn: 0, frameRow: 0, sizing: 'manual' },
+      style: { width: 180, height: 140 },
+      measured: { width: 180, height: 140 },
+    } as Node;
+    const target = {
+      id: 'target',
+      type: 'frame',
+      parentId: 'outer',
+      position: { x: 0, y: 0 },
+      data: { frameColumn: 1, frameRow: 0, sizing: 'hug' },
+      style: { width: 180, height: 140 },
+      measured: { width: 180, height: 140 },
+    } as Node;
+    const initialLayout = applyGridLayout([outer, peer, target], 'outer', 2);
+    const targetStart = initialLayout?.childPositions.get('target');
+    if (!initialLayout || !targetStart) {
+      throw new Error('Nested Frame fixture did not produce a layout');
+    }
+    const laidOut = [outer, peer, target].map((node) => {
+      const position = initialLayout.childPositions.get(node.id);
+      return position ? { ...node, position } : node;
+    });
+    const dragged = {
+      id: 'dragged',
+      type: 'note',
+      position: {
+        x: targetStart.x + outer.position.x + 120,
+        y: targetStart.y + outer.position.y + 80,
+      },
+      data: {},
+      style: { width: 100, height: 80 },
+      measured: { width: 100, height: 80 },
+    } as Node;
+    const nodes = [...laidOut, dragged];
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: {
+          x: targetStart.x + outer.position.x + 150,
+          y: targetStart.y + outer.position.y + 100,
+        },
+        cachedDecisions: new Map([
+          ['dragged', { unframe: false, enterFrameId: 'target' }],
+        ]),
+      },
+      state(nodes),
+    );
+    const committed = executeCanvasCommands(
+      { source: 'ui', commands: resolution.commands },
+      { nodes, edges: [], canvasId: 'canvas' },
+    ).writeResult.nodes;
+    const expected = applyGridLayout(committed, 'outer', 2)?.childPositions.get(
+      'target',
+    );
+    const committedTarget = committed.find((node) => node.id === 'target');
+
+    expect(committedTarget?.position).toEqual(expected);
+  });
+
   it('moves into an empty later cell without touching earlier rows', () => {
     const scene = layoutScene([
       makeFrame(),
