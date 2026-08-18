@@ -762,12 +762,7 @@ describe('POST /api/rfs/:canvasId/execute', () => {
     ],
   });
 
-  // A live Space whose Portal does not exist yet used to be answered with
-  // 409 "refresh the World". Since `ensureCanonicalPortals`, the router
-  // reconciles the missing Portal first and the pin succeeds, so the route
-  // has no reason to fail. Router-level coverage of the reconciliation
-  // itself lives in canvas-command-router.test.ts.
-  it('reconciles a missing Portal instead of failing the request', async () => {
+  it('does not recreate legacy Portals for a retired Pin command', async () => {
     writeWorldFixture('.world', 'canvas-world', []);
     writeWorldFixture('Project', 'canvas-source', [
       {
@@ -788,7 +783,7 @@ describe('POST /api/rfs/:canvasId/execute', () => {
         payload: pinPayload('canvas-source', 'node-source'),
       });
 
-      expect(response.statusCode).toBe(200);
+      expect(response.statusCode).toBe(409);
 
       const worldNodes = getCanvasStore('canvas-world').read()?.state.nodes as
         | { type?: string; data?: { targetCanvasId?: string } }[]
@@ -796,7 +791,7 @@ describe('POST /api/rfs/:canvasId/execute', () => {
       expect(
         worldNodes?.some(
           (node) =>
-            node.type === 'canvasRef' &&
+            node.type === 'spacePreview' &&
             node.data?.targetCanvasId === 'canvas-source',
         ),
       ).toBe(true);

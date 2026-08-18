@@ -379,6 +379,26 @@
     "pinFailed": "Failed to update World pins",
     "pinSourceMissing": "Cannot pin: this Space no longer exists"
   },
+  "spacePreview": {
+    "add": "Add Space Preview",
+    "chooseTarget": "Choose a Space",
+    "chooseTargetDescription": "Select the Space to show in this view-only preview.",
+    "loadingTargets": "Loading Spaces…",
+    "targetsUnavailable": "Spaces could not be loaded.",
+    "noTargets": "No other Spaces are available.",
+    "openSpace": "Open Space",
+    "loading": "Loading Space preview…",
+    "unavailable": "Preview unavailable",
+    "unavailableDescription": "The target Space could not be loaded.",
+    "retry": "Retry",
+    "stale": "Stale",
+    "partial": "Partial",
+    "untitledSpace": "Untitled Space",
+    "viewport": "View-only preview of {{title}}",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "resetView": "Reset preview view"
+  },
   "preview": {
     "tabStrip": "Open previews",
     "group": "Preview group",

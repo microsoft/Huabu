@@ -139,6 +139,7 @@ import {
   CANCEL_SKETCH_GESTURE_EVENT,
   SketchOverlay,
 } from '../../Nodes/sketch/SketchOverlay.tsx';
+import { SpacePreviewNode } from '../../Nodes/spacePreview/SpacePreviewNode.tsx';
 import { VideoNode } from '../../Nodes/video/VideoNode.tsx';
 import { WebNode } from '../../Nodes/web/WebNode.tsx';
 import {
@@ -162,6 +163,7 @@ const nodeTypes = {
   pdf: PDFNode,
   office: OfficeNode,
   frame: FrameNode,
+  spacePreview: SpacePreviewNode,
   canvasRef: CanvasRefNode,
   frameRef: FrameRefNode,
   nodeRef: NodeRefNode,

@@ -226,6 +226,10 @@ Huabu chooses between those models by input ambiguity rather than adopting eithe
 
 The distinctive choice is the automatic split: with a pen, physical pointers provide separate drawing and selection channels; without a pen, explicit tools remove the ambiguity. This combines whiteboard predictability with pen-first directness without making a resting finger or pen create ink accidentally.
 
+## 8. Nested Space Preview ownership
+
+A Space Preview viewport is an explicit nested interaction region. Its scene surface captures pointer pan and non-passive wheel zoom, stops native propagation, and carries `nodrag`, `nopan`, and `nowheel`; host-node movement remains available only from the preview's outer chrome. Keyboard focus gives the viewport arrows, `+`, `-`, `0`, and Escape. See [space-preview.md](./space-preview.md).
+
 ## Code entry points
 
 | File                                                                                                                                   | Responsibility                                                                               |

@@ -143,6 +143,12 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
       generate_label: ['childLabels'],
     },
   },
+  spacePreview: {
+    nodeType: 'spacePreview',
+    bodyOwnership: 'derived',
+    capabilities: [],
+    watchFields: [],
+  },
   canvasRef: {
     nodeType: 'canvasRef',
     bodyOwnership: 'derived',
