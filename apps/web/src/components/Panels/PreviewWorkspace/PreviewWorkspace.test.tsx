@@ -117,6 +117,10 @@ function render(nodes: Node[]) {
   act(() => root?.render(<PreviewWorkspace />));
 }
 
+async function flushActivityWork() {
+  await act(async () => {});
+}
+
 const tabs = () =>
   Array.from(container?.querySelectorAll('[role="tab"]') ?? []);
 const activeTabName = () =>
@@ -125,7 +129,7 @@ const activeTabName = () =>
     ?.getAttribute('aria-label');
 const mountedNodeId = () =>
   container
-    ?.querySelector('[data-preview-node-id]')
+    ?.querySelector('[data-preview-active="true"] [data-preview-node-id]')
     ?.getAttribute('data-preview-node-id');
 
 beforeEach(() => {
@@ -326,16 +330,77 @@ describe('tab strip', () => {
     ).toBe(true);
   });
 
-  it('shows one tab per open target and mounts only the active one', () => {
+  it('keeps the active and most recent eligible tab mounted', async () => {
     openNode('a');
     openNode('b');
     render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    await flushActivityWork();
 
     expect(tabs()).toHaveLength(2);
     expect(mountedNodeId()).toBe('b');
     expect(container?.querySelectorAll('[data-preview-node-id]')).toHaveLength(
-      1,
+      2,
     );
+    expect(
+      container?.querySelector<HTMLElement>('[data-preview-active="false"]')
+        ?.style.display,
+    ).toBe('none');
+  });
+
+  it('unmounts the oldest eligible tab when the warm slot advances', async () => {
+    const firstTabId = openNode('a');
+    openNode('b');
+    openNode('c');
+    render([
+      canvasNode('a', 'Alpha'),
+      canvasNode('b', 'Beta'),
+      canvasNode('c', 'Gamma'),
+    ]);
+    await flushActivityWork();
+
+    expect(
+      Array.from(
+        container?.querySelectorAll('[data-preview-node-id]') ?? [],
+      ).map((preview) => preview.getAttribute('data-preview-node-id')),
+    ).toEqual(['b', 'c']);
+
+    await act(async () => store().activateTab(firstTabId));
+
+    expect(
+      Array.from(
+        container?.querySelectorAll('[data-preview-node-id]') ?? [],
+      ).map((preview) => preview.getAttribute('data-preview-node-id')),
+    ).toEqual(['a', 'c']);
+  });
+
+  it('unmounts a warm tab when it is closed', async () => {
+    openNode('a');
+    openNode('b');
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    await flushActivityWork();
+
+    expect(
+      container?.querySelector('[data-preview-node-id="a"]'),
+    ).not.toBeNull();
+
+    const closeAlpha = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Close Alpha"]',
+    );
+    expect(closeAlpha).not.toBeNull();
+    act(() => closeAlpha?.click());
+
+    expect(container?.querySelector('[data-preview-node-id="a"]')).toBeNull();
+  });
+
+  it('unmounts inactive iframe previews instead of warming them', () => {
+    openNode('web');
+    openNode('note');
+    render([
+      canvasNode('web', 'Website', 'web'),
+      canvasNode('note', 'Note', 'note'),
+    ]);
+
+    expect(container?.querySelector('[data-preview-node-id="web"]')).toBeNull();
   });
 
   it('derives the title from the node, so a rename propagates', () => {
@@ -461,19 +526,19 @@ describe('activation', () => {
     expect(settle).not.toHaveBeenCalled();
   });
 
-  it('switches the mounted panel on click', () => {
+  it('switches the mounted panel on click', async () => {
     openNode('a');
     openNode('b');
     render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
 
-    act(() =>
+    await act(async () =>
       tabs()[0].dispatchEvent(new MouseEvent('click', { bubbles: true })),
     );
 
     expect(mountedNodeId()).toBe('a');
   });
 
-  it('closes a tab from its close control without touching the others', () => {
+  it('closes a tab from its close control without touching the others', async () => {
     openNode('a');
     openNode('b');
     render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
@@ -482,7 +547,9 @@ describe('activation', () => {
     expect(tabs()[1].hasAttribute('title')).toBe(false);
     expect(close?.hasAttribute('title')).toBe(false);
     expect(close?.getAttribute('aria-label')).toContain('Beta');
-    act(() => close?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await act(async () =>
+      close?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
+    );
 
     expect(tabs()).toHaveLength(1);
     expect(mountedNodeId()).toBe('a');
@@ -543,10 +610,11 @@ describe('activation', () => {
     expect(store().workspace.tabs[tabId].transient).toBe(true);
   });
 
-  it('reuses the inspection slot while browsing transiently', () => {
+  it('reuses the inspection slot while browsing transiently', async () => {
     openNode('a', true);
     openNode('b', true);
     render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+    await flushActivityWork();
 
     expect(tabs()).toHaveLength(1);
     expect(mountedNodeId()).toBe('b');
@@ -675,6 +743,32 @@ describe('split', () => {
       container?.querySelectorAll('[data-preview-node-id]') ?? [],
     ).map((el) => el.getAttribute('data-preview-node-id'));
     expect(mounted).toEqual(['a', 'b']);
+  });
+
+  it('bounds warm retention independently in each group', async () => {
+    openNode('a');
+    openNode('b');
+    openNode('c');
+    store().openPreviewTarget(
+      { kind: 'node', canvasId: CANVAS_ID, nodeId: 'c' },
+      { openToSide: true },
+    );
+    openNode('d');
+    render([
+      canvasNode('a', 'Alpha'),
+      canvasNode('b', 'Beta'),
+      canvasNode('c', 'Gamma'),
+      canvasNode('d', 'Delta'),
+    ]);
+    await flushActivityWork();
+
+    const mounted = Array.from(
+      container?.querySelectorAll('[data-preview-node-id]') ?? [],
+    ).map((el) => el.getAttribute('data-preview-node-id'));
+    expect(mounted).toEqual(['a', 'b', 'c', 'd']);
+    expect(
+      container?.querySelectorAll('[data-preview-active="false"]'),
+    ).toHaveLength(2);
   });
 
   it('renders one visual divider between split groups', () => {

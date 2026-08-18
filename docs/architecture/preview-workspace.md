@@ -72,7 +72,9 @@ Canvas search results and connected-node navigation open transiently. Explicit n
 
 ## 4. Rendering and Chat sessions
 
-Each group mounts only its active tab. Inactive tabs retain topology and store-backed runtime state but do not retain editor, PDF, media, or Chat component trees.
+Each group mounts its active tab plus at most one warm inactive tab selected by the greatest `lastActiveSeq`. The warm slot is a bounded runtime optimization rather than persisted topology: React 19 `Activity` keeps that tab's DOM and component state with `mode="hidden"`, cleans up its Effects while hidden, and restarts those Effects when the tab becomes visible again.
+
+Chat, Question, Note, Text, PDF, and Office tabs are eligible for the warm slot. Eligibility follows the resolved renderer, so a valid World `nodeRef` that presents a source Question is treated as a Question rather than as a generic reference. Web, Audio, Video, and other node types are not retained because hidden native media or iframe work can outlive React Effect cleanup. Closing or replacing a warm tab, deleting its node, or advancing the slot to a more recently active eligible tab unmounts the old tree. The shared runtime scroll cache remains the cold-restore fallback after a real unmount.
 
 `PreviewRenderer` resolves node targets against the current Canvas nodes and World references. Ordinary nodes render through `ExpandedNodePanel`; Question nodes and unbound Chat targets render through `ChatPanel`.
 
@@ -100,7 +102,7 @@ A transient tab is one reusable inspection slot per group. Opening another trans
 
 Permanent tabs are never closed automatically. A group may retain any number of permanent tabs; users close them explicitly, while transient browsing continues to reuse the group's inspection slot.
 
-The activation sequence is an integer stored with the workspace rather than a wall-clock timestamp, making recent-target ordering deterministic in tests and persistence.
+The activation sequence is an integer stored with the workspace rather than a wall-clock timestamp, making recent-target ordering deterministic in tests and persistence. Rendering also uses this sequence as the per-group LRU order for the single inactive warm slot; it does not add a second recency model.
 
 ## 6. Focus and opening position
 
@@ -108,7 +110,7 @@ Editor focus is a runtime-only `{ tabId, nonce }` request. Only the addressed ac
 
 Question conversation positioning is a runtime-only `{ tabId, position, nonce }` request where `position` is `last-user` or `bottom`. `MessageList` consumes the request after history hydration and successful positioning. Every scrollable Preview renderer keeps its latest vertical offset in one runtime cache: Chat uses conversation-owner Canvas plus `threadId`, while ordinary nodes use target Canvas plus `nodeId`. Note, PDF, Office, and Web reader renderers register their own scroll element through the shared hook because the outer panel is intentionally non-scrolling. The cache restores asynchronous content as it becomes measurable, removes an offset after the final target is closed, replaced, or invalidated, and clears unreferenced offsets when a Canvas layout is deleted or evicted from the persisted MRU index. Chat retains its additional unread-opening rule: a saved offset above the latest messages is preserved and exposes the New message action instead of scrolling automatically; a thread without a saved offset uses the requested opening position.
 
-Inactive tabs never count as actively viewed. A Question is actively viewed only when its tab is the active tab of a rendered group and the outer right panel is expanded; this rule controls the Canvas open indicator and whether stream completion marks a result as viewed.
+Inactive tabs never count as actively viewed, including a tab retained in hidden Activity. A Question is actively viewed only when its tab is the active tab of a rendered group and the outer right panel is expanded; this rule controls the Canvas open indicator and whether stream completion marks a result as viewed.
 
 Composer focus is addressed by `threadId` through `panelStore`, so opening one Chat cannot steal focus through a request intended for another mounted Chat.
 
@@ -144,7 +146,7 @@ New user-visible node and Chat open paths must use the Preview Workspace actions
 
 Renderer code must treat targets as references and resolve mutable data at render time. Adding labels, node snapshots, conversation state, or derived resource keys to persisted tabs creates a second source of truth and is not allowed.
 
-Code that determines visibility must inspect each group's active tab, not every tab in `workspace.tabs`, because inactive tabs are not mounted.
+Code that determines visibility must inspect each group's active tab, not every tab in `workspace.tabs` or every mounted renderer, because one inactive renderer may remain mounted in hidden Activity.
 
 Runtime intents such as editor focus, composer focus, and initial message position must stay outside the persisted workspace model and must be addressed to a tab or thread.
 
