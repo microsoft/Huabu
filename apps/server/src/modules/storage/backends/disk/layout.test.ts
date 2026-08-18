@@ -7,11 +7,11 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { refreshCanvasDirIndex } from './canvas-dirs.js';
-import { canvasRoot } from './paths.js';
-import { setWorkspacePath } from '../../workspace.js';
+import { refreshCanvasDirIndex, registerCanvasDir } from './canvas-dirs.js';
+import { canvasRoot } from './layout.js';
+import { setWorkspacePath } from '../../../workspace.js';
 
-describe('Disk Workspace paths', () => {
+describe('Disk layout', () => {
   let workspacePath: string;
 
   beforeEach(() => {
@@ -38,4 +38,12 @@ describe('Disk Workspace paths', () => {
       expect(() => canvasRoot(canvasId)).toThrow(/Invalid canvasId/);
     },
   );
+
+  it('rejects an indexed directory that escapes the active Workspace', () => {
+    registerCanvasDir('canvas-a', '../escape', null);
+
+    expect(() => canvasRoot('canvas-a')).toThrow(
+      /escapes the active Workspace/,
+    );
+  });
 });

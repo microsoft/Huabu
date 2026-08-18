@@ -10,11 +10,15 @@
 import { existsSync, readdirSync, renameSync, statSync } from 'node:fs';
 import path from 'node:path';
 
+import { SPACE_JSON_FILENAME, WORLD_CANVAS_DIR_NAME } from './layout.js';
 import { NameIndex, type NameIndexResult } from './name-index.js';
-import { dedupeName, normalizeForCompare, toSafeFilename } from './naming.js';
-import { SPACE_JSON_FILENAME, WORLD_CANVAS_DIR_NAME } from './paths.js';
-import { readJsonStrict, sanitizeId } from '../../../utils/fs.js';
-import { getWorkspacePath } from '../../workspace.js';
+import { readJsonStrict, sanitizeId } from '../../../../utils/fs.js';
+import {
+  dedupeName,
+  normalizeForCompare,
+  toSafeFilename,
+} from '../../../../utils/naming.js';
+import { getWorkspacePath } from '../../../workspace.js';
 
 export interface CanvasDirEntry {
   id: string;

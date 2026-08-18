@@ -16,17 +16,6 @@
 import path from 'node:path';
 
 import {
-  forgetCanvasStore,
-  getCanvasStore,
-} from './legacy/canvas-store-cache.js';
-import { readValidCanvasFile } from './space-record-validation.js';
-import { readDiskSpaceRecord } from './space-record.js';
-import {
-  titleForAllocatedDirectory,
-  titleVisibleAtDirectory,
-} from './space-title.js';
-import { atomicWriteJson, mkdirp, sanitizeId } from '../../../../utils/fs.js';
-import {
   isWorldCanvasId,
   listAllCanvasDirEntries,
   listCanvasDirEntries,
@@ -34,13 +23,21 @@ import {
   registerCanvasDir,
   requireWorldCanvasId,
   suggestCanvasDir,
-} from '../../../workspace/disk/canvas-dirs.js';
-import { normalizeForCompare } from '../../../workspace/disk/naming.js';
+} from './canvas-dirs.js';
+import { canvasJsonPath, SPACE_JSON_FILENAME } from './layout.js';
 import {
-  canvasJsonPath,
-  SPACE_JSON_FILENAME,
-} from '../../../workspace/disk/paths.js';
-import { withSpaceDirHandlesReleased } from '../../../workspace/disk/space-dir-handles.js';
+  forgetCanvasStore,
+  getCanvasStore,
+} from './legacy/canvas-store-cache.js';
+import { withSpaceDirHandlesReleased } from './space-dir-handles.js';
+import { readValidCanvasFile } from './space-record-validation.js';
+import { readDiskSpaceRecord } from './space-record.js';
+import {
+  titleForAllocatedDirectory,
+  titleVisibleAtDirectory,
+} from './space-title.js';
+import { atomicWriteJson, mkdirp, sanitizeId } from '../../../../utils/fs.js';
+import { normalizeForCompare } from '../../../../utils/naming.js';
 import { getWorkspacePath } from '../../../workspace.js';
 import {
   assertSpaceMutationAllowed,

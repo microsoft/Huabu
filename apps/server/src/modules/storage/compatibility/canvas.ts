@@ -21,18 +21,18 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { atomicWriteJson, mkdirp, sanitizeId } from '../../../utils/fs.js';
+import { toSafeFilename } from '../../../utils/naming.js';
+import { getWorkspacePath } from '../../workspace.js';
 import {
   listCanvasDirEntries,
   refreshCanvasDirIndex,
   registerCanvasDir,
   suggestCanvasDir,
-} from '../../workspace/disk/canvas-dirs.js';
-import { toSafeFilename } from '../../workspace/disk/naming.js';
+} from '../backends/disk/canvas-dirs.js';
 import {
   canvasJsonPath,
   SPACE_JSON_FILENAME,
-} from '../../workspace/disk/paths.js';
-import { getWorkspacePath } from '../../workspace.js';
+} from '../backends/disk/layout.js';
 import { getCanvasStore } from '../backends/disk/legacy/canvas-store-cache.js';
 import { deleteSpace } from '../storage.js';
 

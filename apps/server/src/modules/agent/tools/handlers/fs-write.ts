@@ -36,7 +36,7 @@ import {
   canvasMemoryDir,
   settingDir,
   userSkillsDir,
-} from '../../../storage/paths.js';
+} from '../../../workspace/paths.js';
 import {
   resolveLongTermPath,
   resolveUserSkillPath,

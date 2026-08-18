@@ -14,9 +14,9 @@ import {
   type TaskStoreSnapshot,
 } from '@huabu/shared';
 
+import { tasksPath } from './layout.js';
 import { readDiskSpaceRecord } from './space-record.js';
 import { atomicWriteJson, readJsonStrict } from '../../../../utils/fs.js';
-import { tasksPath } from '../../../workspace/disk/paths.js';
 import { getWorkspacePath } from '../../../workspace.js';
 import { assertSpaceMutationAllowed } from '../../space-lifecycle-admission.js';
 

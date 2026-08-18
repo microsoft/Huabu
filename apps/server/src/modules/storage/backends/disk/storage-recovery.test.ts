@@ -25,13 +25,13 @@ vi.mock('../../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
 }));
 
+import { refreshCanvasDirIndex } from './canvas-dirs.js';
+import { changesPath, eventsPath } from './layout.js';
 import {
   getCanvasStore,
   resetStorageCache,
 } from './legacy/canvas-store-cache.js';
 import { DiskStructuredStore } from './structured-store.js';
-import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
-import { changesPath, eventsPath } from '../../../workspace/disk/paths.js';
 import {
   canvasBlobs,
   createStorage,

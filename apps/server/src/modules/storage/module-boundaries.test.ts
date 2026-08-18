@@ -156,6 +156,11 @@ describe('storage dependency direction', () => {
     const violations: string[] = [];
     for (const file of sourceFiles) {
       if (file.startsWith('modules/storage/')) continue;
+      // Same exemption, and the same reason, as the composition-root rule
+      // below: exercising an adapter means naming it. A production file that
+      // names one has bound the application to a backend, which is the thing
+      // being prevented; a test that names one is choosing its subject.
+      if (file.endsWith('.test.ts')) continue;
       for (const spec of specifiersOf(file)) {
         const target = resolveSpecifier(file, spec);
         if (target?.includes('modules/storage/backends')) {
@@ -185,7 +190,95 @@ describe('storage dependency direction', () => {
       );
 
     const nonAdapter = importers.filter((f) => !inLayer(f, 'backends'));
-    expect(nonAdapter).toEqual(['modules/storage/storage.ts']);
+    // `storage.ts` selects the backend. The rest reach a *named* Disk module
+    // because the Disk layout and its directory index moved inside the
+    // boundary in Phase 4.5 (§12.5.2): the barrel re-exports the Disk World
+    // helpers, the two shims forward Disk-capability imports, and the
+    // compatibility facade is Disk-coupled by construction. Each entry
+    // disappears as its consumers move onto ports and the materialization
+    // capability (§12.5.5 step 5).
+    expect(nonAdapter).toEqual([
+      'modules/storage/canvas-dirs.ts',
+      'modules/storage/compatibility/canvas.ts',
+      'modules/storage/index.ts',
+      'modules/storage/paths.ts',
+      'modules/storage/storage.ts',
+    ]);
+  });
+});
+
+/**
+ * Phase 4.5's outcome, guarded (proposal §12.5).
+ *
+ * The workspace module used to hold a `disk/` segment containing the Disk
+ * record layout, the `space.json`-derived directory index, and pure naming
+ * rules — so "where is a Space" was answered outside the storage boundary, in
+ * a module whose name asserted the substrate. These pin the correction: what
+ * remains describes the workspace as a place, and anything needing a real
+ * Space directory asks for it by capability.
+ */
+describe('workspace module names no backend', () => {
+  const workspaceFiles = sourceFiles.filter((f) =>
+    /^modules\/workspace(?:[./-])/.test(f),
+  );
+
+  it('has no substrate segment', () => {
+    const substrate = workspaceFiles.filter((f) =>
+      f.startsWith('modules/workspace/disk/'),
+    );
+    expect(substrate).toEqual([]);
+    expect(workspaceFiles.length).toBeGreaterThan(0);
+  });
+
+  it('never imports a storage backend', () => {
+    const violations: string[] = [];
+    for (const file of workspaceFiles) {
+      for (const spec of specifiersOf(file)) {
+        const target = resolveSpecifier(file, spec);
+        if (target?.includes('modules/storage/backends')) {
+          violations.push(`${file} → ${spec}`);
+        }
+      }
+    }
+    // A Space's directory comes from `spaceDirectory()` on the facade, which
+    // is the capability; reaching a backend for it would restore exactly the
+    // coupling this phase removed.
+    expect(violations).toEqual([]);
+  });
+
+  it('names no Disk record or blob layout symbol', () => {
+    // These are the members that moved to `backends/disk/layout.ts`. Their
+    // reappearance here would mean the workspace had started describing how a
+    // backend stores things again, whatever the import path said.
+    const DISK_LAYOUT = [
+      'SPACE_JSON_FILENAME',
+      'WORLD_CANVAS_DIR_NAME',
+      'canvasJsonPath',
+      'nodesDir',
+      'nodeFilePath',
+      'ARTIFACTS_DIR_NAME',
+      'artifactsDir',
+      'artifactPath',
+      'HISTORY_DIR_NAME',
+      'historyDir',
+      'chatDir',
+      'tasksPath',
+      'eventsPath',
+      'deltaLogPath',
+      'changesPath',
+      'canvasRoot',
+    ];
+    const violations: string[] = [];
+    for (const file of workspaceFiles) {
+      if (file.startsWith('modules/workspace/migrations/')) continue;
+      const source = read(file);
+      for (const symbol of DISK_LAYOUT) {
+        if (new RegExp(`\\b${symbol}\\b`).test(source)) {
+          violations.push(`${file} → ${symbol}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
   });
 });
 
@@ -263,15 +356,9 @@ describe('root forwarding shims', () => {
     expect(body[0]).toMatch(/^export \* from '\.[^']+\.js';$/);
   });
 
-  /**
-   * Frozen snapshot of the call sites that already imported these paths when
-   * the shims were installed. The lists may shrink as consumers migrate;
-   * a new entry means someone added an importer of a deprecated path, which
-   * is what the shims exist to stop.
-   */
-  const ALLOWED_IMPORTERS: Record<string, readonly string[]> = {
+  /** Exact snapshot of the remaining deprecated-path importers. */
+  const EXPECTED_IMPORTERS: Record<string, readonly string[]> = {
     'storage/canvas-store.js': [
-      'modules/agent/sketch.service.ts',
       'modules/canvas/canvas-search.test.ts',
       'modules/canvas/canvas-search.ts',
       'modules/canvas/canvas-spatial.ts',
@@ -280,10 +367,6 @@ describe('root forwarding shims', () => {
       'modules/canvas/node-prompt.ts',
       'modules/canvas/world-reference-resolver.ts',
       'modules/canvas/world-target-access.ts',
-      'modules/preprocessing/pipeline.test.ts',
-      'modules/preprocessing/pipeline.ts',
-      'modules/preprocessing/stages/cache-check.ts',
-      'modules/preprocessing/stages/persist.ts',
     ],
     'storage/canvas-dirs.js': [
       'modules/agent/tools/world-target-read.test.ts',
@@ -301,35 +384,17 @@ describe('root forwarding shims', () => {
       'modules/workspace.ts',
     ],
     'storage/paths.js': [
-      'modules/agent/acp/service.ts',
-      'modules/agent/acp/threads.route.ts',
-      'modules/agent/agent.route.ts',
-      'modules/agent/agent.service.ts',
-      'modules/agent/conversation/prompt/debug-prompt.ts',
-      'modules/agent/memory/analyzer.ts',
-      'modules/agent/memory/read.ts',
-      'modules/agent/memory/sandbox.ts',
-      'modules/agent/memory/trigger.ts',
-      'modules/agent/skills.route.test.ts',
-      'modules/agent/tools/handlers/fs-sandbox.ts',
-      'modules/agent/tools/handlers/fs-write.test.ts',
-      'modules/agent/tools/handlers/fs-write.ts',
-      'modules/canvas/canvas-search.test.ts',
-      'modules/canvas/canvas-search.ts',
+      'modules/canvas/canvas-content-cas.test.ts',
+      'modules/canvas/canvas.route.test.ts',
       'modules/canvas/canvas.route.ts',
       'modules/canvas/external-watcher.ts',
-      'modules/canvas/external.route.ts',
-      'modules/canvas/import-node-src.test.ts',
-      'modules/canvas/import-node-src.ts',
       'modules/canvas/world-target-access.ts',
-      'modules/remote_fs/rfs.route.ts',
-      'modules/remote_fs/skill.ts',
-      'prompt/skills/loader.ts',
+      'modules/workspace/migrations/migrate-acp-sessions.ts',
     ],
   };
 
-  it.each(Object.keys(ALLOWED_IMPORTERS))(
-    'gains no new importer of %s',
+  it.each(Object.keys(EXPECTED_IMPORTERS))(
+    'keeps the exact importer snapshot for %s',
     (shimPath) => {
       const importers = sourceFiles
         .filter((file) => !file.startsWith('modules/storage/'))
@@ -338,14 +403,7 @@ describe('root forwarding shims', () => {
         )
         .sort();
 
-      const added = importers.filter(
-        (f) => !ALLOWED_IMPORTERS[shimPath].includes(f),
-      );
-      expect(added).toEqual([]);
-      // Shrinking is the goal, so the snapshot is a ceiling, not an equality.
-      expect(importers.length).toBeLessThanOrEqual(
-        ALLOWED_IMPORTERS[shimPath].length,
-      );
+      expect(importers).toEqual(EXPECTED_IMPORTERS[shimPath]);
     },
   );
 });

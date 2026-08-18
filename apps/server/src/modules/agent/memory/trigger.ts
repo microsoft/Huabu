@@ -11,9 +11,9 @@
  *                       enqueued when this crosses {@link OP_THRESHOLD}.
  *   lastAnalyzedAt      epoch ms of the last successful analysis;
  *                       null until the first pass lands.
- *   lastSeenThreadCursor pi-ai context timestamp of the last
- *                       analysed chat turn — lets `context.ts` (PR-C)
- *                       only pull "new" turns into the analysis prompt.
+ *   lastSeenThreadCursor retained compatibility field from the removed
+ *                       legacy chat digest. Existing state files preserve it,
+ *                       but current analysis passes do not advance it.
  *
  * Persisted at `<canvasDir>/.memory/state.json` so the counter
  * survives process restarts. The file is kept tiny (<128 B) and
@@ -26,11 +26,8 @@ import { existsSync } from 'node:fs';
 
 import { atomicWriteJson, mkdirp, readJson } from '../../../utils/fs.js';
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
-import {
-  memoryStatePath,
-  canvasMemoryDir,
-  canvasRoot,
-} from '../../storage/paths.js';
+import { spaceDirectory } from '../../storage/index.js';
+import { memoryStatePath, canvasMemoryDir } from '../../workspace/paths.js';
 
 /** Op-count threshold that triggers a memory analysis pass. */
 export const OP_THRESHOLD = 50;
@@ -86,7 +83,7 @@ export function writeMemoryState(canvasId: string, state: MemoryState): void {
   // file. Same hazard for any in-flight memory worker that calls
   // `markAnalyzed` post-delete. Skip the write when the canvas root
   // is gone; losing one bookkeeping write is harmless.
-  if (!existsSync(canvasRoot(canvasId))) return;
+  if (!existsSync(spaceDirectory(canvasId))) return;
   mkdirp(canvasMemoryDir(canvasId));
   atomicWriteJson(memoryStatePath(canvasId), state);
 }

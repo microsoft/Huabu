@@ -2,86 +2,55 @@
 // Licensed under the MIT license.
 
 /**
- * Storage paths.
+ * Workspace paths that outlive the storage backend.
+ *
+ * What remains here passes the §12.5.2 test: it is still meaningful once the
+ * structured backend keeps Spaces in tables. Two populations qualify.
+ *
+ *   - Workspace-level, no canvasId: `setting/` and the user memory file.
+ *     Untouched by a backend switch.
+ *   - Per-Space state owned by *other* domains — memory, ACP sessions, the
+ *     debug prompt log — which need a materialized directory but not the Disk
+ *     record layout. They anchor on `spaceDirectory()` from the storage
+ *     facade, so they no longer consult the Disk name index (§12.5.4).
+ *
+ * The Disk record and blob layout moved to `storage/backends/disk/layout.ts`.
  *
  * Layout under `<workspace>/`:
  *
  *   setting/                        user-owned, cross-Space
  *     user.md                       user memory (preferences)
  *     skills/<id>/SKILL.md          user / memory-agent authored skills
- *   <canvasDir>/                    name = sanitised Space title
- *     space.json                    carries the stable canvasId
- *     nodes/<safe(label)>.md        per-node markdown (id in frontmatter)
- *     .artifacts/<artifactId><ext>  raw uploads (hidden dir)
+ *   <spaceDir>/
  *     .memory/                      Space-scoped memory (AI-private)
  *       space.md                    Space memory body
  *       state.json                  memory worker bookkeeping
  *     .history/
- *       chat/<threadId>.turns.jsonl finalized turns (append-only)
- *       chat/<threadId>.active.json in-progress turn (partial)
- *       events.jsonl
  *       acp-sessions.json           per-thread ACP sessionId map (optional)
+ *       chat/<threadId>.prompt.log  debug dump, opt-in
  *
- * Naming convention: anything prefixed with `.` is hidden / AI-private
- * (`.artifacts`, `.history`, `.memory`); anything without the prefix is
- * user-visible (`nodes/`, `setting/`).
+ * Naming convention: anything prefixed with `.` is hidden / AI-private;
+ * anything without the prefix is user-visible.
  */
 
 import path from 'node:path';
 
-import { canvasDirName } from './canvas-dirs.js';
-import { sanitizeId } from '../../../utils/fs.js';
-import { getWorkspacePath } from '../../workspace.js';
+import { sanitizeId } from '../../utils/fs.js';
+import { spaceDirectory } from '../storage/index.js';
+import { getWorkspacePath } from '../workspace.js';
 
 import type { Namespace } from '@agenetes/protocol';
 
-export function canvasRoot(canvasId: string): string {
-  const safeId = sanitizeId(canvasId, 'canvasId');
-  const workspaceRoot = path.resolve(getWorkspacePath());
-  const resolved = path.resolve(workspaceRoot, canvasDirName(safeId));
-  if (!resolved.startsWith(`${workspaceRoot}${path.sep}`)) {
-    throw new Error(`Canvas path escapes the active Workspace: "${canvasId}"`);
-  }
-  return resolved;
-}
-
 /**
- * On-disk topology filename. Agent- and user-visible (L1), so it uses the
- * Space vocabulary; the TypeScript type of its contents stays `CanvasFile`
- * (L2 internal). See migrate-canvas-to-space.ts for the legacy rename.
+ * The `.history/` tier is named by the Disk backend, which owns most of what
+ * is in it. The families below sit there only because they were written next
+ * to it; the duplicated literal keeps that colocation visible as the accident
+ * it is, rather than binding this module to the backend's layout (§12.5.3).
  */
-export const SPACE_JSON_FILENAME = 'space.json';
-export const WORLD_CANVAS_DIR_NAME = '.world';
+const LEGACY_HISTORY_DIR_NAME = '.history';
 
-export function canvasJsonPath(canvasId: string): string {
-  return path.join(canvasRoot(canvasId), SPACE_JSON_FILENAME);
-}
-
-export function nodesDir(canvasId: string): string {
-  return path.join(canvasRoot(canvasId), 'nodes');
-}
-
-export function nodeFilePath(canvasId: string, filename: string): string {
-  const base = path.basename(filename);
-  if (!base || base === '.' || base === '..') {
-    throw new Error(`Invalid node filename: "${filename}"`);
-  }
-  return path.join(nodesDir(canvasId), base);
-}
-
-/** Hidden directory holding raw uploaded files keyed by artifactId. */
-export const ARTIFACTS_DIR_NAME = '.artifacts';
-
-export function artifactsDir(canvasId: string): string {
-  return path.join(canvasRoot(canvasId), ARTIFACTS_DIR_NAME);
-}
-
-export function artifactPath(canvasId: string, filename: string): string {
-  const base = path.basename(filename);
-  if (!base || base === '.' || base === '..') {
-    throw new Error(`Invalid artifact filename: "${filename}"`);
-  }
-  return path.join(artifactsDir(canvasId), base);
+function legacyHistoryDir(canvasId: string): string {
+  return path.join(spaceDirectory(canvasId), LEGACY_HISTORY_DIR_NAME);
 }
 
 // ─── Memory module paths ───────────────────────────────────────────────────
@@ -89,7 +58,7 @@ export function artifactPath(canvasId: string, filename: string): string {
 // Two scopes:
 //   - User memory (`<workspace>/setting/user.md`):
 //     cross-Space user preferences / profile. User-editable.
-//   - Space memory (`<canvasDir>/.memory/`): hidden,
+//   - Space memory (`<spaceDir>/.memory/`): hidden,
 //     AI-private working notes for *this* Space. The leading `.` puts
 //     it in the same hidden tier as `.history/` and `.artifacts/`.
 
@@ -102,7 +71,7 @@ export function workspaceMemoryPath(): string {
 export const WORKING_MEMORY_DIR_NAME = '.memory';
 
 export function canvasMemoryDir(canvasId: string): string {
-  return path.join(canvasRoot(canvasId), WORKING_MEMORY_DIR_NAME);
+  return path.join(spaceDirectory(canvasId), WORKING_MEMORY_DIR_NAME);
 }
 
 /** Working memory body for a canvas. */
@@ -140,26 +109,6 @@ export function userSkillsDir(): string {
   return path.join(settingDir(), 'skills');
 }
 
-export function historyDir(canvasId: string): string {
-  return path.join(canvasRoot(canvasId), '.history');
-}
-
-export function chatDir(canvasId: string): string {
-  return path.join(historyDir(canvasId), 'chat');
-}
-
-/**
- * Pending change-review records for an ACP thread (the "what the agent
- * changed" card). A mutable sidecar — entries are removed on accept /
- * revert — so it lives apart from the append-only `.turns.jsonl` log.
- */
-export function changesPath(canvasId: string, threadId: string): string {
-  return path.join(
-    chatDir(canvasId),
-    `${sanitizeId(threadId, 'threadId')}.changes.json`,
-  );
-}
-
 /**
  * Human-readable debug dump of the assembled prompt sent to the agent,
  * one block per turn with strong turn separators. Append-only, written
@@ -168,34 +117,10 @@ export function changesPath(canvasId: string, threadId: string): string {
  */
 export function chatPromptLogPath(canvasId: string, threadId: string): string {
   return path.join(
-    chatDir(canvasId),
+    legacyHistoryDir(canvasId),
+    'chat',
     `${sanitizeId(threadId, 'threadId')}.prompt.log`,
   );
-}
-
-export function tasksPath(canvasId: string): string {
-  return path.join(historyDir(canvasId), 'tasks.json');
-}
-
-export function eventsPath(canvasId: string): string {
-  return path.join(historyDir(canvasId), 'events.jsonl');
-}
-
-/**
- * Append-only delta log for headless executor batches (M2).
- *
- * One JSONL line per `POST /api/canvas/:canvasId/execute` call that
- * actually mutated state. Lines carry the canvas version, run id,
- * originator, applied commands, and the resulting structural deltas
- * (see `shared/canvas-engine/delta.ts`). Used by M3 broadcast / replay
- * and as the persistence anchor for `space.json`'s monotonic version
- * counter.
- *
- * Lives next to `events.jsonl` so the entire `.history/` tier travels
- * together in canvas export bundles.
- */
-export function deltaLogPath(canvasId: string): string {
-  return path.join(historyDir(canvasId), 'delta-log.jsonl');
 }
 
 /**
@@ -210,7 +135,7 @@ export function deltaLogPath(canvasId: string): string {
  * an external agent.
  */
 export function acpSessionsPath(canvasId: string): string {
-  return path.join(historyDir(canvasId), 'acp-sessions.json');
+  return path.join(legacyHistoryDir(canvasId), 'acp-sessions.json');
 }
 
 /**
@@ -225,6 +150,6 @@ export function acpSessionsPath(canvasId: string): string {
 export function canvasAcpNamespace(canvasId: string): Namespace {
   return {
     name: canvasId,
-    storage: canvasId ? { root: historyDir(canvasId) } : undefined,
+    storage: canvasId ? { root: legacyHistoryDir(canvasId) } : undefined,
   };
 }

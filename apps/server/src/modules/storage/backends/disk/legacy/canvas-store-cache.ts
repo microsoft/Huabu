@@ -24,8 +24,8 @@ import path from 'node:path';
 
 import { CanvasStore } from './canvas-store.js';
 import { sanitizeId } from '../../../../../utils/fs.js';
-import { refreshCanvasDirIndex } from '../../../../workspace/disk/canvas-dirs.js';
 import { getWorkspacePath } from '../../../../workspace.js';
+import { refreshCanvasDirIndex } from '../canvas-dirs.js';
 
 const MAX_CACHE = 16;
 const cache = new Map<string, CanvasStore>();

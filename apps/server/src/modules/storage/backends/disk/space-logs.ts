@@ -26,13 +26,13 @@ import {
   type CanvasChangeRecord,
 } from '@huabu/shared/canvas-engine';
 
+import { changesPath, eventsPath } from './layout.js';
 import { readDiskSpaceRecord } from './space-record.js';
 import {
   atomicWriteJson,
   readJsonLinesStrict,
   readJsonStrict,
 } from '../../../../utils/fs.js';
-import { changesPath, eventsPath } from '../../../workspace/disk/paths.js';
 import { getWorkspacePath } from '../../../workspace.js';
 import { assertSpaceMutationAllowed } from '../../space-lifecycle-admission.js';
 

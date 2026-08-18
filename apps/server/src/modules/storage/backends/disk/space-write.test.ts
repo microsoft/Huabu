@@ -13,6 +13,8 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { refreshCanvasDirIndex } from './canvas-dirs.js';
+import { nodesDir } from './layout.js';
 import {
   getCanvasStore,
   resetStorageCache,
@@ -20,9 +22,7 @@ import {
 import { DiskSpaceRepository } from './space-repository.js';
 import { createDiskSpaceWrite } from './space-write.js';
 import { DiskStructuredStore } from './structured-store.js';
-import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
-import { nodesDir } from '../../../workspace/disk/paths.js';
-import { ensureWorldCanvasOnDisk } from '../../../workspace/disk/world-canvas.js';
+import { ensureWorldCanvasOnDisk } from './world-canvas.js';
 import { setWorkspacePath } from '../../../workspace.js';
 import { describeSpaceWriteContract } from '../../ports/contracts/space-write.contract.js';
 

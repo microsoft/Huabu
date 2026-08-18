@@ -72,9 +72,18 @@ const canvasStore = vi.hoisted(() => ({
   read: vi.fn(() => ({ state: { nodes: [] } })),
 }));
 
-vi.mock('../storage/index.js', () => ({
-  getCanvasStore: () => canvasStore,
-}));
+// The facade is stubbed for the store, but the handle helpers must stay the
+// real ones: these cases drive `withSpaceDirHandlesReleased` and assert the
+// watcher released its handles, which only works if both sides share the one
+// module instance that holds the registry.
+vi.mock('../storage/index.js', async () => {
+  const handles = await import('../storage/backends/disk/space-dir-handles.js');
+  return {
+    getCanvasStore: () => canvasStore,
+    registerSpaceDirHandleOwner: handles.registerSpaceDirHandleOwner,
+    withSpaceDirHandlesReleased: handles.withSpaceDirHandlesReleased,
+  };
+});
 
 function makeFakeNativeWatcher() {
   const nativeWatcher = {
@@ -96,7 +105,7 @@ import {
   openExternalNoteSession,
   resetExternalNoteSessions,
 } from './external-watcher.js';
-import { withSpaceDirHandlesReleased } from '../workspace/disk/space-dir-handles.js';
+import { withSpaceDirHandlesReleased } from '../storage/index.js';
 
 import type { ExternalNoteEvent } from '@huabu/shared';
 

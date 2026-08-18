@@ -2,12 +2,14 @@
 // Licensed under the MIT license.
 
 /**
- * @deprecated Forwarding shim — the Workspace layout owns these now.
+ * @deprecated Forwarding shim — the Disk backend owns its layout now.
  *
- * Import from `modules/workspace/disk/paths.js` instead. This file exists
- * only so the many existing physical-Disk capability imports keep resolving
- * while they migrate; it must never contain logic, and no new call site may
- * import it (enforced by the module-boundary test).
+ * Inside the storage module, import from
+ * `storage/backends/disk/layout.js`. Application code should use
+ * `spaceDirectory()` or the workspace-owned paths when those express the
+ * capability it needs. This file exists for the remaining explicit Disk
+ * layout reads while they migrate; it must never contain logic, and no new
+ * call site may import it (enforced by the module-boundary test).
  */
 
-export * from '../workspace/disk/paths.js';
+export * from './backends/disk/layout.js';

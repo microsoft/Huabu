@@ -11,7 +11,7 @@
 
 import { mkdirSync } from 'node:fs';
 
-import { ensureWorldCanvasOnDisk } from './workspace/disk/world-canvas.js';
+import { ensureWorldCanvasOnDisk } from './storage/index.js';
 import { migrateLegacyAcpSessions } from './workspace/migrations/migrate-acp-sessions.js';
 import {
   migrateLegacyAgenetesThreads,
@@ -40,7 +40,8 @@ export function prepareWorkspaceOnDisk(workspacePath: string): void {
   migrateLegacyChatThreads(workspacePath);
   // Second hop (M6.9 row 2): fold legacy `.history/chat/*.turns.jsonl` turns
   // into the Agenetes two-tier log (`chat_v2/`). MUST run AFTER the pi-ai
-  // `.json` -> `.turns.jsonl` hop above.
+  // `.json` -> `.turns.jsonl` hop above, which resolves every coexisting pair
+  // before this hop folds the turn logs.
   migrateLegacyChatTurns(workspacePath);
   // Convert the strict workload/state boundary before any writer opens the
   // namespace. Keeps the original v1 file as `.agenetes-v1.bak`.

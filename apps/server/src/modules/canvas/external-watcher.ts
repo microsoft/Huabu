@@ -34,8 +34,8 @@ import { getLogger } from '../../utils/logger.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
 import { listAllCanvasDirEntries } from '../storage/canvas-dirs.js';
 import { getCanvasStore } from '../storage/index.js';
+import { registerSpaceDirHandleOwner } from '../storage/index.js';
 import { SPACE_JSON_FILENAME } from '../storage/paths.js';
-import { registerSpaceDirHandleOwner } from '../workspace/disk/space-dir-handles.js';
 import { getWorkspacePath, isWorkspaceConfigured } from '../workspace.js';
 
 import type { CanvasFile } from '../storage/index.js';

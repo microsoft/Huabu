@@ -30,7 +30,7 @@ import {
   getStorage,
   setStorageForTesting,
 } from '../storage/index.js';
-import { nodesDir } from '../workspace/disk/paths.js';
+import { nodesDir } from '../storage/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { BlobScope, BlobStore } from '../storage/index.js';

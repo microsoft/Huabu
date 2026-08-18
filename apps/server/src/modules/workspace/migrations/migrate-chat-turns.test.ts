@@ -9,6 +9,7 @@
  *   ✓ pins an empty Tier-1 range (seqStart 1 > seqEnd 0) on every turn
  *   ✓ renames the consumed source log to `.turns.jsonl.bak`
  *   ✓ idempotent — a second sweep neither re-writes nor throws
+ *   ✓ folds a turn log even when an unreadable Context sits beside it
  *   ✓ tolerant — a canvas with no chat dir is skipped
  */
 
@@ -16,6 +17,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -123,6 +125,33 @@ describe('migrateLegacyChatTurns', () => {
     // Re-run: no source log remains, target must be untouched.
     expect(() => migrateLegacyChatTurns(tmp)).not.toThrow();
     expect(readJsonLines<PersistedTurn>(target)).toHaveLength(before.length);
+  });
+
+  it('folds a turn log even when an unreadable Context sits beside it', () => {
+    // Hop 1 owns the coexistence decision; a Context still here is one it
+    // could not read. Blocking on it would cost the thread the history it
+    // already has in the new format.
+    const src = seedLegacyLog('Canvas A', 'thread-1', [legacyRecord('one')]);
+    const malformedLegacy = join(
+      tmp,
+      'Canvas A',
+      '.history',
+      'chat',
+      'thread-1.json',
+    );
+    writeFileSync(malformedLegacy, '{invalid');
+
+    migrateLegacyChatTurns(tmp);
+
+    expect(existsSync(src)).toBe(false);
+    expect(existsSync(`${src}.bak`)).toBe(true);
+    // Nothing consumed or rewrote the damaged Context.
+    expect(readFileSync(malformedLegacy, 'utf8')).toBe('{invalid');
+    expect(
+      readJsonLines<PersistedTurn>(
+        join(tmp, 'Canvas A', '.history', 'chat_v2', 'thread-1.turns.jsonl'),
+      ),
+    ).toHaveLength(1);
   });
 
   it('skips a canvas that has no legacy chat dir', () => {

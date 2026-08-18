@@ -16,6 +16,8 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { refreshCanvasDirIndex } from './canvas-dirs.js';
+import { nodesDir } from './layout.js';
 import {
   getCanvasStore,
   resetStorageCache,
@@ -23,9 +25,7 @@ import {
 import { DiskSpaceNodes } from './space-nodes.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { DiskStructuredStore } from './structured-store.js';
-import { refreshCanvasDirIndex } from '../../../workspace/disk/canvas-dirs.js';
-import { nodesDir } from '../../../workspace/disk/paths.js';
-import { ensureWorldCanvasOnDisk } from '../../../workspace/disk/world-canvas.js';
+import { ensureWorldCanvasOnDisk } from './world-canvas.js';
 import { setWorkspacePath } from '../../../workspace.js';
 import { describeSpaceNodesContract } from '../../ports/contracts/space-nodes.contract.js';
 

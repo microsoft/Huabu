@@ -43,6 +43,7 @@ import {
   WorldReferenceResolutionError,
 } from './world-reference-resolver.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
+import { toSafeFilename } from '../../utils/naming.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
@@ -58,12 +59,12 @@ import {
   deleteSpace,
   getCanvasStore,
   getStructuredStore,
-  updateNode,
+  spaceDirectory,
   type CanvasFile,
   type UpdateNodeOutcome,
+  updateNode,
 } from '../storage/index.js';
-import { canvasRoot, nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
-import { toSafeFilename } from '../workspace/disk/naming.js';
+import { nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
@@ -1609,7 +1610,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
-    const canvasDir = canvasRoot(canvasId);
+    const canvasDir = spaceDirectory(canvasId);
     if (!existsSync(canvasDir)) {
       return reply.code(404).send({ message: 'Canvas directory not found' });
     }

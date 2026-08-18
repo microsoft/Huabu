@@ -25,10 +25,10 @@
  * ### Idempotent, launch-only
  *
  * Skips any thread whose `chat_v2` log already exists, and renames each
- * source log to `.bak` on success, so a re-run never double-writes. One bad
- * thread never aborts the batch. The frozen {@link LegacyChatTurnRecord}
- * descriptor (never the live chat-store types) is the only dependency on
- * the old shape.
+ * consumed source log to `.bak` on success, so a re-run never double-writes.
+ * One bad thread never aborts the batch. The frozen
+ * {@link LegacyChatTurnRecord} descriptor (never the live chat-store types)
+ * is the only dependency on the old shape.
  */
 
 import { existsSync, readdirSync, renameSync } from 'node:fs';
@@ -122,6 +122,10 @@ export function migrateLegacyChatTurns(workspace: string): void {
       // sidecar, already-retired `.bak` files, and anything else.
       if (!file.endsWith(LEGACY_SUFFIX)) continue;
       const threadId = file.slice(0, -LEGACY_SUFFIX.length);
+      // No same-thread `.json` check: hop 1 owns the coexistence decision and
+      // always terminates it, so a Context still sitting here is one hop 1
+      // could not read. Folding this log anyway is what keeps the thread's
+      // history reachable; the unreadable Context stays on disk untouched.
       try {
         migrateLegacyTurnFile(
           turnStore,

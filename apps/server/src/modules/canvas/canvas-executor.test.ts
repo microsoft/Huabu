@@ -242,7 +242,7 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
 
     expect(out.conflicts ?? []).toHaveLength(0);
     expect(out.toVersion).toBe(out.fromVersion + 1);
-    expect(getCanvasStore('c1').readNode('m1')?.src).toBe('artifacts/new.png');
+    expect(getCanvasStore('c1').readNode('m1')?.src).toBe('new.png');
   });
 
   it('auto-updates image height when MERGE_NODE_DATA rewrites src', async () => {

@@ -8,7 +8,7 @@
  *   ✓ seeds selection ids/refs from the [Selected Nodes] block + tag
  *   ✓ folds [SYSTEM Error/Interrupted] rows into the open turn transcript
  *   ✓ migrateLegacyThreadFile: writes .turns.jsonl, renames .json → .bak
- *   ✓ idempotent — skips when a .turns.jsonl already exists
+ *   ✓ repairs supported legacy/new-format coexistence without data loss
  *   ✓ migrateLegacyChatThreads: sweeps canvases, ignores active sidecars
  */
 
@@ -16,6 +16,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -126,12 +127,95 @@ describe('migrateLegacyThreadFile', () => {
     expect(readJsonLines<ChatTurnRecord>(turnsPath)).toHaveLength(2);
   });
 
-  it('is idempotent — skips when a .turns.jsonl already exists', () => {
+  it('atomically completes a coexisting log that is a legacy prefix', () => {
     const jsonPath = join(tmp, 'tr.json');
+    const turnsPath = jsonPath.replace(/\.json$/, '.turns.jsonl');
+    const legacyTurns = legacyContextToTurns(legacyContext());
     writeFileSync(jsonPath, JSON.stringify(legacyContext()));
-    writeFileSync(jsonPath.replace(/\.json$/, '.turns.jsonl'), '');
-    expect(migrateLegacyThreadFile(jsonPath)).toBe(false);
-    expect(existsSync(jsonPath)).toBe(true); // untouched
+    writeFileSync(turnsPath, `${JSON.stringify(legacyTurns[0])}\n`);
+
+    expect(migrateLegacyThreadFile(jsonPath)).toBe(true);
+    expect(readJsonLines<ChatTurnRecord>(turnsPath)).toEqual(legacyTurns);
+    expect(existsSync(jsonPath)).toBe(false);
+    expect(existsSync(`${jsonPath}.bak`)).toBe(true);
+  });
+
+  it('preserves a newer tail when the legacy conversion is its prefix', () => {
+    const jsonPath = join(tmp, 'tr.json');
+    const turnsPath = jsonPath.replace(/\.json$/, '.turns.jsonl');
+    const legacyTurns = legacyContextToTurns(legacyContext());
+    const newerTurn: ChatTurnRecord = {
+      ...legacyTurns[1],
+      envelope: {
+        ...legacyTurns[1].envelope,
+        user: { ...legacyTurns[1].envelope.user, text: 'new-format tail' },
+      },
+    };
+    writeFileSync(jsonPath, JSON.stringify(legacyContext()));
+    writeFileSync(
+      turnsPath,
+      [...legacyTurns, newerTurn]
+        .map((turn) => JSON.stringify(turn))
+        .join('\n') + '\n',
+    );
+
+    expect(migrateLegacyThreadFile(jsonPath)).toBe(true);
+    expect(readJsonLines<ChatTurnRecord>(turnsPath)).toEqual([
+      ...legacyTurns,
+      newerTurn,
+    ]);
+    expect(existsSync(jsonPath)).toBe(false);
+    expect(existsSync(`${jsonPath}.bak`)).toBe(true);
+  });
+
+  it('preserves a divergent Context and leaves the live log as written', () => {
+    const jsonPath = join(tmp, 'tr.json');
+    const turnsPath = jsonPath.replace(/\.json$/, '.turns.jsonl');
+    const [first] = legacyContextToTurns(legacyContext());
+    const divergent: ChatTurnRecord = {
+      ...first,
+      envelope: {
+        ...first.envelope,
+        user: { ...first.envelope.user, text: 'different first turn' },
+      },
+    };
+    writeFileSync(jsonPath, JSON.stringify(legacyContext()));
+    writeFileSync(turnsPath, `${JSON.stringify(divergent)}\n`);
+
+    expect(migrateLegacyThreadFile(jsonPath)).toBe(true);
+    // The live log is the one the app appends to, so it is untouched — and
+    // hop 2 is now free to fold it.
+    expect(readJsonLines<ChatTurnRecord>(turnsPath)).toEqual([divergent]);
+    // The Context survives verbatim under a suffix that says why.
+    expect(existsSync(jsonPath)).toBe(false);
+    expect(existsSync(`${jsonPath}.bak`)).toBe(false);
+    expect(existsSync(`${jsonPath}.unresolved`)).toBe(true);
+    expect(
+      JSON.parse(readFileSync(`${jsonPath}.unresolved`, 'utf8')) as unknown,
+    ).toEqual(legacyContext());
+  });
+
+  it('converts a thread whose Context holds an unrecognised row', () => {
+    const jsonPath = join(tmp, 'tr.json');
+    const ctx = legacyContext();
+    // A row from an older pi-ai version, plus outright junk. Neither may cost
+    // the thread the turns around them.
+    const widened = {
+      ...ctx,
+      messages: [
+        { role: 'system', content: 'you are helpful' },
+        ...ctx.messages,
+        null,
+      ],
+    };
+    writeFileSync(jsonPath, JSON.stringify(widened));
+
+    expect(migrateLegacyThreadFile(jsonPath)).toBe(true);
+    const turnsPath = jsonPath.replace(/\.json$/, '.turns.jsonl');
+    expect(readJsonLines<ChatTurnRecord>(turnsPath)).toEqual(
+      legacyContextToTurns(ctx),
+    );
+    expect(existsSync(`${jsonPath}.bak`)).toBe(true);
   });
 });
 
@@ -152,5 +236,48 @@ describe('migrateLegacyChatThreads', () => {
     // The active sidecar is left untouched (not mistaken for a thread).
     expect(existsSync(join(chat, 'tr.active.json'))).toBe(true);
     expect(existsSync(join(chat, 'tr.active.json.bak'))).toBe(false);
+  });
+
+  it('terminates divergent coexistence instead of deferring it', () => {
+    const chat = join(tmp, 'cv-1', '.history', 'chat');
+    const jsonPath = join(chat, 'tr.json');
+    const turnsPath = join(chat, 'tr.turns.jsonl');
+    const [first] = legacyContextToTurns(legacyContext());
+    const divergent: ChatTurnRecord = {
+      ...first,
+      envelope: {
+        ...first.envelope,
+        user: { ...first.envelope.user, text: 'different first turn' },
+      },
+    };
+    mkdirSync(chat, { recursive: true });
+    writeFileSync(jsonPath, JSON.stringify(legacyContext()));
+    writeFileSync(turnsPath, `${JSON.stringify(divergent)}\n`);
+
+    expect(() => migrateLegacyChatThreads(tmp)).not.toThrow();
+    expect(existsSync(jsonPath)).toBe(false);
+    expect(existsSync(`${jsonPath}.unresolved`)).toBe(true);
+    expect(readJsonLines<ChatTurnRecord>(turnsPath)).toEqual([divergent]);
+
+    // Idempotent: the preserved Context is not a `.json` thread, so a second
+    // sweep neither re-reads nor re-reports it.
+    expect(() => migrateLegacyChatThreads(tmp)).not.toThrow();
+    expect(existsSync(`${jsonPath}.unresolved`)).toBe(true);
+    expect(readJsonLines<ChatTurnRecord>(turnsPath)).toEqual([divergent]);
+  });
+
+  it('leaves an unreadable Context in place without losing the batch', () => {
+    const chat = join(tmp, 'cv-1', '.history', 'chat');
+    mkdirSync(chat, { recursive: true });
+    writeFileSync(join(chat, 'broken.json'), '{"messages":[{"role":"user"');
+    writeFileSync(join(chat, 'good.json'), JSON.stringify(legacyContext()));
+
+    expect(() => migrateLegacyChatThreads(tmp)).not.toThrow();
+    // The damaged thread stays put, the healthy one beside it still migrates.
+    expect(existsSync(join(chat, 'broken.json'))).toBe(true);
+    expect(existsSync(join(chat, 'good.json.bak'))).toBe(true);
+    expect(
+      readJsonLines<ChatTurnRecord>(join(chat, 'good.turns.jsonl')),
+    ).toHaveLength(2);
   });
 });

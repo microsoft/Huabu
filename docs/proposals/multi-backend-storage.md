@@ -893,6 +893,14 @@ the legacy class import; the other two preserve physical-Disk capability
 imports. Lower-fanout imports are updated directly. No forwarding file may
 contain logic, and no new call site may import one.
 
+> **Superseded in part by §12.5.** The row moving `paths.ts` and
+> `canvas-dirs.ts` to `modules/workspace/disk/` is justified above by those
+> files serving "non-storage domains". That reason is inverted: a storage
+> detail with consumers outside `storage/` is describing a leak, not earning a
+> home outside the boundary. The move was right for the files that describe
+> the Workspace _as a place_ and wrong for the files that describe _how the
+> Disk backend stores Spaces_. Phase 4.5 separates the two.
+
 #### 12.2.3 Compatibility boundary and blast-radius budget
 
 In Phase 2, `storage/compatibility/canvas.ts` owns the legacy
@@ -1665,7 +1673,250 @@ bearing: change-review records and Tasks are not history, whatever Disk's
 arrives, the group comes back — and `events` is where it was before, so
 nothing else has to move.
 
-### 12.5 Later phases — provisional
+### 12.5 Phase 4.5 — storage-owned layout moves inside the boundary — **implemented**
+
+Phase 5 adds a second structured backend. Before it does, the layout knowledge
+that belongs to the _Disk_ backend has to stop living outside `storage/`.
+Otherwise every later backend inherits a module named `disk` as the ambient
+description of where Spaces are, and each one pays to migrate the same callers
+again.
+
+The rule this phase restores: **outside `storage/`, nothing knows how Spaces
+are stored.** A domain may know a Space is _materialized_ somewhere — that is a
+declared capability with real consumers — but not that its record is
+`space.json`, nor that its events are a JSONL file.
+
+#### 12.5.1 What the census shows
+
+Measured on `6b43798a`. Non-storage **production** files importing
+`modules/workspace/disk/`:
+
+| File                              | Symbols                                   | Kind              |
+| --------------------------------- | ----------------------------------------- | ----------------- |
+| `agent/acp/service.ts`            | `canvasAcpNamespace`                      | materialization   |
+| `agent/agent-thread.service.ts`   | `canvasAcpNamespace`                      | materialization   |
+| `agent/memory/analyzer.ts`        | `canvasMemoryPath`, `workspaceMemoryPath` | materialization   |
+| `agent/memory/analyzer.ts`        | `chatDir`                                 | **storage-owned** |
+| `agent/node-ref.ts`               | `toSafeFilename`                          | pure naming       |
+| `canvas/canvas.route.ts`          | `toSafeFilename`                          | pure naming       |
+| `canvas/external-watcher.ts`      | `registerSpaceDirHandleOwner`             | materialization   |
+| `preprocessing/stages/project.ts` | `normalizeForCompare`                     | pure naming       |
+| `workspace-prepare.ts`            | `ensureWorldCanvasOnDisk`                 | materialization   |
+
+Six test files add `nodesDir`, `changesPath`, `canvasRoot`, and
+`withSpaceDirHandlesReleased`.
+
+**Corrected.** The table above was built by searching for `workspace/disk/`,
+which misses every consumer that reaches the same symbols through the
+deprecated `storage/paths.js` shim. Counting both paths, the production files
+outside `storage/` that read a **storage-owned** symbol are six, not one:
+
+| File                                        | Symbol                            | Resolution                                 |
+| ------------------------------------------- | --------------------------------- | ------------------------------------------ |
+| `canvas/canvas.route.ts`                    | `nodesDir`, `SPACE_JSON_FILENAME` | import/export bundle format; own constant  |
+| `canvas/external-watcher.ts`                | `SPACE_JSON_FILENAME`             | Disk-only feature; declare materialization |
+| `canvas/world-target-access.ts`             | `SPACE_JSON_FILENAME`             | catalogue read; `SpaceRepository.list()`   |
+| `canvas/import-node-src.ts`                 | `artifactsDir`                    | ref-level `isArtifactsRel` (§12.5.7)       |
+| `agent/conversation/prompt/debug-prompt.ts` | `chatDir`                         | writes its own debug log; own path         |
+| `agent/memory/analyzer.ts`                  | `chatDir`                         | dead code; removed (§12.5.7)               |
+
+Even at six this is a smaller leak than the raw import count suggests: most
+`workspace/disk/` imports come from `storage/` itself, which is the permitted
+direction. The problem is not mass violation by consumers — it is that the
+module they import is _mixed_, and its name and location assert an answer the
+port layer exists to keep open. Note also that only one of the six wants a new
+port capability; the rest are dead, misfiled, or already served.
+
+#### 12.5.2 The test that decides ownership
+
+A symbol belongs outside `storage/` only if it is **still useful, unchanged,
+when the structured backend becomes SQLite**. Applied one symbol at a time,
+that question sorts `paths.ts` into four groups — not the three an eyeball
+reading suggests.
+
+| Outcome under a SQLite structured profile      | Members                                                                                                                                                              | Belongs to                                   |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Meaningless — the state became a table         | `SPACE_JSON_FILENAME`, `canvasJsonPath`, `nodesDir`, `nodeFilePath`, `historyDir`, `changesPath`, `tasksPath`, `eventsPath`, `deltaLogPath`, `WORLD_CANVAS_DIR_NAME` | `storage/backends/disk/`                     |
+| Still useful — belongs to the _other_ axis     | `ARTIFACTS_DIR_NAME`, `artifactsDir`, `artifactPath`                                                                                                                 | `storage/backends/disk/` (blob)              |
+| Still useful — concept survives, body does not | `canvasRoot`, `chatDir`                                                                                                                                              | re-founded on the materialization capability |
+| Still useful, untouched                        | `settingDir`, `userSkillsDir`, `workspaceMemoryPath`                                                                                                                 | `modules/workspace/`                         |
+
+Two corrections the test forces against a looser reading:
+
+- `WORLD_CANVAS_DIR_NAME` is a _directory name_. SQLite encodes World as
+  `is_world = 1` with its own reserved collision key, and the portable concept
+  already exists as `SpaceRepository.worldId()`. The constant is Disk's.
+- `canvasRoot` cannot simply move. Its body resolves through `canvasDirName()`,
+  which reads an index built from `space.json`, so under SQLite it silently
+  falls back to id-named directories. It is the materialization anchor and has
+  to be re-founded on something that does not consult the structured backend —
+  which is also the fix for the blob-scope hazard in §13.
+
+`canvas-dirs.ts` is not ambiguous at all: it builds its index by reading
+`space.json` from every directory. It is Disk structured-backend state that
+currently lives outside the storage boundary. `space-dir-handles.ts` looks
+substrate-specific but fails the test for the same reason — it exists so
+Windows can rename a Space _directory_ safely, and under SQLite there is no
+such rename.
+
+`naming.ts` is misfiled in a different way: pure string logic with no I/O,
+already re-exported rather than owned. It passes the test trivially (a second
+backend needs the identical rules) but has no business behind a `disk`
+segment. Phase 5 extracts it to `utils/naming.ts` as a side effect of needing
+it twice; that extraction belongs here, where it is the point.
+
+Because the residue that survives the test is three setting helpers and
+`getWorkspacePath()` itself — none of it filesystem-specific — the target is a
+**flat `modules/workspace/`** with no substrate segment.
+
+#### 12.5.3 `.history/` conflates two populations
+
+The directory holds the Disk structured backend's files — `events.jsonl`,
+`tasks.json`, `delta-log.jsonl`, `<thread>.changes.json` — and, sharing the
+same parent for no stated reason beyond travelling together in export bundles,
+per-Space state owned by other domains:
+
+| Family                                                   | Owner under the test                                                                                                                                                                            |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `acpSessionsPath`, `canvasAcpNamespace`                  | Agent domain. It is Agenetes' own store — the namespace hands the ACP driver `storage.root` and the driver persists there. Survives the switch; its address inside `.history/` is the accident. |
+| `chatPromptLogPath`                                      | Debug artifact. Written only under `HUABU_DEBUG_PROMPT` and, per its own comment, never read by the app. Needs a location, not an owner.                                                        |
+| `canvasMemoryDir`, `canvasMemoryPath`, `memoryStatePath` | Agent domain, materialized. AI-private Markdown an agent reads and writes as files.                                                                                                             |
+
+Under SQLite the first population evaporates and the second still needs a
+home. Phase 4.5 assigns each an owner so that the split is a decision rather
+than a leftover; it implements none of them beyond the relocation.
+
+#### 12.5.4 Materialization becomes declared, not ambient
+
+The consumers above cannot be served by a structured port and should not be.
+An ACP agent, a file watcher, and RFS need a real directory; that is a product
+requirement, not a leak.
+
+What is wrong today is that they get it by reading an ambient layout module
+whose name asserts the substrate. The port layer already has the right shape
+one level down — `BlobScope` exposes `materialize()` for "consumers that
+genuinely need a real filename" (§7). This phase gives Space trees the same
+treatment: an explicit capability a consumer depends on by name and a profile
+can decline to offer, rather than a path helper that is always simply there.
+
+Note the dependency direction this settles. `modules/workspace/` owns _which_
+directory is active; `storage/` owns what the Disk backend puts inside it.
+Consumers needing a Space's real directory ask `storage/`, so the current
+`storage → workspace/disk` edge inverts to `workspace ← storage` plus an
+explicit capability — instead of every domain reaching into a shared layout.
+
+#### 12.5.5 Scope
+
+In:
+
+1. Extract pure naming to `utils/naming.ts` and delete `workspace/disk/naming.ts`
+   outright — no shim, since every call site is updated in the same step.
+2. Relocate the Disk structured and blob layout families, plus
+   `canvas-dirs.ts`, `name-index.ts`, `space-dir-handles.ts`, and
+   `world-canvas.ts`, into `storage/backends/disk/`.
+3. Leave `settingDir`, `userSkillsDir`, and `workspaceMemoryPath` in a flat
+   `modules/workspace/`, with no substrate segment.
+4. Introduce the Space materialization capability, re-found `canvasRoot` on it,
+   and move the ACP, watcher, memory, and World-bootstrap consumers onto it.
+5. Move `agent/memory/analyzer.ts` off `chatDir`. Keep the agent-owned path
+   families of §12.5.3 in `modules/workspace/paths.ts` as a transitional
+   materialization surface; moving them into their owning domains remains
+   follow-up work.
+6. Extend the module-boundary test to fail when a non-storage file imports a
+   storage-owned layout symbol — the guard that stops this recurring.
+
+Out:
+
+- Any SQLite work, schema, or adapter.
+- Changing the blob scope's _identity_ (title-derived vs `canvasId`). This
+  phase records the decision point; §13 owns the hazard.
+- Agenetes persistence, RFS/file-tool contracts, import/export, product UI.
+
+#### 12.5.6 Sequence and verification
+
+The moves preserve symbol names and runtime logic, as in §12.2.2. Tests move
+with their subjects. Verification is `pnpm run check` plus the extended
+boundary test; behavior parity is asserted by the existing Disk suites, which
+must pass unchanged — a diff that alters a Disk test's expectations is out of
+scope by definition.
+
+Phase 5 rebases onto this and drops its `utils/naming.ts` extraction, its
+`workspace/disk/naming.ts` shim, and the corresponding roadmap edits.
+
+**Landed for the Workspace-to-storage substrate move.** `modules/workspace/`
+is flat and holds `paths.ts` plus `migrations/`; the Disk record layout, blob
+layout, directory index, name index, directory-handle coordination, and World
+bootstrap all sit under `storage/backends/disk/`. Consumers that need only a
+real Space directory call `spaceDirectory()`; directory-handle release and
+World bootstrap are re-exported from the facade rather than reached by path.
+This does not close every application-to-Disk read: `canvas.route.ts`,
+`external-watcher.ts`, and `world-target-access.ts` intentionally retain
+compatibility-shim reads, alongside migration and test callers. Three guards
+in `module-boundaries.test.ts` pin the Workspace move: the workspace module
+has no substrate segment, imports no backend, and names no Disk layout symbol.
+
+#### 12.5.7 Findings from step 5, and one follow-up
+
+Working the six consumers of §12.5.1 individually produced four different
+answers, only one of which was a missing port capability.
+
+**No new port capability — a rejected design, recorded because the reasoning
+generalizes.** `import-node-src.ts` asked whether a resolved path was already
+inside `.artifacts/`, and answered by rebuilding the Disk artifacts directory.
+The first fix added `BlobScope.owns(absolutePath): boolean`, letting the scope
+answer for itself. That was wrong, in the same way this phase exists to
+correct.
+
+`materialize()` runs port → filesystem: the port _renders_ a real path as a
+service, and any backend can satisfy it by spooling a temp copy.
+`owns(absolutePath)` runs the other way — it hands the port a path in a
+vocabulary only a local backend can interpret and asks it to adjudicate. The
+`false` a remote backend would return is not a neutral implementation but an
+admission that the question is meaningless there. The net effect would have
+been to remove a Disk-layout import from one consumer by moving the Disk
+assumption into the port, where it constrains every future backend.
+
+**Test for the next such proposal:** a port method must be answerable by every
+backend in the port's own vocabulary. If one backend's honest implementation
+is a constant, the method is describing that backend, not the port.
+
+The caller never needed storage at all. `toPhysicalRel` already maps the
+virtual `artifacts/` prefix onto the hidden directory, so "is this ref already
+an artifact?" is a question about the _ref_, answered by `isArtifactsRel` in
+`fs-sandbox.ts` — the module that owns virtual↔physical ref mapping.
+Resolving against a synthetic root keeps it free of workspace, canvas
+directory, and filesystem, while still collapsing `..`.
+
+Writing its test surfaced a limitation worth pinning: the virtual alias is
+applied as a prefix, so `nodes/../artifacts/x` is not treated as an artifact.
+The pre-existing check behaved identically, so the test records the behavior
+rather than widening it.
+
+**The memory analyzer's chat digest — removed, not ported.** `readChatDigest`
+scanned `<canvas>/.history/chat/*.json` for a `{ messages: [] }` shape. Two
+migrations retired it: `migrate-chat-threads` renamed `<threadId>.json` to
+`.json.bak` and wrote `.turns.jsonl`; `migrate-chat-turns` folded those into
+the Agenetes Tier-2 store under `chat_v2/`. The only live `.json` writer left
+in that directory is the change-review sidecar, whose payload is an array with
+no `messages` key, so every file failed the guard. The reader had returned
+nothing in any migrated workspace, and its own test pointed it at a directory
+that does not exist, so nothing caught it.
+
+Adding a `SpaceChats.list()` port to serve it would have been the wrong repair
+twice over: it would give the storage ports authority over data storage does
+not own — `legacy/canvas-store.ts` states plainly that threads and turns
+belong to the agent runtime — and would oblige every future structured backend
+to model Agenetes' turn log, which is the two-authorities hazard in §13.
+
+**Follow-up (open):** decide whether the memory agent should see conversation
+turns at all, and if so reinstate the digest against `agenetes.history()` —
+the call `canvas-search.ts` already uses for exactly this data. That is a
+behavior change and deliberately outside this phase, whose parity rule is that
+no working behavior moves. The `latestChatTs` field and its
+`lastSeenThreadCursor` plumbing survive the removal because they are the
+resume point such a digest would need.
+
+### 12.6 Later phases — provisional
 
 5. Add one new adapter at a time — SQLite, then Postgres, then Azure Blob —
    running the same contract suites, migration fixtures, failure injection,
@@ -1904,7 +2155,7 @@ Before a new backend is production-ready:
 | [`.../storage/compatibility/canvas.ts`](../../apps/server/src/modules/storage/compatibility/canvas.ts)                                       | Residual Disk read surface plus direct-module lifecycle test fixtures; production structured mutations enumerated in §12.4 use the portable ports.                                                                   |
 | [`apps/server/src/modules/agent/memory/analyzer.ts`](../../apps/server/src/modules/agent/memory/analyzer.ts)                                 | P3 repository consumer for strict Space existence, bounded action events, and intent episodes; physical chat and memory files remain Disk-specific.                                                                  |
 | [`apps/server/src/modules/canvas/write-coordinator.ts`](../../apps/server/src/modules/canvas/write-coordinator.ts)                           | Canvas mutation coordinator and per-Space write lock, held across asynchronous node read, revision CAS, and put.                                                                                                     |
-| [`apps/server/src/modules/workspace/disk/`](../../apps/server/src/modules/workspace/disk/)                                                   | Cross-domain physical Workspace layout: paths, canvas dirs, naming, name index, dir handles, World bootstrap. `storage/paths.ts` forwards here.                                                                      |
+| [`apps/server/src/modules/workspace/`](../../apps/server/src/modules/workspace/)                                                             | Workspace-owned and transitional materialization paths plus migrations. Disk layout and directory-index code now live under `storage/backends/disk/`.                                                                |
 | [`apps/server/src/modules/canvas/canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts)                               | Canonical command execution; submits one ordered node/record/delta batch through `SpaceHandle.write`.                                                                                                                |
 | [`apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts`](../../apps/server/src/modules/agent/tools/handlers/fs-sandbox.ts)             | Current real-Disk path resolution and traversal for built-in agent file tools.                                                                                                                                       |
 | [`apps/server/src/modules/agent/acp/capabilities/fs.ts`](../../apps/server/src/modules/agent/acp/capabilities/fs.ts)                         | Synthetic ACP `/space` read capability, currently not wired into the production driver.                                                                                                                              |

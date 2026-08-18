@@ -28,7 +28,24 @@ export {
   getWorldCanvasId,
   isWorldCanvasId,
   requireWorldCanvasId,
-} from '../workspace/disk/canvas-dirs.js';
+} from './backends/disk/canvas-dirs.js';
+
+/**
+ * Materialization-tier capabilities, re-exported so consumers that need a
+ * real Space directory reach them through the facade rather than naming a
+ * backend (§12.5.4).
+ *
+ * Each is Disk-shaped by nature, not by accident: releasing directory handles
+ * exists so Windows can rename a Space folder, and the World bootstrap writes
+ * one. A profile that does not materialize Spaces has nothing for either to
+ * do, which is the gate that keeps them off the portable surface.
+ */
+export {
+  registerSpaceDirHandleOwner,
+  withSpaceDirHandlesReleased,
+} from './backends/disk/space-dir-handles.js';
+export type { SpaceDirHandleOwner } from './backends/disk/space-dir-handles.js';
+export { ensureWorldCanvasOnDisk } from './backends/disk/world-canvas.js';
 export { withCanvasMutex, updateNode } from '../canvas/write-coordinator.js';
 export type {
   UpdateNodeOptions,
@@ -53,6 +70,7 @@ export {
   getStructuredStore,
   initStorage,
   setStorageForTesting,
+  spaceDirectory,
   storageHealth,
 } from './storage.js';
 export type { SpaceDeleteOutcome, Storage } from './storage.js';

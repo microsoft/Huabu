@@ -6,7 +6,7 @@
 import {
   normalizeForCompare,
   toSafeFilename,
-} from '../../../workspace/disk/naming.js';
+} from '../../../../utils/naming.js';
 
 /**
  * Whether `filename` is `base` carrying an allocation suffix (` (2)`, ` (3)`).

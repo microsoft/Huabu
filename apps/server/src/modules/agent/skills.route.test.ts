@@ -30,7 +30,7 @@ import {
   invalidateSkillCache,
   type LoadedSkill,
 } from '../../prompt/skills/loader.js';
-import { userSkillsDir } from '../storage/paths.js';
+import { userSkillsDir } from '../workspace/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { SkillCatalogueEntry } from '@huabu/shared';

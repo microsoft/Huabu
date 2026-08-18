@@ -17,7 +17,7 @@ import {
   takeExternalNote,
 } from './external-watcher.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
-import { canvasRoot } from '../storage/paths.js';
+import { spaceDirectory } from '../storage/index.js';
 
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -95,7 +95,7 @@ const externalRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       return reply.code(404).send({ message: 'External note not found' });
     }
 
-    const abs = path.join(canvasRoot(canvasId), item.relativePath);
+    const abs = path.join(spaceDirectory(canvasId), item.relativePath);
     let raw: string;
     try {
       raw = await readFile(abs, 'utf8');

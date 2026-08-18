@@ -8,8 +8,8 @@
  * The worker calls {@link runAnalysisPass}. We:
  *
  *   1. Build the system prompt from `prompt/agents/memory/AGENT.md`.
- *   2. Assemble a compact context bundle from backend-owned Space records and
- *      logs plus the remaining Disk-owned chat and memory surfaces.
+ *   2. Assemble a compact context bundle from backend-owned Space records
+ *      and logs, plus the memory surfaces.
  *   3. Run the sub-agent against that context. The agent's only way
  *      to affect the world is via the `fs_write` tool, whose handler
  *      routes by virtual path into the writers in `./writers.ts`.
@@ -24,11 +24,8 @@
  *     mutations on the same disk targets apply in declared order.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import path from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 
-import { runAgent } from '../agent.service.js';
-import { readMemoryState } from './trigger.js';
 import { loadAgent, listSkills } from '../../../prompt/index.js';
 import {
   getStructuredStore,
@@ -38,9 +35,9 @@ import {
 } from '../../storage/index.js';
 import {
   canvasMemoryPath,
-  chatDir,
   workspaceMemoryPath,
-} from '../../workspace/disk/paths.js';
+} from '../../workspace/paths.js';
+import { runAgent } from '../agent.service.js';
 
 import type { MemoryLogger } from './index.js';
 import type { WriteResult } from './writers.js';
@@ -54,8 +51,6 @@ import type { Context, Message } from '@earendil-works/pi-ai';
  */
 const MAX_NODES_IN_SNAPSHOT = 60;
 const MAX_EVENTS_IN_DIGEST = 100;
-const MAX_CHAT_TURNS_IN_DIGEST = 12;
-const MAX_THREAD_SCAN = 6;
 
 /**
  * Run one memory analysis pass.
@@ -64,19 +59,11 @@ const MAX_THREAD_SCAN = 6;
  * does NOT call `markAnalyzed` (so the next trigger retries). Writer
  * rejections are *not* errors — they come back as `ok:false` tool
  * results which we surface in the returned summary.
- *
- * The returned `latestChatTs` is the maximum message timestamp the
- * pass scanned (independent of which were summarised into the
- * prompt). The worker persists it as `lastSeenThreadCursor` via
- * {@link markAnalyzed} so subsequent passes only look at strictly
- * newer turns — without it the chat digest would re-include the
- * same messages every threshold crossing.
  */
 export type AnalysisPassResult =
   | {
       status: 'completed';
       results: WriteResult[];
-      latestChatTs: number | null;
     }
   | { status: 'skipped'; reason: 'space-not-found' };
 
@@ -136,7 +123,6 @@ export async function runAnalysisPass(
   return {
     status: 'completed',
     results: writeResults,
-    latestChatTs: bundle.latestChatTs,
   };
 }
 
@@ -173,13 +159,6 @@ function parseWriteResult(raw: string): WriteResult | null {
 interface ContextBundle {
   messages: Message[];
   summary: string;
-  /**
-   * Max message timestamp scanned by the chat digest, or `null` when
-   * no new turns were seen. Carries to the worker so it can persist
-   * `lastSeenThreadCursor` and the next pass only looks at strictly
-   * newer turns.
-   */
-  latestChatTs: number | null;
 }
 
 /**
@@ -207,18 +186,6 @@ async function assembleContext(
   });
   parts.push(`${snapshot.nodeCount} nodes`);
 
-  const state = readMemoryState(canvasId);
-  const chat = readChatDigest(canvasId, state.lastSeenThreadCursor);
-  if (chat) {
-    messages.push({
-      role: 'user',
-      content: `[SYSTEM Chat digest since ${
-        state.lastSeenThreadCursor ?? 'start'
-      }]\n${chat.text}`,
-      timestamp: Date.now(),
-    });
-    parts.push(`${chat.turns} chat turns`);
-  }
   const eventRows = await handle.events.read(MAX_EVENTS_IN_DIGEST);
   const events = readEventsDigest(eventRows);
   if (events) {
@@ -247,7 +214,6 @@ async function assembleContext(
   return {
     messages,
     summary: parts.join(', ') || '(empty)',
-    latestChatTs: chat?.latestTs ?? null,
   };
 }
 
@@ -291,116 +257,6 @@ function summariseNode(node: unknown): string {
       ? ` @ (${Math.round(x)},${Math.round(y)})`
       : '';
   return `- [${type}] ${id} "${label.slice(0, 60)}"${pos}`;
-}
-
-interface ChatDigest {
-  text: string;
-  turns: number;
-  /**
-   * Max `timestamp` seen across every message that passed the `since`
-   * filter, regardless of whether it landed in the digest body. The
-   * worker persists this as the next pass's `lastSeenThreadCursor`
-   * so the chat digest monotonically advances.
-   */
-  latestTs: number | null;
-}
-
-/**
- * Pull a digest of recent chat turns from `<canvas>/.history/chat/`.
- *
- * Strategy:
- *   - List every thread file, sorted by `mtime` descending.
- *   - Walk up to {@link MAX_THREAD_SCAN} threads, scanning each
- *     message in turn. For each message:
- *       - drop turns older than `since` (the bookkeeping's
- *         `lastSeenThreadCursor`);
- *       - track `latestTs` = max(`timestamp`) of every survivor,
- *         so the caller can advance the cursor even when the
- *         digest body itself was capped;
- *       - skip system / non-user / non-assistant rows;
- *       - emit up to {@link MAX_CHAT_TURNS_IN_DIGEST} into the body.
- *   - For each emitted turn, render the role + the first ~200 chars
- *     of the content (or `[tool: name]` for assistant turns that
- *     only carried tool calls).
- */
-function readChatDigest(
-  canvasId: string,
-  since: number | null,
-): ChatDigest | null {
-  const dir = chatDir(canvasId);
-  if (!existsSync(dir)) return null;
-  let files: string[];
-  try {
-    files = readdirSync(dir);
-  } catch {
-    return null;
-  }
-  const threads = files
-    .filter((f) => f.endsWith('.json'))
-    .map((f) => path.join(dir, f))
-    .map((p) => ({ path: p, mtime: safeMtime(p) }))
-    .filter((t) => t.mtime !== null)
-    .sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0))
-    .slice(0, MAX_THREAD_SCAN);
-
-  const lines: string[] = [];
-  let turns = 0;
-  let latestTs: number | null = null;
-  for (const thread of threads) {
-    let ctx: { messages?: unknown[] } | null;
-    try {
-      ctx = JSON.parse(readFileSync(thread.path, 'utf8')) as {
-        messages?: unknown[];
-      };
-    } catch {
-      continue;
-    }
-    if (!ctx?.messages || !Array.isArray(ctx.messages)) continue;
-    for (const m of ctx.messages) {
-      if (!m || typeof m !== 'object') continue;
-      const msg = m as {
-        role?: string;
-        content?: unknown;
-        timestamp?: number;
-      };
-      const ts = typeof msg.timestamp === 'number' ? msg.timestamp : null;
-      if (since !== null && ts !== null && ts <= since) continue;
-
-      // Advance latestTs for every message that survived the `since`
-      // filter — not just the ones we end up emitting. That way the
-      // cursor still advances when MAX_CHAT_TURNS_IN_DIGEST has been
-      // reached, and we don't re-scan the same prefix next pass.
-      if (ts !== null && (latestTs === null || ts > latestTs)) {
-        latestTs = ts;
-      }
-
-      const role = msg.role;
-      if (role !== 'user' && role !== 'assistant') continue;
-      if (turns >= MAX_CHAT_TURNS_IN_DIGEST) continue;
-      const text = digestMessageContent(msg.content);
-      if (text.startsWith('[SYSTEM')) continue;
-      lines.push(`${role}: ${text}`);
-      turns++;
-    }
-  }
-  if (turns === 0 && latestTs === null) return null;
-  return { text: lines.join('\n'), turns, latestTs };
-}
-
-function digestMessageContent(content: unknown): string {
-  if (typeof content === 'string') return content.slice(0, 200);
-  if (!Array.isArray(content)) return '';
-  const parts: string[] = [];
-  for (const block of content) {
-    if (!block || typeof block !== 'object') continue;
-    const b = block as { type?: string; text?: string; name?: string };
-    if (b.type === 'text' && typeof b.text === 'string') {
-      parts.push(b.text);
-    } else if (b.type === 'toolCall' && typeof b.name === 'string') {
-      parts.push(`[tool: ${b.name}]`);
-    }
-  }
-  return parts.join(' ').slice(0, 200);
 }
 
 interface EventsDigest {
@@ -460,13 +316,5 @@ function readFileSafe(file: string): string {
     return readFileSync(file, 'utf8');
   } catch {
     return '';
-  }
-}
-
-function safeMtime(file: string): number | null {
-  try {
-    return statSync(file).mtimeMs;
-  } catch {
-    return null;
   }
 }

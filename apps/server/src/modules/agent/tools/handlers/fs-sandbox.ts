@@ -30,8 +30,7 @@ import { readFileSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 
 import { parseFrontmatter } from '../../../../utils/markdown-frontmatter.js';
-import { getCanvasStore } from '../../../storage/index.js';
-import { canvasRoot } from '../../../storage/paths.js';
+import { getCanvasStore, spaceDirectory } from '../../../storage/index.js';
 
 // ─── Always-skipped directory names ─────────────────────────────────────────
 
@@ -71,6 +70,26 @@ const VIRTUAL_PREFIX: ReadonlyArray<readonly [string, string]> = [
   ['artifacts/', '.artifacts/'],
   ['upload/', '.upload/'],
 ];
+
+/**
+ * Whether an already-resolved, Space-relative physical path denotes something
+ * under `.artifacts/`.
+ *
+ * Callers must first resolve the original ref with {@link safeResolve}, then
+ * make that absolute target relative to the actual Space root. The second
+ * step matters for refs such as `../Canvas/.artifacts/pic.png`, which leave
+ * and re-enter the same Space before resolving inside `.artifacts/`.
+ *
+ * Resolving the resulting relative path against a synthetic root keeps this
+ * membership check independent of storage while preserving segment-aware
+ * normalization and sibling-prefix protection.
+ */
+export function isArtifactsRel(resolvedPhysicalRel: string): boolean {
+  const [, artifactsPhysical] = VIRTUAL_PREFIX[0];
+  const root = path.resolve('/', artifactsPhysical);
+  const target = path.resolve('/', resolvedPhysicalRel);
+  return target === root || target.startsWith(root + path.sep);
+}
 
 /**
  * Rewrite a request path's virtual prefix (`artifacts/`, `upload/`) to its
@@ -124,7 +143,7 @@ export function safeResolve(canvasId: string, rel: string): string {
   ) {
     throw new Error(`Invalid canvasId: ${canvasId}`);
   }
-  const root = canvasRoot(canvasId);
+  const root = spaceDirectory(canvasId);
   // Accept the clean virtual prefixes (`upload/`, `artifacts/`) as aliases
   // for their hidden on-disk dirs so agents can reference either form.
   const target = path.resolve(root, toPhysicalRel(rel));

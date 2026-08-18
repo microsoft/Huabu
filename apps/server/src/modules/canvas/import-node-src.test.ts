@@ -15,8 +15,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { importForeignNodeSources } from './import-node-src.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
-import { canvasBlobs, getCanvasStore } from '../storage/index.js';
-import { canvasRoot } from '../storage/paths.js';
+import {
+  canvasBlobs,
+  getCanvasStore,
+  spaceDirectory,
+} from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { CanvasCommand } from '@huabu/shared';
@@ -34,6 +37,7 @@ beforeEach(() => {
     'c-web-merge-local',
     'c-web-merge-remote',
     'c-image-local',
+    'c-image-reentered',
   ]) {
     createCanvas(canvasId);
   }
@@ -45,7 +49,7 @@ afterEach(() => {
 
 /** Stage a file under the canvas's hidden `.upload/` scratch dir. */
 function stageUpload(canvasId: string, name: string, body: string): string {
-  const uploadDir = path.join(canvasRoot(canvasId), '.upload');
+  const uploadDir = path.join(spaceDirectory(canvasId), '.upload');
   mkdirSync(uploadDir, { recursive: true });
   const abs = path.join(uploadDir, name);
   writeFileSync(abs, body);
@@ -265,5 +269,37 @@ describe('importForeignNodeSources — media nodes (regression)', () => {
     expect(src).toBeDefined();
     if (src === undefined) throw new Error('Expected a rewritten image src');
     expect(await canvasBlobs(canvasId).head(src)).not.toBeNull();
+  });
+
+  it('canonicalizes an artifact path that leaves and re-enters the Space', async () => {
+    const canvasId = 'c-image-reentered';
+    const store = getCanvasStore(canvasId);
+    const spaceDir = spaceDirectory(canvasId);
+    const artifactsDir = path.join(spaceDir, '.artifacts');
+    mkdirSync(artifactsDir, { recursive: true });
+    writeFileSync(path.join(artifactsDir, 'pic.png'), 'existing artifact');
+    const src = path.join(
+      '..',
+      path.basename(spaceDir),
+      '.artifacts',
+      'pic.png',
+    );
+
+    const commands: CanvasCommand[] = [
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            nodeType: 'image',
+            data: { src },
+            position: { x: 0, y: 0 },
+          },
+        ],
+      },
+    ];
+
+    const out = await importForeignNodeSources(store, canvasId, commands);
+
+    expect(firstSrc(out)).toBe('pic.png');
   });
 });
