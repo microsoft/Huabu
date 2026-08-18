@@ -122,6 +122,12 @@ export type CanvasUiIntent =
        */
       bypassReparent?: boolean;
       /**
+       * Allow entry into a nested Frame. Without this override, child Frames
+       * are frozen as complete nodes. Set by Cmd on macOS or Ctrl on
+       * Windows/Linux.
+       */
+      allowNestedFrameEntry?: boolean;
+      /**
        * Per-dragged-node frame-membership decisions captured by the
        * live preview tick (`onNodeDrag` rAF callback). When present,
        * the resolver MUST use these verbatim — bypassing its own

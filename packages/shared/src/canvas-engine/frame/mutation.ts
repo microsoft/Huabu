@@ -180,6 +180,7 @@ export function autoFrameNodeByOverlap(
     threshold,
     getRect,
     options.pointer,
+    options.allowNestedFrameEntry,
   );
   if (!bestFrameId) return nodes;
 

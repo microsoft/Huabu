@@ -18,6 +18,11 @@ export type AutoFrameByOverlapOptions = {
   /** Portion of the dragged node area that must be inside the frame. */
   threshold?: number;
   /**
+   * Allow entry into a nested Frame. Without this explicit override, child
+   * Frames are frozen as complete nodes and only root Frames qualify.
+   */
+  allowNestedFrameEntry?: boolean;
+  /**
    * Cursor position in absolute flow coordinates. When provided, any
    * candidate frame whose rect contains `pointer` AND has any positive
    * body overlap with the dragged node qualifies, in addition to the
@@ -198,6 +203,7 @@ export function findBestFrameForNode(
   threshold: number,
   getRect: (id: string) => Rect | null,
   pointer?: { x: number; y: number },
+  allowNestedFrameEntry = false,
 ): string | null {
   const nodeRect = getRect(nodeId);
   if (!nodeRect) return null;
@@ -205,6 +211,14 @@ export function findBestFrameForNode(
   const nodeArea = nodeRect.width * nodeRect.height;
   if (nodeArea <= 0) return null;
 
+  const node = nodes.find((candidate) => candidate.id === nodeId);
+  const byId = new Map(nodes.map((candidate) => [candidate.id, candidate]));
+  const ancestorIds = new Set<string>();
+  let ancestorId = node?.parentId;
+  while (ancestorId && !ancestorIds.has(ancestorId)) {
+    ancestorIds.add(ancestorId);
+    ancestorId = byId.get(ancestorId)?.parentId;
+  }
   const descendantIds = new Set(getDescendantIds(nodes, nodeId));
 
   // 1. Collect all qualifying candidate frames.
@@ -215,6 +229,8 @@ export function findBestFrameForNode(
     if (candidate.id === nodeId) continue;
     if (candidate.data?.locked) continue;
     if (descendantIds.has(candidate.id)) continue;
+    if (ancestorIds.has(candidate.id)) continue;
+    if (candidate.parentId && !allowNestedFrameEntry) continue;
 
     const frameRect = getRect(candidate.id);
     if (!frameRect) continue;
@@ -229,6 +245,10 @@ export function findBestFrameForNode(
       pointer.x <= frameRect.x + frameRect.width &&
       pointer.y >= frameRect.y &&
       pointer.y <= frameRect.y + frameRect.height;
+
+    if (allowNestedFrameEntry && pointer && !pointerInside) {
+      continue;
+    }
 
     // Pointer-inside path: any positive overlap qualifies. Otherwise
     // fall back to the strict area-ratio threshold.
@@ -262,7 +282,6 @@ export function findBestFrameForNode(
   }
 
   if (!best) return null;
-  const node = nodes.find((n) => n.id === nodeId);
   if (node?.parentId === best.frameId) return null;
   return best.frameId;
 }

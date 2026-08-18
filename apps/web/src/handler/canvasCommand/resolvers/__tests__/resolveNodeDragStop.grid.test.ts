@@ -79,6 +79,53 @@ function state(nodes: Node[]): UiResolverState {
 }
 
 describe('resolveNodeDragStop Grid cells', () => {
+  it('freezes nested Frames for external drops unless entry is explicit', () => {
+    const outer = {
+      id: 'outer',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { sizing: 'manual' },
+      style: { width: 500, height: 500 },
+      measured: { width: 500, height: 500 },
+    } as Node;
+    const inner = {
+      id: 'inner',
+      type: 'frame',
+      parentId: 'outer',
+      position: { x: 50, y: 50 },
+      data: { sizing: 'manual' },
+      style: { width: 200, height: 200 },
+      measured: { width: 200, height: 200 },
+    } as Node;
+    const dragged = {
+      id: 'dragged',
+      type: 'note',
+      position: { x: 140, y: 140 },
+      data: {},
+      style: { width: 100, height: 100 },
+      measured: { width: 100, height: 100 },
+    } as Node;
+    const pointerFlowPosition = { x: 160, y: 160 };
+
+    const resolveParent = (allowNestedFrameEntry: boolean) => {
+      const resolution = resolveUiIntent(
+        {
+          type: 'NODE_DRAG_STOP',
+          draggedNodeIds: ['dragged'],
+          pointerFlowPosition,
+          allowNestedFrameEntry,
+        },
+        state([outer, inner, dragged]),
+      );
+      return resolution.commands.find(
+        (command) => command.type === 'SET_NODE_PARENT',
+      );
+    };
+
+    expect(resolveParent(false)).toMatchObject({ parentId: 'outer' });
+    expect(resolveParent(true)).toMatchObject({ parentId: 'inner' });
+  });
+
   it('moves into an empty later cell without touching earlier rows', () => {
     const scene = layoutScene([
       makeFrame(),
@@ -204,6 +251,140 @@ describe('resolveNodeDragStop Grid cells', () => {
     expect(patches.get('occupant')).toMatchObject({
       frameColumn: 0,
       frameRow: 0,
+    });
+  });
+
+  it('reorders sibling frames instead of nesting one into the other', () => {
+    const scene = layoutScene([
+      makeFrame(),
+      { ...makeChild('dragged', 0, 0), type: 'frame' },
+      { ...makeChild('occupant', 1, 0), type: 'frame' },
+    ]);
+    const target = scene.positions.get('occupant');
+    if (!target) throw new Error('Target fixture is missing');
+    const liveNodes = scene.nodes.map((node) =>
+      node.id === 'dragged' ? { ...node, position: target } : node,
+    );
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: {
+          x: target.x + CHILD_SIZE.width / 2,
+          y: target.y + CHILD_SIZE.height / 2,
+        },
+      },
+      state(liveNodes),
+    );
+    const patches = mergedPatches(resolution.commands);
+    const parentCommands = resolution.commands.filter(
+      (command) => command.type === 'SET_NODE_PARENT',
+    );
+
+    expect(parentCommands).toHaveLength(0);
+    expect(patches.get('dragged')).toMatchObject({ frameColumn: 1 });
+    expect(patches.get('occupant')).toMatchObject({ frameColumn: 0 });
+  });
+
+  it('nests into a sibling frame when Cmd or Ctrl overrides reordering', () => {
+    const scene = layoutScene([
+      makeFrame(),
+      { ...makeChild('dragged', 0, 0), type: 'frame' },
+      { ...makeChild('occupant', 1, 0), type: 'frame' },
+    ]);
+    const target = scene.positions.get('occupant');
+    if (!target) throw new Error('Target fixture is missing');
+    const liveNodes = scene.nodes.map((node) =>
+      node.id === 'dragged' ? { ...node, position: target } : node,
+    );
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: {
+          x: target.x + CHILD_SIZE.width / 2,
+          y: target.y + CHILD_SIZE.height / 2,
+        },
+        allowNestedFrameEntry: true,
+      },
+      state(liveNodes),
+    );
+    const parentCommand = resolution.commands.find(
+      (command) => command.type === 'SET_NODE_PARENT',
+    );
+
+    expect(parentCommand).toMatchObject({
+      nodeIds: ['dragged'],
+      parentId: 'occupant',
+    });
+  });
+
+  it('reorders a regular node instead of nesting it into a sibling frame', () => {
+    const scene = layoutScene([
+      makeFrame(),
+      makeChild('dragged', 0, 0),
+      { ...makeChild('occupant', 1, 0), type: 'frame' },
+    ]);
+    const target = scene.positions.get('occupant');
+    if (!target) throw new Error('Target fixture is missing');
+    const liveNodes = scene.nodes.map((node) =>
+      node.id === 'dragged' ? { ...node, position: target } : node,
+    );
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: {
+          x: target.x + CHILD_SIZE.width / 2,
+          y: target.y + CHILD_SIZE.height / 2,
+        },
+      },
+      state(liveNodes),
+    );
+    const patches = mergedPatches(resolution.commands);
+    const parentCommands = resolution.commands.filter(
+      (command) => command.type === 'SET_NODE_PARENT',
+    );
+
+    expect(parentCommands).toHaveLength(0);
+    expect(patches.get('dragged')).toMatchObject({ frameColumn: 1 });
+    expect(patches.get('occupant')).toMatchObject({ frameColumn: 0 });
+  });
+
+  it('nests a regular node into a sibling frame with Cmd or Ctrl', () => {
+    const scene = layoutScene([
+      makeFrame(),
+      makeChild('dragged', 0, 0),
+      { ...makeChild('occupant', 1, 0), type: 'frame' },
+    ]);
+    const target = scene.positions.get('occupant');
+    if (!target) throw new Error('Target fixture is missing');
+    const liveNodes = scene.nodes.map((node) =>
+      node.id === 'dragged' ? { ...node, position: target } : node,
+    );
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: {
+          x: target.x + CHILD_SIZE.width / 2,
+          y: target.y + CHILD_SIZE.height / 2,
+        },
+        allowNestedFrameEntry: true,
+      },
+      state(liveNodes),
+    );
+    const parentCommand = resolution.commands.find(
+      (command) => command.type === 'SET_NODE_PARENT',
+    );
+
+    expect(parentCommand).toMatchObject({
+      nodeIds: ['dragged'],
+      parentId: 'occupant',
     });
   });
 

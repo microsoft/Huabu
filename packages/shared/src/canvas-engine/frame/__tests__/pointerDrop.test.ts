@@ -123,7 +123,7 @@ describe('wouldAutoFrame — pointer-aware entry', () => {
     expect(wouldAutoFrame([frame, node], 'n', { threshold: 0.5 })).toBeNull();
   });
 
-  it('prefers the deepest frame that contains the pointer', () => {
+  it('treats a nested frame as a frozen child unless entry is explicit', () => {
     // Outer frame contains an inner frame; pointer falls inside inner.
     const outer = makeFrame('outer', 0, 0, 400, 400);
     const inner = makeFrame('inner', 50, 50, 200, 200, { parentId: 'outer' });
@@ -134,6 +134,60 @@ describe('wouldAutoFrame — pointer-aware entry', () => {
       wouldAutoFrame([outer, inner, node], 'n', {
         threshold: 0.5,
         pointer: { x: 100, y: 100 }, // inside inner (and outer)
+      }),
+    ).toBe('outer');
+
+    expect(
+      wouldAutoFrame([outer, inner, node], 'n', {
+        threshold: 0.5,
+        pointer: { x: 100, y: 100 },
+        allowNestedFrameEntry: true,
+      }),
+    ).toBe('inner');
+  });
+
+  it('does not promote a node to an ancestor while it remains nested', () => {
+    const outer = makeFrame('outer', 0, 0, 500, 500);
+    const inner = makeFrame('inner', 50, 50, 200, 200, {
+      parentId: 'outer',
+    });
+    const node = makeNode('n', 20, 20, 100, 100, { parentId: 'inner' });
+
+    expect(
+      wouldAutoFrame([outer, inner, node], 'n', {
+        threshold: 0.5,
+        pointer: { x: 100, y: 100 },
+      }),
+    ).toBeNull();
+  });
+
+  it('uses the pointed frame surface for explicit structured entry', () => {
+    const outer = makeFrame('outer', 0, 0, 500, 500, {
+      data: { layoutMode: 'grid', gridCount: 2 },
+    });
+    const middle = makeFrame('middle', 50, 50, 300, 300, {
+      parentId: 'outer',
+    });
+    const inner = makeFrame('inner', 100, 100, 80, 80, {
+      parentId: 'middle',
+    });
+    const node = makeNode('n', 140, 140, 200, 200, {
+      parentId: 'outer',
+    });
+
+    expect(
+      wouldAutoFrame([outer, middle, inner, node], 'n', {
+        threshold: 0.5,
+        pointer: { x: 80, y: 80 },
+        allowNestedFrameEntry: true,
+      }),
+    ).toBe('middle');
+
+    expect(
+      wouldAutoFrame([outer, middle, inner, node], 'n', {
+        threshold: 0.5,
+        pointer: { x: 160, y: 160 },
+        allowNestedFrameEntry: true,
       }),
     ).toBe('inner');
   });

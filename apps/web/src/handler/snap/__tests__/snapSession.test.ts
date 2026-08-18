@@ -17,13 +17,17 @@ import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import {
   applySnap,
   beginSnapSession,
+  consumeLastDragDecisions,
+  consumeLastNestedFrameEntryAllowed,
   endSnapSession,
+  isNestedFrameEntryAllowed,
   isSnapSessionActive,
   isSnapSessionDragEndCommit,
   isSnapSessionResizeEndCommit,
   applyResizeProposal,
   getResizeSnappedRect,
   getResizeContext,
+  writeDragDecision,
 } from '../snapSession';
 
 import type { NestableNode } from '@huabu/shared/canvas-engine';
@@ -183,6 +187,68 @@ describe('snapSession — lifecycle', () => {
     document.body.dispatchEvent(keydown);
 
     expect(keydown.defaultPrevented).toBe(true);
+  });
+
+  it('tracks Cmd or Ctrl as an explicit nested Frame entry override', () => {
+    const node = makeNode('A', { x: 0, y: 0 }, { w: 50, h: 50 });
+    beginSnapSession({
+      nodes: [node],
+      gestureIds: new Set(['A']),
+      altPressed: false,
+    });
+
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Meta', bubbles: true }),
+    );
+    expect(isNestedFrameEntryAllowed()).toBe(true);
+
+    endSnapSession();
+    expect(consumeLastNestedFrameEntryAllowed()).toBe(true);
+    expect(isNestedFrameEntryAllowed()).toBe(false);
+  });
+
+  it('invalidates a cached Frame decision when Cmd or Ctrl changes', () => {
+    const node = makeNode('A', { x: 0, y: 0 }, { w: 50, h: 50 });
+    beginSnapSession({
+      nodes: [node],
+      gestureIds: new Set(['A']),
+      altPressed: false,
+    });
+    writeDragDecision('A', { unframe: false, enterFrameId: null });
+
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Control', bubbles: true }),
+    );
+    endSnapSession();
+
+    expect(consumeLastDragDecisions()).toBeNull();
+  });
+
+  it('keeps the current preview decision across repeated modifier keydown', () => {
+    const node = makeNode('A', { x: 0, y: 0 }, { w: 50, h: 50 });
+    beginSnapSession({
+      nodes: [node],
+      gestureIds: new Set(['A']),
+      altPressed: false,
+    });
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Meta', bubbles: true }),
+    );
+    writeDragDecision('A', { unframe: false, enterFrameId: 'target' });
+
+    document.body.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Meta',
+        repeat: true,
+        bubbles: true,
+      }),
+    );
+    endSnapSession();
+
+    expect(consumeLastDragDecisions()?.get('A')).toEqual({
+      unframe: false,
+      enterFrameId: 'target',
+    });
   });
 });
 

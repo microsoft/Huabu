@@ -152,6 +152,7 @@ export default function resolveNodeDragStop(
     result = autoFrameNodeByOverlap(result, id, {
       threshold: 0.5,
       pointer: intent.pointerFlowPosition,
+      allowNestedFrameEntry: intent.allowNestedFrameEntry,
     });
   }
 

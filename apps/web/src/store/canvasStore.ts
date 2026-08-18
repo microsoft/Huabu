@@ -58,16 +58,20 @@ import {
   type CanvasUiIntent,
   type UiResolverState,
 } from '@/handler/canvasCommand/uiIntent';
+import { mergeLiveDragGeometry } from '@/handler/liveDragGeometry';
+import { projectStructuredSourceTransition } from '@/handler/projectStructuredSourceTransition';
 import {
   applySnap,
   beginSnapSession,
   clearDragDecisions,
   consumeLastDragDecisions,
   consumeLastDragReparentBypass,
+  consumeLastNestedFrameEntryAllowed,
   endSnapSession,
   getResizeContext,
   getResizeSnappedRect,
   isReparentBypassed,
+  isNestedFrameEntryAllowed,
   isSnapSessionActive,
   isSnapSessionDragEndCommit,
   isSnapSessionResizeEndCommit,
@@ -2331,6 +2335,7 @@ const useCanvasStore = create<RFState>()(
         nodes: get().nodes as NestableNode[],
         gestureIds: new Set(draggedNodes.map((n) => n.id)),
         altPressed: event.altKey,
+        nestedFrameEntryAllowed: event.metaKey || event.ctrlKey,
       });
     },
 
@@ -2401,14 +2406,17 @@ const useCanvasStore = create<RFState>()(
         // different one. Mirrors the `continue` short-circuit in
         // `resolveNodeDragStop`.
         const bypassReparent = isReparentBypassed();
+        const allowNestedFrameEntry = isNestedFrameEntryAllowed();
 
-        const liveNodes = nodes.map((n) => {
-          if (n.id === draggedNode.id)
-            return { ...n, position: draggedNode.position };
-          const live = draggedNodes.find((d) => d.id === n.id);
-          if (live) return { ...n, position: live.position };
-          return n;
-        }) as NestableNode[];
+        const liveNodes = nodes.map((node) => {
+          const live =
+            node.id === draggedNode.id
+              ? draggedNode
+              : draggedNodes.find((dragged) => dragged.id === node.id);
+          return live
+            ? mergeLiveDragGeometry(node as NestableNode, live)
+            : (node as NestableNode);
+        });
 
         // Pointer in flow space — feeds the pointer-aware
         // wouldUnframe / wouldAutoFrame predicates so the live preview
@@ -2501,8 +2509,20 @@ const useCanvasStore = create<RFState>()(
             : wouldAutoFrame(liveNodes, dn.id, {
                 threshold: 0.5,
                 pointer: pointerFlow,
+                allowNestedFrameEntry,
               });
           if (targetFrameId) {
+            if (
+              originalNode.parentId &&
+              originalNode.parentId !== targetFrameId
+            ) {
+              let leaving = leavingByFrame.get(originalNode.parentId);
+              if (!leaving) {
+                leaving = new Set();
+                leavingByFrame.set(originalNode.parentId, leaving);
+              }
+              leaving.add(dn.id);
+            }
             previewFrameIds.add(targetFrameId);
             // Track the dragged node's absolute rect so the fit preview can
             // include the incoming node in the frame's bounding-box calculation.
@@ -2572,6 +2592,7 @@ const useCanvasStore = create<RFState>()(
           : wouldAutoFrame(liveNodes, draggedNode.id, {
               threshold: 0.5,
               pointer: pointerFlow,
+              allowNestedFrameEntry,
             });
         let targetFrameId = enteringFrameId ?? primary?.parentId;
         // Sticky case (node already lives in a frame): only keep showing the
@@ -2591,6 +2612,26 @@ const useCanvasStore = create<RFState>()(
           ? liveNodes.find((n) => n.id === targetFrameId)
           : undefined;
         const gridCfg = readFrameGridConfig(targetFrame);
+
+        // Entering a sibling (or one of its descendants) removes the dragged
+        // node from the current structured parent. That source reflow may move
+        // the target branch itself, so project it before positioning the
+        // target's drop overlay. Otherwise the preview is drawn against the
+        // target's old absolute position and jumps on commit.
+        const currentTargetFrameAbs = targetFrameId
+          ? getFrameAbsolutePosition(liveNodes, targetFrameId)
+          : null;
+        const sourceFrameId = primary?.parentId;
+        const sourceTransition = projectStructuredSourceTransition({
+          nodes: liveNodes,
+          draggedIds,
+          sourceFrameId,
+          targetFrameId: enteringFrameId,
+          edges,
+        });
+        const sourceReflow = sourceTransition.reflow;
+        const projectedTargetFrameAbs =
+          sourceTransition.targetFramePosition ?? currentTargetFrameAbs;
 
         /** Content-driven fit preview for one structured frame. */
         const solveStructuredPreview = (
@@ -2660,6 +2701,14 @@ const useCanvasStore = create<RFState>()(
               absY += parentAbsPos.y;
             }
           }
+          if (
+            frameId === targetFrameId &&
+            currentTargetFrameAbs &&
+            projectedTargetFrameAbs
+          ) {
+            absX += projectedTargetFrameAbs.x - currentTargetFrameAbs.x;
+            absY += projectedTargetFrameAbs.y - currentTargetFrameAbs.y;
+          }
 
           const role: FrameFitPreviewRole =
             leaving && !entering ? 'source' : 'target';
@@ -2680,7 +2729,7 @@ const useCanvasStore = create<RFState>()(
         // where it would land. Free frames have no tracks → no
         // indicator.
         if (targetFrameId && targetFrame && gridCfg) {
-          const frameAbs = getFrameAbsolutePosition(liveNodes, targetFrameId);
+          const frameAbs = projectedTargetFrameAbs;
           // Frame-local drop point: prefer the cursor, fall back to the
           // dragged node's live top-left (matches the resolver).
           const liveDragged = liveNodes.find((n) => n.id === draggedNode.id);
@@ -2762,7 +2811,7 @@ const useCanvasStore = create<RFState>()(
             }
             // Solver owns the slot here → suppress free-alignment guides.
             setSnapStructuredSuppressed(true);
-            commitReflow(zone.reflow);
+            commitReflow([...sourceReflow, ...zone.reflow]);
           } else {
             // The zone did not resolve, so nothing reported the size of
             // the frame the fit pass skipped. Compute it after all.
@@ -2775,12 +2824,12 @@ const useCanvasStore = create<RFState>()(
             }
             useGesturePreviewStore.getState().clearStructuredDropPreview();
             setSnapStructuredSuppressed(false);
-            commitReflow(null);
+            commitReflow(sourceReflow.length > 0 ? sourceReflow : null);
           }
         } else {
           useGesturePreviewStore.getState().clearStructuredDropPreview();
           setSnapStructuredSuppressed(false);
-          commitReflow(null);
+          commitReflow(sourceReflow.length > 0 ? sourceReflow : null);
         }
       });
     },
@@ -2812,6 +2861,8 @@ const useCanvasStore = create<RFState>()(
       // OR-ing with the live flag.
       const bypassReparent =
         consumeLastDragReparentBypass() || isReparentBypassed();
+      const allowNestedFrameEntry =
+        consumeLastNestedFrameEntryAllowed() || isNestedFrameEntryAllowed();
 
       // Read the per-dragged-node frame-membership decisions captured
       // by the live preview tick. Same teardown-before-stop ordering
@@ -2860,6 +2911,7 @@ const useCanvasStore = create<RFState>()(
         draggedNodeIds: draggedNodes.map((n) => n.id),
         pointerFlowPosition,
         bypassReparent,
+        allowNestedFrameEntry,
         cachedDecisions,
       });
 
