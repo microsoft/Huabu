@@ -167,7 +167,9 @@ and Azure Blob adapters do not yet exist.
 
 ## 5. Non-goals
 
-- Selecting an ORM, SQL query builder, Postgres driver, or SQLite driver.
+- Selecting a production ORM, SQL query builder, Postgres driver, or final
+  SQLite driver. The isolated Phase 5 preview uses built-in `node:sqlite`
+  without making that production choice.
 - Defining the final relational schema or migration framework.
 - Choosing a VFS, FUSE, materialization, cache, or write-back design.
 - Replacing RFS or the canonical `SpaceQuery` / `CanvasCommand` contracts in
@@ -946,9 +948,10 @@ explicitly:
 
 ## 12. Migration plan
 
-Phases 1–4 are implemented and specified below. Phase 5 onward keeps the
-provisional character of the original outline: those entries record intended
-order, not approved designs.
+Phases 1–4.5 are implemented and merged. Phase 5 is implemented by this
+isolated contract preview. Phase 6 onward keeps the provisional character of
+the original outline: those entries record intended order, not approved
+designs.
 
 The current on-disk format remains readable throughout port extraction. A
 database adapter must not require Disk consumers to simulate tables, and the
@@ -1810,12 +1813,15 @@ justify.
    footing and was left alone as Phase-1 surface.
 
 Not changed, deliberately: `authoritativeInsert` and the `write-suppressed`
-put outcome remain in the portable shapes. Both exist for Disk's in-memory
-deletion fence, and neither has a portable meaning a SQL adapter would
-produce. They are now documented as adapter-shaped, the way `duplicate-node`
-already was, rather than renamed or pushed behind the adapter — the honest
-resolution needs a second adapter to say what the shared abstraction is, and
-inventing one now would be the same speculative move this trim is undoing.
+put outcome remain in the portable shapes. At this phase boundary, both
+existed for Disk's in-memory deletion fence and a second adapter was still
+needed to establish their shared meaning.
+
+**Superseded by Phase 5:** the SQLite contract preview supplies that second
+adapter and confirms the portable rule as a connection-lifetime
+anti-resurrection fence: after deletion, standalone puts are suppressed until
+an ordered authoritative insert commits (§12.6.2). The outcome is therefore
+no longer merely adapter-shaped.
 
 The review also asked composition to move default-title allocation
 ("Untitled", "Untitled (1)", …) into `create`, which would have removed the
@@ -1964,10 +1970,11 @@ bearing: change-review records and Tasks are not history, whatever Disk's
 arrives, the group comes back — and `events` is where it was before, so
 nothing else has to move.
 
-### 12.5 Phase 4.5 — storage-owned layout moves inside the boundary — **implemented**
+### 12.5 Phase 4.5 — storage-owned layout moves inside the boundary — **merged**
 
-Phase 5 adds a second structured backend. Before it does, the layout knowledge
-that belongs to the _Disk_ backend has to stop living outside `storage/`.
+Phase 5 would introduce a second structured backend. Before that work, the
+layout knowledge that belongs to the _Disk_ backend had to stop living outside
+`storage/`.
 Otherwise every later backend inherits a module named `disk` as the ambient
 description of where Spaces are, and each one pays to migrate the same callers
 again.
@@ -2050,11 +2057,11 @@ substrate-specific but fails the test for the same reason — it exists so
 Windows can rename a Space _directory_ safely, and under SQLite there is no
 such rename.
 
-`naming.ts` is misfiled in a different way: pure string logic with no I/O,
-already re-exported rather than owned. It passes the test trivially (a second
-backend needs the identical rules) but has no business behind a `disk`
-segment. Phase 5 extracts it to `utils/naming.ts` as a side effect of needing
-it twice; that extraction belongs here, where it is the point.
+`naming.ts` was misfiled in a different way: pure string logic with no I/O,
+already re-exported rather than owned. It passed the test trivially (a second
+backend needs the identical rules) but had no business behind a `disk`
+segment. Phase 4.5 extracted it to `utils/naming.ts`, where the shared rule has
+a backend-neutral owner.
 
 Because the residue that survives the test is three setting helpers and
 `getWorkspacePath()` itself — none of it filesystem-specific — the target is a
@@ -2131,8 +2138,9 @@ boundary test; behavior parity is asserted by the existing Disk suites, which
 must pass unchanged — a diff that alters a Disk test's expectations is out of
 scope by definition.
 
-Phase 5 rebases onto this and drops its `utils/naming.ts` extraction, its
-`workspace/disk/naming.ts` shim, and the corresponding roadmap edits.
+Phase 5 builds on this merged result and carries none of its former
+`utils/naming.ts` extraction, `workspace/disk/naming.ts` shim, or parallel
+roadmap edits.
 
 **Landed for the Workspace-to-storage substrate move.** `modules/workspace/`
 is flat and holds `paths.ts` plus `migrations/`; the Disk record layout, blob
@@ -2728,18 +2736,19 @@ Before a new backend is production-ready:
   persistence ownership, namespace, sequence, and replay invariants.
 - [Agenetes-Agentlet Gateway Consolidation](./agenetes-agentlet-gateway-consolidation.md)
   — records removal of the old Agentlet SQLite session store; it must not be
-  confused with the proposed SQLite structured backend.
+  confused with the SQLite structured contract-preview backend.
 
 ## 17. Code entry points
 
 | File/dir                                                                                                                                     | Responsibility                                                                                                                                                                                                       |
 | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`apps/server/src/modules/storage/`](../../apps/server/src/modules/storage/)                                                                 | Ports, composition, adapters, compatibility, tests, and three forwarding shims — the canonical Phase-1–4 tree (§§12.1–12.4), guarded by `module-boundaries.test.ts`.                                                 |
+| [`apps/server/src/modules/storage/`](../../apps/server/src/modules/storage/)                                                                 | Ports, composition, adapters, compatibility, tests, and three forwarding shims — the canonical Phase-1–5 tree (§§12.1–12.6), guarded by `module-boundaries.test.ts`.                                                 |
 | [`apps/server/src/modules/storage/ports/`](../../apps/server/src/modules/storage/ports/)                                                     | The two ports; reusable suites live in `ports/contracts/`. `blob.ts` is normative (§7.1); `structured.ts` owns the Space collection and the per-Space handle: record read/write, nodes, changes, Tasks, and history. |
 | [`apps/server/src/modules/storage/storage.ts`](../../apps/server/src/modules/storage/storage.ts)                                             | Composition root: maps profiles to adapters, guards blob puts, and holds a lifecycle deletion session across the blob-first cleanup saga.                                                                            |
 | [`.../storage/backends/disk/legacy/canvas-store-cache.ts`](../../apps/server/src/modules/storage/backends/disk/legacy/canvas-store-cache.ts) | Bounded LRU of legacy Disk Space objects. The single owner both the adapter and the facade resolve through, and the real limit of `space(id)` identity (§12.2.4).                                                    |
 | [`apps/server/src/modules/storage/profile.ts`](../../apps/server/src/modules/storage/profile.ts)                                             | Two-axis backend selection from env, and the fail-fast validation hook for unsupported combinations.                                                                                                                 |
 | [`apps/server/src/modules/storage/backends/disk/`](../../apps/server/src/modules/storage/backends/disk/)                                     | Every Disk implementation: blob/structured stores, the Space collection, and the per-Space record, node, log, and Task adapters, in-process batch restoration, and the legacy class under `legacy/`.                 |
+| [`apps/server/src/modules/storage/backends/sqlite/`](../../apps/server/src/modules/storage/backends/sqlite/)                                 | Isolated `node:sqlite` structured adapter, strict schema and migrations, transaction-backed writes, and real-file contract/integration tests; available for proof but not runtime-selectable.                        |
 | [`.../storage/compatibility/canvas.ts`](../../apps/server/src/modules/storage/compatibility/canvas.ts)                                       | Residual Disk read surface plus direct-module lifecycle test fixtures; production structured mutations enumerated in §12.4 use the portable ports.                                                                   |
 | [`apps/server/src/modules/agent/memory/analyzer.ts`](../../apps/server/src/modules/agent/memory/analyzer.ts)                                 | P3 repository consumer for strict Space existence, bounded action events, and intent episodes; physical chat and memory files remain Disk-specific.                                                                  |
 | [`apps/server/src/modules/canvas/write-coordinator.ts`](../../apps/server/src/modules/canvas/write-coordinator.ts)                           | Canvas mutation coordinator and per-Space write lock, held across asynchronous node read, revision CAS, and put.                                                                                                     |
