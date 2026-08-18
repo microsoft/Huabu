@@ -24,6 +24,7 @@
  *    response headers (label percent-encoded, edges as JSON).
  */
 
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -33,12 +34,13 @@ import {
 } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
+import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
 import {
   ALWAYS_SKIP,
   safeResolve,
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
-import { getCanvasStore } from '../storage/index.js';
+import { readCanvas, readCanvasNode } from '../canvas/space-read.js';
 
 import type { CanvasNodeType } from '@huabu/shared';
 import type { CanvasNode, CanvasEdge } from '@huabu/shared/canvas-engine';
@@ -89,30 +91,40 @@ const NODE_FILE_RE = /^nodes\/[^/]+\.md$/;
  * serve the bytes without `X-Huabu-*` headers.
  *
  * The file → node mapping goes through the store's frontmatter-`id` index
- * ({@link CanvasStore.nodeIdForFilename}), NOT a re-derived
+ * (the persisted node record), NOT a re-derived
  * `toSafeFilename(label)` — topology never carries `data.label`, so the
  * derived path would collapse to `nodes/<id>.md` and never match a real
  * label-named file. `label` / `rev` are then sourced from the sidecar.
  */
-export function lookupNodeByPath(
+export async function lookupNodeByPath(
   canvasId: string,
   physicalRel: string,
-): RfsNodeLookup | null {
+): Promise<RfsNodeLookup | null> {
   if (!NODE_FILE_RE.test(physicalRel)) return null;
 
-  const store = getCanvasStore(canvasId);
-  const canvas = store.read();
-  if (!canvas) return null;
-
+  let raw: string;
+  try {
+    raw = await readFile(safeResolve(canvasId, physicalRel), 'utf8');
+  } catch {
+    return null;
+  }
+  const { meta: frontmatter } = parseFrontmatter(raw);
   const filename = physicalRel.slice('nodes/'.length);
-  const nodeId = store.nodeIdForFilename(filename);
-  if (!nodeId) return null;
+  const rawNodeId = frontmatter['id'];
+  const nodeId =
+    typeof rawNodeId === 'string' && rawNodeId.length > 0
+      ? rawNodeId
+      : filename.replace(/\.md$/, '');
+  const [canvas, sidecar] = await Promise.all([
+    readCanvas(canvasId),
+    readCanvasNode(canvasId, nodeId),
+  ]);
+  if (!canvas) return null;
 
   const nodes = (canvas.state.nodes ?? []) as CanvasNode[];
   const match = nodes.find((n) => n.id === nodeId);
   if (!match) return null;
 
-  const sidecar = store.readNode(nodeId);
   const data = (match.data ?? {}) as {
     locked?: boolean;
     src?: string;

@@ -1321,7 +1321,7 @@ describe('node download revision (ETag / conditional GET)', () => {
 
 describe('POST /api/rfs/:canvasId/agent', () => {
   it('creates an idle Agent and connects its parent when available', async () => {
-    vi.spyOn(agentThreadResolver, 'resolveAgentNodeId').mockReturnValue(
+    vi.spyOn(agentThreadResolver, 'resolveAgentNodeId').mockResolvedValue(
       'node-parent' as CanvasNodeId,
     );
     const create = vi.spyOn(agentNodeService, 'create').mockResolvedValue({
@@ -1419,7 +1419,9 @@ describe('POST /api/rfs/:canvasId/agent', () => {
       content: '',
     });
 
-    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(target);
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(
+      target,
+    );
     const dispose = vi.fn().mockResolvedValue(undefined);
     const invoke = vi
       .spyOn(agentThreadService, 'invoke')
@@ -1482,7 +1484,9 @@ describe('POST /api/rfs/:canvasId/agent', () => {
       profileId: 'huabu',
       parentConnection: 'not_requested',
     });
-    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(target);
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(
+      target,
+    );
     vi.spyOn(agentThreadService, 'invoke').mockImplementation(
       async (options) => ({
         binding: target.agentBinding,
@@ -1529,7 +1533,7 @@ describe('POST /api/rfs/:canvasId/agent', () => {
       profileId: 'huabu',
       parentConnection: 'not_requested',
     });
-    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(null);
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(null);
 
     const app = await buildApp();
     try {
@@ -1561,7 +1565,9 @@ describe('POST /api/rfs/:canvasId/agent', () => {
       status: 'done',
       content: 'Earlier request',
     };
-    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(target);
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(
+      target,
+    );
     const invoke = vi
       .spyOn(agentThreadService, 'invoke')
       .mockImplementation(async (options) => ({
@@ -1610,7 +1616,7 @@ describe('POST /api/rfs/:canvasId/agent', () => {
   });
 
   it('returns thread_not_found before opening SSE', async () => {
-    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(null);
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(null);
 
     const app = await buildApp();
     try {
@@ -1630,7 +1636,7 @@ describe('POST /api/rfs/:canvasId/agent', () => {
 
   it('creates the Agent when its requested parent cannot be found', async () => {
     seedNote('c1', 'node-anchor', 'Anchor', 'content');
-    vi.spyOn(agentThreadResolver, 'resolveAgentNodeId').mockReturnValue(null);
+    vi.spyOn(agentThreadResolver, 'resolveAgentNodeId').mockResolvedValue(null);
     vi.spyOn(agentNodeService, 'create').mockResolvedValue({
       canvasId: 'c1',
       nodeId: 'node-independent' as CanvasNodeId,
@@ -1677,7 +1683,9 @@ describe('POST /api/rfs/:canvasId/agent', () => {
       status: 'running',
       content: 'Working',
     };
-    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(target);
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(
+      target,
+    );
     vi.spyOn(agentThreadService, 'invoke').mockRejectedValue(
       new AgentThreadBusyError('thread-busy'),
     );
@@ -1707,7 +1715,9 @@ describe('POST /api/rfs/:canvasId/agent', () => {
       status: 'idle',
       content: '',
     };
-    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(target);
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(
+      target,
+    );
     vi.spyOn(agentThreadService, 'invoke').mockImplementation(
       async (options) => ({
         binding: target.agentBinding,
@@ -1746,7 +1756,9 @@ describe('POST /api/rfs/:canvasId/agent', () => {
       status: 'idle',
       content: '',
     };
-    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockReturnValue(target);
+    vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(
+      target,
+    );
     vi.spyOn(agentThreadService, 'invoke').mockImplementation(
       async (options) => ({
         binding: target.agentBinding,

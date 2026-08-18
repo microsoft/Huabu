@@ -51,6 +51,14 @@ export function describeSpaceRepositoryContract(
       await expect(repository.list()).resolves.toEqual([]);
     });
 
+    it('ensures the existing World idempotently', async () => {
+      const { repository, worldCanvasId } = await open();
+
+      await expect(repository.ensureWorld()).resolves.toBe(worldCanvasId);
+      await expect(repository.ensureWorld()).resolves.toBe(worldCanvasId);
+      await expect(repository.worldId()).resolves.toBe(worldCanvasId);
+    });
+
     it('lists created ordinary Spaces without promising order', async () => {
       const { repository } = await open();
       const first = await repository.create({

@@ -25,7 +25,7 @@ import {
 import { getLogger } from '../../utils/logger.js';
 import { executeCanvasCommandsOnHost } from '../canvas/canvas-command-router.js';
 import { buildSpatialBundle } from '../canvas/canvas-spatial.js';
-import { getCanvasStore } from '../storage/index.js';
+import { readCanvas } from '../canvas/space-read.js';
 
 import type { ExecuteOnServerOutput } from '../canvas/canvas-executor.js';
 
@@ -87,7 +87,9 @@ interface StoredNode {
 
 interface AgentNodeServiceDependencies {
   getProfileRegistry: () => AgentProfileRegistryPort | null;
-  readCanvasNodes: (canvasId: string) => StoredNode[] | null;
+  readCanvasNodes: (
+    canvasId: string,
+  ) => Promise<StoredNode[] | null> | StoredNode[] | null;
   execute: (input: {
     canvasId: string;
     commands: readonly CanvasCommand[];
@@ -95,8 +97,10 @@ interface AgentNodeServiceDependencies {
   }) => Promise<ExecuteOnServerOutput>;
 }
 
-function defaultReadCanvasNodes(canvasId: string): StoredNode[] | null {
-  const canvas = getCanvasStore(canvasId).read();
+async function defaultReadCanvasNodes(
+  canvasId: string,
+): Promise<StoredNode[] | null> {
+  const canvas = await readCanvas(canvasId);
   if (!canvas) return null;
   return canvas.state.nodes as StoredNode[];
 }
@@ -153,11 +157,11 @@ function resolveAnchor(
   return nodeId;
 }
 
-export function resolveAgentNodePosition(
+export async function resolveAgentNodePosition(
   canvasId: string,
   parentNodeId?: CanvasNodeId,
-): Point {
-  const canvas = getCanvasStore(canvasId).read();
+): Promise<Point> {
+  const canvas = await readCanvas(canvasId);
   if (!canvas) {
     throw new AgentNodeCreationError(
       'canvas_not_found',
@@ -201,7 +205,7 @@ export class AgentNodeService {
       throw error;
     }
 
-    const nodes = this.dependencies.readCanvasNodes(input.canvasId);
+    const nodes = await this.dependencies.readCanvasNodes(input.canvasId);
     if (!nodes) {
       throw new AgentNodeCreationError(
         'canvas_not_found',

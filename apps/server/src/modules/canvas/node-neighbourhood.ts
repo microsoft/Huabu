@@ -41,12 +41,12 @@ import {
 
 import { buildSpatialBundle } from './canvas-spatial.js';
 import { describeNode } from './node-prompt.js';
+import { readCanvasSnapshot } from './space-read.js';
 import {
   escapeXmlAttr,
   renderNodes,
 } from '../agent/conversation/prompt/node-element.js';
 import { buildAgentNodePreview } from '../agent/node-ref.js';
-import { getCanvasStore } from '../storage/index.js';
 
 import type { AgentNodePreview } from '../agent/node-ref.js';
 import type { CanvasNodeType, SpatialNode } from '@huabu/shared';
@@ -72,17 +72,17 @@ import type { CanvasNodeType, SpatialNode } from '@huabu/shared';
  * `data.content` / `data.src` (text-on-canvas nodes whose body never
  * touches disk). Per-node disk reads are memoized.
  */
-export function getNodeNeighbourhood(
+export async function getNodeNeighbourhood(
   canvasId: string,
   anchorNodeId: string,
-): NodeNeighbourhoodContext | null {
-  const canvas = getCanvasStore(canvasId).read();
-  if (!canvas) return null;
+): Promise<NodeNeighbourhoodContext | null> {
+  const snapshot = await readCanvasSnapshot(canvasId);
+  if (!snapshot) return null;
+  const { canvas, nodes: nodeRecords } = snapshot;
   const bundle = buildSpatialBundle(canvas);
   const target = bundle.spatialNodes.find((n) => n.id === anchorNodeId);
   if (!target) return null;
 
-  const store = getCanvasStore(canvasId);
   const cache = new Map<string, AgentNodePreview>();
   // One assembler for every neighbour: the node carries whatever the spatial
   // bundle knows (id / type; its `data.label` is always empty), and
@@ -93,9 +93,9 @@ export function getNodeNeighbourhood(
     const hit = cache.get(n.id);
     if (hit) return hit;
     const preview = describeNode(
-      store,
       { id: n.id, type: n.type, ...(n.label ? { label: n.label } : {}) },
       'preview',
+      nodeRecords.get(n.id),
     );
     cache.set(n.id, preview);
     return preview;

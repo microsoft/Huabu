@@ -14,7 +14,7 @@
  */
 
 import { subscribeCanvasUpdates } from './canvas-sync.js';
-import { getCanvasStore } from '../storage/index.js';
+import { readCanvas } from './space-read.js';
 
 import type { CanvasSyncEvent } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -51,7 +51,7 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       // Subscribe before reading the baseline. Updates committed while the
       // snapshot is read are buffered and delivered after it, closing the
       // handshake race without reordering updates ahead of the snapshot.
-      const canvas = getCanvasStore(canvasId).read();
+      const canvas = await readCanvas(canvasId);
       writeSSE(reply.raw, {
         type: 'snapshot',
         data: { version: canvas?.version ?? 0 },

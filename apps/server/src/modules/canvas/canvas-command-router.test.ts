@@ -676,13 +676,13 @@ describe('workspace canvas command routing', () => {
           ? { ...node, type: 'note' }
           : node,
       );
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed(
         'canvas-world',
         brokenTopology,
         convertedDescendant,
       ),
-    ).toThrow('A node reference cannot change node type');
+    ).rejects.toThrow('A node reference cannot change node type');
 
     const output = await executeCanvasCommandsOnHost({
       canvasId: 'canvas-world',
@@ -799,13 +799,13 @@ describe('workspace canvas command routing', () => {
     expect(
       directlyLocked.find((node) => node.id === nodeRef.id)?.data,
     ).toMatchObject({ locked: true });
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed(
         'canvas-world',
         directlyLocked,
         directlyLocked,
       ),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
 
     await executeCanvasCommandsOnHost({
       canvasId: 'canvas-world',
@@ -828,13 +828,13 @@ describe('workspace canvas command routing', () => {
     expect(
       portalLocked.find((node) => node.id === nodeRef.id)?.data,
     ).toMatchObject({ __dragDisabledByFrameLock: true });
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed(
         'canvas-world',
         portalLocked,
         portalLocked,
       ),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
 
     await executeCanvasCommandsOnHost({
       canvasId: 'canvas-world',
@@ -887,13 +887,13 @@ describe('workspace canvas command routing', () => {
       | undefined;
     if (!copiedTarget || !target) throw new Error('Missing nodeRef target');
     target.label = 'Copied source label';
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed(
         'canvas-world',
         styled ?? [],
         copiedTarget,
       ),
-    ).toThrow('contains unsupported source-owned data');
+    ).rejects.toThrow('contains unsupported source-owned data');
 
     await expect(
       executeCanvasCommandsOnHost({
@@ -932,9 +932,9 @@ describe('workspace canvas command routing', () => {
     const previous = getCanvasStore('canvas-world').read()?.state.nodes;
     if (!previous) throw new Error('Missing World state');
     const canonical = structuredClone(previous);
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed('canvas-world', previous, canonical),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
 
     const resized = structuredClone(previous) as Array<{
       type?: string;
@@ -943,20 +943,22 @@ describe('workspace canvas command routing', () => {
     const portal = resized.find((node) => node.type === 'canvasRef');
     if (!portal?.style) throw new Error('Missing Portal');
     portal.style.width = (portal.style.width ?? 0) + 100;
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed('canvas-world', previous, resized),
-    ).toThrow(WorldPortalMutationError);
+    ).rejects.toThrow(WorldPortalMutationError);
 
     const withoutNodeRef = (
       structuredClone(previous) as Array<{ type?: string }>
     ).filter((node) => node.type !== 'nodeRef');
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed(
         'canvas-world',
         previous,
         withoutNodeRef,
       ),
-    ).toThrow('Node references must be removed with SET_PORTAL_NODE_PINS');
+    ).rejects.toThrow(
+      'Node references must be removed with SET_PORTAL_NODE_PINS',
+    );
   });
 
   it('allows moving but rejects manually resizing a frameRef', async () => {

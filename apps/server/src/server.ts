@@ -7,7 +7,7 @@ import { app } from './app.js';
 import { resolveBindHost } from './bind-host.js';
 import { prewarmOAuthCredentials } from './modules/agent/oauth.js';
 import { resolveDeploymentConfig } from './modules/security/deployment-config.js';
-import { initStorage } from './modules/storage/index.js';
+import { closeStorage, initStorage } from './modules/storage/index.js';
 import { initializeSecretStore } from './security/secret-store.js';
 import { getLogger } from './utils/logger.js';
 
@@ -39,6 +39,7 @@ async function start(): Promise<void> {
       {
         structured: storage.profile.structured.kind,
         blobs: storage.profile.blobs.kind,
+        mounted: storage.mounted,
       },
       'Storage backends ready',
     );
@@ -106,6 +107,7 @@ function shutdown(reason: string): void {
   forceExit.unref();
   app
     .close()
+    .then(() => closeStorage())
     .then(() => {
       clearTimeout(forceExit);
       process.exit(0);

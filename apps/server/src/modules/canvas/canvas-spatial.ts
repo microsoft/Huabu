@@ -36,8 +36,7 @@
  *     parent, visual style on `data.style`, edge endpoints +
  *     `data.edgeStyle`, plus all derived spatial/topological metadata.
  *   - When `includePreviews` is set, outline pulls the preview text
- *     via `CanvasStore.readNode` — the only place it crosses into the
- *     markdown side, kept gated behind an opt-in flag.
+ *     from the already-read node records, kept gated behind an opt-in flag.
  */
 
 import {
@@ -53,10 +52,10 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { describeNode, nodeLabel, type NodeInput } from './node-prompt.js';
-import { getCanvasStore } from '../storage/index.js';
+import { readCanvas, readCanvasSnapshot } from './space-read.js';
 
+import type { CanvasFile } from './persistence-types.js';
 import type { AgentNodeOutline } from '../agent/node-ref.js';
-import type { CanvasFile } from '../storage/canvas-store.js';
 import type {
   CanvasNodeType,
   CardinalDirection,
@@ -282,13 +281,13 @@ export interface CanvasOutlineOpts {
  * Build the one-shot "map" of a canvas: every node's geometry + edges +
  * spatial clusters. Returns `null` when the canvas does not exist.
  */
-export function buildCanvasOutline(
+export async function buildCanvasOutline(
   canvasId: string,
   opts: CanvasOutlineOpts = {},
-): CanvasOutline | null {
-  const store = getCanvasStore(canvasId);
-  const canvas = store.read();
-  if (!canvas) return null;
+): Promise<CanvasOutline | null> {
+  const snapshot = await readCanvasSnapshot(canvasId);
+  if (!snapshot) return null;
+  const { canvas, nodes: nodeRecords } = snapshot;
 
   const bundle = buildSpatialBundle(canvas);
   const summary = buildSpatialSummary(bundle.spatialNodes, bundle.edges);
@@ -314,7 +313,7 @@ export function buildCanvasOutline(
   const labelMemo = new Map<string, string | undefined>();
   const memoLabel = (id: string): string | undefined => {
     if (labelMemo.has(id)) return labelMemo.get(id);
-    const l = nodeLabel(store, id);
+    const l = nodeLabel(nodeRecords.get(id));
     labelMemo.set(id, l);
     return l;
   };
@@ -324,12 +323,12 @@ export function buildCanvasOutline(
     const parentLabel = s.parentId ? memoLabel(s.parentId) : undefined;
     const style = opts.includeStyle ? readVisualStyle(raw) : undefined;
     const out: CanvasOutlineNode = describeNode(
-      store,
       {
         ...spatialNodeInput(s, raw, parentLabel),
         ...(style ? { style } : {}),
       },
       'outline',
+      nodeRecords.get(s.id),
     );
     // The shared builder attaches `summary` (authored abstract) and
     // `preview` (raw body excerpt) from the sidecar; both are text scan
@@ -449,13 +448,13 @@ const DEFAULT_INSPECT_LIMIT = 50;
  * direction, edgeIds, hops, clusterId) are computed during filtering
  * and merged into the final result row.
  */
-export function inspectNodes(
+export async function inspectNodes(
   canvasId: string,
   args: InspectNodesArgs,
-): InspectNodesResult | InspectNodesError {
-  const store = getCanvasStore(canvasId);
-  const canvas = store.read();
-  if (!canvas) return { error: `Canvas ${canvasId} not found` };
+): Promise<InspectNodesResult | InspectNodesError> {
+  const snapshot = await readCanvasSnapshot(canvasId);
+  if (!snapshot) return { error: `Canvas ${canvasId} not found` };
+  const { canvas, nodes: nodeRecords } = snapshot;
 
   const bundle = buildSpatialBundle(canvas);
 
@@ -464,7 +463,7 @@ export function inspectNodes(
   const labelMemo = new Map<string, string | undefined>();
   const memoLabel = (id: string): string | undefined => {
     if (labelMemo.has(id)) return labelMemo.get(id);
-    const l = nodeLabel(store, id);
+    const l = nodeLabel(nodeRecords.get(id));
     labelMemo.set(id, l);
     return l;
   };
@@ -713,9 +712,9 @@ export function inspectNodes(
     const raw = bundle.rawById.get(s.id);
     const parentLabel = s.parentId ? memoLabel(s.parentId) : undefined;
     const base = describeNode(
-      store,
       spatialNodeInput(s, raw, parentLabel),
       'outline',
+      nodeRecords.get(s.id),
     );
     // Inspect deliberately omits text hints (`summary` / `preview`); agents
     // that need text use `get_canvas_outline({ includePreviews: true })` or
@@ -815,12 +814,11 @@ export type InspectEdgesError = { error: string };
  * `inspect_nodes({ connectedTo }).edgeIds` or directly from a styling
  * task, so even the unfiltered case is bounded in practice.
  */
-export function inspectEdges(
+export async function inspectEdges(
   canvasId: string,
   args: InspectEdgesArgs,
-): InspectEdgesResult | InspectEdgesError {
-  const store = getCanvasStore(canvasId);
-  const canvas = store.read();
+): Promise<InspectEdgesResult | InspectEdgesError> {
+  const canvas = await readCanvas(canvasId);
   if (!canvas) return { error: `Canvas ${canvasId} not found` };
 
   const bundle = buildSpatialBundle(canvas);

@@ -13,11 +13,7 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { executeOnServer } from './canvas-executor.js';
-import {
-  listCanvasDirEntries,
-  requireWorldCanvasId,
-} from '../storage/canvas-dirs.js';
-import { getCanvasStore } from '../storage/index.js';
+import { getStructuredStore, requireWorldCanvasId } from '../storage/index.js';
 
 const PORTAL_WIDTH = PORTAL_DEFAULT_WIDTH;
 const PORTAL_HEIGHT = PORTAL_DEFAULT_HEIGHT;
@@ -113,9 +109,10 @@ interface WorldPortalReconciliationPlan {
   inputs: CanvasNodeCreateInput[];
 }
 
-function planWorldPortalReconciliation(): WorldPortalReconciliationPlan {
-  const worldCanvasId = requireWorldCanvasId();
-  const world = getCanvasStore(worldCanvasId).read();
+async function planWorldPortalReconciliation(): Promise<WorldPortalReconciliationPlan> {
+  const structured = getStructuredStore();
+  const worldCanvasId = await requireWorldCanvasId();
+  const world = await structured.space(worldCanvasId).read();
   if (!world) {
     throw new WorldPortalIntegrityError('World Canvas is not readable');
   }
@@ -141,9 +138,9 @@ function planWorldPortalReconciliation(): WorldPortalReconciliationPlan {
     portalByTarget.set(targetCanvasId, node);
   }
 
-  const spaces = listCanvasDirEntries()
-    .filter((entry) => !portalByTarget.has(entry.id))
-    .sort((a, b) => a.id.localeCompare(b.id));
+  const spaces = (await structured.spaces().list())
+    .filter((entry) => !portalByTarget.has(entry.canvasId))
+    .sort((a, b) => a.canvasId.localeCompare(b.canvasId));
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const occupied: Rect[] = nodes.map((node) => {
     const position = absolutePosition(node, byId);
@@ -168,7 +165,7 @@ function planWorldPortalReconciliation(): WorldPortalReconciliationPlan {
       position,
       size: { width: PORTAL_WIDTH, height: PORTAL_HEIGHT },
       data: {
-        targetCanvasId: space.id,
+        targetCanvasId: space.canvasId,
       },
       selectOnCreate: false,
     };
@@ -178,7 +175,7 @@ function planWorldPortalReconciliation(): WorldPortalReconciliationPlan {
 }
 
 async function reconcileWorldPortalsOnce(): Promise<void> {
-  const { worldCanvasId, inputs } = planWorldPortalReconciliation();
+  const { worldCanvasId, inputs } = await planWorldPortalReconciliation();
   if (inputs.length === 0) return;
 
   const command: CanvasCommand = {

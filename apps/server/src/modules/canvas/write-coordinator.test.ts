@@ -33,6 +33,15 @@ function fakeRepository(canvasId = 'c1') {
       if (revision === null) throw new Error('test storage token is missing');
       return { record, revision };
     },
+    async list(): Promise<ReadonlyMap<string, NodeSnapshot>> {
+      const snapshot = await nodes.read('n1');
+      return snapshot ? new Map([['n1', snapshot]]) : new Map();
+    },
+    async stream(onNode): Promise<ReadonlyMap<string, NodeSnapshot>> {
+      const snapshots = await nodes.list();
+      for (const [nodeId, snapshot] of snapshots) onNode(nodeId, snapshot);
+      return snapshots;
+    },
     async put(input) {
       if (suppressed) return { ok: false, reason: 'write-suppressed' };
       const currentRevision = storageRevisionOf(record);

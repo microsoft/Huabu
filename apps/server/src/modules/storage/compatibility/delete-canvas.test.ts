@@ -22,6 +22,7 @@ import { DiskStructuredStore } from '../backends/disk/structured-store.js';
 import { getCanvasStore } from '../index.js';
 import {
   canvasBlobs,
+  createStorage,
   deleteSpace,
   setStorageForTesting,
   type Storage,
@@ -195,9 +196,12 @@ let restoreStorage: () => void;
 
 function installBlobStore(next: BlobStore): void {
   restoreStorage();
+  const storage = createStorage({
+    structured: { kind: 'disk' },
+    blobs: { kind: 'disk' },
+  });
   restoreStorage = setStorageForTesting({
-    profile: { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
-    structured: new DiskStructuredStore(),
+    ...storage,
     blobs: next,
   } satisfies Storage);
 }
@@ -211,9 +215,12 @@ beforeEach(() => {
   resetStorageCache();
 
   blobs = new OrderRecordingBlobStore();
+  const storage = createStorage({
+    structured: { kind: 'disk' },
+    blobs: { kind: 'disk' },
+  });
   restoreStorage = setStorageForTesting({
-    profile: { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
-    structured: new DiskStructuredStore(),
+    ...storage,
     blobs,
   } satisfies Storage);
 });

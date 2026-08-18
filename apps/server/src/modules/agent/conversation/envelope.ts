@@ -24,7 +24,7 @@ import { getSkill } from '../../../prompt/index.js';
 import { getNodeNeighbourhood } from '../../canvas/node-neighbourhood.js';
 import { describeNode } from '../../canvas/node-prompt.js';
 import { snapshotNodesToArtifacts } from '../../canvas/snapshot-nodes.js';
-import { getCanvasStore } from '../../storage/index.js';
+import { readCanvasNode, readCanvasSnapshot } from '../../canvas/space-read.js';
 import { isUserInvokableSkill } from '../skills.route.js';
 
 import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
@@ -205,18 +205,13 @@ function collectSketchStrokeSubsets(
  * store is unavailable, so refs fall back to bare `{ id, type, label?,
  * filename }` (no preview).
  */
-function collectSelectedNodeRefs(
+async function collectSelectedNodeRefs(
   nodes: WireSelectionNode[],
   canvasId: string | null,
-): AgentNodePreview[] {
-  let store: ReturnType<typeof getCanvasStore> | null = null;
-  if (canvasId) {
-    try {
-      store = getCanvasStore(canvasId);
-    } catch {
-      store = null;
-    }
-  }
+): Promise<AgentNodePreview[]> {
+  const records = canvasId
+    ? (await readCanvasSnapshot(canvasId))?.nodes
+    : undefined;
   const refs: AgentNodePreview[] = [];
   const walk = (list: WireSelectionNode[]) => {
     for (const n of list) {
@@ -226,7 +221,6 @@ function collectSelectedNodeRefs(
       // label + file + preview + rev for every server-side node context.
       refs.push(
         describeNode(
-          store,
           {
             id: n.id,
             type: n.type,
@@ -234,6 +228,7 @@ function collectSelectedNodeRefs(
             ...(n.src !== undefined ? { src: n.src } : {}),
           },
           'preview',
+          records?.get(n.id),
         ),
       );
       if (n.children) walk(n.children);
@@ -408,10 +403,10 @@ export async function buildChatEnvelope(
   let anchor: ChatEnvelope['focus']['anchor'];
   if (anchorNodeId && canvasId) {
     const neighbourhood =
-      getNodeNeighbourhood(canvasId, anchorNodeId) ?? undefined;
+      (await getNodeNeighbourhood(canvasId, anchorNodeId)) ?? undefined;
     let label: string | undefined;
     try {
-      const meta = getCanvasStore(canvasId).readNode(anchorNodeId) as Record<
+      const meta = (await readCanvasNode(canvasId, anchorNodeId)) as Record<
         string,
         unknown
       > | null;
@@ -463,7 +458,7 @@ export async function buildChatEnvelope(
     focus: {
       selection: {
         refs: selectedNodes
-          ? collectSelectedNodeRefs(selectedNodes, canvasId)
+          ? await collectSelectedNodeRefs(selectedNodes, canvasId)
           : [],
         selectedIds: selectedNodes ? collectSelectedNodeIds(selectedNodes) : [],
         imageAttachments: dedupedImageAttachments,

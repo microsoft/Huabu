@@ -66,6 +66,45 @@ export function describeSpaceNodesContract(
       await expect(repository.read('contract-missing')).resolves.toBeNull();
     });
 
+    it('lists every complete node record with the same revisions as targeted reads', async () => {
+      const { repository } = await open();
+      const first = await putSuccessfully(repository, {
+        nodeId: 'contract-list-node-a',
+        record: note('contract-list-node-a', 'Contract list A', 'alpha'),
+      });
+      const second = await putSuccessfully(repository, {
+        nodeId: 'contract-list-node-b',
+        record: note('contract-list-node-b', 'Contract list B', 'beta'),
+      });
+
+      await expect(repository.list()).resolves.toEqual(
+        new Map([
+          ['contract-list-node-a', first],
+          ['contract-list-node-b', second],
+        ]),
+      );
+    });
+
+    it('streams the same snapshot returned by list', async () => {
+      const { repository } = await open();
+      await putSuccessfully(repository, {
+        nodeId: 'contract-stream-node-a',
+        record: note('contract-stream-node-a', 'Contract stream A', 'alpha'),
+      });
+      await putSuccessfully(repository, {
+        nodeId: 'contract-stream-node-b',
+        record: note('contract-stream-node-b', 'Contract stream B', 'beta'),
+      });
+      const delivered = new Map<string, NodeSnapshot>();
+
+      const streamed = await repository.stream((nodeId, snapshot) => {
+        delivered.set(nodeId, snapshot);
+      });
+
+      await expect(repository.list()).resolves.toEqual(streamed);
+      expect(delivered).toEqual(streamed);
+    });
+
     it('returns the exact persisted record and its matching revision from put', async () => {
       const { repository } = await open();
       const input: NodePutInput = {
@@ -236,6 +275,7 @@ export function describeSpaceNodesContract(
       await expect(repository.delete(nodeId)).resolves.toBe('deleted');
       await expect(repository.read(nodeId)).resolves.toBeNull();
       await expect(repository.delete(nodeId)).resolves.toBe('absent');
+      expect((await repository.list()).has(nodeId)).toBe(false);
     });
 
     it('suppresses a late standalone put after deletion', async () => {

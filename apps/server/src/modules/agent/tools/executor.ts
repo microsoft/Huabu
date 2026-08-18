@@ -119,10 +119,10 @@ export async function executeTool(
   };
   const withCanvasId = <T>(value: Record<string, unknown>, toolName: string) =>
     ({ ...value, canvasId: requireCanvasId(toolName) }) as unknown as T;
-  const withReadCanvasId = <T>(
+  const withReadCanvasId = async <T>(
     value: Record<string, unknown>,
     toolName: string,
-  ): T => {
+  ): Promise<T> => {
     const ownerCanvasId = requireCanvasId(toolName);
     const requested = value.targetCanvasId;
     if (requested !== undefined && typeof requested !== 'string') {
@@ -131,7 +131,7 @@ export async function executeTool(
     const { targetCanvasId: _targetCanvasId, ...toolArgs } = value;
     return {
       ...toolArgs,
-      canvasId: resolveWorldReadCanvasId(ownerCanvasId, requested),
+      canvasId: await resolveWorldReadCanvasId(ownerCanvasId, requested),
     } as unknown as T;
   };
 
@@ -141,31 +141,31 @@ export async function executeTool(
 
     case 'get_space_outline':
       return handleGetCanvasOutline(
-        withReadCanvasId<GetCanvasOutlineArgs>(args, 'get_space_outline'),
+        await withReadCanvasId<GetCanvasOutlineArgs>(args, 'get_space_outline'),
       );
 
     case 'inspect_nodes':
       return handleInspectNodes(
-        withReadCanvasId<InspectNodesArgs>(args, 'inspect_nodes'),
+        await withReadCanvasId<InspectNodesArgs>(args, 'inspect_nodes'),
       );
 
     case 'inspect_edges':
       return handleInspectEdges(
-        withReadCanvasId<InspectEdgesArgs>(args, 'inspect_edges'),
+        await withReadCanvasId<InspectEdgesArgs>(args, 'inspect_edges'),
       );
 
     case 'grep':
-      return handleGrep(withReadCanvasId<GrepArgs>(args, 'grep'));
+      return handleGrep(await withReadCanvasId<GrepArgs>(args, 'grep'));
 
     case 'find':
-      return handleFind(withReadCanvasId<FindArgs>(args, 'find'));
+      return handleFind(await withReadCanvasId<FindArgs>(args, 'find'));
 
     case 'ls':
-      return handleLs(withReadCanvasId<LsArgs>(args, 'ls'));
+      return handleLs(await withReadCanvasId<LsArgs>(args, 'ls'));
 
     case 'read': {
       const ownerCanvasId = requireCanvasId('read');
-      const readArgs = withReadCanvasId<ReadArgs>(args, 'read');
+      const readArgs = await withReadCanvasId<ReadArgs>(args, 'read');
       return handleRead(
         readArgs,
         readArgs.canvasId === ownerCanvasId ? context?.readSet : undefined,

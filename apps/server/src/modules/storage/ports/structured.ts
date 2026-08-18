@@ -173,6 +173,8 @@ export type SpaceRenameResult =
  * complete before a later, independent record write fails.
  */
 export interface SpaceRepository {
+  /** Return the stable World id, creating the one initial World if absent. */
+  ensureWorld(): Promise<string>;
   list(): Promise<CanvasSummary[]>;
   /**
    * Return the stable id of the hidden World Space.
@@ -401,7 +403,14 @@ export interface SpaceTaskRuns {
 export interface NodeSnapshot {
   readonly record: NodeContent;
   readonly revision: string;
+  /** Non-fatal integrity findings observed while reading this record. */
+  readonly warnings?: readonly NodeReadWarning[];
 }
+
+export type NodeReadWarning = {
+  readonly kind: 'duplicate-record';
+  readonly names: readonly string[];
+};
 
 export interface NodePutInput {
   readonly nodeId: string;
@@ -471,6 +480,16 @@ export interface SpaceNodes {
    */
   readonly canvasId: string;
   read(nodeId: string): Promise<NodeSnapshot | null>;
+  /** Read every complete node record in this Space, keyed by stable id. */
+  list(): Promise<ReadonlyMap<string, NodeSnapshot>>;
+  /**
+   * Deliver complete node records as they become available and return the
+   * same final snapshot as {@link list}. Delivery order is unspecified.
+   */
+  stream(
+    onNode: (nodeId: string, snapshot: NodeSnapshot) => void,
+    signal?: { readonly aborted: boolean },
+  ): Promise<ReadonlyMap<string, NodeSnapshot>>;
   put(input: NodePutInput): Promise<NodePutResult>;
   delete(nodeId: string): Promise<NodeDeleteResult>;
 }

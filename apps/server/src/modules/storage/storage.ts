@@ -26,9 +26,10 @@ import path from 'node:path';
 import {
   acquireWorkspaceOperationLease,
   getWorkspacePath,
+  isWorkspaceConfigured,
 } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
-import { canvasRoot } from './backends/disk/layout.js';
+import { DiskSpaceFiles } from './backends/disk/space-files.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import {
   parseStorageProfile,
@@ -38,6 +39,7 @@ import {
   type StorageProfile,
 } from './profile.js';
 import { withSpacePutAdmission } from './space-lifecycle-admission.js';
+import { getLogger } from '../../utils/logger.js';
 
 import type {
   BlobInfo,
@@ -48,12 +50,15 @@ import type {
   BlobStore,
 } from './ports/blob.js';
 import type { StorageHealth } from './ports/common.js';
+import type { SpaceFiles } from './ports/files.js';
 import type {
   SpaceCreateResult,
   SpaceDeleteFinishResult,
   StructuredStore,
 } from './ports/structured.js';
 import type { Readable } from 'node:stream';
+
+const log = getLogger('storage');
 
 /**
  * Outcome of the cross-store Space deletion this module composes.
@@ -97,24 +102,33 @@ function drainRejectedBody(body: Readable | Buffer): void {
 
 export interface Storage {
   readonly profile: StorageProfile;
+  readonly workspacePath: string;
   readonly structured: StructuredStore;
   readonly blobs: BlobStore;
+  readonly files: SpaceFiles;
 }
 
-function buildBlobStore(profile: StorageProfile): BlobStore {
+function buildSpaceFiles(workspacePath: string): SpaceFiles {
+  return new DiskSpaceFiles(workspacePath);
+}
+
+function buildBlobStore(profile: StorageProfile, files: SpaceFiles): BlobStore {
   switch (profile.blobs.kind) {
     case 'disk':
-      return new DiskBlobStore();
+      return new DiskBlobStore((canvasId) => files.space(canvasId).directory());
     default:
       // Unreachable: validateStorageProfile rejects unimplemented kinds.
       throw new Error(`Unsupported blob backend: ${profile.blobs.kind}`);
   }
 }
 
-function buildStructuredStore(profile: StorageProfile): StructuredStore {
+function buildStructuredStore(
+  profile: StorageProfile,
+  workspacePath: string,
+): StructuredStore {
   switch (profile.structured.kind) {
     case 'disk':
-      return new DiskStructuredStore();
+      return new DiskStructuredStore(workspacePath);
     default:
       throw new Error(
         `Unsupported structured backend: ${profile.structured.kind}`,
@@ -122,20 +136,40 @@ function buildStructuredStore(profile: StorageProfile): StructuredStore {
   }
 }
 
-/** Validate a profile and construct both connections. Does not `init()`. */
-export function createStorage(profile: StorageProfile): Storage {
+/** Validate a profile and construct the Workspace-bound connections. */
+export function createStorage(
+  profile: StorageProfile,
+  workspacePath: string = getWorkspacePath(),
+): Storage {
   validateStorageProfile(profile);
+  const resolvedWorkspacePath = path.resolve(workspacePath);
+  const files = buildSpaceFiles(resolvedWorkspacePath);
   return {
     profile,
-    structured: buildStructuredStore(profile),
-    blobs: buildBlobStore(profile),
+    workspacePath: resolvedWorkspacePath,
+    structured: buildStructuredStore(profile, resolvedWorkspacePath),
+    blobs: buildBlobStore(profile, files),
+    files,
   };
 }
 
 // ─── Process-wide holder ────────────────────────────────────────────────────
 
 let current: Storage | null = null;
+let configuredProfile: StorageProfile | null = null;
 let spaceCreateTail: Promise<void> = Promise.resolve();
+
+export interface StorageRuntime {
+  readonly profile: StorageProfile;
+  readonly mounted: boolean;
+  readonly workspacePath: string | null;
+}
+
+export interface StagedStorageMount {
+  readonly storage: Storage;
+  activate(): Promise<void>;
+  abort(): Promise<void>;
+}
 
 function defaultSpaceTitle(
   existing: readonly { readonly title: string | null }[],
@@ -159,12 +193,14 @@ function serializeSpaceCreate<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 function ensure(): Storage {
-  if (current) return current;
+  const workspacePath = activeWorkspacePath();
+  if (current?.workspacePath === workspacePath) return current;
 
-  const profile = parseStorageProfile();
+  const profile =
+    current?.profile ?? configuredProfile ?? parseStorageProfile();
   // Build first, so an unimplemented backend reports that rather than the
   // initialization complaint below.
-  const storage = createStorage(profile);
+  const storage = createStorage(profile, workspacePath);
   if (requiresExplicitInit(profile)) {
     throw new StorageProfileError(
       `Storage was used before initStorage(). The ` +
@@ -173,8 +209,75 @@ function ensure(): Storage {
         `Call initStorage() during startup.`,
     );
   }
+  // The synchronous free-mode compatibility path can still commit a new
+  // Workspace directly. Disk connections are inert, so rebuilding their
+  // Workspace-bound handles here preserves that path without letting a
+  // retained handle cross namespaces. Backends that require async startup
+  // are rejected above and must use the staged activation lifecycle.
   current = storage;
   return current;
+}
+
+async function closeConnections(storage: Storage): Promise<void> {
+  await Promise.all([
+    storage.structured.close(),
+    storage.blobs.close(),
+    storage.files.close(),
+  ]);
+}
+
+async function openConnections(storage: Storage): Promise<void> {
+  try {
+    await Promise.all([
+      storage.structured.init(),
+      storage.blobs.init(),
+      storage.files.init(),
+    ]);
+    await storage.structured.spaces().ensureWorld();
+  } catch (error) {
+    await closeConnections(storage).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Prepare all connections for a Workspace without changing the active mount. */
+export async function stageStorageForWorkspace(
+  workspacePath: string,
+  profile: StorageProfile = configuredProfile ?? parseStorageProfile(),
+): Promise<StagedStorageMount> {
+  const storage = createStorage(profile, workspacePath);
+  await openConnections(storage);
+  let state: 'staged' | 'active' | 'aborted' = 'staged';
+  return Object.freeze({
+    storage,
+    async activate(): Promise<void> {
+      if (state !== 'staged') {
+        throw new Error(`Storage mount is already ${state}`);
+      }
+      // Refresh only process-local materialization locators after the
+      // Workspace path has been committed. This performs no filesystem I/O;
+      // fallible connection setup and World bootstrap happened while staged.
+      storage.files.activate();
+      state = 'active';
+      const previous = current;
+      current = storage;
+      configuredProfile = profile;
+      spaceCreateTail = Promise.resolve();
+      if (previous && previous !== storage) {
+        await closeConnections(previous).catch((error: unknown) => {
+          log.error(
+            { error, workspacePath: previous.workspacePath },
+            'Previous Workspace storage did not close cleanly',
+          );
+        });
+      }
+    },
+    async abort(): Promise<void> {
+      if (state !== 'staged') return;
+      state = 'aborted';
+      await closeConnections(storage);
+    },
+  });
 }
 
 /**
@@ -185,11 +288,26 @@ function ensure(): Storage {
  */
 export async function initStorage(
   profile: StorageProfile = parseStorageProfile(),
-): Promise<Storage> {
-  const storage = createStorage(profile);
-  await Promise.all([storage.structured.init(), storage.blobs.init()]);
-  current = storage;
-  return storage;
+): Promise<StorageRuntime> {
+  validateStorageProfile(profile);
+  configuredProfile = profile;
+  if (!isWorkspaceConfigured()) {
+    return { profile, mounted: false, workspacePath: null };
+  }
+  const staged = await stageStorageForWorkspace(getWorkspacePath(), profile);
+  await staged.activate();
+  return {
+    profile,
+    mounted: true,
+    workspacePath: staged.storage.workspacePath,
+  };
+}
+
+/** Close the current Workspace-bound connections during graceful shutdown. */
+export async function closeStorage(): Promise<void> {
+  const storage = current;
+  current = null;
+  if (storage) await closeConnections(storage);
 }
 
 export function getStorage(): Storage {
@@ -202,6 +320,22 @@ export function getBlobStore(): BlobStore {
 
 export function getStructuredStore(): StructuredStore {
   return ensure().structured;
+}
+
+export function getWorldCanvasId(): Promise<string> {
+  return ensure().structured.spaces().worldId();
+}
+
+export async function isWorldCanvasId(canvasId: string): Promise<boolean> {
+  return (await getWorldCanvasId()) === canvasId;
+}
+
+export function requireWorldCanvasId(): Promise<string> {
+  return getWorldCanvasId();
+}
+
+export function getSpaceFiles(): SpaceFiles {
+  return ensure().files;
 }
 
 /**
@@ -328,7 +462,11 @@ export function canvasBlobs(canvasId: string): BlobScope {
 
 export async function storageHealth(): Promise<StorageHealth[]> {
   const storage = ensure();
-  return Promise.all([storage.structured.health(), storage.blobs.health()]);
+  return Promise.all([
+    storage.structured.health(),
+    storage.blobs.health(),
+    storage.files.health(),
+  ]);
 }
 
 /**
@@ -347,7 +485,7 @@ export async function storageHealth(): Promise<StorageHealth[]> {
  * exist.
  */
 export function spaceDirectory(canvasId: string): string {
-  return canvasRoot(canvasId);
+  return ensure().files.space(canvasId).directory();
 }
 
 /**

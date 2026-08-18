@@ -5,13 +5,9 @@ import { agentBindingSchema, getQuestionNodeStatus } from '@huabu/shared';
 
 import { describeNode } from './node-prompt.js';
 import { readWorldTargetCanvasesStrict } from './world-target-access.js';
-import {
-  isWorldCanvasId,
-  refreshCanvasDirIndex,
-} from '../storage/canvas-dirs.js';
-import { getCanvasStore } from '../storage/index.js';
+import { getStructuredStore, isWorldCanvasId } from '../storage/index.js';
 
-import type { CanvasFile, NodeContent } from '../storage/canvas-store.js';
+import type { CanvasFile, NodeContent } from './persistence-types.js';
 import type {
   CanvasNodeType,
   GetWorldReferencesResponse,
@@ -40,12 +36,13 @@ interface SourceCanvas {
 export async function resolveWorldReferences(
   worldCanvasId: string,
 ): Promise<GetWorldReferencesResponse> {
-  if (!isWorldCanvasId(worldCanvasId)) {
+  if (!(await isWorldCanvasId(worldCanvasId))) {
     throw new WorldReferenceResolutionError(
       'References can be resolved only for the World Canvas',
     );
   }
-  const world = getCanvasStore(worldCanvasId).read();
+  const structured = getStructuredStore();
+  const world = await structured.space(worldCanvasId).read();
   if (!world) {
     throw new WorldReferenceResolutionError('World Canvas is not readable');
   }
@@ -76,16 +73,24 @@ export async function resolveWorldReferences(
   }
 
   const sources = new Map<string, SourceCanvas>();
-  const sourceCanvases = readWorldTargetCanvasesStrict(sourceCanvasIds);
-  refreshCanvasDirIndex();
+  const sourceCanvases = await readWorldTargetCanvasesStrict(sourceCanvasIds);
   await Promise.all(
     [...sourceCanvasIds].map(async (canvasId) => {
-      const store = getCanvasStore(canvasId);
       const canvas = sourceCanvases.get(canvasId) ?? null;
+      const snapshots = canvas
+        ? await structured.space(canvasId).nodes.list()
+        : null;
       sources.set(canvasId, {
         canvas,
-        ...(canvas
-          ? { content: await store.readAllNodes({ strict: true }) }
+        ...(snapshots
+          ? {
+              content: new Map(
+                [...snapshots].map(([nodeId, snapshot]) => [
+                  nodeId,
+                  snapshot.record,
+                ]),
+              ),
+            }
           : {}),
       });
     }),
@@ -141,7 +146,6 @@ export async function resolveWorldReferences(
 
     const sourceContent = source.content?.get(target.nodeId) ?? null;
     const resolved = describeNode(
-      getCanvasStore(target.canvasId),
       {
         id: target.nodeId,
         type: sourceNode.type as CanvasNodeType,

@@ -9,7 +9,7 @@ import path from 'node:path';
 import { validatePathSchema, workspacePathSchema } from '@huabu/shared';
 
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
-import { getStructuredStore, resetStorageCache } from './storage/index.js';
+import { getStructuredStore } from './storage/index.js';
 import {
   activateWorkspacePath,
   WorkspaceActivationInProgressError,
@@ -262,8 +262,6 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       await activateWorkspacePath(parsed.data.path);
-      // Reset singletons that cache filesystem handles for the old workspace.
-      resetStorageCache();
       resetPreprocessDispatcher();
       return await buildWorkspaceState();
     } catch (e) {

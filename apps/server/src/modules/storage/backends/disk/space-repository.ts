@@ -36,6 +36,7 @@ import {
   titleForAllocatedDirectory,
   titleVisibleAtDirectory,
 } from './space-title.js';
+import { ensureWorldCanvasOnDisk } from './world-canvas.js';
 import { atomicWriteJson, mkdirp, sanitizeId } from '../../../../utils/fs.js';
 import { normalizeForCompare } from '../../../../utils/naming.js';
 import { getWorkspacePath } from '../../../workspace.js';
@@ -66,9 +67,25 @@ export class DiskSpaceRepository implements SpaceRepository {
   readonly #workspacePath: string;
   readonly #now: () => number;
 
-  constructor(now: () => number = Date.now) {
-    this.#workspacePath = path.resolve(getWorkspacePath());
+  constructor(
+    now: () => number = Date.now,
+    workspacePath = getWorkspacePath(),
+  ) {
+    this.#workspacePath = path.resolve(workspacePath);
     this.#now = now;
+  }
+
+  async ensureWorld(): Promise<string> {
+    const canvasId = ensureWorldCanvasOnDisk(this.#workspacePath);
+    try {
+      if (path.resolve(getWorkspacePath()) === this.#workspacePath) {
+        refreshCanvasDirIndex();
+      }
+    } catch {
+      // A staged mount deliberately initializes before the Workspace becomes
+      // process-active. Its activation read refreshes the locator afterwards.
+    }
+    return canvasId;
   }
 
   async list(): Promise<CanvasSummary[]> {

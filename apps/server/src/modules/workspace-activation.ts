@@ -15,6 +15,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { stageStorageForWorkspace } from './storage/index.js';
 import {
   commitWorkspacePath,
   isManagedMode,
@@ -194,7 +195,14 @@ export async function activateWorkspacePath(
   activationInProgress = true;
   try {
     await runWorkspacePreparation(resolvedPath, options);
-    commitWorkspacePath(resolvedPath);
+    const staged = await stageStorageForWorkspace(resolvedPath);
+    try {
+      commitWorkspacePath(resolvedPath);
+      await staged.activate();
+    } catch (error) {
+      await staged.abort();
+      throw error;
+    }
   } finally {
     activationInProgress = false;
   }

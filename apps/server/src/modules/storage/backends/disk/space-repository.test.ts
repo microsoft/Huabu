@@ -119,6 +119,18 @@ describeSpaceRepositoryContract('Disk', () => {
 });
 
 describe('DiskSpaceRepository membership', () => {
+  it('rejects duplicate ordinary Space ids', async () => {
+    const root = makeWorkspace('huabu-space-membership-duplicate-');
+    seedWorld(root);
+    writeRecord(root, 'First', record('canvas-duplicate', 'First'));
+    writeRecord(root, 'Second', record('canvas-duplicate', 'Second'));
+    refreshCanvasDirIndex();
+
+    await expect(new DiskSpaceRepository().list()).rejects.toThrow(
+      'Duplicate ordinary Space canvasId',
+    );
+  });
+
   it('refreshes external additions, deletions, and directory renames', async () => {
     const root = makeWorkspace('huabu-space-membership-refresh-');
     seedWorld(root);

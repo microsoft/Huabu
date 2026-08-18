@@ -14,7 +14,7 @@ import {
   InvalidAgentLaunchOverridesError,
   parseAgentLaunchOverrides,
 } from './agent-launch-overrides.js';
-import { getCanvasStore } from '../storage/index.js';
+import { readCanvas, readCanvasNode } from '../canvas/space-read.js';
 
 interface StoredNode {
   id: string;
@@ -23,8 +23,13 @@ interface StoredNode {
 }
 
 interface ResolverDependencies {
-  readCanvasNodes: (canvasId: string) => StoredNode[] | null;
-  readNodeContent: (canvasId: string, nodeId: string) => string | null;
+  readCanvasNodes: (
+    canvasId: string,
+  ) => Promise<StoredNode[] | null> | StoredNode[] | null;
+  readNodeContent: (
+    canvasId: string,
+    nodeId: string,
+  ) => Promise<string | null> | string | null;
 }
 
 export interface FixedAgentNodeTarget {
@@ -55,12 +60,12 @@ export class AgentThreadResolutionError extends Error {
 }
 
 const DEFAULT_DEPENDENCIES: ResolverDependencies = {
-  readCanvasNodes: (canvasId) => {
-    const canvas = getCanvasStore(canvasId).read();
+  readCanvasNodes: async (canvasId) => {
+    const canvas = await readCanvas(canvasId);
     return canvas ? (canvas.state.nodes as StoredNode[]) : null;
   },
-  readNodeContent: (canvasId, nodeId) =>
-    getCanvasStore(canvasId).readNode(nodeId)?.content ?? null,
+  readNodeContent: async (canvasId, nodeId) =>
+    (await readCanvasNode(canvasId, nodeId))?.content ?? null,
 };
 
 /**
@@ -74,8 +79,11 @@ export class AgentThreadResolver {
     private readonly dependencies: ResolverDependencies = DEFAULT_DEPENDENCIES,
   ) {}
 
-  resolveAgentNodeId(canvasId: string, threadId: string): CanvasNodeId | null {
-    const nodes = this.dependencies.readCanvasNodes(canvasId);
+  async resolveAgentNodeId(
+    canvasId: string,
+    threadId: string,
+  ): Promise<CanvasNodeId | null> {
+    const nodes = await this.dependencies.readCanvasNodes(canvasId);
     if (!nodes) {
       throw new AgentThreadResolutionError(
         'canvas_not_found',
@@ -93,11 +101,11 @@ export class AgentThreadResolver {
     return node?.type === 'question' ? (node.id as CanvasNodeId) : null;
   }
 
-  resolveFixedAgentNode(
+  async resolveFixedAgentNode(
     canvasId: string,
     threadId: string,
-  ): FixedAgentNodeTarget | null {
-    const nodes = this.dependencies.readCanvasNodes(canvasId);
+  ): Promise<FixedAgentNodeTarget | null> {
+    const nodes = await this.dependencies.readCanvasNodes(canvasId);
     if (!nodes) {
       throw new AgentThreadResolutionError(
         'canvas_not_found',
@@ -145,7 +153,7 @@ export class AgentThreadResolver {
       throw error;
     }
 
-    const content = this.dependencies.readNodeContent(canvasId, node.id);
+    const content = await this.dependencies.readNodeContent(canvasId, node.id);
     if (content === null) {
       throw new AgentThreadResolutionError(
         'missing_node_content',

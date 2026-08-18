@@ -2,8 +2,8 @@
 // Licensed under the MIT license.
 
 import { spawn } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, renameSync } from 'node:fs';
-import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { createWriteStream, existsSync } from 'node:fs';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -34,6 +34,11 @@ import { CanvasNotFoundError, applyDeltasOnServer } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import {
+  readCanvas,
+  readCanvasNode,
+  readCanvasSnapshot,
+} from './space-read.js';
+import {
   assertWorldPortalTopologyAllowed,
   WorldPortalMutationError,
 } from './world-portal-policy.js';
@@ -43,31 +48,23 @@ import {
   WorldReferenceResolutionError,
 } from './world-reference-resolver.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
-import { toSafeFilename } from '../../utils/naming.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import {
-  isWorldCanvasId,
-  refreshCanvasDirIndex,
-  registerCanvasDir,
-  suggestCanvasDir,
-} from '../storage/canvas-dirs.js';
-import {
   canvasBlobs,
   createSpace,
   deleteSpace,
-  getCanvasStore,
+  getSpaceFiles,
   getStructuredStore,
-  spaceDirectory,
+  isWorldCanvasId,
   type CanvasFile,
+  type NodeContent,
+  type NodeReadWarning,
   type UpdateNodeOutcome,
   updateNode,
 } from '../storage/index.js';
-import { nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
-import { getWorkspacePath } from '../workspace.js';
 
-import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type { CanvasNodeType } from '@huabu/shared';
 import type {
   ApiResult,
@@ -113,6 +110,10 @@ interface NodeLike {
   data?: Record<string, unknown>;
   [key: string]: unknown;
 }
+
+/** Stable record names in the portable `.huabu.zip` bundle format. */
+const SPACE_BUNDLE_RECORD_FILENAME = 'space.json';
+const LEGACY_CANVAS_BUNDLE_RECORD_FILENAME = 'canvas.json';
 
 function nowMs(): number {
   return Date.now();
@@ -347,20 +348,18 @@ async function singleArtifactProbe(
  * {@link hydrateNodeContent}; also used by the per-node GET endpoint so
  * batch and single-node hydration stay in lock-step.
  *
- * `preloaded` lets the batch path inject content from a one-pass
- * directory scan (see {@link CanvasStore.readAllNodes}) so we don't
- * re-read every `.md` file per node. Pass `undefined` to fall back to
- * the targeted single-node `store.readNode(nodeId)` lookup; pass
- * `null` to indicate the batch scan ran but found no sidecar.
+ * `nodeContent` comes from the request's structured read. Batch hydration
+ * supplies the result of one `SpaceNodes.list()` call; the single-node route
+ * supplies one `SpaceNodes.read()` result.
  *
  * Returns the original `node` reference when nothing was mutated so
  * callers can rely on identity-based diffing.
  */
 function hydrateOneNode(
-  store: CanvasStore,
   node: NodeLike,
   artifactExists: (key: string) => boolean,
-  preloaded?: NodeContent | null,
+  nodeContent: NodeContent | null,
+  warnings: readonly NodeReadWarning[] = [],
 ): NodeLike {
   const nodeId = typeof node.id === 'string' ? node.id : '';
   if (!nodeId) return node;
@@ -375,17 +374,6 @@ function hydrateOneNode(
   // is the only source of truth for those fields, so we read it before
   // any check that depends on them (notably the artifact-missing probe,
   // which needs the hydrated `src`).
-  let nodeContent: NodeContent | null;
-  if (preloaded !== undefined) {
-    nodeContent = preloaded;
-  } else {
-    try {
-      nodeContent = store.readNode(nodeId);
-    } catch {
-      nodeContent = null;
-    }
-  }
-
   if (!nodeContent) {
     if (MD_BACKED_NODE_TYPES.has(nodeType)) {
       data['contentMissing'] = true;
@@ -404,12 +392,14 @@ function hydrateOneNode(
   // claims this nodeId. Unlike a write (which hard-fails), a read stays
   // best-effort — the index keeps the last-scanned file so the node still
   // renders — but the client can flag it so the user resolves the
-  // duplicate. The duplicate set was already populated by the
-  // `readAllNodes()` scan that produced `preloaded`, so this is a cheap
-  // in-memory lookup with no extra disk I/O.
-  if (store.isDuplicateNode(nodeId)) {
+  // duplicate. The adapter attached this warning to the same node snapshot,
+  // so checking it adds no second storage read.
+  const duplicate = warnings.find(
+    (warning) => warning.kind === 'duplicate-record',
+  );
+  if (duplicate) {
     data['contentDuplicate'] = true;
-    data['duplicateFiles'] = store.duplicateNodeFiles(nodeId);
+    data['duplicateFiles'] = duplicate.names;
   } else {
     if ('contentDuplicate' in data) {
       delete data['contentDuplicate'];
@@ -508,13 +498,14 @@ function hydrateOneNode(
  * load on cold cache.
  */
 async function hydrateNodeContent(
-  store: CanvasStore,
+  canvasId: string,
   nodes: NodeLike[],
+  contentByNodeId: ReadonlyMap<string, NodeContent>,
+  warningsByNodeId: ReadonlyMap<string, readonly NodeReadWarning[]>,
 ): Promise<NodeLike[]> {
   // Read sidecars first because they are the source of truth for `src`.
   // Probe only the keys referenced by artifact-backed nodes; enumerating the
   // entire scope would make hydration cost grow with unrelated blob count.
-  const contentByNodeId = await store.readAllNodes();
   const referenced = new Set<string>();
   for (const node of nodes) {
     const nodeType = typeof node.type === 'string' ? node.type : '';
@@ -527,16 +518,16 @@ async function hydrateNodeContent(
   const present =
     referenced.size === 0
       ? new Set<string>()
-      : await canvasBlobs(store.canvasId).hasMany([...referenced]);
+      : await canvasBlobs(canvasId).hasMany([...referenced]);
   const artifactExists = (key: string): boolean => present.has(key);
 
   return nodes.map((node) => {
     const nodeId = typeof node.id === 'string' ? node.id : '';
     return hydrateOneNode(
-      store,
       node,
       artifactExists,
       contentByNodeId.get(nodeId) ?? null,
+      warningsByNodeId.get(nodeId) ?? [],
     );
   });
 }
@@ -882,19 +873,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   }>('/:canvasId/nodes/:nodeId/content', async function (request, reply) {
     const { canvasId, nodeId } = request.params;
 
-    const store = getCanvasStore(canvasId);
-    const canvas = store.read();
+    const handle = getStructuredStore().space(canvasId);
+    const canvas = await handle.read();
     if (!canvas) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
-
-    // Reconcile the cached node index against disk before this read.
-    // Only re-scans when warranted: a node already flagged duplicate
-    // always re-reads (so a hand-resolved duplicate is detected — the
-    // cheap count probe alone can't see that case), otherwise it falls
-    // back to the names-only staleness probe. Keeps the common healthy
-    // read off the full content rescan.
-    store.revalidateNodeForRead(nodeId);
 
     // Find this node in the persisted canvas state so we know its type
     // (without it we can't apply the artifact-missing branch). For
@@ -905,12 +888,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     let nodeType =
       stateNode && typeof stateNode.type === 'string' ? stateNode.type : '';
 
-    let existing: NodeContent | null = null;
-    try {
-      existing = store.readNode(nodeId);
-    } catch {
-      existing = null;
-    }
+    const existingSnapshot = await handle.nodes.read(nodeId);
+    const existing = existingSnapshot?.record ?? null;
     if (!nodeType && existing) {
       nodeType = existing.type;
     }
@@ -934,13 +913,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // Reuse the batched hydration helper so single-node and whole-
     // canvas reads stay in lock-step.
     const hydrated = hydrateOneNode(
-      store,
       {
         id: nodeId,
         type: nodeType,
         data: { ...(stateNode?.data ?? {}) },
       },
-      await singleArtifactProbe(store.canvasId, existing.src),
+      await singleArtifactProbe(canvasId, existing.src),
+      existing,
+      existingSnapshot?.warnings,
     );
     const data = (hydrated.data ?? {}) as Record<string, unknown>;
 
@@ -1010,9 +990,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const { nodeType, trigger, snapshot, previousSnapshot, options } =
       parsed.data;
     const dispatcher = getPreprocessDispatcher();
-    const store = getCanvasStore(canvasId);
-
-    if (MD_BACKED_NODE_TYPES.has(nodeType) && !store.readNode(nodeId)) {
+    if (
+      MD_BACKED_NODE_TYPES.has(nodeType) &&
+      !(await readCanvasNode(canvasId, nodeId))
+    ) {
       return reply.send({
         nodeId,
         success: false,
@@ -1095,20 +1076,24 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<GetCanvasResponse>;
   }>('/:canvasId', async function (request, reply) {
     const { canvasId } = request.params;
-    if (isWorldCanvasId(canvasId)) {
+    if (await isWorldCanvasId(canvasId)) {
       await reconcileWorldPortals();
     }
-    const store = getCanvasStore(canvasId);
-    const canvas = store.read();
-
-    if (!canvas) {
+    const snapshot = await readCanvasSnapshot(canvasId);
+    if (!snapshot) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
+    const { canvas } = snapshot;
 
     // Hydrate node content from the per-canvas store so clients always
     // receive fresh markdown bodies.
     const nodes = canvas.state.nodes as NodeLike[];
-    const hydratedNodes = await hydrateNodeContent(store, nodes);
+    const hydratedNodes = await hydrateNodeContent(
+      canvasId,
+      nodes,
+      snapshot.nodes,
+      snapshot.nodeWarnings,
+    );
 
     return reply.send({
       canvasId: canvas.canvasId,
@@ -1169,7 +1154,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      assertWorldPortalTopologyAllowed(
+      await assertWorldPortalTopologyAllowed(
         canvasId,
         (existing?.state.nodes ?? []) as NodeLike[],
         incomingState.nodes ?? [],
@@ -1570,11 +1555,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<RevealNodesFolderResponse>;
   }>('/:canvasId/reveal-nodes', async function (request, reply) {
     const { canvasId } = request.params;
-    const store = getCanvasStore(canvasId);
-    if (!store.read()) {
+    if (!(await readCanvas(canvasId))) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
-    const dir = nodesDir(canvasId);
+    const dir = getSpaceFiles().space(canvasId).nodesDirectory();
     if (!existsSync(dir)) {
       return reply.code(404).send({ message: 'Nodes folder not found' });
     }
@@ -1604,13 +1588,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
     const includeHistory = parsedQuery.data.includeHistory !== 'false';
 
-    const store = getCanvasStore(canvasId);
-    const canvas = store.read();
+    const canvas = await readCanvas(canvasId);
     if (!canvas) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
-    const canvasDir = spaceDirectory(canvasId);
+    const canvasDir = getSpaceFiles().space(canvasId).directory();
     if (!existsSync(canvasDir)) {
       return reply.code(404).send({ message: 'Canvas directory not found' });
     }
@@ -1671,14 +1654,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       // Stream the upload to a temp zip file
       const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
       const targetCanvasId = createId('canvas');
-      // Extract into a hidden staging dir so `scanWorkspace()` ignores it
-      // (it skips dot-prefixed entries) and the as-yet-unrenamed dir cannot
-      // be picked up by `read()`'s self-heal as a canvas titled `<canvasId>`.
-      const stagingDir = path.join(
-        getWorkspacePath(),
-        `.import-${targetCanvasId}`,
-      );
-      let stagingCleanedUp = false;
+      const importStaging = await getSpaceFiles().stageImport(targetCanvasId);
+      const stagingDir = importStaging.directory;
       try {
         await new Promise<void>((resolve, reject) => {
           const ws = createWriteStream(tmpZip);
@@ -1701,8 +1678,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             )}MB`,
           });
         }
-
-        mkdirSync(stagingDir, { recursive: true });
 
         type ImportManifest = {
           version?: string;
@@ -1746,16 +1721,21 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         // Rewrite the topology file so canvasId matches the new directory.
         // New bundles carry `space.json`; still accept legacy `canvas.json`
         // exports and normalise them to the new name on the way in.
-        const stagedJsonPath = path.join(stagingDir, SPACE_JSON_FILENAME);
-        const legacyJsonPath = path.join(stagingDir, 'canvas.json');
+        const stagedJsonPath = path.join(
+          stagingDir,
+          SPACE_BUNDLE_RECORD_FILENAME,
+        );
+        const legacyJsonPath = path.join(
+          stagingDir,
+          LEGACY_CANVAS_BUNDLE_RECORD_FILENAME,
+        );
         const sourceJsonPath = existsSync(stagedJsonPath)
           ? stagedJsonPath
           : existsSync(legacyJsonPath)
             ? legacyJsonPath
             : null;
         if (!sourceJsonPath) {
-          await rm(stagingDir, { recursive: true, force: true });
-          stagingCleanedUp = true;
+          await importStaging.discard();
           return reply.code(400).send({
             message: 'Invalid bundle: missing space.json',
           });
@@ -1766,41 +1746,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         const importedManifest = manifest as ImportManifest | null;
         const targetTitle =
           importedManifest?.title ?? parsed.title ?? 'Imported canvas';
-        const finalDirName = suggestCanvasDir(targetTitle, targetCanvasId);
-        const safeFromTitle = toSafeFilename(targetTitle, targetCanvasId);
-        const dedupeSuffix =
-          finalDirName === safeFromTitle
-            ? ''
-            : finalDirName.slice(safeFromTitle.length);
-        const resolvedTitle =
-          dedupeSuffix === '' ? targetTitle : targetTitle + dedupeSuffix;
 
         const remapped: CanvasFile = {
           ...parsed,
           canvasId: targetCanvasId,
-          title: resolvedTitle,
+          title: targetTitle,
           state: rewriteCanvasArtifactUrls(
             parsed.state,
             sourceCanvasId,
             targetCanvasId,
           ),
         };
-        // Always persist under the new name so the storage layer (which
-        // addresses `space.json`) can find it; drop a legacy source file.
-        await writeFile(stagedJsonPath, JSON.stringify(remapped));
-        if (sourceJsonPath !== stagedJsonPath) {
-          await rm(sourceJsonPath, { force: true });
-        }
-
-        // Move the staged dir into its final, title-derived location so
-        // the on-disk basename matches the title and `read()` will not
-        // self-heal-overwrite the title with the staging dir basename on
-        // the next access.
-        const finalDir = path.join(getWorkspacePath(), finalDirName);
-        renameSync(stagingDir, finalDir);
-        stagingCleanedUp = true;
-        registerCanvasDir(targetCanvasId, finalDirName, resolvedTitle);
-        refreshCanvasDirIndex();
+        await importStaging.publish(remapped);
 
         const response: ImportCanvasResponse = {
           canvasId: targetCanvasId,
@@ -1811,11 +1768,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(500).send({ message: 'Failed to import canvas' });
       } finally {
         void unlink(tmpZip).catch(() => {});
-        if (!stagingCleanedUp && existsSync(stagingDir)) {
-          await rm(stagingDir, { recursive: true, force: true }).catch(
-            () => {},
-          );
-        }
+        await importStaging.discard().catch(() => {});
       }
     },
   );
@@ -1840,8 +1793,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      const store = getCanvasStore(canvasId);
-      const canvas = store.read();
+      const space = getStructuredStore().space(canvasId);
+      const canvas = await space.read();
       if (!canvas) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
@@ -1880,7 +1833,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       request.raw.on('close', onClose);
 
       try {
-        await searchCanvas(store, parsed.data, writeEvent, abort.signal);
+        await searchCanvas(space, parsed.data, writeEvent, abort.signal);
       } catch (err) {
         request.log.error({ err, canvasId }, 'Canvas search failed');
         writeEvent({

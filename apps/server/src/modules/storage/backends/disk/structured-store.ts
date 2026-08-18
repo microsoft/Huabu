@@ -21,6 +21,8 @@
  * Space has one long-lived instance.
  */
 
+import path from 'node:path';
+
 import { getCanvasStore } from './legacy/canvas-store-cache.js';
 import { createDiskSpaceLogs } from './space-logs.js';
 import { DiskSpaceNodes } from './space-nodes.js';
@@ -28,12 +30,18 @@ import { createDiskSpaceRecordReader } from './space-record.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { DiskSpaceTasks } from './space-tasks.js';
 import { createDiskSpaceWrite } from './space-write.js';
+import { getWorkspacePath } from '../../../workspace.js';
 
 import type { StorageHealth } from '../../ports/common.js';
 import type { SpaceHandle, StructuredStore } from '../../ports/structured.js';
 
 export class DiskStructuredStore implements StructuredStore {
   readonly kind = 'disk' as const;
+  readonly #workspacePath: string;
+
+  constructor(workspacePath = getWorkspacePath()) {
+    this.#workspacePath = path.resolve(workspacePath);
+  }
 
   async init(): Promise<void> {
     // The workspace directory is prepared by `workspace-prepare.ts`; Space
@@ -47,10 +55,15 @@ export class DiskStructuredStore implements StructuredStore {
   async close(): Promise<void> {}
 
   spaces(): DiskSpaceRepository {
-    return new DiskSpaceRepository();
+    return new DiskSpaceRepository(Date.now, this.#workspacePath);
   }
 
   space(canvasId: string): SpaceHandle {
+    if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
+      throw new Error(
+        'Structured store belongs to an inactive workspace. Resolve storage after workspace activation.',
+      );
+    }
     // `getCanvasStore` validates the id and owns the instance cache.
     const store = getCanvasStore(canvasId);
     const { events, changes } = createDiskSpaceLogs(store);

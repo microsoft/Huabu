@@ -7,8 +7,8 @@
  * Covers the streaming {@link searchCanvas} driver. The route layer is
  * a thin NDJSON adapter, so the interesting behaviour — tiered emission
  * order, field filtering, snippet construction, limits, abort semantics
- * — all lives here and is exercised against a fake `CanvasStore` whose
- * `streamAllNodes` walks an in-memory snapshot. Production reads sidecars
+ * — all lives here and is exercised against a fake `SpaceHandle` whose
+ * node stream walks an in-memory snapshot. Production reads records
  * off disk, but the scanner takes a callback so the two are wire-compatible.
  */
 
@@ -24,7 +24,11 @@ import {
 import { createChatSubmission } from '../agent/agenetes/handle.js';
 
 import type { ChatEnvelope } from '../agent/conversation/envelope.js';
-import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
+import type {
+  NodeContent,
+  NodeSnapshot,
+  SpaceHandle,
+} from '../storage/index.js';
 import type { AgentTurn } from '@agenetes/protocol';
 import type { CanvasSearchEvent, CanvasSearchRequest } from '@huabu/shared';
 
@@ -76,16 +80,16 @@ function mkEdge(
 }
 
 /**
- * Build a duck-typed `CanvasStore` that satisfies just the two methods
+ * Build a duck-typed `SpaceHandle` that satisfies just the reads
  * `searchCanvas` actually reads from: `read()` (for the static node + edge
- * shape) and `streamAllNodes()` (for the sidecar bodies). The rest of the
+ * shape) and `nodes.stream()` (for the node records). The rest of the
  * store surface is irrelevant here, so we cast through `unknown`.
  */
 function makeFakeStore(opts: {
   nodes: readonly SearchableNode[];
   contents: readonly NodeContent[];
   edges?: readonly SearchableEdge[];
-}): CanvasStore {
+}): SpaceHandle {
   const stateNodes = opts.nodes.map((n) => ({
     id: n.id,
     type: n.type,
@@ -100,21 +104,24 @@ function makeFakeStore(opts: {
   }));
   const fake = {
     canvasId: 'test-canvas',
-    read: () => ({ state: { nodes: stateNodes, edges: stateEdges } }),
-    streamAllNodes: async (
-      onNode: (id: string, content: NodeContent) => void,
-      signal?: { readonly aborted: boolean },
-    ): Promise<Map<string, NodeContent>> => {
-      const map = new Map<string, NodeContent>();
-      for (const c of opts.contents) {
-        if (signal?.aborted) return map;
-        map.set(c.nodeId, c);
-        onNode(c.nodeId, c);
-      }
-      return map;
+    read: async () => ({ state: { nodes: stateNodes, edges: stateEdges } }),
+    nodes: {
+      stream: async (
+        onNode: (id: string, snapshot: NodeSnapshot) => void,
+        signal?: { readonly aborted: boolean },
+      ): Promise<Map<string, NodeSnapshot>> => {
+        const map = new Map<string, NodeSnapshot>();
+        for (const content of opts.contents) {
+          if (signal?.aborted) return map;
+          const snapshot = { record: content, revision: content.nodeId };
+          map.set(content.nodeId, snapshot);
+          onNode(content.nodeId, snapshot);
+        }
+        return map;
+      },
     },
   };
-  return fake as unknown as CanvasStore;
+  return fake as unknown as SpaceHandle;
 }
 
 async function collect(

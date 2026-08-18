@@ -335,6 +335,19 @@ describe('structured write authority', () => {
   });
 });
 
+describe('backend-neutral production reads', () => {
+  it('does not import CanvasStore or getCanvasStore from the public barrel', () => {
+    const legacyReadImport =
+      /import\s+(?:type\s+)?\{[^}]*\b(?:CanvasStore|getCanvasStore)\b[^}]*\}\s+from\s+['"][^'"]*storage\/index\.js['"]/s;
+    const violations = sourceFiles
+      .filter((file) => !file.endsWith('.test.ts'))
+      .filter((file) => !file.startsWith('modules/storage/'))
+      .filter((file) => legacyReadImport.test(read(file)));
+
+    expect(violations).toEqual([]);
+  });
+});
+
 describe('root forwarding shims', () => {
   const SHIMS = [
     'modules/storage/canvas-store.ts',
@@ -358,37 +371,17 @@ describe('root forwarding shims', () => {
 
   /** Exact snapshot of the remaining deprecated-path importers. */
   const EXPECTED_IMPORTERS: Record<string, readonly string[]> = {
-    'storage/canvas-store.js': [
-      'modules/canvas/canvas-search.test.ts',
-      'modules/canvas/canvas-search.ts',
-      'modules/canvas/canvas-spatial.ts',
-      'modules/canvas/canvas.route.ts',
-      'modules/canvas/node-prompt.test.ts',
-      'modules/canvas/node-prompt.ts',
-      'modules/canvas/world-reference-resolver.ts',
-      'modules/canvas/world-target-access.ts',
-    ],
+    'storage/canvas-store.js': [],
     'storage/canvas-dirs.js': [
       'modules/agent/tools/world-target-read.test.ts',
       'modules/canvas/canvas-command-router.test.ts',
-      'modules/canvas/canvas-command-router.ts',
-      'modules/canvas/canvas.route.ts',
       'modules/canvas/external-watcher.test.ts',
-      'modules/canvas/external-watcher.ts',
-      'modules/canvas/world-portal-policy.ts',
       'modules/canvas/world-portals.test.ts',
-      'modules/canvas/world-portals.ts',
       'modules/canvas/world-reference-resolver.test.ts',
-      'modules/canvas/world-reference-resolver.ts',
-      'modules/canvas/world-target-access.ts',
-      'modules/workspace.ts',
     ],
     'storage/paths.js': [
       'modules/canvas/canvas-content-cas.test.ts',
       'modules/canvas/canvas.route.test.ts',
-      'modules/canvas/canvas.route.ts',
-      'modules/canvas/external-watcher.ts',
-      'modules/canvas/world-target-access.ts',
       'modules/workspace/migrations/migrate-acp-sessions.ts',
     ],
   };

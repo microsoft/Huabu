@@ -1,12 +1,42 @@
 # Canvas Storage Architecture
 
-> Last updated: 2026-08-11
+> Last updated: 2026-08-18
 
 ## 1. Overview
 
-Every Space remains fully self-contained on Disk by default, but storage no longer presents one all-purpose `CanvasStore` as its backend contract. `apps/server/src/modules/storage/` separates backend-neutral blob and structured ports, Disk adapters, process-wide composition, and a shrinking Disk compatibility facade. Opaque artifact bytes flow through `BlobStore`; `StructuredStore` exposes one `spaces()` repository for the Space collection — membership, World identity, and create/delete/rename — while `SpaceHandle` exposes the Space's own async record read and ordered write plus the parts it holds: `nodes`, `changes`, `tasks`, and `events`. Space creation and deletion, standalone node writes, executor and revert batches, preprocessing persistence, and event/change mutations enter these ports. The remaining compatibility consumers are explicit Disk capabilities and paths such as ZIP import/export, RFS upload/delete, external-note observation/claim, bootstrap/migration, and hydration helpers; some read and some mutate physical files, so they keep non-Disk profiles unselectable until their own contracts are designed.
+Every Space remains fully self-contained on Disk by default, but storage no
+longer presents one all-purpose `CanvasStore` as its application contract.
+`apps/server/src/modules/storage/` separates backend-neutral blob and
+structured ports, the declared `SpaceFiles` materialization capability, Disk
+adapters, process-wide composition, and a shrinking compatibility facade.
+Opaque artifact bytes flow through `BlobStore`; `StructuredStore` exposes one
+`spaces()` repository for the Space collection — membership, World identity,
+bootstrap, and create/delete/rename — while `SpaceHandle` exposes the Space's
+own async record read and ordered write plus the parts it holds: `nodes`,
+`changes`, `tasks`, and `events`. Production Canvas, agent, RFS, web,
+interactive-view, and Task structured reads and writes use these ports.
+`CanvasStore` remains an internal Disk primitive and compatibility-test seam,
+not an application service.
 
-Runtime Home-folder activation prepares and migrates the selected directory in a disposable child process before committing it as the active workspace. This isolation is required because synchronous filesystem calls against cloud, network, or virtual drives can block indefinitely; a stuck preparation is terminated after 70 seconds with `WORKSPACE_ACTIVATION_TIMEOUT`, while the Server event loop and previously active workspace remain available. Concurrent activation attempts return `WORKSPACE_ACTIVATION_IN_PROGRESS`. Managed-mode startup still prepares synchronously before the Server accepts requests.
+File-native features such as RFS, built-in file tools, external-note watching,
+memory/debug files, and bundle import/export resolve their Workspace-bound
+materialization through `SpaceFiles`. They may use real paths, but do not name
+the Disk record layout or title-derived locator. This leaves a later SQLite
+adapter free to compose a filesystem projection without changing feature
+modules.
+
+Runtime Home-folder activation prepares and migrates the selected directory in
+a disposable child process, stages and initializes the Workspace-bound storage
+connections, and asks `SpaceRepository.ensureWorld()` to bootstrap the stable
+World before committing the path and swapping the active mount. A failed child
+or storage stage leaves the previous Workspace and mount active. This isolation
+is required because synchronous filesystem calls against cloud, network, or
+virtual drives can block indefinitely; a stuck preparation is terminated after
+70 seconds with `WORKSPACE_ACTIVATION_TIMEOUT`, while the Server event loop and
+previously active workspace remain available. Concurrent activation attempts
+return `WORKSPACE_ACTIVATION_IN_PROGRESS`. Managed-mode startup still prepares
+synchronously before the Server accepts requests, then initializes the same
+storage lifecycle. Graceful shutdown closes the mounted connections.
 
 ## 2. Disk Layout
 
@@ -45,7 +75,11 @@ Key points:
 - The `canvasId -> directory name` index in `canvas-dirs.ts` is invalidated **lazily**, never by a live filesystem watcher. Catalogue reads and the World resolvers re-scan unconditionally, server-owned create/rename register the new directory directly, and `CanvasStore.read()` re-scans and retries when `space.json` is missing — which is also how a Finder-side Space rename is adopted as the new title. A stale index therefore self-heals on the next read of the affected Space.
 - External-note observation exists for one feature: surfacing user-authored `.md` files dropped into `<Space>/nodes/` from outside the app. There is **no workspace-level watcher**. In steady state there is at most one native `fs.watch` handle per **active Space session**; concurrent SSE subscribers to the same Space share that session, watcher, and scan, so watcher count follows distinct active Spaces rather than open streams. Opening a Space's stream arms its native watcher _before_ the one lazy scan begins (closing the scan-then-watch gap), limits that scan to eight concurrent file reads plus one asynchronous topology read for filtering known note ids, and returns a single merged snapshot; live events read the latest topology synchronously and always win over an older scan observation of the same path. When `nodes/` does not exist, non-Windows sessions watch the Space root and promote themselves to the child directory as soon as it appears. Windows sessions use one periodic existence probe instead, avoiding a root handle that would block external Space rename/delete. If an active `nodes/` directory is deleted or replaced, the session verifies its filesystem identity before emitting an empty snapshot, re-resolves a Finder-renamed Space by `canvasId`, then waits for the path and resumes child watching instead of remaining attached to the stale inode. The final `close()` releases the watcher, clears pending timers, and drops the Space's discovery state. A failed scan is not cached, so a later subscription retries. Workspace and session generations reject scans and events that resolve after a workspace switch or a close/reopen. Inactive Spaces hold no watcher and no in-memory state; their eventual state is rebuilt by the first lazy scan when they are next opened.
 - Because a live `fs.watch` handle inside a Space subtree makes `renameSync` / `rmSync` fail with EPERM on Windows, `space-dir-handles.ts` arbitrates between handle owners and directory mutations. Each active external-note session registers itself against its `canvasId`; server-owned Space rename and delete bracket the mutation with `withSpaceDirHandlesReleased(canvasId, fn)`, which releases that Space's handles and lets the owner re-acquire afterwards — re-resolving the directory, so a rename re-arms at the new path and a delete collapses the session to an empty snapshot. A Space with no open stream has no registered owner, so the bracket is a plain passthrough. Neither side knows about the other.
-- Workspace preparation creates exactly one hidden `.world/space.json` after migrations. Its generated `canvasId` remains stable, resolves through the normal `CanvasStore`, and is exposed separately as `WorkspaceInfo.worldCanvasId`; ordinary Canvas lists continue to omit it.
+- Workspace preparation and `SpaceRepository.ensureWorld()` share the same
+  idempotent Disk bootstrap primitive. They create exactly one hidden
+  `.world/space.json`; its generated `canvasId` remains stable, resolves through
+  the normal `SpaceHandle`, and is exposed separately as
+  `WorkspaceInfo.worldCanvasId`. Ordinary Space lists continue to omit it.
 - An established `.world` directory with a missing or malformed `space.json` is an integrity error. World identity is never silently regenerated, and the World cannot be deleted or directory-renamed through ordinary Space lifecycle operations.
 - Reading the World reconciles one canonical `canvasRef` Portal for every live ordinary Space; a Portal Pin whose source Space has no Portal yet runs the same reconciliation first, so pinning never depends on the user having opened the World. Reconciliation creates only missing Portals in deterministic open grid slots, preserves every existing node and position, rejects duplicate or malformed Portal identities, and leaves a broken Portal when its source Space is deleted.
 - Canonical Portal identity is server-owned: non-system commands cannot create or repoint a `canvasRef`, a live Portal cannot be deleted, and only a broken Portal may be removed. Portal geometry may move like ordinary World geometry, but its size is content-managed rather than manually resized.
@@ -68,21 +102,58 @@ Key points:
 | Path                                            | Responsibility                                                                                                                                                      |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ports/blob.ts`                                 | Backend-neutral `BlobStore` connection/scope contract for opaque bytes and bounded materialization leases.                                                          |
+| `ports/files.ts`                                | Declared Workspace-bound filesystem materialization, bundle publication, and native-handle coordination for file-native features.                                   |
 | `ports/structured.ts`                           | Backend-neutral `StructuredStore`, the `SpaceRepository` collection, and the `SpaceHandle` composite: record read/ordered write, nodes, changes, Tasks, and events. |
 | `ports/contracts/`                              | Reusable Space-collection, node, Space-write, log, blob, and store suites; guarantees are the minimum every adapter implements.                                     |
 | `backends/disk/`                                | Disk implementations plus before-image restoration for rejected in-process ordered batches; no journal or startup recovery.                                         |
 | `backends/disk/legacy/`                         | The legacy `CanvasStore` and its synchronous adapter primitives, bounded Workspace-qualified cache, and process-local node tombstones.                              |
-| `compatibility/canvas.ts`                       | Residual Disk reads plus direct-module create/delete test fixtures; lifecycle writers are not exported from the public storage barrel.                              |
+| `compatibility/canvas.ts`                       | Residual Disk test/legacy facade over the same adapter primitive; production feature reads no longer enter here.                                                    |
 | `space-lifecycle-admission.ts`                  | Backend-neutral, writer-preferring single-process coordinator shared by structured mutations and blob puts during a delete session.                                 |
-| `profile.ts` and `storage.ts`                   | Two-axis backend selection, validation, adapter construction, process-wide lifecycle, blob scopes, and the blob-first deletion saga.                                |
+| `profile.ts` and `storage.ts`                   | Backend selection, validation, Workspace-scoped staged mount lifecycle, World bootstrap, materialization/blob scopes, and the blob-first deletion saga.             |
 | `index.ts`                                      | Public exports only; application code imports here rather than reaching into an adapter.                                                                            |
 | `canvas-store.ts`, `paths.ts`, `canvas-dirs.ts` | Deprecated forwarding shims with no logic, retained only for high-fanout compatibility imports.                                                                     |
 
-The Disk structured adapter and compatibility facade resolve the same cached legacy object, so migration does not create two in-memory authorities. All portable repository methods are async. `SpaceRepository` owns membership reads, structured create/rename, and an exclusive `beginDelete()` session; composition holds that session across the existing blob-first delete saga and then calls `finish()` or `abort()`. Every Space-record write goes through `SpaceHandle.write`, which is the version-checked replacement with the node and delta batch attached; `SpaceHandle.read` reads only. `SpaceNodes` returns complete records plus revision tokens without exposing filenames. `write` preserves the old node mutations → Space record → optional delta order. When a normal in-process node → record → delta batch rejects, the adapter must restore that batch's prestate before returning the rejection. An explicit title rename remains the preceding ordered, best-effort boundary and is not rolled back with the batch. The port does not promise process-crash or power-loss recovery, a determinate result after an unknown remote outcome, multi-process serialization, idempotent retry, or publication. Disk meets the in-process restoration requirement with its existing before-image rollback; a SQL adapter may use a native transaction.
+The Disk structured adapter and compatibility facade resolve the same cached
+legacy object, so migration does not create two in-memory authorities. All
+portable repository methods are async. `SpaceRepository` owns membership
+reads, idempotent World bootstrap, structured create/rename, and an exclusive
+`beginDelete()` session; composition holds that session across the existing
+blob-first delete saga and then calls `finish()` or `abort()`. Every
+Space-record write goes through `SpaceHandle.write`, which is the
+version-checked replacement with the node and delta batch attached;
+`SpaceHandle.read` reads only. `SpaceNodes.read/list/stream` return complete
+records plus opaque revision tokens without exposing filenames. `write`
+preserves the old node mutations → Space record → optional delta order. When a
+normal in-process node → record → delta batch rejects, the adapter must restore
+that batch's prestate before returning the rejection. An explicit title rename
+remains the preceding ordered, best-effort boundary and is not rolled back with
+the batch. The port does not promise process-crash or power-loss recovery, a
+determinate result after an unknown remote outcome, multi-process
+serialization, idempotent retry, or publication. Disk meets the in-process
+restoration requirement with its existing before-image rollback; a SQL adapter
+may use a native transaction.
 
-Canvas persistence DTOs and the write coordinator live under `modules/canvas/`; physical Workspace paths, name indexes, directory-handle arbitration, and boot migrations live under `modules/workspace/`; generic filesystem and Markdown codecs live under `utils/`. `canvasRoot()` validates the identifier and then verifies that the resolved Space directory remains a strict descendant of the active Workspace before any downstream Disk operation receives it. `module-boundaries.test.ts` enforces the storage dependency direction and prevents new consumers of the forwarding shims.
+Canvas persistence DTOs and the write coordinator live under `modules/canvas/`;
+Disk record paths, name indexes, and directory-handle arbitration live inside
+the Disk adapter; boot migrations remain under `modules/workspace/migrations/`;
+generic filesystem and Markdown codecs live under `utils/`. `SpaceFiles`
+validates identifiers and fences retained scopes after a Workspace switch
+before any feature receives a path. `module-boundaries.test.ts` enforces the
+storage dependency direction, rejects production backend imports, and keeps
+the deprecated forwarding-shim importer lists shrinking.
 
-Space deletion is serialized against composed blob puts by a writer-preferring admission coordinator and holds an active-Workspace lease across blob cleanup and structured destruction. `beginDelete()` acquires the exclusive session before blob I/O; `finish()` removes structured state, while `abort()` releases the fence without doing so. Blobs are swept before structure so a failed sweep can be retried while the Space record still names them. Puts already admitted may finish; a put queued behind a successful deletion rechecks existence and fails without recreating blobs, while a failed blob sweep leaves the record available for retry. Mutations through existing Space handles and repositories reject while deletion is active or queued; reads remain available for cleanup. Residual direct-filesystem capabilities such as ZIP import, RFS upload/delete, and external-note claim are outside this repository fence and remain blockers for a non-Disk profile.
+Space deletion is serialized against composed blob puts by a writer-preferring
+admission coordinator and holds an active-Workspace lease across blob cleanup
+and structured destruction. `beginDelete()` acquires the exclusive session
+before blob I/O; `finish()` removes structured state, while `abort()` releases
+the fence without doing so. Blobs are swept before structure so a failed sweep
+can be retried while the Space record still names them. Puts already admitted
+may finish; a put queued behind a successful deletion rechecks existence and
+fails without recreating blobs, while a failed blob sweep leaves the record
+available for retry. Mutations through existing Space handles and repositories
+reject while deletion is active or queued; reads remain available for cleanup.
+File-native operations remain separate physical actions, but they enter through
+`SpaceFiles` rather than binding application code to one backend layout.
 
 Retained Disk Space repository and handle instances, blob scopes, and legacy `CanvasStore` instances reject use after the active Workspace changes. Each `spaces()` call returns a fresh Workspace-bound handle and each read rescans current Disk state. The Workspace-qualified LRU is cleared and rebuilt on the next lookup after a switch. The delete-session contract covers overlapping operations through one configured backend instance. Disk realizes it with the shared process-local coordinator; it is not a multi-process transaction or distributed lock, and a SQL adapter must supply an equivalent backend-instance fence using its own mechanisms.
 
@@ -126,7 +197,7 @@ publication remain in the Canvas application layer. Conflict responses now
 report the existing logical title/label instead of a Disk filename or directory
 locator.
 
-Phase 4 changes no shared schema or web/client source. HTTP statuses and schemas
+Phase 4.6 changes no shared schema or web/client source. HTTP statuses and schemas
 and the SSE shape remain stable, subject to the logical conflict-value correction
 above. Publication remains an application action after persistence rather than
 a storage-port responsibility.

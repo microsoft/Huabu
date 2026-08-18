@@ -1,15 +1,15 @@
 # Multi-Backend Storage
 
-Status: Phases 1–4 implemented
-Last updated: 2026-08-11
+Status: Phase 4.6 implemented
+Last updated: 2026-08-18
 
 > **Scope and decision confidence.** This proposal records the two-port
 > `StructuredStore` / `BlobStore` split and their target backend families as
 > the settled direction. The Blob contract, the structured module/repository
 > shape, the Space catalogue/lifecycle, async node repository, and minimal ordered
 > writer are accepted. Exact schemas, stronger transactional APIs, migration
-> mechanics, backend-selection scope, virtual filesystem behavior, agent
-> workspace materialization, and write-back are still design space. Remaining
+> mechanics, backend-selection scope, and virtual-filesystem and agent
+> write-back semantics are still design space. Remaining
 > candidate interfaces below are discussion aids, not implementation
 > instructions.
 >
@@ -47,9 +47,13 @@ Last updated: 2026-08-11
 > Corrections made during implementation and adversarial
 > review are recorded in place, including the CAS race ordering (§12.2.5),
 > log-family interface segregation (§12.2.6), and retained-handle Workspace
-> guards (§12.2.4). Remaining Disk-only read and physical capabilities still
-> keep non-Disk profiles unselectable. No SQLite, Postgres, or Azure adapter
-> exists. §12 is the
+> guards (§12.2.4). Phase 4.5 moved storage-owned Disk layout behind the
+> storage boundary in PR #93. Phase 4.6 is the application-neutrality bridge
+> specified in §12.6: production structured reads moved off `CanvasStore`,
+> filesystem consumers depend on one declared Space-file capability, and
+> storage connections gained an explicit Workspace mount lifecycle before a
+> second structured adapter is selectable. No SQLite, Postgres, or Azure
+> adapter exists on `main`. §12 is the
 > authoritative phase plan; the decision table in §2 marks what each phase
 > has actually settled.
 
@@ -1916,7 +1920,45 @@ no working behavior moves. The `latestChatTs` field and its
 `lastSeenThreadCursor` plumbing survive the removal because they are the
 resume point such a digest would need.
 
-### 12.6 Later phases — provisional
+### 12.6 Phase 4.6 — backend-neutral application and Workspace mount
+
+Phase 4.6 closes the application-side gap between the portable storage contracts and the SQLite adapter proof. It contains no SQLite schema, driver, migration, or profile-selectability branch. Its exit criterion is: **adding another `StructuredStore` changes adapter, composition, and migration code, but does not require Canvas, agent, web, RFS, interactive-view, Task, or Workspace feature modules to learn that backend's record layout.**
+
+#### 12.6.1 Portable read completion
+
+Every production structured read uses `StructuredStore`: Space topology through `SpaceHandle.read()`, single node content through `SpaceNodes.read()`, and whole-Space or incremental scans through new `SpaceNodes.list()` / `SpaceNodes.stream()` members. The scan members return the same complete node records and opaque storage revisions as `read()`; the streaming callback is delivery order only and promises neither query ordering nor a backend cursor. Search keeps its progressive metadata delivery without naming a filesystem scan.
+
+`CanvasStore` remains inside the Disk adapter and compatibility tests only. It is not an application service, and production module-boundary tests reject new or remaining feature imports. Pure Canvas context builders accept already-read `CanvasFile` / node-record values instead of reaching into storage themselves; their async adapters own repository access once per request.
+
+#### 12.6.2 Declared Space-file capability
+
+RFS, built-in file tools, ACP working directories, external-note observation,
+bundle import/export, debug logs, and memory files genuinely require a
+filesystem tree. They use one `SpaceFiles` capability from storage composition
+rather than `canvasRoot`, `nodesDir`, `SPACE_JSON_FILENAME`, a title-derived
+directory index, or another Disk-layout symbol. The capability owns a
+Workspace-bound Space directory, bundle publication, and directory-handle
+coordination. Consumers may interpret their own public virtual paths and the
+public `.huabu.zip` format, but cannot infer the active backend's structured
+record layout.
+
+The current Disk profile implements `SpaceFiles` with the existing human-readable directory. A later SQLite profile may compose a stable id-addressed materialization without changing feature modules. This phase does not choose bidirectional projection or native write-back semantics: external-note claim and bundle import continue to enter the authoritative application commands/repositories they use today, while unowned scratch and agent-domain files stay ordinary materialized files.
+
+#### 12.6.3 Workspace-scoped storage lifecycle and World bootstrap
+
+Storage construction receives the resolved Workspace path. Startup may hold only a validated profile while free mode has no active Workspace; activating one stages and initializes both backend connections, asks the structured collection to ensure its one stable World, commits the Workspace path, atomically swaps the process-wide storage holder, and then closes the previous connections. A failed stage leaves the old Workspace and connections active. Graceful Server shutdown closes the mounted stores.
+
+`SpaceRepository.ensureWorld()` is the backend-neutral bootstrap hook. It returns the existing stable World or creates exactly one version-0 World when the namespace is new; an established malformed World remains an integrity error. Disk delegates to its existing `.world` bootstrap. The older on-disk preparation path may call the same idempotent Disk primitive before the mount while legacy migrations remain filesystem-based.
+
+#### 12.6.4 Proof and scope boundary
+
+The reusable node and Space-collection contracts cover list/stream equivalence and idempotent World bootstrap. Product tests replace only storage connections or the declared Space-file capability; real Canvas services, serializers, repository behavior, and filesystem materialization inside the claimed boundary remain real. A module-boundary guard rejects production `CanvasStore` imports and non-storage Disk-layout imports.
+
+In scope: Canvas/agent/web/interactive-view/Task structured reads, World target reads, RFS node metadata, built-in file-tool node enrichment, external-note membership checks, storage mount/remount/close, World bootstrap, architecture documentation, and the shared product-level backend harness needed for Phase 5.
+
+Out of scope: a SQLite adapter or schema, Disk→SQLite data migration, SQLite profile registration, Postgres/Azure, Agenetes persistence migration, a writable general-purpose virtual filesystem, protocol or UI changes, and stronger crash/distributed transaction guarantees.
+
+### 12.7 Later phases — provisional
 
 5. Add one new adapter at a time — SQLite, then Postgres, then Azure Blob —
    running the same contract suites, migration fixtures, failure injection,

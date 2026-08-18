@@ -208,9 +208,9 @@ describe('World Portal reconciliation', () => {
     const previous = getCanvasStore('canvas-world').read()?.state.nodes;
     if (!previous) throw new Error('Missing World topology');
 
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed('canvas-world', previous, []),
-    ).toThrow(WorldPortalMutationError);
+    ).rejects.toThrow(WorldPortalMutationError);
 
     const moved = structuredClone(previous) as Array<{
       type?: string;
@@ -219,11 +219,11 @@ describe('World Portal reconciliation', () => {
     const portal = moved.find((node) => node.type === 'canvasRef');
     if (!portal) throw new Error('Missing Portal');
     portal.position = { x: 999, y: 999 };
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed('canvas-world', previous, moved),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
 
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed(
         'canvas-a',
         [],
@@ -236,7 +236,7 @@ describe('World Portal reconciliation', () => {
           },
         ],
       ),
-    ).toThrow(WorldPortalMutationError);
+    ).rejects.toThrow(WorldPortalMutationError);
   });
 
   it('allows a nested reference subtree to leave with its broken Portal', async () => {
@@ -280,12 +280,12 @@ describe('World Portal reconciliation', () => {
     });
     refreshCanvasDirIndex();
 
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed('canvas-world', previous, []),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
 
-  it('rejects a manually resized frameRef behind an apparently fitted Portal', () => {
+  it('rejects a manually resized frameRef behind an apparently fitted Portal', async () => {
     const raw = [
       {
         id: 'node-portal',
@@ -321,13 +321,13 @@ describe('World Portal reconciliation', () => {
       },
     ] as NestableNode[];
     const canonical = fitPortals(raw, ['node-frame-ref', 'node-portal']);
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed(
         'canvas-world',
         canonical,
         structuredClone(canonical),
       ),
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
 
     const resized = structuredClone(canonical);
     const frameRef = resized.find((node) => node.id === 'node-frame-ref');
@@ -342,16 +342,16 @@ describe('World Portal reconciliation', () => {
     };
     const apparentlyFitted = fitPortalToChildren(resized, 'node-portal');
 
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed(
         'canvas-world',
         canonical,
         apparentlyFitted,
       ),
-    ).toThrow('Frame reference size is managed by its contents');
+    ).rejects.toThrow('Frame reference size is managed by its contents');
   });
 
-  it('rejects resizing an empty frameRef through a full-state write', () => {
+  it('rejects resizing an empty frameRef through a full-state write', async () => {
     const raw = [
       {
         id: 'node-portal',
@@ -384,16 +384,16 @@ describe('World Portal reconciliation', () => {
     };
     const apparentlyFitted = fitPortalToChildren(resized, 'node-portal');
 
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed(
         'canvas-world',
         canonical,
         apparentlyFitted,
       ),
-    ).toThrow('Frame reference size is managed by its contents');
+    ).rejects.toThrow('Frame reference size is managed by its contents');
   });
 
-  it('rejects cyclic frameRef topology without hanging during fit', () => {
+  it('rejects cyclic frameRef topology without hanging during fit', async () => {
     const cyclic = [
       {
         id: 'node-portal',
@@ -427,12 +427,12 @@ describe('World Portal reconciliation', () => {
       },
     ];
 
-    expect(() =>
+    await expect(
       assertWorldPortalTopologyAllowed(
         'canvas-world',
         cyclic,
         structuredClone(cyclic),
       ),
-    ).toThrow('World reference hierarchy is cyclic');
+    ).rejects.toThrow('World reference hierarchy is cyclic');
   });
 });

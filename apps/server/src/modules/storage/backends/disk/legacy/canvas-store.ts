@@ -952,6 +952,7 @@ export class CanvasStore {
   async streamAllNodes(
     onNode: (id: string, content: NodeContent) => void,
     signal?: { readonly aborted: boolean },
+    options?: { strict?: boolean },
   ): Promise<Map<string, NodeContent>> {
     this.assertActiveWorkspace();
     const generation = this.nodeIndexGeneration;
@@ -967,7 +968,9 @@ export class CanvasStore {
           indexIsConclusive = false;
           return;
         }
-        const raw = await readTextAsync(path.join(dir, file));
+        const raw = options?.strict
+          ? await readFile(path.join(dir, file), 'utf8')
+          : await readTextAsync(path.join(dir, file));
         if (raw === null) {
           indexIsConclusive = false;
           return;

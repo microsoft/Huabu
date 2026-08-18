@@ -50,7 +50,7 @@ export type InspectEdgesArgs = InspectEdgesQueryParams & {
 export async function handleGetCanvasOutline(
   args: GetCanvasOutlineArgs,
 ): Promise<string> {
-  const outline = buildCanvasOutline(args.canvasId, {
+  const outline = await buildCanvasOutline(args.canvasId, {
     includePreviews: args.includePreviews,
     includeStyle: args.includeStyle,
   });
@@ -64,7 +64,7 @@ export async function handleInspectNodes(
   args: InspectNodesArgs,
 ): Promise<string> {
   const { canvasId, ...predicates } = args;
-  const result = inspectNodes(canvasId, predicates);
+  const result = await inspectNodes(canvasId, predicates);
   // `inspectNodes` returns either a result object or `{ error }` when a
   // referenced node is missing. Promote the error case to a throw so
   // pi-agent-core flags the tool result as `isError: true`.
@@ -78,7 +78,7 @@ export async function handleInspectEdges(
   args: InspectEdgesArgs,
 ): Promise<string> {
   const { canvasId, ...predicates } = args;
-  const result = inspectEdges(canvasId, predicates);
+  const result = await inspectEdges(canvasId, predicates);
   if ('error' in result) {
     throw new Error(result.error);
   }

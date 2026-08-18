@@ -39,7 +39,6 @@
 import path from 'node:path';
 
 import { resetExternalNoteSessions } from './canvas/external-watcher.js';
-import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
 import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import { invalidateUserSkill } from '../prompt/index.js';
 
@@ -212,9 +211,6 @@ export function resolveWorkspacePath(newPath: string): string {
 export function commitWorkspacePath(resolvedPath: string): void {
   assertWorkspacePathChangeAllowed(resolvedPath);
   _workspacePath = resolvedPath;
-  // Drop the cached canvas-dir index so subsequent lookups (used by
-  // migrations and route handlers) reflect the new workspace.
-  refreshCanvasDirIndex();
   // Drop any user-skill cache built against the previous workspace so
   // the next `listSkills` / `read("skills/...")` call rescans the new
   // `<workspace>/setting/skills/` from scratch. The import-cycle with

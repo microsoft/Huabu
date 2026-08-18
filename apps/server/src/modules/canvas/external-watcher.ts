@@ -30,13 +30,11 @@ import {
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
+import { readCanvas } from './space-read.js';
 import { getLogger } from '../../utils/logger.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
-import { listAllCanvasDirEntries } from '../storage/canvas-dirs.js';
-import { getCanvasStore } from '../storage/index.js';
-import { registerSpaceDirHandleOwner } from '../storage/index.js';
-import { SPACE_JSON_FILENAME } from '../storage/paths.js';
-import { getWorkspacePath, isWorkspaceConfigured } from '../workspace.js';
+import { getSpaceFiles } from '../storage/index.js';
+import { isWorkspaceConfigured } from '../workspace.js';
 
 import type { CanvasFile } from '../storage/index.js';
 import type { ExternalNoteEvent, ExternalNoteItem } from '@huabu/shared';
@@ -113,11 +111,11 @@ function isSessionCurrent(session: ActiveSpaceWatch, stamp?: string): boolean {
 
 function nodesPathFor(canvasId: string): string | null {
   if (!isWorkspaceConfigured()) return null;
-  const entry = listAllCanvasDirEntries().find(
-    (candidate) => candidate.id === canvasId,
-  );
-  if (!entry) return null;
-  return path.join(getWorkspacePath(), entry.filename, 'nodes');
+  try {
+    return getSpaceFiles().space(canvasId).nodesDirectory();
+  } catch {
+    return null;
+  }
 }
 
 function noteIdsFromCanvas(canvas: CanvasFile | null): Set<string> {
@@ -130,19 +128,15 @@ function noteIdsFromCanvas(canvas: CanvasFile | null): Set<string> {
   return ids;
 }
 
-function canvasNoteIds(canvasId: string): Set<string> {
-  return noteIdsFromCanvas(getCanvasStore(canvasId).read());
+async function canvasNoteIds(canvasId: string): Promise<Set<string>> {
+  return noteIdsFromCanvas(await readCanvas(canvasId));
 }
 
 async function readInitialCanvasNoteIds(
-  nodesPath: string,
+  canvasId: string,
 ): Promise<Set<string>> {
   try {
-    const raw = await readFile(
-      path.join(path.dirname(nodesPath), SPACE_JSON_FILENAME),
-      'utf8',
-    );
-    return noteIdsFromCanvas(JSON.parse(raw) as CanvasFile);
+    return await canvasNoteIds(canvasId);
   } catch {
     return new Set();
   }
@@ -195,8 +189,10 @@ function forgetItem(session: ActiveSpaceWatch, relativePath: string): void {
   emit(session, { type: 'removed', data: { relativePath } });
 }
 
-function snapshotOf(session: ActiveSpaceWatch): ExternalNoteItem[] {
-  const known = canvasNoteIds(session.canvasId);
+function snapshotOf(
+  session: ActiveSpaceWatch,
+  known: ReadonlySet<string>,
+): ExternalNoteItem[] {
   const out: ExternalNoteItem[] = [];
   for (const [rel, item] of session.pendingItems) {
     if (item.noteId && known.has(item.noteId)) {
@@ -228,7 +224,7 @@ function scheduleNodeEvent(session: ActiveSpaceWatch, basename: string): void {
         .then(async (fileStat) => {
           if (!fileStat.isFile()) return;
           const item = await buildItem(absPath, relativePath, () =>
-            Promise.resolve(canvasNoteIds(session.canvasId)),
+            canvasNoteIds(session.canvasId),
           );
           if (!item || !isSessionCurrent(session, stamp)) return;
           recordItem(session, item);
@@ -590,8 +586,16 @@ function destroySession(session: ActiveSpaceWatch): void {
  * a deleted Space drops its live state and tells subscribers it is now empty.
  * Idempotent, so it doubles as the handle-owner `reacquire` hook.
  */
-function resyncSession(session: ActiveSpaceWatch): void {
+async function resyncSession(session: ActiveSpaceWatch): Promise<void> {
   if (session.closed) return;
+  if (!(await readCanvas(session.canvasId))) {
+    disarmSessionWatcher(session);
+    session.nodesPath = '';
+    session.pendingItems.clear();
+    session.initialScan = null;
+    emit(session, { type: 'snapshot', data: { items: [] } });
+    return;
+  }
   const nodesPath = nodesPathFor(session.canvasId);
   if (!nodesPath) {
     disarmSessionWatcher(session);
@@ -674,7 +678,7 @@ async function runInitialScan(session: ActiveSpaceWatch): Promise<void> {
 
     let topology: Promise<Set<string>> | null = null;
     const knownNoteIds = (): Promise<Set<string>> =>
-      (topology ??= readInitialCanvasNoteIds(session.nodesPath));
+      (topology ??= readInitialCanvasNoteIds(session.canvasId));
 
     let nextIndex = 0;
     const worker = async (): Promise<void> => {
@@ -759,10 +763,12 @@ export async function openExternalNoteSession(
     sessions.set(canvasId, created);
     // Declare the handle so a server-owned rename/delete of this Space can
     // release it; `resyncSession` re-resolves the directory on re-acquire.
-    created.unregisterHandleOwner = registerSpaceDirHandleOwner(canvasId, {
-      release: () => disarmSessionWatcher(created),
-      reacquire: () => resyncSession(created),
-    });
+    created.unregisterHandleOwner = getSpaceFiles()
+      .space(canvasId)
+      .registerHandleOwner({
+        release: () => disarmSessionWatcher(created),
+        reacquire: () => resyncSession(created),
+      });
     armSessionWatcher(created);
   }
 
@@ -789,9 +795,10 @@ export async function openExternalNoteSession(
 
   // Registering the listener and reading the snapshot must stay in one
   // synchronous block so no event can slip between them.
+  const known = await canvasNoteIds(active.canvasId);
   if (released || !isSessionCurrent(active)) return { snapshot: [], close };
   active.listeners.add(listener);
-  return { snapshot: snapshotOf(active), close };
+  return { snapshot: snapshotOf(active, known), close };
 }
 
 /** Remove and return a pending item — used by the import endpoint. */

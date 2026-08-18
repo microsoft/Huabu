@@ -9,12 +9,12 @@
  *
  *   - `ports/`          backend-neutral contracts and their reusable suites
  *   - `backends/disk/`  the Disk adapters implementing those ports
- *   - `compatibility/`  the current synchronous application surface
+ *   - `compatibility/`  the residual Disk legacy/test surface
  *
  * Application code imports from here, never from `backends/`.
  */
 
-// ─── Compatibility surface (current application API) ───────────────────────
+// ─── Compatibility surface (legacy and adapter tests only) ─────────────────
 
 export {
   CanvasStore,
@@ -24,27 +24,10 @@ export {
 } from './compatibility/canvas.js';
 export type { RenameResult, RenameSelfResult } from './compatibility/canvas.js';
 
-export {
-  getWorldCanvasId,
-  isWorldCanvasId,
-  requireWorldCanvasId,
-} from './backends/disk/canvas-dirs.js';
-
 /**
- * Materialization-tier capabilities, re-exported so consumers that need a
- * real Space directory reach them through the facade rather than naming a
- * backend (§12.5.4).
- *
- * Each is Disk-shaped by nature, not by accident: releasing directory handles
- * exists so Windows can rename a Space folder, and the World bootstrap writes
- * one. A profile that does not materialize Spaces has nothing for either to
- * do, which is the gate that keeps them off the portable surface.
+ * Disk-only bootstrap retained for the isolated legacy migration worker.
+ * Runtime World bootstrap enters through `SpaceRepository.ensureWorld()`.
  */
-export {
-  registerSpaceDirHandleOwner,
-  withSpaceDirHandlesReleased,
-} from './backends/disk/space-dir-handles.js';
-export type { SpaceDirHandleOwner } from './backends/disk/space-dir-handles.js';
 export { ensureWorldCanvasOnDisk } from './backends/disk/world-canvas.js';
 export { withCanvasMutex, updateNode } from '../canvas/write-coordinator.js';
 export type {
@@ -62,18 +45,29 @@ export type {
 
 export {
   canvasBlobs,
+  closeStorage,
   createSpace,
   createStorage,
   deleteSpace,
   getBlobStore,
+  getSpaceFiles,
   getStorage,
   getStructuredStore,
+  getWorldCanvasId,
   initStorage,
+  isWorldCanvasId,
+  requireWorldCanvasId,
   setStorageForTesting,
   spaceDirectory,
+  stageStorageForWorkspace,
   storageHealth,
 } from './storage.js';
-export type { SpaceDeleteOutcome, Storage } from './storage.js';
+export type {
+  SpaceDeleteOutcome,
+  StagedStorageMount,
+  Storage,
+  StorageRuntime,
+} from './storage.js';
 export {
   parseStorageProfile,
   StorageProfileError,
@@ -93,10 +87,17 @@ export type {
 } from './ports/blob.js';
 export type { StorageHealth } from './ports/common.js';
 export type {
+  SpaceFileHandleOwner,
+  SpaceFileScope,
+  SpaceFiles,
+  SpaceImportStaging,
+} from './ports/files.js';
+export type {
   NewCanvasEvent,
   NodeDeleteResult,
   NodePutInput,
   NodePutResult,
+  NodeReadWarning,
   NodeSnapshot,
   SpaceBeginDeleteResult,
   SpaceChanges,

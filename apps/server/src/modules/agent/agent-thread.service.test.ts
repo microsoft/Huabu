@@ -164,7 +164,7 @@ describe('AgentThreadService', () => {
     expect(externalBindingFromWorkloadSpec({ binding: {} })).toBeNull();
   });
 
-  it('resolves a persisted external Thread without a fixed Agent Node', () => {
+  it('resolves a persisted external Thread without a fixed Agent Node', async () => {
     const binding = {
       kind: 'external' as const,
       profileId: 'profile-selectable',
@@ -173,11 +173,11 @@ describe('AgentThreadService', () => {
     const harness = createHarness({ target: null, persistedBinding: binding });
 
     expect(
-      harness.service.resolveExternalTarget('canvas-a', 'thread-a'),
+      await harness.service.resolveExternalTarget('canvas-a', 'thread-a'),
     ).toEqual({ binding, fixedTarget: null });
   });
 
-  it('prefers the fixed Agent Node binding when one exists', () => {
+  it('prefers the fixed Agent Node binding when one exists', async () => {
     const harness = createHarness({
       persistedBinding: {
         kind: 'external',
@@ -187,7 +187,7 @@ describe('AgentThreadService', () => {
     });
 
     expect(
-      harness.service.resolveExternalTarget('canvas-a', 'thread-a'),
+      await harness.service.resolveExternalTarget('canvas-a', 'thread-a'),
     ).toEqual({ binding: TARGET.agentBinding, fixedTarget: TARGET });
   });
 

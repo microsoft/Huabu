@@ -33,7 +33,8 @@ import {
   SelectableAgentProfileError,
 } from '../agent/selectable-agent-profile.js';
 import { buildSpatialBundle } from '../canvas/canvas-spatial.js';
-import { getStructuredStore, getCanvasStore } from '../storage/index.js';
+import { readCanvas } from '../canvas/space-read.js';
+import { getStructuredStore } from '../storage/index.js';
 
 import type { ChatEnvelope } from '../agent/conversation/envelope.js';
 import type { SpaceTasks } from '../storage/index.js';
@@ -57,12 +58,12 @@ function createRootEnvelope(goal: string): ChatEnvelope {
   };
 }
 
-export function resolveRootAgentPosition(
+export async function resolveRootAgentPosition(
   canvasId: string,
   anchorNodeId: string,
   runOrdinal: number,
-): Point {
-  const canvas = getCanvasStore(canvasId).read();
+): Promise<Point> {
+  const canvas = await readCanvas(canvasId);
   if (!canvas) throw new Error(`Canvas ${canvasId} does not exist`);
   const bundle = buildSpatialBundle(canvas);
   const anchor = bundle.spatialById.get(anchorNodeId);
@@ -91,7 +92,7 @@ interface RunLauncherDependencies {
     canvasId: string,
     anchorNodeId: string,
     runOrdinal: number,
-  ) => Point;
+  ) => Promise<Point> | Point;
   createAgentNode: (
     input: CreateAgentNodeInput,
   ) => Promise<CreateAgentNodeResult>;
@@ -337,7 +338,7 @@ export class RunLauncher {
       if (runOrdinal < 0) {
         throw new Error(`Run ${runId} disappeared after creation`);
       }
-      return this.dependencies.resolveRootPosition(
+      return await this.dependencies.resolveRootPosition(
         task.canvasId,
         task.anchorNodeId,
         runOrdinal,

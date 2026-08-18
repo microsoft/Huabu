@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { getStorage } from './storage/index.js';
 import {
   activateWorkspacePath,
   runWorkspacePreparation,
@@ -65,6 +66,37 @@ describe('workspace activation isolation', () => {
       activateWorkspacePath(next, { workerPath, timeoutMs: 30 }),
     ).rejects.toBeInstanceOf(WorkspaceActivationTimeoutError);
     expect(getWorkspacePath()).toBe(path.resolve(previous));
+  });
+
+  it('commits a prepared Workspace together with its storage mount', async () => {
+    const previous = tempDir('huabu-workspace-previous-');
+    const next = tempDir('huabu-workspace-next-');
+    const workerPath = worker(`process.send({ ok: true });`);
+    setWorkspacePath(previous);
+    const previousStorage = getStorage();
+
+    await activateWorkspacePath(next, { workerPath, timeoutMs: 1_000 });
+
+    expect(getWorkspacePath()).toBe(path.resolve(next));
+    expect(getStorage()).not.toBe(previousStorage);
+    expect(getStorage().workspacePath).toBe(path.resolve(next));
+  });
+
+  it('keeps the previous Workspace and mount when staged storage rejects', async () => {
+    const previous = tempDir('huabu-workspace-previous-');
+    const next = tempDir('huabu-workspace-invalid-');
+    const workerPath = worker(`process.send({ ok: true });`);
+    setWorkspacePath(previous);
+    const previousStorage = getStorage();
+    mkdirSync(path.join(next, '.world'), { recursive: true });
+    writeFileSync(path.join(next, '.world', 'space.json'), '{', 'utf8');
+
+    await expect(
+      activateWorkspacePath(next, { workerPath, timeoutMs: 1_000 }),
+    ).rejects.toThrow();
+
+    expect(getWorkspacePath()).toBe(path.resolve(previous));
+    expect(getStorage()).toBe(previousStorage);
   });
 
   it('rejects a concurrent activation while preparation is running', async () => {

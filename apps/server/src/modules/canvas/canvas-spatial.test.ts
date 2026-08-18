@@ -50,7 +50,7 @@ function seed(canvasId: string, nodes: SeedNode[]): void {
   });
 }
 
-function byId(result: ReturnType<typeof inspectNodes>): Map<
+function byId(result: Awaited<ReturnType<typeof inspectNodes>>): Map<
   string,
   {
     position: { x: number; y: number };
@@ -113,18 +113,18 @@ describe('inspect_nodes / outline — dual-field coordinates', () => {
     ]);
   }
 
-  it('root node reports position == absolutePosition', () => {
+  it('root node reports position == absolutePosition', async () => {
     seedScene();
-    const m = byId(inspectNodes(CANVAS, { ids: ['root'] }));
+    const m = byId(await inspectNodes(CANVAS, { ids: ['root'] }));
     expect(m.get('root')).toEqual({
       position: { x: 100, y: 100 },
       absolutePosition: { x: 100, y: 100 },
     });
   });
 
-  it('framed child reports parent-local position and world absolutePosition', () => {
+  it('framed child reports parent-local position and world absolutePosition', async () => {
     seedScene();
-    const m = byId(inspectNodes(CANVAS, { ids: ['child'] }));
+    const m = byId(await inspectNodes(CANVAS, { ids: ['child'] }));
     expect(m.get('child')).toEqual({
       // raw stored value = frame-relative
       position: { x: 50, y: 60 },
@@ -133,9 +133,9 @@ describe('inspect_nodes / outline — dual-field coordinates', () => {
     });
   });
 
-  it('resolves absolutePosition through a nested frame chain', () => {
+  it('resolves absolutePosition through a nested frame chain', async () => {
     seedScene();
-    const m = byId(inspectNodes(CANVAS, { ids: ['grandchild'] }));
+    const m = byId(await inspectNodes(CANVAS, { ids: ['grandchild'] }));
     expect(m.get('grandchild')).toEqual({
       // raw stored value = relative to inner frame
       position: { x: 10, y: 20 },
@@ -144,9 +144,9 @@ describe('inspect_nodes / outline — dual-field coordinates', () => {
     });
   });
 
-  it('get_canvas_outline emits the same dual fields', () => {
+  it('get_canvas_outline emits the same dual fields', async () => {
     seedScene();
-    const outline = buildCanvasOutline(CANVAS);
+    const outline = await buildCanvasOutline(CANVAS);
     if (!outline) throw new Error('no outline');
     const child = outline.nodes.find((n) => n.id === 'child');
     expect(child?.position).toEqual({ x: 50, y: 60 });

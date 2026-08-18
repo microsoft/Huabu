@@ -124,7 +124,12 @@ function scanWorkspace(): void {
       continue;
     }
     const canvasEntry = readCanvasDirEntry(full, entry);
-    if (canvasEntry) index.add(canvasEntry);
+    if (canvasEntry) {
+      if (index.has(canvasEntry.id)) {
+        throw new Error(`Duplicate ordinary Space canvasId: ${canvasEntry.id}`);
+      }
+      index.add(canvasEntry);
+    }
   }
   if (worldEntry && index.has(worldEntry.id)) {
     throw new Error(

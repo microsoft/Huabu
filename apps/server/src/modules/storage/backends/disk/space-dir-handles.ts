@@ -20,13 +20,13 @@
 /** A component holding OS handles inside one Space directory. */
 export interface SpaceDirHandleOwner {
   /** Close every handle held inside the Space directory. */
-  release(): void;
+  release(): Promise<void> | void;
   /**
    * Re-acquire handles after the mutation. The Space directory may have been
    * renamed or deleted, so implementations must re-resolve their paths from
    * the canvas-directory index rather than reusing a cached path.
    */
-  reacquire(): void;
+  reacquire(): Promise<void> | void;
 }
 
 const ownersByCanvas = new Map<string, Set<SpaceDirHandleOwner>>();
@@ -70,7 +70,7 @@ export async function withSpaceDirHandlesReleased<T>(
   const depth = suspendDepth.get(canvasId) ?? 0;
   if (depth === 0) {
     for (const owner of [...(ownersByCanvas.get(canvasId) ?? [])]) {
-      owner.release();
+      await owner.release();
     }
   }
   suspendDepth.set(canvasId, depth + 1);
@@ -85,7 +85,7 @@ export async function withSpaceDirHandlesReleased<T>(
       // Re-read the owner set: a subscriber may have arrived or left while
       // the mutation ran. `reacquire` must therefore be idempotent.
       for (const owner of [...(ownersByCanvas.get(canvasId) ?? [])]) {
-        owner.reacquire();
+        await owner.reacquire();
       }
     }
   }

@@ -24,10 +24,23 @@ function revisionOf(record: NodeContent | null): string | null {
   return createHash('sha256').update(JSON.stringify(record)).digest('hex');
 }
 
-function snapshotOf(record: NodeContent): NodeSnapshot {
+function snapshotOf(
+  record: NodeContent,
+  duplicateNames: readonly string[] = [],
+): NodeSnapshot {
   const revision = revisionOf(record);
   if (revision === null) throw new Error('A persisted node must have a token');
-  return { record, revision };
+  return {
+    record,
+    revision,
+    ...(duplicateNames.length > 1
+      ? {
+          warnings: [
+            { kind: 'duplicate-record' as const, names: duplicateNames },
+          ],
+        }
+      : {}),
+  };
 }
 
 export class DiskSpaceNodes implements SpaceNodes {
@@ -45,7 +58,42 @@ export class DiskSpaceNodes implements SpaceNodes {
   async read(nodeId: string): Promise<NodeSnapshot | null> {
     this.#assertActiveWorkspace();
     const record = this.#store.readNodeStrict(nodeId);
-    return record === null ? null : snapshotOf(record);
+    return record === null
+      ? null
+      : snapshotOf(record, this.#store.duplicateNodeFiles(nodeId));
+  }
+
+  async list(): Promise<ReadonlyMap<string, NodeSnapshot>> {
+    this.#assertActiveWorkspace();
+    const records = await this.#store.readAllNodes({ strict: true });
+    return new Map(
+      [...records].map(([nodeId, record]) => [
+        nodeId,
+        snapshotOf(record, this.#store.duplicateNodeFiles(nodeId)),
+      ]),
+    );
+  }
+
+  async stream(
+    onNode: (nodeId: string, snapshot: NodeSnapshot) => void,
+    signal?: { readonly aborted: boolean },
+  ): Promise<ReadonlyMap<string, NodeSnapshot>> {
+    this.#assertActiveWorkspace();
+    const records = await this.#store.streamAllNodes(
+      (nodeId, record) =>
+        onNode(
+          nodeId,
+          snapshotOf(record, this.#store.duplicateNodeFiles(nodeId)),
+        ),
+      signal,
+      { strict: true },
+    );
+    return new Map(
+      [...records].map(([nodeId, record]) => [
+        nodeId,
+        snapshotOf(record, this.#store.duplicateNodeFiles(nodeId)),
+      ]),
+    );
   }
 
   async put(input: NodePutInput): Promise<NodePutResult> {
@@ -118,7 +166,10 @@ export class DiskSpaceNodes implements SpaceNodes {
         `SpaceNodes(${this.canvasId}) wrote node ${JSON.stringify(input.nodeId)} but could not read it back`,
       );
     }
-    return { ok: true, ...snapshotOf(persisted) };
+    return {
+      ok: true,
+      ...snapshotOf(persisted, this.#store.duplicateNodeFiles(input.nodeId)),
+    };
   }
 
   async delete(nodeId: string): Promise<NodeDeleteResult> {

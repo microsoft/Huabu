@@ -6,11 +6,8 @@
  *
  * Two-tier scan:
  *   1. **Metadata tier** (label / summary / keywords) — emitted as each
- *      sidecar lands via `CanvasStore.streamAllNodes`. Matches start
- *      flowing to the client after the very first `.md` read resolves,
- *      not after the whole directory has been pulled into memory, so
- *      perceived latency is bounded by the slowest single file rather
- *      than the full scan.
+ *      node record lands via `SpaceNodes.stream`. Matches start flowing
+ *      before the whole Space has been pulled into memory.
  *   2. **Content tier** (markdown body) — scans the same `NodeContent`
  *      bodies already cached by step 1. No additional disk reads.
  *
@@ -18,13 +15,12 @@
  *   Search is low-frequency. The OS page cache handles repeated reads
  *   transparently, and adding our own cache would cost permanent RAM
  *   plus an invalidation surface across every sidecar write path. If a
- *   single canvas grows past ~30 MB of sidecar text, the right next
- *   step is swapping the scan for spawned `ripgrep`, not in-process
- *   caching. See discussion in #search-architecture for the call.
+ *   single Space grows past ~30 MB of text, the right next step is a
+ *   backend-native index, not another application cache.
  *
  * Cancellation:
  *   The caller passes a `signal` (AbortSignal-like — we only need
- *   `.aborted` polling). Workers inside `streamAllNodes` short-circuit
+ *   `.aborted` polling). Workers inside `SpaceNodes.stream` short-circuit
  *   when the signal aborts, and the content-tier loop checks before
  *   each node so a superseded keystroke doesn't waste CPU.
  *
@@ -46,7 +42,8 @@ import { agenetes } from '../agent/agenetes/drivers.js';
 import { chatEnvelopeFromSubmission } from '../agent/agenetes/handle.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
-import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
+import type { NodeContent } from './persistence-types.js';
+import type { SpaceHandle } from '../storage/index.js';
 import type { AgentTurn } from '@agenetes/protocol';
 
 /** Window of characters shown around each match in `snippet`. */
@@ -460,7 +457,7 @@ function stringArrayFrontmatter(
 }
 
 /**
- * Adapter: collect persisted nodes from a `CanvasStore.read()` payload.
+ * Adapter: collect persisted nodes from a Space record payload.
  * Lives here so the route layer can stay thin and tests can synthesise
  * canvas state without touching disk.
  */
@@ -494,7 +491,7 @@ export function extractSearchableNodes(state: unknown): SearchableNode[] {
 }
 
 /**
- * Adapter: collect persisted edges from a `CanvasStore.read()` payload.
+ * Adapter: collect persisted edges from a Space record payload.
  * Reads only what the scanner needs (`id`, endpoints, `label`); other
  * `EdgeStyle` fields (lineStyle, stroke, …) are intentionally
  * dropped so the in-memory footprint stays bounded.
@@ -531,20 +528,20 @@ export function extractSearchableEdges(state: unknown): SearchableEdge[] {
 }
 
 /**
- * Drive a search directly off a {@link CanvasStore}.
+ * Drive a search directly off a backend-neutral {@link SpaceHandle}.
  *
- * Streams meta-tier matches as each sidecar lands (no `await`-all
+ * Streams meta-tier matches as each node record lands (no `await`-all
  * barrier in front of the first emit). Content tier runs after the
  * stream settles, scanning the in-memory cache that was built as a
- * side effect of the meta walk — zero extra disk reads.
+ * side effect of the meta walk — zero extra storage reads.
  */
 export async function searchCanvas(
-  store: CanvasStore,
+  space: SpaceHandle,
   request: CanvasSearchRequest,
   emit: (event: CanvasSearchEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const file = store.read();
+  const file = await space.read();
   if (!file) {
     emit({ type: 'error', message: 'Canvas not found' });
     return;
@@ -583,7 +580,7 @@ export async function searchCanvas(
   // invokes the callback synchronously as each file resolves, so a
   // match against the very first parsed file ships before any of the
   // remaining files are even opened.
-  const contentByNodeId = await store.streamAllNodes((id, content) => {
+  const snapshots = await space.nodes.stream((id, snapshot) => {
     if (signal?.aborted) return;
     if (!wantsMeta) return;
     if (totalEmitted >= limit) {
@@ -592,13 +589,16 @@ export async function searchCanvas(
     }
     const node = candidateById.get(id);
     // Skip sidecars that belong to nodes filtered out by
-    // `nodeId` / `nodeTypes` — we still read them (the directory
-    // walk is unfiltered) but they contribute nothing here.
+    // `nodeId` / `nodeTypes` — the backend scan is unfiltered, but those
+    // records contribute nothing here.
     if (!node) return;
-    scanNodeMeta(node, content, fields, needleLower, needleLen, (m) =>
+    scanNodeMeta(node, snapshot.record, fields, needleLower, needleLen, (m) =>
       tryEmitMatch('meta', m),
     );
   }, signal);
+  const contentByNodeId = new Map(
+    [...snapshots].map(([nodeId, snapshot]) => [nodeId, snapshot.record]),
+  );
 
   if (signal?.aborted) return;
 
@@ -677,7 +677,7 @@ export async function searchCanvas(
       const label = content?.label ?? null;
       scanNodeConversation(
         node,
-        store.canvasId,
+        space.canvasId,
         label,
         needleLower,
         needleLen,

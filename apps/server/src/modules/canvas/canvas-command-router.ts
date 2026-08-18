@@ -23,11 +23,7 @@ import {
 } from './canvas-executor.js';
 import { reconcileWorldPortals } from './world-portals.js';
 import { createKeyedMutex } from '../../utils/keyed-mutex.js';
-import {
-  listCanvasDirEntries,
-  requireWorldCanvasId,
-} from '../storage/canvas-dirs.js';
-import { getCanvasStore } from '../storage/index.js';
+import { getStructuredStore, requireWorldCanvasId } from '../storage/index.js';
 
 type PortalCommand = Extract<CanvasCommand, { type: 'SET_PORTAL_NODE_PINS' }>;
 const withPortalRoutingMutex = createKeyedMutex<string>();
@@ -210,7 +206,9 @@ async function ensureCanonicalPortals(
   worldCanvasId: string,
   commands: readonly PortalCommand[],
 ): Promise<void> {
-  const world = getCanvasStore(worldCanvasId).read() as StoredCanvas | null;
+  const world = (await getStructuredStore()
+    .space(worldCanvasId)
+    .read()) as StoredCanvas | null;
   const targets = new Set<string>();
   for (const node of (world?.state.nodes ?? []) as NestableNode[]) {
     const target = portalTarget(node);
@@ -249,14 +247,17 @@ async function executeCanvasCommandsOnHostInternal(
 
   assertConsistentDesiredStates(portalCommands);
 
-  const worldCanvasId = requireWorldCanvasId();
+  const worldCanvasId = await requireWorldCanvasId();
   if (!routingLockHeld) {
     return withPortalRoutingMutex(worldCanvasId, () =>
       executeCanvasCommandsOnHostInternal(input, true),
     );
   }
   await ensureCanonicalPortals(worldCanvasId, portalCommands);
-  const world = getCanvasStore(worldCanvasId).read() as StoredCanvas | null;
+  const structured = getStructuredStore();
+  const world = (await structured
+    .space(worldCanvasId)
+    .read()) as StoredCanvas | null;
   if (!world || !Array.isArray(world.state.nodes)) {
     throw new CanvasCommandRoutingError('World Canvas is unavailable');
   }
@@ -335,17 +336,20 @@ async function executeCanvasCommandsOnHostInternal(
   }
 
   const liveCanvasIds = new Set(
-    listCanvasDirEntries().map((entry) => entry.id),
+    (await structured.spaces().list()).map((entry) => entry.canvasId),
   );
-  const sourceStates = new Map<string, SourceState | null>();
-  const readSource = (canvasId: string): SourceState | null => {
+  const sourceStates = new Map<string, Promise<SourceState | null>>();
+  const readSource = (canvasId: string): Promise<SourceState | null> => {
     if (!sourceStates.has(canvasId)) {
       sourceStates.set(
         canvasId,
-        sourceStateOf(getCanvasStore(canvasId).read() as StoredCanvas | null),
+        structured
+          .space(canvasId)
+          .read()
+          .then((canvas) => sourceStateOf(canvas as StoredCanvas | null)),
       );
     }
-    return sourceStates.get(canvasId) ?? null;
+    return sourceStates.get(canvasId) ?? Promise.resolve(null);
   };
 
   const requested = new Map<string, boolean>();
@@ -356,7 +360,7 @@ async function executeCanvasCommandsOnHostInternal(
         throw new MissingWorldPortalError(update.sourceCanvasId);
       }
       const source = liveCanvasIds.has(update.sourceCanvasId)
-        ? readSource(update.sourceCanvasId)
+        ? await readSource(update.sourceCanvasId)
         : null;
       for (const sourceNodeId of update.sourceNodeIds) {
         requested.set(
@@ -398,7 +402,7 @@ async function executeCanvasCommandsOnHostInternal(
 
   const sourcePositions: PreparedPortalSourcePosition[] = [];
   for (const target of positionTargets.values()) {
-    const position = readSource(target.canvasId)?.absolutePosition(
+    const position = (await readSource(target.canvasId))?.absolutePosition(
       target.nodeId,
     );
     if (!position) continue;
@@ -433,6 +437,18 @@ async function executeCanvasCommandsOnHostInternal(
     }
   };
 
+  const resolvedSources = new Map<string, SourceState | null>();
+  for (const command of portalCommands) {
+    for (const update of command.updates) {
+      if (!resolvedSources.has(update.sourceCanvasId)) {
+        resolvedSources.set(
+          update.sourceCanvasId,
+          await readSource(update.sourceCanvasId),
+        );
+      }
+    }
+  }
+
   const commands = portalCommands.map((command): CanvasCommand => {
     const pins: PreparedPortalNodePin[] = [];
     const seen = new Set<string>();
@@ -446,7 +462,7 @@ async function executeCanvasCommandsOnHostInternal(
           throw new MissingWorldPortalError(update.sourceCanvasId);
         }
         const desiredPinned = requested.get(key) ?? update.pinned;
-        const source = readSource(update.sourceCanvasId);
+        const source = resolvedSources.get(update.sourceCanvasId) ?? null;
         const sourceNode = source ? sourceNodeById(source, sourceNodeId) : null;
         const existing = preparedReferenceByTarget.get(key);
         if (!desiredPinned || !source || !sourceNode) {

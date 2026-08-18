@@ -65,12 +65,10 @@ import {
 import { getLogger } from '../../utils/logger.js';
 import {
   canvasBlobs,
-  getCanvasStore,
   getStructuredStore,
   withCanvasMutex,
   type BlobScope,
   type CanvasFile,
-  type CanvasStore,
   type DeltaLogEntry,
   type NodeContent,
   type SpaceNodeMutation,
@@ -140,7 +138,7 @@ function stripNodesForCanvas(nodes: readonly CanvasNode[]): CanvasNode[] {
 }
 
 function hydrateNodes(
-  store: CanvasStore,
+  records: ReadonlyMap<string, NodeContent>,
   nodes: readonly CanvasNode[],
 ): CanvasNode[] {
   return nodes.map((node) => {
@@ -149,12 +147,7 @@ function hydrateNodes(
     const nodeType = typeof node.type === 'string' ? node.type : '';
     if (!MD_BACKED_NODE_TYPES.has(nodeType)) return { ...node };
 
-    let content: NodeContent | null = null;
-    try {
-      content = store.readNode(nodeId);
-    } catch {
-      content = null;
-    }
+    const content = records.get(nodeId) ?? null;
     if (!content) return { ...node };
 
     const data: Record<string, unknown> = { ...(node.data ?? {}) };
@@ -692,11 +685,7 @@ export async function executeOnServer(
   // writes to the same canvas. Idempotent for values that are already artifact
   // keys / `/api/` URLs / `data:` URIs.
   if (originator.source === 'agent') {
-    commands = await importForeignNodeSources(
-      getCanvasStore(canvasId),
-      canvasId,
-      commands,
-    );
+    commands = await importForeignNodeSources(canvasId, commands);
 
     // For image nodes with only width specified, calculate height from actual
     // image aspect ratio. This ensures correct proportions for all image sources.
@@ -704,9 +693,8 @@ export async function executeOnServer(
   }
 
   return await withCanvasMutex(canvasId, async () => {
-    const store = getCanvasStore(canvasId);
     const handle = getStructuredStore().space(canvasId);
-    const canvas = store.read();
+    const canvas = await handle.read();
     if (!canvas) throw new CanvasNotFoundError(canvasId);
 
     const fromVersion = canvas.version;
@@ -714,13 +702,19 @@ export async function executeOnServer(
     // Hydrate per-node content from .md sidecars before the engine sees
     // the prestate — handlers like MERGE_NODE_DATA need the current
     // `data.content` to merge against, but topology never carries it.
+    const nodeRecords = new Map(
+      [...(await handle.nodes.list())].map(([nodeId, snapshot]) => [
+        nodeId,
+        snapshot.record,
+      ]),
+    );
     const prestateNodes = hydrateNodes(
-      store,
+      nodeRecords,
       canvas.state.nodes as CanvasNode[],
     );
     const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];
 
-    assertWorldPortalMutationsAllowed(
+    await assertWorldPortalMutationsAllowed(
       canvasId,
       commands,
       prestateNodes,
@@ -824,7 +818,7 @@ export async function executeOnServer(
     const sharedOut = applySharedPostEffectsFromWriteResult(writeResult);
     const finalNodes = writeResult.nodes;
     const finalEdges = sharedOut.edges;
-    assertWorldPortalResultAllowed(canvasId, prestateNodes, finalNodes);
+    await assertWorldPortalResultAllowed(canvasId, prestateNodes, finalNodes);
 
     const deltas = diffCanvasState(
       { nodes: prestateNodes, edges: prestateEdges },
@@ -1123,14 +1117,19 @@ export async function applyDeltasOnServer(input: {
   const { canvasId, originator, runId } = input;
 
   return await withCanvasMutex(canvasId, async () => {
-    const store = getCanvasStore(canvasId);
     const handle = getStructuredStore().space(canvasId);
-    const canvas = store.read();
+    const canvas = await handle.read();
     if (!canvas) throw new CanvasNotFoundError(canvasId);
 
     const fromVersion = canvas.version;
+    const nodeRecords = new Map(
+      [...(await handle.nodes.list())].map(([nodeId, snapshot]) => [
+        nodeId,
+        snapshot.record,
+      ]),
+    );
     const prestateNodes = hydrateNodes(
-      store,
+      nodeRecords,
       canvas.state.nodes as CanvasNode[],
     );
     const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];

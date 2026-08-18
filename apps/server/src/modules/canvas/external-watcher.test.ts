@@ -69,7 +69,9 @@ vi.mock('../storage/canvas-dirs.js', () => ({
 }));
 
 const canvasStore = vi.hoisted(() => ({
-  read: vi.fn(() => ({ state: { nodes: [] } })),
+  read: vi.fn<() => { state: { nodes: never[] } } | null>(() => ({
+    state: { nodes: [] },
+  })),
 }));
 
 // The facade is stubbed for the store, but the handle helpers must stay the
@@ -79,7 +81,28 @@ const canvasStore = vi.hoisted(() => ({
 vi.mock('../storage/index.js', async () => {
   const handles = await import('../storage/backends/disk/space-dir-handles.js');
   return {
-    getCanvasStore: () => canvasStore,
+    getStructuredStore: () => ({
+      space: () => ({ read: async () => canvasStore.read() }),
+    }),
+    getSpaceFiles: () => ({
+      activate: () => undefined,
+      space: (canvasId: string) => {
+        const directoryName =
+          canvasDirs.list().find((entry) => entry.id === canvasId)?.filename ??
+          canvasId;
+        const directory = `/ws/${directoryName}`;
+        return {
+          directory: () => directory,
+          nodesDirectory: () => `${directory}/nodes`,
+          registerHandleOwner: (owner: {
+            release(): void;
+            reacquire(): void;
+          }) => handles.registerSpaceDirHandleOwner(canvasId, owner),
+          withHandlesReleased: <T>(operation: () => Promise<T> | T) =>
+            handles.withSpaceDirHandlesReleased(canvasId, operation),
+        };
+      },
+    }),
     registerSpaceDirHandleOwner: handles.registerSpaceDirHandleOwner,
     withSpaceDirHandlesReleased: handles.withSpaceDirHandlesReleased,
   };
@@ -105,7 +128,7 @@ import {
   openExternalNoteSession,
   resetExternalNoteSessions,
 } from './external-watcher.js';
-import { withSpaceDirHandlesReleased } from '../storage/index.js';
+import { withSpaceDirHandlesReleased } from '../storage/backends/disk/space-dir-handles.js';
 
 import type { ExternalNoteEvent } from '@huabu/shared';
 
@@ -252,7 +275,7 @@ describe('openExternalNoteSession', () => {
     (await opening).close();
   });
 
-  it('reads the Space topology at most once per lazy scan', async () => {
+  it('shares one lazy scan while refreshing topology per subscriber', async () => {
     canvasDirs.list.mockReturnValue([{ id: 'canvas-a', filename: 'canvas-a' }]);
     fileIO.readdir.mockResolvedValue([
       { name: 'first.md', isFile: () => true },
@@ -266,9 +289,9 @@ describe('openExternalNoteSession', () => {
     expect(
       readPaths.filter((filePath) => filePath.endsWith('.md')),
     ).toHaveLength(2);
-    expect(
-      readPaths.filter((filePath) => filePath.endsWith('space.json')),
-    ).toHaveLength(1);
+    // One read supplies the shared scan and one refresh supplies each
+    // subscriber's snapshot against the current topology.
+    expect(canvasStore.read).toHaveBeenCalledTimes(3);
     expect(fileIO.readdir).toHaveBeenCalledTimes(1);
     expect(first.snapshot).toHaveLength(2);
 
@@ -796,6 +819,7 @@ describe('Space-directory handle release', () => {
 
     await withSpaceDirHandlesReleased('canvas-a', async () => {
       canvasDirs.list.mockReturnValue([]);
+      canvasStore.read.mockReturnValue(null);
     });
 
     expect(nativeWatchMock).not.toHaveBeenCalled();

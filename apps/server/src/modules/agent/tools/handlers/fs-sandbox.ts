@@ -30,7 +30,8 @@ import { readFileSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 
 import { parseFrontmatter } from '../../../../utils/markdown-frontmatter.js';
-import { getCanvasStore, spaceDirectory } from '../../../storage/index.js';
+import { readCanvas } from '../../../canvas/space-read.js';
+import { spaceDirectory } from '../../../storage/index.js';
 
 // ─── Always-skipped directory names ─────────────────────────────────────────
 
@@ -296,23 +297,14 @@ export interface NodeMeta {
  * frontmatter `id:` plus `space.json` metadata.
  * Returns `null` otherwise.
  */
-export function makeNodeLookup(
+export async function makeNodeLookup(
   canvasId: string,
-): (canvasRelPath: string) => NodeMeta | null {
-  let cache: Map<string, NodeMeta> | null = null;
-  const ensure = (): Map<string, NodeMeta> => {
-    if (cache) return cache;
-
-    const byId = new Map<string, NodeMeta>();
-    const byPath = new Map<string, NodeMeta>();
-
-    let file;
-    try {
-      file = getCanvasStore(canvasId).read();
-    } catch {
-      file = null;
-    }
-    if (file) {
+): Promise<(canvasRelPath: string) => NodeMeta | null> {
+  const byId = new Map<string, NodeMeta>();
+  const byPath = new Map<string, NodeMeta>();
+  try {
+    const file = await readCanvas(canvasId);
+    if (file !== null) {
       const nodes = (file.state.nodes ?? []) as Array<Record<string, unknown>>;
       for (const n of nodes) {
         const id = n.id;
@@ -323,63 +315,56 @@ export function makeNodeLookup(
         byId.set(id, { nodeId: id, nodeType, label });
       }
     }
+  } catch {
+    // File enrichment is best-effort; the path result remains usable.
+  }
 
-    let nodesRoot: string;
+  let nodesRoot: string;
+  try {
+    nodesRoot = safeResolve(canvasId, 'nodes');
+  } catch {
+    return () => null;
+  }
+
+  let nodesStat;
+  try {
+    nodesStat = statSync(nodesRoot);
+  } catch {
+    return () => null;
+  }
+  if (!nodesStat.isDirectory()) return () => null;
+
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(nodesRoot, { withFileTypes: true });
+  } catch {
+    return () => null;
+  }
+
+  for (const ent of entries) {
+    if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
+    const abs = path.join(nodesRoot, ent.name);
+    let raw: string;
     try {
-      nodesRoot = safeResolve(canvasId, 'nodes');
+      raw = readFileSync(abs, 'utf8');
     } catch {
-      cache = byPath;
-      return byPath;
+      continue;
     }
-
-    let nodesStat;
-    try {
-      nodesStat = statSync(nodesRoot);
-    } catch {
-      cache = byPath;
-      return byPath;
-    }
-    if (!nodesStat.isDirectory()) {
-      cache = byPath;
-      return byPath;
-    }
-
-    let entries: Dirent[];
-    try {
-      entries = readdirSync(nodesRoot, { withFileTypes: true });
-    } catch {
-      cache = byPath;
-      return byPath;
-    }
-
-    for (const ent of entries) {
-      if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
-      const abs = path.join(nodesRoot, ent.name);
-      let raw: string;
-      try {
-        raw = readFileSync(abs, 'utf8');
-      } catch {
-        continue;
-      }
-      const { meta } = parseFrontmatter(raw);
-      const fallbackId = ent.name.replace(/\.md$/, '');
-      const fmId = typeof meta['id'] === 'string' ? meta['id'] : null;
-      const nodeId = fmId && fmId.length > 0 ? fmId : fallbackId;
-      const metaFromCanvas = byId.get(nodeId) ?? {
-        nodeId,
-        nodeType: undefined,
-        label: undefined,
-      };
-      byPath.set(`nodes/${ent.name}`, metaFromCanvas);
-    }
-
-    cache = byPath;
-    return byPath;
-  };
+    const { meta } = parseFrontmatter(raw);
+    const fallbackId = ent.name.replace(/\.md$/, '');
+    const fmId = typeof meta['id'] === 'string' ? meta['id'] : null;
+    const nodeId = fmId && fmId.length > 0 ? fmId : fallbackId;
+    const metaFromCanvas = byId.get(nodeId) ?? {
+      nodeId,
+      nodeType: undefined,
+      label: undefined,
+    };
+    byPath.set(`nodes/${ent.name}`, metaFromCanvas);
+  }
 
   return (canvasRelPath) => {
     const normalized = canvasRelPath.replace(/^\.\//, '');
     if (!CANVAS_NODE_RE.test(normalized)) return null;
-    return ensure().get(normalized) ?? null;
+    return byPath.get(normalized) ?? null;
   };
 }

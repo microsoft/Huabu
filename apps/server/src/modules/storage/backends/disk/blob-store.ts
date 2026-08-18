@@ -26,7 +26,7 @@ import {
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
-import { artifactsDir } from './layout.js';
+import { ARTIFACTS_DIR_NAME, canvasRoot } from './layout.js';
 import { renameOverWithRetry } from '../../../../utils/fs.js';
 import { getWorkspacePath } from '../../../workspace.js';
 import { createBlobLease, normalizeBlobName } from '../../ports/blob.js';
@@ -56,11 +56,6 @@ function isTempEntry(entry: string): boolean {
   return entry.startsWith(TEMP_PREFIX);
 }
 
-/** Resolve a scope to its backing directory. */
-function scopeDir(ref: BlobScopeRef): string {
-  return artifactsDir(ref.canvasId);
-}
-
 /** Resolve one blob beneath an already-bound scope directory. */
 function blobPath(dir: string, name: string): string {
   return path.join(dir, normalizeBlobName(name));
@@ -74,10 +69,15 @@ function isMissing(err: unknown): boolean {
 class DiskBlobScope implements BlobScope {
   readonly #ref: BlobScopeRef;
   readonly #workspacePath: string;
+  readonly #resolveSpaceDirectory: (canvasId: string) => string;
 
-  constructor(ref: BlobScopeRef) {
+  constructor(
+    ref: BlobScopeRef,
+    resolveSpaceDirectory: (canvasId: string) => string,
+  ) {
     this.#ref = ref;
     this.#workspacePath = path.resolve(getWorkspacePath());
+    this.#resolveSpaceDirectory = resolveSpaceDirectory;
   }
 
   #resolveDir(): string {
@@ -91,7 +91,10 @@ class DiskBlobScope implements BlobScope {
     // Resolve once per operation, before its first await. Every later path in
     // that operation is derived from this absolute directory, so a workspace
     // switch cannot combine a temp in A with a destination in B.
-    return scopeDir(this.#ref);
+    return path.join(
+      this.#resolveSpaceDirectory(this.#ref.canvasId),
+      ARTIFACTS_DIR_NAME,
+    );
   }
 
   async #headAt(dir: string, name: string): Promise<BlobInfo | null> {
@@ -235,6 +238,13 @@ class DiskBlobScope implements BlobScope {
 
 export class DiskBlobStore implements BlobStore {
   readonly kind = 'disk' as const;
+  readonly #resolveSpaceDirectory: (canvasId: string) => string;
+
+  constructor(
+    resolveSpaceDirectory: (canvasId: string) => string = canvasRoot,
+  ) {
+    this.#resolveSpaceDirectory = resolveSpaceDirectory;
+  }
 
   async init(): Promise<void> {
     // Scope directories are created on first write; nothing to prepare.
@@ -247,6 +257,6 @@ export class DiskBlobStore implements BlobStore {
   async close(): Promise<void> {}
 
   scope(ref: BlobScopeRef): BlobScope {
-    return new DiskBlobScope(ref);
+    return new DiskBlobScope(ref, this.#resolveSpaceDirectory);
   }
 }
