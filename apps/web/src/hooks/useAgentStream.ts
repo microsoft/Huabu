@@ -869,6 +869,8 @@ export function useAgentStream(
       const questionNodeId = conversationView?.conversationOwner.nodeId ?? null;
       let sawDone = false;
       let serverOwnsQuestionLifecycle = false;
+      let isComposingQuestion = false;
+      let serverSettingsConfirmed = false;
 
       if (questionNodeId && conversationView) {
         // First send of a freshly-composed question node ⇔ the node is still
@@ -885,6 +887,7 @@ export function useAgentStream(
           conversationView,
         );
         const isCompose = shouldComposeConversationOwner(ownerSource, headless);
+        isComposingQuestion = isCompose;
         serverOwnsQuestionLifecycle =
           ownerSource?.agentBindingPolicy === 'fixed';
         if (isCompose && !headless && !serverOwnsQuestionLifecycle) {
@@ -936,6 +939,11 @@ export function useAgentStream(
           if (startPatch) {
             await patchConversationOwnerNode(conversationView, startPatch);
             await refreshConversationPresentation(conversationView);
+            if (isCompose) {
+              useChatStore.getState().makeThreadMetadataEphemeral(threadId, {
+                preserveSettings: true,
+              });
+            }
           }
         } catch (error) {
           const message =
@@ -989,6 +997,10 @@ export function useAgentStream(
           agentMode,
           {
             onEvent: (event: AgentStreamEvent) => {
+              if (isComposingQuestion && !serverSettingsConfirmed) {
+                serverSettingsConfirmed = true;
+                useChatStore.getState().makeThreadMetadataEphemeral(threadId);
+              }
               if (event.type === 'done') sawDone = true;
               handleStreamEvent(event, {
                 threadId,

@@ -79,6 +79,10 @@ export interface ChatState {
     string,
     { modelId: string | null; reasoningEffort: string | null }
   >;
+  /** Question-owned threads whose binding and mode are durable on the node. */
+  ephemeralMetadataThreads: Record<string, true>;
+  /** Threads whose built-in settings are durable on the server. */
+  ephemeralSettingsThreads: Record<string, true>;
   /** Map of canvasId → threadId, persisted so each canvas keeps its own thread. */
   threadMap: Record<string, string>;
 
@@ -158,6 +162,12 @@ export interface ChatState {
   setThreadSettings: (
     threadId: string,
     settings: { modelId: string | null; reasoningEffort: string | null },
+  ) => void;
+
+  /** Stop persisting metadata after its authoritative owner is durable. */
+  makeThreadMetadataEphemeral: (
+    threadId: string,
+    options?: { preserveSettings?: boolean },
   ) => void;
 
   /** Stage an attachment (e.g. from PDF capture) on a thread's next message. */
@@ -283,6 +293,8 @@ export const useChatStore = create<ChatState>()(
       lastActionByThread: {},
       bindingByThread: {},
       settingsByThread: {},
+      ephemeralMetadataThreads: {},
+      ephemeralSettingsThreads: {},
       threadMap: {},
       bindingMap: {},
       selectionAttachment: null,
@@ -339,7 +351,9 @@ export const useChatStore = create<ChatState>()(
       setThreadLastAction: (threadId, action) =>
         set((state) => ({
           ...patchThread(state, threadId, { lastAction: action }),
-          lastActionByThread: rememberLastAction(state, threadId, action),
+          lastActionByThread: state.ephemeralMetadataThreads[threadId]
+            ? state.lastActionByThread
+            : rememberLastAction(state, threadId, action),
         })),
 
       createThread: (options) => {
@@ -387,11 +401,9 @@ export const useChatStore = create<ChatState>()(
         const state = get();
         set({
           ...patchThread(state, threadId, { binding }),
-          bindingByThread: rememberThreadValue(
-            state.bindingByThread,
-            threadId,
-            binding,
-          ),
+          bindingByThread: state.ephemeralMetadataThreads[threadId]
+            ? state.bindingByThread
+            : rememberThreadValue(state.bindingByThread, threadId, binding),
           bindingMap: canvasId
             ? { ...state.bindingMap, [canvasId]: binding }
             : state.bindingMap,
@@ -409,11 +421,34 @@ export const useChatStore = create<ChatState>()(
           }
           return {
             ...patchThread(state, threadId, { settings }),
-            settingsByThread: rememberThreadValue(
-              state.settingsByThread,
-              threadId,
-              settings,
-            ),
+            settingsByThread: state.ephemeralSettingsThreads[threadId]
+              ? state.settingsByThread
+              : rememberThreadValue(state.settingsByThread, threadId, settings),
+          };
+        }),
+
+      makeThreadMetadataEphemeral: (threadId, options) =>
+        set((state) => {
+          const lastActionByThread = { ...state.lastActionByThread };
+          const bindingByThread = { ...state.bindingByThread };
+          const settingsByThread = { ...state.settingsByThread };
+          delete lastActionByThread[threadId];
+          delete bindingByThread[threadId];
+          if (!options?.preserveSettings) delete settingsByThread[threadId];
+          return {
+            lastActionByThread,
+            bindingByThread,
+            settingsByThread,
+            ephemeralMetadataThreads: {
+              ...state.ephemeralMetadataThreads,
+              [threadId]: true,
+            },
+            ephemeralSettingsThreads: options?.preserveSettings
+              ? state.ephemeralSettingsThreads
+              : {
+                  ...state.ephemeralSettingsThreads,
+                  [threadId]: true,
+                },
           };
         }),
 

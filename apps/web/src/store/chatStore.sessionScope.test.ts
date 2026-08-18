@@ -37,6 +37,8 @@ function resetStore() {
     lastActionByThread: {},
     bindingByThread: {},
     settingsByThread: {},
+    ephemeralMetadataThreads: {},
+    ephemeralSettingsThreads: {},
     threadMap: {},
     bindingMap: {},
     selectionAttachment: null,
@@ -139,6 +141,71 @@ describe('chatStore thread creation', () => {
 });
 
 describe('chatStore persistence and eviction', () => {
+  it('keeps authoritative Question metadata in memory only', () => {
+    const store = useChatStore.getState();
+    store.setAgentBinding('thread-question', EXTERNAL);
+    store.setThreadLastAction('thread-question', 'operate');
+    store.setThreadSettings('thread-question', {
+      modelId: 'model-1',
+      reasoningEffort: 'high',
+    });
+
+    store.makeThreadMetadataEphemeral('thread-question');
+    store.setThreadLastAction('thread-question', 'ask');
+
+    const state = useChatStore.getState();
+    expect(selectThreadBinding(state, 'thread-question')).toEqual(EXTERNAL);
+    expect(selectThreadLastAction(state, 'thread-question')).toBe('ask');
+    expect(selectThreadSettings(state, 'thread-question')).toEqual({
+      modelId: 'model-1',
+      reasoningEffort: 'high',
+    });
+    expect(state.bindingByThread['thread-question']).toBeUndefined();
+    expect(state.lastActionByThread['thread-question']).toBeUndefined();
+    expect(state.settingsByThread['thread-question']).toBeUndefined();
+  });
+
+  it('keeps first-send settings durable until the server thread responds', () => {
+    const store = useChatStore.getState();
+    store.setAgentBinding('thread-question', EXTERNAL);
+    store.setThreadLastAction('thread-question', 'operate');
+    store.setThreadSettings('thread-question', {
+      modelId: 'model-1',
+      reasoningEffort: 'high',
+    });
+
+    store.makeThreadMetadataEphemeral('thread-question', {
+      preserveSettings: true,
+    });
+
+    let state = useChatStore.getState();
+    expect(state.bindingByThread['thread-question']).toBeUndefined();
+    expect(state.lastActionByThread['thread-question']).toBeUndefined();
+    expect(state.settingsByThread['thread-question']).toEqual({
+      modelId: 'model-1',
+      reasoningEffort: 'high',
+    });
+
+    store.setThreadSettings('thread-question', {
+      modelId: 'model-2',
+      reasoningEffort: 'medium',
+    });
+    state = useChatStore.getState();
+    expect(state.settingsByThread['thread-question']).toEqual({
+      modelId: 'model-2',
+      reasoningEffort: 'medium',
+    });
+
+    store.makeThreadMetadataEphemeral('thread-question');
+    store.setThreadSettings('thread-question', {
+      modelId: 'model-3',
+      reasoningEffort: 'low',
+    });
+
+    state = useChatStore.getState();
+    expect(state.settingsByThread['thread-question']).toBeUndefined();
+  });
+
   it('restores independent thread binding and settings after reload', () => {
     useChatStore.setState({
       threadsById: {},

@@ -48,6 +48,9 @@ export function enterQuestionConversation(
   canvasId: string | null,
   openPosition: 'last-user' | 'bottom',
 ): void {
+  useChatStore
+    .getState()
+    .makeThreadMetadataEphemeral(view.conversationOwner.threadId);
   initializeQuestionBinding(view, binding, canvasId, false);
   const tabId = openPreviewNode(view.presentationAnchor.nodeId);
   if (tabId) {
