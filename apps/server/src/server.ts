@@ -7,7 +7,11 @@ import { app } from './app.js';
 import { resolveBindHost } from './bind-host.js';
 import { prewarmOAuthCredentials } from './modules/agent/oauth.js';
 import { resolveDeploymentConfig } from './modules/security/deployment-config.js';
-import { closeStorage, initStorage } from './modules/storage/index.js';
+import {
+  closeStorage,
+  initStorage,
+  materializationFor,
+} from './modules/storage/index.js';
 import { initializeSecretStore } from './security/secret-store.js';
 import { getLogger } from './utils/logger.js';
 
@@ -40,8 +44,8 @@ async function start(): Promise<void> {
         structured: storage.profile.structured.kind,
         blobs: storage.profile.blobs.kind,
         // Derived from the structured kind rather than configured, so log it:
-        // it is the one part of the profile an operator did not choose.
-        files: storage.profile.files.kind,
+        // it is the one part of the setup an operator did not choose.
+        materialization: materializationFor(storage.profile.structured.kind),
         mounted: storage.mounted,
       },
       'Storage backends ready',

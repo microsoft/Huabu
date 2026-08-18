@@ -199,7 +199,6 @@ function installBlobStore(next: BlobStore): void {
   const storage = createStorage({
     structured: { kind: 'disk' },
     blobs: { kind: 'disk' },
-    files: { kind: 'disk-titled' },
   });
   restoreStorage = setStorageForTesting({
     ...storage,
@@ -219,7 +218,6 @@ beforeEach(() => {
   const storage = createStorage({
     structured: { kind: 'disk' },
     blobs: { kind: 'disk' },
-    files: { kind: 'disk-titled' },
   });
   restoreStorage = setStorageForTesting({
     ...storage,

@@ -84,7 +84,7 @@ vi.mock('../storage/index.js', async () => {
     getStructuredStore: () => ({
       space: () => ({ read: async () => canvasStore.read() }),
     }),
-    getSpaceFiles: () => ({
+    getSpaceMaterialization: () => ({
       activate: () => undefined,
       space: (canvasId: string) => {
         const directoryName =

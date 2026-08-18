@@ -33,7 +33,7 @@ import path from 'node:path';
 import { readCanvas } from './space-read.js';
 import { getLogger } from '../../utils/logger.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
-import { getSpaceFiles } from '../storage/index.js';
+import { getSpaceMaterialization } from '../storage/index.js';
 import { isWorkspaceConfigured } from '../workspace.js';
 
 import type { CanvasFile } from '../storage/index.js';
@@ -112,7 +112,7 @@ function isSessionCurrent(session: ActiveSpaceWatch, stamp?: string): boolean {
 function nodesPathFor(canvasId: string): string | null {
   if (!isWorkspaceConfigured()) return null;
   try {
-    return getSpaceFiles().space(canvasId).nodesDirectory();
+    return getSpaceMaterialization().space(canvasId).nodesDirectory();
   } catch {
     return null;
   }
@@ -763,7 +763,7 @@ export async function openExternalNoteSession(
     sessions.set(canvasId, created);
     // Declare the handle so a server-owned rename/delete of this Space can
     // release it; `resyncSession` re-resolves the directory on re-acquire.
-    created.unregisterHandleOwner = getSpaceFiles()
+    created.unregisterHandleOwner = getSpaceMaterialization()
       .space(canvasId)
       .registerHandleOwner({
         release: () => disarmSessionWatcher(created),

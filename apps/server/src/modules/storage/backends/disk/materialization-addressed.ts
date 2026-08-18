@@ -25,19 +25,19 @@ import { sanitizeId } from '../../../../utils/fs.js';
 import { getWorkspacePath } from '../../../workspace.js';
 
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
-import type { StorageHealth } from '../../ports/common.js';
 import type {
-  SpaceFileHandleOwner,
-  SpaceFileScope,
-  SpaceFiles,
   SpaceImportStaging,
-} from '../../ports/files.js';
+  SpaceMaterialization,
+  SpaceTree,
+  SpaceTreeHandleOwner,
+} from '../../materialization.js';
+import type { StorageHealth } from '../../ports/common.js';
 
 /** Space-relative markdown node file; capture group is the bare filename. */
 const NODE_FILE_RE = /^nodes\/([^/]+)\.md$/;
 
-export class AddressedSpaceFiles implements SpaceFiles {
-  readonly kind = 'disk-addressed' as const;
+export class AddressedSpaceMaterialization implements SpaceMaterialization {
+  readonly kind = 'addressed' as const;
   readonly #workspacePath: string;
 
   constructor(workspacePath = getWorkspacePath()) {
@@ -59,7 +59,7 @@ export class AddressedSpaceFiles implements SpaceFiles {
 
   async close(): Promise<void> {}
 
-  space(canvasId: string): SpaceFileScope {
+  space(canvasId: string): SpaceTree {
     const safeId = sanitizeId(canvasId, 'canvasId');
     const root = path.join(this.#workspacePath, safeId);
     const assertActive = (): void => {
@@ -91,7 +91,7 @@ export class AddressedSpaceFiles implements SpaceFiles {
           return null;
         }
       },
-      registerHandleOwner: (owner: SpaceFileHandleOwner): (() => void) => {
+      registerHandleOwner: (owner: SpaceTreeHandleOwner): (() => void) => {
         assertActive();
         return registerSpaceDirHandleOwner(safeId, owner);
       },

@@ -16,11 +16,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
-import type { SpaceFiles } from '../files.js';
+import type { SpaceMaterialization } from '../../materialization.js';
 
-export interface SpaceFilesContractHarness {
+export interface MaterializationContractHarness {
   /** Capability under test, bound to an isolated active Workspace. */
-  readonly files: SpaceFiles;
+  readonly files: SpaceMaterialization;
   /** Activate a different Workspace, so retained scopes must be refused. */
   readonly switchWorkspace: () => void;
   /** Does `relativePath` exist inside this Space's materialization? */
@@ -45,16 +45,16 @@ function record(canvasId: string, title: string | null): CanvasFile {
   };
 }
 
-export function describeSpaceFilesContract(
+export function describeMaterializationContract(
   name: string,
   createHarness: () =>
-    | Promise<SpaceFilesContractHarness>
-    | SpaceFilesContractHarness,
+    | Promise<MaterializationContractHarness>
+    | MaterializationContractHarness,
 ): void {
-  describe(`SpaceFiles contract: ${name}`, () => {
-    let harness: SpaceFilesContractHarness | null = null;
+  describe(`SpaceMaterialization contract: ${name}`, () => {
+    let harness: MaterializationContractHarness | null = null;
 
-    async function open(): Promise<SpaceFilesContractHarness> {
+    async function open(): Promise<MaterializationContractHarness> {
       harness = await createHarness();
       await harness.files.init();
       harness.files.activate();

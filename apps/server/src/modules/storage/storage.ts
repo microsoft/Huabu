@@ -29,9 +29,13 @@ import {
   isWorkspaceConfigured,
 } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
-import { AddressedSpaceFiles } from './backends/disk/space-files-addressed.js';
-import { DiskSpaceFiles } from './backends/disk/space-files.js';
+import { AddressedSpaceMaterialization } from './backends/disk/materialization-addressed.js';
+import { TitledSpaceMaterialization } from './backends/disk/materialization-titled.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
+import {
+  materializationFor,
+  type SpaceMaterialization,
+} from './materialization.js';
 import {
   parseStorageProfile,
   requiresExplicitInit,
@@ -51,7 +55,6 @@ import type {
   BlobStore,
 } from './ports/blob.js';
 import type { StorageHealth } from './ports/common.js';
-import type { SpaceFiles } from './ports/files.js';
 import type {
   SpaceCreateResult,
   SpaceDeleteFinishResult,
@@ -106,30 +109,37 @@ export interface Storage {
   readonly workspacePath: string;
   readonly structured: StructuredStore;
   readonly blobs: BlobStore;
-  readonly files: SpaceFiles;
+  readonly materialization: SpaceMaterialization;
 }
 
-function buildSpaceFiles(
+/**
+ * Select the placement policy the structured backend forces.
+ *
+ * Not read from the profile: materialization is not a configuration axis, so
+ * there is nothing for a deployment to have chosen. See `materialization.ts`.
+ */
+function buildMaterialization(
   profile: StorageProfile,
   workspacePath: string,
-): SpaceFiles {
-  switch (profile.files.kind) {
-    case 'disk-titled':
-      return new DiskSpaceFiles(workspacePath);
-    case 'disk-addressed':
-      return new AddressedSpaceFiles(workspacePath);
-    default:
-      // Unreachable: validateStorageProfile rejects unimplemented kinds.
-      throw new Error(
-        `Unsupported Space materialization: ${String(profile.files.kind)}`,
-      );
+): SpaceMaterialization {
+  const kind = materializationFor(profile.structured.kind);
+  switch (kind) {
+    case 'titled':
+      return new TitledSpaceMaterialization(workspacePath);
+    case 'addressed':
+      return new AddressedSpaceMaterialization(workspacePath);
   }
 }
 
-function buildBlobStore(profile: StorageProfile, files: SpaceFiles): BlobStore {
+function buildBlobStore(
+  profile: StorageProfile,
+  materialization: SpaceMaterialization,
+): BlobStore {
   switch (profile.blobs.kind) {
     case 'disk':
-      return new DiskBlobStore((canvasId) => files.space(canvasId).directory());
+      return new DiskBlobStore((canvasId) =>
+        materialization.space(canvasId).directory(),
+      );
     default:
       // Unreachable: validateStorageProfile rejects unimplemented kinds.
       throw new Error(`Unsupported blob backend: ${profile.blobs.kind}`);
@@ -157,13 +167,13 @@ export function createStorage(
 ): Storage {
   validateStorageProfile(profile);
   const resolvedWorkspacePath = path.resolve(workspacePath);
-  const files = buildSpaceFiles(profile, resolvedWorkspacePath);
+  const materialization = buildMaterialization(profile, resolvedWorkspacePath);
   return {
     profile,
     workspacePath: resolvedWorkspacePath,
     structured: buildStructuredStore(profile, resolvedWorkspacePath),
-    blobs: buildBlobStore(profile, files),
-    files,
+    blobs: buildBlobStore(profile, materialization),
+    materialization,
   };
 }
 
@@ -236,7 +246,7 @@ async function closeConnections(storage: Storage): Promise<void> {
   await Promise.all([
     storage.structured.close(),
     storage.blobs.close(),
-    storage.files.close(),
+    storage.materialization.close(),
   ]);
 }
 
@@ -245,7 +255,7 @@ async function openConnections(storage: Storage): Promise<void> {
     await Promise.all([
       storage.structured.init(),
       storage.blobs.init(),
-      storage.files.init(),
+      storage.materialization.init(),
     ]);
     await storage.structured.spaces().ensureWorld();
   } catch (error) {
@@ -271,7 +281,7 @@ export async function stageStorageForWorkspace(
       // Refresh only process-local materialization locators after the
       // Workspace path has been committed. This performs no filesystem I/O;
       // fallible connection setup and World bootstrap happened while staged.
-      storage.files.activate();
+      storage.materialization.activate();
       state = 'active';
       const previous = current;
       current = storage;
@@ -348,8 +358,8 @@ export function requireWorldCanvasId(): Promise<string> {
   return getWorldCanvasId();
 }
 
-export function getSpaceFiles(): SpaceFiles {
-  return ensure().files;
+export function getSpaceMaterialization(): SpaceMaterialization {
+  return ensure().materialization;
 }
 
 /**
@@ -479,7 +489,7 @@ export async function storageHealth(): Promise<StorageHealth[]> {
   return Promise.all([
     storage.structured.health(),
     storage.blobs.health(),
-    storage.files.health(),
+    storage.materialization.health(),
   ]);
 }
 
@@ -499,7 +509,7 @@ export async function storageHealth(): Promise<StorageHealth[]> {
  * exist.
  */
 export function spaceDirectory(canvasId: string): string {
-  return ensure().files.space(canvasId).directory();
+  return ensure().materialization.space(canvasId).directory();
 }
 
 /**

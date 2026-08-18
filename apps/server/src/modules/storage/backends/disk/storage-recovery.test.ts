@@ -129,7 +129,6 @@ beforeEach(() => {
     createStorage({
       structured: { kind: 'disk' },
       blobs: { kind: 'disk' },
-      files: { kind: 'disk-titled' },
     }),
   );
 });

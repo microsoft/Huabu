@@ -137,6 +137,7 @@ describe('storage module tree', () => {
       'canvas-dirs.ts',
       'canvas-store.ts',
       'index.ts',
+      'materialization.ts',
       'module-boundaries.test.ts',
       'paths.ts',
       'product-boundary.test.ts',
@@ -146,6 +147,27 @@ describe('storage module tree', () => {
       'storage.ts',
       'testing.ts',
     ]);
+  });
+
+  /**
+   * The settled architecture is **two** backend ports (§6.3, and the
+   * proposal's own scope note). A third file appearing here would be a
+   * third port, which is an architectural decision rather than an
+   * implementation detail — so it has to be made deliberately, by editing
+   * this list, and not by someone finding `ports/` a convenient place to put
+   * an interface.
+   *
+   * Space materialization is the case that already tried: it is always the
+   * local filesystem under every profile, so it abstracts no backend family
+   * and lives in the composition layer (`materialization.ts`) as the
+   * Space-level counterpart to `BlobScope.materialize()`.
+   */
+  it('keeps ports/ to exactly the two backend ports', () => {
+    const portFiles = storageFiles
+      .filter((f) => path.dirname(f) === 'modules/storage/ports')
+      .map((f) => path.basename(f));
+
+    expect(portFiles.sort()).toEqual(['blob.ts', 'common.ts', 'structured.ts']);
   });
 
   it('keeps every other file inside ports/, backends/, or compatibility/', () => {

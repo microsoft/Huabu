@@ -50,7 +50,7 @@ export {
   createStorage,
   deleteSpace,
   getBlobStore,
-  getSpaceFiles,
+  getSpaceMaterialization,
   getStorage,
   getStructuredStore,
   getWorldCanvasId,
@@ -86,12 +86,14 @@ export type {
   BlobStore,
 } from './ports/blob.js';
 export type { StorageHealth } from './ports/common.js';
-export type {
-  SpaceFileHandleOwner,
-  SpaceFileScope,
-  SpaceFiles,
-  SpaceImportStaging,
-} from './ports/files.js';
+export {
+  materializationFor,
+  type MaterializationKind,
+  type SpaceImportStaging,
+  type SpaceMaterialization,
+  type SpaceTree,
+  type SpaceTreeHandleOwner,
+} from './materialization.js';
 export type {
   NewCanvasEvent,
   NodeDeleteResult,

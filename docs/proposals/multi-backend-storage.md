@@ -1936,7 +1936,7 @@ Every production structured read uses `StructuredStore`: Space topology through 
 
 RFS, built-in file tools, ACP working directories, external-note observation,
 bundle import/export, debug logs, and memory files genuinely require a
-filesystem tree. They use one `SpaceFiles` capability from storage composition
+filesystem tree. They use one materialization capability from storage composition
 rather than `canvasRoot`, `nodesDir`, `SPACE_JSON_FILENAME`, a title-derived
 directory index, or another Disk-layout symbol. The capability owns a
 Workspace-bound Space directory, bundle publication, and directory-handle
@@ -1944,24 +1944,36 @@ coordination. Consumers may interpret their own public virtual paths and the
 public `.huabu.zip` format, but cannot infer the active backend's structured
 record layout.
 
-`SpaceFiles` is a named axis with two implementations, not a description of
-the Disk layout. `disk-titled` files a Space under its title and moves that
-directory on rename — the Finder-visible Workspace Huabu ships, which can only
-resolve a locator by consulting title-bearing structured records.
-`disk-addressed` files it under its stable id, needs no record scan, and is
-what a structured backend that keeps Spaces in tables composes with. Both pass
-one reusable `SpaceFiles` contract; the file→record mapping RFS needs is
-`SpaceFileScope.nodeIdForPath()`, answered from the sidecar index by one and
-from the name by the other.
+Materialization is **not a third port**, and does not live in `ports/`. The
+settled architecture is two backend ports; a port abstracts a backend
+_family_, and materialization has none to abstract — it is the local
+filesystem under every profile, because its entire purpose is handing a real
+path to something that cannot take a record. §12.5.4 named it correctly: an
+explicit capability, the Space-level counterpart to `BlobScope.materialize()`,
+one level _down_ from the port layer. It lives in `storage/materialization.ts`
+beside the composition root, and `module-boundaries.test.ts` pins `ports/` to
+exactly the two ports so the next interface needing a home does not drift
+there.
 
-The materialization is **derived from the structured backend, not
-configured**. A backend that stores each Space as a directory has already
-chosen where that Space lives, and the materialization must name the same
-directory or a Space's blobs and its records land in different ones —
-so `parseStorageProfile` derives it and `validateStorageProfile` rejects a
-hand-built profile that pairs them wrongly. Only `disk-titled` is reachable in
-production today, because `disk` is the only implemented structured backend;
-`disk-addressed` exists, passes the contract, and is what Phase 5 selects.
+What varies is the **placement policy**, not the substrate. `titled` files a
+Space under its title and moves that directory on rename — the Finder-visible
+Workspace Huabu ships, which resolves a locator by consulting title-bearing
+structured records. `addressed` files it under its stable id and consults
+nothing, which is what a structured backend keeping Spaces in tables needs.
+Both pass one reusable contract; the file→record mapping RFS needs is
+`SpaceTree.nodeIdForPath()`, answered from the sidecar index by one and from
+the name by the other.
+
+The policy is **derived from the structured backend, not configured**, which
+is the other reason it is not an axis: a backend that stores each Space as a
+directory has already chosen where that Space lives, and the materialization
+must name the same directory or a Space's blobs and its records land in
+different ones. There is exactly one coherent policy per structured backend,
+so the composition root derives it and `StorageProfile` does not carry it — a
+knob with one correct value per deployment is not a knob. Only `titled` is
+reachable in production today, because `disk` is the only implemented
+structured backend; `addressed` exists, passes the contract, and is what
+Phase 5 selects.
 
 This phase does not choose bidirectional projection or native write-back semantics: external-note claim and bundle import continue to enter the authoritative application commands/repositories they use today, while unowned scratch and agent-domain files stay ordinary materialized files.
 
@@ -1973,7 +1985,7 @@ Storage construction receives the resolved Workspace path. Startup may hold only
 
 #### 12.6.4 Proof and scope boundary
 
-The reusable node and Space-collection contracts cover `readMany`/list/stream equivalence and both branches of World bootstrap — the existing World, and the empty namespace a new backend meets first. A reusable `SpaceFiles` contract covers the materialization, and both implementations pass it.
+The reusable node and Space-collection contracts cover `readMany`/list/stream equivalence and both branches of World bootstrap — the existing World, and the empty namespace a new backend meets first. A reusable contract covers the materialization, and both placement policies pass it.
 
 The product-level harness is `storage/testing.ts`: it mounts a real profile onto a temporary Workspace through the production lifecycle — prepared Workspace, staged connections, `ensureWorld()`, atomic swap — rather than swapping in a stub. `product-boundary.test.ts` runs the exit criterion against every profile in `PRODUCT_STORAGE_PROFILES`, naming no directory, filename, or `space.json`; Phase 5 adds one entry to that list and the same behaviours are covered for SQLite. Elsewhere, product tests replace only storage connections or the declared Space-file capability; real Canvas services, serializers, repository behavior, and filesystem materialization inside the claimed boundary remain real.
 
@@ -1999,8 +2011,8 @@ Out of scope: a SQLite adapter or schema, Disk→SQLite data migration, SQLite p
    / `list` / `stream`; an entry in `PRODUCT_STORAGE_PROFILES`, which is what
    runs the product-level boundary suite against it; and `IMPLEMENTED_STRUCTURED`
    plus `StructuredBackendKind`. It does **not** owe a materialization —
-   `disk-addressed` already exists and `materializationFor` already pairs it
-   with any non-`disk` structured backend.
+   the `addressed` policy already exists and `materializationFor` already
+   pairs it with any non-`disk` structured backend.
 
 6. Migrate the currently synchronous Agenetes persistence ports without
    changing their persist-before-notify, sequence, and fencing semantics.

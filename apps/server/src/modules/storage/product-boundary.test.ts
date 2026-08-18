@@ -33,7 +33,7 @@ import { readCanvas, readCanvasNodes } from '../canvas/space-read.js';
 import {
   canvasBlobs,
   createSpace,
-  getSpaceFiles,
+  getSpaceMaterialization,
   getStructuredStore,
   spaceDirectory,
 } from './index.js';
@@ -105,7 +105,7 @@ describe.each(PRODUCT_STORAGE_PROFILES.map((p) => [describeProfile(p), p]))(
 
       // The one invariant a feature module depends on: the tree it is handed
       // and the tree blobs land in are the same tree.
-      const directory = getSpaceFiles().space(canvasId).directory();
+      const directory = getSpaceMaterialization().space(canvasId).directory();
       expect(spaceDirectory(canvasId)).toBe(directory);
       expect(existsSync(directory)).toBe(true);
       await expect(
@@ -132,7 +132,7 @@ describe.each(PRODUCT_STORAGE_PROFILES.map((p) => [describeProfile(p), p]))(
       // RFS serves files and needs the record behind one. Which file that is
       // belongs to the materialization, so the test asks it rather than
       // constructing a name.
-      const scope = getSpaceFiles().space(canvasId);
+      const scope = getSpaceMaterialization().space(canvasId);
       const nodesDirectory = scope.nodesDirectory();
       expect(nodesDirectory.startsWith(scope.directory())).toBe(true);
 

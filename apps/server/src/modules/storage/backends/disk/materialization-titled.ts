@@ -8,7 +8,7 @@
  * sees in Finder and renames from. Resolving that directory means asking the
  * structured records which title a Space currently has, so this
  * implementation is only coherent beside the Disk structured backend — see
- * `AddressedSpaceFiles` for the materialization that composes with any of
+ * `AddressedSpaceMaterialization` for the materialization that composes with any of
  * them, and `profile.ts` for the rule that keeps the pairing honest.
  */
 
@@ -28,19 +28,19 @@ import { toSafeFilename } from '../../../../utils/naming.js';
 import { getWorkspacePath } from '../../../workspace.js';
 
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
-import type { StorageHealth } from '../../ports/common.js';
 import type {
-  SpaceFileHandleOwner,
-  SpaceFileScope,
-  SpaceFiles,
   SpaceImportStaging,
-} from '../../ports/files.js';
+  SpaceMaterialization,
+  SpaceTree,
+  SpaceTreeHandleOwner,
+} from '../../materialization.js';
+import type { StorageHealth } from '../../ports/common.js';
 
 /** Space-relative markdown node file; capture group is the bare filename. */
 const NODE_FILE_RE = /^nodes\/([^/]+\.md)$/;
 
-export class DiskSpaceFiles implements SpaceFiles {
-  readonly kind = 'disk-titled' as const;
+export class TitledSpaceMaterialization implements SpaceMaterialization {
+  readonly kind = 'titled' as const;
   readonly #workspacePath: string;
 
   constructor(workspacePath = getWorkspacePath()) {
@@ -66,7 +66,7 @@ export class DiskSpaceFiles implements SpaceFiles {
 
   async close(): Promise<void> {}
 
-  space(canvasId: string): SpaceFileScope {
+  space(canvasId: string): SpaceTree {
     const safeId = sanitizeId(canvasId, 'canvasId');
     const assertActive = (): void => {
       if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
@@ -93,7 +93,7 @@ export class DiskSpaceFiles implements SpaceFiles {
         // is filed under its label, so the name alone cannot be inverted.
         return getCanvasStore(safeId).nodeIdForFilename(filename);
       },
-      registerHandleOwner: (owner: SpaceFileHandleOwner): (() => void) => {
+      registerHandleOwner: (owner: SpaceTreeHandleOwner): (() => void) => {
         assertActive();
         return registerSpaceDirHandleOwner(safeId, owner);
       },

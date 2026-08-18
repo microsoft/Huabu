@@ -14,13 +14,13 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { AddressedSpaceFiles } from './space-files-addressed.js';
-import { DiskSpaceFiles } from './space-files.js';
+import { AddressedSpaceMaterialization } from './materialization-addressed.js';
+import { TitledSpaceMaterialization } from './materialization-titled.js';
+import { describeMaterializationContract } from './materialization.contract.js';
 import { setWorkspacePath } from '../../../workspace.js';
-import { describeSpaceFilesContract } from '../../ports/contracts/space-files.contract.js';
 
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
-import type { SpaceFiles } from '../../ports/files.js';
+import type { SpaceMaterialization } from '../../materialization.js';
 
 const roots: string[] = [];
 
@@ -38,7 +38,7 @@ function workspace(): string {
  * the Disk layout: the addressing differs completely, and nothing in the
  * shared contract notices.
  */
-function contractHarness(files: (root: string) => SpaceFiles) {
+function contractHarness(files: (root: string) => SpaceMaterialization) {
   return () => {
     const root = workspace();
     const capability = files(root);
@@ -67,14 +67,14 @@ function contractHarness(files: (root: string) => SpaceFiles) {
   };
 }
 
-describeSpaceFilesContract(
+describeMaterializationContract(
   'Disk (title-addressed)',
-  contractHarness((root) => new DiskSpaceFiles(root)),
+  contractHarness((root) => new TitledSpaceMaterialization(root)),
 );
 
-describeSpaceFilesContract(
+describeMaterializationContract(
   'Disk (id-addressed)',
-  contractHarness((root) => new AddressedSpaceFiles(root)),
+  contractHarness((root) => new AddressedSpaceMaterialization(root)),
 );
 
 function record(canvasId: string): CanvasFile {
@@ -94,10 +94,10 @@ afterEach(() => {
   }
 });
 
-describe('DiskSpaceFiles', () => {
+describe('TitledSpaceMaterialization', () => {
   it('publishes an imported materialization without exposing Disk layout to the route', async () => {
     const root = workspace();
-    const files = new DiskSpaceFiles(root);
+    const files = new TitledSpaceMaterialization(root);
     const staged = await files.stageImport('canvas-imported');
     mkdirSync(path.join(staged.directory, 'nodes'), { recursive: true });
     writeFileSync(
@@ -126,7 +126,7 @@ describe('DiskSpaceFiles', () => {
 
   it('fences a retained file scope after Workspace activation changes', async () => {
     const first = workspace();
-    const files = new DiskSpaceFiles(first);
+    const files = new TitledSpaceMaterialization(first);
     const scope = files.space('canvas-a');
     workspace();
 
@@ -138,7 +138,7 @@ describe('DiskSpaceFiles', () => {
 
   it('resolves a node file through the sidecar index, not its name', async () => {
     const root = workspace();
-    const files = new DiskSpaceFiles(root);
+    const files = new TitledSpaceMaterialization(root);
     const staged = await files.stageImport('canvas-imported');
     mkdirSync(path.join(staged.directory, 'nodes'), { recursive: true });
     writeFileSync(
@@ -155,10 +155,10 @@ describe('DiskSpaceFiles', () => {
   });
 });
 
-describe('AddressedSpaceFiles', () => {
+describe('AddressedSpaceMaterialization', () => {
   it('addresses a Space and its nodes by stable id alone', async () => {
     const root = workspace();
-    const files = new AddressedSpaceFiles(root);
+    const files = new AddressedSpaceMaterialization(root);
     const scope = files.space('canvas-imported');
 
     expect(scope.directory()).toBe(path.join(root, 'canvas-imported'));
@@ -172,7 +172,7 @@ describe('AddressedSpaceFiles', () => {
 
   it('publishes an import without allocating a name or touching the title', async () => {
     const root = workspace();
-    const files = new AddressedSpaceFiles(root);
+    const files = new AddressedSpaceMaterialization(root);
     // A Space already occupies the title this import asks for. A
     // title-addressed layout would have to dedupe; this one never looks.
     mkdirSync(path.join(root, 'Imported Space'), { recursive: true });
