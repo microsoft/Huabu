@@ -1926,7 +1926,9 @@ Phase 4.6 closes the application-side gap between the portable storage contracts
 
 #### 12.6.1 Portable read completion
 
-Every production structured read uses `StructuredStore`: Space topology through `SpaceHandle.read()`, single node content through `SpaceNodes.read()`, and whole-Space or incremental scans through new `SpaceNodes.list()` / `SpaceNodes.stream()` members. The scan members return the same complete node records and opaque storage revisions as `read()`; the streaming callback is delivery order only and promises neither query ordering nor a backend cursor. Search keeps its progressive metadata delivery without naming a filesystem scan.
+Every production structured read uses `StructuredStore`: Space topology through `SpaceHandle.read()`, single node content through `SpaceNodes.read()`, a named subset through `SpaceNodes.readMany()`, and whole-Space or incremental scans through `SpaceNodes.list()` / `SpaceNodes.stream()`. All of them return the same complete node records and opaque storage revisions; the streaming callback is delivery order only and promises neither query ordering nor a backend cursor. Search keeps its progressive metadata delivery without naming a filesystem scan.
+
+`readMany` exists because most readers want a handful of named nodes rather than the Space — a selection to describe, a neighbourhood to render, one View to serve. Expressing those as `list()` makes an unrelated node somewhere else cost the request, and it is a shape every backend serves better than a scan. Whole-Space reads stay on `list()` where the work genuinely is whole-Space: executor prestate hydration, the Space GET, the canvas outline, cross-node inspection.
 
 `CanvasStore` remains inside the Disk adapter and compatibility tests only. It is not an application service, and production module-boundary tests reject new or remaining feature imports. Pure Canvas context builders accept already-read `CanvasFile` / node-record values instead of reaching into storage themselves; their async adapters own repository access once per request.
 
@@ -1942,7 +1944,26 @@ coordination. Consumers may interpret their own public virtual paths and the
 public `.huabu.zip` format, but cannot infer the active backend's structured
 record layout.
 
-The current Disk profile implements `SpaceFiles` with the existing human-readable directory. A later SQLite profile may compose a stable id-addressed materialization without changing feature modules. This phase does not choose bidirectional projection or native write-back semantics: external-note claim and bundle import continue to enter the authoritative application commands/repositories they use today, while unowned scratch and agent-domain files stay ordinary materialized files.
+`SpaceFiles` is a named axis with two implementations, not a description of
+the Disk layout. `disk-titled` files a Space under its title and moves that
+directory on rename — the Finder-visible Workspace Huabu ships, which can only
+resolve a locator by consulting title-bearing structured records.
+`disk-addressed` files it under its stable id, needs no record scan, and is
+what a structured backend that keeps Spaces in tables composes with. Both pass
+one reusable `SpaceFiles` contract; the file→record mapping RFS needs is
+`SpaceFileScope.nodeIdForPath()`, answered from the sidecar index by one and
+from the name by the other.
+
+The materialization is **derived from the structured backend, not
+configured**. A backend that stores each Space as a directory has already
+chosen where that Space lives, and the materialization must name the same
+directory or a Space's blobs and its records land in different ones —
+so `parseStorageProfile` derives it and `validateStorageProfile` rejects a
+hand-built profile that pairs them wrongly. Only `disk-titled` is reachable in
+production today, because `disk` is the only implemented structured backend;
+`disk-addressed` exists, passes the contract, and is what Phase 5 selects.
+
+This phase does not choose bidirectional projection or native write-back semantics: external-note claim and bundle import continue to enter the authoritative application commands/repositories they use today, while unowned scratch and agent-domain files stay ordinary materialized files.
 
 #### 12.6.3 Workspace-scoped storage lifecycle and World bootstrap
 
@@ -1952,9 +1973,15 @@ Storage construction receives the resolved Workspace path. Startup may hold only
 
 #### 12.6.4 Proof and scope boundary
 
-The reusable node and Space-collection contracts cover list/stream equivalence and idempotent World bootstrap. Product tests replace only storage connections or the declared Space-file capability; real Canvas services, serializers, repository behavior, and filesystem materialization inside the claimed boundary remain real. A module-boundary guard rejects production `CanvasStore` imports and non-storage Disk-layout imports.
+The reusable node and Space-collection contracts cover `readMany`/list/stream equivalence and both branches of World bootstrap — the existing World, and the empty namespace a new backend meets first. A reusable `SpaceFiles` contract covers the materialization, and both implementations pass it.
 
-In scope: Canvas/agent/web/interactive-view/Task structured reads, World target reads, RFS node metadata, built-in file-tool node enrichment, external-note membership checks, storage mount/remount/close, World bootstrap, architecture documentation, and the shared product-level backend harness needed for Phase 5.
+The product-level harness is `storage/testing.ts`: it mounts a real profile onto a temporary Workspace through the production lifecycle — prepared Workspace, staged connections, `ensureWorld()`, atomic swap — rather than swapping in a stub. `product-boundary.test.ts` runs the exit criterion against every profile in `PRODUCT_STORAGE_PROFILES`, naming no directory, filename, or `space.json`; Phase 5 adds one entry to that list and the same behaviours are covered for SQLite. Elsewhere, product tests replace only storage connections or the declared Space-file capability; real Canvas services, serializers, repository behavior, and filesystem materialization inside the claimed boundary remain real.
+
+A module-boundary guard rejects production `CanvasStore` imports, and rejects Disk-layout imports from every production module outside `storage/` — not merely the workspace module. The check is import-level, so a local variable that happens to be called `artifactPath` is not a violation while importing `canvasRoot` is. Migrations are exempt (they rewrite frozen historical on-disk shapes); tests are exempt for the same reason they may name an adapter, and the shim-importer snapshots pin which ones do.
+
+One behavioural hardening rides along and is not implied by the criterion above: two Space directories carrying the same `canvasId` used to resolve last-wins, and now raise from the directory scan. That makes a Finder-side duplication a loud failure of every catalogue read rather than a Space that silently resolves to an arbitrary copy.
+
+In scope: Canvas/agent/web/interactive-view/Task structured reads, World target reads, RFS node metadata, built-in file-tool node enrichment, external-note membership checks, storage mount/remount/close, World bootstrap, the materialization axis and its second implementation, architecture documentation, and the shared product-level backend harness needed for Phase 5.
 
 Out of scope: a SQLite adapter or schema, Disk→SQLite data migration, SQLite profile registration, Postgres/Azure, Agenetes persistence migration, a writable general-purpose virtual filesystem, protocol or UI changes, and stronger crash/distributed transaction guarantees.
 
@@ -1965,6 +1992,16 @@ Out of scope: a SQLite adapter or schema, Disk→SQLite data migration, SQLite p
    and concurrency tests against each. An adapter may exist for isolated
    testing before its backend profile is selectable; profile validation keeps
    rejecting it until the required capability matrix is satisfied.
+
+   The SQLite preview branch predates Phase 4.6 and forks from the same
+   commit, so it does not yet satisfy the port it will be rebased onto. What
+   it owes, concretely: `SpaceRepository.ensureWorld()`; `SpaceNodes.readMany`
+   / `list` / `stream`; an entry in `PRODUCT_STORAGE_PROFILES`, which is what
+   runs the product-level boundary suite against it; and `IMPLEMENTED_STRUCTURED`
+   plus `StructuredBackendKind`. It does **not** owe a materialization —
+   `disk-addressed` already exists and `materializationFor` already pairs it
+   with any non-`disk` structured backend.
+
 6. Migrate the currently synchronous Agenetes persistence ports without
    changing their persist-before-notify, sequence, and fencing semantics.
 7. Refactor RFS and built-in file tools only after a logical file-view contract

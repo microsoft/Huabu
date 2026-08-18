@@ -24,7 +24,7 @@ import { getSkill } from '../../../prompt/index.js';
 import { getNodeNeighbourhood } from '../../canvas/node-neighbourhood.js';
 import { describeNode } from '../../canvas/node-prompt.js';
 import { snapshotNodesToArtifacts } from '../../canvas/snapshot-nodes.js';
-import { readCanvasNode, readCanvasSnapshot } from '../../canvas/space-read.js';
+import { readCanvasNode, readCanvasNodes } from '../../canvas/space-read.js';
 import { isUserInvokableSkill } from '../skills.route.js';
 
 import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
@@ -209,8 +209,18 @@ async function collectSelectedNodeRefs(
   nodes: WireSelectionNode[],
   canvasId: string | null,
 ): Promise<AgentNodePreview[]> {
+  const selectedIds: string[] = [];
+  const collectIds = (list: WireSelectionNode[]): void => {
+    for (const n of list) {
+      selectedIds.push(n.id);
+      if (n.children) collectIds(n.children);
+    }
+  };
+  collectIds(nodes);
+  // A selection is a handful of nodes; reading the whole Space to describe
+  // them would make an unrelated node somewhere else cost this request.
   const records = canvasId
-    ? (await readCanvasSnapshot(canvasId))?.nodes
+    ? await readCanvasNodes(canvasId, selectedIds)
     : undefined;
   const refs: AgentNodePreview[] = [];
   const walk = (list: WireSelectionNode[]) => {

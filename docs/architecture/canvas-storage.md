@@ -21,9 +21,21 @@ not an application service.
 File-native features such as RFS, built-in file tools, external-note watching,
 memory/debug files, and bundle import/export resolve their Workspace-bound
 materialization through `SpaceFiles`. They may use real paths, but do not name
-the Disk record layout or title-derived locator. This leaves a later SQLite
-adapter free to compose a filesystem projection without changing feature
-modules.
+the Disk record layout or title-derived locator, and they ask
+`SpaceFileScope.nodeIdForPath()` which record a materialized file carries
+rather than reading it out of the file's own frontmatter.
+
+`SpaceFiles` has two implementations. `disk-titled` files a Space under its
+title and moves that directory on rename — the Finder-visible layout Huabu
+ships, which resolves a locator by consulting title-bearing structured
+records. `disk-addressed` files it under its stable id and consults nothing.
+Which one is active is **derived from the structured backend rather than
+configured**: a backend that stores each Space as a directory has already
+chosen where that Space lives, and the materialization has to name the same
+directory or a Space's blobs and its records end up in different ones.
+`parseStorageProfile` derives it, `validateStorageProfile` refuses a
+mismatched pairing, and one reusable contract holds both implementations to
+the same behaviour.
 
 Runtime Home-folder activation prepares and migrates the selected directory in
 a disposable child process, stages and initializes the Workspace-bound storage
@@ -72,6 +84,7 @@ Key points:
 
 - An ordinary Space **directory name** is derived from its title via `toSafeFilename(title)`, not from `canvasId`. The stable `canvasId` only lives inside `space.json`; the World is the reserved `.world` exception.
 - `SpaceRepository.list()` rescans on every call, returns ordinary Spaces only, skips ordinary directories without `space.json`, rejects malformed records (including a corrupt established World), and leaves ordering to the caller. `worldId()` resolves the hidden World from the same rescan and rejects missing or malformed state; it is the single World resolution point the collection's own create/delete/rename refusals also go through.
+- Two ordinary Space directories carrying the same `canvasId` are an integrity error raised by the directory scan, so a Finder-side duplication fails every catalogue read instead of resolving to an arbitrary copy.
 - The `canvasId -> directory name` index in `canvas-dirs.ts` is invalidated **lazily**, never by a live filesystem watcher. Catalogue reads and the World resolvers re-scan unconditionally, server-owned create/rename register the new directory directly, and `CanvasStore.read()` re-scans and retries when `space.json` is missing — which is also how a Finder-side Space rename is adopted as the new title. A stale index therefore self-heals on the next read of the affected Space.
 - External-note observation exists for one feature: surfacing user-authored `.md` files dropped into `<Space>/nodes/` from outside the app. There is **no workspace-level watcher**. In steady state there is at most one native `fs.watch` handle per **active Space session**; concurrent SSE subscribers to the same Space share that session, watcher, and scan, so watcher count follows distinct active Spaces rather than open streams. Opening a Space's stream arms its native watcher _before_ the one lazy scan begins (closing the scan-then-watch gap), limits that scan to eight concurrent file reads plus one asynchronous topology read for filtering known note ids, and returns a single merged snapshot; live events read the latest topology synchronously and always win over an older scan observation of the same path. When `nodes/` does not exist, non-Windows sessions watch the Space root and promote themselves to the child directory as soon as it appears. Windows sessions use one periodic existence probe instead, avoiding a root handle that would block external Space rename/delete. If an active `nodes/` directory is deleted or replaced, the session verifies its filesystem identity before emitting an empty snapshot, re-resolves a Finder-renamed Space by `canvasId`, then waits for the path and resumes child watching instead of remaining attached to the stale inode. The final `close()` releases the watcher, clears pending timers, and drops the Space's discovery state. A failed scan is not cached, so a later subscription retries. Workspace and session generations reject scans and events that resolve after a workspace switch or a close/reopen. Inactive Spaces hold no watcher and no in-memory state; their eventual state is rebuilt by the first lazy scan when they are next opened.
 - Because a live `fs.watch` handle inside a Space subtree makes `renameSync` / `rmSync` fail with EPERM on Windows, `space-dir-handles.ts` arbitrates between handle owners and directory mutations. Each active external-note session registers itself against its `canvasId`; server-owned Space rename and delete bracket the mutation with `withSpaceDirHandlesReleased(canvasId, fn)`, which releases that Space's handles and lets the owner re-acquire afterwards — re-resolving the directory, so a rename re-arms at the new path and a delete collapses the session to an empty snapshot. A Space with no open stream has no registered owner, so the bracket is a plain passthrough. Neither side knows about the other.
@@ -99,19 +112,20 @@ Key points:
 
 `apps/server/src/modules/storage/` has three layers plus its composition root:
 
-| Path                                            | Responsibility                                                                                                                                                      |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ports/blob.ts`                                 | Backend-neutral `BlobStore` connection/scope contract for opaque bytes and bounded materialization leases.                                                          |
-| `ports/files.ts`                                | Declared Workspace-bound filesystem materialization, bundle publication, and native-handle coordination for file-native features.                                   |
-| `ports/structured.ts`                           | Backend-neutral `StructuredStore`, the `SpaceRepository` collection, and the `SpaceHandle` composite: record read/ordered write, nodes, changes, Tasks, and events. |
-| `ports/contracts/`                              | Reusable Space-collection, node, Space-write, log, blob, and store suites; guarantees are the minimum every adapter implements.                                     |
-| `backends/disk/`                                | Disk implementations plus before-image restoration for rejected in-process ordered batches; no journal or startup recovery.                                         |
-| `backends/disk/legacy/`                         | The legacy `CanvasStore` and its synchronous adapter primitives, bounded Workspace-qualified cache, and process-local node tombstones.                              |
-| `compatibility/canvas.ts`                       | Residual Disk test/legacy facade over the same adapter primitive; production feature reads no longer enter here.                                                    |
-| `space-lifecycle-admission.ts`                  | Backend-neutral, writer-preferring single-process coordinator shared by structured mutations and blob puts during a delete session.                                 |
-| `profile.ts` and `storage.ts`                   | Backend selection, validation, Workspace-scoped staged mount lifecycle, World bootstrap, materialization/blob scopes, and the blob-first deletion saga.             |
-| `index.ts`                                      | Public exports only; application code imports here rather than reaching into an adapter.                                                                            |
-| `canvas-store.ts`, `paths.ts`, `canvas-dirs.ts` | Deprecated forwarding shims with no logic, retained only for high-fanout compatibility imports.                                                                     |
+| Path                                            | Responsibility                                                                                                                                                                              |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ports/blob.ts`                                 | Backend-neutral `BlobStore` connection/scope contract for opaque bytes and bounded materialization leases.                                                                                  |
+| `ports/files.ts`                                | Declared Workspace-bound filesystem materialization, bundle publication, and native-handle coordination for file-native features.                                                           |
+| `ports/structured.ts`                           | Backend-neutral `StructuredStore`, the `SpaceRepository` collection, and the `SpaceHandle` composite: record read/ordered write, nodes, changes, Tasks, and events.                         |
+| `ports/contracts/`                              | Reusable Space-collection, node, Space-write, log, blob, and store suites; guarantees are the minimum every adapter implements.                                                             |
+| `backends/disk/`                                | Disk implementations plus before-image restoration for rejected in-process ordered batches; no journal or startup recovery.                                                                 |
+| `backends/disk/legacy/`                         | The legacy `CanvasStore` and its synchronous adapter primitives, bounded Workspace-qualified cache, and process-local node tombstones.                                                      |
+| `compatibility/canvas.ts`                       | Residual Disk test/legacy facade over the same adapter primitive; production feature reads no longer enter here.                                                                            |
+| `space-lifecycle-admission.ts`                  | Backend-neutral, writer-preferring single-process coordinator shared by structured mutations and blob puts during a delete session.                                                         |
+| `profile.ts` and `storage.ts`                   | Backend selection, derived materialization, cross-axis validation, Workspace-scoped staged mount lifecycle, World bootstrap, materialization/blob scopes, and the blob-first deletion saga. |
+| `testing.ts`                                    | Mounts a real profile onto a temporary Workspace through the production lifecycle, so product tests are written once and run against every profile.                                         |
+| `index.ts`                                      | Public exports only; application code imports here rather than reaching into an adapter.                                                                                                    |
+| `canvas-store.ts`, `paths.ts`, `canvas-dirs.ts` | Deprecated forwarding shims with no logic, retained only for high-fanout compatibility imports.                                                                                             |
 
 The Disk structured adapter and compatibility facade resolve the same cached
 legacy object, so migration does not create two in-memory authorities. All
@@ -121,8 +135,11 @@ reads, idempotent World bootstrap, structured create/rename, and an exclusive
 blob-first delete saga and then calls `finish()` or `abort()`. Every
 Space-record write goes through `SpaceHandle.write`, which is the
 version-checked replacement with the node and delta batch attached;
-`SpaceHandle.read` reads only. `SpaceNodes.read/list/stream` return complete
-records plus opaque revision tokens without exposing filenames. `write`
+`SpaceHandle.read` reads only. `SpaceNodes.read/readMany/list/stream` return
+complete records plus opaque revision tokens without exposing filenames.
+`readMany` is the shape most readers want — a selection, a neighbourhood, one
+View — and keeps their cost proportional to the request rather than to the
+Space; `list`/`stream` stay for work that genuinely spans it. `write`
 preserves the old node mutations → Space record → optional delta order. When a
 normal in-process node → record → delta batch rejects, the adapter must restore
 that batch's prestate before returning the rejection. An explicit title rename

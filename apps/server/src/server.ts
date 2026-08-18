@@ -39,6 +39,9 @@ async function start(): Promise<void> {
       {
         structured: storage.profile.structured.kind,
         blobs: storage.profile.blobs.kind,
+        // Derived from the structured kind rather than configured, so log it:
+        // it is the one part of the profile an operator did not choose.
+        files: storage.profile.files.kind,
         mounted: storage.mounted,
       },
       'Storage backends ready',

@@ -70,6 +70,56 @@ function resolveSpecifier(fromRelative: string, spec: string): string | null {
   return resolved.replace(/\.js$/, '');
 }
 
+/**
+ * Names a file imports, whatever they are imported from.
+ *
+ * Import-level rather than identifier-level on purpose: a module is coupled
+ * to the Disk layout when it *brings in* `canvasRoot`, not when it happens to
+ * name a local variable `artifactPath`.
+ */
+function importedNames(relative: string): string[] {
+  const source = read(relative);
+  const out: string[] = [];
+  const re = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*['"][^'"]+['"]/gs;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(source)) !== null) {
+    for (const clause of match[1].split(',')) {
+      const name = clause
+        .trim()
+        .split(/\s+as\s+/)[0]
+        ?.replace(/^type\s+/, '');
+      if (name) out.push(name.trim());
+    }
+  }
+  return out;
+}
+
+/**
+ * The members that describe how the Disk backend stores a Space.
+ *
+ * They moved to `backends/disk/layout.ts` in Phase 4.5. Nothing outside the
+ * storage boundary may name them: each one answers "how does *this* backend
+ * store that", so a consumer holding one has bound the application to Disk.
+ */
+const DISK_LAYOUT_SYMBOLS = [
+  'SPACE_JSON_FILENAME',
+  'WORLD_CANVAS_DIR_NAME',
+  'canvasJsonPath',
+  'nodesDir',
+  'nodeFilePath',
+  'ARTIFACTS_DIR_NAME',
+  'artifactsDir',
+  'artifactPath',
+  'HISTORY_DIR_NAME',
+  'historyDir',
+  'chatDir',
+  'tasksPath',
+  'eventsPath',
+  'deltaLogPath',
+  'changesPath',
+  'canvasRoot',
+];
+
 const storageFiles = walk(STORAGE_DIR);
 const sourceFiles = walk(SRC_DIR);
 
@@ -89,10 +139,12 @@ describe('storage module tree', () => {
       'index.ts',
       'module-boundaries.test.ts',
       'paths.ts',
+      'product-boundary.test.ts',
       'profile.test.ts',
       'profile.ts',
       'space-lifecycle-admission.ts',
       'storage.ts',
+      'testing.ts',
     ]);
   });
 
@@ -246,33 +298,16 @@ describe('workspace module names no backend', () => {
     expect(violations).toEqual([]);
   });
 
+  // Stricter than the import-level rule that covers every other module:
+  // here even *naming* one of these is a violation, because this is the
+  // module the layout was extracted from and a re-implementation under a
+  // local name would restore the same coupling with a clean import list.
   it('names no Disk record or blob layout symbol', () => {
-    // These are the members that moved to `backends/disk/layout.ts`. Their
-    // reappearance here would mean the workspace had started describing how a
-    // backend stores things again, whatever the import path said.
-    const DISK_LAYOUT = [
-      'SPACE_JSON_FILENAME',
-      'WORLD_CANVAS_DIR_NAME',
-      'canvasJsonPath',
-      'nodesDir',
-      'nodeFilePath',
-      'ARTIFACTS_DIR_NAME',
-      'artifactsDir',
-      'artifactPath',
-      'HISTORY_DIR_NAME',
-      'historyDir',
-      'chatDir',
-      'tasksPath',
-      'eventsPath',
-      'deltaLogPath',
-      'changesPath',
-      'canvasRoot',
-    ];
     const violations: string[] = [];
     for (const file of workspaceFiles) {
       if (file.startsWith('modules/workspace/migrations/')) continue;
       const source = read(file);
-      for (const symbol of DISK_LAYOUT) {
+      for (const symbol of DISK_LAYOUT_SYMBOLS) {
         if (new RegExp(`\\b${symbol}\\b`).test(source)) {
           violations.push(`${file} → ${symbol}`);
         }
@@ -336,6 +371,33 @@ describe('structured write authority', () => {
 });
 
 describe('backend-neutral production reads', () => {
+  /**
+   * §12.6.4's second guard, at the scope the phase claimed: *no* production
+   * module outside `storage/` imports a Disk-layout symbol, not merely the
+   * workspace module.
+   *
+   * Two exemptions, both the same ones the sibling rules make. A migration
+   * rewrites a frozen historical on-disk shape, so it is Disk-bound by
+   * definition and cannot be expressed against a port. A test that names the
+   * layout is choosing its subject rather than binding the application to it
+   * — and the shim-importer snapshots below already pin which tests those
+   * are, so they cannot grow unnoticed.
+   */
+  it('does not import a Disk-layout symbol outside the storage boundary', () => {
+    const violations: string[] = [];
+    for (const file of sourceFiles) {
+      if (file.startsWith('modules/storage/')) continue;
+      if (file.startsWith('modules/workspace/migrations/')) continue;
+      if (file.endsWith('.test.ts')) continue;
+      for (const name of importedNames(file)) {
+        if (DISK_LAYOUT_SYMBOLS.includes(name)) {
+          violations.push(`${file} → ${name}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
   it('does not import CanvasStore or getCanvasStore from the public barrel', () => {
     const legacyReadImport =
       /import\s+(?:type\s+)?\{[^}]*\b(?:CanvasStore|getCanvasStore)\b[^}]*\}\s+from\s+['"][^'"]*storage\/index\.js['"]/s;

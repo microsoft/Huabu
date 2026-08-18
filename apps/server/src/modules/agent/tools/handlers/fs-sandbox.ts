@@ -291,17 +291,20 @@ export interface NodeMeta {
 }
 
 /**
- * Lazy single-Space node lookup. Reads `space.json` at most once,
- * returning a closure that maps a canvas-relative path to its
- * `NodeMeta` if it matches `nodes/<filename>.md` and can be resolved via
- * frontmatter `id:` plus `space.json` metadata.
- * Returns `null` otherwise.
+ * Single-Space node lookup: a canvas-relative path to its {@link NodeMeta},
+ * or `null` when the path is not a node file.
+ *
+ * The Space record is read up front — one small read that gives every node's
+ * type and label. Building the path index is deferred to the first lookup
+ * that could use one, because that step opens and parses every file under
+ * `nodes/` and most searches never touch a node file at all: a grep for a
+ * string that lives in `.memory/` or an uploaded document would otherwise pay
+ * for the whole Space before matching anything.
  */
 export async function makeNodeLookup(
   canvasId: string,
 ): Promise<(canvasRelPath: string) => NodeMeta | null> {
   const byId = new Map<string, NodeMeta>();
-  const byPath = new Map<string, NodeMeta>();
   try {
     const file = await readCanvas(canvasId);
     if (file !== null) {
@@ -319,52 +322,48 @@ export async function makeNodeLookup(
     // File enrichment is best-effort; the path result remains usable.
   }
 
-  let nodesRoot: string;
-  try {
-    nodesRoot = safeResolve(canvasId, 'nodes');
-  } catch {
-    return () => null;
-  }
+  let byPath: Map<string, NodeMeta> | null = null;
+  const indexByPath = (): Map<string, NodeMeta> => {
+    if (byPath) return byPath;
+    const index = new Map<string, NodeMeta>();
+    byPath = index;
 
-  let nodesStat;
-  try {
-    nodesStat = statSync(nodesRoot);
-  } catch {
-    return () => null;
-  }
-  if (!nodesStat.isDirectory()) return () => null;
-
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(nodesRoot, { withFileTypes: true });
-  } catch {
-    return () => null;
-  }
-
-  for (const ent of entries) {
-    if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
-    const abs = path.join(nodesRoot, ent.name);
-    let raw: string;
+    let nodesRoot: string;
+    let entries: Dirent[];
     try {
-      raw = readFileSync(abs, 'utf8');
+      nodesRoot = safeResolve(canvasId, 'nodes');
+      if (!statSync(nodesRoot).isDirectory()) return index;
+      entries = readdirSync(nodesRoot, { withFileTypes: true });
     } catch {
-      continue;
+      return index;
     }
-    const { meta } = parseFrontmatter(raw);
-    const fallbackId = ent.name.replace(/\.md$/, '');
-    const fmId = typeof meta['id'] === 'string' ? meta['id'] : null;
-    const nodeId = fmId && fmId.length > 0 ? fmId : fallbackId;
-    const metaFromCanvas = byId.get(nodeId) ?? {
-      nodeId,
-      nodeType: undefined,
-      label: undefined,
-    };
-    byPath.set(`nodes/${ent.name}`, metaFromCanvas);
-  }
+
+    for (const ent of entries) {
+      if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
+      const abs = path.join(nodesRoot, ent.name);
+      let raw: string;
+      try {
+        raw = readFileSync(abs, 'utf8');
+      } catch {
+        continue;
+      }
+      const { meta } = parseFrontmatter(raw);
+      const fallbackId = ent.name.replace(/\.md$/, '');
+      const fmId = typeof meta['id'] === 'string' ? meta['id'] : null;
+      const nodeId = fmId && fmId.length > 0 ? fmId : fallbackId;
+      const metaFromCanvas = byId.get(nodeId) ?? {
+        nodeId,
+        nodeType: undefined,
+        label: undefined,
+      };
+      index.set(`nodes/${ent.name}`, metaFromCanvas);
+    }
+    return index;
+  };
 
   return (canvasRelPath) => {
     const normalized = canvasRelPath.replace(/^\.\//, '');
     if (!CANVAS_NODE_RE.test(normalized)) return null;
-    return byPath.get(normalized) ?? null;
+    return indexByPath().get(normalized) ?? null;
   };
 }

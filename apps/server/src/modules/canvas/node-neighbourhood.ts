@@ -41,7 +41,7 @@ import {
 
 import { buildSpatialBundle } from './canvas-spatial.js';
 import { describeNode } from './node-prompt.js';
-import { readCanvasSnapshot } from './space-read.js';
+import { readCanvas, readCanvasNodes } from './space-read.js';
 import {
   escapeXmlAttr,
   renderNodes,
@@ -76,12 +76,28 @@ export async function getNodeNeighbourhood(
   canvasId: string,
   anchorNodeId: string,
 ): Promise<NodeNeighbourhoodContext | null> {
-  const snapshot = await readCanvasSnapshot(canvasId);
-  if (!snapshot) return null;
-  const { canvas, nodes: nodeRecords } = snapshot;
+  const canvas = await readCanvas(canvasId);
+  if (!canvas) return null;
   const bundle = buildSpatialBundle(canvas);
   const target = bundle.spatialNodes.find((n) => n.id === anchorNodeId);
   if (!target) return null;
+
+  // Which nodes end up in the neighbourhood is the algorithm's decision, and
+  // it is a small bounded set — so let it decide first, without records, then
+  // read exactly those. The algorithm is pure geometry over an in-memory
+  // bundle; running it twice costs far less than reading a Space's worth of
+  // node records to describe a dozen of them.
+  const shape = buildNodeNeighbourhoodContext(
+    target,
+    bundle.spatialNodes,
+    bundle.edges,
+  );
+  const nodeRecords = await readCanvasNodes(
+    canvasId,
+    shape.layers.flatMap((layer) =>
+      layer.groups.flatMap((group) => group.nodes.map((node) => node.id)),
+    ),
+  );
 
   const cache = new Map<string, AgentNodePreview>();
   // One assembler for every neighbour: the node carries whatever the spatial

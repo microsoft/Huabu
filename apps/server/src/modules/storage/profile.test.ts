@@ -11,11 +11,29 @@ import {
 } from './profile.js';
 
 describe('parseStorageProfile', () => {
-  it('defaults both axes to disk', () => {
+  it('defaults both backend axes to disk, and files to their pairing', () => {
     expect(parseStorageProfile({})).toEqual({
       structured: { kind: 'disk' },
       blobs: { kind: 'disk' },
+      files: { kind: 'disk-titled' },
     });
+  });
+
+  it('derives the materialization from the structured backend', () => {
+    // Not a knob: a structured backend that owns directories has already
+    // chosen where a Space lives, and the materialization has to agree.
+    expect(
+      parseStorageProfile({ HUABU_STRUCTURED_BACKEND: 'sqlite' }).files.kind,
+    ).toBe('disk-addressed');
+    expect(
+      parseStorageProfile({ HUABU_STRUCTURED_BACKEND: 'disk' }).files.kind,
+    ).toBe('disk-titled');
+  });
+
+  it('ignores an environment attempt to choose the materialization', () => {
+    expect(
+      parseStorageProfile({ HUABU_SPACE_FILES: 'disk-addressed' }).files.kind,
+    ).toBe('disk-titled');
   });
 
   it('reads each axis independently', () => {
@@ -52,6 +70,7 @@ describe('validateStorageProfile', () => {
       validateStorageProfile({
         structured: { kind: 'disk' },
         blobs: { kind: 'disk' },
+        files: { kind: 'disk-titled' },
       }),
     ).not.toThrow();
   });
@@ -63,6 +82,7 @@ describe('validateStorageProfile', () => {
       validateStorageProfile({
         structured: { kind: 'postgres' },
         blobs: { kind: 'disk' },
+        files: { kind: 'disk-titled' },
       }),
     ).toThrow(/not implemented yet.*disk/s);
   });
@@ -72,8 +92,33 @@ describe('validateStorageProfile', () => {
       validateStorageProfile({
         structured: { kind: 'disk' },
         blobs: { kind: 'azure' },
+        files: { kind: 'disk-titled' },
       }),
     ).toThrow(/not implemented yet.*disk/s);
+  });
+
+  // The pairing guards a quiet failure rather than a crash: Disk's records
+  // live under the title, so id-addressed materialization would put a
+  // Space's blobs in one directory and its records in another, with neither
+  // looking wrong on its own.
+  it('rejects a materialization the structured backend did not choose', () => {
+    expect(() =>
+      validateStorageProfile({
+        structured: { kind: 'disk' },
+        blobs: { kind: 'disk' },
+        files: { kind: 'disk-addressed' },
+      }),
+    ).toThrow(/requires the "disk-titled" Space materialization/);
+  });
+
+  it('reports a missing adapter ahead of the pairing it would also fail', () => {
+    expect(() =>
+      validateStorageProfile({
+        structured: { kind: 'sqlite' },
+        blobs: { kind: 'disk' },
+        files: { kind: 'disk-titled' },
+      }),
+    ).toThrow(/Structured backend "sqlite" is not implemented yet/);
   });
 });
 
@@ -87,14 +132,27 @@ describe('requiresExplicitInit', () => {
       requiresExplicitInit({
         structured: { kind: 'disk' },
         blobs: { kind: 'disk' },
+        files: { kind: 'disk-titled' },
       }),
     ).toBe(false);
   });
 
   it.each([
-    { structured: { kind: 'postgres' }, blobs: { kind: 'disk' } },
-    { structured: { kind: 'sqlite' }, blobs: { kind: 'disk' } },
-    { structured: { kind: 'disk' }, blobs: { kind: 'azure' } },
+    {
+      structured: { kind: 'postgres' },
+      blobs: { kind: 'disk' },
+      files: { kind: 'disk-titled' },
+    },
+    {
+      structured: { kind: 'sqlite' },
+      blobs: { kind: 'disk' },
+      files: { kind: 'disk-titled' },
+    },
+    {
+      structured: { kind: 'disk' },
+      blobs: { kind: 'azure' },
+      files: { kind: 'disk-titled' },
+    },
   ] as const)('requires an awaited init for %j', (profile) => {
     expect(requiresExplicitInit(profile)).toBe(true);
   });

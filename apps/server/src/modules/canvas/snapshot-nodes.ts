@@ -67,7 +67,7 @@ import {
 } from '@huabu/shared';
 import { getSketchRenderedSize } from '@huabu/shared/canvas-engine';
 
-import { readCanvasSnapshot } from './space-read.js';
+import { readCanvas, readCanvasNodes } from './space-read.js';
 import { RASTERIZABLE_IMAGE_EXT_MIME } from '../../utils/mime.js';
 import { canvasBlobs } from '../storage/index.js';
 
@@ -863,14 +863,13 @@ export async function snapshotNodesToArtifacts(
     Math.min(SPACE_SNAPSHOT_MAX_PIXELS, args.maxPixels ?? CLUSTER_MAX_PIXELS),
   );
 
-  const snapshot = await readCanvasSnapshot(args.canvasId);
-  if (!snapshot) {
+  const canvas = await readCanvas(args.canvasId);
+  if (!canvas) {
     throw new SnapshotNodeError(
       `Canvas ${args.canvasId} not found`,
       'canvas_not_found',
     );
   }
-  const { canvas, nodes: nodeRecords } = snapshot;
   const allNodes = (canvas.state.nodes ?? []) as CanvasNode[];
   const byId = new Map(allNodes.map((n) => [n.id, n] as const));
 
@@ -925,6 +924,13 @@ export async function snapshotNodesToArtifacts(
     expansion.push({ id, fromFrame });
   };
   for (const id of orderedIds) expand(id, false);
+
+  // Only the expanded set contributes: a snapshot needs each node's `src`,
+  // and nothing else in the Space is consulted.
+  const nodeRecords = await readCanvasNodes(
+    args.canvasId,
+    expansion.map((entry) => entry.id),
+  );
 
   const results: SnapshotNodeResult[] = [];
   // All snapshottable nodes (image + sketch) feed into the same

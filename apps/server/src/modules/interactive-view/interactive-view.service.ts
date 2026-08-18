@@ -32,7 +32,11 @@ import {
   executeOnServer,
   type InteractiveViewConflict,
 } from '../canvas/canvas-executor.js';
-import { readCanvas, readCanvasSnapshot } from '../canvas/space-read.js';
+import {
+  readCanvas,
+  readCanvasNode,
+  readCanvasNodes,
+} from '../canvas/space-read.js';
 import { canvasBlobs, getStructuredStore } from '../storage/index.js';
 
 import type { FastifyBaseLogger } from 'fastify';
@@ -190,17 +194,26 @@ export class InteractiveViewService {
     canvasId: string,
     viewKey?: string,
   ): Promise<InteractiveViewResource[]> {
-    const snapshot = await readCanvasSnapshot(canvasId);
-    if (!snapshot) {
+    const canvas = await readCanvas(canvasId);
+    if (!canvas) {
       throw new InteractiveViewServiceError(
         'canvas_not_found',
         `Canvas ${canvasId} does not exist`,
       );
     }
-    return (snapshot.canvas.state.nodes as StoredNode[]).flatMap((node) => {
+    const nodes = canvas.state.nodes as StoredNode[];
+    // Only `web` nodes can carry a View, and their records supply nothing but
+    // the renderer artifact — so read those, not the Space.
+    const records = await readCanvasNodes(
+      canvasId,
+      nodes.flatMap((node) =>
+        node.type === 'web' && typeof node.id === 'string' ? [node.id] : [],
+      ),
+    );
+    return nodes.flatMap((node) => {
       const resource = resourceFromNode(
         node,
-        typeof node.id === 'string' ? snapshot.nodes.get(node.id) : null,
+        typeof node.id === 'string' ? records.get(node.id) : null,
       );
       if (
         !resource ||
@@ -216,18 +229,18 @@ export class InteractiveViewService {
     canvasId: string,
     nodeId: string,
   ): Promise<InteractiveViewResource> {
-    const snapshot = await readCanvasSnapshot(canvasId);
-    if (!snapshot) {
+    const canvas = await readCanvas(canvasId);
+    if (!canvas) {
       throw new InteractiveViewServiceError(
         'canvas_not_found',
         `Canvas ${canvasId} does not exist`,
       );
     }
-    const node = (snapshot.canvas.state.nodes as StoredNode[]).find(
+    const node = (canvas.state.nodes as StoredNode[]).find(
       (candidate) => candidate.id === nodeId,
     );
     const resource = node
-      ? resourceFromNode(node, snapshot.nodes.get(nodeId))
+      ? resourceFromNode(node, await readCanvasNode(canvasId, nodeId))
       : null;
     if (!resource) {
       throw new InteractiveViewServiceError(

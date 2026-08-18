@@ -29,6 +29,7 @@ import {
   isWorkspaceConfigured,
 } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
+import { AddressedSpaceFiles } from './backends/disk/space-files-addressed.js';
 import { DiskSpaceFiles } from './backends/disk/space-files.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import {
@@ -108,8 +109,21 @@ export interface Storage {
   readonly files: SpaceFiles;
 }
 
-function buildSpaceFiles(workspacePath: string): SpaceFiles {
-  return new DiskSpaceFiles(workspacePath);
+function buildSpaceFiles(
+  profile: StorageProfile,
+  workspacePath: string,
+): SpaceFiles {
+  switch (profile.files.kind) {
+    case 'disk-titled':
+      return new DiskSpaceFiles(workspacePath);
+    case 'disk-addressed':
+      return new AddressedSpaceFiles(workspacePath);
+    default:
+      // Unreachable: validateStorageProfile rejects unimplemented kinds.
+      throw new Error(
+        `Unsupported Space materialization: ${String(profile.files.kind)}`,
+      );
+  }
 }
 
 function buildBlobStore(profile: StorageProfile, files: SpaceFiles): BlobStore {
@@ -143,7 +157,7 @@ export function createStorage(
 ): Storage {
   validateStorageProfile(profile);
   const resolvedWorkspacePath = path.resolve(workspacePath);
-  const files = buildSpaceFiles(resolvedWorkspacePath);
+  const files = buildSpaceFiles(profile, resolvedWorkspacePath);
   return {
     profile,
     workspacePath: resolvedWorkspacePath,

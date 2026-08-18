@@ -63,6 +63,22 @@ export class DiskSpaceNodes implements SpaceNodes {
       : snapshotOf(record, this.#duplicates(nodeId));
   }
 
+  async readMany(
+    nodeIds: Iterable<string>,
+  ): Promise<ReadonlyMap<string, NodeSnapshot>> {
+    this.#assertActiveWorkspace();
+    const out = new Map<string, NodeSnapshot>();
+    // Each targeted read resolves a filename through the index and opens one
+    // file, so the cost follows the request. Deduplicated because a caller
+    // assembling ids from topology can easily name one twice.
+    for (const nodeId of new Set(nodeIds)) {
+      const record = this.#store.readNodeStrict(nodeId);
+      if (record === null) continue;
+      out.set(nodeId, snapshotOf(record, this.#duplicates(nodeId)));
+    }
+    return out;
+  }
+
   async list(): Promise<ReadonlyMap<string, NodeSnapshot>> {
     this.#assertActiveWorkspace();
     const records = await this.#store.readAllNodes({ strict: true });

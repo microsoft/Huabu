@@ -37,6 +37,11 @@ function fakeRepository(canvasId = 'c1') {
       const snapshot = await nodes.read('n1');
       return snapshot ? new Map([['n1', snapshot]]) : new Map();
     },
+    async readMany(nodeIds): Promise<ReadonlyMap<string, NodeSnapshot>> {
+      const listed = await nodes.list();
+      const wanted = new Set(nodeIds);
+      return new Map([...listed].filter(([nodeId]) => wanted.has(nodeId)));
+    },
     async stream(onNode): Promise<ReadonlyMap<string, NodeSnapshot>> {
       const snapshots = await nodes.list();
       for (const [nodeId, snapshot] of snapshots) onNode(nodeId, snapshot);

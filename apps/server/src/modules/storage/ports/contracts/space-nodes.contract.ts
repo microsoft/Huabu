@@ -85,6 +85,44 @@ export function describeSpaceNodesContract(
       );
     });
 
+    it('reads the named nodes, agreeing with list and omitting absentees', async () => {
+      const { repository } = await open();
+      const first = await putSuccessfully(repository, {
+        nodeId: 'contract-many-node-a',
+        record: note('contract-many-node-a', 'Contract many A', 'alpha'),
+      });
+      await putSuccessfully(repository, {
+        nodeId: 'contract-many-node-b',
+        record: note('contract-many-node-b', 'Contract many B', 'beta'),
+      });
+
+      const selected = await repository.readMany([
+        'contract-many-node-a',
+        'contract-missing',
+        // Repeated on purpose: a caller assembling ids from topology can
+        // easily name one twice, and that must not change the result.
+        'contract-many-node-a',
+      ]);
+
+      expect(selected).toEqual(new Map([['contract-many-node-a', first]]));
+      // Whatever it returns must be exactly what the whole-Space read holds,
+      // so a caller can move between the two without noticing.
+      const listed = await repository.list();
+      expect(selected.get('contract-many-node-a')).toEqual(
+        listed.get('contract-many-node-a'),
+      );
+    });
+
+    it('reads nothing for an empty id set', async () => {
+      const { repository } = await open();
+      await putSuccessfully(repository, {
+        nodeId: 'contract-many-empty',
+        record: note('contract-many-empty', 'Contract many empty', 'alpha'),
+      });
+
+      await expect(repository.readMany([])).resolves.toEqual(new Map());
+    });
+
     it('streams the same snapshot returned by list', async () => {
       const { repository } = await open();
       await putSuccessfully(repository, {

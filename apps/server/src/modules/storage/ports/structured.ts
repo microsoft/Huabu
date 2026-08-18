@@ -480,6 +480,23 @@ export interface SpaceNodes {
    */
   readonly canvasId: string;
   read(nodeId: string): Promise<NodeSnapshot | null>;
+  /**
+   * Read the named node records, keyed by stable id.
+   *
+   * Ids with no record are absent from the result rather than present and
+   * null, so the map is the same shape {@link list} returns and callers can
+   * treat the two interchangeably.
+   *
+   * This exists because most readers want a handful of named nodes, not the
+   * Space: a selection to describe, a neighbourhood to render, one view to
+   * serve. Expressing those as `list()` makes their cost grow with the Space
+   * instead of with the request, and it is a shape every backend can serve
+   * better than a full scan — a SQL adapter answers it with one `WHERE id IN`
+   * rather than reading every row.
+   */
+  readMany(
+    nodeIds: Iterable<string>,
+  ): Promise<ReadonlyMap<string, NodeSnapshot>>;
   /** Read every complete node record in this Space, keyed by stable id. */
   list(): Promise<ReadonlyMap<string, NodeSnapshot>>;
   /**

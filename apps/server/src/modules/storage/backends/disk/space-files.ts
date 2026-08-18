@@ -1,7 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-/** Disk materialization of the Space file capability. */
+/**
+ * Title-addressed Disk materialization of the Space file capability.
+ *
+ * A Space lives at `<workspace>/<safe(title)>/`, which is the layout a user
+ * sees in Finder and renames from. Resolving that directory means asking the
+ * structured records which title a Space currently has, so this
+ * implementation is only coherent beside the Disk structured backend — see
+ * `AddressedSpaceFiles` for the materialization that composes with any of
+ * them, and `profile.ts` for the rule that keeps the pairing honest.
+ */
 
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -31,7 +40,7 @@ import type {
 const NODE_FILE_RE = /^nodes\/([^/]+\.md)$/;
 
 export class DiskSpaceFiles implements SpaceFiles {
-  readonly kind = 'disk' as const;
+  readonly kind = 'disk-titled' as const;
   readonly #workspacePath: string;
 
   constructor(workspacePath = getWorkspacePath()) {
