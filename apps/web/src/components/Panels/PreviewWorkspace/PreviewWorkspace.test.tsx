@@ -27,7 +27,7 @@ import {
   PreviewTabDragOverlayPortal,
   PreviewWorkspace,
   settleActivePreviewTab,
-  subscribeToTabDragDeactivation,
+  subscribeToTabDragInterruption,
 } from './PreviewWorkspace';
 import { PreviewWorkspacePanel } from './PreviewWorkspacePanel';
 import {
@@ -162,16 +162,28 @@ describe('tab strip', () => {
     expect(restoreMessageListScrollPosition(messageList, viewKey)).toBe(false);
   });
 
-  it('clears an active tab drag when the window loses focus', () => {
-    const clear = vi.fn();
-    const unsubscribe = subscribeToTabDragDeactivation(clear);
+  it('cancels a tab pointer sensor when its document is deactivated', () => {
+    const cancel = vi.fn();
+    const unsubscribe = subscribeToTabDragInterruption(cancel);
 
     window.dispatchEvent(new Event('blur'));
-    expect(clear).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(cancel).toHaveBeenCalledTimes(2);
 
     unsubscribe();
     window.dispatchEvent(new Event('blur'));
-    expect(clear).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledTimes(2);
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
   });
 
   it('renders a labelled tab ghost while dragging', () => {

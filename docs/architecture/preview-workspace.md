@@ -90,7 +90,7 @@ The workspace contains one or two horizontal groups. Each group owns one active 
 
 Tabs can be reordered within a group or moved across groups with pointer or keyboard drag sensors. Every drop delegates to the pure `moveTab` model action, which repairs ordering, active tabs, and empty source groups.
 
-Pointer dragging keeps a faded source placeholder in the tab strip, portals a labelled tab overlay to `document.body` so transformed panel ancestors cannot offset it from the pointer, and marks the resolved insertion edge of the hovered tab or the end of a group. The visual marker follows the same destination semantics used by `resolveTabDropDestination`.
+Pointer dragging keeps a faded source placeholder in the tab strip, portals a labelled tab overlay to `document.body` so transformed panel ancestors cannot offset it from the pointer, and marks the resolved insertion edge of the hovered tab or the end of a group. The visual marker follows the same destination semantics used by `resolveTabDropDestination`. Window blur and document hiding cancel the pointer sensor itself so releasing outside the Electron window cannot leave a tab in a stale dragging state.
 
 Closing an active tab selects the nearest remaining tab in the same group. Moving or closing the final tab in a secondary group removes that group. The workspace keeps one empty primary group as its valid empty state.
 

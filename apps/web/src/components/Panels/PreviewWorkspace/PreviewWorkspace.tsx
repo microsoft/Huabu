@@ -22,6 +22,7 @@ import {
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
+  type PointerSensorProps,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import {
@@ -62,16 +63,52 @@ const RATIO_STEP = 0.05;
 
 const selectWorkspace = (s: PreviewWorkspaceState) => s.workspace;
 
-export function subscribeToTabDragDeactivation(clear: () => void): () => void {
-  const clearOnHidden = () => {
-    if (document.visibilityState === 'hidden') clear();
+export function subscribeToTabDragInterruption(
+  cancel: () => void,
+  ownerDocument: Document = document,
+  ownerWindow: Window = window,
+): () => void {
+  const cancelOnHidden = () => {
+    if (ownerDocument.visibilityState === 'hidden') cancel();
   };
-  window.addEventListener('blur', clear);
-  document.addEventListener('visibilitychange', clearOnHidden);
+  ownerWindow.addEventListener('blur', cancel);
+  ownerDocument.addEventListener('visibilitychange', cancelOnHidden);
   return () => {
-    window.removeEventListener('blur', clear);
-    document.removeEventListener('visibilitychange', clearOnHidden);
+    ownerWindow.removeEventListener('blur', cancel);
+    ownerDocument.removeEventListener('visibilitychange', cancelOnHidden);
   };
+}
+
+class PreviewTabPointerSensor extends PointerSensor {
+  constructor(props: PointerSensorProps) {
+    let unsubscribe = () => {};
+    const onCancel = () => {
+      unsubscribe();
+      props.onCancel();
+    };
+    const onEnd = () => {
+      unsubscribe();
+      props.onEnd();
+    };
+    const onAbort = (id: Parameters<PointerSensorProps['onAbort']>[0]) => {
+      unsubscribe();
+      props.onAbort(id);
+    };
+
+    super({ ...props, onAbort, onCancel, onEnd });
+
+    const ownerDocument =
+      (
+        props.event.target as
+          | (EventTarget & { ownerDocument?: Document })
+          | null
+      )?.ownerDocument ?? document;
+    unsubscribe = subscribeToTabDragInterruption(
+      onCancel,
+      ownerDocument,
+      ownerDocument.defaultView ?? window,
+    );
+  }
 }
 
 export function PreviewTabDragOverlayPortal({
@@ -257,7 +294,9 @@ export function PreviewWorkspace({
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const isSplit = workspace.groups.length > 1;
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(PreviewTabPointerSensor, {
+      activationConstraint: { distance: 5 },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     }),
@@ -267,11 +306,6 @@ export function PreviewWorkspace({
     setActiveDragTabId(null);
     setDragOverId(null);
   }, []);
-
-  useEffect(() => {
-    if (!activeDragTabId) return;
-    return subscribeToTabDragDeactivation(clearTabDrag);
-  }, [activeDragTabId, clearTabDrag]);
 
   const onTabDragStart = useCallback(({ active }: DragStartEvent) => {
     setActiveDragTabId(String(active.id));
