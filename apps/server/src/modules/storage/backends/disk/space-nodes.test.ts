@@ -205,6 +205,59 @@ describe('DiskSpaceNodes', () => {
     ).resolves.toMatchObject({ ok: false, reason: 'duplicate-node' });
   });
 
+  it('reports duplicate representations as a warning on the listed node', async () => {
+    mkdirSync(nodesDir('canvas-a'), { recursive: true });
+    for (const filename of ['Node A.md', 'Duplicate A.md']) {
+      writeFileSync(
+        path.join(nodesDir('canvas-a'), filename),
+        `---\nid: node-a\ntype: note\nlabel: ${filename.replace(/\.md$/, '')}\n---\nbody\n`,
+        'utf8',
+      );
+    }
+    const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
+
+    const listed = await repository.list();
+
+    expect(listed.get('node-a')?.warnings).toEqual([
+      { kind: 'duplicate-record', names: ['Duplicate A.md', 'Node A.md'] },
+    ]);
+    await expect(repository.read('node-a')).resolves.toMatchObject({
+      warnings: [
+        { kind: 'duplicate-record', names: ['Duplicate A.md', 'Node A.md'] },
+      ],
+    });
+  });
+
+  it('does not re-enumerate the Space per node when nothing is duplicated', async () => {
+    const store = getCanvasStore('canvas-a');
+    const repository = new DiskSpaceNodes(store);
+    for (let i = 0; i < 5; i++) {
+      await repository.put({
+        nodeId: `node-${i}`,
+        record: note(`node-${i}`, `Node ${i}`, `body ${i}`),
+      });
+    }
+
+    // The disk-truth enumeration opens and parses every file in the Space.
+    // Reaching for it once per node turns a read, a whole-Space list, and a
+    // write into quadratic synchronous I/O, so a healthy Space must never
+    // reach it at all — the warm duplicate set answers first.
+    const enumerate = vi.spyOn(store, 'duplicateNodeFiles');
+    try {
+      await repository.list();
+      await repository.read('node-3');
+      await repository.stream(() => {});
+      await repository.put({
+        nodeId: 'node-3',
+        record: note('node-3', 'Node 3', 'updated'),
+      });
+
+      expect(enumerate).not.toHaveBeenCalled();
+    } finally {
+      enumerate.mockRestore();
+    }
+  });
+
   it('deletes the indexed representative of a duplicate node', async () => {
     mkdirSync(nodesDir('canvas-a'), { recursive: true });
     for (const filename of ['Node A.md', 'Duplicate A.md']) {

@@ -56,17 +56,3 @@ export async function readCanvasSnapshot(
     ),
   };
 }
-
-export async function streamCanvasNodes(
-  canvasId: string,
-  onNode: (nodeId: string, record: NodeContent) => void,
-  signal?: { readonly aborted: boolean },
-): Promise<ReadonlyMap<string, NodeContent>> {
-  const snapshots = await getStructuredStore()
-    .space(canvasId)
-    .nodes.stream(
-      (nodeId, snapshot) => onNode(nodeId, snapshot.record),
-      signal,
-    );
-  return nodeRecords(snapshots);
-}

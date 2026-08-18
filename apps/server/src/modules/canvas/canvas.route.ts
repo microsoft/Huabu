@@ -1548,7 +1548,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
    * user can resolve a duplicate-markdown collision by hand (keep one
    * file, delete the rest). Desktop-first: the server runs on the same
    * machine as the UI, so it owns the only reliable filesystem path.
-   * The folder is sandboxed to the workspace via {@link nodesDir}.
+   * The folder is sandboxed to the workspace by the materialization
+   * capability, which validates the id before resolving a path.
    */
   fastify.post<{
     Params: { canvasId: string };

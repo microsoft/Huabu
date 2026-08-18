@@ -115,6 +115,10 @@ describeSpaceRepositoryContract('Disk', () => {
         },
       }),
     worldCanvasId: WORLD_ID,
+    openUnbootstrapped: () => {
+      makeWorkspace('huabu-space-repository-contract-empty-');
+      return new DiskStructuredStore().spaces();
+    },
   };
 });
 

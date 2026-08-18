@@ -24,7 +24,6 @@
  *    response headers (label percent-encoded, edges as JSON).
  */
 
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -34,13 +33,13 @@ import {
 } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
-import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
 import {
   ALWAYS_SKIP,
   safeResolve,
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
 import { readCanvas, readCanvasNode } from '../canvas/space-read.js';
+import { getSpaceFiles } from '../storage/index.js';
 
 import type { CanvasNodeType } from '@huabu/shared';
 import type { CanvasNode, CanvasEdge } from '@huabu/shared/canvas-engine';
@@ -90,11 +89,12 @@ const NODE_FILE_RE = /^nodes\/[^/]+\.md$/;
  * the path is not a node file or no node currently claims it — callers then
  * serve the bytes without `X-Huabu-*` headers.
  *
- * The file → node mapping goes through the store's frontmatter-`id` index
- * (the persisted node record), NOT a re-derived
- * `toSafeFilename(label)` — topology never carries `data.label`, so the
- * derived path would collapse to `nodes/<id>.md` and never match a real
- * label-named file. `label` / `rev` are then sourced from the sidecar.
+ * The file → node mapping is asked of the materialization capability, NOT
+ * re-derived from `toSafeFilename(label)` and not read out of the file's own
+ * frontmatter — topology never carries `data.label`, so the derived path
+ * would collapse to `nodes/<id>.md` and never match a real label-named file,
+ * and reading the id out of the bytes would bind this route to one backend's
+ * record encoding. `label` / `rev` are then sourced from the node record.
  */
 export async function lookupNodeByPath(
   canvasId: string,
@@ -102,19 +102,11 @@ export async function lookupNodeByPath(
 ): Promise<RfsNodeLookup | null> {
   if (!NODE_FILE_RE.test(physicalRel)) return null;
 
-  let raw: string;
-  try {
-    raw = await readFile(safeResolve(canvasId, physicalRel), 'utf8');
-  } catch {
-    return null;
-  }
-  const { meta: frontmatter } = parseFrontmatter(raw);
-  const filename = physicalRel.slice('nodes/'.length);
-  const rawNodeId = frontmatter['id'];
-  const nodeId =
-    typeof rawNodeId === 'string' && rawNodeId.length > 0
-      ? rawNodeId
-      : filename.replace(/\.md$/, '');
+  const nodeId = await getSpaceFiles()
+    .space(canvasId)
+    .nodeIdForPath(physicalRel);
+  if (nodeId === null) return null;
+
   const [canvas, sidecar] = await Promise.all([
     readCanvas(canvasId),
     readCanvasNode(canvasId, nodeId),

@@ -18,7 +18,9 @@ import { fileURLToPath } from 'node:url';
 import { stageStorageForWorkspace } from './storage/index.js';
 import {
   commitWorkspacePath,
+  getWorkspacePath,
   isManagedMode,
+  isWorkspaceConfigured,
   resolveWorkspacePath,
 } from './workspace.js';
 import { getLogger } from '../utils/logger.js';
@@ -196,10 +198,16 @@ export async function activateWorkspacePath(
   try {
     await runWorkspacePreparation(resolvedPath, options);
     const staged = await stageStorageForWorkspace(resolvedPath);
+    // The mount's own activation refreshes process-global locators, which
+    // only resolve once the path is committed — so the commit has to lead.
+    // Should the swap still fail, put the previous path back rather than
+    // leaving a committed Workspace whose storage was just discarded.
+    const previousPath = isWorkspaceConfigured() ? getWorkspacePath() : null;
     try {
       commitWorkspacePath(resolvedPath);
       await staged.activate();
     } catch (error) {
+      if (previousPath !== null) commitWorkspacePath(previousPath);
       await staged.abort();
       throw error;
     }

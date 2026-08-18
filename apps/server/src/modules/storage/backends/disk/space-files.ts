@@ -12,10 +12,8 @@ import {
   suggestCanvasDir,
 } from './canvas-dirs.js';
 import { canvasRoot, SPACE_JSON_FILENAME } from './layout.js';
-import {
-  registerSpaceDirHandleOwner,
-  withSpaceDirHandlesReleased,
-} from './space-dir-handles.js';
+import { getCanvasStore } from './legacy/canvas-store-cache.js';
+import { registerSpaceDirHandleOwner } from './space-dir-handles.js';
 import { sanitizeId } from '../../../../utils/fs.js';
 import { toSafeFilename } from '../../../../utils/naming.js';
 import { getWorkspacePath } from '../../../workspace.js';
@@ -28,6 +26,9 @@ import type {
   SpaceFiles,
   SpaceImportStaging,
 } from '../../ports/files.js';
+
+/** Space-relative markdown node file; capture group is the bare filename. */
+const NODE_FILE_RE = /^nodes\/([^/]+\.md)$/;
 
 export class DiskSpaceFiles implements SpaceFiles {
   readonly kind = 'disk' as const;
@@ -75,15 +76,17 @@ export class DiskSpaceFiles implements SpaceFiles {
         assertActive();
         return path.join(canvasRoot(safeId), 'nodes');
       },
+      nodeIdForPath: async (relativePath: string): Promise<string | null> => {
+        assertActive();
+        const filename = NODE_FILE_RE.exec(relativePath)?.[1];
+        if (filename === undefined) return null;
+        // The sidecar index is the Disk authority for this mapping: a node
+        // is filed under its label, so the name alone cannot be inverted.
+        return getCanvasStore(safeId).nodeIdForFilename(filename);
+      },
       registerHandleOwner: (owner: SpaceFileHandleOwner): (() => void) => {
         assertActive();
         return registerSpaceDirHandleOwner(safeId, owner);
-      },
-      withHandlesReleased: async <T>(
-        operation: () => Promise<T> | T,
-      ): Promise<T> => {
-        assertActive();
-        return withSpaceDirHandlesReleased(safeId, operation);
       },
     });
   }

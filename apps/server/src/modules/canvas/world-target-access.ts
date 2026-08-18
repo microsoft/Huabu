@@ -17,6 +17,14 @@ export class WorldTargetAccessError extends Error {
   }
 }
 
+/**
+ * Read the named Spaces, refusing a record whose topology is unusable.
+ *
+ * The strictness is the point of the name: a cross-Space read must not
+ * silently present a Space whose `state` is not a pair of arrays as an empty
+ * one. The check reads the record rather than the substrate, so it survives a
+ * backend that keeps topology in tables.
+ */
 export async function readWorldTargetCanvasesStrict(
   canvasIds: ReadonlySet<string>,
 ): Promise<Map<string, CanvasFile | null>> {
@@ -25,6 +33,15 @@ export async function readWorldTargetCanvasesStrict(
     await Promise.all(
       [...canvasIds].map(async (canvasId) => {
         const canvas = await structured.space(canvasId).read();
+        if (
+          canvas &&
+          (!Array.isArray(canvas.state?.nodes) ||
+            !Array.isArray(canvas.state.edges))
+        ) {
+          throw new WorldTargetAccessError(
+            `Canvas ${canvasId} has malformed topology`,
+          );
+        }
         return [canvasId, canvas] as const;
       }),
     ),

@@ -21,6 +21,14 @@ export interface SpaceRepositoryContractHarness {
   readonly read: (canvasId: string) => Promise<CanvasFile | null>;
   /** Stable World id in the harness namespace. */
   readonly worldCanvasId: string;
+  /**
+   * Repository over a second namespace that has never held a World.
+   *
+   * Bootstrap has two branches and a new backend meets the empty one first,
+   * so the suite has to be able to reach a namespace the harness has not
+   * already seeded.
+   */
+  readonly openUnbootstrapped: () => Promise<SpaceRepository> | SpaceRepository;
   /** One representative portable mutation for deletion-fence checks. */
   readonly attemptMutation: (canvasId: string) => Promise<unknown>;
   readonly cleanup?: () => Promise<void> | void;
@@ -57,6 +65,21 @@ export function describeSpaceRepositoryContract(
       await expect(repository.ensureWorld()).resolves.toBe(worldCanvasId);
       await expect(repository.ensureWorld()).resolves.toBe(worldCanvasId);
       await expect(repository.worldId()).resolves.toBe(worldCanvasId);
+    });
+
+    it('creates exactly one World in a namespace that has none', async () => {
+      const { openUnbootstrapped } = await open();
+      const repository = await openUnbootstrapped();
+
+      const created = await repository.ensureWorld();
+
+      expect(created).toBeTruthy();
+      // Same id on a second call: bootstrap must not mint a new identity,
+      // and the World it created must be the one `worldId()` now reports.
+      await expect(repository.ensureWorld()).resolves.toBe(created);
+      await expect(repository.worldId()).resolves.toBe(created);
+      // The World is never an ordinary, user-visible Space.
+      await expect(repository.list()).resolves.toEqual([]);
     });
 
     it('lists created ordinary Spaces without promising order', async () => {

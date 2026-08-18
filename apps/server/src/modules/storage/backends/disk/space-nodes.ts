@@ -60,7 +60,7 @@ export class DiskSpaceNodes implements SpaceNodes {
     const record = this.#store.readNodeStrict(nodeId);
     return record === null
       ? null
-      : snapshotOf(record, this.#store.duplicateNodeFiles(nodeId));
+      : snapshotOf(record, this.#duplicates(nodeId));
   }
 
   async list(): Promise<ReadonlyMap<string, NodeSnapshot>> {
@@ -69,7 +69,7 @@ export class DiskSpaceNodes implements SpaceNodes {
     return new Map(
       [...records].map(([nodeId, record]) => [
         nodeId,
-        snapshotOf(record, this.#store.duplicateNodeFiles(nodeId)),
+        snapshotOf(record, this.#duplicates(nodeId)),
       ]),
     );
   }
@@ -79,19 +79,23 @@ export class DiskSpaceNodes implements SpaceNodes {
     signal?: { readonly aborted: boolean },
   ): Promise<ReadonlyMap<string, NodeSnapshot>> {
     this.#assertActiveWorkspace();
+    // Retain what was delivered and reuse it for the returned map, so the
+    // two can never disagree: the adapter's duplicate set is republished
+    // when the scan finishes, which is after the first record is delivered.
+    const delivered = new Map<string, NodeSnapshot>();
     const records = await this.#store.streamAllNodes(
-      (nodeId, record) =>
-        onNode(
-          nodeId,
-          snapshotOf(record, this.#store.duplicateNodeFiles(nodeId)),
-        ),
+      (nodeId, record) => {
+        const snapshot = snapshotOf(record, this.#duplicates(nodeId));
+        delivered.set(nodeId, snapshot);
+        onNode(nodeId, snapshot);
+      },
       signal,
       { strict: true },
     );
     return new Map(
       [...records].map(([nodeId, record]) => [
         nodeId,
-        snapshotOf(record, this.#store.duplicateNodeFiles(nodeId)),
+        delivered.get(nodeId) ?? snapshotOf(record, this.#duplicates(nodeId)),
       ]),
     );
   }
@@ -168,13 +172,27 @@ export class DiskSpaceNodes implements SpaceNodes {
     }
     return {
       ok: true,
-      ...snapshotOf(persisted, this.#store.duplicateNodeFiles(input.nodeId)),
+      ...snapshotOf(persisted, this.#duplicates(input.nodeId)),
     };
   }
 
   async delete(nodeId: string): Promise<NodeDeleteResult> {
     this.#assertActiveWorkspace();
     return this.#store.deleteNode(nodeId);
+  }
+
+  /**
+   * Physical names claiming `nodeId`, or none when it is not duplicated.
+   *
+   * Gated on the index's duplicate set, which is a warm in-memory lookup
+   * populated by the same scan that produced these records. The disk-truth
+   * enumeration behind it opens and parses every file in the Space, so
+   * calling it per node — on a read, a whole-Space list, or a write —
+   * would make each of those quadratic and synchronous.
+   */
+  #duplicates(nodeId: string): readonly string[] {
+    if (!this.#store.isDuplicateNode(nodeId)) return [];
+    return this.#store.duplicateNodeFiles(nodeId);
   }
 
   #assertActiveWorkspace(): void {

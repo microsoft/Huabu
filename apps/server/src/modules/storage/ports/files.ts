@@ -17,10 +17,19 @@ export interface SpaceFileScope {
   directory(): string;
   /** Absolute path to the materialized node-record directory. */
   nodesDirectory(): string;
+  /**
+   * The node record a materialized file carries, or null when none does.
+   *
+   * Which file stands for which record is the materialization's own business
+   * — a Disk layout answers it from the sidecar index, an id-addressed
+   * projection from the name. A consumer that derived it from file *content*
+   * would be reading this backend's record encoding, which is what the
+   * capability exists to keep out of feature modules. `relativePath` is
+   * Space-relative and uses `/` separators.
+   */
+  nodeIdForPath(relativePath: string): Promise<string | null>;
   /** Register a live native handle that must be released for rename/delete. */
   registerHandleOwner(owner: SpaceFileHandleOwner): () => void;
-  /** Temporarily release registered native handles around one operation. */
-  withHandlesReleased<T>(operation: () => Promise<T> | T): Promise<T>;
 }
 
 export interface SpaceImportStaging {

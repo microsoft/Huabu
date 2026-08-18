@@ -983,7 +983,7 @@ export class CanvasStore {
             ? rawId
             : file.replace(/\.md$/, '');
         addSidecarToIndex(idx, duplicates, this.canvasId, id, file);
-        const content = markdownToNodeContent(id, raw);
+        const content = markdownToNodeContent(id, raw, options?.strict);
         contents.set(id, content);
         // JS is single-threaded between awaits, so even though
         // multiple workers may be in-flight, exactly one onNode call
