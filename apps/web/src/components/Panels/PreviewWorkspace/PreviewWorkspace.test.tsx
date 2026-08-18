@@ -20,6 +20,7 @@ import {
 } from '@/components/Messages/messageListScroll';
 import useCanvasStore from '@/store/canvasStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
+import { messageListViewKey } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { PreviewTabDragOverlay } from './PreviewTab';
@@ -147,7 +148,7 @@ afterEach(() => {
 describe('tab strip', () => {
   it('forgets a Chat scroll position when its tab is explicitly closed', () => {
     const threadId = 'thread-close-scroll';
-    const viewKey = `${CANVAS_ID}:${threadId}`;
+    const viewKey = messageListViewKey(CANVAS_ID, threadId);
     store().openPreviewTarget({ kind: 'chat', canvasId: CANVAS_ID, threadId });
     rememberMessageListScrollPosition(viewKey, 420);
     render([]);

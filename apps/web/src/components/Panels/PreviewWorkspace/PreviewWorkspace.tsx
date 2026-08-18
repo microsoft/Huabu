@@ -35,13 +35,15 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
 
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
 import {
   messageListViewKey,
-  reconcileMessageListScrollTargets,
+  nodePreviewViewKey,
+  reconcilePreviewScrollTargets,
 } from '@/store/previewWorkspace/scrollMemory';
 import {
   usePreviewWorkspaceStore,
@@ -174,8 +176,6 @@ export function PreviewWorkspace({
   const { t } = useTranslation();
   const workspace = usePreviewWorkspaceStore(selectWorkspace);
   const canvasId = usePreviewWorkspaceStore((s) => s.canvasId);
-  const nodes = useCanvasStore((s) => s.nodes);
-  const worldReferences = useCanvasStore((s) => s.worldReferences);
   const nodeFocusRequest = usePreviewWorkspaceStore((s) => s.nodeFocusRequest);
   const chatOpenRequest = usePreviewWorkspaceStore((s) => s.chatOpenRequest);
   const consumeNodeFocusRequest = usePreviewWorkspaceStore(
@@ -191,42 +191,49 @@ export function PreviewWorkspace({
   const setActiveGroup = usePreviewWorkspaceStore((s) => s.setActiveGroup);
   const setSplitRatio = usePreviewWorkspaceStore((s) => s.setSplitRatio);
 
+  const scrollTargets = useMemo(
+    () => Object.values(workspace.tabs).map(({ target }) => target),
+    [workspace.tabs],
+  );
+  const scrollViewKeys = useCanvasStore(
+    useShallow((state) =>
+      scrollTargets.map((target) => {
+        if (target.kind === 'chat') {
+          return messageListViewKey(target.canvasId, target.threadId);
+        }
+
+        const node = state.nodes.find(
+          (candidate) => candidate.id === target.nodeId,
+        );
+        if (!node) return undefined;
+        const view = conversationViewForNode(
+          node,
+          target.canvasId,
+          state.worldReferences[target.nodeId],
+        );
+        return view
+          ? messageListViewKey(
+              view.conversationOwner.canvasId,
+              view.conversationOwner.threadId,
+            )
+          : nodePreviewViewKey(target.canvasId, target.nodeId);
+      }),
+    ),
+  );
   const scrollRegistrations = useMemo(() => {
     const registrations: Array<{
       target: PreviewTarget;
       viewKey: string;
     }> = [];
-    for (const { target } of Object.values(workspace.tabs)) {
-      if (target.kind === 'chat') {
-        registrations.push({
-          target,
-          viewKey: messageListViewKey(target.canvasId, target.threadId),
-        });
-        continue;
-      }
-
-      const node = nodes.find((candidate) => candidate.id === target.nodeId);
-      if (!node) continue;
-      const view = conversationViewForNode(
-        node,
-        target.canvasId,
-        worldReferences[target.nodeId],
-      );
-      if (view) {
-        registrations.push({
-          target,
-          viewKey: messageListViewKey(
-            view.conversationOwner.canvasId,
-            view.conversationOwner.threadId,
-          ),
-        });
-      }
+    for (const [index, target] of scrollTargets.entries()) {
+      const viewKey = scrollViewKeys[index];
+      if (viewKey) registrations.push({ target, viewKey });
     }
     return registrations;
-  }, [nodes, workspace.tabs, worldReferences]);
+  }, [scrollTargets, scrollViewKeys]);
 
   useEffect(() => {
-    reconcileMessageListScrollTargets(canvasId, scrollRegistrations);
+    reconcilePreviewScrollTargets(canvasId, scrollRegistrations);
   }, [canvasId, scrollRegistrations]);
 
   const settleTab = useCallback((tabId: string) => {

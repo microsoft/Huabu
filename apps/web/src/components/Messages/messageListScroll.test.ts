@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import {
   forgetMessageListScrollCanvas,
   forgetMessageListScrollTarget,
+  messageListViewKey,
+  nodePreviewViewKey,
   reconcileMessageListScrollTargets,
   registerMessageListScrollTarget,
   replaceMessageListScrollTarget,
@@ -59,6 +61,19 @@ describe('positionMessageListOnOpen', () => {
 });
 
 describe('per-view scroll positions', () => {
+  it('isolates node and Chat positions with matching Canvas and target ids', () => {
+    const chatViewKey = messageListViewKey('canvas-shared', 'target-shared');
+    const nodeViewKey = nodePreviewViewKey('canvas-shared', 'target-shared');
+    rememberMessageListScrollPosition(chatViewKey, 120);
+    rememberMessageListScrollPosition(nodeViewKey, 240);
+
+    const container = document.createElement('div');
+    expect(restoreMessageListScrollPosition(container, chatViewKey)).toBe(true);
+    expect(container.scrollTop).toBe(120);
+    expect(restoreMessageListScrollPosition(container, nodeViewKey)).toBe(true);
+    expect(container.scrollTop).toBe(240);
+  });
+
   it('restores the exact position saved for a thread', () => {
     const container = document.createElement('div');
     rememberMessageListScrollPosition('thread-1', 240);
@@ -225,8 +240,12 @@ describe('per-view scroll positions', () => {
   });
 
   it('forgets every unreferenced position owned or presented by a Canvas', () => {
-    const directViewKey = 'canvas-delete:chat-thread';
-    const sourceViewKey = 'source-canvas:question-thread-delete';
+    const directViewKey = messageListViewKey('canvas-delete', 'chat-thread');
+    const nodeViewKey = nodePreviewViewKey('canvas-delete', 'note-delete');
+    const sourceViewKey = messageListViewKey(
+      'source-canvas',
+      'question-thread-delete',
+    );
     registerMessageListScrollTarget(
       {
         kind: 'node',
@@ -236,6 +255,7 @@ describe('per-view scroll positions', () => {
       sourceViewKey,
     );
     rememberMessageListScrollPosition(directViewKey, 100);
+    rememberMessageListScrollPosition(nodeViewKey, 150);
     rememberMessageListScrollPosition(sourceViewKey, 200);
 
     forgetMessageListScrollCanvas('canvas-delete');
@@ -244,6 +264,12 @@ describe('per-view scroll positions', () => {
       restoreMessageListScrollPosition(
         document.createElement('div'),
         directViewKey,
+      ),
+    ).toBe(false);
+    expect(
+      restoreMessageListScrollPosition(
+        document.createElement('div'),
+        nodeViewKey,
       ),
     ).toBe(false);
     expect(

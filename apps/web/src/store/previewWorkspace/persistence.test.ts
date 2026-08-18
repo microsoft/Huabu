@@ -13,6 +13,7 @@ import {
   writeWorkspace,
 } from './persistence';
 import {
+  messageListViewKey,
   rememberMessageListScrollPosition,
   restoreMessageListScrollPosition,
 } from './scrollMemory';
@@ -252,7 +253,8 @@ describe('canvas index', () => {
   });
 
   it('deletes the layout of canvases pushed past the cap', () => {
-    rememberMessageListScrollPosition('c0:thread-0', 100);
+    const viewKey = messageListViewKey('c0', 'thread-0');
+    rememberMessageListScrollPosition(viewKey, 100);
     for (let i = 0; i <= MAX_PERSISTED_CANVASES; i += 1) {
       writeWorkspace(`c${i}`, sampleWorkspace());
     }
@@ -263,27 +265,22 @@ describe('canvas index', () => {
     expect(readWorkspace('c0')).toBeNull();
     expect(readWorkspace('c1')).not.toBeNull();
     expect(
-      restoreMessageListScrollPosition(
-        document.createElement('div'),
-        'c0:thread-0',
-      ),
+      restoreMessageListScrollPosition(document.createElement('div'), viewKey),
     ).toBe(false);
   });
 
   it('removes the record and the index entry on canvas delete', () => {
     writeWorkspace('c1', sampleWorkspace());
     writeWorkspace('c2', sampleWorkspace());
-    rememberMessageListScrollPosition('c1:thread-1', 100);
+    const viewKey = messageListViewKey('c1', 'thread-1');
+    rememberMessageListScrollPosition(viewKey, 100);
 
     deleteWorkspace('c1');
 
     expect(readWorkspace('c1')).toBeNull();
     expect(readPersistedCanvasIndex()).toEqual(['c2']);
     expect(
-      restoreMessageListScrollPosition(
-        document.createElement('div'),
-        'c1:thread-1',
-      ),
+      restoreMessageListScrollPosition(document.createElement('div'), viewKey),
     ).toBe(false);
   });
 

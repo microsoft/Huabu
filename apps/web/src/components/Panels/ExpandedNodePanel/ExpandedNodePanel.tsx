@@ -30,6 +30,7 @@ import {
   closeActivePreviewNode,
   openPreviewNode,
 } from '../../../store/previewWorkspace/actions.ts';
+import { nodePreviewViewKey } from '../../../store/previewWorkspace/scrollMemory.ts';
 import {
   selectActiveNodeId,
   usePreviewWorkspaceStore,
@@ -250,6 +251,7 @@ export const ExpandedNodePanel = ({
   const closeExpandedCanvas = onClose ?? closeActivePreviewNode;
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
+  const canvasId = useCanvasStore((s) => s.canvasId);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   // Routed through `tryRename` so a sibling-label collision triggers the
   // shared alert + revert flow (same path used by the layer tree and
@@ -664,6 +666,11 @@ export const ExpandedNodePanel = ({
             <NodePreviewContent
               key={expandedNodeId}
               id={expandedNodeId ?? undefined}
+              scrollViewKey={
+                canvasId && expandedNodeId
+                  ? nodePreviewViewKey(canvasId, expandedNodeId)
+                  : undefined
+              }
               type={activeItem.type}
               data={activeItem.data}
               readOnly={false}

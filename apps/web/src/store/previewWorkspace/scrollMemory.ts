@@ -39,10 +39,20 @@ export function messageListViewKey(
   ownerCanvasId: string,
   threadId: string,
 ): string {
-  return `${ownerCanvasId}:${threadId}`;
+  return `chat:${ownerCanvasId}:${threadId}`;
 }
 
-export function rememberMessageListScrollPosition(
+export function nodePreviewViewKey(canvasId: string, nodeId: string): string {
+  return `node:${canvasId}:${nodeId}`;
+}
+
+export function readPreviewScrollPosition(
+  viewKey: string | undefined,
+): number | undefined {
+  return viewKey ? scrollTopByViewKey.get(viewKey) : undefined;
+}
+
+export function rememberPreviewScrollPosition(
   viewKey: string | undefined,
   scrollTop: number,
 ): void {
@@ -50,7 +60,7 @@ export function rememberMessageListScrollPosition(
   scrollTopByViewKey.set(viewKey, Math.max(0, scrollTop));
 }
 
-export function restoreMessageListScrollPosition(
+export function restorePreviewScrollPosition(
   container: HTMLElement,
   viewKey: string | undefined,
 ): boolean {
@@ -61,7 +71,7 @@ export function restoreMessageListScrollPosition(
   return true;
 }
 
-export function registerMessageListScrollTarget(
+export function registerPreviewScrollTarget(
   target: PreviewTarget,
   viewKey: string,
 ): void {
@@ -77,7 +87,7 @@ export function registerMessageListScrollTarget(
   if (previous) removeReference(previous.viewKey);
 }
 
-export function reconcileMessageListScrollTargets(
+export function reconcilePreviewScrollTargets(
   canvasId: string,
   registrations: ReadonlyArray<{
     target: PreviewTarget;
@@ -87,7 +97,7 @@ export function reconcileMessageListScrollTargets(
   const retainedTargetKeys = new Set<string>();
   for (const { target, viewKey } of registrations) {
     retainedTargetKeys.add(previewTargetKey(target));
-    registerMessageListScrollTarget(target, viewKey);
+    registerPreviewScrollTarget(target, viewKey);
   }
 
   for (const [key, registration] of registrationByTarget) {
@@ -98,9 +108,7 @@ export function reconcileMessageListScrollTargets(
   }
 }
 
-export function forgetMessageListScrollPosition(
-  viewKey: string | undefined,
-): void {
+export function forgetPreviewScrollPosition(viewKey: string | undefined): void {
   if (!viewKey) return;
   for (const [key, registration] of registrationByTarget) {
     if (registration.viewKey !== viewKey) continue;
@@ -110,14 +118,14 @@ export function forgetMessageListScrollPosition(
   scrollTopByViewKey.delete(viewKey);
 }
 
-export function forgetMessageListScrollTarget(target: PreviewTarget): void {
+export function forgetPreviewScrollTarget(target: PreviewTarget): void {
   const key = previewTargetKey(target);
   const registration = registrationByTarget.get(key);
   registrationByTarget.delete(key);
   if (registration) removeReference(registration.viewKey);
 }
 
-export function replaceMessageListScrollTarget(
+export function replacePreviewScrollTarget(
   previousTarget: PreviewTarget,
   nextTarget: PreviewTarget,
 ): void {
@@ -139,7 +147,7 @@ export function replaceMessageListScrollTarget(
   });
 }
 
-export function forgetMessageListScrollCanvas(canvasId: string): void {
+export function forgetPreviewScrollCanvas(canvasId: string): void {
   if (!canvasId) return;
   const removedViewKeys = new Set<string>();
   for (const [key, registration] of registrationByTarget) {
@@ -149,12 +157,23 @@ export function forgetMessageListScrollCanvas(canvasId: string): void {
     removeReference(registration.viewKey);
   }
 
-  const viewKeyPrefix = `${canvasId}:`;
+  const viewKeyPrefixes = [`chat:${canvasId}:`, `node:${canvasId}:`];
   for (const viewKey of scrollTopByViewKey.keys()) {
-    if (viewKey.startsWith(viewKeyPrefix)) removedViewKeys.add(viewKey);
+    if (viewKeyPrefixes.some((prefix) => viewKey.startsWith(prefix))) {
+      removedViewKeys.add(viewKey);
+    }
   }
   for (const viewKey of removedViewKeys) {
     if (!referenceCountByViewKey.has(viewKey))
       scrollTopByViewKey.delete(viewKey);
   }
 }
+
+export const rememberMessageListScrollPosition = rememberPreviewScrollPosition;
+export const restoreMessageListScrollPosition = restorePreviewScrollPosition;
+export const registerMessageListScrollTarget = registerPreviewScrollTarget;
+export const reconcileMessageListScrollTargets = reconcilePreviewScrollTargets;
+export const forgetMessageListScrollPosition = forgetPreviewScrollPosition;
+export const forgetMessageListScrollTarget = forgetPreviewScrollTarget;
+export const replaceMessageListScrollTarget = replacePreviewScrollTarget;
+export const forgetMessageListScrollCanvas = forgetPreviewScrollCanvas;
