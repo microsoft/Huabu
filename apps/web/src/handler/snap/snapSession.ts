@@ -164,7 +164,7 @@ let _nestedFrameEntryAllowed = false;
 interface LastEndedSnapshot {
   /** Space-bypass state at the moment the gesture ended. */
   reparentBypass: boolean;
-  /** Cmd/Ctrl sibling-Frame entry state when the gesture ended. */
+  /** Cmd/Ctrl nested-Frame entry state when the gesture ended. */
   nestedFrameEntryAllowed: boolean;
   /** Per-node frame-membership decisions from the last preview tick. */
   dragDecisions: Map<string, DragDecision> | null;

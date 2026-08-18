@@ -126,6 +126,51 @@ describe('resolveNodeDragStop Grid cells', () => {
     expect(resolveParent(true)).toMatchObject({ parentId: 'inner' });
   });
 
+  it('commits a cached upward move from an inner Frame to its outer ancestor', () => {
+    const outer = {
+      id: 'outer',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { sizing: 'manual' },
+      style: { width: 500, height: 500 },
+      measured: { width: 500, height: 500 },
+    } as Node;
+    const inner = {
+      id: 'inner',
+      type: 'frame',
+      parentId: 'outer',
+      position: { x: 50, y: 50 },
+      data: { sizing: 'manual' },
+      style: { width: 200, height: 200 },
+      measured: { width: 200, height: 200 },
+    } as Node;
+    const dragged = {
+      id: 'dragged',
+      type: 'note',
+      parentId: 'inner',
+      position: { x: -40, y: -40 },
+      data: {},
+      style: { width: 100, height: 100 },
+      measured: { width: 100, height: 100 },
+    } as Node;
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: { x: 30, y: 30 },
+        cachedDecisions: new Map([
+          ['dragged', { unframe: true, enterFrameId: 'outer' }],
+        ]),
+      },
+      state([outer, inner, dragged]),
+    );
+
+    expect(
+      resolution.commands.find((command) => command.type === 'SET_NODE_PARENT'),
+    ).toMatchObject({ nodeIds: ['dragged'], parentId: 'outer' });
+  });
+
   it('moves into an empty later cell without touching earlier rows', () => {
     const scene = layoutScene([
       makeFrame(),
