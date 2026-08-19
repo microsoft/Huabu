@@ -4,6 +4,12 @@
 export type MessageListOpenPosition = 'last-user' | 'bottom';
 export type MessageListPreferredPosition = 'last-user' | 'bottom';
 
+export {
+  forgetMessageListScrollPosition,
+  rememberMessageListScrollPosition,
+  restoreMessageListScrollPosition,
+} from '@/store/previewWorkspace/scrollMemory';
+
 /** Position an opened conversation without scrolling any page ancestors. */
 export function positionMessageListOnOpen(
   container: HTMLElement,

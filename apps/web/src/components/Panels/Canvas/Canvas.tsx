@@ -74,6 +74,7 @@ import { useCanvasShortcuts } from '@/hooks/shortcuts';
 import { useAutoPanDuringSelection } from '@/hooks/useAutoPanDuringSelection';
 import { useCanvasGestures } from '@/hooks/useCanvasGestures';
 import { useCanvasLasso } from '@/hooks/useCanvasLasso';
+import { useCanvasPanReleaseGuard } from '@/hooks/useCanvasPanReleaseGuard';
 import { useCanvasPointerRouter } from '@/hooks/useCanvasPointerRouter';
 import { useFrameDragToCreate } from '@/hooks/useFrameDragToCreate';
 import {
@@ -517,6 +518,10 @@ export const Canvas: React.FC<CanvasProps> = ({
   // when a tool-derived prop value changes.
   const [interactivityLocked, setInteractivityLocked] = useState(false);
 
+  const isNotMouse = useIsNotMouse();
+  const inputMode = useEffectiveInputMode();
+  const lastPointer = useInputMode();
+
   // Keyboard shortcuts + paste handler (extracted to hook).
   // Also manages tool state (select/pan) and Space-key temporary pan.
   const { tool, setTool } = useCanvasShortcuts(
@@ -528,10 +533,8 @@ export const Canvas: React.FC<CanvasProps> = ({
       disabled: shortcutsDisabled,
     },
   );
+  useCanvasPanReleaseGuard(wrapperRef, !isNotMouse && tool === 'pan');
 
-  const isNotMouse = useIsNotMouse();
-  const inputMode = useEffectiveInputMode();
-  const lastPointer = useInputMode();
   // Tap-vs-drag activation follows the pointer actually in use.
   const dragActivationDistance = isNotMouse
     ? getDragActivationDistance(lastPointer === 'pen' ? 'pen' : 'touch')

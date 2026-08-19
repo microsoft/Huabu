@@ -38,6 +38,8 @@ While the mouse is the current pointer, the toolbar keeps the Select, Pan, and L
 
 Holding Space temporarily selects Pan. If Space is released during an active mouse pan, Pan remains selected until the gesture's `mouseup` has completed so React Flow can tear down its native viewport-drag session before `panOnDrag` is reconfigured; releasing the mouse first keeps Pan selected until Space is released. Window blur and page hiding cancel this temporary tool state so a swallowed `keyup` cannot leave the canvas in Pan.
 
+Mouse Pan also has a Canvas-bound release guard for temporary Pan, persistent Pan, and middle-button Pan. A matching `pointerup` synchronously dispatches a window-level fallback `mouseup` so React Flow's d3-zoom session removes its global move listeners before any queued pointer movement can move the viewport; the later native `mouseup` is harmless. The guard applies the same fallback when a later pointer move reports no pressed buttons, the pointer is cancelled, or the window loses focus.
+
 While touch or pen is active, Select is the visible default tool and the safe home base: a tap selects a node and a drag on an already-selected node moves it, all through React Flow with no accidental ink. Pan collapses to the internal direct-manipulation state and is hidden from the touch-first toolbar; Select and Lasso are the visible tools, and Sketch is an explicit sticky tool listed among the creation nodes. Pan shortcuts resolve to the internal Select state instead of creating hidden Pan state. Because the toolbar layout follows the current pointer rather than the persisted mode, a mouse and a finger used on the same hybrid device each get their native toolbar.
 
 New empty canvases carry a one-shot input-appropriate creation intent: Mouse starts with Note armed, while Pen and Finger start with Sketch armed. This intent is consumed once, on the first completed load of a freshly created empty canvas. After it is consumed — and after any one-shot placement tool finishes on any canvas — the tool falls back to Select rather than re-arming Sketch, so a resting finger or pen can never accidentally draw or erase.
@@ -83,6 +85,8 @@ stateDiagram-v2
 ```
 
 The shared values define only the tap-versus-drag activation gate. Feature-specific quantities retain their separate meanings, including Lasso point sampling and minimum polygon span, Frame minimum creation size, Sketch merge distance, eraser radius, and Smart Snap distance.
+
+Locked selected roots do not participate in multi-selection resize geometry. Resizing an unlocked selected Frame continues to cascade through its subtree as one coordinate-space operation.
 
 In Finger mode, one-finger touch on empty canvas owns a pending viewport gesture: releasing below the touch activation distance clears the current selection, while crossing the distance locks and pans without clearing selection. Empty-canvas ownership is determined by excluding nodes and React Flow panels rather than requiring a particular React Flow pane descendant, so Background and other non-interactive canvas layers remain pannable. Node content and selected nodes retain their normal target ownership.
 

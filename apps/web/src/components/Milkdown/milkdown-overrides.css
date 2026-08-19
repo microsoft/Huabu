@@ -113,10 +113,9 @@
    opacity so the insertion bar reads clearly while dragging blocks
    between notes.
 
-   Same specificity as Crepe's rule (`.milkdown .crepe-drop-cursor`);
-   this file loads AFTER Crepe so the cascade wins without
-   `!important`. */
-.milkdown .crepe-drop-cursor {
+  The indicator is portalled to `document.body` so its fixed viewport
+  coordinates are not rebased by transformed Preview panel ancestors. */
+.crepe-drop-cursor.milkdown-drop-indicator {
   background: var(--info);
   opacity: 0.6;
 }

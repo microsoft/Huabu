@@ -226,6 +226,7 @@ export {
   fingerprintMarkdownBlocks,
   fingerprintMarkdownKeys,
   fingerprintMdastBlock,
+  topLevelListItemMarkdown,
   type FingerprintedBlock,
 } from './provenance/blockFingerprint.js';
 export {

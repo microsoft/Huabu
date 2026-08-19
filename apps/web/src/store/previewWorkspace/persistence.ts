@@ -21,6 +21,7 @@ import {
   type PreviewTab,
   type PreviewTarget,
 } from './model';
+import { forgetPreviewScrollCanvas } from './scrollMemory';
 
 const WORKSPACE_VERSION = 1;
 
@@ -65,29 +66,39 @@ function removeRaw(key: string): void {
   }
 }
 
-function parseTarget(value: unknown): PreviewTarget | null {
+function parseTarget(value: unknown, canvasId: string): PreviewTarget | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Record<string, unknown>;
-  const canvasId = candidate.canvasId;
-  if (typeof canvasId !== 'string' || !canvasId) return null;
+  if (candidate.canvasId !== canvasId) return null;
 
-  if (candidate.kind === 'node' && typeof candidate.nodeId === 'string') {
+  if (
+    candidate.kind === 'node' &&
+    typeof candidate.nodeId === 'string' &&
+    candidate.nodeId.length > 0
+  ) {
     return { kind: 'node', canvasId, nodeId: candidate.nodeId };
   }
-  if (candidate.kind === 'chat' && typeof candidate.threadId === 'string') {
+  if (
+    candidate.kind === 'chat' &&
+    typeof candidate.threadId === 'string' &&
+    candidate.threadId.length > 0
+  ) {
     return { kind: 'chat', canvasId, threadId: candidate.threadId };
   }
   return null;
 }
 
-function parseTabs(value: unknown): Record<string, PreviewTab> {
+function parseTabs(
+  value: unknown,
+  canvasId: string,
+): Record<string, PreviewTab> {
   if (!value || typeof value !== 'object') return {};
   const tabs: Record<string, PreviewTab> = {};
 
   for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
     if (!id || !raw || typeof raw !== 'object') continue;
     const candidate = raw as Record<string, unknown>;
-    const target = parseTarget(candidate.target);
+    const target = parseTarget(candidate.target, canvasId);
     // An entry that cannot be resolved is dropped rather than blocking the
     // rest of the layout, matching how the editor treats a tab whose
     // serializer is gone.
@@ -142,7 +153,10 @@ function parseGroups(
   return groups;
 }
 
-function parseWorkspace(raw: string | null): CanvasPreviewWorkspace | null {
+function parseWorkspace(
+  raw: string | null,
+  canvasId: string,
+): CanvasPreviewWorkspace | null {
   if (!raw) return null;
 
   try {
@@ -154,7 +168,7 @@ function parseWorkspace(raw: string | null): CanvasPreviewWorkspace | null {
       | undefined;
     if (!source) return null;
 
-    const tabs = parseTabs(source.tabs);
+    const tabs = parseTabs(source.tabs, canvasId);
     const groups = parseGroups(source.groups, tabs).filter(
       (group, index) => index === 0 || group.tabIds.length > 0,
     );
@@ -214,13 +228,16 @@ function writeIndex(canvasIds: string[]): void {
 function touchIndex(canvasId: string): void {
   const next = [canvasId, ...readIndex().filter((id) => id !== canvasId)];
   const evicted = next.slice(MAX_PERSISTED_CANVASES);
-  for (const id of evicted) removeRaw(workspaceStorageKey(id));
+  for (const id of evicted) {
+    removeRaw(workspaceStorageKey(id));
+    forgetPreviewScrollCanvas(id);
+  }
   writeIndex(next.slice(0, MAX_PERSISTED_CANVASES));
 }
 
 export function readWorkspace(canvasId: string): CanvasPreviewWorkspace | null {
   if (!canvasId) return null;
-  return parseWorkspace(readRaw(workspaceStorageKey(canvasId)));
+  return parseWorkspace(readRaw(workspaceStorageKey(canvasId)), canvasId);
 }
 
 export function writeWorkspace(
@@ -241,6 +258,7 @@ export function writeWorkspace(
 export function deleteWorkspace(canvasId: string): void {
   if (!canvasId) return;
   removeRaw(workspaceStorageKey(canvasId));
+  forgetPreviewScrollCanvas(canvasId);
   const next = readIndex().filter((id) => id !== canvasId);
   writeIndex(next);
 }

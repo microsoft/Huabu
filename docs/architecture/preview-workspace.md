@@ -10,7 +10,7 @@ Preview Workspace owns presentation topology: open tabs, tab order, active tabs,
 
 `canvasStore` owns Canvas document state and the command pipeline. Preview renderers read live nodes from that store rather than copying node content or labels into tabs.
 
-`chatStore` owns conversation state keyed by `threadId`: messages, drafts, history status, streaming state, binding, model settings, compose mode, and pending attachments. Preview Workspace stores only the target needed to select a renderer.
+`chatStore` owns conversation state keyed by `threadId`: messages, drafts, history status, streaming state, binding, model settings, compose mode, and pending attachments. It persists thread identity metadata (binding, built-in settings, and compose mode) without an entry limit so every independent Chat tab rehydrates with the same agent after reload; messages, drafts, history status, streaming state, and attachments remain runtime-only. Preview Workspace stores only the target needed to select a renderer.
 
 `panelStore` owns and persists the outer right-column collapse state, owns the transient Preview fullscreen state, and owns thread-addressed composer focus requests. Opening a Preview target expands the right column; closing a tab does not delete its underlying node or conversation history. `MainLayout` treats the persisted collapse state as authoritative whenever no panel motion is active. A settled collapsed slot is zero-width and clips overflow, while an active open/close motion temporarily releases that clipping; interrupted startup hydration therefore cannot leave translated panel content visible over the Canvas in either persisted state. Fullscreen is intentionally not persisted across reloads.
 
@@ -72,11 +72,15 @@ Canvas search results and connected-node navigation open transiently. Explicit n
 
 ## 4. Rendering and Chat sessions
 
-Each group mounts only its active tab. Inactive tabs retain topology and store-backed runtime state but do not retain editor, PDF, media, or Chat component trees.
+Each group mounts its active tab plus at most one warm inactive tab selected by the greatest `lastActiveSeq`. The warm slot is a bounded runtime optimization rather than persisted topology: React 19 `Activity` keeps that tab's DOM and component state with `mode="hidden"`, cleans up its Effects while hidden, and restarts those Effects when the tab becomes visible again. Activity cleanup and closing a tab do not mark the page as unloading or terminate a thread-owned stream; only the browser page lifecycle suppresses unload-time transport errors.
+
+Chat, Question, Note, Text, PDF, and Office tabs are eligible for the warm slot. Eligibility follows the resolved renderer, so a valid World `nodeRef` that presents a source Question is treated as a Question rather than as a generic reference. Web, Audio, Video, and other node types are not retained because hidden native media or iframe work can outlive React Effect cleanup. Closing or replacing a warm tab, deleting its node, or advancing the slot to a more recently active eligible tab unmounts the old tree. The shared runtime scroll cache remains the cold-restore fallback after a real unmount.
 
 `PreviewRenderer` resolves node targets against the current Canvas nodes and World references. Ordinary nodes render through `ExpandedNodePanel`; Question nodes and unbound Chat targets render through `ChatPanel`.
 
 Every mounted `ChatPanel` receives an explicit `ChatSession` and owning preview tab ID. There is no globally current Chat thread or Question replay pointer, so two groups can render independent conversations without sharing messages, drafts, bindings, attachments, settings, loading state, or stream control.
+
+Dragging a Chat or Note block into an editable Note uses Milkdown's geometric drop position, while its fixed-position indicator is portalled to `document.body` so the Preview panel's compositor transform cannot rebase viewport coordinates in either split group.
 
 PDF area capture routes directly to a Chat or Question conversation that is active in the group beside the PDF. When no conversation is visible beside it, the Canvas's canonical unbound Chat opens to the side and the capture is staged immediately as that thread's pending attachment. The explicit Send to Chat action always produces a thread-owned attachment; the shared dashed selection attachment remains reserved for passive browser text selection.
 
@@ -90,7 +94,7 @@ The workspace contains one or two horizontal groups. Each group owns one active 
 
 Tabs can be reordered within a group or moved across groups with pointer or keyboard drag sensors. Every drop delegates to the pure `moveTab` model action, which repairs ordering, active tabs, and empty source groups.
 
-Pointer dragging keeps a faded source placeholder in the tab strip, portals a labelled tab overlay to `document.body` so transformed panel ancestors cannot offset it from the pointer, and marks the resolved insertion edge of the hovered tab or the end of a group. The visual marker follows the same destination semantics used by `resolveTabDropDestination`.
+Pointer dragging keeps a faded source placeholder in the tab strip, portals a labelled tab overlay to `document.body` so transformed panel ancestors cannot offset it from the pointer, and marks the resolved insertion edge of the hovered tab or the end of a group. The visual marker follows the same destination semantics used by `resolveTabDropDestination`. Window blur and document hiding cancel the pointer sensor itself so releasing outside the Electron window cannot leave a tab in a stale dragging state.
 
 Closing an active tab selects the nearest remaining tab in the same group. Moving or closing the final tab in a secondary group removes that group. The workspace keeps one empty primary group as its valid empty state.
 
@@ -98,15 +102,15 @@ A transient tab is one reusable inspection slot per group. Opening another trans
 
 Permanent tabs are never closed automatically. A group may retain any number of permanent tabs; users close them explicitly, while transient browsing continues to reuse the group's inspection slot.
 
-The activation sequence is an integer stored with the workspace rather than a wall-clock timestamp, making recent-target ordering deterministic in tests and persistence.
+The activation sequence is an integer stored with the workspace rather than a wall-clock timestamp, making recent-target ordering deterministic in tests and persistence. Rendering also uses this sequence as the per-group LRU order for the single inactive warm slot; it does not add a second recency model.
 
 ## 6. Focus and opening position
 
 Editor focus is a runtime-only `{ tabId, nonce }` request. Only the addressed active tab receives it, and its renderer consumes it after focus succeeds so remounting cannot replay stale intent.
 
-Question conversation positioning is a runtime-only `{ tabId, position, nonce }` request where `position` is `last-user` or `bottom`. `MessageList` consumes the request after history hydration and successful positioning.
+Question conversation positioning is a runtime-only `{ tabId, position, nonce }` request where `position` is `last-user` or `bottom`. `MessageList` consumes the request after history hydration and successful positioning. Every scrollable Preview renderer keeps its latest vertical offset in one runtime cache: Chat uses conversation-owner Canvas plus `threadId`, while ordinary nodes use target Canvas plus `nodeId`. Note, PDF, Office, and Web reader renderers register their own scroll element through the shared hook because the outer panel is intentionally non-scrolling. Hidden retained tabs ignore Activity-driven scroll events and Effect cleanup so temporary zero-sized layout cannot overwrite their saved offset. Asynchronous restoration remains active only until the saved offset becomes reachable or wheel, touch, or scrolling-key input signals that the user has taken control. The cache removes an offset after the final target is closed, replaced, or invalidated, and clears unreferenced offsets when a Canvas layout is deleted or evicted from the persisted MRU index. Chat retains its additional unread-opening rule: a saved offset above the latest messages is preserved and exposes the New message action instead of scrolling automatically; a thread without a saved offset uses the requested opening position.
 
-Inactive tabs never count as actively viewed. A Question is actively viewed only when its tab is the active tab of a rendered group and the outer right panel is expanded; this rule controls the Canvas open indicator and whether stream completion marks a result as viewed.
+Inactive tabs never count as actively viewed, including a tab retained in hidden Activity. A Question is actively viewed only when its tab is the active tab of a rendered group and the outer right panel is expanded; this rule controls the Canvas open indicator and whether stream completion marks a result as viewed.
 
 Composer focus is addressed by `threadId` through `panelStore`, so opening one Chat cannot steal focus through a request intended for another mounted Chat.
 
@@ -122,7 +126,7 @@ Persisted input is parsed defensively. Invalid targets, dangling tab IDs, duplic
 
 After a command deletes nodes, the web post-effect validates the workspace against the committed live node IDs. Tabs targeting deleted nodes are removed and active IDs or empty groups are repaired by `validateWorkspace`.
 
-Closing a Preview tab does not delete the Canvas node, stop a running turn, or remove server-side Chat history. Persistence exposes `deleteWorkspace(canvasId)`, but Canvas deletion does not currently call it in production; unreachable layout records are reclaimed when they fall out of the capped Canvas MRU index.
+Closing a Preview tab does not delete the Canvas node, stop a running turn, or remove server-side Chat history. Successful Canvas deletion calls `deleteWorkspace(canvasId)` to remove its layout and runtime scroll-memory ownership; unreachable layout records are also reclaimed when they fall out of the capped Canvas MRU index.
 
 ## 8. Layout and accessibility
 
@@ -142,7 +146,7 @@ New user-visible node and Chat open paths must use the Preview Workspace actions
 
 Renderer code must treat targets as references and resolve mutable data at render time. Adding labels, node snapshots, conversation state, or derived resource keys to persisted tabs creates a second source of truth and is not allowed.
 
-Code that determines visibility must inspect each group's active tab, not every tab in `workspace.tabs`, because inactive tabs are not mounted.
+Code that determines visibility must inspect each group's active tab, not every tab in `workspace.tabs` or every mounted renderer, because one inactive renderer may remain mounted in hidden Activity.
 
 Runtime intents such as editor focus, composer focus, and initial message position must stay outside the persisted workspace model and must be addressed to a tab or thread.
 

@@ -70,8 +70,19 @@ export interface ChatState {
    * without colliding when the user navigates away mid-stream.
    */
   threadsById: Record<string, ChatThreadState>;
-  /** Bounded persistence projection for thread-local compose modes. */
+  /** Persisted compose mode for every independent thread. */
   lastActionByThread: Record<string, AgentMode>;
+  /** Persisted binding identity for independent Preview Workspace threads. */
+  bindingByThread: Record<string, AgentBinding>;
+  /** Persisted built-in model settings for independent threads. */
+  settingsByThread: Record<
+    string,
+    { modelId: string | null; reasoningEffort: string | null }
+  >;
+  /** Question-owned threads whose binding and mode are durable on the node. */
+  ephemeralMetadataThreads: Record<string, true>;
+  /** Threads whose built-in settings are durable on the server. */
+  ephemeralSettingsThreads: Record<string, true>;
   /** Map of canvasId → threadId, persisted so each canvas keeps its own thread. */
   threadMap: Record<string, string>;
 
@@ -153,6 +164,12 @@ export interface ChatState {
     settings: { modelId: string | null; reasoningEffort: string | null },
   ) => void;
 
+  /** Stop persisting metadata after its authoritative owner is durable. */
+  makeThreadMetadataEphemeral: (
+    threadId: string,
+    options?: { preserveSettings?: boolean },
+  ) => void;
+
   /** Stage an attachment (e.g. from PDF capture) on a thread's next message. */
   addPendingAttachment: (threadId: string, attachment: ChatAttachment) => void;
   /** Remove one of a thread's staged attachments by index. */
@@ -192,7 +209,6 @@ export interface ChatState {
  * refetch on re-visit is cheap.
  */
 const MAX_CACHED_THREADS = 10;
-const MAX_PERSISTED_THREAD_ACTIONS = 50;
 
 /** Stable empty array so selectors that miss the cache don't trigger renders. */
 const EMPTY_MESSAGES: ChatMessage[] = [];
@@ -214,6 +230,8 @@ function threadOf(state: ChatState, threadId: string): ChatThreadState {
     state.threadsById[threadId] ?? {
       ...EMPTY_THREAD,
       lastAction: state.lastActionByThread[threadId] ?? 'ask',
+      binding: state.bindingByThread[threadId] ?? DEFAULT_BINDING,
+      settings: state.settingsByThread[threadId] ?? EMPTY_THREAD.settings,
     }
   );
 }
@@ -224,15 +242,32 @@ function rememberLastAction(
   action: AgentMode,
 ): Record<string, AgentMode> {
   const entries = { ...state.lastActionByThread };
-  delete entries[threadId];
   entries[threadId] = action;
-  const overflow = Object.keys(entries).length - MAX_PERSISTED_THREAD_ACTIONS;
-  if (overflow > 0) {
-    for (const key of Object.keys(entries).slice(0, overflow)) {
-      delete entries[key];
-    }
-  }
   return entries;
+}
+
+function rememberThreadValue<T>(
+  entries: Record<string, T>,
+  threadId: string,
+  value: T,
+): Record<string, T> {
+  return { ...entries, [threadId]: value };
+}
+
+function normalizeThreadSettings(value: unknown): ChatThreadState['settings'] {
+  if (!value || typeof value !== 'object') return EMPTY_THREAD.settings;
+  const candidate = value as Record<string, unknown>;
+  return {
+    modelId:
+      typeof candidate.modelId === 'string' || candidate.modelId === null
+        ? candidate.modelId
+        : null,
+    reasoningEffort:
+      typeof candidate.reasoningEffort === 'string' ||
+      candidate.reasoningEffort === null
+        ? candidate.reasoningEffort
+        : null,
+  };
 }
 
 /** Immutably patches one thread entry, creating it when absent. */
@@ -256,6 +291,10 @@ export const useChatStore = create<ChatState>()(
       draftsByThread: {},
       threadsById: {},
       lastActionByThread: {},
+      bindingByThread: {},
+      settingsByThread: {},
+      ephemeralMetadataThreads: {},
+      ephemeralSettingsThreads: {},
       threadMap: {},
       bindingMap: {},
       selectionAttachment: null,
@@ -312,7 +351,9 @@ export const useChatStore = create<ChatState>()(
       setThreadLastAction: (threadId, action) =>
         set((state) => ({
           ...patchThread(state, threadId, { lastAction: action }),
-          lastActionByThread: rememberLastAction(state, threadId, action),
+          lastActionByThread: state.ephemeralMetadataThreads[threadId]
+            ? state.lastActionByThread
+            : rememberLastAction(state, threadId, action),
         })),
 
       createThread: (options) => {
@@ -327,6 +368,11 @@ export const useChatStore = create<ChatState>()(
             lastAction,
           }),
           lastActionByThread: rememberLastAction(state, threadId, lastAction),
+          bindingByThread: rememberThreadValue(
+            state.bindingByThread,
+            threadId,
+            binding,
+          ),
         }));
         return threadId;
       },
@@ -342,6 +388,11 @@ export const useChatStore = create<ChatState>()(
           ...patchThread(state, threadId, { binding }),
           threadMap: { ...state.threadMap, [canvasId]: threadId },
           bindingMap: { ...state.bindingMap, [canvasId]: binding },
+          bindingByThread: rememberThreadValue(
+            state.bindingByThread,
+            threadId,
+            binding,
+          ),
         });
         return threadId;
       },
@@ -350,6 +401,9 @@ export const useChatStore = create<ChatState>()(
         const state = get();
         set({
           ...patchThread(state, threadId, { binding }),
+          bindingByThread: state.ephemeralMetadataThreads[threadId]
+            ? state.bindingByThread
+            : rememberThreadValue(state.bindingByThread, threadId, binding),
           bindingMap: canvasId
             ? { ...state.bindingMap, [canvasId]: binding }
             : state.bindingMap,
@@ -365,7 +419,37 @@ export const useChatStore = create<ChatState>()(
           ) {
             return {};
           }
-          return patchThread(state, threadId, { settings });
+          return {
+            ...patchThread(state, threadId, { settings }),
+            settingsByThread: state.ephemeralSettingsThreads[threadId]
+              ? state.settingsByThread
+              : rememberThreadValue(state.settingsByThread, threadId, settings),
+          };
+        }),
+
+      makeThreadMetadataEphemeral: (threadId, options) =>
+        set((state) => {
+          const lastActionByThread = { ...state.lastActionByThread };
+          const bindingByThread = { ...state.bindingByThread };
+          const settingsByThread = { ...state.settingsByThread };
+          delete lastActionByThread[threadId];
+          delete bindingByThread[threadId];
+          if (!options?.preserveSettings) delete settingsByThread[threadId];
+          return {
+            lastActionByThread,
+            bindingByThread,
+            settingsByThread,
+            ephemeralMetadataThreads: {
+              ...state.ephemeralMetadataThreads,
+              [threadId]: true,
+            },
+            ephemeralSettingsThreads: options?.preserveSettings
+              ? state.ephemeralSettingsThreads
+              : {
+                  ...state.ephemeralSettingsThreads,
+                  [threadId]: true,
+                },
+          };
         }),
 
       addPendingAttachment: (threadId, attachment) =>
@@ -427,26 +511,47 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'huabu-chat',
-      version: 4,
+      version: 5,
       migrate: (persisted) => {
         const state = persisted as Partial<ChatState> & {
           lastAction?: AgentMode;
           threadId?: string;
         };
         const legacyThreadId = state.threadId;
+        const threadMap = state.threadMap ?? {};
+        const bindingMap = state.bindingMap ?? {};
+        const bindingByThread = { ...(state.bindingByThread ?? {}) };
+        for (const [canvasId, threadId] of Object.entries(threadMap)) {
+          const binding = bindingMap[canvasId];
+          if (threadId && binding && !bindingByThread[threadId]) {
+            bindingByThread[threadId] = binding;
+          }
+        }
+        const settingsByThread = Object.fromEntries(
+          Object.entries(state.settingsByThread ?? {}).map(
+            ([threadId, settings]) => [
+              threadId,
+              normalizeThreadSettings(settings),
+            ],
+          ),
+        );
         return {
-          threadMap: state.threadMap ?? {},
+          threadMap,
           lastActionByThread:
             state.lastActionByThread ??
             (state.lastAction && legacyThreadId
               ? { [legacyThreadId]: state.lastAction }
               : {}),
-          bindingMap: state.bindingMap ?? {},
+          bindingByThread,
+          settingsByThread,
+          bindingMap,
         };
       },
       partialize: (state) => ({
         threadMap: state.threadMap,
         lastActionByThread: state.lastActionByThread,
+        bindingByThread: state.bindingByThread,
+        settingsByThread: state.settingsByThread,
         bindingMap: state.bindingMap,
       }),
     },

@@ -186,6 +186,8 @@ beforeEach(async () => {
   useAcpThreadChangesStore.setState({ load: async () => {} });
   useChatStore.setState({
     threadsById: {},
+    bindingByThread: {},
+    settingsByThread: {},
     // Deliberately points at neither renderer: nothing on screen may resolve
     // its conversation through this field.
     threadMap: {},

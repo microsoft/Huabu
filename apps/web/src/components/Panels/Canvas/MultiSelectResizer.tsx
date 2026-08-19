@@ -12,10 +12,17 @@ import {
   type NestableNode,
 } from '@huabu/shared/canvas-engine';
 
+import { resumeHeightCommits } from '@/components/Nodes/shared/height/commitSuspension';
 import { useIsNotMouse } from '@/hooks/useInputMode.ts';
 import useCanvasStore from '@/store/canvasStore';
+import {
+  getNodeFontFit,
+  refitFont,
+  type NodeFontFit,
+} from '@/utils/node/fontFit';
 
 import type { CanvasNode } from '@/components/Nodes/types';
+import type { NodeStyle } from '@huabu/shared';
 
 /**
  * Multi-select bounding-box resizer.
@@ -34,26 +41,30 @@ import type { CanvasNode } from '@/components/Nodes/types';
  *    bounding-box diagonal via projection so aspect ratios are preserved.
  *  - The OPPOSITE corner of the dragged handle acts as the anchor and
  *    stays pinned in flow coordinates throughout the gesture.
- *  - Frame children whose parent is ALSO in the selection are skipped
- *    (they would otherwise be scaled twice — once by the parent move
- *    and once directly). Frame children whose parent is NOT selected
- *    are not part of the selection at all and stay put — i.e. selecting
- *    a frame and resizing it does NOT scale its children, matching the
- *    "children stay put" requirement.
- *  - Locked nodes are excluded from the gesture.
+ *  - A selected Frame is a scaling root: its complete descendant subtree is
+ *    transformed with the Frame so the resized Frame continues to contain
+ *    its children. Nested selected Frames are handled by their outermost
+ *    selected ancestor and are not scaled a second time.
+ *  - Canvas-level interaction locking prevents the gesture from starting;
+ *    descendants of a selected Frame are always included so containment is
+ *    preserved.
  *  - The whole gesture collapses into a single undo entry by going
  *    through `onNodeResizeStart()` (which calls `beginGesture('SET_NODE_GEOMETRY')`)
- *    and per-frame `setNodeGeometry()` updates.
+ *    with preview updates during movement and one final geometry commit.
  */
 
 type Corner = 'tl' | 'tr' | 'bl' | 'br';
 
 type SnapshotNode = {
   id: string;
+  parentId?: string;
+  scaleRootId: string | null;
   parentAbs: { x: number; y: number };
   pos0Abs: { x: number; y: number };
   size0: { width: number; height: number };
   preserveAspectRatio: boolean;
+  style?: NodeStyle;
+  fontFit?: NodeFontFit | null;
 };
 
 type ResizeSnapshot = {
@@ -64,6 +75,70 @@ type ResizeSnapshot = {
   diagLen2: number;
   nodes: SnapshotNode[];
 };
+
+export function resolveMultiSelectGeometry({
+  snapshot,
+  scaleX,
+  scaleY,
+}: {
+  snapshot: ResizeSnapshot;
+  scaleX: number;
+  scaleY: number;
+}): Array<{
+  nodeId: string;
+  position: { x: number; y: number };
+  size: { width: number; height: number };
+}> {
+  const newAbsById = new Map<string, { x: number; y: number }>();
+  const newSizeById = new Map<string, { width: number; height: number }>();
+  const snapshotById = new Map(snapshot.nodes.map((node) => [node.id, node]));
+
+  for (const node of snapshot.nodes) {
+    const root = node.scaleRootId
+      ? snapshotById.get(node.scaleRootId)
+      : undefined;
+    let newAbs = {
+      x: snapshot.anchor.x + (node.pos0Abs.x - snapshot.anchor.x) * scaleX,
+      y: snapshot.anchor.y + (node.pos0Abs.y - snapshot.anchor.y) * scaleY,
+    };
+    if (root) {
+      const rootAbs = newAbsById.get(root.id) ?? {
+        x: snapshot.anchor.x + (root.pos0Abs.x - snapshot.anchor.x) * scaleX,
+        y: snapshot.anchor.y + (root.pos0Abs.y - snapshot.anchor.y) * scaleY,
+      };
+      newAbs = {
+        x: rootAbs.x + (node.pos0Abs.x - root.pos0Abs.x) * scaleX,
+        y: rootAbs.y + (node.pos0Abs.y - root.pos0Abs.y) * scaleY,
+      };
+    }
+    newAbsById.set(node.id, newAbs);
+    newSizeById.set(node.id, {
+      width: node.size0.width * scaleX,
+      height: node.size0.height * scaleY,
+    });
+  }
+
+  return snapshot.nodes.map((node) => {
+    const newAbs = newAbsById.get(node.id)!;
+    const newParentAbs = node.parentId
+      ? (newAbsById.get(node.parentId) ?? node.parentAbs)
+      : { x: 0, y: 0 };
+    return {
+      nodeId: node.id,
+      position: {
+        x: newAbs.x - newParentAbs.x,
+        y: newAbs.y - newParentAbs.y,
+      },
+      size: newSizeById.get(node.id)!,
+    };
+  });
+}
+
+export function canSnapshotMultiSelectRoot(node: {
+  data?: { locked?: boolean };
+}): boolean {
+  return !node.data?.locked;
+}
 
 /** Smallest scale we permit; prevents flipping past zero. */
 const MIN_SCALE = 0.05;
@@ -100,6 +175,8 @@ export function resolveMultiSelectScale({
 export const MultiSelectResizer = () => {
   const nodes = useCanvasStore((s) => s.nodes);
   const setNodeGeometry = useCanvasStore((s) => s.setNodeGeometry);
+  const previewResizeGeometry = useCanvasStore((s) => s.previewResizeGeometry);
+  const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
   const onNodeResizeStart = useCanvasStore((s) => s.onNodeResizeStart);
 
   const isDirectManipulation = useIsNotMouse();
@@ -109,6 +186,10 @@ export const MultiSelectResizer = () => {
 
   /** Snapshot captured on pointerdown; null when no gesture is active. */
   const snapshotRef = useRef<ResizeSnapshot | null>(null);
+  const latestItemsRef = useRef<ReturnType<typeof resolveMultiSelectGeometry>>(
+    [],
+  );
+  const lastAppliedFontRef = useRef(new Map<string, number>());
 
   const selectedNodes = useMemo(
     () => nodes.filter((n) => n.selected) as CanvasNode[],
@@ -126,10 +207,18 @@ export const MultiSelectResizer = () => {
       return [];
     }
     const selectedIds = new Set(selectedNodes.map((n) => n.id));
-    return selectedNodes.filter(
-      (n) => !n.parentId || !selectedIds.has(n.parentId),
-    );
-  }, [selectedNodes]);
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    return selectedNodes.filter((node) => {
+      let parentId = node.parentId;
+      const visited = new Set<string>();
+      while (parentId && !visited.has(parentId)) {
+        if (selectedIds.has(parentId)) return false;
+        visited.add(parentId);
+        parentId = nodeById.get(parentId)?.parentId;
+      }
+      return true;
+    });
+  }, [nodes, selectedNodes]);
 
   // Live bounds in absolute flow coords. Recomputes after each
   // setNodeGeometry update so the outline + handles track the resize.
@@ -173,30 +262,56 @@ export const MultiSelectResizer = () => {
     if (diagLen2 === 0) return;
 
     const snapNodes: SnapshotNode[] = [];
-    for (const n of eligibleNodes) {
-      if (n.data?.locked) continue;
+    const snapshottedIds = new Set<string>();
+    const childrenByParentId = new Map<string, CanvasNode[]>();
+    for (const node of nodes as CanvasNode[]) {
+      if (!node.parentId) continue;
+      const children = childrenByParentId.get(node.parentId) ?? [];
+      children.push(node);
+      childrenByParentId.set(node.parentId, children);
+    }
+    const addSnapshotSubtree = (
+      node: CanvasNode,
+      scaleRootId: string | null,
+    ) => {
+      if (snapshottedIds.has(node.id)) return;
+      snapshottedIds.add(node.id);
       const abs =
-        getAbsolutePosition(nodes as NestableNode[], n.id) ?? n.position;
-      const parentAbs = n.parentId
-        ? (getAbsolutePosition(nodes as NestableNode[], n.parentId) ?? {
+        getAbsolutePosition(nodes as NestableNode[], node.id) ?? node.position;
+      const parentAbs = node.parentId
+        ? (getAbsolutePosition(nodes as NestableNode[], node.parentId) ?? {
             x: 0,
             y: 0,
           })
         : { x: 0, y: 0 };
-      const { width, height } = getNodeSize(n);
+      const { width, height } = getNodeSize(node);
+      const style = (node.data as { style?: NodeStyle } | undefined)?.style;
       snapNodes.push({
-        id: n.id,
+        id: node.id,
+        parentId: node.parentId,
+        scaleRootId,
         parentAbs,
         pos0Abs: abs,
         size0: { width: width || 200, height: height || 100 },
-        preserveAspectRatio: n.type === 'image' || n.type === 'video',
+        preserveAspectRatio: node.type === 'image' || node.type === 'video',
+        style,
+        fontFit: getNodeFontFit(node),
       });
+      for (const child of childrenByParentId.get(node.id) ?? []) {
+        addSnapshotSubtree(child, scaleRootId);
+      }
+    };
+    for (const n of eligibleNodes) {
+      if (!canSnapshotMultiSelectRoot(n)) continue;
+      addSnapshotSubtree(n, n.type === 'frame' ? n.id : null);
     }
     if (snapNodes.length === 0) return;
 
     // Mark the start of an undoable gesture; subsequent setNodeGeometry
     // calls collapse into one history entry.
     onNodeResizeStart();
+    latestItemsRef.current = [];
+    lastAppliedFontRef.current.clear();
     snapshotRef.current = { anchor, diag, diagLen2, nodes: snapNodes };
   };
 
@@ -224,28 +339,40 @@ export const MultiSelectResizer = () => {
         e.shiftKey || snap.nodes.some((node) => node.preserveAspectRatio),
     });
 
-    const items = snap.nodes.map((n) => {
-      const newAbsX = snap.anchor.x + (n.pos0Abs.x - snap.anchor.x) * scaleX;
-      const newAbsY = snap.anchor.y + (n.pos0Abs.y - snap.anchor.y) * scaleY;
-      return {
-        nodeId: n.id,
-        position: {
-          x: newAbsX - n.parentAbs.x,
-          y: newAbsY - n.parentAbs.y,
-        },
-        size: {
-          width: n.size0.width * scaleX,
-          height: n.size0.height * scaleY,
-        },
-      };
+    const items = resolveMultiSelectGeometry({
+      snapshot: snap,
+      scaleX,
+      scaleY,
     });
-
-    setNodeGeometry(items);
+    latestItemsRef.current = items;
+    previewResizeGeometry(items);
+    const itemById = new Map(items.map((item) => [item.nodeId, item]));
+    for (const node of snap.nodes) {
+      if (!node.fontFit) continue;
+      const item = itemById.get(node.id);
+      if (!item) continue;
+      const fontSize = refitFont(
+        node.fontFit,
+        item.size.width,
+        item.size.height,
+      );
+      if (!Number.isFinite(fontSize) || fontSize <= 0) continue;
+      if (lastAppliedFontRef.current.get(node.id) === fontSize) continue;
+      lastAppliedFontRef.current.set(node.id, fontSize);
+      patchNodeSilent(node.id, {
+        style: { ...(node.style ?? {}), fontSize },
+      });
+    }
   };
 
   const endGesture = (e: React.PointerEvent) => {
     if (!snapshotRef.current) return;
     snapshotRef.current = null;
+    const items = latestItemsRef.current;
+    latestItemsRef.current = [];
+    lastAppliedFontRef.current.clear();
+    if (items.length > 0) setNodeGeometry(items);
+    resumeHeightCommits('node-resize');
     try {
       (e.currentTarget as Element).releasePointerCapture(e.pointerId);
     } catch {
@@ -262,7 +389,7 @@ export const MultiSelectResizer = () => {
 
   const overlay = (
     <div
-      className="pointer-events-none absolute z-[999]"
+      className="pointer-events-none absolute z-999"
       style={{
         left: minPx.x,
         top: minPx.y,

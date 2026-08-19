@@ -2380,6 +2380,16 @@ export async function createMilkdown(
   }
 
   await crepe.create();
+  // Milkdown renders viewport coordinates into a fixed-position element.
+  // Keep it outside transformed panel ancestors so those coordinates retain
+  // their viewport reference frame (notably in split Preview Workspace).
+  crepe.editor.action((ctx) => {
+    const parent = ctx.get(editorViewCtx).dom.parentElement;
+    const indicator = Array.from(parent?.children ?? []).find((child) =>
+      child.classList.contains('milkdown-drop-indicator'),
+    );
+    if (indicator) document.body.appendChild(indicator);
+  });
   crepe.setReadonly(!editable);
 
   return {

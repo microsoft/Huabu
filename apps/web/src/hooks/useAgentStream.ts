@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef } from 'react';
 
 import {
   createId,
@@ -43,6 +43,7 @@ import {
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
+import { isPageUnloading } from '@/utils/pageLifecycle';
 
 import {
   abortAgentStreamClaim,
@@ -678,21 +679,6 @@ export function useAgentStream(
   // starts on a different thread.
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
-  // Track whether the component is still active (not unloading).
-  // Prevents adding spurious "network error" status on page refresh.
-  const activeRef = useRef(true);
-  useEffect(() => {
-    activeRef.current = true;
-    const onUnload = () => {
-      activeRef.current = false;
-    };
-    window.addEventListener('beforeunload', onUnload);
-    return () => {
-      window.removeEventListener('beforeunload', onUnload);
-      activeRef.current = false;
-    };
-  }, []);
-
   const startStream = useCallback(
     async (prompt: string, agentMode: AgentMode, invokedSkills?: string[]) => {
       // Per-thread guard: this thread's own loading flag, not any other
@@ -869,6 +855,8 @@ export function useAgentStream(
       const questionNodeId = conversationView?.conversationOwner.nodeId ?? null;
       let sawDone = false;
       let serverOwnsQuestionLifecycle = false;
+      let isComposingQuestion = false;
+      let serverSettingsConfirmed = false;
 
       if (questionNodeId && conversationView) {
         // First send of a freshly-composed question node ⇔ the node is still
@@ -885,6 +873,7 @@ export function useAgentStream(
           conversationView,
         );
         const isCompose = shouldComposeConversationOwner(ownerSource, headless);
+        isComposingQuestion = isCompose;
         serverOwnsQuestionLifecycle =
           ownerSource?.agentBindingPolicy === 'fixed';
         if (isCompose && !headless && !serverOwnsQuestionLifecycle) {
@@ -936,6 +925,11 @@ export function useAgentStream(
           if (startPatch) {
             await patchConversationOwnerNode(conversationView, startPatch);
             await refreshConversationPresentation(conversationView);
+            if (isCompose) {
+              useChatStore.getState().makeThreadMetadataEphemeral(threadId, {
+                preserveSettings: true,
+              });
+            }
           }
         } catch (error) {
           const message =
@@ -989,6 +983,10 @@ export function useAgentStream(
           agentMode,
           {
             onEvent: (event: AgentStreamEvent) => {
+              if (isComposingQuestion && !serverSettingsConfirmed) {
+                serverSettingsConfirmed = true;
+                useChatStore.getState().makeThreadMetadataEphemeral(threadId);
+              }
               if (event.type === 'done') sawDone = true;
               handleStreamEvent(event, {
                 threadId,
@@ -996,7 +994,7 @@ export function useAgentStream(
               });
             },
             onError: (err) => {
-              if (!activeRef.current || errorHandled) return;
+              if (isPageUnloading() || errorHandled) return;
               errorHandled = true;
               console.error(`${agentMode} error:`, err);
               // Question-node follow-up: only flip to `error` if no
@@ -1153,7 +1151,7 @@ export function useAgentStream(
           return;
         }
         // Page unloading — don't persist error
-        if (!activeRef.current) return;
+        if (isPageUnloading()) return;
         // Skip if onError callback already handled this
         if (errorHandled) return;
         errorHandled = true;

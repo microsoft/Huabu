@@ -11,7 +11,11 @@ import {
 } from 'react';
 
 import { AIMessage } from './AIMessage';
-import { positionMessageListOnOpen } from './messageListScroll';
+import {
+  positionMessageListOnOpen,
+  rememberMessageListScrollPosition,
+  restoreMessageListScrollPosition,
+} from './messageListScroll';
 import { StatusMessage } from './StatusMessage';
 import { UserMessage } from './UserMessage';
 import { Button } from '../Common/Button';
@@ -81,10 +85,24 @@ export const MessageList = ({
       handledOpenRequestRef.current !== openPositionRequestNonce;
     if (!viewChanged && !hasNewRequest) return;
 
-    const position = positionMessageListOnOpen(container, openPosition);
-    isAtBottomRef.current = position !== 'last-user';
+    const restored = restoreMessageListScrollPosition(container, viewKey);
+    const restoredAtBottom =
+      restored &&
+      container.scrollTop >=
+        container.scrollHeight - container.clientHeight - 50;
+    const position = restored
+      ? restoredAtBottom
+        ? 'bottom'
+        : 'restored'
+      : positionMessageListOnOpen(container, openPosition);
+    isAtBottomRef.current = position !== 'last-user' && position !== 'restored';
 
-    setHasNewMessage(false);
+    setHasNewMessage(
+      restored &&
+        !restoredAtBottom &&
+        hasNewRequest &&
+        openPosition === 'last-user',
+    );
     prevMessageCountRef.current = currentMessageCountRef.current;
     positionedViewKeyRef.current = viewKey;
     hasPositionedViewRef.current = true;
@@ -92,6 +110,15 @@ export const MessageList = ({
       handledOpenRequestRef.current = openPositionRequestNonce;
       onOpenPositionHandled?.(openPositionRequestNonce);
     }
+    if (!restored) return;
+    const frame = requestAnimationFrame(() => {
+      const current = containerRef.current;
+      if (!current) return;
+      restoreMessageListScrollPosition(current, viewKey);
+      isAtBottomRef.current =
+        current.scrollTop >= current.scrollHeight - current.clientHeight - 50;
+    });
+    return () => cancelAnimationFrame(frame);
   }, [
     viewKey,
     isActive,
@@ -127,12 +154,13 @@ export const MessageList = ({
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
+    rememberMessageListScrollPosition(viewKey, el.scrollTop);
     const threshold = 50;
     const atBottom =
       el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
     isAtBottomRef.current = atBottom;
     if (atBottom) setHasNewMessage(false);
-  }, []);
+  }, [viewKey]);
 
   // Scroll the thread's own container rather than `scrollIntoView` on a
   // sentinel: that walks up every scrollable ancestor, and the app root is

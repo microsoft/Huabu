@@ -23,6 +23,7 @@ import {
   mergeLineRects,
 } from '@/handler/pdfHighlight/highlight';
 import { scheduleScrollToMatch } from '@/hooks/searchDom';
+import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
@@ -76,6 +77,7 @@ type PendingCaptureDrag = {
 export const PDFPreview = ({
   id,
   data,
+  scrollViewKey,
   onDataChange,
 }: PreviewComponentProps) => {
   const { t } = useTranslation();
@@ -128,6 +130,7 @@ export const PDFPreview = ({
   const highlightsRef = useRef(highlights);
   highlightsRef.current = highlights;
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  usePreviewScrollMemory(scrollContainerRef, scrollViewKey);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   // The width at which the PDF canvas is actually rendered.  Starts at 0 and
   // is updated when the container is first measured *and* whenever the
