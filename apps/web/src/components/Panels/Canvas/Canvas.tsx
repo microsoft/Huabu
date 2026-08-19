@@ -87,6 +87,7 @@ import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
+import { applyNodeGeometryPreview } from './applyNodeGeometryPreview';
 import {
   canDirectlyManipulateWithPointer,
   closestNodeElement,
@@ -147,6 +148,7 @@ import {
   revealBoundsInViewport,
 } from '../CanvasLayerPanel/focusNodesOnCanvas.ts';
 
+import type { CanvasNode } from '@/components/Nodes/types';
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
 import type { PointerRecognizer } from '@/handler/pointerRouter';
@@ -437,6 +439,9 @@ export const Canvas: React.FC<CanvasProps> = ({
   // into the node array below, at the render boundary only.
   const structuredReflowPositions = useGesturePreviewStore(
     (state) => state.structuredReflowPositions,
+  );
+  const nodeGeometryPreviews = useGesturePreviewStore(
+    (state) => state.nodeGeometryPreviews,
   );
 
   // ── Non-reactive action handles ──────────────────────────────
@@ -850,14 +855,24 @@ export const Canvas: React.FC<CanvasProps> = ({
       // Transient slide-aside offset; absent for every node outside the
       // hovered structured frame, and for the dragged node itself.
       const previewPosition = structuredReflowPositions?.get(node.id);
-      const nextPosition = previewPosition ?? node.position;
+      const geometryPreview = nodeGeometryPreviews?.get(node.id);
+      const previewedNode = applyNodeGeometryPreview(
+        node as CanvasNode,
+        geometryPreview,
+        previewPosition,
+      );
+      const nextPosition = previewedNode.position;
+      const nextStyle = previewedNode.style;
+      const nextMeasured = previewedNode.measured;
 
       const cached = prevCache.get(node);
       if (
         cached &&
         cached.zIndex === z &&
         cached.className === nextClassName &&
-        cached.position === nextPosition
+        cached.position === nextPosition &&
+        cached.style === nextStyle &&
+        cached.measured === nextMeasured
       ) {
         nextCache.set(node, cached);
         return cached;
@@ -872,7 +887,9 @@ export const Canvas: React.FC<CanvasProps> = ({
         nextClassName !== baseClassName ||
         node.zIndex !== z ||
         node.draggable !== touchDraggable ||
-        nextPosition !== node.position;
+        nextPosition !== node.position ||
+        nextStyle !== node.style ||
+        nextMeasured !== node.measured;
       const wrapped = needsWrap
         ? {
             ...node,
@@ -880,6 +897,8 @@ export const Canvas: React.FC<CanvasProps> = ({
             zIndex: z,
             draggable: touchDraggable,
             position: nextPosition,
+            style: nextStyle,
+            measured: nextMeasured,
           }
         : node;
       nextCache.set(node, wrapped);
@@ -892,6 +911,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     isNotMouse,
     lassoPreviewNodeIdSet,
     nodes,
+    nodeGeometryPreviews,
     structuredReflowPositions,
     zByNode,
   ]);

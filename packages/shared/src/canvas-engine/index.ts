@@ -196,6 +196,7 @@ export {
   computeFrameFit,
   fitFrameToChildren,
   fitFrames,
+  projectAffectedFrameGeometry,
   getFrameSizing,
   moveNodeOutOfFrame,
 } from './frame/index.js';

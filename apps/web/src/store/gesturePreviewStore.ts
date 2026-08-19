@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import type { Guide } from '@/handler/snap/types';
 import type {
   FrameFitResult,
+  NestableNode,
   StructuredDropContext,
   StructuredReflowEntry,
 } from '@huabu/shared/canvas-engine';
@@ -143,6 +144,15 @@ type GesturePreviewData = {
     string,
     { x: number; y: number }
   > | null;
+
+  /**
+   * Complete future geometry for nodes affected by a nested Frame transaction.
+   * Folded into React Flow only at the render boundary; never persisted.
+   */
+  nodeGeometryPreviews: ReadonlyMap<
+    string,
+    Pick<NestableNode, 'position' | 'style' | 'measured'>
+  > | null;
 };
 
 type GesturePreviewState = GesturePreviewData & {
@@ -211,6 +221,9 @@ type GesturePreviewState = GesturePreviewData & {
   /** Drop the slide-aside positions, restoring the real geometry. */
   clearStructuredReflowPositions: () => void;
 
+  setNodeGeometryPreviews: (nodes: readonly NestableNode[]) => void;
+  clearNodeGeometryPreviews: () => void;
+
   /**
    * Clear every canvas-scoped transient. Called on any authoritative
    * geometry swap that may strand a retained stroke selection / polygon:
@@ -250,6 +263,7 @@ const INITIAL_PREVIEW_DATA: GesturePreviewData = {
   snapGuides: [],
   structuredDropPreview: null,
   structuredReflowPositions: null,
+  nodeGeometryPreviews: null,
 };
 
 /**
@@ -336,6 +350,46 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
       state.structuredReflowPositions === null
         ? state
         : { structuredReflowPositions: null },
+    ),
+  setNodeGeometryPreviews: (nodes) =>
+    set((state) => {
+      const current = state.nodeGeometryPreviews;
+      if (nodes.length === 0) {
+        return current === null ? state : { nodeGeometryPreviews: null };
+      }
+      const unchanged =
+        current !== null &&
+        current.size === nodes.length &&
+        nodes.every((node) => {
+          const previous = current.get(node.id);
+          return (
+            previous?.position.x === node.position.x &&
+            previous.position.y === node.position.y &&
+            previous.style?.width === node.style?.width &&
+            previous.style?.height === node.style?.height &&
+            previous.measured?.width === node.measured?.width &&
+            previous.measured?.height === node.measured?.height
+          );
+        });
+      if (unchanged) return state;
+      return {
+        nodeGeometryPreviews: new Map(
+          nodes.map((node) => [
+            node.id,
+            {
+              position: node.position,
+              style: node.style,
+              measured: node.measured,
+            },
+          ]),
+        ),
+      };
+    }),
+  clearNodeGeometryPreviews: () =>
+    set((state) =>
+      state.nodeGeometryPreviews === null
+        ? state
+        : { nodeGeometryPreviews: null },
     ),
   resetCanvasScopedTransients: () => set({ ...INITIAL_PREVIEW_DATA }),
 }));

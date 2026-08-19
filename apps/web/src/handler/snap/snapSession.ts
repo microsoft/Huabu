@@ -265,6 +265,7 @@ function invalidateFrameDragPreview(): void {
   preview.clearFrameFitPreview();
   preview.clearStructuredDropPreview();
   preview.clearStructuredReflowPositions();
+  preview.clearNodeGeometryPreviews();
 }
 
 function setNestedFrameEntryAllowed(allowed: boolean): void {

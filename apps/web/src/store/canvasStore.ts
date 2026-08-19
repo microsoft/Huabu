@@ -41,7 +41,9 @@ import {
   solveStructuredFrameLayout,
   describeStructuredDropZone,
   getNodeSize,
+  moveNodeOutOfFrame as projectNodeOutOfFrame,
   normalizeTreeOrder,
+  projectAffectedFrameGeometry,
   type AlignDirection,
   type Delta,
   type ExecutorOptions,
@@ -2562,6 +2564,40 @@ const useCanvasStore = create<RFState>()(
           }
         }
 
+        let projectedSourceNodes = liveNodes;
+        for (const leavingIds of leavingByFrame.values()) {
+          for (const leavingId of leavingIds) {
+            projectedSourceNodes = projectNodeOutOfFrame(
+              projectedSourceNodes,
+              leavingId,
+            );
+          }
+        }
+        const sourceGeometryProjection = projectAffectedFrameGeometry(
+          projectedSourceNodes,
+          leavingByFrame.keys(),
+          edges,
+        ).nodes;
+        const liveById = new Map(liveNodes.map((node) => [node.id, node]));
+        const sourceGeometryPreviews = sourceGeometryProjection.filter(
+          (node) => {
+            if (draggedIds.has(node.id)) return false;
+            const current = liveById.get(node.id);
+            if (!current) return false;
+            const currentSize = getNodeSize(current);
+            const nextSize = getNodeSize(node);
+            return (
+              current.position.x !== node.position.x ||
+              current.position.y !== node.position.y ||
+              currentSize.width !== nextSize.width ||
+              currentSize.height !== nextSize.height
+            );
+          },
+        );
+        useGesturePreviewStore
+          .getState()
+          .setNodeGeometryPreviews(sourceGeometryPreviews);
+
         // Compute fit previews for all affected frames and show them all
         // simultaneously — e.g. source frame shrinking + target frame expanding.
         // Each entry is tagged with a UI role so the overlay can paint the
@@ -2849,6 +2885,7 @@ const useCanvasStore = create<RFState>()(
       // peers snap to their committed positions in the same tick the
       // authoritative `SET_NODE_GEOMETRY` lands.
       useGesturePreviewStore.getState().clearStructuredReflowPositions();
+      useGesturePreviewStore.getState().clearNodeGeometryPreviews();
 
       // Read the Space-bypass snapshot taken by `endSnapSession`.
       // The snap session is normally torn down by `onNodesChange`
@@ -2960,6 +2997,7 @@ const useCanvasStore = create<RFState>()(
       preview.clearFrameFitPreview();
       preview.clearStructuredDropPreview();
       preview.clearStructuredReflowPositions();
+      preview.clearNodeGeometryPreviews();
 
       const startPositions = _dragStartPositions;
       _dragStartPositions = null;
@@ -3003,6 +3041,7 @@ const useCanvasStore = create<RFState>()(
       useGesturePreviewStore.getState().clearFrameFitPreview();
       useGesturePreviewStore.getState().clearStructuredDropPreview();
       useGesturePreviewStore.getState().clearStructuredReflowPositions();
+      useGesturePreviewStore.getState().clearNodeGeometryPreviews();
       _dragStartPositions = null;
       endSnapSession();
     },

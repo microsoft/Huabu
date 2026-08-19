@@ -4,9 +4,7 @@
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
-  fitFrames,
   FRAME_POINTER_CAPTURE_MARGIN,
-  getFrameSizing,
   moveNodeIntoFrame,
   moveNodeOutOfFrame,
   pickColumnDropTarget,
@@ -16,6 +14,7 @@ import {
   readFrameGridRow,
   readFrameTrack,
   resolveFrameTrackCount,
+  projectAffectedFrameGeometry,
   wouldStickToStructuredFrame,
   type FrameAxis,
   type FrameGridAxis,
@@ -191,21 +190,14 @@ export default function resolveNodeDragStop(
     if (prevParentId) affectedFrameIds.add(prevParentId);
     if (node?.parentId) affectedFrameIds.add(node.parentId);
   }
-  const frameById = new Map(result.map((node) => [node.id, node]));
-  for (const frameId of [...affectedFrameIds]) {
-    let parentId = frameById.get(frameId)?.parentId;
-    while (parentId) {
-      affectedFrameIds.add(parentId);
-      parentId = frameById.get(parentId)?.parentId;
-    }
-  }
-  const hugFrameIds = new Set<string>();
-  for (const frameId of affectedFrameIds) {
-    const frame = result.find((n) => n.id === frameId);
-    if (getFrameSizing(frame) === 'hug') hugFrameIds.add(frameId);
-  }
-  if (hugFrameIds.size > 0) {
-    result = fitFrames(result, hugFrameIds);
+  const projection = projectAffectedFrameGeometry(
+    result,
+    affectedFrameIds,
+    ui.edges,
+  );
+  result = projection.nodes;
+  for (const frameId of projection.affectedFrameIds) {
+    affectedFrameIds.add(frameId);
   }
 
   for (const node of result) {
