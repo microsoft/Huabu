@@ -67,8 +67,17 @@ export class DiskSpaceRepository implements SpaceRepository {
   readonly #workspacePath: string;
   readonly #now: () => number;
 
-  constructor(now: () => number = Date.now) {
-    this.#workspacePath = path.resolve(getWorkspacePath());
+  /**
+   * @param workspacePath Workspace this repository is bound to. Defaults to
+   *   the active one, which is what every caller outside the mount lifecycle
+   *   wants; the lifecycle passes the Workspace being staged, because
+   *   {@link ensureWorld} runs before that Workspace becomes active.
+   */
+  constructor(
+    workspacePath: string = getWorkspacePath(),
+    now: () => number = Date.now,
+  ) {
+    this.#workspacePath = path.resolve(workspacePath);
     this.#now = now;
   }
 
@@ -107,8 +116,14 @@ export class DiskSpaceRepository implements SpaceRepository {
    * World is a new member of the collection every later read resolves through.
    */
   async ensureWorld(): Promise<string> {
-    this.#assertActiveWorkspace();
+    // Deliberately no active-Workspace assertion. Bootstrap is the one
+    // operation defined *before* its Workspace is active: the mount stages a
+    // connection, ensures the World, and only then commits the path and swaps
+    // (proposal §12.6.5). It works on the bound path directly rather than
+    // through the active-Workspace layout, so it is safe either way.
     const canvasId = ensureWorldCanvasOnDisk(this.#workspacePath);
+    // Lazy invalidation only; the next read rescans whichever Workspace is
+    // active by then.
     refreshCanvasDirIndex();
     return canvasId;
   }

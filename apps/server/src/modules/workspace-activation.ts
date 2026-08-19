@@ -15,6 +15,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { stageStorage } from './storage/index.js';
 import {
   commitWorkspacePath,
   isManagedMode,
@@ -176,7 +177,17 @@ export function runWorkspacePreparation(
   });
 }
 
-/** Prepare a free-mode workspace and commit it only after full success. */
+/**
+ * Prepare a free-mode workspace and commit it only after full success.
+ *
+ * Ordering is the contract (proposal §12.6.5). The disposable child prepares
+ * and migrates the directory; storage then stages its connections against the
+ * *new* path and bootstraps its World; only once both have succeeded is the
+ * Workspace path committed and the mount published. Anything that fails before
+ * the commit leaves the previous Workspace and its connections serving, which
+ * is why staging is separate from publishing — a half-activated Workspace is
+ * the one outcome this sequence exists to prevent.
+ */
 export async function activateWorkspacePath(
   newPath: string,
   options: PreparationOptions = {},
@@ -194,7 +205,17 @@ export async function activateWorkspacePath(
   activationInProgress = true;
   try {
     await runWorkspacePreparation(resolvedPath, options);
-    commitWorkspacePath(resolvedPath);
+    const staged = await stageStorage(resolvedPath);
+    try {
+      // The path and the mount that serves it are published together, so no
+      // request can observe one without the other.
+      await staged.commit(() => commitWorkspacePath(resolvedPath));
+    } catch (error) {
+      // The path change was refused — an in-flight operation still holds the
+      // previous Workspace. Discard the connections nobody will reach.
+      await staged.abort();
+      throw error;
+    }
   } finally {
     activationInProgress = false;
   }

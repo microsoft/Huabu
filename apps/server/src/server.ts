@@ -33,12 +33,15 @@ async function start(): Promise<void> {
     }
 
     // Before anything serves: an unknown or unimplemented backend must
-    // fail here with an actionable message, not on the first upload.
+    // fail here with an actionable message, not on the first upload. In free
+    // mode there is no Workspace yet, so this validates the profile and the
+    // mount waits for activation.
     const storage = await initStorage();
     log.info(
       {
-        structured: storage.profile.structured.kind,
-        blobs: storage.profile.blobs.kind,
+        structured: storage?.profile.structured.kind,
+        blobs: storage?.profile.blobs.kind,
+        workspace: storage ? 'mounted' : 'awaiting activation',
       },
       'Storage backends ready',
     );

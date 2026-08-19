@@ -198,6 +198,7 @@ function installBlobStore(next: BlobStore): void {
   restoreStorage = setStorageForTesting(
     composeStorage(
       { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
+      workspaceState.path,
       new DiskStructuredStore(),
       next,
     ),
@@ -216,6 +217,7 @@ beforeEach(() => {
   restoreStorage = setStorageForTesting(
     composeStorage(
       { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
+      workspaceState.path,
       new DiskStructuredStore(),
       blobs,
     ),

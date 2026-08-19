@@ -40,6 +40,7 @@ import path from 'node:path';
 
 import { resetExternalNoteSessions } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
+import { detachStorage } from './storage/storage.js';
 import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import { invalidateUserSkill } from '../prompt/index.js';
 
@@ -211,7 +212,17 @@ export function resolveWorkspacePath(newPath: string): string {
  */
 export function commitWorkspacePath(resolvedPath: string): void {
   assertWorkspacePathChangeAllowed(resolvedPath);
+  const changed = _workspacePath !== resolvedPath;
   _workspacePath = resolvedPath;
+  if (changed) {
+    // A mount belongs to one Workspace, so the previous one no longer
+    // describes anything reachable. Detach rather than close: this function is
+    // synchronous and cannot await, and a backend whose `close()` matters is
+    // one the lazy rebuild refuses to construct anyway — such a profile is
+    // mounted through `stageStorage`, which closes the mount it replaces
+    // (proposal §12.6.5).
+    detachStorage();
+  }
   // Drop the cached canvas-dir index so subsequent lookups (used by
   // migrations and route handlers) reflect the new workspace.
   refreshCanvasDirIndex();

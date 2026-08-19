@@ -122,7 +122,10 @@ beforeEach(() => {
   workspaceState.path = root;
   resetStorageCache();
   restoreStorage = setStorageForTesting(
-    createStorage({ structured: { kind: 'disk' }, blobs: { kind: 'disk' } }),
+    createStorage(
+      { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
+      root,
+    ),
   );
 });
 

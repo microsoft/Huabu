@@ -61,19 +61,28 @@ export type {
 // ─── Storage ports and composition ─────────────────────────────────────────
 
 export {
+  closeStorage,
   composeStorage,
   createSpace,
   createStorage,
   deleteSpace,
+  detachStorage,
   getBlobStore,
   getStorage,
   getStructuredStore,
   initStorage,
+  mountStorage,
   setStorageForTesting,
   space,
+  stageStorage,
   storageHealth,
 } from './storage.js';
-export type { Space, SpaceDeleteOutcome, Storage } from './storage.js';
+export type {
+  Space,
+  SpaceDeleteOutcome,
+  StagedStorage,
+  Storage,
+} from './storage.js';
 export type { DiskSpaceTree } from './backends/disk/space-tree.js';
 export {
   parseStorageProfile,

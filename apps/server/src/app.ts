@@ -56,6 +56,7 @@ import {
   originGuardPlugin,
   resolveAllowedHostnames,
 } from './modules/security/index.js';
+import { closeStorage } from './modules/storage/index.js';
 import webRoutes from './modules/web/web.route.js';
 import {
   initWorkspaceFromEnv,
@@ -364,6 +365,11 @@ if (bundledAgentTeamsPath) {
 // after the process is gone. Closing them here lets `app.close()` (driven
 // by the SIGTERM/SIGINT handlers in server.ts) tear them down gracefully.
 app.addHook('onClose', async () => resetExternalNoteSessions());
+// Close the mounted storage connections on graceful shutdown. Disk has
+// nothing to release, but a connection-holding backend does, and a mount that
+// outlives the process that owned it is exactly the kind of leak that only
+// shows up under the backend nobody has written yet.
+app.addHook('onClose', async () => closeStorage());
 // Capture the bound TCP port for L1-owned reachback (RFS): the
 // canvas-scoped `HUABU_RFS_URL` base is built from this. RFS is
 // canvas-coupled and therefore a pure L1 concern, so the port lives in
