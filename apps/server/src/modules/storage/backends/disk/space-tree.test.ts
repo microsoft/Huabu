@@ -52,6 +52,9 @@ describe('diskSpaceTree', () => {
     // *other* Workspace's files under the id it asked about — the file tools'
     // sandbox root and bundle export both resolve real paths from it.
     expect(() => retained.directory()).toThrow(/inactive workspace/);
+    expect(() => retained.nodeIdForPath('nodes/Note.md')).toThrow(
+      /inactive workspace/,
+    );
     expect(diskSpaceTree('space-a').directory()).toBe(
       path.join(second, 'space-a'),
     );

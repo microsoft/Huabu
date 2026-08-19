@@ -667,7 +667,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         return reply.code(404).send(rfsError(`No file at "${requestRel}".`));
       }
 
-      const lookup = lookupNodeByPath(canvasId, physicalRel);
+      const lookup = await lookupNodeByPath(canvasId, physicalRel);
 
       // Node files carry a revision ETag (hash of authored content) so an
       // agent can conditional-GET: an unchanged node returns `304` and the
@@ -1064,7 +1064,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       let parentLookupFailed = false;
       if (parentThreadId) {
         try {
-          parentNodeId = agentThreadResolver.resolveAgentNodeId(
+          parentNodeId = await agentThreadResolver.resolveAgentNodeId(
             canvasId,
             parentThreadId,
           );
@@ -1185,7 +1185,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           .send(rfsError('An initial prompt is required.', 'prompt_required'));
       }
 
-      const target = agentThreadService.resolveFixedTarget(
+      const target = await agentThreadService.resolveFixedTarget(
         canvasId,
         created.threadId,
       );
@@ -1325,7 +1325,10 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
 
       let target;
       try {
-        target = agentThreadService.resolveFixedTarget(canvasId, threadId);
+        target = await agentThreadService.resolveFixedTarget(
+          canvasId,
+          threadId,
+        );
       } catch (error) {
         if (error instanceof AgentThreadResolutionError) {
           return reply
