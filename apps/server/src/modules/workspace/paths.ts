@@ -11,7 +11,7 @@
  *     Untouched by a backend switch.
  *   - Per-Space state owned by *other* domains — memory, ACP sessions, the
  *     debug prompt log — which need a materialized directory but not the Disk
- *     record layout. They anchor on `spaceDirectory()` from the storage
+ *     record layout. They anchor on the Space's Disk tree from the storage
  *     facade, so they no longer consult the Disk name index (§12.5.4).
  *
  * The Disk record and blob layout moved to `storage/backends/disk/layout.ts`.
@@ -36,7 +36,7 @@
 import path from 'node:path';
 
 import { sanitizeId } from '../../utils/fs.js';
-import { spaceDirectory } from '../storage/index.js';
+import { space } from '../storage/index.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { Namespace } from '@agenetes/protocol';
@@ -49,8 +49,28 @@ import type { Namespace } from '@agenetes/protocol';
  */
 const LEGACY_HISTORY_DIR_NAME = '.history';
 
+/**
+ * The Space's real directory, or a refusal.
+ *
+ * Every path this module builds is for a family Phase 4.6 relocates — memory
+ * state and the debug prompt log to the extension substrate, the memory body
+ * to a blob, ACP sessions with phase 6 (proposal §6.4.3). Until then they are
+ * bare files, so one branch here says once what each of them would otherwise
+ * repeat: these paths exist only where the backend has a tree.
+ */
+function spaceRoot(canvasId: string): string {
+  const tree = space(canvasId).diskTree;
+  if (!tree) {
+    throw new Error(
+      `Per-Space files for "${canvasId}" need a Space directory, which the ` +
+        'active structured backend does not provide.',
+    );
+  }
+  return tree.directory();
+}
+
 function legacyHistoryDir(canvasId: string): string {
-  return path.join(spaceDirectory(canvasId), LEGACY_HISTORY_DIR_NAME);
+  return path.join(spaceRoot(canvasId), LEGACY_HISTORY_DIR_NAME);
 }
 
 // ─── Memory module paths ───────────────────────────────────────────────────
@@ -71,7 +91,7 @@ export function workspaceMemoryPath(): string {
 export const WORKING_MEMORY_DIR_NAME = '.memory';
 
 export function canvasMemoryDir(canvasId: string): string {
-  return path.join(spaceDirectory(canvasId), WORKING_MEMORY_DIR_NAME);
+  return path.join(spaceRoot(canvasId), WORKING_MEMORY_DIR_NAME);
 }
 
 /** Working memory body for a canvas. */

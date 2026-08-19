@@ -39,7 +39,7 @@ import canvasRoutes from './canvas.route.js';
 import { withSpaceDirHandlesReleased } from '../storage/backends/disk/space-dir-handles.js';
 import { createCanvas, deleteCanvas } from '../storage/compatibility/canvas.js';
 import {
-  canvasBlobs,
+  space,
   getCanvasStore,
   getStructuredStore,
   resetStorageCache,
@@ -738,7 +738,7 @@ describe('Space export/import persistence', () => {
       change,
     ]);
     const blob = Buffer.from([0, 1, 2, 3, 255]);
-    await canvasBlobs('c1').put('asset.bin', blob);
+    await space('c1').blobs.put('asset.bin', blob);
 
     const app = await buildApp();
     try {
@@ -790,7 +790,7 @@ describe('Space export/import persistence', () => {
       expect(await importedSpace.changes.read('thread-export')).toEqual(
         storedChanges,
       );
-      expect(await canvasBlobs(importedId).read('asset.bin')).toEqual(blob);
+      expect(await space(importedId).blobs.read('asset.bin')).toEqual(blob);
     } finally {
       await app.close();
     }

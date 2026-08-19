@@ -5,7 +5,7 @@
  * End-to-end activation of a legacy workspace, over the production routes.
  *
  * Phase 4.5 moved the Disk record layout inside the storage boundary and
- * routed every "where is this Space" question through `spaceDirectory()`. This
+ * routed every "where is this Space" question through one accessor. This
  * suite exists to prove that the move did not change what the app can read or
  * write. It does not test a module — it activates a workspace the way a launch
  * does (`setWorkspacePath` → `prepareWorkspaceOnDisk` → every migration) and
@@ -57,10 +57,22 @@ import agentRoutes from '../agent/agent.route.js';
 import artifactRoute from '../artifact/artifact.route.js';
 import canvasRoutes from '../canvas/canvas.route.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
-import { resetStorageCache, spaceDirectory } from '../storage/index.js';
+import { resetStorageCache, space } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { FastifyInstance } from 'fastify';
+
+/**
+ * The Space's Disk directory, or a test failure.
+ *
+ * These cases are Disk-specific by construction; the assertion states that
+ * rather than letting an optional-chained `undefined` quietly pass.
+ */
+function diskDirOf(canvasId: string): string {
+  const tree = space(canvasId).diskTree;
+  if (!tree) throw new Error('Expected the Disk backend in this test');
+  return tree.directory();
+}
 
 /** The Space under test: title-derived directory name ≠ canvasId. */
 const CANVAS_ID = 'legacy-space-1';
@@ -203,7 +215,7 @@ async function seedLegacyWorkspace(): Promise<void> {
   }
 
   // A legacy artifact, in the layout the Disk backend has always used.
-  const spaceDir = spaceDirectory(CANVAS_ID);
+  const spaceDir = diskDirOf(CANVAS_ID);
   mkdirSync(join(spaceDir, '.artifacts'), { recursive: true });
   writeFileSync(
     join(spaceDir, '.artifacts', 'art_legacy.txt'),
@@ -408,7 +420,7 @@ describe('activating a legacy workspace on the new storage boundary', () => {
 
       // 2. Execute a real command batch that imports a staged local file into
       //    the artifact store through the blob port.
-      const uploadDir = join(spaceDirectory(CANVAS_ID), '.upload');
+      const uploadDir = join(diskDirOf(CANVAS_ID), '.upload');
       mkdirSync(uploadDir, { recursive: true });
       writeFileSync(join(uploadDir, 'fresh.txt'), 'freshly imported bytes');
       const exec = await app.inject({
