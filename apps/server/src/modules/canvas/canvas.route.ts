@@ -57,16 +57,16 @@ import {
   space,
   createSpace,
   deleteSpace,
-  getCanvasStore,
   getStructuredStore,
   type CanvasFile,
+  type NodeContent,
+  type Space,
   type UpdateNodeOutcome,
   updateNode,
 } from '../storage/index.js';
 import { nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
 import { getWorkspacePath } from '../workspace.js';
 
-import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
 import type { CanvasNodeType } from '@huabu/shared';
 import type {
   ApiResult,
@@ -356,10 +356,10 @@ async function singleArtifactProbe(
  * callers can rely on identity-based diffing.
  */
 function hydrateOneNode(
-  store: CanvasStore,
   node: NodeLike,
   artifactExists: (key: string) => boolean,
-  preloaded?: NodeContent | null,
+  nodeContent: NodeContent | null,
+  duplicateSidecars: readonly string[],
 ): NodeLike {
   const nodeId = typeof node.id === 'string' ? node.id : '';
   if (!nodeId) return node;
@@ -374,17 +374,6 @@ function hydrateOneNode(
   // is the only source of truth for those fields, so we read it before
   // any check that depends on them (notably the artifact-missing probe,
   // which needs the hydrated `src`).
-  let nodeContent: NodeContent | null;
-  if (preloaded !== undefined) {
-    nodeContent = preloaded;
-  } else {
-    try {
-      nodeContent = store.readNode(nodeId);
-    } catch {
-      nodeContent = null;
-    }
-  }
-
   if (!nodeContent) {
     if (MD_BACKED_NODE_TYPES.has(nodeType)) {
       data['contentMissing'] = true;
@@ -406,9 +395,9 @@ function hydrateOneNode(
   // duplicate. The duplicate set was already populated by the
   // `readAllNodes()` scan that produced `preloaded`, so this is a cheap
   // in-memory lookup with no extra disk I/O.
-  if (store.isDuplicateNode(nodeId)) {
+  if (duplicateSidecars.length > 0) {
     data['contentDuplicate'] = true;
-    data['duplicateFiles'] = store.duplicateNodeFiles(nodeId);
+    data['duplicateFiles'] = [...duplicateSidecars];
   } else {
     if ('contentDuplicate' in data) {
       delete data['contentDuplicate'];
@@ -507,13 +496,17 @@ function hydrateOneNode(
  * load on cold cache.
  */
 async function hydrateNodeContent(
-  store: CanvasStore,
+  handle: Space,
   nodes: NodeLike[],
 ): Promise<NodeLike[]> {
   // Read sidecars first because they are the source of truth for `src`.
   // Probe only the keys referenced by artifact-backed nodes; enumerating the
   // entire scope would make hydration cost grow with unrelated blob count.
-  const contentByNodeId = await store.readAllNodes();
+  const records = await handle.nodes.list();
+  const contentByNodeId = new Map<string, NodeContent>();
+  for (const [nodeId, snapshot] of records) {
+    contentByNodeId.set(nodeId, snapshot.record);
+  }
   const referenced = new Set<string>();
   for (const node of nodes) {
     const nodeType = typeof node.type === 'string' ? node.type : '';
@@ -526,16 +519,16 @@ async function hydrateNodeContent(
   const present =
     referenced.size === 0
       ? new Set<string>()
-      : await space(store.canvasId).blobs.hasMany([...referenced]);
+      : await handle.blobs.hasMany([...referenced]);
   const artifactExists = (key: string): boolean => present.has(key);
 
   return nodes.map((node) => {
     const nodeId = typeof node.id === 'string' ? node.id : '';
     return hydrateOneNode(
-      store,
       node,
       artifactExists,
       contentByNodeId.get(nodeId) ?? null,
+      handle.diskTree?.duplicateSidecars(nodeId) ?? [],
     );
   });
 }
@@ -881,19 +874,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   }>('/:canvasId/nodes/:nodeId/content', async function (request, reply) {
     const { canvasId, nodeId } = request.params;
 
-    const store = getCanvasStore(canvasId);
-    const canvas = store.read();
+    const handle = space(canvasId);
+    const canvas = await handle.read();
     if (!canvas) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
-
-    // Reconcile the cached node index against disk before this read.
-    // Only re-scans when warranted: a node already flagged duplicate
-    // always re-reads (so a hand-resolved duplicate is detected — the
-    // cheap count probe alone can't see that case), otherwise it falls
-    // back to the names-only staleness probe. Keeps the common healthy
-    // read off the full content rescan.
-    store.revalidateNodeForRead(nodeId);
 
     // Find this node in the persisted canvas state so we know its type
     // (without it we can't apply the artifact-missing branch). For
@@ -904,9 +889,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     let nodeType =
       stateNode && typeof stateNode.type === 'string' ? stateNode.type : '';
 
+    // The port's single-node read reconciles the adapter's cached index
+    // against storage before answering, so a hand-resolved duplicate or an
+    // external rename is picked up here rather than needing its own probe.
     let existing: NodeContent | null = null;
     try {
-      existing = store.readNode(nodeId);
+      existing = (await handle.nodes.read(nodeId))?.record ?? null;
     } catch {
       existing = null;
     }
@@ -933,13 +921,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // Reuse the batched hydration helper so single-node and whole-
     // canvas reads stay in lock-step.
     const hydrated = hydrateOneNode(
-      store,
       {
         id: nodeId,
         type: nodeType,
         data: { ...(stateNode?.data ?? {}) },
       },
-      await singleArtifactProbe(store.canvasId, existing.src),
+      await singleArtifactProbe(canvasId, existing.src),
+      existing,
+      handle.diskTree?.duplicateSidecars(nodeId) ?? [],
     );
     const data = (hydrated.data ?? {}) as Record<string, unknown>;
 
@@ -1009,9 +998,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const { nodeType, trigger, snapshot, previousSnapshot, options } =
       parsed.data;
     const dispatcher = getPreprocessDispatcher();
-    const store = getCanvasStore(canvasId);
-
-    if (MD_BACKED_NODE_TYPES.has(nodeType) && !store.readNode(nodeId)) {
+    if (
+      MD_BACKED_NODE_TYPES.has(nodeType) &&
+      !(await space(canvasId).nodes.read(nodeId))
+    ) {
       return reply.send({
         nodeId,
         success: false,
@@ -1097,8 +1087,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     if (isWorldCanvasId(canvasId)) {
       await reconcileWorldPortals();
     }
-    const store = getCanvasStore(canvasId);
-    const canvas = store.read();
+    const handle = space(canvasId);
+    const canvas = await handle.read();
 
     if (!canvas) {
       return reply.code(404).send({ message: 'Canvas not found' });
@@ -1107,7 +1097,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // Hydrate node content from the per-canvas store so clients always
     // receive fresh markdown bodies.
     const nodes = canvas.state.nodes as NodeLike[];
-    const hydratedNodes = await hydrateNodeContent(store, nodes);
+    const hydratedNodes = await hydrateNodeContent(handle, nodes);
 
     return reply.send({
       canvasId: canvas.canvasId,
@@ -1569,8 +1559,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<RevealNodesFolderResponse>;
   }>('/:canvasId/reveal-nodes', async function (request, reply) {
     const { canvasId } = request.params;
-    const store = getCanvasStore(canvasId);
-    if (!store.read()) {
+    if (!(await space(canvasId).read())) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
     const dir = nodesDir(canvasId);
@@ -1603,8 +1592,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
     const includeHistory = parsedQuery.data.includeHistory !== 'false';
 
-    const store = getCanvasStore(canvasId);
-    const canvas = store.read();
+    const canvas = await space(canvasId).read();
     if (!canvas) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
@@ -1843,9 +1831,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      const store = getCanvasStore(canvasId);
-      const canvas = store.read();
-      if (!canvas) {
+      const handle = space(canvasId);
+      if (!(await handle.read())) {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
 
@@ -1883,7 +1870,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       request.raw.on('close', onClose);
 
       try {
-        await searchCanvas(store, parsed.data, writeEvent, abort.signal);
+        await searchCanvas(handle, parsed.data, writeEvent, abort.signal);
       } catch (err) {
         request.log.error({ err, canvasId }, 'Canvas search failed');
         writeEvent({

@@ -10,7 +10,7 @@
  * one import".
  *
  * What this is **not**: evidence that every read capability is portable. The
- * compatibility facade and three root forwarding shims still serve explicit
+ * compatibility facade and two root forwarding shims still serve explicit
  * Disk-only/read paths. This asserts that the portable write boundary and
  * dependency direction stay intact while that remaining list only shrinks.
  */
@@ -78,14 +78,13 @@ function inLayer(relative: string, layer: string): boolean {
 }
 
 describe('storage module tree', () => {
-  it('keeps only the barrel, composition, and the three shims at the root', () => {
+  it('keeps only the barrel, composition, and the two shims at the root', () => {
     const rootFiles = storageFiles
       .filter((f) => path.dirname(f) === 'modules/storage')
       .map((f) => path.basename(f));
 
     expect(rootFiles.sort()).toEqual([
       'canvas-dirs.ts',
-      'canvas-store.ts',
       'index.ts',
       'module-boundaries.test.ts',
       'paths.ts',
@@ -397,11 +396,7 @@ describe('structured write authority', () => {
 });
 
 describe('root forwarding shims', () => {
-  const SHIMS = [
-    'modules/storage/canvas-store.ts',
-    'modules/storage/canvas-dirs.ts',
-    'modules/storage/paths.ts',
-  ];
+  const SHIMS = ['modules/storage/canvas-dirs.ts', 'modules/storage/paths.ts'];
 
   it.each(SHIMS)('%s contains no logic', (shim) => {
     const body = read(shim)
@@ -419,11 +414,6 @@ describe('root forwarding shims', () => {
 
   /** Exact snapshot of the remaining deprecated-path importers. */
   const EXPECTED_IMPORTERS: Record<string, readonly string[]> = {
-    'storage/canvas-store.js': [
-      'modules/canvas/canvas-search.test.ts',
-      'modules/canvas/canvas-search.ts',
-      'modules/canvas/canvas.route.ts',
-    ],
     'storage/canvas-dirs.js': [
       'modules/agent/tools/world-target-read.test.ts',
       'modules/canvas/canvas-command-router.test.ts',

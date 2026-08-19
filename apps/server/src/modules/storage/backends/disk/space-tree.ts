@@ -57,6 +57,18 @@ export interface DiskSpaceTree {
    * would collapse to `nodes/<id>.md` and never match a label-named file.
    */
   nodeIdForPath(relativePath: string): string | null;
+  /**
+   * Every sidecar filename currently claiming `nodeId`; empty when there is
+   * no conflict.
+   *
+   * Only a filesystem can produce this: two files can both say they are one
+   * node, and a table with a primary key cannot. The read path surfaces it as
+   * a non-blocking hint — the index keeps the last-scanned file, so the node
+   * still renders — while a write hard-fails with `duplicate-node`. That
+   * asymmetry is deliberate: a user who broke it by hand needs to see the node
+   * to fix it.
+   */
+  duplicateSidecars(nodeId: string): readonly string[];
 }
 
 export function diskSpaceTree(canvasId: string): DiskSpaceTree {
@@ -67,6 +79,12 @@ export function diskSpaceTree(canvasId: string): DiskSpaceTree {
       const filename = NODE_SIDECAR_RE.exec(relativePath)?.[1];
       if (filename === undefined) return null;
       return getCanvasStore(canvasId).nodeIdForFilename(filename);
+    },
+    duplicateSidecars: (nodeId: string) => {
+      const store = getCanvasStore(canvasId);
+      return store.isDuplicateNode(nodeId)
+        ? store.duplicateNodeFiles(nodeId)
+        : [];
     },
   };
 }

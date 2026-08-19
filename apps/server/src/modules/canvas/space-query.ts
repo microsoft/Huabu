@@ -13,7 +13,7 @@ import {
   snapshotNodesToArtifacts,
   SnapshotNodeError,
 } from './snapshot-nodes.js';
-import { getCanvasStore } from '../storage/index.js';
+import { space } from '../storage/index.js';
 
 import type {
   CanvasSearchMatch,
@@ -86,7 +86,7 @@ export async function executeSpaceQuery(
       }> = [];
       let truncated = false;
       let error: string | undefined;
-      await searchCanvas(getCanvasStore(canvasId), request, (event) => {
+      await searchCanvas(space(canvasId), request, (event) => {
         if (event.type === 'match') {
           matches.push({ tier: event.tier, match: event.match });
         } else if (event.type === 'done') {
