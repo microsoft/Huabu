@@ -69,15 +69,10 @@ function isMissing(err: unknown): boolean {
 class DiskBlobScope implements BlobScope {
   readonly #ref: BlobScopeRef;
   readonly #workspacePath: string;
-  readonly #resolveSpaceDirectory: (canvasId: string) => string;
 
-  constructor(
-    ref: BlobScopeRef,
-    resolveSpaceDirectory: (canvasId: string) => string,
-  ) {
+  constructor(ref: BlobScopeRef) {
     this.#ref = ref;
     this.#workspacePath = path.resolve(getWorkspacePath());
-    this.#resolveSpaceDirectory = resolveSpaceDirectory;
   }
 
   #resolveDir(): string {
@@ -91,10 +86,10 @@ class DiskBlobScope implements BlobScope {
     // Resolve once per operation, before its first await. Every later path in
     // that operation is derived from this absolute directory, so a workspace
     // switch cannot combine a temp in A with a destination in B.
-    return path.join(
-      this.#resolveSpaceDirectory(this.#ref.canvasId),
-      ARTIFACTS_DIR_NAME,
-    );
+    // The Disk blob adapter owns its own placement. Borrowing it from the
+    // Space-tree capability made two modules answer "where is this Space",
+    // which is one more than can stay in agreement.
+    return path.join(canvasRoot(this.#ref.canvasId), ARTIFACTS_DIR_NAME);
   }
 
   async #headAt(dir: string, name: string): Promise<BlobInfo | null> {
@@ -238,13 +233,6 @@ class DiskBlobScope implements BlobScope {
 
 export class DiskBlobStore implements BlobStore {
   readonly kind = 'disk' as const;
-  readonly #resolveSpaceDirectory: (canvasId: string) => string;
-
-  constructor(
-    resolveSpaceDirectory: (canvasId: string) => string = canvasRoot,
-  ) {
-    this.#resolveSpaceDirectory = resolveSpaceDirectory;
-  }
 
   async init(): Promise<void> {
     // Scope directories are created on first write; nothing to prepare.
@@ -257,6 +245,6 @@ export class DiskBlobStore implements BlobStore {
   async close(): Promise<void> {}
 
   scope(ref: BlobScopeRef): BlobScope {
-    return new DiskBlobScope(ref, this.#resolveSpaceDirectory);
+    return new DiskBlobScope(ref);
   }
 }

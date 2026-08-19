@@ -25,7 +25,6 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { materializationFor } from './materialization.js';
 import { type StorageProfile } from './profile.js';
 import {
   closeStorage,
@@ -59,10 +58,7 @@ export const PRODUCT_STORAGE_PROFILES: readonly StorageProfile[] = [
 
 /** A short, stable label for a profile — useful as a test name. */
 export function describeProfile(profile: StorageProfile): string {
-  return (
-    `${profile.structured.kind}/${profile.blobs.kind}` +
-    `/${materializationFor(profile.structured.kind)}`
-  );
+  return `${profile.structured.kind}/${profile.blobs.kind}`;
 }
 
 /**

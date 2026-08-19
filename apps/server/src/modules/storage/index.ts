@@ -50,7 +50,6 @@ export {
   createStorage,
   deleteSpace,
   getBlobStore,
-  getSpaceMaterialization,
   getStorage,
   getStructuredStore,
   getWorldCanvasId,
@@ -58,7 +57,6 @@ export {
   isWorldCanvasId,
   requireWorldCanvasId,
   setStorageForTesting,
-  spaceDirectory,
   stageStorageForWorkspace,
   storageHealth,
 } from './storage.js';
@@ -86,14 +84,20 @@ export type {
   BlobStore,
 } from './ports/blob.js';
 export type { StorageHealth } from './ports/common.js';
-export {
-  materializationFor,
-  type MaterializationKind,
-  type SpaceImportStaging,
-  type SpaceMaterialization,
-  type SpaceTree,
-  type SpaceTreeHandleOwner,
-} from './materialization.js';
+/**
+ * Disk-only capabilities, exported here because they have nowhere portable to
+ * live and every consumer must be visible.
+ *
+ * These are **not** ports and carry no cross-backend promise. Each caller is
+ * a reason a non-Disk structured profile is not selectable, and
+ * `module-boundaries.test.ts` keeps the exact list so it can only shrink.
+ */
+export { diskSpaceTree, stageDiskSpaceImport } from './storage.js';
+export type {
+  DiskSpaceImport,
+  DiskSpaceTree,
+} from './backends/disk/space-tree.js';
+export type { SpaceDirHandleOwner } from './backends/disk/space-dir-handles.js';
 export type {
   NewCanvasEvent,
   NodeDeleteResult,

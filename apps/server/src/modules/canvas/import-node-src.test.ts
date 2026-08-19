@@ -18,7 +18,7 @@ import { createCanvas } from '../storage/compatibility/canvas.js';
 import {
   canvasBlobs,
   getCanvasStore,
-  spaceDirectory,
+  diskSpaceTree,
 } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
@@ -49,7 +49,7 @@ afterEach(() => {
 
 /** Stage a file under the canvas's hidden `.upload/` scratch dir. */
 function stageUpload(canvasId: string, name: string, body: string): string {
-  const uploadDir = path.join(spaceDirectory(canvasId), '.upload');
+  const uploadDir = path.join(diskSpaceTree(canvasId).directory(), '.upload');
   mkdirSync(uploadDir, { recursive: true });
   const abs = path.join(uploadDir, name);
   writeFileSync(abs, body);
@@ -266,7 +266,7 @@ describe('importForeignNodeSources — media nodes (regression)', () => {
 
   it('canonicalizes an artifact path that leaves and re-enters the Space', async () => {
     const canvasId = 'c-image-reentered';
-    const spaceDir = spaceDirectory(canvasId);
+    const spaceDir = diskSpaceTree(canvasId).directory();
     const artifactsDir = path.join(spaceDir, '.artifacts');
     mkdirSync(artifactsDir, { recursive: true });
     writeFileSync(path.join(artifactsDir, 'pic.png'), 'existing artifact');

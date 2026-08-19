@@ -1936,44 +1936,35 @@ Every production structured read uses `StructuredStore`: Space topology through 
 
 RFS, built-in file tools, ACP working directories, external-note observation,
 bundle import/export, debug logs, and memory files genuinely require a
-filesystem tree. They use one materialization capability from storage composition
-rather than `canvasRoot`, `nodesDir`, `SPACE_JSON_FILENAME`, a title-derived
-directory index, or another Disk-layout symbol. The capability owns a
-Workspace-bound Space directory, bundle publication, and directory-handle
-coordination. Consumers may interpret their own public virtual paths and the
-public `.huabu.zip` format, but cannot infer the active backend's structured
-record layout.
+filesystem tree. They reach it through one named Disk capability rather than
+`canvasRoot`, `nodesDir`, `SPACE_JSON_FILENAME`, a title-derived directory
+index, or another Disk-layout symbol. The capability owns a Workspace-bound
+Space directory, bundle publication, the sidecar-to-record mapping, and
+directory-handle coordination. Consumers may interpret their own public
+virtual paths and the public `.huabu.zip` format, but cannot infer the active
+backend's structured record layout.
 
-Materialization is **not a third port**, and does not live in `ports/`. The
-settled architecture is two backend ports; a port abstracts a backend
-_family_, and materialization has none to abstract — it is the local
-filesystem under every profile, because its entire purpose is handing a real
-path to something that cannot take a record. §12.5.4 named it correctly: an
-explicit capability, the Space-level counterpart to `BlobScope.materialize()`,
-one level _down_ from the port layer. It lives in `storage/materialization.ts`
-beside the composition root, and `module-boundaries.test.ts` pins `ports/` to
-exactly the two ports so the next interface needing a home does not drift
-there.
+Materialization is **not a port and not portable**, and it does not live in
+`ports/`. `StructuredStore` and `BlobStore` are the whole portable surface. A
+Space directory is Disk's, and a backend that keeps Spaces in tables simply
+does not have one — a capability missing from a backend is an acceptable
+outcome, and the honest one. Making every backend promise a directory would
+mean fabricating one, which moves the failure somewhere less obvious than the
+refusal.
 
-What varies is the **placement policy**, not the substrate. `titled` files a
-Space under its title and moves that directory on rename — the Finder-visible
-Workspace Huabu ships, which resolves a locator by consulting title-bearing
-structured records. `addressed` files it under its stable id and consults
-nothing, which is what a structured backend keeping Spaces in tables needs.
-Both pass one reusable contract; the file→record mapping RFS needs is
-`SpaceTree.nodeIdForPath()`, answered from the sidecar index by one and from
-the name by the other.
+So it is reached as `diskSpaceTree(canvasId)` / `stageDiskSpaceImport()` from
+the barrel: names that say Disk at every call site, refusing rather than
+improvising on a non-Disk profile. `module-boundaries.test.ts` holds both the
+exported names and the exact consumer list, so the surface can only shrink,
+and asserts the barrel exposes nothing that reads as a portable path API. Each
+consumer is a reason a non-Disk structured profile is not selectable, which is
+the same fence §12.4 already put around ZIP import, RFS upload/delete, and
+external-note claim.
 
-The policy is **derived from the structured backend, not configured**, which
-is the other reason it is not an axis: a backend that stores each Space as a
-directory has already chosen where that Space lives, and the materialization
-must name the same directory or a Space's blobs and its records land in
-different ones. There is exactly one coherent policy per structured backend,
-so the composition root derives it and `StorageProfile` does not carry it — a
-knob with one correct value per deployment is not a knob. Only `titled` is
-reachable in production today, because `disk` is the only implemented
-structured backend; `addressed` exists, passes the contract, and is what
-Phase 5 selects.
+The route out is not a portable materialization. It is for these features to
+stop needing a tree: an agent can reach a Space over Huabu's HTTP API rather
+than a projected filesystem, and RFS is that API. Until then the list stands
+and is visible.
 
 This phase does not choose bidirectional projection or native write-back semantics: external-note claim and bundle import continue to enter the authoritative application commands/repositories they use today, while unowned scratch and agent-domain files stay ordinary materialized files.
 
@@ -1985,7 +1976,7 @@ Storage construction receives the resolved Workspace path. Startup may hold only
 
 #### 12.6.4 Proof and scope boundary
 
-The reusable node and Space-collection contracts cover `readMany`/list/stream equivalence and both branches of World bootstrap — the existing World, and the empty namespace a new backend meets first. A reusable contract covers the materialization, and both placement policies pass it.
+The reusable node and Space-collection contracts cover `readMany`/list/stream equivalence and both branches of World bootstrap — the existing World, and the empty namespace a new backend meets first.
 
 The product-level harness is `storage/testing.ts`: it mounts a real profile onto a temporary Workspace through the production lifecycle — prepared Workspace, staged connections, `ensureWorld()`, atomic swap — rather than swapping in a stub. `product-boundary.test.ts` runs the exit criterion against every profile in `PRODUCT_STORAGE_PROFILES`, naming no directory, filename, or `space.json`; Phase 5 adds one entry to that list and the same behaviours are covered for SQLite. Elsewhere, product tests replace only storage connections or the declared Space-file capability; real Canvas services, serializers, repository behavior, and filesystem materialization inside the claimed boundary remain real.
 
@@ -1993,7 +1984,7 @@ A module-boundary guard rejects production `CanvasStore` imports, and rejects Di
 
 One behavioural hardening rides along and is not implied by the criterion above: two Space directories carrying the same `canvasId` used to resolve last-wins, and now raise from the directory scan. That makes a Finder-side duplication a loud failure of every catalogue read rather than a Space that silently resolves to an arbitrary copy.
 
-In scope: Canvas/agent/web/interactive-view/Task structured reads, World target reads, RFS node metadata, built-in file-tool node enrichment, external-note membership checks, storage mount/remount/close, World bootstrap, the materialization axis and its second implementation, architecture documentation, and the shared product-level backend harness needed for Phase 5.
+In scope: Canvas/agent/web/interactive-view/Task structured reads, World target reads, RFS node metadata, built-in file-tool node enrichment, external-note membership checks, storage mount/remount/close, World bootstrap, naming and fencing the residual Disk directory capability, architecture documentation, and the shared product-level backend harness needed for Phase 5.
 
 Out of scope: a SQLite adapter or schema, Disk→SQLite data migration, SQLite profile registration, Postgres/Azure, Agenetes persistence migration, a writable general-purpose virtual filesystem, protocol or UI changes, and stronger crash/distributed transaction guarantees.
 

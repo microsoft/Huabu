@@ -29,13 +29,12 @@ import {
   isWorkspaceConfigured,
 } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
-import { AddressedSpaceMaterialization } from './backends/disk/materialization-addressed.js';
-import { TitledSpaceMaterialization } from './backends/disk/materialization-titled.js';
-import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import {
-  materializationFor,
-  type SpaceMaterialization,
-} from './materialization.js';
+  DiskSpaceTrees,
+  type DiskSpaceImport,
+  type DiskSpaceTree,
+} from './backends/disk/space-tree.js';
+import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import {
   parseStorageProfile,
   requiresExplicitInit,
@@ -109,37 +108,21 @@ export interface Storage {
   readonly workspacePath: string;
   readonly structured: StructuredStore;
   readonly blobs: BlobStore;
-  readonly materialization: SpaceMaterialization;
+  /**
+   * Disk's Space directories — **not a third port**.
+   *
+   * Present only while the profile is Disk, and `null` otherwise, because a
+   * backend that keeps Spaces in tables has no directory to offer and should
+   * not pretend. Reached through {@link diskSpaceTree}, never directly, so
+   * every consumer is enumerable.
+   */
+  readonly diskTrees: DiskSpaceTrees | null;
 }
 
-/**
- * Select the placement policy the structured backend forces.
- *
- * Not read from the profile: materialization is not a configuration axis, so
- * there is nothing for a deployment to have chosen. See `materialization.ts`.
- */
-function buildMaterialization(
-  profile: StorageProfile,
-  workspacePath: string,
-): SpaceMaterialization {
-  const kind = materializationFor(profile.structured.kind);
-  switch (kind) {
-    case 'titled':
-      return new TitledSpaceMaterialization(workspacePath);
-    case 'addressed':
-      return new AddressedSpaceMaterialization(workspacePath);
-  }
-}
-
-function buildBlobStore(
-  profile: StorageProfile,
-  materialization: SpaceMaterialization,
-): BlobStore {
+function buildBlobStore(profile: StorageProfile): BlobStore {
   switch (profile.blobs.kind) {
     case 'disk':
-      return new DiskBlobStore((canvasId) =>
-        materialization.space(canvasId).directory(),
-      );
+      return new DiskBlobStore();
     default:
       // Unreachable: validateStorageProfile rejects unimplemented kinds.
       throw new Error(`Unsupported blob backend: ${profile.blobs.kind}`);
@@ -167,13 +150,15 @@ export function createStorage(
 ): Storage {
   validateStorageProfile(profile);
   const resolvedWorkspacePath = path.resolve(workspacePath);
-  const materialization = buildMaterialization(profile, resolvedWorkspacePath);
   return {
     profile,
     workspacePath: resolvedWorkspacePath,
     structured: buildStructuredStore(profile, resolvedWorkspacePath),
-    blobs: buildBlobStore(profile, materialization),
-    materialization,
+    blobs: buildBlobStore(profile),
+    diskTrees:
+      profile.structured.kind === 'disk'
+        ? new DiskSpaceTrees(resolvedWorkspacePath)
+        : null,
   };
 }
 
@@ -243,20 +228,12 @@ function ensure(): Storage {
 }
 
 async function closeConnections(storage: Storage): Promise<void> {
-  await Promise.all([
-    storage.structured.close(),
-    storage.blobs.close(),
-    storage.materialization.close(),
-  ]);
+  await Promise.all([storage.structured.close(), storage.blobs.close()]);
 }
 
 async function openConnections(storage: Storage): Promise<void> {
   try {
-    await Promise.all([
-      storage.structured.init(),
-      storage.blobs.init(),
-      storage.materialization.init(),
-    ]);
+    await Promise.all([storage.structured.init(), storage.blobs.init()]);
     await storage.structured.spaces().ensureWorld();
   } catch (error) {
     await closeConnections(storage).catch(() => undefined);
@@ -278,10 +255,10 @@ export async function stageStorageForWorkspace(
       if (state !== 'staged') {
         throw new Error(`Storage mount is already ${state}`);
       }
-      // Refresh only process-local materialization locators after the
+      // Refresh only the process-local Disk directory index after the
       // Workspace path has been committed. This performs no filesystem I/O;
       // fallible connection setup and World bootstrap happened while staged.
-      storage.materialization.activate();
+      storage.diskTrees?.activate();
       state = 'active';
       const previous = current;
       current = storage;
@@ -356,10 +333,6 @@ export async function isWorldCanvasId(canvasId: string): Promise<boolean> {
 
 export function requireWorldCanvasId(): Promise<string> {
   return getWorldCanvasId();
-}
-
-export function getSpaceMaterialization(): SpaceMaterialization {
-  return ensure().materialization;
 }
 
 /**
@@ -486,30 +459,48 @@ export function canvasBlobs(canvasId: string): BlobScope {
 
 export async function storageHealth(): Promise<StorageHealth[]> {
   const storage = ensure();
-  return Promise.all([
-    storage.structured.health(),
-    storage.blobs.health(),
-    storage.materialization.health(),
-  ]);
+  return Promise.all([storage.structured.health(), storage.blobs.health()]);
 }
 
 /**
- * The real directory backing a Space — the materialization capability.
+ * The Disk directory backing a Space — a **Disk-only** capability.
  *
- * Some consumers genuinely need a filesystem path rather than a record: an
- * ACP agent needs a working directory, the external watcher needs something
- * to watch, RFS exposes a tree. That is a product requirement, not a leak
- * (proposal §12.5.4), and it is the Space-level counterpart to
- * `BlobScope.materialize()`.
+ * Some features currently need a Space as a filesystem tree: RFS projects a
+ * listing, the external-note watcher arms `fs.watch`, the built-in file tools
+ * root a sandbox, and the agent domain keeps `.memory/` and ACP sessions
+ * beside a Space. None of that is portable, and none of it is promised by a
+ * port — `StructuredStore` and `BlobStore` are the whole portable surface.
  *
- * It lives in the composition root because only this module may ask a named
- * backend where anything is. Every profile selectable today materializes, so
- * this resolves unconditionally; a backend that stores Spaces without a
- * directory would refuse here rather than hand back a path that does not
- * exist.
+ * It therefore refuses rather than improvising when the profile is not Disk.
+ * A backend that keeps Spaces in tables has no directory to hand out, and
+ * fabricating one would only move the failure somewhere less obvious. Every
+ * caller of this is a reason a non-Disk structured profile is not selectable,
+ * which is why `module-boundaries.test.ts` keeps an exact list of them.
  */
-export function spaceDirectory(canvasId: string): string {
-  return ensure().materialization.space(canvasId).directory();
+export function diskSpaceTree(canvasId: string): DiskSpaceTree {
+  const trees = ensure().diskTrees;
+  if (!trees) {
+    throw new StorageProfileError(
+      `Space directories are a Disk capability, and the structured backend ` +
+        `is "${ensure().profile.structured.kind}". The feature that asked ` +
+        `for one needs a filesystem projection this backend does not have.`,
+    );
+  }
+  return trees.space(canvasId);
+}
+
+/** Stage an uploaded Space bundle. Disk-only, for the same reason. */
+export function stageDiskSpaceImport(
+  canvasId: string,
+): Promise<DiskSpaceImport> {
+  const trees = ensure().diskTrees;
+  if (!trees) {
+    throw new StorageProfileError(
+      `Space bundle import is a Disk capability, and the structured backend ` +
+        `is "${ensure().profile.structured.kind}".`,
+    );
+  }
+  return trees.stageImport(canvasId);
 }
 
 /**

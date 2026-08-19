@@ -39,7 +39,7 @@ import {
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
 import { readCanvas, readCanvasNode } from '../canvas/space-read.js';
-import { getSpaceMaterialization } from '../storage/index.js';
+import { diskSpaceTree } from '../storage/index.js';
 
 import type { CanvasNodeType } from '@huabu/shared';
 import type { CanvasNode, CanvasEdge } from '@huabu/shared/canvas-engine';
@@ -102,9 +102,7 @@ export async function lookupNodeByPath(
 ): Promise<RfsNodeLookup | null> {
   if (!NODE_FILE_RE.test(physicalRel)) return null;
 
-  const nodeId = await getSpaceMaterialization()
-    .space(canvasId)
-    .nodeIdForPath(physicalRel);
+  const nodeId = await diskSpaceTree(canvasId).nodeIdForPath(physicalRel);
   if (nodeId === null) return null;
 
   const [canvas, sidecar] = await Promise.all([

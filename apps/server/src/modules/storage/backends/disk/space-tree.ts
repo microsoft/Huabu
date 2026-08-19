@@ -2,14 +2,28 @@
 // Licensed under the MIT license.
 
 /**
- * Title-addressed Disk materialization of the Space file capability.
+ * The Disk backend's Space directory, for consumers that need a real one.
  *
- * A Space lives at `<workspace>/<safe(title)>/`, which is the layout a user
- * sees in Finder and renames from. Resolving that directory means asking the
- * structured records which title a Space currently has, so this
- * implementation is only coherent beside the Disk structured backend — see
- * `AddressedSpaceMaterialization` for the materialization that composes with any of
- * them, and `profile.ts` for the rule that keeps the pairing honest.
+ * **This is a Disk capability, not a portable one, and it is not a port.**
+ * `StructuredStore` and `BlobStore` are the two ports; everything portable
+ * goes through them. What lives here is the residue: features that today
+ * reach a Space as a filesystem tree — RFS projecting a directory listing,
+ * the external-note watcher arming `fs.watch`, the built-in file tools
+ * rooting a sandbox, the agent domain keeping `.memory/` and ACP sessions
+ * beside a Space.
+ *
+ * Those are not portable requirements and must not be dressed up as if they
+ * were. A backend that keeps Spaces in tables has no directory to hand out
+ * and would have to fabricate one; a capability absent from a backend is an
+ * acceptable outcome, and the honest one. The route out is for those features
+ * to stop needing a tree — an agent can reach a Space over Huabu's HTTP API
+ * instead of a projected filesystem — not for storage to promise every
+ * backend a directory.
+ *
+ * So this is deliberately reached by a name with `disk` in it, exported from
+ * exactly one place, and enumerated by `module-boundaries.test.ts` so the
+ * consumer list can only shrink. Every entry on that list is a reason a
+ * non-Disk structured profile is not selectable.
  */
 
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
@@ -22,25 +36,55 @@ import {
 } from './canvas-dirs.js';
 import { canvasRoot, SPACE_JSON_FILENAME } from './layout.js';
 import { getCanvasStore } from './legacy/canvas-store-cache.js';
-import { registerSpaceDirHandleOwner } from './space-dir-handles.js';
+import {
+  registerSpaceDirHandleOwner,
+  type SpaceDirHandleOwner,
+} from './space-dir-handles.js';
 import { sanitizeId } from '../../../../utils/fs.js';
 import { toSafeFilename } from '../../../../utils/naming.js';
 import { getWorkspacePath } from '../../../workspace.js';
 
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
-import type {
-  SpaceImportStaging,
-  SpaceMaterialization,
-  SpaceTree,
-  SpaceTreeHandleOwner,
-} from '../../materialization.js';
-import type { StorageHealth } from '../../ports/common.js';
 
 /** Space-relative markdown node file; capture group is the bare filename. */
 const NODE_FILE_RE = /^nodes\/([^/]+\.md)$/;
 
-export class TitledSpaceMaterialization implements SpaceMaterialization {
-  readonly kind = 'titled' as const;
+/** One Space's directory under the Disk layout. */
+export interface DiskSpaceTree {
+  readonly canvasId: string;
+  /** Absolute root of this Space's directory. */
+  directory(): string;
+  /** Absolute path to the node-sidecar directory. */
+  nodesDirectory(): string;
+  /**
+   * The node whose sidecar is `relativePath`, or null when none is.
+   *
+   * A node is filed under its *label*, so the name cannot be inverted — only
+   * the sidecar index knows. Reading the id out of the file's frontmatter
+   * instead would spread Disk's record encoding into whoever asked.
+   */
+  nodeIdForPath(relativePath: string): Promise<string | null>;
+  /** Register a live native handle that must be released for rename/delete. */
+  registerHandleOwner(owner: SpaceDirHandleOwner): () => void;
+}
+
+/** An uploaded bundle staged outside the Space namespace until published. */
+export interface DiskSpaceImport {
+  readonly canvasId: string;
+  readonly directory: string;
+  /**
+   * Adopt the staged directory as this Space's directory.
+   *
+   * Returns the record as written. The title may come back adjusted: the
+   * directory name is derived from it and the name may already be taken, so
+   * callers must use the returned record rather than the one they passed in.
+   */
+  publish(record: CanvasFile): Promise<CanvasFile>;
+  /** Remove the unpublished staging directory. Idempotent after publish. */
+  discard(): Promise<void>;
+}
+
+export class DiskSpaceTrees {
   readonly #workspacePath: string;
 
   constructor(workspacePath = getWorkspacePath()) {
@@ -54,24 +98,22 @@ export class TitledSpaceMaterialization implements SpaceMaterialization {
     }
   }
 
-  async init(): Promise<void> {}
-
+  /**
+   * Refresh the process-local directory index after a Workspace commit.
+   *
+   * Called once the new Workspace path is committed and before the mount is
+   * swapped in, so it must not fail: it only drops a cache.
+   */
   activate(): void {
     refreshCanvasDirIndex();
   }
 
-  async health(): Promise<StorageHealth> {
-    return { ok: true, kind: this.kind };
-  }
-
-  async close(): Promise<void> {}
-
-  space(canvasId: string): SpaceTree {
+  space(canvasId: string): DiskSpaceTree {
     const safeId = sanitizeId(canvasId, 'canvasId');
     const assertActive = (): void => {
       if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
         throw new Error(
-          `Space file scope for "${safeId}" belongs to an inactive workspace. Resolve a fresh scope after workspace activation.`,
+          `Space directory for "${safeId}" belongs to an inactive workspace. Resolve a fresh one after workspace activation.`,
         );
       }
     };
@@ -89,21 +131,17 @@ export class TitledSpaceMaterialization implements SpaceMaterialization {
         assertActive();
         const filename = NODE_FILE_RE.exec(relativePath)?.[1];
         if (filename === undefined) return null;
-        // The sidecar index is the Disk authority for this mapping: a node
-        // is filed under its label, so the name alone cannot be inverted.
         return getCanvasStore(safeId).nodeIdForFilename(filename);
       },
-      registerHandleOwner: (owner: SpaceTreeHandleOwner): (() => void) => {
+      registerHandleOwner: (owner: SpaceDirHandleOwner): (() => void) => {
         assertActive();
         return registerSpaceDirHandleOwner(safeId, owner);
       },
     });
   }
 
-  async stageImport(canvasId: string): Promise<SpaceImportStaging> {
-    if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
-      throw new Error('Cannot stage an import for an inactive Workspace');
-    }
+  async stageImport(canvasId: string): Promise<DiskSpaceImport> {
+    this.#assertActive();
     const safeId = sanitizeId(canvasId, 'canvasId');
     const stagingDirectory = path.join(
       this.#workspacePath,
@@ -117,9 +155,7 @@ export class TitledSpaceMaterialization implements SpaceMaterialization {
       directory: stagingDirectory,
       publish: async (record: CanvasFile): Promise<CanvasFile> => {
         if (published) throw new Error('Imported Space was already published');
-        if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
-          throw new Error('Cannot publish into an inactive Workspace');
-        }
+        this.#assertActive();
         if (record.canvasId !== safeId) {
           throw new Error(
             `Imported Space id mismatch: expected ${safeId}, received ${record.canvasId}`,
@@ -160,5 +196,11 @@ export class TitledSpaceMaterialization implements SpaceMaterialization {
         await rm(stagingDirectory, { recursive: true, force: true });
       },
     });
+  }
+
+  #assertActive(): void {
+    if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
+      throw new Error('Cannot stage an import for an inactive Workspace');
+    }
   }
 }

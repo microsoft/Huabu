@@ -5,7 +5,7 @@
  * End-to-end activation of a legacy workspace, over the production routes.
  *
  * Phase 4.5 moved the Disk record layout inside the storage boundary and
- * routed every "where is this Space" question through `spaceDirectory()`. This
+ * routed every "where is this Space" question through `diskSpaceTree().directory()`. This
  * suite exists to prove that the move did not change what the app can read or
  * write. It does not test a module — it activates a workspace the way a launch
  * does (`setWorkspacePath` → `prepareWorkspaceOnDisk` → every migration) and
@@ -57,7 +57,7 @@ import agentRoutes from '../agent/agent.route.js';
 import artifactRoute from '../artifact/artifact.route.js';
 import canvasRoutes from '../canvas/canvas.route.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
-import { resetStorageCache, spaceDirectory } from '../storage/index.js';
+import { resetStorageCache, diskSpaceTree } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { FastifyInstance } from 'fastify';
@@ -203,7 +203,7 @@ async function seedLegacyWorkspace(): Promise<void> {
   }
 
   // A legacy artifact, in the layout the Disk backend has always used.
-  const spaceDir = spaceDirectory(CANVAS_ID);
+  const spaceDir = diskSpaceTree(CANVAS_ID).directory();
   mkdirSync(join(spaceDir, '.artifacts'), { recursive: true });
   writeFileSync(
     join(spaceDir, '.artifacts', 'art_legacy.txt'),
@@ -408,7 +408,7 @@ describe('activating a legacy workspace on the new storage boundary', () => {
 
       // 2. Execute a real command batch that imports a staged local file into
       //    the artifact store through the blob port.
-      const uploadDir = join(spaceDirectory(CANVAS_ID), '.upload');
+      const uploadDir = join(diskSpaceTree(CANVAS_ID).directory(), '.upload');
       mkdirSync(uploadDir, { recursive: true });
       writeFileSync(join(uploadDir, 'fresh.txt'), 'freshly imported bytes');
       const exec = await app.inject({

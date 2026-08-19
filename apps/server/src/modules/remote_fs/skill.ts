@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { renderPromptFile } from '../../prompt/agents/loader.js';
-import { spaceDirectory } from '../storage/index.js';
+import { diskSpaceTree } from '../storage/index.js';
 
 /** PROMPT-ROOT-relative path of the bundled access guide. */
 const ACCESS_GUIDE_TEMPLATE = 'external-agent/access-huabu.md';
@@ -40,7 +40,7 @@ export function resolveBundledRootSkill(): string {
  * markdown text (served with `Content-Type: text/markdown`).
  */
 export function resolveCanvasSkill(canvasId: string): string {
-  const override = path.join(spaceDirectory(canvasId), 'skill.md');
+  const override = path.join(diskSpaceTree(canvasId).directory(), 'skill.md');
   if (existsSync(override)) {
     return readFileSync(override, 'utf8');
   }

@@ -137,7 +137,6 @@ describe('storage module tree', () => {
       'canvas-dirs.ts',
       'canvas-store.ts',
       'index.ts',
-      'materialization.ts',
       'module-boundaries.test.ts',
       'paths.ts',
       'product-boundary.test.ts',
@@ -157,10 +156,10 @@ describe('storage module tree', () => {
    * this list, and not by someone finding `ports/` a convenient place to put
    * an interface.
    *
-   * Space materialization is the case that already tried: it is always the
-   * local filesystem under every profile, so it abstracts no backend family
-   * and lives in the composition layer (`materialization.ts`) as the
-   * Space-level counterpart to `BlobScope.materialize()`.
+   * Space directories are the case that already tried. They are not portable
+   * and must not be made to look it: a backend keeping Spaces in tables has
+   * no directory to offer. They stay a named Disk capability instead — see
+   * the exported-surface guard below.
    */
   it('keeps ports/ to exactly the two backend ports', () => {
     const portFiles = storageFiles
@@ -389,6 +388,69 @@ describe('structured write authority', () => {
       .filter((file) => callsLegacyMutation(read(file)));
 
     expect(violations).toEqual([]);
+  });
+});
+
+/**
+ * The Disk-only surface, held to an exact list.
+ *
+ * Some features still reach a Space as a filesystem tree — RFS, the
+ * external-note watcher, the file-tool sandbox, and the agent domain's
+ * `.memory/` and ACP files. That is not portable and the barrel does not
+ * pretend otherwise: it exports `diskSpaceTree` / `stageDiskSpaceImport`,
+ * whose names say so at every call site.
+ *
+ * Both lists below are snapshots so they can only shrink. Every consumer is a
+ * reason a non-Disk structured profile is not selectable; the route out is
+ * for these features to stop needing a tree (an agent can reach a Space over
+ * the HTTP API instead of a projected filesystem), not for storage to promise
+ * one it cannot keep.
+ */
+describe('Disk-only surface', () => {
+  it('exposes no portable path capability from the barrel', () => {
+    const barrel = read('modules/storage/index.ts');
+
+    // Anything named for a Space's files without `disk` in it reads as a
+    // promise every backend keeps. There is no such promise.
+    expect(barrel).not.toMatch(/\bSpaceMaterialization\b/);
+    expect(barrel).not.toMatch(/\bMaterializationKind\b/);
+    expect(barrel).not.toMatch(/\bspaceDirectory\b/);
+    expect(barrel).not.toMatch(/\bgetSpaceFiles\b/);
+  });
+
+  it('keeps the exact Disk-only export list', () => {
+    const barrel = read('modules/storage/index.ts');
+    const diskExports = [...barrel.matchAll(/\bdisk[A-Z]\w*|\bstageDisk\w*/g)]
+      .map((m) => m[0])
+      .filter((name, index, all) => all.indexOf(name) === index)
+      .sort();
+
+    expect(diskExports).toEqual(['diskSpaceTree', 'stageDiskSpaceImport']);
+  });
+
+  it('keeps the exact list of files that need a Space directory', () => {
+    const consumers = sourceFiles
+      .filter((file) => !file.startsWith('modules/storage/'))
+      .filter((file) =>
+        /\b(?:diskSpaceTree|stageDiskSpaceImport)\b/.test(read(file)),
+      )
+      .sort();
+
+    expect(consumers).toEqual([
+      'modules/agent/memory/trigger.ts',
+      'modules/agent/tools/handlers/fs-sandbox.ts',
+      'modules/canvas/canvas.route.ts',
+      'modules/canvas/external-watcher.test.ts',
+      'modules/canvas/external-watcher.ts',
+      'modules/canvas/external.route.ts',
+      'modules/canvas/import-node-src.test.ts',
+      'modules/canvas/import-node-src.ts',
+      'modules/remote_fs/node-meta.ts',
+      'modules/remote_fs/rfs.route.test.ts',
+      'modules/remote_fs/skill.ts',
+      'modules/workspace/legacy-workspace-activation.test.ts',
+      'modules/workspace/paths.ts',
+    ]);
   });
 });
 

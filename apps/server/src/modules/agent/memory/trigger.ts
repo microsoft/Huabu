@@ -26,7 +26,7 @@ import { existsSync } from 'node:fs';
 
 import { atomicWriteJson, mkdirp, readJson } from '../../../utils/fs.js';
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
-import { spaceDirectory } from '../../storage/index.js';
+import { diskSpaceTree } from '../../storage/index.js';
 import { memoryStatePath, canvasMemoryDir } from '../../workspace/paths.js';
 
 /** Op-count threshold that triggers a memory analysis pass. */
@@ -83,7 +83,7 @@ export function writeMemoryState(canvasId: string, state: MemoryState): void {
   // file. Same hazard for any in-flight memory worker that calls
   // `markAnalyzed` post-delete. Skip the write when the canvas root
   // is gone; losing one bookkeeping write is harmless.
-  if (!existsSync(spaceDirectory(canvasId))) return;
+  if (!existsSync(diskSpaceTree(canvasId).directory())) return;
   mkdirp(canvasMemoryDir(canvasId));
   atomicWriteJson(memoryStatePath(canvasId), state);
 }

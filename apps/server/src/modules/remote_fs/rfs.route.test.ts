@@ -59,7 +59,7 @@ import * as selectableProfiles from '../agent/selectable-agent-profile.js';
 import {
   getCanvasStore,
   resetStorageCache,
-  spaceDirectory,
+  diskSpaceTree,
 } from '../storage/index.js';
 import {
   RunCompletionError,
@@ -159,7 +159,7 @@ describe('GET /api/rfs/:canvasId/skill', () => {
   it('returns only the bundled root guide without authorization', async () => {
     seedNote('c1', 'node-1', 'Anchor', 'content');
     writeFileSync(
-      join(spaceDirectory('c1'), 'skill.md'),
+      join(diskSpaceTree('c1').directory(), 'skill.md'),
       '# Private Space Override',
       'utf8',
     );

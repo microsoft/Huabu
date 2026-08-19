@@ -42,7 +42,7 @@ import {
   isArtifactsRel,
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
-import { canvasBlobs, spaceDirectory } from '../storage/index.js';
+import { canvasBlobs, diskSpaceTree } from '../storage/index.js';
 
 const log = getLogger('canvas.import-node-src');
 
@@ -267,7 +267,10 @@ async function resolveImportedSrc(
   // is judged by where it actually lands, while the helper still owns the
   // virtual/physical `.artifacts` vocabulary. A nested path is not a blob key,
   // so it falls through and is copied into the artifact root below.
-  const resolvedPhysicalRel = path.relative(spaceDirectory(canvasId), absPath);
+  const resolvedPhysicalRel = path.relative(
+    diskSpaceTree(canvasId).directory(),
+    absPath,
+  );
   if (isArtifactsRel(resolvedPhysicalRel)) {
     const key = path.basename(absPath);
     const canonicalPath = safeResolve(

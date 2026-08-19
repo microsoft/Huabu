@@ -36,7 +36,7 @@
 import path from 'node:path';
 
 import { sanitizeId } from '../../utils/fs.js';
-import { spaceDirectory } from '../storage/index.js';
+import { diskSpaceTree } from '../storage/index.js';
 import { getWorkspacePath } from '../workspace.js';
 
 import type { Namespace } from '@agenetes/protocol';
@@ -50,7 +50,10 @@ import type { Namespace } from '@agenetes/protocol';
 const LEGACY_HISTORY_DIR_NAME = '.history';
 
 function legacyHistoryDir(canvasId: string): string {
-  return path.join(spaceDirectory(canvasId), LEGACY_HISTORY_DIR_NAME);
+  return path.join(
+    diskSpaceTree(canvasId).directory(),
+    LEGACY_HISTORY_DIR_NAME,
+  );
 }
 
 // ─── Memory module paths ───────────────────────────────────────────────────
@@ -71,7 +74,10 @@ export function workspaceMemoryPath(): string {
 export const WORKING_MEMORY_DIR_NAME = '.memory';
 
 export function canvasMemoryDir(canvasId: string): string {
-  return path.join(spaceDirectory(canvasId), WORKING_MEMORY_DIR_NAME);
+  return path.join(
+    diskSpaceTree(canvasId).directory(),
+    WORKING_MEMORY_DIR_NAME,
+  );
 }
 
 /** Working memory body for a canvas. */

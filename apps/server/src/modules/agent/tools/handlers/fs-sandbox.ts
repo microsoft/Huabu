@@ -31,7 +31,7 @@ import path from 'node:path';
 
 import { parseFrontmatter } from '../../../../utils/markdown-frontmatter.js';
 import { readCanvas } from '../../../canvas/space-read.js';
-import { spaceDirectory } from '../../../storage/index.js';
+import { diskSpaceTree } from '../../../storage/index.js';
 
 // ─── Always-skipped directory names ─────────────────────────────────────────
 
@@ -144,7 +144,7 @@ export function safeResolve(canvasId: string, rel: string): string {
   ) {
     throw new Error(`Invalid canvasId: ${canvasId}`);
   }
-  const root = spaceDirectory(canvasId);
+  const root = diskSpaceTree(canvasId).directory();
   // Accept the clean virtual prefixes (`upload/`, `artifacts/`) as aliases
   // for their hidden on-disk dirs so agents can reference either form.
   const target = path.resolve(root, toPhysicalRel(rel));

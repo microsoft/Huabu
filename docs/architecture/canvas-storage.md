@@ -7,7 +7,7 @@
 Every Space remains fully self-contained on Disk by default, but storage no
 longer presents one all-purpose `CanvasStore` as its application contract.
 `apps/server/src/modules/storage/` separates backend-neutral blob and
-structured ports, the declared materialization capability, Disk
+structured ports, the residual Disk directory capability, Disk
 adapters, process-wide composition, and a shrinking compatibility facade.
 Opaque artifact bytes flow through `BlobStore`; `StructuredStore` exposes one
 `spaces()` repository for the Space collection — membership, World identity,
@@ -20,27 +20,26 @@ not an application service.
 
 File-native features such as RFS, built-in file tools, external-note watching,
 memory/debug files, and bundle import/export resolve their Workspace-bound
-materialization through `SpaceMaterialization`. They may use real paths, but do not name
+materialization through `diskSpaceTree()`. They may use real paths, but do not name
 the Disk record layout or title-derived locator, and they ask
 `SpaceFileScope.nodeIdForPath()` which record a materialized file carries
 rather than reading it out of the file's own frontmatter.
 
-`SpaceMaterialization` is a composition-layer capability, not a third port:
-`ports/` holds exactly `StructuredStore` and `BlobStore`, and materialization
-abstracts no backend family — it is the local filesystem under every profile.
-It lives in `storage/materialization.ts` as the Space-level counterpart to
-`BlobScope.materialize()`.
+A Space directory is **Disk's, and not portable**. `ports/` holds exactly
+`StructuredStore` and `BlobStore`; there is no third port and no promise that
+every backend can hand out a tree, because one that keeps Spaces in tables
+cannot. The capability is therefore reached as `diskSpaceTree(canvasId)` and
+`stageDiskSpaceImport()` — names that say Disk at the call site — and it
+refuses rather than improvising when the profile is not Disk.
+`module-boundaries.test.ts` pins both the exported names and the exact list of
+files that use them, so the surface only shrinks; each entry is a reason a
+non-Disk structured profile is not selectable. The route out is those features
+no longer needing a tree — an agent can reach a Space over the HTTP API rather
+than a projected filesystem — not a materialization every backend fakes.
 
-Two placement policies implement it. `titled` files a Space under its title
-and moves that directory on rename — the Finder-visible layout Huabu ships,
-which resolves a locator by consulting title-bearing structured records.
-`addressed` files it under its stable id and consults nothing. Which one is
-active is **derived from the structured backend rather than configured**: a
-backend that stores each Space as a directory has already chosen where that
-Space lives, and the materialization has to name the same directory or a
-Space's blobs and its records end up in different ones. `StorageProfile`
-therefore has two axes, not three, and the composition root derives the
-policy; one reusable contract holds both policies to the same behaviour.
+The Disk blob adapter resolves its own `.artifacts/` placement from the Disk
+layout rather than borrowing the Space tree, so exactly one module answers
+"where is this Space" for each population it owns.
 
 Runtime Home-folder activation prepares and migrates the selected directory in
 a disposable child process, stages and initializes the Workspace-bound storage
@@ -158,7 +157,7 @@ may use a native transaction.
 Canvas persistence DTOs and the write coordinator live under `modules/canvas/`;
 Disk record paths, name indexes, and directory-handle arbitration live inside
 the Disk adapter; boot migrations remain under `modules/workspace/migrations/`;
-generic filesystem and Markdown codecs live under `utils/`. The materialization
+generic filesystem and Markdown codecs live under `utils/`. `diskSpaceTree()`
 validates identifiers and fences retained scopes after a Workspace switch
 before any feature receives a path. `module-boundaries.test.ts` enforces the
 storage dependency direction, rejects production backend imports, and keeps
@@ -175,7 +174,7 @@ fails without recreating blobs, while a failed blob sweep leaves the record
 available for retry. Mutations through existing Space handles and repositories
 reject while deletion is active or queued; reads remain available for cleanup.
 File-native operations remain separate physical actions, but they enter through
-the materialization capability rather than binding application code to one backend layout.
+`diskSpaceTree()` rather than binding application code to one backend layout.
 
 Retained Disk Space repository and handle instances, blob scopes, and legacy `CanvasStore` instances reject use after the active Workspace changes. Each `spaces()` call returns a fresh Workspace-bound handle and each read rescans current Disk state. The Workspace-qualified LRU is cleared and rebuilt on the next lookup after a switch. The delete-session contract covers overlapping operations through one configured backend instance. Disk realizes it with the shared process-local coordinator; it is not a multi-process transaction or distributed lock, and a SQL adapter must supply an equivalent backend-instance fence using its own mechanisms.
 

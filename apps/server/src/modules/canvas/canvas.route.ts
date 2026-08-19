@@ -55,7 +55,8 @@ import {
   canvasBlobs,
   createSpace,
   deleteSpace,
-  getSpaceMaterialization,
+  diskSpaceTree,
+  stageDiskSpaceImport,
   getStructuredStore,
   isWorldCanvasId,
   type CanvasFile,
@@ -1559,7 +1560,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     if (!(await readCanvas(canvasId))) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
-    const dir = getSpaceMaterialization().space(canvasId).nodesDirectory();
+    const dir = diskSpaceTree(canvasId).nodesDirectory();
     if (!existsSync(dir)) {
       return reply.code(404).send({ message: 'Nodes folder not found' });
     }
@@ -1594,7 +1595,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
-    const canvasDir = getSpaceMaterialization().space(canvasId).directory();
+    const canvasDir = diskSpaceTree(canvasId).directory();
     if (!existsSync(canvasDir)) {
       return reply.code(404).send({ message: 'Canvas directory not found' });
     }
@@ -1655,8 +1656,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       // Stream the upload to a temp zip file
       const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
       const targetCanvasId = createId('canvas');
-      const importStaging =
-        await getSpaceMaterialization().stageImport(targetCanvasId);
+      const importStaging = await stageDiskSpaceImport(targetCanvasId);
       const stagingDir = importStaging.directory;
       try {
         await new Promise<void>((resolve, reject) => {

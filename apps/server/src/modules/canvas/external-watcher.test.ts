@@ -84,25 +84,20 @@ vi.mock('../storage/index.js', async () => {
     getStructuredStore: () => ({
       space: () => ({ read: async () => canvasStore.read() }),
     }),
-    getSpaceMaterialization: () => ({
-      activate: () => undefined,
-      space: (canvasId: string) => {
-        const directoryName =
-          canvasDirs.list().find((entry) => entry.id === canvasId)?.filename ??
-          canvasId;
-        const directory = `/ws/${directoryName}`;
-        return {
-          directory: () => directory,
-          nodesDirectory: () => `${directory}/nodes`,
-          registerHandleOwner: (owner: {
-            release(): void;
-            reacquire(): void;
-          }) => handles.registerSpaceDirHandleOwner(canvasId, owner),
-          withHandlesReleased: <T>(operation: () => Promise<T> | T) =>
-            handles.withSpaceDirHandlesReleased(canvasId, operation),
-        };
-      },
-    }),
+    diskSpaceTree: (canvasId: string) => {
+      const directoryName =
+        canvasDirs.list().find((entry) => entry.id === canvasId)?.filename ??
+        canvasId;
+      const directory = `/ws/${directoryName}`;
+      return {
+        canvasId,
+        directory: () => directory,
+        nodesDirectory: () => `${directory}/nodes`,
+        nodeIdForPath: async () => null,
+        registerHandleOwner: (owner: { release(): void; reacquire(): void }) =>
+          handles.registerSpaceDirHandleOwner(canvasId, owner),
+      };
+    },
     registerSpaceDirHandleOwner: handles.registerSpaceDirHandleOwner,
     withSpaceDirHandlesReleased: handles.withSpaceDirHandlesReleased,
   };
