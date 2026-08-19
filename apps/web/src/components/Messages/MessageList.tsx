@@ -3,6 +3,7 @@
 
 import { ArrowDown } from 'lucide-react';
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -45,7 +46,7 @@ interface MessageListProps {
   onOpenPositionHandled?: (nonce: number) => void;
 }
 
-export const MessageList = ({
+export const MessageList = memo(function MessageList({
   messages,
   isLoading,
   isHistoryLoading,
@@ -56,7 +57,7 @@ export const MessageList = ({
   openPosition = 'bottom',
   openPositionRequestNonce,
   onOpenPositionHandled,
-}: MessageListProps) => {
+}: MessageListProps) {
   const [hasNewMessage, setHasNewMessage] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
@@ -257,4 +258,4 @@ export const MessageList = ({
       )}
     </div>
   );
-};
+});

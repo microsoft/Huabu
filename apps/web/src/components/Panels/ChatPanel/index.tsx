@@ -34,7 +34,6 @@ import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
   selectThreadBinding,
-  selectThreadDraft,
   selectThreadHistoryLoaded,
   selectThreadLastAction,
   selectThreadMessages,
@@ -58,9 +57,9 @@ import { bindingsEqual } from './agentMenu';
 import { AgentSelector, type AgentChoice } from './AgentSelector';
 import { BuiltinSessionSelectors } from './BuiltinSessionSelectors';
 import { ChangeReviewCard } from './ChangeReviewCard';
-import { ChatInput } from './ChatInput';
 import { parseSlashInvocations } from './parseSlashInvocations';
 import { saveChatAsQuestion } from './saveChatAsQuestion';
+import { ThreadChatInput } from './ThreadChatInput';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
@@ -96,7 +95,6 @@ export const ChatPanel = ({
 }: ChatPanelProps) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const setDraft = useChatStore((state) => state.setDraft);
   const canvasId = useCanvasStore((state) => state.canvasId);
 
   // When the panel is replaying a question node's thread, the mode is a
@@ -116,12 +114,6 @@ export const ChatPanel = ({
     selectThreadLastAction(state, threadId),
   );
   const activeConversationView = session.conversationView;
-
-  // Composer draft lives in the store keyed by threadId (see chatStore
-  // `ChatThreadState.draft`) so an unsent draft stays with its own session
-  // instead of being wiped when the user switches canvas or opens a
-  // question replay.
-  const input = useChatStore((state) => selectThreadDraft(state, threadId));
 
   const viewingQuestionNodeId =
     activeConversationView?.conversationOwner.nodeId;
@@ -224,13 +216,6 @@ export const ChatPanel = ({
   );
   const isHistoryLoaded = useChatStore((state) =>
     selectThreadHistoryLoaded(state, threadId),
-  );
-  // Wire the composer's onChange to the current thread's draft slot. An
-  // empty string clears the draft (see `setDraft`), so the existing
-  // `setInput('')` on send doubles as clear-on-send.
-  const setInput = useCallback(
-    (text: string) => setDraft(threadId, text),
-    [setDraft, threadId],
   );
   const addNode = useCanvasStore((state) => state.addNode);
   const llmConfig = useLLMStore((state) => state.config);
@@ -628,48 +613,60 @@ export const ChatPanel = ({
     viewingQuestionNodeId,
   ]);
 
-  const handleSubmit = async (e: React.FormEvent, agentMode: AgentMode) => {
-    e.preventDefault();
-    // Strip leading `/<id>` tokens that match a known slash command
-    // and forward them as `invokedSkills`. Skill invocation is gated
-    // to **internal + operate mode** only:
-    //
-    //  - External (ACP) bindings: skip parsing entirely. ACP agents
-    //    handle their own slash dispatch inside the prompt body, so
-    //    re-splitting here would double-strip the leading token.
-    //  - Internal + ask mode: skip parsing too. Ask is a Q&A surface
-    //    where a leading `/foo` is just literal text (e.g. a path or
-    //    a typo); the menu is suppressed upstream and submit must
-    //    mirror that or the two halves of the UX would disagree.
-    //  - Internal + operate mode: parse, dedup, forward.
-    //
-    // Unknown `/foo` tokens in operate mode pass through as literal
-    // message text — matches the typeahead UX (no menu hit → no
-    // recognition).
-    const raw = input;
-    setInput('');
-    const isSkillInvocationAllowed =
-      agentBinding.kind === 'internal' && agentMode === 'operate';
-    if (!isSkillInvocationAllowed) {
-      const prompt = raw.trim();
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent, agentMode: AgentMode, draft: string) => {
+      e.preventDefault();
+      // Strip leading `/<id>` tokens that match a known slash command
+      // and forward them as `invokedSkills`. Skill invocation is gated
+      // to **internal + operate mode** only:
+      //
+      //  - External (ACP) bindings: skip parsing entirely. ACP agents
+      //    handle their own slash dispatch inside the prompt body, so
+      //    re-splitting here would double-strip the leading token.
+      //  - Internal + ask mode: skip parsing too. Ask is a Q&A surface
+      //    where a leading `/foo` is just literal text (e.g. a path or
+      //    a typo); the menu is suppressed upstream and submit must
+      //    mirror that or the two halves of the UX would disagree.
+      //  - Internal + operate mode: parse, dedup, forward.
+      //
+      // Unknown `/foo` tokens in operate mode pass through as literal
+      // message text — matches the typeahead UX (no menu hit → no
+      // recognition).
+      const raw = draft;
+      useChatStore.getState().setDraft(threadId, '');
+      const isSkillInvocationAllowed =
+        agentBinding.kind === 'internal' && agentMode === 'operate';
+      if (!isSkillInvocationAllowed) {
+        const prompt = raw.trim();
+        if (!prompt) return;
+        onCommit?.();
+        await startStream(prompt, agentMode);
+        return;
+      }
+      const { invokedSkills, message } = parseSlashInvocations(
+        raw,
+        knownSlashIds,
+      );
+      const prompt = message.trim();
       if (!prompt) return;
       onCommit?.();
-      await startStream(prompt, agentMode);
-      return;
+      await startStream(
+        prompt,
+        agentMode,
+        invokedSkills.length > 0 ? invokedSkills : undefined,
+      );
+    },
+    [agentBinding.kind, knownSlashIds, onCommit, startStream, threadId],
+  );
+
+  const handleRetry = useCallback(() => {
+    const lastUserMsg = [...messages]
+      .reverse()
+      .find((message) => message.role === 'user');
+    if (lastUserMsg?.role === 'user') {
+      void startStream(lastUserMsg.content, mode);
     }
-    const { invokedSkills, message } = parseSlashInvocations(
-      raw,
-      knownSlashIds,
-    );
-    const prompt = message.trim();
-    if (!prompt) return;
-    onCommit?.();
-    await startStream(
-      prompt,
-      agentMode,
-      invokedSkills.length > 0 ? invokedSkills : undefined,
-    );
-  };
+  }, [messages, mode, startStream]);
 
   // Inline agent selector (left of the chat input toolbar). The binding
   // is mutable only while the thread has no user message yet — once a
@@ -848,15 +845,7 @@ export const ChatPanel = ({
             }
             openPositionRequestNonce={openPositionRequest?.nonce}
             onOpenPositionHandled={onOpenPositionHandled}
-            onRetry={() => {
-              // Find the last user message and re-send it
-              const lastUserMsg = [...messages]
-                .reverse()
-                .find((m) => m.role === 'user');
-              if (lastUserMsg && lastUserMsg.role === 'user') {
-                void startStream(lastUserMsg.content, mode);
-              }
-            }}
+            onRetry={handleRetry}
           />
 
           <div className="px-3 pb-2">
@@ -886,9 +875,7 @@ export const ChatPanel = ({
                 </Button>
               </div>
             ) : null}
-            <ChatInput
-              value={input}
-              onChange={setInput}
+            <ThreadChatInput
               onSubmit={handleSubmit}
               onCommit={onCommit}
               onStop={stopStream}

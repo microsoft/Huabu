@@ -31,7 +31,7 @@ import { Tooltip } from '../../Common/Tooltip';
 import type { ContextUsageOverride } from './ContextUsageRing';
 import type { AgentMode, AvailableCommand } from '@huabu/shared';
 
-interface ChatInputProps {
+export interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
   onSubmit: (e: React.FormEvent, mode: AgentMode) => void;
@@ -121,6 +121,12 @@ export const ChatInput = ({
   const { t } = useTranslation();
   const isSubmitDisabled = disabled || !value.trim();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const resizeMetricsRef = useRef<{
+    minHeight: number;
+    maxHeight: number;
+    borderY: number;
+  } | null>(null);
+  const resizeMetricsModeRef = useRef<AgentMode | null>(null);
   const historyIndexRef = useRef(-1);
   const draftRef = useRef('');
 
@@ -278,43 +284,59 @@ export const ChatInput = ({
     const textarea = textareaRef.current;
     if (!textarea) return;
 
-    const computed = window.getComputedStyle(textarea);
-    const lineHeightRaw = Number.parseFloat(computed.lineHeight);
-    const lineHeight =
-      Number.isFinite(lineHeightRaw) && lineHeightRaw > 0 ? lineHeightRaw : 20;
-
-    const paddingY =
-      (Number.parseFloat(computed.paddingTop) || 0) +
-      (Number.parseFloat(computed.paddingBottom) || 0);
-    const borderY =
-      (Number.parseFloat(computed.borderTopWidth) || 0) +
-      (Number.parseFloat(computed.borderBottomWidth) || 0);
-
-    const minLines = 2;
-    const maxLines = 5;
-    // With box-sizing: border-box (Tailwind preflight), style.height must
-    // include padding + border to match the visible row count.
-    const chrome = paddingY + borderY;
-    const minHeight = lineHeight * minLines + chrome;
-    const maxHeight = lineHeight * maxLines + chrome;
+    let metrics =
+      resizeMetricsModeRef.current === mode ? resizeMetricsRef.current : null;
+    if (!metrics) {
+      const computed = window.getComputedStyle(textarea);
+      const lineHeightRaw = Number.parseFloat(computed.lineHeight);
+      const lineHeight =
+        Number.isFinite(lineHeightRaw) && lineHeightRaw > 0
+          ? lineHeightRaw
+          : 20;
+      const paddingY =
+        (Number.parseFloat(computed.paddingTop) || 0) +
+        (Number.parseFloat(computed.paddingBottom) || 0);
+      const borderY =
+        (Number.parseFloat(computed.borderTopWidth) || 0) +
+        (Number.parseFloat(computed.borderBottomWidth) || 0);
+      const chrome = paddingY + borderY;
+      metrics = {
+        minHeight: lineHeight * 2 + chrome,
+        maxHeight: lineHeight * 5 + chrome,
+        borderY,
+      };
+      resizeMetricsRef.current = metrics;
+      resizeMetricsModeRef.current = mode;
+    }
 
     if (!value) {
       // Empty content — skip scrollHeight measurement because it's unreliable
       // on first mount (layout / fonts not yet settled) and tends to produce
       // a value larger than the actual rows={2} default, making the textarea
       // appear stretched until the user types.
-      textarea.style.height = `${minHeight}px`;
-      textarea.style.overflowY = 'hidden';
+      const minHeight = `${metrics.minHeight}px`;
+      if (textarea.style.height !== minHeight) {
+        textarea.style.height = minHeight;
+      }
+      if (textarea.style.overflowY !== 'hidden') {
+        textarea.style.overflowY = 'hidden';
+      }
       return;
     }
 
     // Reset to auto so scrollHeight reflects the intrinsic content height.
     textarea.style.height = 'auto';
     // scrollHeight excludes border per spec — add it back for border-box.
-    const measured = textarea.scrollHeight + borderY;
-    const nextHeight = Math.max(minHeight, Math.min(measured, maxHeight));
+    const measured = textarea.scrollHeight + metrics.borderY;
+    const nextHeight = Math.max(
+      metrics.minHeight,
+      Math.min(measured, metrics.maxHeight),
+    );
     textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = measured > maxHeight ? 'auto' : 'hidden';
+    const overflowY = measured > metrics.maxHeight ? 'auto' : 'hidden';
+    if (textarea.style.overflowY !== overflowY) {
+      textarea.style.overflowY = overflowY;
+    }
   }, [mode, value]);
 
   // Handle Enter key for submission and ArrowUp/ArrowDown for prompt history

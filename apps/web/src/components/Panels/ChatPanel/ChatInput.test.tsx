@@ -166,4 +166,117 @@ describe('ChatInput', () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(container.querySelector('textarea')?.value).toBe('Keep this draft');
   });
+
+  it('updates a Chinese IME composition without submitting it', () => {
+    const onSubmit = vi.fn();
+
+    function Harness() {
+      const [value, setValue] = useState('');
+      return (
+        <ChatInput
+          value={value}
+          onChange={setValue}
+          onSubmit={onSubmit}
+          onStop={vi.fn()}
+          mode="ask"
+        />
+      );
+    }
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root?.render(
+        <ChatSessionProvider
+          value={{
+            threadId: 'thread-test',
+            canvasId: 'canvas-test',
+            ownerCanvasId: 'canvas-test',
+            conversationView: null,
+          }}
+        >
+          <Harness />
+        </ChatSessionProvider>,
+      ),
+    );
+
+    const textarea = container.querySelector('textarea');
+    expect(textarea).not.toBeNull();
+
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, '你');
+      const input = new InputEvent('input', {
+        bubbles: true,
+        data: '你',
+        inputType: 'insertCompositionText',
+      });
+      Object.defineProperty(input, 'isComposing', { value: true });
+      textarea?.dispatchEvent(input);
+
+      const enter = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(enter, 'isComposing', { value: true });
+      textarea?.dispatchEvent(enter);
+    });
+
+    expect(textarea?.value).toBe('你');
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('reuses computed resize metrics while the draft changes', () => {
+    const getComputedStyle = vi.spyOn(window, 'getComputedStyle');
+
+    function Harness() {
+      const [value, setValue] = useState('');
+      return (
+        <ChatInput
+          value={value}
+          onChange={setValue}
+          onSubmit={vi.fn()}
+          onStop={vi.fn()}
+          mode="ask"
+        />
+      );
+    }
+
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root?.render(
+        <ChatSessionProvider
+          value={{
+            threadId: 'thread-test',
+            canvasId: 'canvas-test',
+            ownerCanvasId: 'canvas-test',
+            conversationView: null,
+          }}
+        >
+          <Harness />
+        </ChatSessionProvider>,
+      ),
+    );
+
+    const textarea = container.querySelector('textarea');
+    act(() => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set;
+      valueSetter?.call(textarea, 'a');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+      valueSetter?.call(textarea, 'ab');
+      textarea?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(getComputedStyle).toHaveBeenCalledOnce();
+  });
 });
