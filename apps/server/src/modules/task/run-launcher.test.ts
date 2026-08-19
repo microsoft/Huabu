@@ -114,7 +114,7 @@ function createHarness(options?: {
     requireProfile: vi.fn(() => {
       if (options?.profileError) throw options.profileError;
     }),
-    resolveRootPosition: vi.fn(() => {
+    resolveRootPosition: vi.fn(async () => {
       calls.push('resolve-position');
       if (options?.positionError) throw options.positionError;
       return { x: 420, y: 20 };

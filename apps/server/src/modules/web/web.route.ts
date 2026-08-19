@@ -9,7 +9,7 @@ import {
   webLookupQuerySchema,
 } from '@huabu/shared';
 
-import { getCanvasStore } from '../storage/index.js';
+import { space } from '../storage/index.js';
 
 import type {
   WebLookupQuery,
@@ -168,7 +168,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
 
       const { canvasId, nodeId } = parsed.data;
 
-      const source = getCanvasStore(canvasId).readNode(nodeId);
+      const source = (await space(canvasId).nodes.read(nodeId))?.record;
       if (!source || source.type !== 'web') {
         return reply.code(404).send({ message: 'Source not ingested' });
       }
@@ -227,7 +227,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
 
       const { canvasId, nodeId } = parsed.data;
 
-      const source = getCanvasStore(canvasId).readNode(nodeId);
+      const source = (await space(canvasId).nodes.read(nodeId))?.record;
       if (!source || source.type !== 'web') {
         return reply.code(404).send({ message: 'Source not ingested' });
       }
@@ -284,7 +284,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
 
     const { canvasId, nodeId } = parsed.data;
 
-    const source = getCanvasStore(canvasId).readNode(nodeId);
+    const source = (await space(canvasId).nodes.read(nodeId))?.record;
     if (!source || source.type !== 'web') {
       return reply.code(404).send({ message: 'Source not ingested' });
     }
@@ -342,7 +342,7 @@ const webRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.send(payload);
     }
 
-    const structuralNodes = getCanvasStore(canvasId).read()?.state.nodes as
+    const structuralNodes = (await space(canvasId).read())?.state.nodes as
       | Array<{
           id?: unknown;
           type?: unknown;

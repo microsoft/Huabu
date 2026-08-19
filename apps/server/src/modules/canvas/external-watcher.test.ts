@@ -68,18 +68,19 @@ vi.mock('../storage/canvas-dirs.js', () => ({
   listAllCanvasDirEntries: () => canvasDirs.list(),
 }));
 
-const canvasStore = vi.hoisted(() => ({
-  read: vi.fn(() => ({ state: { nodes: [] } })),
+const spaceHandle = vi.hoisted(() => ({
+  read: vi.fn(async () => ({ state: { nodes: [] } })),
 }));
 
-// The facade is stubbed for the store, but the handle helpers must stay the
-// real ones: these cases drive `withSpaceDirHandlesReleased` and assert the
-// watcher released its handles, which only works if both sides share the one
-// module instance that holds the registry.
+// The facade is stubbed for the Space handle, but the directory-handle
+// helpers must stay the real ones: these cases drive
+// `withSpaceDirHandlesReleased` and assert the watcher released its handles,
+// which only works if both sides share the one module instance that holds the
+// registry.
 vi.mock('../storage/index.js', async () => {
   const handles = await import('../storage/backends/disk/space-dir-handles.js');
   return {
-    getCanvasStore: () => canvasStore,
+    space: () => spaceHandle,
     registerSpaceDirHandleOwner: handles.registerSpaceDirHandleOwner,
     withSpaceDirHandlesReleased: handles.withSpaceDirHandlesReleased,
   };
@@ -146,7 +147,7 @@ beforeEach(() => {
     isFile: () => true,
     isDirectory: () => false,
   });
-  canvasStore.read.mockClear();
+  spaceHandle.read.mockClear();
   canvasDirs.list.mockReturnValue([]);
   state.configured = true;
 });
@@ -552,7 +553,7 @@ describe('openExternalNoteSession', () => {
 
     emitNativeWatcherEvent('later.md');
     await vi.waitFor(() => {
-      expect(canvasStore.read).toHaveBeenCalled();
+      expect(spaceHandle.read).toHaveBeenCalled();
     });
     expect(listener).not.toHaveBeenCalled();
 
@@ -687,7 +688,7 @@ describe('native note events', () => {
     // A repeat observation replaces the entry instead of duplicating it.
     emitNativeWatcherEvent('later.md');
     await vi.waitFor(() => {
-      expect(canvasStore.read.mock.calls.length).toBeGreaterThan(1);
+      expect(spaceHandle.read.mock.calls.length).toBeGreaterThan(1);
     });
     expect(events).toHaveLength(1);
 

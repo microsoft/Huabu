@@ -33,7 +33,7 @@ import path from 'node:path';
 import { getLogger } from '../../utils/logger.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
 import { listAllCanvasDirEntries } from '../storage/canvas-dirs.js';
-import { getCanvasStore } from '../storage/index.js';
+import { space } from '../storage/index.js';
 import { registerSpaceDirHandleOwner } from '../storage/index.js';
 import { SPACE_JSON_FILENAME } from '../storage/paths.js';
 import { getWorkspacePath, isWorkspaceConfigured } from '../workspace.js';
@@ -130,8 +130,8 @@ function noteIdsFromCanvas(canvas: CanvasFile | null): Set<string> {
   return ids;
 }
 
-function canvasNoteIds(canvasId: string): Set<string> {
-  return noteIdsFromCanvas(getCanvasStore(canvasId).read());
+async function canvasNoteIds(canvasId: string): Promise<Set<string>> {
+  return noteIdsFromCanvas(await space(canvasId).read());
 }
 
 async function readInitialCanvasNoteIds(
@@ -195,8 +195,16 @@ function forgetItem(session: ActiveSpaceWatch, relativePath: string): void {
   emit(session, { type: 'removed', data: { relativePath } });
 }
 
-function snapshotOf(session: ActiveSpaceWatch): ExternalNoteItem[] {
-  const known = canvasNoteIds(session.canvasId);
+/**
+ * `known` is passed in rather than read here because this must stay
+ * synchronous: it both reads and prunes `pendingItems`, and the caller relies
+ * on registering its listener and taking the snapshot without an await
+ * between them, so no event can slip through.
+ */
+function snapshotOf(
+  session: ActiveSpaceWatch,
+  known: ReadonlySet<string>,
+): ExternalNoteItem[] {
   const out: ExternalNoteItem[] = [];
   for (const [rel, item] of session.pendingItems) {
     if (item.noteId && known.has(item.noteId)) {
@@ -228,7 +236,7 @@ function scheduleNodeEvent(session: ActiveSpaceWatch, basename: string): void {
         .then(async (fileStat) => {
           if (!fileStat.isFile()) return;
           const item = await buildItem(absPath, relativePath, () =>
-            Promise.resolve(canvasNoteIds(session.canvasId)),
+            canvasNoteIds(session.canvasId),
           );
           if (!item || !isSessionCurrent(session, stamp)) return;
           recordItem(session, item);
@@ -787,11 +795,13 @@ export async function openExternalNoteSession(
     await ensureInitialScan(active);
   }
 
+  const known = await canvasNoteIds(active.canvasId);
+
   // Registering the listener and reading the snapshot must stay in one
   // synchronous block so no event can slip between them.
   if (released || !isSessionCurrent(active)) return { snapshot: [], close };
   active.listeners.add(listener);
-  return { snapshot: snapshotOf(active), close };
+  return { snapshot: snapshotOf(active, known), close };
 }
 
 /** Remove and return a pending item — used by the import endpoint. */
