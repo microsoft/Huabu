@@ -13,11 +13,7 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { executeOnServer } from './canvas-executor.js';
-import {
-  listCanvasDirEntries,
-  requireWorldCanvasId,
-} from '../storage/canvas-dirs.js';
-import { getCanvasStore } from '../storage/index.js';
+import { getStructuredStore, space } from '../storage/index.js';
 
 const PORTAL_WIDTH = PORTAL_DEFAULT_WIDTH;
 const PORTAL_HEIGHT = PORTAL_DEFAULT_HEIGHT;
@@ -113,9 +109,13 @@ interface WorldPortalReconciliationPlan {
   inputs: CanvasNodeCreateInput[];
 }
 
-function planWorldPortalReconciliation(): WorldPortalReconciliationPlan {
-  const worldCanvasId = requireWorldCanvasId();
-  const world = getCanvasStore(worldCanvasId).read();
+async function planWorldPortalReconciliation(): Promise<WorldPortalReconciliationPlan> {
+  // One repository instance spans World resolution and membership, so a
+  // Workspace switch between them is rejected by the handle rather than
+  // reconciling one Workspace's Portals against another's Space list.
+  const spaces = getStructuredStore().spaces();
+  const worldCanvasId = await spaces.worldId();
+  const world = await space(worldCanvasId).read();
   if (!world) {
     throw new WorldPortalIntegrityError('World Canvas is not readable');
   }
@@ -141,9 +141,12 @@ function planWorldPortalReconciliation(): WorldPortalReconciliationPlan {
     portalByTarget.set(targetCanvasId, node);
   }
 
-  const spaces = listCanvasDirEntries()
-    .filter((entry) => !portalByTarget.has(entry.id))
-    .sort((a, b) => a.id.localeCompare(b.id));
+  const unreconciled = (await spaces.list())
+    .filter((summary) => !portalByTarget.has(summary.canvasId))
+    // `list()` promises no order, and slot allocation is positional, so the
+    // deterministic layout comes from sorting here rather than from a backend
+    // happening to scan in a stable order.
+    .sort((a, b) => a.canvasId.localeCompare(b.canvasId));
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const occupied: Rect[] = nodes.map((node) => {
     const position = absolutePosition(node, byId);
@@ -155,7 +158,7 @@ function planWorldPortalReconciliation(): WorldPortalReconciliationPlan {
     };
   });
 
-  const inputs: CanvasNodeCreateInput[] = spaces.map((space) => {
+  const inputs: CanvasNodeCreateInput[] = unreconciled.map((summary) => {
     const position = findOpenPortalSlot(occupied);
     occupied.push({
       ...position,
@@ -168,7 +171,7 @@ function planWorldPortalReconciliation(): WorldPortalReconciliationPlan {
       position,
       size: { width: PORTAL_WIDTH, height: PORTAL_HEIGHT },
       data: {
-        targetCanvasId: space.id,
+        targetCanvasId: summary.canvasId,
       },
       selectOnCreate: false,
     };
@@ -178,7 +181,7 @@ function planWorldPortalReconciliation(): WorldPortalReconciliationPlan {
 }
 
 async function reconcileWorldPortalsOnce(): Promise<void> {
-  const { worldCanvasId, inputs } = planWorldPortalReconciliation();
+  const { worldCanvasId, inputs } = await planWorldPortalReconciliation();
   if (inputs.length === 0) return;
 
   const command: CanvasCommand = {

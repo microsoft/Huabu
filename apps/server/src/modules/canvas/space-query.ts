@@ -47,7 +47,7 @@ export async function executeSpaceQuery(
   switch (query.type) {
     case 'GET_SPACE_OUTLINE': {
       const { type: _type, ...params } = query;
-      const result = buildCanvasOutline(canvasId, params);
+      const result = await buildCanvasOutline(canvasId, params);
       if (!result) {
         throw new SpaceQueryError(
           `Canvas ${canvasId} not found`,
@@ -58,7 +58,7 @@ export async function executeSpaceQuery(
     }
     case 'INSPECT_NODES': {
       const { type: _type, ...params } = query;
-      const result = inspectNodes(canvasId, params);
+      const result = await inspectNodes(canvasId, params);
       if ('error' in result) throwQueryError(result.error);
       return {
         type: query.type,
@@ -67,7 +67,7 @@ export async function executeSpaceQuery(
     }
     case 'INSPECT_EDGES': {
       const { type: _type, ...params } = query;
-      const result = inspectEdges(canvasId, params);
+      const result = await inspectEdges(canvasId, params);
       if ('error' in result) throwQueryError(result.error);
       return {
         type: query.type,

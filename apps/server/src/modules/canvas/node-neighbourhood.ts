@@ -46,7 +46,7 @@ import {
   renderNodes,
 } from '../agent/conversation/prompt/node-element.js';
 import { buildAgentNodePreview } from '../agent/node-ref.js';
-import { getCanvasStore } from '../storage/index.js';
+import { space } from '../storage/index.js';
 
 import type { AgentNodePreview } from '../agent/node-ref.js';
 import type { CanvasNodeType, SpatialNode } from '@huabu/shared';
@@ -67,39 +67,39 @@ import type { CanvasNodeType, SpatialNode } from '@huabu/shared';
  * Owns the preview-extraction policy. Forwards each node through the
  * shared {@link extractAgentNodePreview} ladder
  * (`summary > content[:120] > src`) with two inputs merged in one
- * pass: the on-disk frontmatter (via `readNode` — canonical for note
- * nodes whose body lives in `nodes/<file>.md`) and the inline
- * `data.content` / `data.src` (text-on-canvas nodes whose body never
- * touches disk). Per-node disk reads are memoized.
+ * pass: the stored node record (canonical for note nodes whose body lives
+ * outside the topology) and the inline `data.content` / `data.src`
+ * (text-on-canvas nodes whose body is never a separate record).
+ *
+ * Records are read once, up front, for the whole Space. The neighbourhood
+ * is a subset, so this reads more than the old lazy per-node path did on a
+ * sparse canvas — but a lazy read cannot cross an async port without making
+ * the pure walk below async too, and the walk already visits every node to
+ * build the spatial bundle (§12.6.1).
  */
-export function getNodeNeighbourhood(
+export async function getNodeNeighbourhood(
   canvasId: string,
   anchorNodeId: string,
-): NodeNeighbourhoodContext | null {
-  const canvas = getCanvasStore(canvasId).read();
+): Promise<NodeNeighbourhoodContext | null> {
+  const handle = space(canvasId);
+  const canvas = await handle.read();
   if (!canvas) return null;
   const bundle = buildSpatialBundle(canvas);
   const target = bundle.spatialNodes.find((n) => n.id === anchorNodeId);
   if (!target) return null;
 
-  const store = getCanvasStore(canvasId);
-  const cache = new Map<string, AgentNodePreview>();
+  const records = await handle.nodes.list();
   // One assembler for every neighbour: the node carries whatever the spatial
   // bundle knows (id / type; its `data.label` is always empty), and
-  // `describeNode` fills label + body from the sidecar, then derives the
+  // `describeNode` fills label + body from the record, then derives the
   // `file=` path, preview line, and `rev` token (in lock-step with the RFS
-  // `ETag`). Memoized so a node referenced twice is read once.
-  const describe = (n: SpatialNode): AgentNodePreview => {
-    const hit = cache.get(n.id);
-    if (hit) return hit;
-    const preview = describeNode(
-      store,
+  // `ETag`).
+  const describe = (n: SpatialNode): AgentNodePreview =>
+    describeNode(
       { id: n.id, type: n.type, ...(n.label ? { label: n.label } : {}) },
       'preview',
+      records.get(n.id)?.record ?? null,
     );
-    cache.set(n.id, preview);
-    return preview;
-  };
 
   return buildNodeNeighbourhoodContext(
     target,
