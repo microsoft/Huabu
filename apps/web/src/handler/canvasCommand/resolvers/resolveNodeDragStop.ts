@@ -4,9 +4,7 @@
 import {
   autoFrameNodeByOverlap,
   autoUnframeNodeByNonOverlap,
-  fitFrames,
   FRAME_POINTER_CAPTURE_MARGIN,
-  getFrameSizing,
   moveNodeIntoFrame,
   moveNodeOutOfFrame,
   pickColumnDropTarget,
@@ -16,6 +14,7 @@ import {
   readFrameGridRow,
   readFrameTrack,
   resolveFrameTrackCount,
+  projectAffectedFrameGeometry,
   wouldStickToStructuredFrame,
   type FrameAxis,
   type FrameGridAxis,
@@ -32,7 +31,12 @@ import type {
   UiResolverState,
 } from '../uiIntent';
 import type { FrameCellPatch } from '../utils/frameLayout';
-import type { CanvasCommand, CanvasNodeId, RecentAction } from '@huabu/shared';
+import type {
+  CanvasCommand,
+  CanvasNodeGeometryUpdate,
+  CanvasNodeId,
+  RecentAction,
+} from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 export default function resolveNodeDragStop(
@@ -152,14 +156,14 @@ export default function resolveNodeDragStop(
     result = autoFrameNodeByOverlap(result, id, {
       threshold: 0.5,
       pointer: intent.pointerFlowPosition,
+      allowNestedFrameEntry: intent.allowNestedFrameEntry,
     });
   }
 
-  // Collect geometry updates and parent changes.
-  const geometryUpdates: Array<{
-    nodeId: CanvasNodeId;
-    position: { x: number; y: number };
-  }> = [];
+  // Collect parent changes first. Geometry is diffed only after affected Hug
+  // Frames have fitted, so the batch includes the fitted Frame and child
+  // coordinates rather than the intermediate reparent geometry.
+  const geometryUpdates: CanvasNodeGeometryUpdate[] = [];
   const parentChanges = new Map<string, string | null>();
 
   for (const id of intent.draggedNodeIds) {
@@ -171,10 +175,6 @@ export default function resolveNodeDragStop(
 
     if (prevParentId !== nextParentId) {
       parentChanges.set(id, nextParentId);
-      geometryUpdates.push({
-        nodeId: id as CanvasNodeId,
-        position: node.position,
-      });
     }
   }
 
@@ -190,13 +190,33 @@ export default function resolveNodeDragStop(
     if (prevParentId) affectedFrameIds.add(prevParentId);
     if (node?.parentId) affectedFrameIds.add(node.parentId);
   }
-  const hugFrameIds = new Set<string>();
-  for (const frameId of affectedFrameIds) {
-    const frame = result.find((n) => n.id === frameId);
-    if (getFrameSizing(frame) === 'hug') hugFrameIds.add(frameId);
+  const projection = projectAffectedFrameGeometry(
+    result,
+    affectedFrameIds,
+    ui.edges,
+  );
+  result = projection.nodes;
+  for (const frameId of projection.affectedFrameIds) {
+    affectedFrameIds.add(frameId);
   }
-  if (hugFrameIds.size > 0) {
-    result = fitFrames(result, hugFrameIds);
+
+  for (const node of result) {
+    const original = nodes.find((candidate) => candidate.id === node.id);
+    if (!original) continue;
+    const positionChanged =
+      original.position.x !== node.position.x ||
+      original.position.y !== node.position.y;
+    const size = canvasSizeFromStyle(node.style);
+    const originalSize = canvasSizeFromStyle(original.style);
+    const sizeChanged =
+      size?.width !== originalSize?.width ||
+      size?.height !== originalSize?.height;
+    if (!positionChanged && !sizeChanged) continue;
+    geometryUpdates.push({
+      nodeId: node.id as CanvasNodeId,
+      ...(positionChanged ? { position: node.position } : {}),
+      ...(sizeChanged && size ? { size } : {}),
+    });
   }
 
   const dropPlans = collectGridDropPlans(
@@ -210,20 +230,6 @@ export default function resolveNodeDragStop(
 
   if (parentChanges.size === 0) {
     if (affectedFrameIds.size > 0) {
-      for (const n of result) {
-        const original = nodes.find((o) => o.id === n.id);
-        if (
-          original &&
-          (original.position !== n.position || original.style !== n.style)
-        ) {
-          const size = canvasSizeFromStyle(n.style);
-          geometryUpdates.push({
-            nodeId: n.id as CanvasNodeId,
-            position: n.position,
-            ...(size && { size }),
-          } as never);
-        }
-      }
       if (geometryUpdates.length > 0) {
         commands.push({ type: 'SET_NODE_GEOMETRY', items: geometryUpdates });
       }

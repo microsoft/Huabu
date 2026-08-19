@@ -128,6 +128,7 @@ describe('useCanvasShortcuts catalog key lock', () => {
           button: 0,
           isPrimary: true,
           pointerId: 1,
+          pointerType: 'mouse',
         }),
       );
       window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }));
@@ -135,12 +136,27 @@ describe('useCanvasShortcuts catalog key lock', () => {
     expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
 
     act(() => {
-      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 2 }));
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          pointerId: 2,
+          pointerType: 'mouse',
+        }),
+      );
     });
     expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
 
     act(() => {
-      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          pointerId: 1,
+          pointerType: 'mouse',
+        }),
+      );
+    });
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mouseup'));
     });
     expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
   });
@@ -155,15 +171,76 @@ describe('useCanvasShortcuts catalog key lock', () => {
           button: 0,
           isPrimary: true,
           pointerId: 1,
+          pointerType: 'mouse',
         }),
       );
-      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }));
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          pointerId: 1,
+          pointerType: 'mouse',
+        }),
+      );
+      window.dispatchEvent(new MouseEvent('mouseup'));
     });
     expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
 
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }));
     });
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+  });
+
+  it('does not restore temporary pan between pointerup and mouseup', () => {
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', cancelable: true }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          button: 0,
+          isPrimary: true,
+          pointerId: 1,
+          pointerType: 'mouse',
+        }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          pointerId: 1,
+          pointerType: 'mouse',
+        }),
+      );
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }));
+    });
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mouseup'));
+    });
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+  });
+
+  it('restores temporary pan after touch pointerup without mouseup', () => {
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', cancelable: true }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          button: 0,
+          isPrimary: true,
+          pointerId: 1,
+          pointerType: 'touch',
+        }),
+      );
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }));
+      window.dispatchEvent(
+        new PointerEvent('pointerup', {
+          pointerId: 1,
+          pointerType: 'touch',
+        }),
+      );
+    });
+
     expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
   });
 

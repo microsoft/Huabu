@@ -156,7 +156,7 @@ export function autoUnframeNodeByNonOverlap(
  *
  * This function is responsible for:
  * - Calculating overlap ratios
- * - Finding the best frame (highest overlap, smallest area)
+ * - Selecting the pointer-owned Frame surface (or overlap fallback)
  * - Delegating the actual move to moveNodeIntoFrame (which handles validation)
  */
 export function autoFrameNodeByOverlap(
@@ -180,6 +180,7 @@ export function autoFrameNodeByOverlap(
     threshold,
     getRect,
     options.pointer,
+    options.allowNestedFrameEntry,
   );
   if (!bestFrameId) return nodes;
 

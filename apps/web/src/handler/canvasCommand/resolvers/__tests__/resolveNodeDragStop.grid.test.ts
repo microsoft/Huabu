@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyGridLayout,
+  computeFrameFit,
   executeCanvasCommands,
 } from '@huabu/shared/canvas-engine';
 
@@ -79,6 +80,307 @@ function state(nodes: Node[]): UiResolverState {
 }
 
 describe('resolveNodeDragStop Grid cells', () => {
+  it('freezes nested Frames for external drops unless entry is explicit', () => {
+    const outer = {
+      id: 'outer',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { sizing: 'manual' },
+      style: { width: 500, height: 500 },
+      measured: { width: 500, height: 500 },
+    } as Node;
+    const inner = {
+      id: 'inner',
+      type: 'frame',
+      parentId: 'outer',
+      position: { x: 50, y: 50 },
+      data: { sizing: 'manual' },
+      style: { width: 200, height: 200 },
+      measured: { width: 200, height: 200 },
+    } as Node;
+    const dragged = {
+      id: 'dragged',
+      type: 'note',
+      position: { x: 140, y: 140 },
+      data: {},
+      style: { width: 100, height: 100 },
+      measured: { width: 100, height: 100 },
+    } as Node;
+    const pointerFlowPosition = { x: 160, y: 160 };
+
+    const resolveParent = (allowNestedFrameEntry: boolean) => {
+      const resolution = resolveUiIntent(
+        {
+          type: 'NODE_DRAG_STOP',
+          draggedNodeIds: ['dragged'],
+          pointerFlowPosition,
+          allowNestedFrameEntry,
+        },
+        state([outer, inner, dragged]),
+      );
+      return resolution.commands.find(
+        (command) => command.type === 'SET_NODE_PARENT',
+      );
+    };
+
+    expect(resolveParent(false)).toMatchObject({ parentId: 'outer' });
+    expect(resolveParent(true)).toMatchObject({ parentId: 'inner' });
+  });
+
+  it('commits a cached upward move from an inner Frame to its outer ancestor', () => {
+    const outer = {
+      id: 'outer',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { sizing: 'manual' },
+      style: { width: 500, height: 500 },
+      measured: { width: 500, height: 500 },
+    } as Node;
+    const inner = {
+      id: 'inner',
+      type: 'frame',
+      parentId: 'outer',
+      position: { x: 50, y: 50 },
+      data: { sizing: 'manual' },
+      style: { width: 200, height: 200 },
+      measured: { width: 200, height: 200 },
+    } as Node;
+    const dragged = {
+      id: 'dragged',
+      type: 'note',
+      parentId: 'inner',
+      position: { x: -40, y: -40 },
+      data: {},
+      style: { width: 100, height: 100 },
+      measured: { width: 100, height: 100 },
+    } as Node;
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: { x: 30, y: 30 },
+        cachedDecisions: new Map([
+          ['dragged', { unframe: true, enterFrameId: 'outer' }],
+        ]),
+      },
+      state([outer, inner, dragged]),
+    );
+
+    expect(
+      resolution.commands.find((command) => command.type === 'SET_NODE_PARENT'),
+    ).toMatchObject({ nodeIds: ['dragged'], parentId: 'outer' });
+  });
+
+  it('fits a Hug outer Frame after a node moves up from its inner Frame', () => {
+    const outer = {
+      id: 'outer',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { sizing: 'hug' },
+      style: { width: 500, height: 500 },
+      measured: { width: 500, height: 500 },
+    } as Node;
+    const inner = {
+      id: 'inner',
+      type: 'frame',
+      parentId: 'outer',
+      position: { x: 100, y: 100 },
+      data: { sizing: 'manual' },
+      style: { width: 200, height: 200 },
+      measured: { width: 200, height: 200 },
+    } as Node;
+    const dragged = {
+      id: 'dragged',
+      type: 'note',
+      parentId: 'inner',
+      position: { x: -80, y: -80 },
+      data: {},
+      style: { width: 100, height: 100 },
+      measured: { width: 100, height: 100 },
+    } as Node;
+    const nodes = [outer, inner, dragged];
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: { x: 30, y: 30 },
+        cachedDecisions: new Map([
+          ['dragged', { unframe: true, enterFrameId: 'outer' }],
+        ]),
+      },
+      state(nodes),
+    );
+    const committed = executeCanvasCommands(
+      { source: 'ui', commands: resolution.commands },
+      { nodes, edges: [], canvasId: 'canvas' },
+    ).writeResult.nodes;
+    const committedOuter = committed.find((node) => node.id === 'outer');
+    const stableFit = computeFrameFit(committed, 'outer');
+
+    expect(committed.find((node) => node.id === 'dragged')?.parentId).toBe(
+      'outer',
+    );
+    expect(committedOuter?.position).toEqual(stableFit?.position);
+    expect(committedOuter?.style).toMatchObject({
+      width: stableFit?.width,
+      height: stableFit?.height,
+    });
+  });
+
+  it('stabilizes a Hug grid height when a node moves up across three Frame levels', () => {
+    const outer = {
+      id: 'outer',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { layoutMode: 'grid', gridCount: 2, sizing: 'hug' },
+      style: { width: 600, height: 300 },
+      measured: { width: 600, height: 300 },
+    } as Node;
+    const middle = {
+      id: 'middle',
+      type: 'frame',
+      parentId: 'outer',
+      position: { x: 30, y: 30 },
+      data: { frameColumn: 0, frameRow: 0, sizing: 'manual' },
+      style: { width: 240, height: 200 },
+      measured: { width: 240, height: 200 },
+    } as Node;
+    const outerPeer = {
+      id: 'outer-peer',
+      type: 'note',
+      parentId: 'outer',
+      position: { x: 300, y: 30 },
+      data: { frameColumn: 1, frameRow: 0 },
+      style: { width: 120, height: 80 },
+      measured: { width: 120, height: 80 },
+    } as Node;
+    const inner = {
+      id: 'inner',
+      type: 'frame',
+      parentId: 'middle',
+      position: { x: 20, y: 20 },
+      data: { sizing: 'manual' },
+      style: { width: 180, height: 140 },
+      measured: { width: 180, height: 140 },
+    } as Node;
+    const dragged = {
+      id: 'dragged',
+      type: 'note',
+      parentId: 'inner',
+      position: { x: 20, y: 20 },
+      data: {},
+      style: { width: 100, height: 80 },
+      measured: { width: 100, height: 80 },
+    } as Node;
+    const initial = [outer, middle, outerPeer, inner, dragged];
+    const initialLayout = applyGridLayout(initial, 'outer', 2);
+    if (!initialLayout) throw new Error('Outer grid fixture did not resolve');
+    const nodes = initial.map((node) => {
+      const position = initialLayout.childPositions.get(node.id);
+      return position ? { ...node, position } : node;
+    });
+    const outerHeight = initialLayout.frameSize.height;
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: { x: 80, y: outerHeight + 20 },
+        cachedDecisions: new Map([
+          ['dragged', { unframe: true, enterFrameId: 'outer' }],
+        ]),
+      },
+      state(nodes),
+    );
+    const committed = executeCanvasCommands(
+      { source: 'ui', commands: resolution.commands },
+      { nodes, edges: [], canvasId: 'canvas' },
+    ).writeResult.nodes;
+    const committedOuter = committed.find((node) => node.id === 'outer');
+    const stableLayout = applyGridLayout(committed, 'outer', 2);
+
+    expect(committed.find((node) => node.id === 'dragged')?.parentId).toBe(
+      'outer',
+    );
+    expect(committedOuter?.style?.height).toBe(stableLayout?.frameSize.height);
+  });
+
+  it('keeps a Hug child Frame on its outer structured track after entry', () => {
+    const outer = {
+      id: 'outer',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { layoutMode: 'grid', gridCount: 2, sizing: 'manual' },
+      style: { width: 600, height: 300 },
+      measured: { width: 600, height: 300 },
+    } as Node;
+    const peer = {
+      id: 'peer',
+      type: 'frame',
+      parentId: 'outer',
+      position: { x: 0, y: 0 },
+      data: { frameColumn: 0, frameRow: 0, sizing: 'manual' },
+      style: { width: 180, height: 140 },
+      measured: { width: 180, height: 140 },
+    } as Node;
+    const target = {
+      id: 'target',
+      type: 'frame',
+      parentId: 'outer',
+      position: { x: 0, y: 0 },
+      data: { frameColumn: 1, frameRow: 0, sizing: 'hug' },
+      style: { width: 180, height: 140 },
+      measured: { width: 180, height: 140 },
+    } as Node;
+    const initialLayout = applyGridLayout([outer, peer, target], 'outer', 2);
+    const targetStart = initialLayout?.childPositions.get('target');
+    if (!initialLayout || !targetStart) {
+      throw new Error('Nested Frame fixture did not produce a layout');
+    }
+    const laidOut = [outer, peer, target].map((node) => {
+      const position = initialLayout.childPositions.get(node.id);
+      return position ? { ...node, position } : node;
+    });
+    const dragged = {
+      id: 'dragged',
+      type: 'note',
+      position: {
+        x: targetStart.x + outer.position.x + 120,
+        y: targetStart.y + outer.position.y + 80,
+      },
+      data: {},
+      style: { width: 100, height: 80 },
+      measured: { width: 100, height: 80 },
+    } as Node;
+    const nodes = [...laidOut, dragged];
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: {
+          x: targetStart.x + outer.position.x + 150,
+          y: targetStart.y + outer.position.y + 100,
+        },
+        cachedDecisions: new Map([
+          ['dragged', { unframe: false, enterFrameId: 'target' }],
+        ]),
+      },
+      state(nodes),
+    );
+    const committed = executeCanvasCommands(
+      { source: 'ui', commands: resolution.commands },
+      { nodes, edges: [], canvasId: 'canvas' },
+    ).writeResult.nodes;
+    const expected = applyGridLayout(committed, 'outer', 2)?.childPositions.get(
+      'target',
+    );
+    const committedTarget = committed.find((node) => node.id === 'target');
+
+    expect(committedTarget?.position).toEqual(expected);
+  });
+
   it('moves into an empty later cell without touching earlier rows', () => {
     const scene = layoutScene([
       makeFrame(),
@@ -204,6 +506,140 @@ describe('resolveNodeDragStop Grid cells', () => {
     expect(patches.get('occupant')).toMatchObject({
       frameColumn: 0,
       frameRow: 0,
+    });
+  });
+
+  it('reorders sibling frames instead of nesting one into the other', () => {
+    const scene = layoutScene([
+      makeFrame(),
+      { ...makeChild('dragged', 0, 0), type: 'frame' },
+      { ...makeChild('occupant', 1, 0), type: 'frame' },
+    ]);
+    const target = scene.positions.get('occupant');
+    if (!target) throw new Error('Target fixture is missing');
+    const liveNodes = scene.nodes.map((node) =>
+      node.id === 'dragged' ? { ...node, position: target } : node,
+    );
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: {
+          x: target.x + CHILD_SIZE.width / 2,
+          y: target.y + CHILD_SIZE.height / 2,
+        },
+      },
+      state(liveNodes),
+    );
+    const patches = mergedPatches(resolution.commands);
+    const parentCommands = resolution.commands.filter(
+      (command) => command.type === 'SET_NODE_PARENT',
+    );
+
+    expect(parentCommands).toHaveLength(0);
+    expect(patches.get('dragged')).toMatchObject({ frameColumn: 1 });
+    expect(patches.get('occupant')).toMatchObject({ frameColumn: 0 });
+  });
+
+  it('nests into a sibling frame when Cmd or Ctrl overrides reordering', () => {
+    const scene = layoutScene([
+      makeFrame(),
+      { ...makeChild('dragged', 0, 0), type: 'frame' },
+      { ...makeChild('occupant', 1, 0), type: 'frame' },
+    ]);
+    const target = scene.positions.get('occupant');
+    if (!target) throw new Error('Target fixture is missing');
+    const liveNodes = scene.nodes.map((node) =>
+      node.id === 'dragged' ? { ...node, position: target } : node,
+    );
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: {
+          x: target.x + CHILD_SIZE.width / 2,
+          y: target.y + CHILD_SIZE.height / 2,
+        },
+        allowNestedFrameEntry: true,
+      },
+      state(liveNodes),
+    );
+    const parentCommand = resolution.commands.find(
+      (command) => command.type === 'SET_NODE_PARENT',
+    );
+
+    expect(parentCommand).toMatchObject({
+      nodeIds: ['dragged'],
+      parentId: 'occupant',
+    });
+  });
+
+  it('reorders a regular node instead of nesting it into a sibling frame', () => {
+    const scene = layoutScene([
+      makeFrame(),
+      makeChild('dragged', 0, 0),
+      { ...makeChild('occupant', 1, 0), type: 'frame' },
+    ]);
+    const target = scene.positions.get('occupant');
+    if (!target) throw new Error('Target fixture is missing');
+    const liveNodes = scene.nodes.map((node) =>
+      node.id === 'dragged' ? { ...node, position: target } : node,
+    );
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: {
+          x: target.x + CHILD_SIZE.width / 2,
+          y: target.y + CHILD_SIZE.height / 2,
+        },
+      },
+      state(liveNodes),
+    );
+    const patches = mergedPatches(resolution.commands);
+    const parentCommands = resolution.commands.filter(
+      (command) => command.type === 'SET_NODE_PARENT',
+    );
+
+    expect(parentCommands).toHaveLength(0);
+    expect(patches.get('dragged')).toMatchObject({ frameColumn: 1 });
+    expect(patches.get('occupant')).toMatchObject({ frameColumn: 0 });
+  });
+
+  it('nests a regular node into a sibling frame with Cmd or Ctrl', () => {
+    const scene = layoutScene([
+      makeFrame(),
+      makeChild('dragged', 0, 0),
+      { ...makeChild('occupant', 1, 0), type: 'frame' },
+    ]);
+    const target = scene.positions.get('occupant');
+    if (!target) throw new Error('Target fixture is missing');
+    const liveNodes = scene.nodes.map((node) =>
+      node.id === 'dragged' ? { ...node, position: target } : node,
+    );
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: {
+          x: target.x + CHILD_SIZE.width / 2,
+          y: target.y + CHILD_SIZE.height / 2,
+        },
+        allowNestedFrameEntry: true,
+      },
+      state(liveNodes),
+    );
+    const parentCommand = resolution.commands.find(
+      (command) => command.type === 'SET_NODE_PARENT',
+    );
+
+    expect(parentCommand).toMatchObject({
+      nodeIds: ['dragged'],
+      parentId: 'occupant',
     });
   });
 

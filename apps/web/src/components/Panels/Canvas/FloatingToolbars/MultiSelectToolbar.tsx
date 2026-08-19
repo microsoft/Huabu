@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Pin, PinOff, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -25,7 +25,6 @@ import {
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { translateColorOptions } from '@/i18n/colors';
 import useCanvasStore from '@/store/canvasStore';
-import { useWorkspaceStore } from '@/store/workspaceStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
@@ -55,70 +54,11 @@ export const MultiSelectToolbar = () => {
   const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
   const beginGesture = useCanvasStore((s) => s.beginGesture);
   const deleteNodes = useCanvasStore((s) => s.deleteNodes);
-  const canvasId = useCanvasStore((s) => s.canvasId);
-  const setPortalNodePins = useCanvasStore((s) => s.setPortalNodePins);
-  const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
-  const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
-  const pinnedSourceNodeIds = useCanvasStore((s) => s.pinnedSourceNodeIds);
   const isNotMouse = useIsNotMouse();
 
   const selectedNodes = useMemo(
     () => nodes.filter((n) => n.selected) as CanvasNode[],
     [nodes],
-  );
-  const selectedNodeRefUpdates = useMemo(() => {
-    const nodeIdsByCanvas = new Map<string, `node-${string}`[]>();
-    for (const node of selectedNodes) {
-      if (node.type !== 'nodeRef' && node.type !== 'frameRef') continue;
-      const target = (
-        node.data as {
-          target: { canvasId: string; nodeId: string };
-        }
-      ).target;
-      const nodeIds = nodeIdsByCanvas.get(target.canvasId) ?? [];
-      nodeIds.push(target.nodeId as `node-${string}`);
-      nodeIdsByCanvas.set(target.canvasId, nodeIds);
-    }
-    return [...nodeIdsByCanvas].map(([sourceCanvasId, sourceNodeIds]) => ({
-      sourceCanvasId: sourceCanvasId as `canvas-${string}`,
-      sourceNodeIds,
-      pinned: false as const,
-    }));
-  }, [selectedNodes]);
-  const canPinSourceSelection =
-    worldEnabled &&
-    canvasId !== worldCanvasId &&
-    selectedNodes.length > 0 &&
-    selectedNodes.every(
-      (node) =>
-        node.type !== 'canvasRef' &&
-        node.type !== 'frameRef' &&
-        node.type !== 'nodeRef',
-    );
-  // Pin state across the selection. When every node agrees the toolbar
-  // collapses into one toggle; a mixed selection keeps both actions so
-  // "pin all" and "unpin all" stay expressible.
-  const sourcePinState = useMemo(() => {
-    if (!canPinSourceSelection) return null;
-    const pinnedCount = selectedNodes.filter(
-      (node) => pinnedSourceNodeIds[node.id] === true,
-    ).length;
-    if (pinnedCount === 0) return 'none' as const;
-    if (pinnedCount === selectedNodes.length) return 'all' as const;
-    return 'mixed' as const;
-  }, [canPinSourceSelection, pinnedSourceNodeIds, selectedNodes]);
-  const pinSelection = useCallback(
-    (pinned: boolean) =>
-      void setPortalNodePins([
-        {
-          sourceCanvasId: canvasId as `canvas-${string}`,
-          sourceNodeIds: selectedNodes.map(
-            (node) => node.id as `node-${string}`,
-          ),
-          pinned,
-        },
-      ]),
-    [canvasId, selectedNodes, setPortalNodePins],
   );
   const hasPortalSelection = selectedNodes.some(
     (node) => node.type === 'canvasRef',
@@ -343,52 +283,6 @@ export const MultiSelectToolbar = () => {
             ]);
           }}
         />
-      )}
-
-      {sourcePinState && (
-        <>
-          <FloatingToolbar.Divider />
-          {sourcePinState === 'mixed' ? (
-            <>
-              <FloatingToolbar.ActionButton
-                title={t('world.pinSelected')}
-                onClick={() => pinSelection(true)}
-              >
-                <Pin />
-              </FloatingToolbar.ActionButton>
-              <FloatingToolbar.ActionButton
-                title={t('world.unpinSelected')}
-                onClick={() => pinSelection(false)}
-              >
-                <PinOff />
-              </FloatingToolbar.ActionButton>
-            </>
-          ) : (
-            <FloatingToolbar.ToggleButton
-              active={sourcePinState === 'all'}
-              title={
-                sourcePinState === 'all'
-                  ? t('world.unpinSelected')
-                  : t('world.pinSelected')
-              }
-              onClick={() => pinSelection(sourcePinState !== 'all')}
-            >
-              {sourcePinState === 'all' ? <PinOff /> : <Pin />}
-            </FloatingToolbar.ToggleButton>
-          )}
-        </>
-      )}
-
-      {selectedNodeRefUpdates.length > 0 && (
-        <>
-          <FloatingToolbar.Divider />
-          <FloatingToolbar.ActionButton
-            title={t('world.unpinSelected')}
-            onClick={() => void setPortalNodePins(selectedNodeRefUpdates)}
-          >
-            <PinOff />
-          </FloatingToolbar.ActionButton>
-        </>
       )}
 
       <FloatingToolbar.Divider />

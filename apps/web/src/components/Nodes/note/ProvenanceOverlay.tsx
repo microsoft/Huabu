@@ -10,8 +10,8 @@
  *
  *  • Edited block: a thin info-coloured accent bar sits in the
  *    editor's right gutter (`::after` on `.huabu-ai-edited-block`,
- *    declared in `milkdown-overrides.css`). Hovering the block (or
- *    the bar) reveals a popover anchored to the block's right edge
+ *    declared in `milkdown-overrides.css`). Hovering near the bar
+ *    reveals a popover anchored to the block's right edge
  *    that renders a word-level diff between the AI-overwritten
  *    `baselineMarkdown` and the live block markdown, with `Accept`
  *    and `Reject` buttons.
@@ -28,8 +28,10 @@
  * scroll, and resize.
  */
 
-import { diffWords } from 'diff';
+import { diffArrays, diffWords } from 'diff';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { topLevelListItemMarkdown } from '@huabu/shared/canvas-engine';
 
 import { Button } from '@/components/Common/Button';
 
@@ -100,8 +102,42 @@ function computeWordDiff(oldText: string, newText: string): DiffSegment[] {
   }));
 }
 
+export function computeDisplayDiffs(
+  oldText: string,
+  newText: string,
+): DiffSegment[][] {
+  const oldItems = topLevelListItemMarkdown(oldText);
+  const newItems = topLevelListItemMarkdown(newText);
+  if (!oldItems || !newItems) return [computeWordDiff(oldText, newText)];
+
+  return diffArrays(oldItems, newItems).flatMap((change) => {
+    if (change.added) {
+      return change.value.map((item) => computeWordDiff('', item));
+    }
+    if (change.removed) {
+      return change.value.map((item) => computeWordDiff(item, ''));
+    }
+    return change.value.map((item) => computeWordDiff(item, item));
+  });
+}
+
 /** Pixel offset of the gutter bar from the block's right edge. */
 const GUTTER_OFFSET = 12;
+const GUTTER_HIT_LEFT = 3;
+const GUTTER_HIT_WIDTH = 12;
+
+export function isPointInEditedBlockGutter(
+  x: number,
+  y: number,
+  slot: Pick<BlockSlot, 'top' | 'right' | 'height'>,
+): boolean {
+  return (
+    y >= slot.top &&
+    y <= slot.top + slot.height &&
+    x >= slot.right + GUTTER_HIT_LEFT &&
+    x <= slot.right + GUTTER_HIT_LEFT + GUTTER_HIT_WIDTH
+  );
+}
 
 export function ProvenanceOverlay({
   blocks,
@@ -282,8 +318,9 @@ export function ProvenanceOverlay({
     window.clearTimeout(hideTimerRef.current);
   }, []);
 
-  // Treat hovering anywhere on the AI-edited block (or its gutter bar)
-  // as "show that block's popover". Listen on the container.
+  // Only the narrow gutter marker owns the block diff popover. Keeping the
+  // text body outside this hit area lets users read and select it without
+  // repeatedly opening provenance UI.
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !editor || blocks.length === 0) return;
@@ -296,19 +333,15 @@ export function ProvenanceOverlay({
         cancelHide();
         return;
       }
-      // Walk current slot list and check if pointer lies over any
-      // edited block's row (extending into the gutter).
+      // Walk current slot list and check if pointer lies near an edited
+      // block's gutter marker.
       const cRect = container.getBoundingClientRect();
       const xLocal = e.clientX - cRect.left + container.scrollLeft;
       const yLocal = e.clientY - cRect.top + container.scrollTop;
       for (const slot of slots) {
         if (slot.kind !== 'block') continue;
         if (!blockKeySet.has(slot.entry.key)) continue;
-        const yIn = yLocal >= slot.top && yLocal <= slot.top + slot.height;
-        const xIn =
-          xLocal >= slot.right - slot.width &&
-          xLocal <= slot.right + GUTTER_OFFSET + 6;
-        if (yIn && xIn) {
+        if (isPointInEditedBlockGutter(xLocal, yLocal, slot)) {
           cancelHide();
           if (hovered?.kind !== 'block' || hovered.key !== slot.entry.key) {
             setHovered({ kind: 'block', key: slot.entry.key });
@@ -455,7 +488,7 @@ function DiffPopover({
   // concatenate every entry's baseline (rendered as one strike-through
   // block per entry inside the popover body).
   const segments = useMemo<
-    | { kind: 'diff'; segments: DiffSegment[] }
+    | { kind: 'diff'; rows: DiffSegment[][] }
     | { kind: 'tomb'; entries: ReadonlyArray<DeletedBlockInfo> }
   >(() => {
     if (slot.kind === 'block') {
@@ -464,7 +497,7 @@ function DiffPopover({
         slot.entry.baselineMarkdown;
       return {
         kind: 'diff',
-        segments: computeWordDiff(slot.entry.baselineMarkdown, live),
+        rows: computeDisplayDiffs(slot.entry.baselineMarkdown, live),
       };
     }
     return { kind: 'tomb', entries: slot.entries };
@@ -489,19 +522,26 @@ function DiffPopover({
     >
       <div className="text-fg-muted mb-2 text-xs leading-relaxed">
         {segments.kind === 'diff'
-          ? segments.segments.map((seg, i) => (
-              <span
-                key={i}
-                className={
-                  seg.type === 'removed'
-                    ? 'bg-diff-removed-bg text-diff-removed-text line-through'
-                    : seg.type === 'added'
-                      ? 'bg-diff-added-bg text-diff-added-text'
-                      : ''
-                }
+          ? segments.rows.map((row, rowIndex) => (
+              <div
+                key={rowIndex}
+                className={rowIndex > 0 ? 'mt-1 border-t pt-1' : ''}
               >
-                {seg.text}
-              </span>
+                {row.map((seg, segmentIndex) => (
+                  <span
+                    key={segmentIndex}
+                    className={
+                      seg.type === 'removed'
+                        ? 'bg-diff-removed-bg text-diff-removed-text line-through'
+                        : seg.type === 'added'
+                          ? 'bg-diff-added-bg text-diff-added-text'
+                          : ''
+                    }
+                  >
+                    {seg.text}
+                  </span>
+                ))}
+              </div>
             ))
           : segments.entries.map((entry, i) => (
               <div

@@ -29,7 +29,6 @@ import {
   applyDeltas,
   applySharedPostEffectsFromWriteResult,
   executeCanvasCommands,
-  computeFrameFit,
   FRAME_POINTER_CAPTURE_MARGIN,
   getAbsolutePosition as getFrameAbsolutePosition,
   getFrameSizing,
@@ -38,10 +37,12 @@ import {
   wouldAutoFrame,
   readFrameGridConfig,
   resolveFrameTrackCount,
-  solveStructuredFrameLayout,
   describeStructuredDropZone,
   getNodeSize,
+  moveNodeIntoContainer as projectNodeIntoFrame,
+  moveNodeOutOfFrame as projectNodeOutOfFrame,
   normalizeTreeOrder,
+  projectAffectedFrameGeometry,
   type AlignDirection,
   type Delta,
   type ExecutorOptions,
@@ -58,16 +59,20 @@ import {
   type CanvasUiIntent,
   type UiResolverState,
 } from '@/handler/canvasCommand/uiIntent';
+import { mergeLiveDragGeometry } from '@/handler/liveDragGeometry';
+import { projectStructuredTargetGeometry } from '@/handler/projectStructuredTargetGeometry';
 import {
   applySnap,
   beginSnapSession,
   clearDragDecisions,
   consumeLastDragDecisions,
   consumeLastDragReparentBypass,
+  consumeLastNestedFrameEntryAllowed,
   endSnapSession,
   getResizeContext,
   getResizeSnappedRect,
   isReparentBypassed,
+  isNestedFrameEntryAllowed,
   isSnapSessionActive,
   isSnapSessionDragEndCommit,
   isSnapSessionResizeEndCommit,
@@ -144,7 +149,6 @@ import type {
   WireSelectionNode,
   ResolvedWorldReference,
 } from '@huabu/shared';
-import type { StructuredReflowEntry } from '@huabu/shared/canvas-engine';
 
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
@@ -2394,6 +2398,7 @@ const useCanvasStore = create<RFState>()(
         nodes: get().nodes as NestableNode[],
         gestureIds: new Set(draggedNodes.map((n) => n.id)),
         altPressed: event.altKey,
+        nestedFrameEntryAllowed: event.metaKey || event.ctrlKey,
       });
     },
 
@@ -2441,19 +2446,6 @@ const useCanvasStore = create<RFState>()(
         // Dragged nodes are filtered out: React Flow owns their position
         // until release, so projecting one would fight the cursor.
         const draggedIds = new Set(draggedNodes.map((d) => d.id));
-        const commitReflow = (
-          reflow: readonly StructuredReflowEntry[] | null,
-        ) => {
-          const preview = useGesturePreviewStore.getState();
-          if (!reflow) {
-            preview.clearStructuredReflowPositions();
-            return;
-          }
-          preview.setStructuredReflowPositions(
-            reflow.filter((entry) => !draggedIds.has(entry.id)),
-          );
-        };
-
         // Space-held drag opts out of *parent membership changes* only.
         // The current parent's frame still refits around the child's
         // new position (so the virtual outline grows / shrinks live),
@@ -2464,14 +2456,17 @@ const useCanvasStore = create<RFState>()(
         // different one. Mirrors the `continue` short-circuit in
         // `resolveNodeDragStop`.
         const bypassReparent = isReparentBypassed();
+        const allowNestedFrameEntry = isNestedFrameEntryAllowed();
 
-        const liveNodes = nodes.map((n) => {
-          if (n.id === draggedNode.id)
-            return { ...n, position: draggedNode.position };
-          const live = draggedNodes.find((d) => d.id === n.id);
-          if (live) return { ...n, position: live.position };
-          return n;
-        }) as NestableNode[];
+        const liveNodes = nodes.map((node) => {
+          const live =
+            node.id === draggedNode.id
+              ? draggedNode
+              : draggedNodes.find((dragged) => dragged.id === node.id);
+          return live
+            ? mergeLiveDragGeometry(node as NestableNode, live)
+            : (node as NestableNode);
+        });
 
         // Pointer in flow space — feeds the pointer-aware
         // wouldUnframe / wouldAutoFrame predicates so the live preview
@@ -2564,8 +2559,20 @@ const useCanvasStore = create<RFState>()(
             : wouldAutoFrame(liveNodes, dn.id, {
                 threshold: 0.5,
                 pointer: pointerFlow,
+                allowNestedFrameEntry,
               });
           if (targetFrameId) {
+            if (
+              originalNode.parentId &&
+              originalNode.parentId !== targetFrameId
+            ) {
+              let leaving = leavingByFrame.get(originalNode.parentId);
+              if (!leaving) {
+                leaving = new Set();
+                leavingByFrame.set(originalNode.parentId, leaving);
+              }
+              leaving.add(dn.id);
+            }
             previewFrameIds.add(targetFrameId);
             // Track the dragged node's absolute rect so the fit preview can
             // include the incoming node in the frame's bounding-box calculation.
@@ -2605,6 +2612,40 @@ const useCanvasStore = create<RFState>()(
           }
         }
 
+        let projectedSourceNodes = liveNodes;
+        for (const leavingIds of leavingByFrame.values()) {
+          for (const leavingId of leavingIds) {
+            projectedSourceNodes = projectNodeOutOfFrame(
+              projectedSourceNodes,
+              leavingId,
+            );
+          }
+        }
+        let projectedGestureNodes = projectAffectedFrameGeometry(
+          projectedSourceNodes,
+          leavingByFrame.keys(),
+          edges,
+        ).nodes;
+        const liveById = new Map(liveNodes.map((node) => [node.id, node]));
+        const publishGeometryProjection = (projection: NestableNode[]) => {
+          const geometryPreviews = projection.filter((node) => {
+            if (draggedIds.has(node.id)) return false;
+            const current = liveById.get(node.id);
+            if (!current) return false;
+            const currentSize = getNodeSize(current);
+            const nextSize = getNodeSize(node);
+            return (
+              current.position.x !== node.position.x ||
+              current.position.y !== node.position.y ||
+              currentSize.width !== nextSize.width ||
+              currentSize.height !== nextSize.height
+            );
+          });
+          useGesturePreviewStore
+            .getState()
+            .setNodeGeometryPreviews(geometryPreviews);
+        };
+
         // Compute fit previews for all affected frames and show them all
         // simultaneously — e.g. source frame shrinking + target frame expanding.
         // Each entry is tagged with a UI role so the overlay can paint the
@@ -2621,6 +2662,26 @@ const useCanvasStore = create<RFState>()(
         // the landing destination, so painting it `source` would
         // wrongly mute the only relevant overlay.
         const previews: FrameFitPreview[] = [];
+        const publishFrameIntentPreviews = (projection: NestableNode[]) => {
+          const aligned = previews.map((preview) => {
+            const frame = projection.find(
+              (node) => node.id === preview.frameId,
+            );
+            const position = getFrameAbsolutePosition(
+              projection,
+              preview.frameId,
+            );
+            if (!frame || !position) return preview;
+            const size = getNodeSize(frame);
+            return {
+              ...preview,
+              position,
+              width: size.width,
+              height: size.height,
+            };
+          });
+          useGesturePreviewStore.getState().setFrameFitPreviews(aligned);
+        };
 
         // ── Where the drop would land ────────────────────────────────
         // Resolved BEFORE the fit-preview pass, because the structured
@@ -2635,6 +2696,7 @@ const useCanvasStore = create<RFState>()(
           : wouldAutoFrame(liveNodes, draggedNode.id, {
               threshold: 0.5,
               pointer: pointerFlow,
+              allowNestedFrameEntry,
             });
         let targetFrameId = enteringFrameId ?? primary?.parentId;
         // Sticky case (node already lives in a frame): only keep showing the
@@ -2655,87 +2717,49 @@ const useCanvasStore = create<RFState>()(
           : undefined;
         const gridCfg = readFrameGridConfig(targetFrame);
 
-        /** Content-driven fit preview for one structured frame. */
-        const solveStructuredPreview = (
-          frameId: string,
-        ): FrameFitPreview | null => {
-          const leaving = leavingByFrame.get(frameId);
-          const entering = enteringByFrame.get(frameId);
-          const previewNodes = leaving?.size
-            ? liveNodes.filter((node) => !leaving.has(node.id))
-            : liveNodes;
-          const layout = solveStructuredFrameLayout(
-            previewNodes,
-            frameId,
-            'compact',
-            { edges },
+        if (enteringFrameId && targetFrame && !gridCfg) {
+          projectedGestureNodes = projectNodeIntoFrame(
+            projectedGestureNodes,
+            draggedNode.id,
+            enteringFrameId,
           );
-          const frameAbs = getFrameAbsolutePosition(liveNodes, frameId);
-          if (!layout || !frameAbs) return null;
-          return {
-            frameId,
-            position: frameAbs,
-            width: layout.frameSize.width,
-            height: layout.frameSize.height,
-            role: leaving && !entering ? 'source' : 'target',
-          };
-        };
+          projectedGestureNodes = projectAffectedFrameGeometry(
+            projectedGestureNodes,
+            [enteringFrameId],
+            edges,
+          ).nodes;
+        }
 
-        // Skipped in the pass below and reported from the drop zone
-        // instead; recomputed there only if the zone fails to resolve.
-        const deferredStructuredTarget =
-          gridCfg && targetFrameId && getFrameSizing(targetFrame) === 'hug'
-            ? targetFrameId
-            : null;
+        const currentTargetFrameAbs = targetFrameId
+          ? getFrameAbsolutePosition(liveNodes, targetFrameId)
+          : null;
+        const projectedTargetFrameAbs = targetFrameId
+          ? getFrameAbsolutePosition(projectedGestureNodes, targetFrameId)
+          : currentTargetFrameAbs;
 
         for (const frameId of previewFrameIds) {
-          if (frameId === deferredStructuredTarget) continue;
-          // Per-frame sizing gate: only `hug` frames preview a refit;
-          // `manual` frames keep their pinned size during the drag.
-          const frameNode = liveNodes.find((n) => n.id === frameId);
+          const frameNode = projectedGestureNodes.find(
+            (node) => node.id === frameId,
+          );
           if (getFrameSizing(frameNode) !== 'hug') continue;
+          const position = getFrameAbsolutePosition(
+            projectedGestureNodes,
+            frameId,
+          );
+          if (!frameNode || !position) continue;
           const leaving = leavingByFrame.get(frameId);
           const entering = enteringByFrame.get(frameId);
-          if (readFrameGridConfig(frameNode)) {
-            const preview = solveStructuredPreview(frameId);
-            if (preview) previews.push(preview);
-            continue;
-          }
-          const fit = computeFrameFit(liveNodes, frameId, {
-            excludeNodeIds: leaving,
-            includeAbsoluteRects: entering,
-          });
-          if (!fit) continue;
-
-          // Convert to absolute coordinates for overlay rendering.
-          const frame = liveNodes.find((n) => n.id === frameId);
-          if (!frame) continue;
-
-          let absX = fit.position.x;
-          let absY = fit.position.y;
-          if (frame.parentId) {
-            const parentAbsPos = getFrameAbsolutePosition(
-              liveNodes,
-              frame.parentId,
-            );
-            if (parentAbsPos) {
-              absX += parentAbsPos.x;
-              absY += parentAbsPos.y;
-            }
-          }
-
+          const size = getNodeSize(frameNode);
           const role: FrameFitPreviewRole =
             leaving && !entering ? 'source' : 'target';
           previews.push({
             frameId,
-            position: { x: absX, y: absY },
-            width: fit.width,
-            height: fit.height,
+            position,
+            width: size.width,
+            height: size.height,
             role,
           });
         }
-
-        useGesturePreviewStore.getState().setFrameFitPreviews(previews);
 
         // ── Structured-frame drop indicator ──────────────────────────
         // Mirror what NODE_DRAG_STOP will decide, live: if the primary
@@ -2743,7 +2767,9 @@ const useCanvasStore = create<RFState>()(
         // where it would land. Free frames have no tracks → no
         // indicator.
         if (targetFrameId && targetFrame && gridCfg) {
-          const frameAbs = getFrameAbsolutePosition(liveNodes, targetFrameId);
+          const frameAbs =
+            getFrameAbsolutePosition(projectedGestureNodes, targetFrameId) ??
+            projectedTargetFrameAbs;
           // Frame-local drop point: prefer the cursor, fall back to the
           // dragged node's live top-left (matches the resolver).
           const liveDragged = liveNodes.find((n) => n.id === draggedNode.id);
@@ -2757,10 +2783,17 @@ const useCanvasStore = create<RFState>()(
           // Frame-local rect of the dragged node so the indicator can
           // size the new-track ghost and rank the insertion line.
           const draggedAbs = getFrameAbsolutePosition(
-            liveNodes,
+            projectedGestureNodes,
             draggedNode.id,
           );
-          const draggedSize = liveDragged ? getNodeSize(liveDragged) : null;
+          const projectedDragged = projectedGestureNodes.find(
+            (node) => node.id === draggedNode.id,
+          );
+          const draggedSize = projectedDragged
+            ? getNodeSize(projectedDragged)
+            : liveDragged
+              ? getNodeSize(liveDragged)
+              : null;
           const draggedRect =
             frameAbs && draggedAbs && draggedSize
               ? {
@@ -2774,11 +2807,11 @@ const useCanvasStore = create<RFState>()(
 
           const zone = framePoint
             ? describeStructuredDropZone(
-                liveNodes,
+                projectedGestureNodes,
                 targetFrameId,
                 framePoint,
                 gridCfg.axis,
-                resolveFrameTrackCount(nodes, targetFrameId),
+                resolveFrameTrackCount(projectedGestureNodes, targetFrameId),
                 draggedRect,
                 { edges },
               )
@@ -2821,29 +2854,28 @@ const useCanvasStore = create<RFState>()(
               } else {
                 previews.push(structuredFramePreview);
               }
-              useGesturePreviewStore.getState().setFrameFitPreviews(previews);
             }
+            projectedGestureNodes = projectStructuredTargetGeometry({
+              nodes: projectedGestureNodes,
+              targetFrameId,
+              zone,
+              edges,
+            });
+            publishGeometryProjection(projectedGestureNodes);
+            publishFrameIntentPreviews(projectedGestureNodes);
             // Solver owns the slot here → suppress free-alignment guides.
             setSnapStructuredSuppressed(true);
-            commitReflow(zone.reflow);
           } else {
-            // The zone did not resolve, so nothing reported the size of
-            // the frame the fit pass skipped. Compute it after all.
-            if (deferredStructuredTarget) {
-              const preview = solveStructuredPreview(deferredStructuredTarget);
-              if (preview) {
-                previews.push(preview);
-                useGesturePreviewStore.getState().setFrameFitPreviews(previews);
-              }
-            }
             useGesturePreviewStore.getState().clearStructuredDropPreview();
             setSnapStructuredSuppressed(false);
-            commitReflow(null);
+            publishGeometryProjection(projectedGestureNodes);
+            publishFrameIntentPreviews(projectedGestureNodes);
           }
         } else {
           useGesturePreviewStore.getState().clearStructuredDropPreview();
           setSnapStructuredSuppressed(false);
-          commitReflow(null);
+          publishGeometryProjection(projectedGestureNodes);
+          publishFrameIntentPreviews(projectedGestureNodes);
         }
       });
     },
@@ -2862,7 +2894,7 @@ const useCanvasStore = create<RFState>()(
       // against the same geometry the preview was derived from, and the
       // peers snap to their committed positions in the same tick the
       // authoritative `SET_NODE_GEOMETRY` lands.
-      useGesturePreviewStore.getState().clearStructuredReflowPositions();
+      useGesturePreviewStore.getState().clearNodeGeometryPreviews();
 
       // Read the Space-bypass snapshot taken by `endSnapSession`.
       // The snap session is normally torn down by `onNodesChange`
@@ -2875,6 +2907,8 @@ const useCanvasStore = create<RFState>()(
       // OR-ing with the live flag.
       const bypassReparent =
         consumeLastDragReparentBypass() || isReparentBypassed();
+      const allowNestedFrameEntry =
+        consumeLastNestedFrameEntryAllowed() || isNestedFrameEntryAllowed();
 
       // Read the per-dragged-node frame-membership decisions captured
       // by the live preview tick. Same teardown-before-stop ordering
@@ -2923,6 +2957,7 @@ const useCanvasStore = create<RFState>()(
         draggedNodeIds: draggedNodes.map((n) => n.id),
         pointerFlowPosition,
         bypassReparent,
+        allowNestedFrameEntry,
         cachedDecisions,
       });
 
@@ -2970,7 +3005,7 @@ const useCanvasStore = create<RFState>()(
       const preview = useGesturePreviewStore.getState();
       preview.clearFrameFitPreview();
       preview.clearStructuredDropPreview();
-      preview.clearStructuredReflowPositions();
+      preview.clearNodeGeometryPreviews();
 
       const startPositions = _dragStartPositions;
       _dragStartPositions = null;
@@ -3013,7 +3048,7 @@ const useCanvasStore = create<RFState>()(
       resizePreviewController.cancelPendingRaf();
       useGesturePreviewStore.getState().clearFrameFitPreview();
       useGesturePreviewStore.getState().clearStructuredDropPreview();
-      useGesturePreviewStore.getState().clearStructuredReflowPositions();
+      useGesturePreviewStore.getState().clearNodeGeometryPreviews();
       _dragStartPositions = null;
       endSnapSession();
     },

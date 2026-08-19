@@ -14,6 +14,8 @@ export type PreviewData = {
 export interface NodePreviewContentProps {
   /** Canvas node id, when bound to a real node. */
   id?: string;
+  /** Runtime identity used to restore this Preview target's scroll offset. */
+  scrollViewKey?: string;
   type: string;
   data: Record<string, unknown>;
   readOnly?: boolean;

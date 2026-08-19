@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
 import { getWebPage, getWebReader } from '@/api/web';
+import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 
 import { useInteractiveViewBridge } from './useInteractiveViewBridge';
 import { isElectron } from '../../../hooks/useElectron.ts';
@@ -45,7 +46,11 @@ const IFRAME_SPINNER_DISMISS_MS = 1500;
  */
 const LIVE_LOAD_TIMEOUT_MS = 3500;
 
-export const WebPreview = ({ id, data }: PreviewComponentProps) => {
+export const WebPreview = ({
+  id,
+  data,
+  scrollViewKey,
+}: PreviewComponentProps) => {
   const { t } = useTranslation();
   const src = typeof data.src === 'string' ? data.src : '';
   const canvasId = useCanvasStore((s) => s.canvasId);
@@ -72,6 +77,8 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
   const [iframeReady, setIframeReady] = useState(false);
   const [iframeBumpKey, setIframeBumpKey] = useState(0);
   const liveIframeRef = useRef<HTMLIFrameElement>(null);
+  const readerScrollRef = useRef<HTMLDivElement>(null);
+  usePreviewScrollMemory(readerScrollRef, scrollViewKey);
   const connectedInteractiveLoadRef = useRef<string | null>(null);
   const isInteractiveView =
     data.interactiveView !== null &&
@@ -472,7 +479,10 @@ export const WebPreview = ({ id, data }: PreviewComponentProps) => {
             <p className="text-xs">{readerError}</p>
           </div>
         ) : readerHtml ? (
-          <div className="bg-surface h-full overflow-x-hidden overflow-y-auto p-1">
+          <div
+            ref={readerScrollRef}
+            className="bg-surface h-full overflow-x-hidden overflow-y-auto p-1"
+          >
             <iframe
               className="nodrag w-full border-0"
               style={{

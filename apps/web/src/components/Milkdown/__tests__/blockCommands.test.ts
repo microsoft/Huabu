@@ -130,6 +130,19 @@ function clickLink(options: { modifier: boolean; href?: string }): MouseEvent {
 }
 
 describe('Milkdown block commands', () => {
+  it('portals each drop indicator outside transformed editor hosts', async () => {
+    await mount('first');
+    await mount('second');
+
+    const indicators = Array.from(document.body.children).filter((child) =>
+      child.classList.contains('milkdown-drop-indicator'),
+    );
+    expect(indicators).toHaveLength(2);
+    expect(
+      roots.some((root) => root.querySelector('.milkdown-drop-indicator')),
+    ).toBe(false);
+  });
+
   it('prepares a complete native move for partially selected blocks', async () => {
     const instance = await mount(
       'first paragraph\n\nsecond paragraph\n\nthird paragraph',

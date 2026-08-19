@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MessageList } from './MessageList';
+import { rememberMessageListScrollPosition } from './messageListScroll';
 
 import type { ChatMessage } from '../../store/chatTypes';
 
@@ -170,5 +171,39 @@ describe('MessageList render isolation', () => {
 
     expect(renderCounts.assistant.get('assistant-1')).toBe(1);
     expect(renderCounts.assistant.get('assistant-2')).toBe(2);
+  });
+});
+
+describe('MessageList opening position', () => {
+  it('restores a saved position and offers new messages without auto-scrolling', () => {
+    const viewKey = 'canvas-1:thread-1';
+    rememberMessageListScrollPosition(viewKey, 240);
+    const scrollHeight = vi
+      .spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+      .mockReturnValue(1_000);
+    const clientHeight = vi
+      .spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+      .mockReturnValue(200);
+
+    try {
+      mount(
+        <MessageList
+          messages={[]}
+          isLoading={false}
+          viewKey={viewKey}
+          openPosition="last-user"
+          openPositionRequestNonce={1}
+        />,
+      );
+
+      const messageContainer = container?.querySelector<HTMLElement>(
+        '[data-chat-thread-root]',
+      );
+      expect(messageContainer?.scrollTop).toBe(240);
+      expect(container?.textContent).toContain('New message');
+    } finally {
+      scrollHeight.mockRestore();
+      clientHeight.mockRestore();
+    }
   });
 });

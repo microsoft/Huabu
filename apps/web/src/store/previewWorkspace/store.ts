@@ -136,16 +136,19 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       return opened.tabId;
     },
 
-    closeTab: (tabId) =>
-      set((state) => ({
-        workspace: closeTab(state.workspace, tabId),
+    closeTab: (tabId) => {
+      const state = get();
+      const workspace = closeTab(state.workspace, tabId);
+      set({
+        workspace,
         ...(state.nodeFocusRequest?.tabId === tabId
           ? { nodeFocusRequest: null }
           : {}),
         ...(state.chatOpenRequest?.tabId === tabId
           ? { chatOpenRequest: null }
           : {}),
-      })),
+      });
+    },
 
     activateTab: (tabId) =>
       set({ workspace: activateTab(get().workspace, tabId) }),
@@ -156,8 +159,9 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
     moveTab: (tabId, destination) =>
       set({ workspace: moveTab(get().workspace, tabId, destination) }),
 
-    replaceTabTarget: (tabId, target) =>
-      set({ workspace: replaceTabTarget(get().workspace, tabId, target) }),
+    replaceTabTarget: (tabId, target) => {
+      set({ workspace: replaceTabTarget(get().workspace, tabId, target) });
+    },
 
     mergeGroups: () => set({ workspace: mergeGroups(get().workspace) }),
 
@@ -204,7 +208,8 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
     validate: (liveNodeIds) => {
       const { canvasId, workspace } = get();
       if (!canvasId) return;
-      set({ workspace: validateWorkspace(workspace, canvasId, liveNodeIds) });
+      const validated = validateWorkspace(workspace, canvasId, liveNodeIds);
+      set({ workspace: validated });
     },
   }),
 );

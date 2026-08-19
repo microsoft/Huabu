@@ -54,6 +54,25 @@ export interface FingerprintedBlock {
   markdown: string;
 }
 
+/** Source markdown for each item when the document is one top-level list. */
+export function topLevelListItemMarkdown(markdown: string): string[] | null {
+  const blocks = parseTopLevel(markdown);
+  if (blocks.length !== 1 || blocks[0]?.type !== 'list') return null;
+
+  const items = blocks[0].children ?? [];
+  if (items.some((item) => item.type !== 'listItem')) return null;
+  return items.map((item) => {
+    const pos = item.position as
+      | { start?: { offset?: number }; end?: { offset?: number } }
+      | undefined;
+    const start = pos?.start?.offset;
+    const end = pos?.end?.offset;
+    return start !== undefined && end !== undefined && end > start
+      ? markdown.slice(start, end).trim()
+      : '';
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Stable stringify + hash (mirrors the legacy PM-JSON fingerprinter)  */
 /* ------------------------------------------------------------------ */

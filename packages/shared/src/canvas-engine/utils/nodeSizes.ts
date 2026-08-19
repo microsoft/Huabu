@@ -41,6 +41,7 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
   // Compact recorder: fits the recording controls on one row.
   audio: { width: 200, height: 56 },
   frame: { width: 400, height: 300 },
+  spacePreview: { width: 480, height: 320 },
   canvasRef: { width: 360, height: 240 },
   frameRef: { width: 400, height: 300 },
   nodeRef: { width: 180, height: 96 },

@@ -45,6 +45,7 @@ import {
   resolveConversationOwnerSource,
 } from '@/store/conversationOwner';
 import { useLLMStore } from '@/store/llmStore';
+import { messageListViewKey } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
 
@@ -836,7 +837,7 @@ export const ChatPanel = ({
             messages={messages}
             isLoading={isLoading}
             isHistoryLoading={!isHistoryLoaded}
-            viewKey={threadId}
+            viewKey={messageListViewKey(ownerCanvasId, threadId)}
             isActive={!isCollapsed}
             openPosition={
               pendingPermission
