@@ -38,7 +38,7 @@ import {
   safeResolve,
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
-import { getCanvasStore } from '../storage/index.js';
+import { space } from '../storage/index.js';
 
 import type { CanvasNodeType } from '@huabu/shared';
 import type { CanvasNode, CanvasEdge } from '@huabu/shared/canvas-engine';
@@ -88,31 +88,32 @@ const NODE_FILE_RE = /^nodes\/[^/]+\.md$/;
  * the path is not a node file or no node currently claims it — callers then
  * serve the bytes without `X-Huabu-*` headers.
  *
- * The file → node mapping goes through the store's frontmatter-`id` index
- * ({@link CanvasStore.nodeIdForFilename}), NOT a re-derived
- * `toSafeFilename(label)` — topology never carries `data.label`, so the
- * derived path would collapse to `nodes/<id>.md` and never match a real
- * label-named file. `label` / `rev` are then sourced from the sidecar.
+ * The file → node mapping is the Disk tree's sidecar-to-record mapping, NOT a
+ * re-derived `toSafeFilename(label)` — topology never carries `data.label`, so
+ * the derived path would collapse to `nodes/<id>.md` and never match a real
+ * label-named file. It stays Disk-shaped on purpose (§6.4.3, disposition B):
+ * inverting a filename is only meaningful where the file is really there, so
+ * until a second backend exists RFS's file plane is Disk's. The record and the
+ * sidecar themselves come from the portable ports.
  */
-export function lookupNodeByPath(
+export async function lookupNodeByPath(
   canvasId: string,
   physicalRel: string,
-): RfsNodeLookup | null {
+): Promise<RfsNodeLookup | null> {
   if (!NODE_FILE_RE.test(physicalRel)) return null;
 
-  const store = getCanvasStore(canvasId);
-  const canvas = store.read();
+  const handle = space(canvasId);
+  const canvas = await handle.read();
   if (!canvas) return null;
 
-  const filename = physicalRel.slice('nodes/'.length);
-  const nodeId = store.nodeIdForFilename(filename);
+  const nodeId = handle.diskTree?.nodeIdForPath(physicalRel) ?? null;
   if (!nodeId) return null;
 
   const nodes = (canvas.state.nodes ?? []) as CanvasNode[];
   const match = nodes.find((n) => n.id === nodeId);
   if (!match) return null;
 
-  const sidecar = store.readNode(nodeId);
+  const sidecar = (await handle.nodes.read(nodeId))?.record ?? null;
   const data = (match.data ?? {}) as {
     locked?: boolean;
     src?: string;

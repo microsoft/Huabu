@@ -305,6 +305,9 @@ describe('Disk Space tree capability', () => {
     'modules/canvas/external.route.ts',
     // C — the resurrection guard, which disappears with the substrate.
     'modules/agent/memory/trigger.ts',
+    // B, deferred — RFS's sidecar-to-record mapping. Portable in principle,
+    // Disk's in practice until a second backend has a file plane at all.
+    'modules/remote_fs/node-meta.ts',
     // D — the per-Space RFS access guide, headed for a blob.
     'modules/remote_fs/skill.ts',
     // C and D — memory files, the debug prompt log, ACP session state.

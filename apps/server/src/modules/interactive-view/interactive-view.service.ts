@@ -70,12 +70,12 @@ export class InteractiveViewServiceError extends Error {
   }
 }
 
-function resolveOwnerThread(
+async function resolveOwnerThread(
   canvasId: string,
   threadId: string,
-): ExternalAgentThreadTarget | null {
+): Promise<ExternalAgentThreadTarget | null> {
   try {
-    return agentThreadService.resolveExternalTarget(canvasId, threadId);
+    return await agentThreadService.resolveExternalTarget(canvasId, threadId);
   } catch (error) {
     if (error instanceof AgentThreadResolutionError) {
       throw new InteractiveViewServiceError(
@@ -331,7 +331,7 @@ export class InteractiveViewService {
         `Canvas ${canvasId} does not exist`,
       );
     }
-    if (!resolveOwnerThread(canvasId, request.ownerThreadId)) {
+    if (!(await resolveOwnerThread(canvasId, request.ownerThreadId))) {
       throw new InteractiveViewServiceError(
         'invalid_owner_thread',
         `Owner thread ${request.ownerThreadId} is not an external Agent thread in this Canvas`,
@@ -501,7 +501,7 @@ export class InteractiveViewService {
       ...(input !== undefined ? { input } : {}),
       viewRevision: resource.revision,
     };
-    const ownerTarget = resolveOwnerThread(
+    const ownerTarget = await resolveOwnerThread(
       canvasId,
       resource.definition.ownerThreadId,
     );

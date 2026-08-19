@@ -16,8 +16,8 @@ function createResolver(
   content = '',
 ) {
   return new AgentThreadResolver({
-    readCanvasNodes: () => nodes,
-    readNodeContent: () => content,
+    readCanvasNodes: async () => nodes,
+    readNodeContent: async () => content,
   });
 }
 
@@ -41,8 +41,8 @@ const FIXED_NODE = {
 };
 
 describe('AgentThreadResolver', () => {
-  it('resolves a fixed external Agent Node from Canvas storage', () => {
-    const target = createResolver(
+  it('resolves a fixed external Agent Node from Canvas storage', async () => {
+    const target = await createResolver(
       [FIXED_NODE],
       'Existing prompt',
     ).resolveFixedAgentNode('canvas-a', 'thread-a');
@@ -65,36 +65,36 @@ describe('AgentThreadResolver', () => {
     });
   });
 
-  it('falls back for selectable or unrelated threads', () => {
+  it('falls back for selectable or unrelated threads', async () => {
     const selectable = {
       ...FIXED_NODE,
       data: { ...FIXED_NODE.data, agentBindingPolicy: 'selectable' },
     };
-    expect(
+    await expect(
       createResolver([selectable]).resolveFixedAgentNode(
         'canvas-a',
         'thread-a',
       ),
-    ).toBeNull();
-    expect(
+    ).resolves.toBeNull();
+    await expect(
       createResolver([FIXED_NODE]).resolveFixedAgentNode(
         'canvas-a',
         'thread-other',
       ),
-    ).toBeNull();
+    ).resolves.toBeNull();
   });
 
-  it('resolves any Question Node as a possible parent', () => {
+  it('resolves any Question Node as a possible parent', async () => {
     const selectable = {
       ...FIXED_NODE,
       data: { ...FIXED_NODE.data, agentBindingPolicy: 'selectable' },
     };
-    expect(
+    await expect(
       createResolver([selectable]).resolveAgentNodeId('canvas-a', 'thread-a'),
-    ).toBe('node-agent');
+    ).resolves.toBe('node-agent');
   });
 
-  it('resolves a Huabu Agent binding for invocation', () => {
+  it('resolves a Huabu Agent binding for invocation', async () => {
     const internal = {
       ...FIXED_NODE,
       data: {
@@ -103,19 +103,23 @@ describe('AgentThreadResolver', () => {
       },
     };
     expect(
-      createResolver([internal]).resolveFixedAgentNode('canvas-a', 'thread-a')
-        ?.agentBinding,
+      (
+        await createResolver([internal]).resolveFixedAgentNode(
+          'canvas-a',
+          'thread-a',
+        )
+      )?.agentBinding,
     ).toEqual({ kind: 'internal' });
   });
 
-  it('rejects duplicate threads and corrupt fixed-node metadata', () => {
+  it('rejects duplicate threads and corrupt fixed-node metadata', async () => {
     const duplicateResolver = createResolver([
       FIXED_NODE,
       { ...FIXED_NODE, id: 'node-agent-2' },
     ]);
-    expect(() =>
+    await expect(
       duplicateResolver.resolveFixedAgentNode('canvas-a', 'thread-a'),
-    ).toThrowError(
+    ).rejects.toThrowError(
       expect.objectContaining<Partial<AgentThreadResolutionError>>({
         code: 'duplicate_thread',
       }),
@@ -124,9 +128,9 @@ describe('AgentThreadResolver', () => {
     const corruptResolver = createResolver([
       { ...FIXED_NODE, data: { ...FIXED_NODE.data, agentBinding: null } },
     ]);
-    expect(() =>
+    await expect(
       corruptResolver.resolveFixedAgentNode('canvas-a', 'thread-a'),
-    ).toThrowError(
+    ).rejects.toThrowError(
       expect.objectContaining<Partial<AgentThreadResolutionError>>({
         code: 'invalid_binding',
       }),

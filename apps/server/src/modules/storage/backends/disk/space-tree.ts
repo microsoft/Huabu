@@ -20,6 +20,10 @@
  */
 
 import { canvasRoot } from './layout.js';
+import { getCanvasStore } from './legacy/canvas-store-cache.js';
+
+/** A node sidecar, as RFS and the file tools address one. */
+const NODE_SIDECAR_RE = /^nodes\/([^/]+\.md)$/;
 
 export interface DiskSpaceTree {
   readonly canvasId: string;
@@ -34,11 +38,35 @@ export interface DiskSpaceTree {
    * malformed or the resolved path escapes the Workspace.
    */
   directory(): string;
+  /**
+   * Which node record the materialized file at `relativePath` carries.
+   *
+   * `relativePath` is Space-relative (`nodes/My note.md`); anything that is
+   * not a node sidecar, and any name no node currently claims, returns `null`.
+   *
+   * This is the **sidecar-to-record mapping**, and it belongs to the tree
+   * rather than to a port for the reason §6.4.3 gives under disposition B:
+   * every backend could mint `nodes/<label>.md` names from records, but Disk
+   * inverts the *real* filename, because the file is really there and a user
+   * may have renamed it. The two are only the same answer when nothing has
+   * touched the directory from outside — which is exactly the case Disk
+   * cannot assume. Until a second backend exists, RFS's file plane is Disk's.
+   *
+   * Resolved through the frontmatter-`id` index rather than by re-deriving
+   * `toSafeFilename(label)`: topology never carries a label, so a derived path
+   * would collapse to `nodes/<id>.md` and never match a label-named file.
+   */
+  nodeIdForPath(relativePath: string): string | null;
 }
 
 export function diskSpaceTree(canvasId: string): DiskSpaceTree {
   return {
     canvasId,
     directory: () => canvasRoot(canvasId),
+    nodeIdForPath: (relativePath: string) => {
+      const filename = NODE_SIDECAR_RE.exec(relativePath)?.[1];
+      if (filename === undefined) return null;
+      return getCanvasStore(canvasId).nodeIdForFilename(filename);
+    },
   };
 }
