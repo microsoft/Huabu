@@ -7,7 +7,7 @@
  * Covers the streaming {@link searchCanvas} driver. The route layer is
  * a thin NDJSON adapter, so the interesting behaviour — tiered emission
  * order, field filtering, snippet construction, limits, abort semantics
- * — all lives here and is exercised against a fake `CanvasStore` whose
+ * — all lives here and is exercised against a fake `Space` whose
  * `streamAllNodes` walks an in-memory snapshot. Production reads sidecars
  * off disk, but the scanner takes a callback so the two are wire-compatible.
  */
@@ -24,7 +24,7 @@ import {
 import { createChatSubmission } from '../agent/agenetes/handle.js';
 
 import type { ChatEnvelope } from '../agent/conversation/envelope.js';
-import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
+import type { NodeContent, NodeSnapshot, Space } from '../storage/index.js';
 import type { AgentTurn } from '@agenetes/protocol';
 import type { CanvasSearchEvent, CanvasSearchRequest } from '@huabu/shared';
 
@@ -76,16 +76,16 @@ function mkEdge(
 }
 
 /**
- * Build a duck-typed `CanvasStore` that satisfies just the two methods
+ * Build a duck-typed `Space` that satisfies just the two members
  * `searchCanvas` actually reads from: `read()` (for the static node + edge
  * shape) and `streamAllNodes()` (for the sidecar bodies). The rest of the
  * store surface is irrelevant here, so we cast through `unknown`.
  */
-function makeFakeStore(opts: {
+function makeFakeSpace(opts: {
   nodes: readonly SearchableNode[];
   contents: readonly NodeContent[];
   edges?: readonly SearchableEdge[];
-}): CanvasStore {
+}): Space {
   const stateNodes = opts.nodes.map((n) => ({
     id: n.id,
     type: n.type,
@@ -100,21 +100,25 @@ function makeFakeStore(opts: {
   }));
   const fake = {
     canvasId: 'test-canvas',
-    read: () => ({ state: { nodes: stateNodes, edges: stateEdges } }),
-    streamAllNodes: async (
-      onNode: (id: string, content: NodeContent) => void,
-      signal?: { readonly aborted: boolean },
-    ): Promise<Map<string, NodeContent>> => {
-      const map = new Map<string, NodeContent>();
-      for (const c of opts.contents) {
-        if (signal?.aborted) return map;
-        map.set(c.nodeId, c);
-        onNode(c.nodeId, c);
-      }
-      return map;
+    read: async () => ({ state: { nodes: stateNodes, edges: stateEdges } }),
+    nodes: {
+      canvasId: 'test-canvas',
+      stream: async (
+        onNode: (snapshot: NodeSnapshot) => void,
+        options?: { signal?: { readonly aborted: boolean } },
+      ): Promise<Map<string, NodeSnapshot>> => {
+        const map = new Map<string, NodeSnapshot>();
+        for (const c of opts.contents) {
+          if (options?.signal?.aborted) return map;
+          const snapshot = { record: c, revision: `rev-${c.nodeId}` };
+          map.set(c.nodeId, snapshot);
+          onNode(snapshot);
+        }
+        return map;
+      },
     },
   };
-  return fake as unknown as CanvasStore;
+  return fake as unknown as Space;
 }
 
 async function collect(
@@ -124,9 +128,9 @@ async function collect(
   signal?: AbortSignal,
   edges?: SearchableEdge[],
 ): Promise<CanvasSearchEvent[]> {
-  const store = makeFakeStore({ nodes, contents, edges });
+  const handle = makeFakeSpace({ nodes, contents, edges });
   const events: CanvasSearchEvent[] = [];
-  await searchCanvas(store, request, (e) => events.push(e), signal);
+  await searchCanvas(handle, request, (e) => events.push(e), signal);
   return events;
 }
 
@@ -390,9 +394,9 @@ describe('searchCanvas — abort', () => {
     }
     const ctrl = new AbortController();
     const events: CanvasSearchEvent[] = [];
-    const store = makeFakeStore({ nodes, contents });
+    const handle = makeFakeSpace({ nodes, contents });
     await searchCanvas(
-      store,
+      handle,
       { query: 'hit' },
       (e) => {
         events.push(e);
