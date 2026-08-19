@@ -21,6 +21,21 @@ interface DragState {
   locked: boolean;
 }
 
+export function projectTakeoverDraggedNodes(
+  draggedNodes: readonly Node[],
+  startPositions: ReadonlyMap<string, { x: number; y: number }>,
+  dx: number,
+  dy: number,
+): Node[] {
+  return draggedNodes.map((node) => {
+    const start = startPositions.get(node.id) ?? node.position;
+    return {
+      ...node,
+      position: { x: start.x + dx, y: start.y + dy },
+    };
+  });
+}
+
 /**
  * Drag support for the zoom takeover mark.
  *
@@ -61,12 +76,15 @@ export function useTakeoverMarkDrag(nodeId: string): {
   const suppressClickRef = useRef(false);
 
   // The store's drag callbacks are typed as DOM mouse handlers; synthesize the
-  // only fields they read (`altKey` for snap Alt-bypass, `clientX`/`clientY`
-  // for the drop's reparent grid column).
-  const dragEvent = (extra?: {
-    clientX: number;
-    clientY: number;
-  }): MouseEvent => ({ altKey: false, ...extra }) as unknown as MouseEvent;
+  // pointer and modifier fields consumed by snap and Frame entry policy.
+  const dragEvent = (event: PointerEvent): MouseEvent =>
+    ({
+      altKey: event.altKey,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    }) as unknown as MouseEvent;
 
   const positionChanges = useCallback(
     (dx: number, dy: number, dragging: boolean): NodeChange[] => {
@@ -83,6 +101,19 @@ export function useTakeoverMarkDrag(nodeId: string): {
     },
     [],
   );
+
+  const projectedDrag = useCallback((dx: number, dy: number) => {
+    const state = stateRef.current;
+    const draggedNodes = projectTakeoverDraggedNodes(
+      state.draggedNodes,
+      state.startPositions,
+      dx,
+      dy,
+    );
+    const primaryNode =
+      draggedNodes.find((node) => node.id === state.primaryNode?.id) ?? null;
+    return { primaryNode, draggedNodes };
+  }, []);
 
   const flowDelta = useCallback(
     (clientX: number, clientY: number): { dx: number; dy: number } => {
@@ -146,14 +177,23 @@ export function useTakeoverMarkDrag(nodeId: string): {
         if (s.primaryNode) {
           useCanvasStore
             .getState()
-            .onNodeDragStart(dragEvent(), s.primaryNode, s.draggedNodes);
+            .onNodeDragStart(dragEvent(event), s.primaryNode, s.draggedNodes);
         }
       }
       event.stopPropagation();
       const { dx, dy } = flowDelta(event.clientX, event.clientY);
-      useCanvasStore.getState().onNodesChange(positionChanges(dx, dy, true));
+      const store = useCanvasStore.getState();
+      store.onNodesChange(positionChanges(dx, dy, true));
+      const projected = projectedDrag(dx, dy);
+      if (projected.primaryNode) {
+        store.onNodeDrag(
+          dragEvent(event),
+          projected.primaryNode,
+          projected.draggedNodes,
+        );
+      }
     },
-    [flowDelta, positionChanges],
+    [flowDelta, positionChanges, projectedDrag],
   );
 
   const onPointerUp = useCallback(
@@ -165,11 +205,14 @@ export function useTakeoverMarkDrag(nodeId: string): {
         const { dx, dy } = flowDelta(event.clientX, event.clientY);
         const store = useCanvasStore.getState();
         store.onNodesChange(positionChanges(dx, dy, false));
-        store.onNodeDragStop(
-          dragEvent({ clientX: event.clientX, clientY: event.clientY }),
-          s.primaryNode,
-          s.draggedNodes,
-        );
+        const projected = projectedDrag(dx, dy);
+        if (projected.primaryNode) {
+          store.onNodeDragStop(
+            dragEvent(event),
+            projected.primaryNode,
+            projected.draggedNodes,
+          );
+        }
         // Swallow the click that the browser fires after this drag so the
         // mark does not also open the conversation.
         suppressClickRef.current = true;
@@ -179,7 +222,7 @@ export function useTakeoverMarkDrag(nodeId: string): {
       }
       reset();
     },
-    [flowDelta, positionChanges],
+    [flowDelta, positionChanges, projectedDrag],
   );
 
   const onPointerCancel = useCallback((event: PointerEvent): void => {

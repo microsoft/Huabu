@@ -147,6 +147,9 @@ let _bypass = false;
  */
 let _reparentBypassed = false;
 
+/** Whether Cmd (macOS) or Ctrl (Windows/Linux) allows nested Frame entry. */
+let _nestedFrameEntryAllowed = false;
+
 /**
  * Snapshot taken inside `endSnapSession` so `onNodeDragStop` can
  * still recover decisions / flags that lived in the active session.
@@ -161,6 +164,8 @@ let _reparentBypassed = false;
 interface LastEndedSnapshot {
   /** Space-bypass state at the moment the gesture ended. */
   reparentBypass: boolean;
+  /** Cmd/Ctrl nested-Frame entry state when the gesture ended. */
+  nestedFrameEntryAllowed: boolean;
   /** Per-node frame-membership decisions from the last preview tick. */
   dragDecisions: Map<string, DragDecision> | null;
 }
@@ -253,6 +258,21 @@ let _absPosGetter: ((nodeId: string) => XYPosition | null) | null = null;
  */
 let _abortController: AbortController | null = null;
 
+function invalidateFrameDragPreview(): void {
+  clearDragDecisions();
+  _structuredSuppressed = false;
+  const preview = useGesturePreviewStore.getState();
+  preview.clearFrameFitPreview();
+  preview.clearStructuredDropPreview();
+  preview.clearNodeGeometryPreviews();
+}
+
+function setNestedFrameEntryAllowed(allowed: boolean): void {
+  if (_nestedFrameEntryAllowed === allowed) return;
+  _nestedFrameEntryAllowed = allowed;
+  invalidateFrameDragPreview();
+}
+
 /**
  * Which gesture is driving the session. Default `'drag'` matches
  * the historical behaviour for callers that don't pass `kind`.
@@ -311,6 +331,8 @@ export interface BeginSnapSessionOptions {
    * below.
    */
   altPressed: boolean;
+  /** Whether Cmd/Ctrl was held when the drag started. */
+  nestedFrameEntryAllowed?: boolean;
   /**
    * Gesture kind. Defaults to `'drag'` for backward compatibility
    * with the original drag-only call sites.
@@ -343,7 +365,14 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
   // Defensive cleanup — see comments above. Cheap when idle.
   endSnapSession();
 
-  const { nodes, gestureIds, altPressed, kind = 'drag', resizeContext } = opts;
+  const {
+    nodes,
+    gestureIds,
+    altPressed,
+    kind = 'drag',
+    resizeContext,
+    nestedFrameEntryAllowed = false,
+  } = opts;
 
   // One shared id→node index reused by:
   //   • the mixed-parent detection below,
@@ -379,6 +408,7 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
     ? null
     : buildCandidateIndex(nodes, gestureIds, _parentId);
   _bypass = altPressed;
+  _nestedFrameEntryAllowed = nestedFrameEntryAllowed;
   _kind = kind;
   // Resize-only state. Callers that pass `kind: 'resize'` MUST also
   // pass `resizeContext`; we don't synthesise it from `nodes` because
@@ -423,6 +453,24 @@ export function beginSnapSession(opts: BeginSnapSessionOptions): void {
       'keyup',
       (e: KeyboardEvent) => {
         if (e.key === 'Alt') _bypass = false;
+      },
+      { signal },
+    );
+    window.addEventListener(
+      'keydown',
+      (e: KeyboardEvent) => {
+        if (e.key === 'Meta' || e.key === 'Control') {
+          setNestedFrameEntryAllowed(true);
+        }
+      },
+      { signal },
+    );
+    window.addEventListener(
+      'keyup',
+      (e: KeyboardEvent) => {
+        if (e.key === 'Meta' || e.key === 'Control') {
+          setNestedFrameEntryAllowed(e.key === 'Meta' ? e.ctrlKey : e.metaKey);
+        }
       },
       { signal },
     );
@@ -501,9 +549,11 @@ export function endSnapSession(): void {
   // so the next gesture starts fresh.
   _lastEnded = {
     reparentBypass: _reparentBypassed,
+    nestedFrameEntryAllowed: _nestedFrameEntryAllowed,
     dragDecisions: _dragDecisions,
   };
   _reparentBypassed = false;
+  _nestedFrameEntryAllowed = false;
   _dragDecisions = null;
   // Drop the resize-gesture marker (idempotent — safe when not set).
   if (typeof document !== 'undefined') {
@@ -547,6 +597,11 @@ export function isReparentBypassed(): boolean {
   return _reparentBypassed;
 }
 
+/** True while Cmd/Ctrl explicitly requests entry into a nested Frame. */
+export function isNestedFrameEntryAllowed(): boolean {
+  return _nestedFrameEntryAllowed;
+}
+
 /**
  * Read-and-clear accessor for the post-`endSnapSession` snapshot of
  * `_reparentBypassed`. Use this from `onNodeDragStop` (which fires
@@ -557,6 +612,13 @@ export function consumeLastDragReparentBypass(): boolean {
   const v = _lastEnded?.reparentBypass ?? false;
   if (_lastEnded) _lastEnded.reparentBypass = false;
   return v;
+}
+
+/** Read and clear the Cmd/Ctrl state captured when the drag ended. */
+export function consumeLastNestedFrameEntryAllowed(): boolean {
+  const value = _lastEnded?.nestedFrameEntryAllowed ?? false;
+  if (_lastEnded) _lastEnded.nestedFrameEntryAllowed = false;
+  return value;
 }
 
 /**

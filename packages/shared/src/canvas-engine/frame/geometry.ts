@@ -18,13 +18,15 @@ export type AutoFrameByOverlapOptions = {
   /** Portion of the dragged node area that must be inside the frame. */
   threshold?: number;
   /**
-   * Cursor position in absolute flow coordinates. When provided, any
-   * candidate frame whose rect contains `pointer` AND has any positive
-   * body overlap with the dragged node qualifies, in addition to the
-   * area-ratio threshold. Lets users drop a node by hovering the cursor
-   * inside the frame even when the node's bounding box overlaps only
-   * marginally (e.g. dropping near the edge, or a node larger than the
-   * frame whose centre stays outside).
+   * Allow entry into a nested Frame. Without this explicit override, child
+   * Frames are frozen as complete nodes; the dragged node's own ancestors
+   * remain eligible as upward exit surfaces.
+   */
+  allowNestedFrameEntry?: boolean;
+  /**
+   * Cursor position in absolute flow coordinates. When provided, the pointer
+   * surface selects candidates and any positive body overlap qualifies. The
+   * area-ratio threshold is used only when pointer information is unavailable.
    */
   pointer?: { x: number; y: number };
 };
@@ -178,19 +180,19 @@ export function checkShouldUnframe(
 /**
  * Shared predicate: which frame (if any) should a node auto-enter?
  *
- * Returns the frame ID with the best overlap ratio, or `null`.
+ * Returns the frame ID selected by the pointer surface, or `null`.
  * Used by both `autoFrameNodeByOverlap` (mutates) and
  * `wouldAutoFrame` (pure predicate).
  *
- * Two qualifying paths:
- *   - "area-ratio": body overlap ratio ≥ `threshold` (the original rule).
- *   - "pointer-inside": when `pointer` is provided, candidates whose rect
- *     contains the pointer AND have any positive body overlap also
- *     qualify. Lets users drop a node by hovering the cursor inside the
- *     frame even when the bbox overlap is well below `threshold`.
+ * With a pointer, only frames containing that pointer and having positive body
+ * overlap qualify. Without a pointer, the legacy body-overlap ratio threshold
+ * is the fallback. Ancestors remain candidates without the nested-entry
+ * modifier so leaving an inner surface can land on an exposed ancestor;
+ * unrelated child Frames remain frozen unless nested entry is explicit.
  *
- * The deepest-first + highest-ratio tiebreak applies to the combined
- * candidate set.
+ * Deepest-first selection makes the current parent a natural no-op surface and
+ * chooses the nearest ancestor or explicitly opened descendant under the
+ * pointer. Highest overlap breaks ties between unrelated overlapping Frames.
  */
 export function findBestFrameForNode(
   nodes: NestableNode[],
@@ -198,6 +200,7 @@ export function findBestFrameForNode(
   threshold: number,
   getRect: (id: string) => Rect | null,
   pointer?: { x: number; y: number },
+  allowNestedFrameEntry = false,
 ): string | null {
   const nodeRect = getRect(nodeId);
   if (!nodeRect) return null;
@@ -205,6 +208,14 @@ export function findBestFrameForNode(
   const nodeArea = nodeRect.width * nodeRect.height;
   if (nodeArea <= 0) return null;
 
+  const node = nodes.find((candidate) => candidate.id === nodeId);
+  const byId = new Map(nodes.map((candidate) => [candidate.id, candidate]));
+  const ancestorIds = new Set<string>();
+  let ancestorId = node?.parentId;
+  while (ancestorId && !ancestorIds.has(ancestorId)) {
+    ancestorIds.add(ancestorId);
+    ancestorId = byId.get(ancestorId)?.parentId;
+  }
   const descendantIds = new Set(getDescendantIds(nodes, nodeId));
 
   // 1. Collect all qualifying candidate frames.
@@ -215,6 +226,17 @@ export function findBestFrameForNode(
     if (candidate.id === nodeId) continue;
     if (candidate.data?.locked) continue;
     if (descendantIds.has(candidate.id)) continue;
+    // Ancestors remain eligible without the nested-entry modifier: moving
+    // from an inner Frame onto an exposed ancestor surface is an upward exit,
+    // not a downward entry. Every other nested Frame stays frozen unless the
+    // modifier explicitly opens nested entry.
+    if (
+      candidate.parentId &&
+      !ancestorIds.has(candidate.id) &&
+      !allowNestedFrameEntry
+    ) {
+      continue;
+    }
 
     const frameRect = getRect(candidate.id);
     if (!frameRect) continue;
@@ -230,9 +252,12 @@ export function findBestFrameForNode(
       pointer.y >= frameRect.y &&
       pointer.y <= frameRect.y + frameRect.height;
 
-    // Pointer-inside path: any positive overlap qualifies. Otherwise
-    // fall back to the strict area-ratio threshold.
-    if (pointerInside) {
+    // Pointer is the primary ownership signal. The node body must still touch
+    // that surface, which protects synthetic and multi-node drag paths where
+    // the pointer is not necessarily inside every dragged footprint. Only
+    // pointer-less callers fall back to the legacy overlap-ratio policy.
+    if (pointer) {
+      if (!pointerInside) continue;
       if (intersection <= 0) continue;
     } else {
       if (ratio < threshold) continue;
@@ -262,7 +287,6 @@ export function findBestFrameForNode(
   }
 
   if (!best) return null;
-  const node = nodes.find((n) => n.id === nodeId);
   if (node?.parentId === best.frameId) return null;
   return best.frameId;
 }

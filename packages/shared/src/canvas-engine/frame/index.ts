@@ -58,6 +58,9 @@ export {
 export type { FitFrameOptions, FrameFitResult } from './fit.js';
 export { computeFrameFit, fitFrameToChildren, fitFrames } from './fit.js';
 
+export type { AffectedFrameProjection } from './projection.js';
+export { projectAffectedFrameGeometry } from './projection.js';
+
 export { getFrameSizing } from './sizing.js';
 
 export { assignNodeZIndices, edgeZIndex } from '../container/zorder.js';

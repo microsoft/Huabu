@@ -2059,11 +2059,30 @@ export function applyStructuredFrameRelayout(
   const handled = new Set<string>();
   const seen = new Set<string>();
   const fillSet = fillFrameIds ? new Set(fillFrameIds) : null;
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const depthCache = new Map<string, number>();
+  const depthOf = (id: string): number => {
+    const cached = depthCache.get(id);
+    if (cached !== undefined) return cached;
+    const visited = new Set<string>();
+    let depth = 0;
+    let parentId = nodeById.get(id)?.parentId;
+    while (parentId && !visited.has(parentId)) {
+      visited.add(parentId);
+      depth += 1;
+      parentId = nodeById.get(parentId)?.parentId;
+    }
+    depthCache.set(id, depth);
+    return depth;
+  };
+  const orderedFrameIds = [...frameIds].sort(
+    (left, right) => depthOf(right) - depthOf(left),
+  );
 
   // Compute layout for each opted-in frame against the evolving array.
   let working = nodes;
 
-  for (const frameId of frameIds) {
+  for (const frameId of orderedFrameIds) {
     if (seen.has(frameId)) continue;
     seen.add(frameId);
 

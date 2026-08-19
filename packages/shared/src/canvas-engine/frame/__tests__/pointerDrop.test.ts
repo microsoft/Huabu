@@ -101,10 +101,10 @@ describe('wouldAutoFrame — pointer-aware entry', () => {
     ).toBeNull();
   });
 
-  it('falls back to the area-ratio threshold when pointer is outside the candidate', () => {
-    // Pointer outside the frame: the original 50% rule applies.
+  it('uses the pointer surface instead of overlap ratio when pointer is available', () => {
     const frame = makeFrame('f', 0, 0, 200, 200);
-    // 60% overlap → qualifies under threshold even without pointer.
+    // 60% overlap qualifies only for pointer-less callers. A pointer outside
+    // the frame expresses a different landing surface.
     const node = makeNode('n', 80, 80, 100, 100);
 
     expect(
@@ -112,7 +112,8 @@ describe('wouldAutoFrame — pointer-aware entry', () => {
         threshold: 0.5,
         pointer: { x: 500, y: 500 },
       }),
-    ).toBe('f');
+    ).toBeNull();
+    expect(wouldAutoFrame([frame, node], 'n', { threshold: 0.5 })).toBe('f');
   });
 
   it('matches the legacy behaviour when no pointer is provided', () => {
@@ -123,7 +124,7 @@ describe('wouldAutoFrame — pointer-aware entry', () => {
     expect(wouldAutoFrame([frame, node], 'n', { threshold: 0.5 })).toBeNull();
   });
 
-  it('prefers the deepest frame that contains the pointer', () => {
+  it('treats a nested frame as a frozen child unless entry is explicit', () => {
     // Outer frame contains an inner frame; pointer falls inside inner.
     const outer = makeFrame('outer', 0, 0, 400, 400);
     const inner = makeFrame('inner', 50, 50, 200, 200, { parentId: 'outer' });
@@ -134,6 +135,109 @@ describe('wouldAutoFrame — pointer-aware entry', () => {
       wouldAutoFrame([outer, inner, node], 'n', {
         threshold: 0.5,
         pointer: { x: 100, y: 100 }, // inside inner (and outer)
+      }),
+    ).toBe('outer');
+
+    expect(
+      wouldAutoFrame([outer, inner, node], 'n', {
+        threshold: 0.5,
+        pointer: { x: 100, y: 100 },
+        allowNestedFrameEntry: true,
+      }),
+    ).toBe('inner');
+  });
+
+  it('uses the current parent as a no-op surface and exposed ancestors as upward targets', () => {
+    const outer = makeFrame('outer', 0, 0, 500, 500);
+    const inner = makeFrame('inner', 50, 50, 200, 200, {
+      parentId: 'outer',
+    });
+    const node = makeNode('n', 20, 20, 100, 100, { parentId: 'inner' });
+
+    expect(
+      wouldAutoFrame([outer, inner, node], 'n', {
+        threshold: 0.5,
+        pointer: { x: 100, y: 100 },
+      }),
+    ).toBeNull();
+
+    const movedOntoOuterSurface = {
+      ...node,
+      position: { x: -40, y: -40 },
+    };
+    expect(
+      wouldAutoFrame([outer, inner, movedOntoOuterSurface], 'n', {
+        threshold: 0.5,
+        pointer: { x: 30, y: 30 },
+      }),
+    ).toBe('outer');
+  });
+
+  it('walks upward through the deepest ancestor surface under the pointer', () => {
+    const outer = makeFrame('outer', 0, 0, 600, 600);
+    const middle = makeFrame('middle', 100, 100, 400, 400, {
+      parentId: 'outer',
+    });
+    const inner = makeFrame('inner', 100, 100, 200, 200, {
+      parentId: 'middle',
+    });
+    const node = makeNode('n', 20, 20, 100, 100, { parentId: 'inner' });
+
+    expect(
+      wouldAutoFrame([outer, middle, inner, node], 'n', {
+        pointer: { x: 250, y: 250 },
+      }),
+    ).toBeNull();
+
+    const onMiddle = { ...node, position: { x: -70, y: -70 } };
+    expect(
+      wouldAutoFrame([outer, middle, inner, onMiddle], 'n', {
+        pointer: { x: 150, y: 150 },
+      }),
+    ).toBe('middle');
+
+    const onOuter = { ...node, position: { x: -170, y: -170 } };
+    expect(
+      wouldAutoFrame([outer, middle, inner, onOuter], 'n', {
+        pointer: { x: 50, y: 50 },
+      }),
+    ).toBe('outer');
+
+    const onCanvas = { ...node, position: { x: 450, y: 450 } };
+    expect(
+      wouldAutoFrame([outer, middle, inner, onCanvas], 'n', {
+        pointer: { x: 700, y: 700 },
+      }),
+    ).toBeNull();
+  });
+
+  it('uses the pointed frame surface for explicit structured entry', () => {
+    const outer = makeFrame('outer', 0, 0, 500, 500, {
+      data: { layoutMode: 'grid', gridCount: 2 },
+    });
+    const middle = makeFrame('middle', 50, 50, 300, 300, {
+      parentId: 'outer',
+    });
+    const inner = makeFrame('inner', 100, 100, 80, 80, {
+      parentId: 'middle',
+    });
+    const node = makeNode('n', 140, 140, 200, 200, {
+      parentId: 'outer',
+    });
+
+    expect(
+      wouldAutoFrame([outer, middle, inner, node], 'n', {
+        threshold: 0.5,
+        pointer: { x: 80, y: 80 },
+        allowNestedFrameEntry: true,
+      }),
+    ).toBe('middle');
+
+    expect(
+      wouldAutoFrame([outer, middle, inner, node], 'n', {
+        threshold: 0.5,
+        pointer: { x: 160, y: 160 },
+        allowNestedFrameEntry: true,
       }),
     ).toBe('inner');
   });

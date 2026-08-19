@@ -87,6 +87,7 @@ import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
+import { applyNodeGeometryPreviews } from './applyNodeGeometryPreview';
 import {
   canDirectlyManipulateWithPointer,
   closestNodeElement,
@@ -147,6 +148,7 @@ import {
   revealBoundsInViewport,
 } from '../CanvasLayerPanel/focusNodesOnCanvas.ts';
 
+import type { CanvasNode } from '@/components/Nodes/types';
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
 import type { CanvasPointerRouterContext } from '@/handler/canvasPointerRouterContext';
 import type { PointerRecognizer } from '@/handler/pointerRouter';
@@ -431,12 +433,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   const isStructuredReflowing = useGesturePreviewStore(
     (state) => state.structuredDropPreview !== null,
   );
-  // Where those peers slide to. Lives in the gesture-preview store rather
-  // than on `canvasStore.nodes` so a mid-drag save / undo snapshot can
-  // never capture a position the user has not committed; it is folded
-  // into the node array below, at the render boundary only.
-  const structuredReflowPositions = useGesturePreviewStore(
-    (state) => state.structuredReflowPositions,
+  const nodeGeometryPreviews = useGesturePreviewStore(
+    (state) => state.nodeGeometryPreviews,
   );
 
   // ── Non-reactive action handles ──────────────────────────────
@@ -840,6 +838,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     const prevCache = zWrapCacheRef.current;
     const nextCache = new Map<(typeof nodes)[number], (typeof nodes)[number]>();
 
+    const previewNodes = applyNodeGeometryPreviews(
+      nodes as CanvasNode[],
+      nodeGeometryPreviews,
+    );
+    const previewById = new Map(previewNodes.map((node) => [node.id, node]));
     const result = nodes.map((node) => {
       const z = zByNode.get(node.id) ?? 0;
       const wantsLassoClass = lassoPreviewNodeIdSet.has(node.id);
@@ -849,15 +852,19 @@ export const Canvas: React.FC<CanvasProps> = ({
         : baseClassName;
       // Transient slide-aside offset; absent for every node outside the
       // hovered structured frame, and for the dragged node itself.
-      const previewPosition = structuredReflowPositions?.get(node.id);
-      const nextPosition = previewPosition ?? node.position;
+      const previewedNode = previewById.get(node.id) ?? node;
+      const nextPosition = previewedNode.position;
+      const nextStyle = previewedNode.style;
+      const nextMeasured = previewedNode.measured;
 
       const cached = prevCache.get(node);
       if (
         cached &&
         cached.zIndex === z &&
         cached.className === nextClassName &&
-        cached.position === nextPosition
+        cached.position === nextPosition &&
+        cached.style === nextStyle &&
+        cached.measured === nextMeasured
       ) {
         nextCache.set(node, cached);
         return cached;
@@ -872,7 +879,9 @@ export const Canvas: React.FC<CanvasProps> = ({
         nextClassName !== baseClassName ||
         node.zIndex !== z ||
         node.draggable !== touchDraggable ||
-        nextPosition !== node.position;
+        nextPosition !== node.position ||
+        nextStyle !== node.style ||
+        nextMeasured !== node.measured;
       const wrapped = needsWrap
         ? {
             ...node,
@@ -880,6 +889,8 @@ export const Canvas: React.FC<CanvasProps> = ({
             zIndex: z,
             draggable: touchDraggable,
             position: nextPosition,
+            style: nextStyle,
+            measured: nextMeasured,
           }
         : node;
       nextCache.set(node, wrapped);
@@ -888,13 +899,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     zWrapCacheRef.current = nextCache;
     return result;
-  }, [
-    isNotMouse,
-    lassoPreviewNodeIdSet,
-    nodes,
-    structuredReflowPositions,
-    zByNode,
-  ]);
+  }, [isNotMouse, lassoPreviewNodeIdSet, nodes, nodeGeometryPreviews, zByNode]);
 
   // Override marker colors on selected edges so arrows match the selection
   // highlight color (--color-info). CSS cannot style SVG <marker> referenced

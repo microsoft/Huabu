@@ -135,6 +135,7 @@ export function wouldAutoFrame(
     threshold,
     getRect,
     options.pointer,
+    options.allowNestedFrameEntry,
   );
 }
 
