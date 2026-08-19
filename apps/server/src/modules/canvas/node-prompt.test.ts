@@ -6,42 +6,43 @@
  * ({@link describeNode} / {@link nodeLabel} / {@link renderNodes}).
  *
  * Focus: the ONE rule — the caller's own fields win, anything missing is
- * filled from the on-disk sidecar — plus the two agent-facing levels
+ * filled from the stored record — plus the two agent-facing levels
  * (`preview` / `outline`), `rev` presence, the summary/preview split, the
- * null-store degenerate path, and the `<node/>` rendering.
+ * no-record degenerate path, and the `<node/>` rendering.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { describeNode, nodeLabel, renderNodes } from './node-prompt.js';
 
-import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
+import type { NodeContent } from '../storage/index.js';
 
-/** Minimal stub: only `readNode` is exercised by this module. */
-function stubStore(
-  nodes: Record<string, Partial<NodeContent> | null>,
-): CanvasStore {
+/** One stored record, as a caller would have already read it. */
+function record(
+  id: string,
+  fields: Partial<NodeContent> | null,
+): NodeContent | null {
+  if (fields === null) return null;
   return {
-    readNode(id: string): NodeContent | null {
-      const n = nodes[id];
-      if (n == null) return null;
-      return {
-        nodeId: id,
-        type: 'note',
-        label: null,
-        content: '',
-        ...n,
-      } as NodeContent;
-    },
-  } as unknown as CanvasStore;
+    nodeId: id,
+    type: 'note',
+    label: null,
+    content: '',
+    ...fields,
+  } as NodeContent;
 }
 
 describe('describeNode — preview level', () => {
   it('fills label + body from the sidecar when the caller has none', () => {
-    const store = stubStore({
-      n1: { label: 'My Note', content: 'Hello body', summary: 'Abstract' },
-    });
-    const node = describeNode(store, { id: 'n1', type: 'note' }, 'preview');
+    const node = describeNode(
+      { id: 'n1', type: 'note' },
+      'preview',
+      record('n1', {
+        label: 'My Note',
+        content: 'Hello body',
+        summary: 'Abstract',
+      }),
+    );
 
     expect(node.label).toBe('My Note');
     // filename is derived from the (sidecar) label — the real on-disk path,
@@ -53,19 +54,22 @@ describe('describeNode — preview level', () => {
   });
 
   it("prefers the caller's own field over the sidecar (own wins)", () => {
-    const store = stubStore({ n1: { label: 'Sidecar Label', content: 'x' } });
     const node = describeNode(
-      store,
       { id: 'n1', type: 'note', label: 'Wire Label' },
       'preview',
+      record('n1', { label: 'Sidecar Label', content: 'x' }),
     );
     expect(node.label).toBe('Wire Label');
     expect(node.filename).toBe('nodes/Wire Label.md');
   });
 
   it('omits rev / summary / preview for a node with no body or summary', () => {
-    const store = stubStore({ n1: { label: 'Empty' } }); // content '' by default
-    const node = describeNode(store, { id: 'n1', type: 'note' }, 'preview');
+    // content '' by default
+    const node = describeNode(
+      { id: 'n1', type: 'note' },
+      'preview',
+      record('n1', { label: 'Empty' }),
+    );
     expect(node.label).toBe('Empty');
     expect(node.rev).toBeUndefined();
     expect(node.summary).toBeUndefined();
@@ -73,54 +77,54 @@ describe('describeNode — preview level', () => {
   });
 
   it('emits summary and preview as INDEPENDENT fields', () => {
-    const store = stubStore({
-      n1: { label: 'L', summary: 'The abstract', content: 'The full body' },
-    });
-    const node = describeNode(store, { id: 'n1', type: 'note' }, 'preview');
+    const node = describeNode(
+      { id: 'n1', type: 'note' },
+      'preview',
+      record('n1', {
+        label: 'L',
+        summary: 'The abstract',
+        content: 'The full body',
+      }),
+    );
     expect(node.summary).toBe('The abstract');
     expect(node.preview).toBe('The full body');
   });
 
   it('hashes rev from a source-backed node with no body', () => {
-    const store = stubStore({
-      n1: { type: 'image', label: 'Pic', src: 'artifacts/a.png' },
-    });
-    const node = describeNode(store, { id: 'n1', type: 'image' }, 'preview');
+    const node = describeNode(
+      { id: 'n1', type: 'image' },
+      'preview',
+      record('n1', { type: 'image', label: 'Pic', src: 'artifacts/a.png' }),
+    );
     expect(typeof node.rev).toBe('string');
     expect(node.preview).toBeUndefined(); // src is not a content preview
   });
 
-  it('with a null store, uses only the caller-supplied fields', () => {
+  it('with no stored record, uses only the caller-supplied fields', () => {
     const node = describeNode(
-      null,
       { id: 'n1', type: 'note', label: 'L', content: 'Body' },
       'preview',
+      null,
     );
     expect(node.label).toBe('L');
     expect(node.preview).toBe('Body');
     expect(typeof node.rev).toBe('string');
   });
 
-  it('with meta=null, forces "no sidecar" even when a store is passed', () => {
-    const store = stubStore({ n1: { label: 'Sidecar', content: 'x' } });
+  it('treats a null record as "this node has none"', () => {
     const node = describeNode(
-      store,
       { id: 'n1', type: 'note', label: 'Own' },
       'preview',
       null,
     );
     expect(node.label).toBe('Own');
-    expect(node.preview).toBeUndefined(); // sidecar body ignored
+    expect(node.preview).toBeUndefined();
   });
 });
 
 describe('describeNode — outline level', () => {
   it('layers spatial metadata on top of the sidecar-sourced fields', () => {
-    const store = stubStore({
-      n1: { label: 'Node', content: 'Body', summary: 'Sum' },
-    });
     const node = describeNode(
-      store,
       {
         id: 'n1',
         type: 'note',
@@ -130,6 +134,7 @@ describe('describeNode — outline level', () => {
         style: { color: 'red' },
       },
       'outline',
+      record('n1', { label: 'Node', content: 'Body', summary: 'Sum' }),
     );
     expect(node.position).toEqual({ x: 10, y: 20 });
     expect(node.size).toEqual({ width: 30, height: 40 });
@@ -144,9 +149,7 @@ describe('describeNode — outline level', () => {
   });
 
   it('carries an explicit absolutePosition distinct from parent-local position', () => {
-    const store = stubStore({ n1: { label: 'Node' } });
     const node = describeNode(
-      store,
       {
         id: 'n1',
         type: 'note',
@@ -156,6 +159,7 @@ describe('describeNode — outline level', () => {
         parentFrame: { id: 'f1', label: 'Frame' },
       },
       'outline',
+      record('n1', { label: 'Node' }),
     );
     expect(node.position).toEqual({ x: 50, y: 60 });
     expect(node.absolutePosition).toEqual({ x: 1050, y: 560 });
@@ -163,15 +167,15 @@ describe('describeNode — outline level', () => {
 });
 
 describe('nodeLabel', () => {
-  it('returns the sidecar label', () => {
-    const store = stubStore({ n1: { label: 'Frame Title' } });
-    expect(nodeLabel(store, 'n1')).toBe('Frame Title');
+  it('returns the record label', () => {
+    expect(nodeLabel(record('n1', { label: 'Frame Title' }))).toBe(
+      'Frame Title',
+    );
   });
 
-  it('returns undefined when the node has no sidecar or no label', () => {
-    const store = stubStore({ n1: null, n2: { label: null } });
-    expect(nodeLabel(store, 'n1')).toBeUndefined();
-    expect(nodeLabel(store, 'n2')).toBeUndefined();
+  it('returns undefined when there is no record or no label', () => {
+    expect(nodeLabel(record('n1', null))).toBeUndefined();
+    expect(nodeLabel(record('n2', { label: null }))).toBeUndefined();
   });
 });
 
@@ -205,10 +209,15 @@ describe('renderNodes', () => {
   });
 
   it('renders the summary/preview split from describeNode end-to-end', () => {
-    const store = stubStore({
-      n1: { label: 'Risks', summary: 'FX exposure', content: 'Full body' },
-    });
-    const node = describeNode(store, { id: 'n1', type: 'note' }, 'preview');
+    const node = describeNode(
+      { id: 'n1', type: 'note' },
+      'preview',
+      record('n1', {
+        label: 'Risks',
+        summary: 'FX exposure',
+        content: 'Full body',
+      }),
+    );
     const xml = renderNodes([node]);
     expect(xml).toBe(
       '<node id="n1" type="note" label="Risks" file="nodes/Risks.md" ' +

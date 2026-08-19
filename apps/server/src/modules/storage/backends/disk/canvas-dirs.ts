@@ -115,6 +115,8 @@ function scanWorkspace(): void {
     }
   }
 
+  /** Stable id → the directory that already claimed it, for duplicate detection. */
+  const duplicateOf = new Map<string, string>();
   for (const entry of readdirSync(ws)) {
     if (entry.startsWith('.')) continue;
     const full = path.join(ws, entry);
@@ -124,7 +126,21 @@ function scanWorkspace(): void {
       continue;
     }
     const canvasEntry = readCanvasDirEntry(full, entry);
-    if (canvasEntry) index.add(canvasEntry);
+    if (!canvasEntry) continue;
+    // Two directories claiming one stable id used to resolve last-wins, so a
+    // Finder-side duplication of a Space silently became an arbitrary copy —
+    // and every later read, write, and delete addressed whichever the scan
+    // happened to see last. Raise instead: a loud failure of every catalogue
+    // read is recoverable by hand, an arbitrary winner is not.
+    const duplicate = duplicateOf.get(canvasEntry.id);
+    if (duplicate !== undefined) {
+      throw new Error(
+        `Space ${canvasEntry.id} has duplicate directories: ` +
+          `"${duplicate}" and "${entry}". Remove or re-identify one of them.`,
+      );
+    }
+    duplicateOf.set(canvasEntry.id, entry);
+    index.add(canvasEntry);
   }
   if (worldEntry && index.has(worldEntry.id)) {
     throw new Error(

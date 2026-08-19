@@ -507,6 +507,14 @@ export interface SpaceNodes {
    * For work that genuinely spans the Space — executor prestate hydration,
    * the Space GET, the canvas outline, cross-node inspection. Iteration order
    * is unspecified; a caller that needs an order imposes it.
+   *
+   * One deliberate divergence from {@link read}: a record this scan cannot
+   * retrieve is **omitted**, where reading that id directly surfaces the
+   * failure. A caller naming one node needs to know it could not be served;
+   * a caller asking for the collection is better served the rest of it than
+   * refused everything because of one damaged member. Both still parse
+   * content the same lenient way, so a record a user broke by hand appears
+   * identically through either.
    */
   list(): Promise<Map<string, NodeSnapshot>>;
   /**

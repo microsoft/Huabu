@@ -426,12 +426,7 @@ describe('root forwarding shims', () => {
     'storage/canvas-store.js': [
       'modules/canvas/canvas-search.test.ts',
       'modules/canvas/canvas-search.ts',
-      'modules/canvas/canvas-spatial.ts',
       'modules/canvas/canvas.route.ts',
-      'modules/canvas/node-prompt.test.ts',
-      'modules/canvas/node-prompt.ts',
-      'modules/canvas/world-reference-resolver.ts',
-      'modules/canvas/world-target-access.ts',
     ],
     'storage/canvas-dirs.js': [
       'modules/agent/tools/world-target-read.test.ts',
@@ -442,10 +437,7 @@ describe('root forwarding shims', () => {
       'modules/canvas/external-watcher.ts',
       'modules/canvas/world-portal-policy.ts',
       'modules/canvas/world-portals.test.ts',
-      'modules/canvas/world-portals.ts',
       'modules/canvas/world-reference-resolver.test.ts',
-      'modules/canvas/world-reference-resolver.ts',
-      'modules/canvas/world-target-access.ts',
       'modules/workspace.ts',
     ],
     'storage/paths.js': [
@@ -453,7 +445,6 @@ describe('root forwarding shims', () => {
       'modules/canvas/canvas.route.test.ts',
       'modules/canvas/canvas.route.ts',
       'modules/canvas/external-watcher.ts',
-      'modules/canvas/world-target-access.ts',
       'modules/workspace/migrations/migrate-acp-sessions.ts',
     ],
   };

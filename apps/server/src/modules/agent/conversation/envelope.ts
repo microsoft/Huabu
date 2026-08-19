@@ -24,10 +24,11 @@ import { getSkill } from '../../../prompt/index.js';
 import { getNodeNeighbourhood } from '../../canvas/node-neighbourhood.js';
 import { describeNode } from '../../canvas/node-prompt.js';
 import { snapshotNodesToArtifacts } from '../../canvas/snapshot-nodes.js';
-import { getCanvasStore } from '../../storage/index.js';
+import { space } from '../../storage/index.js';
 import { isUserInvokableSkill } from '../skills.route.js';
 
 import type { NodeNeighbourhoodContext } from '../../canvas/node-neighbourhood.js';
+import type { NodeSnapshot } from '../../storage/index.js';
 import type { AgentNodePreview } from '../node-ref.js';
 import type {
   ChatAttachment,
@@ -200,21 +201,26 @@ function collectSketchStrokeSubsets(
  * The `preview` is picked server-side via the shared
  * {@link extractAgentNodePreview} ladder (`summary > content[:120] > src`)
  * — the SAME policy the node-neighbourhood uses — by reading each node's
- * on-disk sidecar from the canvas store. Full content is still one tool
- * call away; the preview is only a scan hint. When `canvasId` is null the
- * store is unavailable, so refs fall back to bare `{ id, type, label?,
- * filename }` (no preview).
+ * stored record. Full content is still one tool call away; the preview is
+ * only a scan hint. When `canvasId` is null there is no Space to read, so
+ * refs fall back to bare `{ id, type, label?, filename }` (no preview).
+ *
+ * A selection is a named subset, so it is read as one — `readMany` over the
+ * ids the wire already named, rather than a scan of the Space or a read per
+ * node (§12.6.1).
  */
-function collectSelectedNodeRefs(
+async function collectSelectedNodeRefs(
   nodes: WireSelectionNode[],
   canvasId: string | null,
-): AgentNodePreview[] {
-  let store: ReturnType<typeof getCanvasStore> | null = null;
+): Promise<AgentNodePreview[]> {
+  let records = new Map<string, NodeSnapshot>();
   if (canvasId) {
     try {
-      store = getCanvasStore(canvasId);
+      records = await space(canvasId).nodes.readMany(
+        collectSelectedNodeIds(nodes),
+      );
     } catch {
-      store = null;
+      /* Space unreadable — refs stay bare. */
     }
   }
   const refs: AgentNodePreview[] = [];
@@ -226,7 +232,6 @@ function collectSelectedNodeRefs(
       // label + file + preview + rev for every server-side node context.
       refs.push(
         describeNode(
-          store,
           {
             id: n.id,
             type: n.type,
@@ -234,6 +239,7 @@ function collectSelectedNodeRefs(
             ...(n.src !== undefined ? { src: n.src } : {}),
           },
           'preview',
+          records.get(n.id)?.record ?? null,
         ),
       );
       if (n.children) walk(n.children);
@@ -408,13 +414,10 @@ export async function buildChatEnvelope(
   let anchor: ChatEnvelope['focus']['anchor'];
   if (anchorNodeId && canvasId) {
     const neighbourhood =
-      getNodeNeighbourhood(canvasId, anchorNodeId) ?? undefined;
+      (await getNodeNeighbourhood(canvasId, anchorNodeId)) ?? undefined;
     let label: string | undefined;
     try {
-      const meta = getCanvasStore(canvasId).readNode(anchorNodeId) as Record<
-        string,
-        unknown
-      > | null;
+      const meta = (await space(canvasId).nodes.read(anchorNodeId))?.record;
       if (typeof meta?.label === 'string') label = meta.label;
     } catch {
       /* store unavailable — anchor still useful by id */
@@ -427,6 +430,9 @@ export async function buildChatEnvelope(
   }
 
   // Focus: selection refs + derived snapshot artifacts.
+  const selectionRefs = selectedNodes
+    ? await collectSelectedNodeRefs(selectedNodes, canvasId)
+    : [];
   const selectionImageAttachments = selectedNodes
     ? collectImageAttachments(selectedNodes)
     : [];
@@ -462,9 +468,7 @@ export async function buildChatEnvelope(
     },
     focus: {
       selection: {
-        refs: selectedNodes
-          ? collectSelectedNodeRefs(selectedNodes, canvasId)
-          : [],
+        refs: selectionRefs,
         selectedIds: selectedNodes ? collectSelectedNodeIds(selectedNodes) : [],
         imageAttachments: dedupedImageAttachments,
         snapshotAttachments,

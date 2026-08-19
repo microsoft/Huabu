@@ -5,13 +5,9 @@ import { agentBindingSchema, getQuestionNodeStatus } from '@huabu/shared';
 
 import { describeNode } from './node-prompt.js';
 import { readWorldTargetCanvasesStrict } from './world-target-access.js';
-import {
-  isWorldCanvasId,
-  refreshCanvasDirIndex,
-} from '../storage/canvas-dirs.js';
-import { getCanvasStore } from '../storage/index.js';
+import { getStructuredStore, space } from '../storage/index.js';
 
-import type { CanvasFile, NodeContent } from '../storage/canvas-store.js';
+import type { CanvasFile, NodeContent } from '../storage/index.js';
 import type {
   CanvasNodeType,
   GetWorldReferencesResponse,
@@ -40,12 +36,12 @@ interface SourceCanvas {
 export async function resolveWorldReferences(
   worldCanvasId: string,
 ): Promise<GetWorldReferencesResponse> {
-  if (!isWorldCanvasId(worldCanvasId)) {
+  if (worldCanvasId !== (await getStructuredStore().spaces().worldId())) {
     throw new WorldReferenceResolutionError(
       'References can be resolved only for the World Canvas',
     );
   }
-  const world = getCanvasStore(worldCanvasId).read();
+  const world = await space(worldCanvasId).read();
   if (!world) {
     throw new WorldReferenceResolutionError('World Canvas is not readable');
   }
@@ -76,18 +72,23 @@ export async function resolveWorldReferences(
   }
 
   const sources = new Map<string, SourceCanvas>();
-  const sourceCanvases = readWorldTargetCanvasesStrict(sourceCanvasIds);
-  refreshCanvasDirIndex();
+  const sourceCanvases = await readWorldTargetCanvasesStrict(sourceCanvasIds);
   await Promise.all(
     [...sourceCanvasIds].map(async (canvasId) => {
-      const store = getCanvasStore(canvasId);
       const canvas = sourceCanvases.get(canvasId) ?? null;
-      sources.set(canvasId, {
-        canvas,
-        ...(canvas
-          ? { content: await store.readAllNodes({ strict: true }) }
-          : {}),
-      });
+      if (!canvas) {
+        sources.set(canvasId, { canvas: null });
+        return;
+      }
+      // A reference can address any node in the source Space, and the
+      // references are discovered as the World topology is walked below, so
+      // the source's nodes are read whole rather than per reference.
+      const records = await space(canvasId).nodes.list();
+      const content = new Map<string, NodeContent>();
+      for (const [nodeId, snapshot] of records) {
+        content.set(nodeId, snapshot.record);
+      }
+      sources.set(canvasId, { canvas, content });
     }),
   );
 
@@ -141,7 +142,6 @@ export async function resolveWorldReferences(
 
     const sourceContent = source.content?.get(target.nodeId) ?? null;
     const resolved = describeNode(
-      getCanvasStore(target.canvasId),
       {
         id: target.nodeId,
         type: sourceNode.type as CanvasNodeType,
