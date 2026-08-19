@@ -22,7 +22,7 @@ File-native features such as RFS, built-in file tools, external-note watching,
 memory/debug files, and bundle import/export resolve their Workspace-bound
 materialization through `diskSpaceTree()`. They may use real paths, but do not name
 the Disk record layout or title-derived locator, and they ask
-`SpaceFileScope.nodeIdForPath()` which record a materialized file carries
+`DiskSpaceTree.nodeIdForPath()` which record a materialized file carries
 rather than reading it out of the file's own frontmatter.
 
 A Space directory is **Disk's, and not portable**. `ports/` holds exactly
@@ -33,9 +33,17 @@ cannot. The capability is therefore reached as `diskSpaceTree(canvasId)` and
 refuses rather than improvising when the profile is not Disk.
 `module-boundaries.test.ts` pins both the exported names and the exact list of
 files that use them, so the surface only shrinks; each entry is a reason a
-non-Disk structured profile is not selectable. The route out is those features
-no longer needing a tree — an agent can reach a Space over the HTTP API rather
-than a projected filesystem — not a materialization every backend fakes.
+non-Disk structured profile is not selectable.
+
+That list is not one population. Some of it is Disk-only for good — bundle
+export/import, reveal-in-file-manager, the built-in file tools, external-note
+discovery, Windows handle coordination — and off Disk those features are simply
+unavailable rather than emulated. The rest is headed for a port: worker state
+and other record-shaped files to `StructuredStore`, named user-authored
+documents to `BlobStore`, change notification to a per-backend capability. See
+[Multi-Backend Storage §6.4](../proposals/multi-backend-storage.md) for the
+disposition of each and for the single `space(canvasId)` handle that will vend
+them; neither is implemented here yet.
 
 The Disk blob adapter resolves its own `.artifacts/` placement from the Disk
 layout rather than borrowing the Space tree, so exactly one module answers
@@ -116,20 +124,19 @@ Key points:
 
 `apps/server/src/modules/storage/` has three layers plus its composition root:
 
-| Path                                            | Responsibility                                                                                                                                                                              |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ports/blob.ts`                                 | Backend-neutral `BlobStore` connection/scope contract for opaque bytes and bounded materialization leases.                                                                                  |
-| `ports/files.ts`                                | Declared Workspace-bound filesystem materialization, bundle publication, and native-handle coordination for file-native features.                                                           |
-| `ports/structured.ts`                           | Backend-neutral `StructuredStore`, the `SpaceRepository` collection, and the `SpaceHandle` composite: record read/ordered write, nodes, changes, Tasks, and events.                         |
-| `ports/contracts/`                              | Reusable Space-collection, node, Space-write, log, blob, and store suites; guarantees are the minimum every adapter implements.                                                             |
-| `backends/disk/`                                | Disk implementations plus before-image restoration for rejected in-process ordered batches; no journal or startup recovery.                                                                 |
-| `backends/disk/legacy/`                         | The legacy `CanvasStore` and its synchronous adapter primitives, bounded Workspace-qualified cache, and process-local node tombstones.                                                      |
-| `compatibility/canvas.ts`                       | Residual Disk test/legacy facade over the same adapter primitive; production feature reads no longer enter here.                                                                            |
-| `space-lifecycle-admission.ts`                  | Backend-neutral, writer-preferring single-process coordinator shared by structured mutations and blob puts during a delete session.                                                         |
-| `profile.ts` and `storage.ts`                   | Backend selection, derived materialization, cross-axis validation, Workspace-scoped staged mount lifecycle, World bootstrap, materialization/blob scopes, and the blob-first deletion saga. |
-| `testing.ts`                                    | Mounts a real profile onto a temporary Workspace through the production lifecycle, so product tests are written once and run against every profile.                                         |
-| `index.ts`                                      | Public exports only; application code imports here rather than reaching into an adapter.                                                                                                    |
-| `canvas-store.ts`, `paths.ts`, `canvas-dirs.ts` | Deprecated forwarding shims with no logic, retained only for high-fanout compatibility imports.                                                                                             |
+| Path                                            | Responsibility                                                                                                                                                                                           |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ports/blob.ts`                                 | Backend-neutral `BlobStore` connection/scope contract for opaque bytes and bounded materialization leases.                                                                                               |
+| `ports/structured.ts`                           | Backend-neutral `StructuredStore`, the `SpaceRepository` collection, and the `SpaceHandle` composite: record read/ordered write, nodes, changes, Tasks, and events.                                      |
+| `ports/contracts/`                              | Reusable Space-collection, node, Space-write, log, blob, and store suites; guarantees are the minimum every adapter implements.                                                                          |
+| `backends/disk/`                                | Disk implementations plus before-image restoration for rejected in-process ordered batches; no journal or startup recovery. `space-tree.ts` holds the Disk-only Space directory capability — not a port. |
+| `backends/disk/legacy/`                         | The legacy `CanvasStore` and its synchronous adapter primitives, bounded Workspace-qualified cache, and process-local node tombstones.                                                                   |
+| `compatibility/canvas.ts`                       | Residual Disk test/legacy facade over the same adapter primitive; production feature reads no longer enter here.                                                                                         |
+| `space-lifecycle-admission.ts`                  | Backend-neutral, writer-preferring single-process coordinator shared by structured mutations and blob puts during a delete session.                                                                      |
+| `profile.ts` and `storage.ts`                   | Backend selection, cross-axis validation, Workspace-scoped staged mount lifecycle, World bootstrap, blob scopes, the Disk-only Space-tree accessors, and the blob-first deletion saga.                   |
+| `testing.ts`                                    | Mounts a real profile onto a temporary Workspace through the production lifecycle, so product tests are written once and run against every profile.                                                      |
+| `index.ts`                                      | Public exports only; application code imports here rather than reaching into an adapter.                                                                                                                 |
+| `canvas-store.ts`, `paths.ts`, `canvas-dirs.ts` | Deprecated forwarding shims with no logic, retained only for high-fanout compatibility imports.                                                                                                          |
 
 The Disk structured adapter and compatibility facade resolve the same cached
 legacy object, so migration does not create two in-memory authorities. All

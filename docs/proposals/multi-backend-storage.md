@@ -1,7 +1,7 @@
 # Multi-Backend Storage
 
-Status: Phase 4.6 implemented
-Last updated: 2026-08-18
+Status: Phase 4.6 implemented; direction revised by §6.4
+Last updated: 2026-08-19
 
 > **Scope and decision confidence.** This proposal records the two-port
 > `StructuredStore` / `BlobStore` split and their target backend families as
@@ -56,6 +56,17 @@ Last updated: 2026-08-18
 > adapter exists on `main`. §12 is the
 > authoritative phase plan; the decision table in §2 marks what each phase
 > has actually settled.
+>
+> **Revision, 2026-08-19.** Phase 4.6 landed a single residual "Space-file"
+> capability covering every consumer that needs a real directory, and gave
+> them one route out: stop needing a tree and reach a Space over the HTTP API.
+> Review found that route correct for some of those consumers and wrong for
+> the rest — several of them want a _port_, not an API. §6.4 replaces the one
+> capability with four dispositions and states the composition-layer Space
+> handle that joins both ports; §12.5.4, §12.6.2, and §12.7 are revised to
+> match, and §12.7 gains Phase 4.7, which does that work. The revision
+> invalidates no implemented behavior; what changes is where the remaining
+> families are headed.
 
 ---
 
@@ -95,7 +106,10 @@ built above these ports, but its form is intentionally unresolved here.
 | Blob key, staging, deletion, and GC semantics          | Proposed / open           | Names are the existing `<artifactId><ext>` keys; `deleteAll()` covers Space destruction. Staging, reference counting, and GC remain undesigned. Per-key deletion stays out of the public port, but the absence of any cleanup path is what makes atomic replace mandatory (§6.2).                                                                                                          |
 | Space-handle identity and caching                      | **Corrected** (P1)        | `space(id)` returning a stable handle is bounded by the LRU behind it, not guaranteed. In-memory tombstones and the filename index are therefore adapter-local caches, never durable state (§12.1.1, §12.2.4).                                                                                                                                                                             |
 | Backend selection scope                                | Open                      | Process-global today because the profile is read from env. Per-Workspace or per-Space selection has not been fixed.                                                                                                                                                                                                                                                                        |
-| Logical filesystem view                                | Open                      | A possible `SpaceFileView` above both stores; name and contract are not accepted yet.                                                                                                                                                                                                                                                                                                      |
+| Unified per-Space handle                               | **Settled direction**     | One composition-layer `space(canvasId)` vends every storage capability for one Space: its structured parts, its blob scope, and any backend-specific extras. The two ports stay independent and are joined above them, never inside one (§6.4.1).                                                                                                                                          |
+| Storage for owners outside this port                   | **Settled direction**     | The Space handle vends an isolated _substrate_ per namespace — a directory, a table prefix, a schema — and the owner brings its own store implementation and SQL. Storage owns namespace isolation and lifecycle only, and never sees the data (§6.4.4).                                                                                                                                   |
+| Disposition of residual per-Space files                | **Settled direction**     | Four outcomes, not one: Disk-only and unimplemented elsewhere; portable capability with a per-backend implementation; a structured record; or a blob. Phase 4.6 applied the first of the four to all of them (§6.4.2, §6.4.3).                                                                                                                                                             |
+| Logical filesystem view                                | Open                      | A possible `SpaceFileView` above both stores; name and contract are not accepted yet. §6.4 narrows what such a view would have to synthesize — named files become blobs — without deciding to build it.                                                                                                                                                                                    |
 | Real agent workspace                                   | Open                      | Materialized directory, OS mount, protocol-only access, or a combination remain under evaluation.                                                                                                                                                                                                                                                                                          |
 | Agent-authored filesystem write-back                   | Open                      | Read-only projection, explicit checkout/commit, and live bidirectional sync are alternatives, not decisions.                                                                                                                                                                                                                                                                               |
 
@@ -208,6 +222,11 @@ remains the sole owner of its existing `ThreadStore`, `EventLogStore`, and
 backend family and inject matching adapters into both domains, but it must not
 move L2 persistence ownership back into `CanvasStore`.
 
+The one thing this port offers another domain is a _connection point_
+(§6.4.4): an isolated substrate per namespace — a directory, a table prefix, a
+schema — that the owner builds its own store on. Storage never sees the data,
+so no ownership moves and no schema is shared.
+
 Every current Canvas structured port is asynchronous so a synchronous Disk or
 SQLite implementation does not constrain Postgres or another remote adapter.
 The corresponding migration for Agenetes ports that are synchronous today
@@ -319,6 +338,273 @@ local SQLite. `validateStorageProfile()` is where such rules live; today it
 rejects kinds that are named but not implemented, so an unsupported profile
 fails at startup with an actionable message rather than nondeterministically
 while serving data.
+
+### 6.4 One Space handle, four dispositions — revised direction
+
+Phases 1–4.6 established the two ports and moved the application off Disk's
+record layout. What they did not settle is the residue: the per-Space state
+that is still a file because it always was one, and the fact that reaching a
+Space still means calling two unrelated functions. This section settles both
+and supersedes the single "Space materialization" framing of §12.5.4 and
+§12.6.2.
+
+Confidence: §6.4.1, the four-outcome test in §6.4.2, the assignments in
+§6.4.3, and the opaque-state member in §6.4.4 are a **settled direction**.
+What remains open is scheduling — which adapter pays for which move (§12.7) —
+and the concrete member names, which are still discussion aids.
+
+#### 6.4.1 One handle per Space
+
+A Space's durable state spans both ports — its record and nodes are
+structured, its files are bytes — so the application should reach all of it
+through one object, from one function, on the object that already holds both
+ports:
+
+```ts
+interface Storage {
+  readonly profile: StorageProfile;
+  readonly workspacePath: string;
+  readonly structured: StructuredStore;
+  readonly blobs: BlobStore;
+  space(canvasId: string): Space;
+}
+```
+
+`Storage` is the composition root's own type — it is what `getStorage()`
+already returns, and it is the only object in the process that holds both
+ports, so it is where the two are allowed to meet. The barrel exports a free
+`space(canvasId)` that is exactly `getStorage().space(canvasId)`, matching how
+`canvasBlobs()` is already called; that is an ergonomic shorthand for the same
+method, not a second design.
+
+`Space` is a **composition-layer facade, not a port type**.
+`StructuredStore.space()` keeps returning the structured-only `SpaceHandle`,
+`BlobStore.scope()` keeps returning a `BlobScope`, and neither port imports the
+other (§6.3). They are joined in the layer that already owns every cross-store
+rule: the blob-put precondition ("bytes only for a Space whose record exists")
+and the blob-first delete saga.
+
+The join cannot move down into a port, for three separate reasons:
+
+- the two axes are configured independently, so a `SpaceHandle` that vended
+  blobs would oblige the Disk structured adapter to construct an Azure blob
+  scope;
+- deletion ordering deliberately keeps remote blob I/O outside any database
+  transaction (§6.1); a handle owning both would move that ordering inside an
+  adapter;
+- `BlobScopeRef` is a union whose only member is `canvas` today. Workspace
+  assets and agent scratch have no Space, and a blob store reachable only
+  through a Space handle could not serve them.
+
+What is wrong today is therefore only the spelling.
+`getStructuredStore().space(id)` and `canvasBlobs(id)` are two entry points —
+37 and 21 production call sites — that never say they address one Space.
+
+**Backend-specific members hang off the same handle.** A capability only some
+backends implement is named for the backend that has it and typed by its
+absence (`null`), not hidden behind a parallel free function and not present as
+a stub that throws:
+
+```ts
+interface Space {
+  readonly canvasId: string;
+  read(): Promise<CanvasFile | null>;
+  write(input: SpaceWriteInput): Promise<SpaceWriteResult>;
+  readonly nodes: SpaceNodes;
+  readonly changes: SpaceChanges;
+  readonly tasks: SpaceTasks;
+  readonly events: SpaceEvents;
+  extension(namespace: string): SpaceSubstrate; // §6.4.4
+  readonly blobs: BlobScope;
+  /** Disk's directory for this Space. `null` on every other backend. */
+  readonly diskTree: DiskSpaceTree | null;
+}
+```
+
+A caller branching on `null` is told the truth once; a caller that must
+remember a second import is being asked to know the storage module's internal
+topology. This revises the Phase 4.6 decision to expose the Disk tree as a
+standalone `diskSpaceTree()`: the fence that matters is the name and the
+enumerated consumer list, and both survive the move onto the handle.
+
+#### 6.4.2 The disposition test
+
+§12.5.2 asked of a _symbol_: is it still useful, unchanged, when the structured
+backend becomes SQLite? That question sorted `paths.ts`. Asked of a _consumer_
+it sorts the residual filesystem population — and it returns four answers, not
+one:
+
+| Disposition                     | The question under SQLite                         | Consequence                                                             |
+| ------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------- |
+| **A. Disk-only**                | Meaningless — the feature is _about_ a filesystem | Not implemented off Disk. The feature is **unavailable**, not emulated. |
+| **B. Portable, re-implemented** | Survives; only the mechanism dies                 | A declared capability every backend answers in its own way.             |
+| **C. Structured record**        | It was a record wearing a file's clothes          | Moves to `StructuredStore`.                                             |
+| **D. Blob**                     | It is genuinely a named file                      | Moves to `BlobStore`.                                                   |
+
+Phase 4.6 assigned **A** to all of them and offered one route out: features
+stop needing a tree, and an agent reaches a Space over Huabu's HTTP API. That
+is right for A and wrong for the other three. B, C, and D do not need the HTTP
+API — they need a port, and routing them through an API instead would leave
+the same state unportable behind a network hop.
+
+An outcome of A is an acceptable, stated product limitation, not debt. It
+belongs in a capability matrix that `validateStorageProfile()` can consult,
+alongside the existing rule that an unimplemented kind fails at startup.
+
+**A is the default answer, and the cheap one.** B, C, and D each cost a port
+change, a contract suite, and a migration; A costs a row in the matrix. A
+family earns B, C, or D by a product need that survives being told plainly
+"this is not available on that backend" — not by being technically portable.
+Where the two are close, take A and say so. A workaround that makes a feature
+_nearly_ work on a backend is worse than its absence: it has to be built,
+tested, and explained, and it hides the limitation instead of stating it.
+
+**Nothing here is built before a backend needs it.** Assigning a disposition
+fixes the direction; it does not schedule the work. B and the open parts of C
+and D land with the adapter that first requires them, so the second backend
+pays for its own portability rather than Disk paying in advance for a
+requirement nobody has stated. The exception is a move that simplifies Disk on
+its own merits — deleting an ad-hoc file format in favour of a record the Space
+handle already writes — which is worth doing whenever it comes up.
+
+#### 6.4.3 Inventory
+
+Every consumer of the Disk Space-tree capability as implemented, with its
+disposition. Every assignment is settled; what is deferred is _when_ each is
+built, not _where_ it goes (§6.4.2, §12.7).
+
+| Consumer                                                   | What it does today                                             | Disposition                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /:id/export` — Space bundle                           | `archiver.glob('**/*', {cwd: spaceDir, dot: true})`            | **A**, accepted. A _portable_ export generated from records plus reachable blob references is a separate later design (§11); the current bundle is a Disk projection.                                                                       |
+| `POST /import` — Space bundle                              | Unzip into a staging dir, rename into place                    | **A**, accepted. Same pairing as export.                                                                                                                                                                                                    |
+| `POST /:id/reveal-nodes`                                   | `openInFileManager(nodesDir)`                                  | **A**, accepted. The feature _is_ "show me this in Finder".                                                                                                                                                                                 |
+| Built-in `read`/`write`/`glob`/`grep` tools (`fs-sandbox`) | Space directory as the sandbox root                            | **A**, accepted. Off Disk the first-party agent uses RFS/HTTP, which is what external agents already use (§9).                                                                                                                              |
+| `import-node-src` artifact-ref classification              | `path.relative(spaceDir, abs)`                                 | **A**, accepted — and it should ask `fs-sandbox` for its root, not storage. Not a storage consumer at all.                                                                                                                                  |
+| Windows directory-handle coordination                      | `registerHandleOwner` around `fs.watch` handles                | **A**, accepted. Exists so a directory rename can succeed; no directory, no problem.                                                                                                                                                        |
+| External-note observation and claim                        | `fs.watch` on `nodes/`, then read + unlink                     | **A** as a product feature; **B** for the notification underneath it. Nothing is built until a second backend exists — see below.                                                                                                           |
+| RFS path → node resolution                                 | `nodeIdForPath('nodes/Foo.md')` inverts Disk's filename        | **B**, deferred. Every backend can mint `nodes/<label>.md` names from records; Disk keeps inverting the real filename because the file is really there. Until a second backend exists, RFS's file plane is Disk's.                          |
+| Memory-worker state (`.memory/state.json`)                 | `atomicWriteJson` of `{counter, lastAnalyzedAt, cursor}`       | **C**, accepted. Per-Space bookkeeping with no reason to be a file; a small store on the §6.4.4 substrate.                                                                                                                                  |
+| Space-existence guard (`existsSync(spaceDir)`)             | Resurrection guard in the memory trigger                       | **C**, accepted — and it disappears rather than moving. The guard exists because an ad-hoc file write can recreate a deleted Space's directory; a structured record write cannot, because the port refuses a write to a Space that is gone. |
+| ACP session state (`.history/acp-sessions.json`)           | Handed to the ACP driver as `storage.root`                     | **C**, accepted. Storage supplies an isolated substrate under a namespace (§6.4.4); Agenetes keeps its own ports, its own store, and its own schema (§6.1).                                                                                 |
+| Chat prompt log (`.history/chat/<thread>.prompt.log`)      | Written under `HUABU_DEBUG_PROMPT`, never read by the app      | **C**, accepted. One namespace on the §6.4.4 substrate, one entry per thread.                                                                                                                                                               |
+| Memory body (`.memory/space.md`)                           | AI-private Markdown an agent reads and rewrites                | **D**, accepted. A document the agent edits as a file.                                                                                                                                                                                      |
+| `skill.md` (per-Space RFS access guide)                    | User-authored override read at the Space root                  | **D**, accepted. A future `AGENTS.md` is the same case.                                                                                                                                                                                     |
+| Upload scratch (`.upload/`)                                | RFS upload and interactive-view write here through the sandbox | **D**, accepted. Its own scope kind, so retention can differ from artifacts later without moving the bytes again.                                                                                                                           |
+
+Three consequences worth stating separately.
+
+**B is where "watch" belongs — later.** Change notification is not a
+filesystem primitive a database lacks; it is a database primitive a filesystem
+happens to also have (`fs.watch`, a SQLite update hook, Postgres
+`LISTEN`/`NOTIFY`). That is why the disposition is B rather than A.
+
+The product behaviour layered on it today does _not_ generalize: external-note
+discovery watches for documents that arrived **without going through the
+application**, and a database backend has no such arrival path unless someone
+writes to the store out of band. Rather than invent one, external-note
+discovery is simply unavailable off Disk, and the notification capability is
+declared only when a second backend has a consumer for it. Building a portable
+watch port now would buy nothing — the one caller is the Disk-only feature.
+
+**D changes what `BlobStore` is for, minimally.** §6.2 says blobs are "opaque
+bytes, not application records", with names that are the existing
+`<artifactId><ext>` keys. Named user-authored documents — `skill.md`, a future
+`AGENTS.md`, the memory body — are still opaque to storage, so the contract
+holds unchanged. One detail needs a decision and it has a cheap answer: the
+Disk adapter maps the single canvas scope onto `.artifacts/`, so a blob named
+`skill.md` would land in a hidden directory rather than at the Space root where
+a user authors it. Add one `BlobScopeRef` kind per user-visible area. That is a
+union member and a directory constant per adapter; it keeps the Disk layout a
+user sees unchanged, and it avoids hierarchical names, which §7.1 excluded for
+every backend and which would be the expensive answer to the same problem.
+
+Rename and per-key delete stay **unsupported**, as they are today. A human will
+eventually want to remove a `skill.md`, and the honest answer until some
+product operation actually requires it is that storage does not offer it —
+overwriting is the supported edit. Adding per-key deletion drags in the
+reference-counting and GC design §14 already parks, which is a large bill for a
+small convenience.
+
+#### 6.4.4 The extension point is a connection, not a data API
+
+Disposition C must not grow `StructuredStore` one member per feature —
+`memory`, `acpSessions`, `promptLogs` — obliging every future backend to model
+data it has no stake in. §12.5.7 rejected exactly that when it declined a
+`SpaceChats.list()` port.
+
+A namespaced opaque key/value member on the port is the obvious repair and is
+also wrong, for a reason worth recording: it fixes one access shape —
+whole-value rewrite, no queries, no indexes — for every owner, forever. An
+owner with real query needs then encodes its own index inside an opaque value,
+which is the two-authorities hazard reappearing one level down. The sibling
+`../octostaff` bubble runtime shows what the owners actually look like: each
+extension ships its own `repository-contract.ts` with `repository-memory.ts`
+and `repository-postgres.ts` beside it, and the Postgres one is constructed
+with an injected `PostgresConnection` carrying `sql` and a `schema` name.
+
+So the port exposes **the connection point and nothing else**. The owner brings
+its own store implementations and its own SQL:
+
+```ts
+/** What a namespace gets to build on. Discriminated by the live backend. */
+type SpaceSubstrate =
+  | { kind: 'disk'; directory: string }
+  | { kind: 'sqlite'; db: SqliteDatabase; tablePrefix: string }
+  | { kind: 'postgres'; sql: Sql; schema: string };
+
+interface Space {
+  /** Isolated substrate for one namespace's own store. */
+  extension(namespace: string): SpaceSubstrate;
+}
+```
+
+The namespace is the isolation token and the only thing storage validates: a
+reserved directory on Disk, a table prefix on SQLite, a schema on Postgres.
+Storage guarantees the namespace is unique and unshared. It guarantees nothing
+about what is inside, and cannot, because it never sees the data.
+
+**Storage keeps lifecycle, because only it can.** A namespace is created on
+demand and destroyed with the Space — `rm -rf` the directory, drop tables
+matching the prefix, drop the schema. That keeps `beginDelete`/`finish` whole
+without any owner registering a cleanup hook, and it is the one operation an
+owner cannot perform without knowing a layout that is not its own.
+
+**An extension supports the backends it chooses.** One that implements only
+`disk` does not load under Postgres, and that is a stated limitation rather
+than a defect — disposition A applied one level out (§6.4.2). Storage's
+contract suites cover none of this: there is no portable behaviour to assert
+about data the port cannot read.
+
+**Ownership does not move.** Agenetes keeps `ThreadStore`, `EventLogStore`, and
+`TurnStore` as its contracts (§6.1) and gains a substrate to implement them
+over, in place of a bare directory path. What §12.5.7 forbade — Huabu's ports
+learning the shape of agent-runtime data — is stronger here than under a
+key/value member: the port does not store the data, it hands over a place to
+put it.
+
+Three consequences to accept openly rather than design against:
+
+- **The backend kind is part of the extension API.** An owner written against
+  `sqlite` breaks if a deployment moves to Postgres. That is inherent in
+  letting owners write their own SQL, and the alternative is the lowest common
+  denominator this section exists to avoid.
+- **The substrate is unfenced.** A live `sql` handle can run arbitrary DDL
+  outside its schema, and a directory path is the very thing §12.5.4 pulled
+  back inside the boundary. The namespace bounds it by convention, not by
+  enforcement. Extensions are in-process code, trusted at the same level as the
+  Server; an untrusted or out-of-process extension model is not supported and is
+  not being designed here.
+- **First-party state pays the same price.** Memory-worker state is three
+  fields, and under a substrate it needs a small store per backend kind rather
+  than a `put()`. Phase 4.7 writes the Disk one directly. If a second owner
+  wants the same shape, extract a shared key/value helper **over** the
+  substrate, in `utils/` — never as a port member, because that is the design
+  this section rejected.
+
+`Namespace.storage.root` follows from this. Under bubble's pattern the driver
+is constructed with its substrate by the composition root, so the serializable
+`Namespace` carries only the scope name and never a path or a live handle —
+which is also what §14 asked for.
 
 ## 7. Contracts
 
@@ -575,6 +861,13 @@ StructuredStore + BlobStore
 This would centralize path mapping and visibility rules without promising an
 OS mount. Its exact path vocabulary, search behavior, ACL model, generated
 `space.json` semantics, and write surface are open.
+
+§6.4 shrinks what such a view would have to invent without deciding to build
+it. Once named user files are blobs and node documents are structured records,
+the view synthesizes only a _path vocabulary_ over state the ports already
+hold, rather than deriving both the names and the bytes. That is also what RFS
+path resolution needs (§6.4.3, disposition B), so the two questions have
+converged even though neither is answered here.
 
 ### 10.2 Materialized agent workspace
 
@@ -1809,6 +2102,14 @@ Consumers needing a Space's real directory ask `storage/`, so the current
 `storage → workspace/disk` edge inverts to `workspace ← storage` plus an
 explicit capability — instead of every domain reaching into a shared layout.
 
+**Superseded in part by §6.4.** The dependency direction this subsection
+settles — consumers ask `storage/` for a Space's real directory, rather than
+every domain reaching into a shared layout module — stands. What does not is
+the assumption that one declared capability serves all of them. Applying the
+disposition test to each consumer individually (§6.4.3) sends most of them to a
+port instead, and leaves the capability covering only the families that are
+genuinely about a filesystem.
+
 #### 12.5.5 Scope
 
 In:
@@ -1851,7 +2152,7 @@ Phase 5 rebases onto this and drops its `utils/naming.ts` extraction, its
 is flat and holds `paths.ts` plus `migrations/`; the Disk record layout, blob
 layout, directory index, name index, directory-handle coordination, and World
 bootstrap all sit under `storage/backends/disk/`. Consumers that need only a
-real Space directory call `spaceDirectory()`; directory-handle release and
+real Space directory call the Disk-only Space-tree accessor; directory-handle release and
 World bootstrap are re-exported from the facade rather than reached by path.
 This does not close every application-to-Disk read: `canvas.route.ts`,
 `external-watcher.ts`, and `world-target-access.ts` intentionally retain
@@ -1912,6 +2213,13 @@ not own — `legacy/canvas-store.ts` states plainly that threads and turns
 belong to the agent runtime — and would oblige every future structured backend
 to model Agenetes' turn log, which is the two-authorities hazard in §13.
 
+The extension substrate (§6.4.4) is not a reversal of this. What was rejected
+is a port that _knows the shape_ of agent-runtime data. What is offered is a
+place to put data — a directory, a table prefix, a schema — that the owner
+builds its own store on. A `list()` over chat turns is no more available
+through storage than it was before; it is Agenetes' own query against Agenetes'
+own tables.
+
 **Follow-up (open):** decide whether the memory agent should see conversation
 turns at all, and if so reinstate the digest against `agenetes.history()` —
 the call `canvas-search.ts` already uses for exactly this data. That is a
@@ -1932,11 +2240,11 @@ Every production structured read uses `StructuredStore`: Space topology through 
 
 `CanvasStore` remains inside the Disk adapter and compatibility tests only. It is not an application service, and production module-boundary tests reject new or remaining feature imports. Pure Canvas context builders accept already-read `CanvasFile` / node-record values instead of reaching into storage themselves; their async adapters own repository access once per request.
 
-#### 12.6.2 Declared Space-file capability
+#### 12.6.2 Declared Space-file capability — **revised by §6.4**
 
 RFS, built-in file tools, ACP working directories, external-note observation,
-bundle import/export, debug logs, and memory files genuinely require a
-filesystem tree. They reach it through one named Disk capability rather than
+bundle import/export, debug logs, and memory files all reach a Space as a
+filesystem tree. Phase 4.6 gave them one named Disk capability instead of
 `canvasRoot`, `nodesDir`, `SPACE_JSON_FILENAME`, a title-derived directory
 index, or another Disk-layout symbol. The capability owns a Workspace-bound
 Space directory, bundle publication, the sidecar-to-record mapping, and
@@ -1944,29 +2252,44 @@ directory-handle coordination. Consumers may interpret their own public
 virtual paths and the public `.huabu.zip` format, but cannot infer the active
 backend's structured record layout.
 
-Materialization is **not a port and not portable**, and it does not live in
-`ports/`. `StructuredStore` and `BlobStore` are the whole portable surface. A
-Space directory is Disk's, and a backend that keeps Spaces in tables simply
-does not have one — a capability missing from a backend is an acceptable
-outcome, and the honest one. Making every backend promise a directory would
-mean fabricating one, which moves the failure somewhere less obvious than the
-refusal.
+It is **not a port and not portable**, and it does not live in `ports/`.
+`StructuredStore` and `BlobStore` are the whole portable surface. A Space
+directory is Disk's, and a backend that keeps Spaces in tables does not have
+one — a capability missing from a backend is an acceptable outcome, and the
+honest one. Making every backend promise a directory would mean fabricating
+one, which moves the failure somewhere less obvious than the refusal.
 
 So it is reached as `diskSpaceTree(canvasId)` / `stageDiskSpaceImport()` from
 the barrel: names that say Disk at every call site, refusing rather than
 improvising on a non-Disk profile. `module-boundaries.test.ts` holds both the
 exported names and the exact consumer list, so the surface can only shrink,
-and asserts the barrel exposes nothing that reads as a portable path API. Each
-consumer is a reason a non-Disk structured profile is not selectable, which is
-the same fence §12.4 already put around ZIP import, RFS upload/delete, and
-external-note claim.
+and asserts the barrel exposes nothing that reads as a portable path API.
 
-The route out is not a portable materialization. It is for these features to
-stop needing a tree: an agent can reach a Space over Huabu's HTTP API rather
-than a projected filesystem, and RFS is that API. Until then the list stands
-and is visible.
+**What §6.4 revises.** Two claims above are narrower than this phase made them.
 
-This phase does not choose bidirectional projection or native write-back semantics: external-note claim and bundle import continue to enter the authoritative application commands/repositories they use today, while unowned scratch and agent-domain files stay ordinary materialized files.
+First, the consumer list is not one population. Phase 4.6 read it as a single
+"needs a tree" group with a single route out — features stop needing a tree and
+reach a Space over the HTTP API. That holds for export, import, reveal,
+the built-in file tools, and Windows handle coordination. It does not hold for
+change notification, RFS path resolution, memory-worker state, the memory body,
+`skill.md`, or upload scratch: those want a port, and an HTTP hop in front of
+unportable state would not make it portable. §6.4.3 assigns each one.
+
+Second, the accessor's _shape_ was over-corrected. Keeping the Disk capability
+off the Space handle and behind a separate free function was meant to keep an
+unportable surface from looking portable, but the name and the enumerated
+consumer list already do that work. §6.4.1 moves it back onto the single
+`space(canvasId)` handle as a member typed by its absence, so one function
+answers every storage question about a Space.
+
+Neither revision invalidates what landed. The consumer list, its enforcement,
+and the refusal on a non-Disk profile all carry forward; Phase 4.7 shrinks the
+list to the families §6.4.3 assigns **A** and relocates the rest.
+
+This phase does not choose bidirectional projection or native write-back
+semantics: external-note claim and bundle import continue to enter the
+authoritative application commands/repositories they use today, while unowned
+scratch and agent-domain files stay ordinary materialized files.
 
 #### 12.6.3 Workspace-scoped storage lifecycle and World bootstrap
 
@@ -1990,6 +2313,63 @@ Out of scope: a SQLite adapter or schema, Disk→SQLite data migration, SQLite p
 
 ### 12.7 Later phases — provisional
 
+#### Phase 4.7 — one Space handle and the four dispositions
+
+Phase 4.7 implements §6.4. It adds no adapter and changes no persisted format
+except where a family moves store, and each move is listed below. Its exit
+criterion is: **every storage capability for one Space is reached through one
+`space(canvasId)` handle, and every family that is still a bare file is one the
+capability matrix declares Disk-only.**
+
+In — the interface, and only the moves that pay for themselves on Disk alone:
+
+1. `Storage` gains `space(canvasId)`, joining the structured handle with the
+   Space's blob scope and any backend-specific members, plus a free
+   `space(canvasId)` shorthand on the barrel. `StructuredStore` and `BlobStore`
+   keep their current interfaces and their independence; the facade is the only
+   new type. `getStructuredStore().space(id)` and `canvasBlobs(id)` call sites
+   migrate to it.
+2. The Disk tree moves from the standalone `diskSpaceTree()` accessor onto that
+   handle as `diskTree`, typed by its absence, keeping the Disk name and the
+   enumerated consumer list.
+3. **The extension substrate (§6.4.4)** lands as one Space-handle member with a
+   Disk case, namespace validation, and destruction with the Space. Its
+   contract is isolation and lifecycle only — there is no data behaviour to
+   assert. Memory-worker state and the debug prompt log become the first two
+   namespaces, each with its own small Disk store, retiring two ad-hoc file
+   formats and the `existsSync` resurrection guard. ACP session state keeps the
+   same disposition but moves with phase 6: `Namespace.storage.root` is a
+   filesystem path in the shared `@agenetes/protocol` contract, and replacing it
+   with a composition-injected substrate is an Agenetes port change, not a
+   storage one.
+4. **D.** `skill.md`, the memory body, and upload scratch become blobs, each
+   user-visible area getting its own `BlobScopeRef` kind so the Disk paths a
+   user sees are unchanged and retention can diverge later without moving bytes
+   again. These qualify under the "simplifies Disk on its own merits"
+   exception: each is a bare `readFileSync`/`writeFile` against a path the
+   caller assembled, and the move retires those plus one resolver in the memory
+   sandbox. The new machinery is a union member and a directory constant per
+   area.
+5. **A is written down.** Export, import, reveal, the built-in file tools,
+   external-note discovery, and Windows handle coordination stay Disk-only and
+   become entries in a capability matrix `validateStorageProfile()` can consult,
+   so an operator selecting a profile learns up front which product features it
+   does not offer.
+6. The boundary test keeps its exact consumer list, now covering the A families
+   only; C and D consumers leave it by construction rather than by exemption.
+
+Out — deferred to the adapter or phase that first needs them, per §6.4.2:
+
+- the portable change-notification capability (its only consumer today is the
+  Disk-only external-note feature);
+- RFS's backend-neutral path vocabulary;
+- ACP session relocation, which is phase 6's `Namespace` change;
+- any SQLite/Postgres/Azure adapter, the portable export format, the rest of
+  the Agenetes persistence migration, an OS mount or writable general-purpose
+  virtual filesystem, and protocol or UI changes.
+
+#### Remaining phases
+
 5. Add one new adapter at a time — SQLite, then Postgres, then Azure Blob —
    running the same contract suites, migration fixtures, failure injection,
    and concurrency tests against each. An adapter may exist for isolated
@@ -2001,14 +2381,24 @@ Out of scope: a SQLite adapter or schema, Disk→SQLite data migration, SQLite p
    it owes, concretely: `SpaceRepository.ensureWorld()`; `SpaceNodes.readMany`
    / `list` / `stream`; an entry in `PRODUCT_STORAGE_PROFILES`, which is what
    runs the product-level boundary suite against it; and `IMPLEMENTED_STRUCTURED`
-   plus `StructuredBackendKind`. It does **not** owe a materialization —
-   the `addressed` policy already exists and `materializationFor` already
-   pairs it with any non-`disk` structured backend.
+   plus `StructuredBackendKind`. It owes **no** Space directory and no
+   portable materialization: Phase 4.6 removed the second placement policy and
+   the profile axis that selected one, because a policy nothing could observe
+   proved nothing. What it owes instead is whatever Phase 4.7 assigns
+   dispositions B, C, and D, and an entry in the capability matrix declaring
+   the A families unavailable.
 
 6. Migrate the currently synchronous Agenetes persistence ports without
-   changing their persist-before-notify, sequence, and fencing semantics.
+   changing their persist-before-notify, sequence, and fencing semantics. This
+   is also where ACP session state leaves `.history/`: `Namespace` stops carrying
+   a filesystem path and carries only its scope name, while the composition root
+   injects the substrate the session store builds on (§6.4.4). The same route is
+   available to the `chat_v2` turn and event logs, which keep their own
+   contracts either way.
 7. Refactor RFS and built-in file tools only after a logical file-view contract
-   is accepted, if that option is chosen.
+   is accepted, if that option is chosen. §6.4 removes part of the reason such
+   a view would need to synthesize anything: named files are blobs, node
+   documents are structured records, and only the path vocabulary is left.
 8. Prototype native CLI access separately and decide between protocol-only,
    materialization, and mounting from measured product requirements.
 9. Design and implement backend migration/export/import only after source and
@@ -2048,6 +2438,30 @@ Out of scope: a SQLite adapter or schema, Disk→SQLite data migration, SQLite p
   export/import.
 - A local projection may expose private memory/history or host paths to an
   external agent unless visibility is capability-scoped.
+- A composition-layer Space facade that vends both ports is one import away
+  from becoming the place cross-store invariants accumulate silently. Every
+  rule it enforces has to be stated as a rule, or the facade becomes a third
+  authority with no contract suite of its own (§6.4.1).
+- Declaring a family Disk-only (§6.4.2, disposition A) is honest but is also
+  the cheapest answer available at any moment. Without a capability matrix an
+  operator can read before selecting a profile, "unavailable" degrades from a
+  stated product limitation into a surprise at first use.
+- Moving user-authored files into `BlobStore` (disposition D) puts documents a
+  human edits behind a port with no rename and no per-key delete — omissions
+  sized for artifacts nobody edits by hand (§6.2, §7.1). §6.4.3 keeps them
+  unsupported deliberately; the risk is that a product requirement for
+  "delete my skill.md" arrives and reopens the GC design §14 parks.
+- Declaring dispositions without building them (§6.4.2) leaves the direction on
+  paper, where it can quietly stop matching the code. The capability matrix is
+  the mitigation only if a profile is actually validated against it.
+- The extension substrate (§6.4.4) hands out a live SQL handle and a real
+  directory path. A namespace bounds an owner by convention; nothing stops DDL
+  outside its schema, a long-held transaction, or a write into a sibling
+  directory. This is the deliberate cost of letting owners write their own SQL,
+  and it makes every extension trusted Server code.
+- The substrate makes the backend kind part of the extension API, so a profile
+  change can break owners that a storage contract suite will never exercise —
+  by construction, since the port cannot read their data.
 
 ## 14. Open questions
 
@@ -2103,7 +2517,21 @@ Out of scope: a SQLite adapter or schema, Disk→SQLite data migration, SQLite p
   changing their persist-before-notify, sequence, and fencing semantics?
 - Where do user memory, Space memory, memory-worker state, chat digest, and
   user-authored skills belong? The analyzer's Space record, action-event, and
-  intent inputs moved in P3; these physical files did not.
+  intent inputs moved in P3; these physical files did not. §6.4.3 answers the
+  per-Space half — worker state is a structured record, the memory body is a
+  blob — and leaves the Workspace-scoped ones (`setting/user.md`, user skills)
+  untouched, because a Workspace is not a Space and no port scopes to it yet.
+- Does an extension namespace need an owner registry, or is a string convention
+  (`huabu.memory`, `agenetes.acp`) enough? A registry buys collision detection
+  and a place to hang the supported-backend list; a convention buys nothing to
+  maintain.
+- Is the substrate per Space, per Workspace, or both? Every consumer today is
+  per Space, so that is what §6.4.4 defines. A Workspace-scoped extension —
+  bubble's schedules are deployment-scoped, not per-conversation — is the same
+  idea one level up and is not designed here.
+- Who runs an extension's schema migrations, and when? Storage creates and
+  destroys the namespace but knows nothing inside it, so an owner arriving at a
+  populated namespace it wrote a previous version of has no hook to migrate on.
 
 ### Blob storage
 
@@ -2113,14 +2541,23 @@ Out of scope: a SQLite adapter or schema, Disk→SQLite data migration, SQLite p
   bypasses `sendBlob` entirely — which means `put()` grows an options
   parameter (§7.1).
 - Should any scope kind ever need hierarchical names? The contract currently
-  collapses names to a single segment for every backend (§7.1).
+  collapses names to a single segment for every backend (§7.1). §6.4.3 proposes
+  answering "no" and adding a `BlobScopeRef` kind per user-visible area
+  instead, so `skill.md`, the memory body, artifacts, and upload scratch stay
+  where a user sees them today without the port learning paths.
+- Do user-authored blobs need rename and per-key delete? Answered "not until a
+  product operation requires it" (§6.4.3): overwriting is the supported edit,
+  because per-key deletion reopens reference counting and GC. Revisit if a
+  product surface offers deleting one.
 - Does `health()` need a failure mode? It cannot currently report one, and the
   contract suite asserts success, so an unhealthy backend fails the suite
   rather than reporting itself unhealthy.
 - Where do staging state, orphan detection, reference counts, retention, and GC
   live?
 - Is an upload scratch area durable BlobStore state, leased temporary state, or
-  agent-workspace state?
+  agent-workspace state? Answered: durable blob state under its own scope kind
+  (§6.4.3), which leaves retention free to diverge from artifacts later without
+  relocating bytes.
 - How are encryption, credentials, tenancy prefixes, and Azure container
   lifecycle configured?
 
@@ -2154,8 +2591,24 @@ Out of scope: a SQLite adapter or schema, Disk→SQLite data migration, SQLite p
 - How is a stable directory refreshed across a long-lived ACP session?
 - How do rename, delete, duplicate IDs, filename collisions, and conflict files
   map back to domain mutations?
-- Does external-note discovery remain a Disk-only optional capability?
 - Is an OS mount justified on every supported desktop platform?
+
+Settled by §6.4, recorded here because this section asked them:
+
+- **Does external-note discovery remain a Disk-only optional capability?** Yes.
+  It watches for documents that arrived without going through the application,
+  and no database backend has such an arrival path (§6.4.3).
+- **Are the built-in file tools, reveal, and bundle export/import portable?**
+  No. They are Disk-only and declared as such, rather than emulated over a
+  synthesized tree. Off Disk the first-party agent uses RFS/HTTP, which is
+  already how external agents reach a Space (§9).
+
+- **Where do the ACP sessions, memory-worker state, and the debug prompt log
+  live?** All three become structured state on an isolated substrate under
+  their own namespace (§6.4.4). Storage owns namespace isolation and lifecycle;
+  each owner brings its own store.
+- **Is upload scratch durable blob state?** Yes, under its own blob scope kind,
+  so retention can diverge from artifacts later without relocating bytes.
 
 ## 15. Validation criteria for a later implementation
 
