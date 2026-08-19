@@ -2,13 +2,13 @@
 // Licensed under the MIT license.
 
 /**
- * @file The structured-frame slide-aside preview.
+ * @file Node geometry previews.
  *
- * The positions deliberately live here rather than on `canvasStore.nodes`:
- * they are re-projected at ~60 fps while a drop is being aimed, and the
- * canvas store is the persisted, undoable, broadcast geometry. Keeping
- * them apart is what makes it impossible for a mid-drag save or history
- * snapshot to capture a position the user never committed.
+ * These previews deliberately live here rather than on `canvasStore.nodes`:
+ * they are re-projected at ~60 fps while a drag/drop is being aimed, and the
+ * canvas store is persisted, undoable, broadcast geometry. Keeping them
+ * separate prevents a mid-drag save or history snapshot from capturing geometry
+ * the user never committed.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
