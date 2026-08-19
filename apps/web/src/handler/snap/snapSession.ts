@@ -264,7 +264,6 @@ function invalidateFrameDragPreview(): void {
   const preview = useGesturePreviewStore.getState();
   preview.clearFrameFitPreview();
   preview.clearStructuredDropPreview();
-  preview.clearStructuredReflowPositions();
   preview.clearNodeGeometryPreviews();
 }
 

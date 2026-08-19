@@ -8,7 +8,6 @@ import type {
   FrameFitResult,
   NestableNode,
   StructuredDropContext,
-  StructuredReflowEntry,
 } from '@huabu/shared/canvas-engine';
 
 /**
@@ -124,28 +123,6 @@ type GesturePreviewData = {
   structuredDropPreview: StructuredDropPreview | null;
 
   /**
-   * Where the hovered structured frame's existing children would sit
-   * after the drop, so they visibly slide aside under the cursor.
-   * Frame-local positions keyed by node id; `null` when no structured
-   * drop is in progress.
-   *
-   * Deliberately NOT written onto `canvasStore.nodes`: the canvas store
-   * is the persisted, undoable, broadcast geometry, and a per-tick
-   * preview has no business being in it — anything that snapshots or
-   * saves mid-drag would capture a position the user never committed.
-   * `Canvas.tsx` folds these into the node array it hands React Flow,
-   * so the peers (and the edges between them) move on screen while the
-   * authoritative geometry stays untouched.
-   *
-   * The dragged node is excluded by the writer: React Flow owns its
-   * position until release.
-   */
-  structuredReflowPositions: ReadonlyMap<
-    string,
-    { x: number; y: number }
-  > | null;
-
-  /**
    * Complete future geometry for nodes affected by a nested Frame transaction.
    * Folded into React Flow only at the render boundary; never persisted.
    */
@@ -208,19 +185,6 @@ type GesturePreviewState = GesturePreviewData & {
   /** Clear the structured drop indicator when the gesture ends. */
   clearStructuredDropPreview: () => void;
 
-  /**
-   * Replace the peer slide-aside positions (called every drag tick).
-   * A tick that projects the same positions as the last one leaves the
-   * state object untouched, so the 60 fps call rate cannot by itself
-   * re-render the canvas.
-   */
-  setStructuredReflowPositions: (
-    entries: readonly StructuredReflowEntry[],
-  ) => void;
-
-  /** Drop the slide-aside positions, restoring the real geometry. */
-  clearStructuredReflowPositions: () => void;
-
   setNodeGeometryPreviews: (nodes: readonly NestableNode[]) => void;
   clearNodeGeometryPreviews: () => void;
 
@@ -262,7 +226,6 @@ const INITIAL_PREVIEW_DATA: GesturePreviewData = {
   frameFitPreviews: [],
   snapGuides: [],
   structuredDropPreview: null,
-  structuredReflowPositions: null,
   nodeGeometryPreviews: null,
 };
 
@@ -278,8 +241,8 @@ const INITIAL_PREVIEW_DATA: GesturePreviewData = {
  *   and resize gestures.
  * - `structuredDropPreview` — live drop indicator (column / row band or
  *   insert bar) shown while dragging a node over a structured frame.
- * - `structuredReflowPositions` — where that frame's existing children
- *   slide to while the drop is being aimed.
+ * - `nodeGeometryPreviews` — the complete future geometry tree for affected
+ *   Frames and peers while a drop is being aimed.
  *
  * Lives in its own store because:
  *
@@ -325,32 +288,6 @@ export const useGesturePreviewStore = create<GesturePreviewState>()((set) => ({
   setStructuredDropPreview: (preview) =>
     set({ structuredDropPreview: preview }),
   clearStructuredDropPreview: () => set({ structuredDropPreview: null }),
-  setStructuredReflowPositions: (entries) =>
-    set((state) => {
-      const current = state.structuredReflowPositions;
-      if (entries.length === 0) {
-        return current === null ? state : { structuredReflowPositions: null };
-      }
-      const unchanged =
-        current !== null &&
-        current.size === entries.length &&
-        entries.every((entry) => {
-          const previous = current.get(entry.id);
-          return previous?.x === entry.x && previous?.y === entry.y;
-        });
-      if (unchanged) return state;
-      return {
-        structuredReflowPositions: new Map(
-          entries.map((entry) => [entry.id, { x: entry.x, y: entry.y }]),
-        ),
-      };
-    }),
-  clearStructuredReflowPositions: () =>
-    set((state) =>
-      state.structuredReflowPositions === null
-        ? state
-        : { structuredReflowPositions: null },
-    ),
   setNodeGeometryPreviews: (nodes) =>
     set((state) => {
       const current = state.nodeGeometryPreviews;

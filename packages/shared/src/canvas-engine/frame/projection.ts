@@ -41,31 +41,16 @@ export function projectAffectedFrameGeometry(
     return { nodes, affectedFrameIds };
   }
 
-  const depthCache = new Map<string, number>();
-  const depthOf = (id: string): number => {
-    const cached = depthCache.get(id);
-    if (cached !== undefined) return cached;
-    let depth = 0;
-    let parentId = byId.get(id)?.parentId;
-    const visited = new Set<string>();
-    while (parentId && !visited.has(parentId)) {
-      visited.add(parentId);
-      depth += 1;
-      parentId = byId.get(parentId)?.parentId;
-    }
-    depthCache.set(id, depth);
-    return depth;
-  };
-  const deepestFirst = [...affectedFrameIds].sort(
-    (left, right) => depthOf(right) - depthOf(left),
-  );
-  const hugFrameIds = deepestFirst.filter(
+  const hugFrameIds = [...affectedFrameIds].filter(
     (id) => getFrameSizing(byId.get(id)) === 'hug',
   );
   const fitted = fitFrames(nodes, hugFrameIds);
-  const relaid = applyStructuredFrameRelayout(fitted, deepestFirst, undefined, {
-    edges,
-  }).nodes as NestableNode[];
+  const relaid = applyStructuredFrameRelayout(
+    fitted,
+    affectedFrameIds,
+    undefined,
+    { edges },
+  ).nodes as NestableNode[];
 
   return { nodes: relaid, affectedFrameIds };
 }

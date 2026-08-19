@@ -87,7 +87,7 @@ import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { isMac } from '@/utils/platform';
 import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 
-import { applyNodeGeometryPreview } from './applyNodeGeometryPreview';
+import { applyNodeGeometryPreviews } from './applyNodeGeometryPreview';
 import {
   canDirectlyManipulateWithPointer,
   closestNodeElement,
@@ -432,13 +432,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   // CSS rule excludes `.dragging` so the dragged node stays on the cursor.
   const isStructuredReflowing = useGesturePreviewStore(
     (state) => state.structuredDropPreview !== null,
-  );
-  // Where those peers slide to. Lives in the gesture-preview store rather
-  // than on `canvasStore.nodes` so a mid-drag save / undo snapshot can
-  // never capture a position the user has not committed; it is folded
-  // into the node array below, at the render boundary only.
-  const structuredReflowPositions = useGesturePreviewStore(
-    (state) => state.structuredReflowPositions,
   );
   const nodeGeometryPreviews = useGesturePreviewStore(
     (state) => state.nodeGeometryPreviews,
@@ -845,6 +838,11 @@ export const Canvas: React.FC<CanvasProps> = ({
     const prevCache = zWrapCacheRef.current;
     const nextCache = new Map<(typeof nodes)[number], (typeof nodes)[number]>();
 
+    const previewNodes = applyNodeGeometryPreviews(
+      nodes as CanvasNode[],
+      nodeGeometryPreviews,
+    );
+    const previewById = new Map(previewNodes.map((node) => [node.id, node]));
     const result = nodes.map((node) => {
       const z = zByNode.get(node.id) ?? 0;
       const wantsLassoClass = lassoPreviewNodeIdSet.has(node.id);
@@ -854,13 +852,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         : baseClassName;
       // Transient slide-aside offset; absent for every node outside the
       // hovered structured frame, and for the dragged node itself.
-      const previewPosition = structuredReflowPositions?.get(node.id);
-      const geometryPreview = nodeGeometryPreviews?.get(node.id);
-      const previewedNode = applyNodeGeometryPreview(
-        node as CanvasNode,
-        geometryPreview,
-        previewPosition,
-      );
+      const previewedNode = previewById.get(node.id) ?? node;
       const nextPosition = previewedNode.position;
       const nextStyle = previewedNode.style;
       const nextMeasured = previewedNode.measured;
@@ -907,14 +899,7 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     zWrapCacheRef.current = nextCache;
     return result;
-  }, [
-    isNotMouse,
-    lassoPreviewNodeIdSet,
-    nodes,
-    nodeGeometryPreviews,
-    structuredReflowPositions,
-    zByNode,
-  ]);
+  }, [isNotMouse, lassoPreviewNodeIdSet, nodes, nodeGeometryPreviews, zByNode]);
 
   // Override marker colors on selected edges so arrows match the selection
   // highlight color (--color-info). CSS cannot style SVG <marker> referenced

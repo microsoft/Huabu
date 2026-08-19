@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyGridLayout,
+  computeFrameFit,
   executeCanvasCommands,
 } from '@huabu/shared/canvas-engine';
 
@@ -169,6 +170,140 @@ describe('resolveNodeDragStop Grid cells', () => {
     expect(
       resolution.commands.find((command) => command.type === 'SET_NODE_PARENT'),
     ).toMatchObject({ nodeIds: ['dragged'], parentId: 'outer' });
+  });
+
+  it('fits a Hug outer Frame after a node moves up from its inner Frame', () => {
+    const outer = {
+      id: 'outer',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { sizing: 'hug' },
+      style: { width: 500, height: 500 },
+      measured: { width: 500, height: 500 },
+    } as Node;
+    const inner = {
+      id: 'inner',
+      type: 'frame',
+      parentId: 'outer',
+      position: { x: 100, y: 100 },
+      data: { sizing: 'manual' },
+      style: { width: 200, height: 200 },
+      measured: { width: 200, height: 200 },
+    } as Node;
+    const dragged = {
+      id: 'dragged',
+      type: 'note',
+      parentId: 'inner',
+      position: { x: -80, y: -80 },
+      data: {},
+      style: { width: 100, height: 100 },
+      measured: { width: 100, height: 100 },
+    } as Node;
+    const nodes = [outer, inner, dragged];
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: { x: 30, y: 30 },
+        cachedDecisions: new Map([
+          ['dragged', { unframe: true, enterFrameId: 'outer' }],
+        ]),
+      },
+      state(nodes),
+    );
+    const committed = executeCanvasCommands(
+      { source: 'ui', commands: resolution.commands },
+      { nodes, edges: [], canvasId: 'canvas' },
+    ).writeResult.nodes;
+    const committedOuter = committed.find((node) => node.id === 'outer');
+    const stableFit = computeFrameFit(committed, 'outer');
+
+    expect(committed.find((node) => node.id === 'dragged')?.parentId).toBe(
+      'outer',
+    );
+    expect(committedOuter?.position).toEqual(stableFit?.position);
+    expect(committedOuter?.style).toMatchObject({
+      width: stableFit?.width,
+      height: stableFit?.height,
+    });
+  });
+
+  it('stabilizes a Hug grid height when a node moves up across three Frame levels', () => {
+    const outer = {
+      id: 'outer',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { layoutMode: 'grid', gridCount: 2, sizing: 'hug' },
+      style: { width: 600, height: 300 },
+      measured: { width: 600, height: 300 },
+    } as Node;
+    const middle = {
+      id: 'middle',
+      type: 'frame',
+      parentId: 'outer',
+      position: { x: 30, y: 30 },
+      data: { frameColumn: 0, frameRow: 0, sizing: 'manual' },
+      style: { width: 240, height: 200 },
+      measured: { width: 240, height: 200 },
+    } as Node;
+    const outerPeer = {
+      id: 'outer-peer',
+      type: 'note',
+      parentId: 'outer',
+      position: { x: 300, y: 30 },
+      data: { frameColumn: 1, frameRow: 0 },
+      style: { width: 120, height: 80 },
+      measured: { width: 120, height: 80 },
+    } as Node;
+    const inner = {
+      id: 'inner',
+      type: 'frame',
+      parentId: 'middle',
+      position: { x: 20, y: 20 },
+      data: { sizing: 'manual' },
+      style: { width: 180, height: 140 },
+      measured: { width: 180, height: 140 },
+    } as Node;
+    const dragged = {
+      id: 'dragged',
+      type: 'note',
+      parentId: 'inner',
+      position: { x: 20, y: 20 },
+      data: {},
+      style: { width: 100, height: 80 },
+      measured: { width: 100, height: 80 },
+    } as Node;
+    const initial = [outer, middle, outerPeer, inner, dragged];
+    const initialLayout = applyGridLayout(initial, 'outer', 2);
+    if (!initialLayout) throw new Error('Outer grid fixture did not resolve');
+    const nodes = initial.map((node) => {
+      const position = initialLayout.childPositions.get(node.id);
+      return position ? { ...node, position } : node;
+    });
+    const outerHeight = initialLayout.frameSize.height;
+
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['dragged'],
+        pointerFlowPosition: { x: 80, y: outerHeight + 20 },
+        cachedDecisions: new Map([
+          ['dragged', { unframe: true, enterFrameId: 'outer' }],
+        ]),
+      },
+      state(nodes),
+    );
+    const committed = executeCanvasCommands(
+      { source: 'ui', commands: resolution.commands },
+      { nodes, edges: [], canvasId: 'canvas' },
+    ).writeResult.nodes;
+    const committedOuter = committed.find((node) => node.id === 'outer');
+    const stableLayout = applyGridLayout(committed, 'outer', 2);
+
+    expect(committed.find((node) => node.id === 'dragged')?.parentId).toBe(
+      'outer',
+    );
+    expect(committedOuter?.style?.height).toBe(stableLayout?.frameSize.height);
   });
 
   it('keeps a Hug child Frame on its outer structured track after entry', () => {

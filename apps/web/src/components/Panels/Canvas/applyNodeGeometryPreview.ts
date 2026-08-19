@@ -21,3 +21,13 @@ export function applyNodeGeometryPreview(
     measured: geometry?.measured ?? node.measured,
   };
 }
+
+export function applyNodeGeometryPreviews(
+  nodes: readonly CanvasNode[],
+  geometries: ReadonlyMap<string, NodeGeometryPreview> | null,
+): CanvasNode[] {
+  if (!geometries) return nodes as CanvasNode[];
+  return nodes.map((node) =>
+    applyNodeGeometryPreview(node, geometries.get(node.id), undefined),
+  );
+}

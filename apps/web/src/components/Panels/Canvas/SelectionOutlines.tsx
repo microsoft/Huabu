@@ -12,11 +12,14 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import useCanvasStore from '@/store/canvasStore';
+import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import {
   blendedMarkRect,
   easeToward,
   useNodeCollapseStore,
 } from '@/store/nodeCollapseStore';
+
+import { applyNodeGeometryPreviews } from './applyNodeGeometryPreview';
 
 import type { CanvasNode } from '@/components/Nodes/types';
 
@@ -52,15 +55,23 @@ export function selectOutlinedNodes(
  */
 export const SelectionOutlines = () => {
   const nodes = useCanvasStore((s) => s.nodes);
+  const nodeGeometryPreviews = useGesturePreviewStore(
+    (state) => state.nodeGeometryPreviews,
+  );
   const { zoom, x: vpX, y: vpY } = useViewport();
   const domNode = useStore((s) => s.domNode);
   // Collapsed nodes have faded their card away, so outlining the footprint
   // would box a stretch of empty canvas beside the mark that replaced it.
   const marks = useNodeCollapseStore((s) => s.marks);
 
+  const previewNodes = useMemo(
+    () =>
+      applyNodeGeometryPreviews(nodes as CanvasNode[], nodeGeometryPreviews),
+    [nodeGeometryPreviews, nodes],
+  );
   const outlinedNodes = useMemo(
-    () => selectOutlinedNodes(nodes as CanvasNode[]),
-    [nodes],
+    () => selectOutlinedNodes(previewNodes),
+    [previewNodes],
   );
 
   if (outlinedNodes.length === 0 || !domNode) return null;
@@ -73,7 +84,7 @@ export const SelectionOutlines = () => {
   const outlines = outlinedNodes.map((n) => {
     const mark = marks[n.id];
     const abs =
-      getAbsolutePosition(nodes as NestableNode[], n.id) ?? n.position;
+      getAbsolutePosition(previewNodes as NestableNode[], n.id) ?? n.position;
     const { width, height } = getNodeSize(n);
     // Fall back to xyflow's typical defaults when the node has no explicit
     // measured size yet (e.g. a freshly added node mid-frame).

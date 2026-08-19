@@ -3,7 +3,11 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { applyGridLayout } from '../../autoLayout/gridLayout.js';
+import {
+  applyGridLayout,
+  applyStructuredFrameRelayout,
+} from '../../autoLayout/gridLayout.js';
+import { moveNodeIntoContainer } from '../../container/mutation.js';
 import { projectAffectedFrameGeometry } from '../projection.js';
 
 import type { NestableNode } from '../../container/tree.js';
@@ -106,5 +110,93 @@ describe('projectAffectedFrameGeometry', () => {
     ).nodes;
 
     expect(projected.find((node) => node.id === 'unrelated')).toBe(unrelated);
+  });
+
+  it('fits a free target after projected entry and reflows its outer grid', () => {
+    const outer = frame('outer', { x: 0, y: 0 }, undefined, {
+      layoutMode: 'grid',
+      gridCount: 2,
+      sizing: 'manual',
+    });
+    const peer = frame('peer', { x: 30, y: 30 }, 'outer', {
+      frameColumn: 0,
+      frameRow: 0,
+      sizing: 'manual',
+    });
+    const target = frame('target', { x: 260, y: 30 }, 'outer', {
+      frameColumn: 1,
+      frameRow: 0,
+      sizing: 'hug',
+    });
+    const existing = {
+      id: 'existing',
+      type: 'note',
+      parentId: 'target',
+      position: { x: 20, y: 20 },
+      data: {},
+      style: { width: 80, height: 60 },
+      measured: { width: 80, height: 60 },
+    } as NestableNode;
+    const dragged = {
+      id: 'dragged',
+      type: 'note',
+      position: { x: 500, y: 120 },
+      data: {},
+      style: { width: 100, height: 80 },
+      measured: { width: 100, height: 80 },
+    } as NestableNode;
+    const entered = moveNodeIntoContainer(
+      [outer, peer, target, existing, dragged],
+      'dragged',
+      'target',
+    );
+    const projected = projectAffectedFrameGeometry(entered, ['target']).nodes;
+    const projectedTarget = projected.find((node) => node.id === 'target');
+    const expectedTargetPosition = applyGridLayout(
+      projected,
+      'outer',
+      2,
+    )?.childPositions.get('target');
+
+    expect(projectedTarget?.style?.width).toBeGreaterThan(180);
+    expect(projectedTarget?.position).toEqual(expectedTargetPosition);
+  });
+});
+
+describe('applyStructuredFrameRelayout ordering', () => {
+  it('stabilizes outer Hug geometry even when callers list ancestors first', () => {
+    const outer = frame('outer', { x: 0, y: 0 }, undefined, {
+      layoutMode: 'row',
+      gridCount: 1,
+      sizing: 'hug',
+    });
+    const middle = frame('middle', { x: 20, y: 20 }, 'outer', {
+      layoutMode: 'row',
+      gridCount: 1,
+      sizing: 'hug',
+      frameRow: 0,
+    });
+    const child = {
+      id: 'child',
+      type: 'note',
+      parentId: 'middle',
+      position: { x: 20, y: 20 },
+      data: { frameRow: 0 },
+      style: { width: 500, height: 300 },
+      measured: { width: 500, height: 300 },
+    } as NestableNode;
+
+    const first = applyStructuredFrameRelayout(
+      [outer, middle, child],
+      ['outer', 'middle'],
+    ).nodes;
+    const second = applyStructuredFrameRelayout(first, [
+      'outer',
+      'middle',
+    ]).nodes;
+    const firstOuter = first.find((node) => node.id === 'outer');
+    const secondOuter = second.find((node) => node.id === 'outer');
+
+    expect(firstOuter?.style?.height).toBe(secondOuter?.style?.height);
   });
 });
