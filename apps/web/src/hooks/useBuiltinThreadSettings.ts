@@ -21,7 +21,7 @@ import {
   setChatThreadModel,
   setChatThreadReasoningEffort,
 } from '@/api/llm';
-import { useChatStore } from '@/store/chatStore';
+import { selectThreadSettings, useChatStore } from '@/store/chatStore';
 
 import type { ChatThreadSettings, LLMModelInfo } from '@huabu/shared';
 
@@ -57,7 +57,25 @@ export function useBuiltinThreadSettings({
   threadHasMessages,
 }: UseBuiltinThreadSettingsArgs) {
   const [models, setModels] = useState<LLMModelInfo[]>([]);
-  const [settings, setSettings] = useState<ChatThreadSettings>(EMPTY_SETTINGS);
+  const [settingsState, setSettingsState] = useState<{
+    threadId: string | null;
+    settings: ChatThreadSettings;
+  }>(() => ({
+    threadId: threadId ?? null,
+    settings:
+      enabled && threadId
+        ? selectThreadSettings(useChatStore.getState(), threadId)
+        : EMPTY_SETTINGS,
+  }));
+  const cachedSettings = useChatStore((state) =>
+    threadId ? selectThreadSettings(state, threadId) : EMPTY_SETTINGS,
+  );
+  const settings =
+    enabled && settingsState.threadId === threadId
+      ? settingsState.settings
+      : enabled
+        ? cachedSettings
+        : EMPTY_SETTINGS;
   const [loading, setLoading] = useState(false);
   // Bumped on every local user mutation. A settings fetch that started
   // before a mutation must not clobber the newer local value (P1-2).
@@ -85,12 +103,21 @@ export function useBuiltinThreadSettings({
   // Fetch this thread's persisted selection.
   useEffect(() => {
     if (!enabled || !threadId) {
-      setSettings(EMPTY_SETTINGS);
+      setSettingsState({
+        threadId: threadId ?? null,
+        settings: EMPTY_SETTINGS,
+      });
+      setLoading(false);
       return;
     }
-    // Clear the previous thread's selection immediately so the load window
-    // never carries a stale value into the newly-selected thread (P1-1).
-    setSettings(EMPTY_SETTINGS);
+    const restored = selectThreadSettings(useChatStore.getState(), threadId);
+    setSettingsState({ threadId, settings: restored });
+    // Before first send there is no durable server record. The local thread
+    // cache is authoritative and is carried on the first message.
+    if (!threadHasMessages) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     const genAtStart = mutationGenRef.current;
     setLoading(true);
@@ -99,10 +126,10 @@ export function useBuiltinThreadSettings({
         // Skip if the thread/enable changed, or the user picked a value
         // after this fetch started — the local choice wins (P1-2).
         if (cancelled || mutationGenRef.current !== genAtStart) return;
-        setSettings(next);
+        setSettingsState({ threadId, settings: next });
       })
       .catch(() => {
-        // Keep EMPTY (or a local pick that bumped the generation).
+        // Keep the restored cache (or a local pick that bumped the generation).
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -110,7 +137,7 @@ export function useBuiltinThreadSettings({
     return () => {
       cancelled = true;
     };
-  }, [enabled, threadId, canvasId]);
+  }, [enabled, threadId, canvasId, threadHasMessages]);
 
   // Mirror the current selection into the owning thread so the send path can
   // carry it on the request (applies a pre-first-message pick on thread
@@ -138,16 +165,23 @@ export function useBuiltinThreadSettings({
       // honour (off/absent stay), so the UI never shows a stale effort.
       const nextEfforts =
         models.find((m) => m.id === modelId)?.reasoningEfforts ?? [];
-      setSettings((s) => ({
-        ...s,
-        modelId,
-        reasoningEffort:
-          s.reasoningEffort &&
-          s.reasoningEffort !== 'off' &&
-          !nextEfforts.includes(s.reasoningEffort)
-            ? null
-            : s.reasoningEffort,
-      }));
+      setSettingsState((current) => {
+        const prior =
+          current.threadId === threadId ? current.settings : cachedSettings;
+        return {
+          threadId,
+          settings: {
+            ...prior,
+            modelId,
+            reasoningEffort:
+              prior.reasoningEffort &&
+              prior.reasoningEffort !== 'off' &&
+              !nextEfforts.includes(prior.reasoningEffort)
+                ? null
+                : prior.reasoningEffort,
+          },
+        };
+      });
       // No persisted record yet → hold locally; the first message carries
       // it (skip the POST so nothing 404s).
       if (!threadHasMessages) return;
@@ -159,20 +193,30 @@ export function useBuiltinThreadSettings({
         );
         // Adopt the server's canonical (clamped) values, unless the user
         // changed something while the request was in flight.
-        if (mutationGenRef.current === gen) setSettings(corrected);
+        if (mutationGenRef.current === gen) {
+          setSettingsState({ threadId, settings: corrected });
+        }
       } catch {
         // Keep the optimistic value; a genuinely bad value is corrected by
         // the next settings fetch.
       }
     },
-    [threadId, canvasId, threadHasMessages, models],
+    [threadId, canvasId, threadHasMessages, models, cachedSettings],
   );
 
   const selectReasoningEffort = useCallback(
     async (reasoningEffort: string) => {
       if (!threadId) return;
       mutationGenRef.current += 1;
-      setSettings((s) => ({ ...s, reasoningEffort })); // optimistic
+      setSettingsState((current) => ({
+        threadId,
+        settings: {
+          ...(current.threadId === threadId
+            ? current.settings
+            : cachedSettings),
+          reasoningEffort,
+        },
+      }));
       if (!threadHasMessages) return;
       try {
         await setChatThreadReasoningEffort(
@@ -184,7 +228,7 @@ export function useBuiltinThreadSettings({
         // Keep the optimistic value; carried on the next send.
       }
     },
-    [threadId, canvasId, threadHasMessages],
+    [threadId, canvasId, threadHasMessages, cachedSettings],
   );
 
   // The effective model id: the per-thread override, else the global default.

@@ -4,9 +4,17 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  canSnapshotMultiSelectRoot,
   resolveMultiSelectGeometry,
   resolveMultiSelectScale,
 } from './MultiSelectResizer';
+
+describe('canSnapshotMultiSelectRoot', () => {
+  it('excludes a locked selected root from resize geometry', () => {
+    expect(canSnapshotMultiSelectRoot({ data: { locked: true } })).toBe(false);
+    expect(canSnapshotMultiSelectRoot({ data: {} })).toBe(true);
+  });
+});
 
 describe('resolveMultiSelectScale', () => {
   it('keeps free-axis scaling for selections without locked media', () => {

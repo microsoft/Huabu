@@ -134,6 +134,12 @@ export function resolveMultiSelectGeometry({
   });
 }
 
+export function canSnapshotMultiSelectRoot(node: {
+  data?: { locked?: boolean };
+}): boolean {
+  return !node.data?.locked;
+}
+
 /** Smallest scale we permit; prevents flipping past zero. */
 const MIN_SCALE = 0.05;
 
@@ -296,6 +302,7 @@ export const MultiSelectResizer = () => {
       }
     };
     for (const n of eligibleNodes) {
+      if (!canSnapshotMultiSelectRoot(n)) continue;
       addSnapshotSubtree(n, n.type === 'frame' ? n.id : null);
     }
     if (snapNodes.length === 0) return;

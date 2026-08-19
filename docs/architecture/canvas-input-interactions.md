@@ -70,6 +70,8 @@ stateDiagram-v2
 
 The shared values define only the tap-versus-drag activation gate. Feature-specific quantities retain their separate meanings, including Lasso point sampling and minimum polygon span, Frame minimum creation size, Sketch merge distance, eraser radius, and Smart Snap distance.
 
+Locked selected roots do not participate in multi-selection resize geometry. Resizing an unlocked selected Frame continues to cascade through its subtree as one coordinate-space operation.
+
 In Finger mode, one-finger touch on empty canvas owns a pending viewport gesture: releasing below the touch activation distance clears the current selection, while crossing the distance locks and pans without clearing selection. Empty-canvas ownership is determined by excluding nodes and React Flow panels rather than requiring a particular React Flow pane descendant, so Background and other non-interactive canvas layers remain pannable. Node content and selected nodes retain their normal target ownership.
 
 The canvas root suppresses browser long-press callouts and native context menus on non-editable interaction surfaces so they cannot interrupt Pan, Lasso, Sketch, or node manipulation. While a finger or pen is the current pointer (`[data-canvas-root][data-not-mouse]`) it also disables text selection (`user-select: none`), so a drawing/pan/drag gesture that crosses node or panel text cannot select it and pop the iOS copy callout; the mouse keeps text selection so desktop users can still copy node text. Text inputs, selects, editable content, and real links retain their native context menus and remain selectable.
