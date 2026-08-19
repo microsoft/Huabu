@@ -96,7 +96,7 @@ The renderer draws inert structural geometry, frames, labels, clipped Image thum
 
 Preview rendering has one live scene depth. A source `spacePreview` or legacy `canvasRef` inside the projected target becomes a labelled nested-preview placeholder and never starts another scene request. This single-depth rule deterministically handles self-reference, `A → B → A`, and deeper cycles without carrying a recursive render stack.
 
-The renderer applies preview-local semantic detail based on screen-space size. Labels and minor edges may be omitted below bounded thresholds, but source geometry remains stable while zooming.
+The renderer applies preview-local semantic detail based on screen-space size. Labels and Note/Text excerpts use bounded screen-space typography: local zoom is fully counter-scaled and host zoom-out compensation is capped, preserving readability without allowing text to overwhelm deeply zoomed-out nodes. Minor edges may be omitted below bounded thresholds, but source geometry remains stable while zooming.
 
 ## 8. Interaction ownership
 

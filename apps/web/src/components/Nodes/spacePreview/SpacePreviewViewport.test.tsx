@@ -5,7 +5,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SpacePreviewViewport } from './SpacePreviewViewport';
+import {
+  SpacePreviewViewport,
+  spacePreviewTextMetrics,
+} from './SpacePreviewViewport';
 
 import type { GetSpacePreviewSceneResponse } from '@huabu/shared';
 
@@ -62,6 +65,47 @@ afterEach(async () => {
 });
 
 describe('SpacePreviewViewport content', () => {
+  it('keeps text at a stable screen size across local zoom', () => {
+    const base = spacePreviewTextMetrics({
+      bounds: scene.bounds,
+      localZoom: 1,
+      hostZoom: 1,
+      viewportSize: { width: 800, height: 300 },
+    });
+    const zoomed = spacePreviewTextMetrics({
+      bounds: scene.bounds,
+      localZoom: 2,
+      hostZoom: 1,
+      viewportSize: { width: 800, height: 300 },
+    });
+
+    expect(base.fontSize).toBe(14);
+    expect(zoomed.fontSize).toBe(7);
+    expect(zoomed.fontSize * 2).toBe(base.fontSize);
+  });
+
+  it('bounds host zoom-out compensation', () => {
+    const metrics = spacePreviewTextMetrics({
+      bounds: scene.bounds,
+      localZoom: 1,
+      hostZoom: 0.1,
+      viewportSize: { width: 800, height: 300 },
+    });
+
+    expect(metrics.fontSize).toBe(42);
+  });
+
+  it('lets host zoom-in scale text with the Preview node', () => {
+    const metrics = spacePreviewTextMetrics({
+      bounds: scene.bounds,
+      localZoom: 1,
+      hostZoom: 2,
+      viewportSize: { width: 800, height: 300 },
+    });
+
+    expect(metrics.fontSize).toBe(14);
+  });
+
   it('renders inert Note text and Image thumbnails', async () => {
     await act(async () => {
       root.render(
@@ -69,11 +113,16 @@ describe('SpacePreviewViewport content', () => {
           scene={scene}
           hostCanvasId="canvas-host"
           previewNodeId="node-preview"
+          hostZoom={1}
         />,
       );
     });
 
     expect(container.textContent).toContain('Visible note body');
+    expect(
+      container.querySelector<HTMLElement>('[data-preview-adaptive-text]')
+        ?.style.fontSize,
+    ).not.toBe('');
     const image = container.querySelector('image');
     expect(image?.getAttribute('href')).toContain(
       '/api/canvas/canvas-target/artifact/artifact-preview.png',

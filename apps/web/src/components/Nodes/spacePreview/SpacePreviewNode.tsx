@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { useStore } from '@xyflow/react';
 import { AlertTriangle, PanelsTopLeft, RefreshCw } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -23,6 +24,7 @@ export type SpacePreviewNodeType = Node<SpacePreviewNodeData, 'spacePreview'>;
 export const SpacePreviewNode = memo(
   ({ id, data, selected }: NodeProps<SpacePreviewNodeType>) => {
     const { t } = useTranslation();
+    const hostZoom = useStore((state) => state.transform[2]);
     const navigate = useNavigate();
     const viewportHostRef = useRef<HTMLDivElement>(null);
     const [nearViewport, setNearViewport] = useState(
@@ -38,6 +40,7 @@ export const SpacePreviewNode = memo(
     );
     const title =
       scene?.title || fallbackTitle || t('spacePreview.untitledSpace');
+    const titleFontSize = 14 * Math.min(3, Math.max(1, 1 / hostZoom));
     const openTarget = useCallback(() => {
       navigate(`/canvas/${data.targetCanvasId}`);
     }, [data.targetCanvasId, navigate]);
@@ -68,7 +71,10 @@ export const SpacePreviewNode = memo(
         >
           <div className="border-edge-default flex shrink-0 items-center gap-2 border-b px-3 py-2">
             <PanelsTopLeft className="text-fg-muted" size={16} />
-            <div className="text-fg-default min-w-0 flex-1 truncate text-sm font-medium">
+            <div
+              className="text-fg-default min-w-0 flex-1 truncate font-medium"
+              style={{ fontSize: titleFontSize }}
+            >
               {title}
             </div>
             {stale && (
@@ -95,6 +101,7 @@ export const SpacePreviewNode = memo(
               scene={scene}
               hostCanvasId={hostCanvasId}
               previewNodeId={id}
+              hostZoom={hostZoom}
             />
           ) : loading || !nearViewport ? (
             <Loading

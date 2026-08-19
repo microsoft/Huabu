@@ -26,9 +26,56 @@ import type { GetSpacePreviewSceneResponse } from '@huabu/shared';
 
 const MIN_PREVIEW_ZOOM = 0.5;
 const MAX_PREVIEW_ZOOM = 8;
+const MAX_HOST_ZOOM_COMPENSATION = 3;
+const PREVIEW_TEXT_SCREEN_PX = 14;
+const PREVIEW_TEXT_PADDING_SCREEN_PX = 10;
+
+interface ViewportSize {
+  width: number;
+  height: number;
+}
 
 function clampZoom(zoom: number): number {
   return Math.min(MAX_PREVIEW_ZOOM, Math.max(MIN_PREVIEW_ZOOM, zoom));
+}
+
+export function spacePreviewTextMetrics({
+  bounds,
+  localZoom,
+  hostZoom,
+  viewportSize,
+}: {
+  bounds: GetSpacePreviewSceneResponse['bounds'];
+  localZoom: number;
+  hostZoom: number;
+  viewportSize: ViewportSize;
+}): { fontSize: number; padding: number } {
+  if (viewportSize.width <= 0 || viewportSize.height <= 0) {
+    const hostZoomOutCompensation = Math.min(
+      MAX_HOST_ZOOM_COMPENSATION,
+      Math.max(1, 1 / hostZoom),
+    );
+    return {
+      fontSize: (PREVIEW_TEXT_SCREEN_PX * hostZoomOutCompensation) / localZoom,
+      padding:
+        (PREVIEW_TEXT_PADDING_SCREEN_PX * hostZoomOutCompensation) / localZoom,
+    };
+  }
+  const viewBoxWidth = Math.max(1, bounds.width / localZoom);
+  const viewBoxHeight = Math.max(1, bounds.height / localZoom);
+  const layoutUnitsPerPixel = Math.max(
+    viewBoxWidth / viewportSize.width,
+    viewBoxHeight / viewportSize.height,
+  );
+  const compensatedHostZoom = Math.min(
+    1,
+    Math.max(hostZoom, 1 / MAX_HOST_ZOOM_COMPENSATION),
+  );
+  const sceneUnitsPerScreenPixel = layoutUnitsPerPixel / compensatedHostZoom;
+  return {
+    fontSize: PREVIEW_TEXT_SCREEN_PX * sceneUnitsPerScreenPixel,
+    padding: PREVIEW_TEXT_PADDING_SCREEN_PX * sceneUnitsPerScreenPixel,
+  };
 }
 
 export const SpacePreviewViewport = memo(
@@ -36,10 +83,12 @@ export const SpacePreviewViewport = memo(
     scene,
     hostCanvasId,
     previewNodeId,
+    hostZoom,
   }: {
     scene: GetSpacePreviewSceneResponse;
     hostCanvasId: string;
     previewNodeId: string;
+    hostZoom: number;
   }) => {
     const { t } = useTranslation();
     const clipPrefix = useId().replaceAll(':', '');
@@ -59,6 +108,10 @@ export const SpacePreviewViewport = memo(
         },
     );
     const viewportRef = useRef(viewport);
+    const [viewportSize, setViewportSize] = useState<ViewportSize>({
+      width: 0,
+      height: 0,
+    });
 
     const reset = useCallback(() => {
       setViewport({ x: scene.bounds.x, y: scene.bounds.y, zoom: 1 });
@@ -108,6 +161,22 @@ export const SpacePreviewViewport = memo(
       return () => root.removeEventListener('wheel', onWheel, true);
     }, [zoomBy]);
 
+    useEffect(() => {
+      const root = rootRef.current;
+      if (!root) return;
+      const updateSize = () => {
+        setViewportSize({
+          width: root.clientWidth,
+          height: root.clientHeight,
+        });
+      };
+      updateSize();
+      if (typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(updateSize);
+      observer.observe(root);
+      return () => observer.disconnect();
+    }, []);
+
     const viewBox = useMemo(() => {
       const width = Math.max(1, scene.bounds.width / viewport.zoom);
       const height = Math.max(1, scene.bounds.height / viewport.zoom);
@@ -117,6 +186,16 @@ export const SpacePreviewViewport = memo(
     const nodeById = useMemo(
       () => new Map(scene.nodes.map((node) => [node.id, node])),
       [scene.nodes],
+    );
+    const textMetrics = useMemo(
+      () =>
+        spacePreviewTextMetrics({
+          bounds: scene.bounds,
+          localZoom: viewport.zoom,
+          hostZoom,
+          viewportSize,
+        }),
+      [hostZoom, scene.bounds, viewport.zoom, viewportSize],
     );
 
     return (
@@ -223,58 +302,80 @@ export const SpacePreviewViewport = memo(
               />
             );
           })}
-          {scene.nodes.map((node, index) => (
-            <g key={node.id}>
-              <rect
-                x={node.x}
-                y={node.y}
-                width={node.width}
-                height={node.height}
-                rx={node.kind === 'frame' ? 4 : 10}
-                className={
-                  node.kind === 'frame'
-                    ? 'stroke-edge-default fill-transparent'
-                    : node.kind === 'nested-preview'
-                      ? 'fill-info-bg stroke-info'
-                      : 'fill-surface stroke-edge-default'
-                }
-                vectorEffect="non-scaling-stroke"
-                strokeDasharray={
-                  node.kind === 'nested-preview' ? '6 4' : undefined
-                }
-              />
-              {node.imageSrc ? (
-                <image
-                  href={resolveArtifactUrl(node.imageSrc, scene.canvasId)}
+          {scene.nodes.map((node, index) => {
+            const textPadding = Math.min(
+              textMetrics.padding,
+              node.width / 4,
+              node.height / 4,
+            );
+            const textFontSize = Math.min(
+              textMetrics.fontSize,
+              Math.max(1, node.height - textPadding * 2),
+            );
+            return (
+              <g key={node.id}>
+                <rect
                   x={node.x}
                   y={node.y}
                   width={node.width}
                   height={node.height}
-                  preserveAspectRatio="xMidYMid meet"
-                  clipPath={`url(#${clipPrefix}-image-${index})`}
+                  rx={node.kind === 'frame' ? 4 : 10}
+                  className={
+                    node.kind === 'frame'
+                      ? 'stroke-edge-default fill-transparent'
+                      : node.kind === 'nested-preview'
+                        ? 'fill-info-bg stroke-info'
+                        : 'fill-surface stroke-edge-default'
+                  }
+                  vectorEffect="non-scaling-stroke"
+                  strokeDasharray={
+                    node.kind === 'nested-preview' ? '6 4' : undefined
+                  }
                 />
-              ) : node.previewText ? (
-                <foreignObject
-                  x={node.x + 12}
-                  y={node.y + 12}
-                  width={Math.max(1, node.width - 24)}
-                  height={Math.max(1, node.height - 24)}
-                >
-                  <div className="text-fg-default h-full overflow-hidden text-sm leading-snug break-words whitespace-pre-wrap">
-                    {node.previewText}
-                  </div>
-                </foreignObject>
-              ) : node.label ? (
-                <text
-                  x={node.x + 10}
-                  y={node.y + 20}
-                  className="fill-fg-muted text-[12px]"
-                >
-                  {node.label}
-                </text>
-              ) : null}
-            </g>
-          ))}
+                {node.imageSrc ? (
+                  <image
+                    href={resolveArtifactUrl(node.imageSrc, scene.canvasId)}
+                    x={node.x}
+                    y={node.y}
+                    width={node.width}
+                    height={node.height}
+                    preserveAspectRatio="xMidYMid meet"
+                    clipPath={`url(#${clipPrefix}-image-${index})`}
+                  />
+                ) : node.previewText ? (
+                  <foreignObject
+                    x={node.x + textPadding}
+                    y={node.y + textPadding}
+                    width={Math.max(1, node.width - textPadding * 2)}
+                    height={Math.max(1, node.height - textPadding * 2)}
+                  >
+                    <div
+                      className="text-fg-default h-full overflow-hidden leading-snug break-words whitespace-pre-wrap"
+                      data-preview-adaptive-text
+                      style={{ fontSize: textFontSize }}
+                    >
+                      {node.previewText}
+                    </div>
+                  </foreignObject>
+                ) : node.label ? (
+                  <foreignObject
+                    x={node.x + textPadding}
+                    y={node.y + textPadding}
+                    width={Math.max(1, node.width - textPadding * 2)}
+                    height={Math.max(1, node.height - textPadding * 2)}
+                  >
+                    <div
+                      className="text-fg-muted h-full overflow-hidden leading-snug break-words"
+                      data-preview-adaptive-label
+                      style={{ fontSize: textFontSize }}
+                    >
+                      {node.label}
+                    </div>
+                  </foreignObject>
+                ) : null}
+              </g>
+            );
+          })}
         </svg>
         <div className="absolute right-2 bottom-2 flex gap-1">
           <Button
