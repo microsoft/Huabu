@@ -174,6 +174,10 @@ Route every new floating canvas surface through `CanvasFloatingPopover` rather t
 
 Use hysteresis for any visibility or render-mode threshold that can be crossed continuously during wheel or pinch zoom. Keep threshold ownership with the feature that defines the semantic policy; generic portal components should accept resolved visibility rather than infer feature hierarchy.
 
+## 8. Space Preview rendering
+
+`spacePreview` keeps its outer node in host Canvas space but renders the target through a bounded static SVG and an independent local viewBox. Preview-local zoom never changes host React Flow zoom. Distant previews suspend their SVG renderer through `IntersectionObserver`; nested preview sources render only an inert placeholder. See [space-preview.md](./space-preview.md).
+
 ## Code entry points
 
 | File                                                                                                                                                   | Responsibility                                                                                  |

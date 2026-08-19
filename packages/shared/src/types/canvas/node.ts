@@ -29,6 +29,7 @@ export const CANVAS_NODE_TYPES = [
   'audio',
   'web',
   'frame',
+  'spacePreview',
   'canvasRef',
   'frameRef',
   'nodeRef',
@@ -41,7 +42,8 @@ export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
  * Node kinds the agent is allowed to construct via `CREATE_NODES`.
  * Excludes:
  * - `sketch` — produced only by the freehand drawing tool.
- * - `canvasRef` / `frameRef` / `nodeRef` — created only by World host operations.
+ * - `spacePreview` — created only by the user-facing target picker or World host operations.
+ * - `canvasRef` / `frameRef` / `nodeRef` — created only by legacy World host operations.
  */
 export const AGENT_CREATABLE_NODE_TYPES = [
   'note',
@@ -576,6 +578,12 @@ export interface CanvasRefNodeData extends BaseNodeData {
   targetCanvasId: string;
 }
 
+/** A view-only projection of another ordinary Space. */
+export interface SpacePreviewNodeData extends BaseNodeData {
+  type: 'spacePreview';
+  targetCanvasId: string;
+}
+
 /** A World-owned symbolic reference to a node in an ordinary Space. */
 export interface NodeRefNodeData extends BaseNodeData {
   type: 'nodeRef';
@@ -747,6 +755,7 @@ export type NodeData =
   | ImageNodeData
   | AudioNodeData
   | FrameNodeData
+  | SpacePreviewNodeData
   | CanvasRefNodeData
   | FrameRefNodeData
   | NodeRefNodeData
@@ -791,6 +800,12 @@ export function isFrameNode(data: NodeData): data is FrameNodeData {
 
 export function isCanvasRefNode(data: NodeData): data is CanvasRefNodeData {
   return data.type === 'canvasRef';
+}
+
+export function isSpacePreviewNode(
+  data: NodeData,
+): data is SpacePreviewNodeData {
+  return data.type === 'spacePreview';
 }
 
 export function isNodeRefNode(data: NodeData): data is NodeRefNodeData {

@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { useInternalNode } from '@xyflow/react';
-import { Pin, PinOff, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import { memo, useCallback, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -10,8 +10,6 @@ import {
   ACCENT_NONE_TOKEN,
   ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT,
   type FrameNodeData,
-  type FrameRefNodeData,
-  type NodeRefNodeData,
 } from '@huabu/shared';
 import { isAlwaysAutoHeightNodeType } from '@huabu/shared/canvas-engine';
 
@@ -35,7 +33,6 @@ import {
   selectIsNodeOpen,
   usePreviewWorkspaceStore,
 } from '@/store/previewWorkspace/store';
-import { useWorkspaceStore } from '@/store/workspaceStore';
 import { resolveGeometryEdit } from '@/utils/node/geometry';
 
 import type { CanvasNodeType, NodeData } from '@/components/Nodes/types';
@@ -106,13 +103,6 @@ export const NodeFloatingToolbar = memo(
     const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
     const isOpenInPreview = usePreviewWorkspaceStore((s) =>
       selectIsNodeOpen(s, id),
-    );
-    const canvasId = useCanvasStore((s) => s.canvasId);
-    const setPortalNodePins = useCanvasStore((s) => s.setPortalNodePins);
-    const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
-    const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
-    const isPinnedToWorld = useCanvasStore(
-      (s) => s.pinnedSourceNodeIds[id] === true,
     );
     const ingestion = useCanvasStore((s) => s.ingestionByNodeId[id]);
     const isNotMouse = useIsNotMouse();
@@ -224,9 +214,6 @@ export const NodeFloatingToolbar = memo(
     const isFrame = type === 'frame';
     const isCanvasRef = type === 'canvasRef';
     const isFrameRef = type === 'frameRef';
-    const isNodeRef = type === 'nodeRef';
-    const isReference = isCanvasRef || isFrameRef || isNodeRef;
-    const isSourceReference = isFrameRef || isNodeRef;
     const frameData = isFrame ? (data as FrameNodeData) : null;
     const frameSizing = frameData?.sizing ?? 'hug';
     const frameLayoutMode = frameData?.layoutMode ?? 'free';
@@ -394,56 +381,6 @@ export const NodeFloatingToolbar = memo(
           <>
             <FloatingToolbar.Divider />
             {actions}
-          </>
-        )}
-
-        {/* World Pin is a single stateful toggle: the highlighted state
-            tells the user this node already has a World reference. Only
-            meaningful while the World feature is enabled — `worldCanvasId`
-            alone is workspace metadata that exists regardless of the
-            user-facing toggle. */}
-        {worldEnabled && canvasId !== worldCanvasId && !isReference && (
-          <>
-            <FloatingToolbar.Divider />
-            <FloatingToolbar.ToggleButton
-              active={isPinnedToWorld}
-              title={
-                isPinnedToWorld ? t('world.unpinNode') : t('world.pinNode')
-              }
-              onClick={() =>
-                void setPortalNodePins([
-                  {
-                    sourceCanvasId: canvasId as `canvas-${string}`,
-                    sourceNodeIds: [id as `node-${string}`],
-                    pinned: !isPinnedToWorld,
-                  },
-                ])
-              }
-            >
-              {isPinnedToWorld ? <PinOff /> : <Pin />}
-            </FloatingToolbar.ToggleButton>
-          </>
-        )}
-
-        {isSourceReference && (
-          <>
-            <FloatingToolbar.Divider />
-            <FloatingToolbar.ActionButton
-              title={t('world.unpinSelected')}
-              onClick={() => {
-                const target = (data as FrameRefNodeData | NodeRefNodeData)
-                  .target;
-                void setPortalNodePins([
-                  {
-                    sourceCanvasId: target.canvasId as `canvas-${string}`,
-                    sourceNodeIds: [target.nodeId as `node-${string}`],
-                    pinned: false,
-                  },
-                ]);
-              }}
-            >
-              <PinOff />
-            </FloatingToolbar.ActionButton>
           </>
         )}
 

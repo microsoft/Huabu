@@ -379,6 +379,26 @@
     "pinFailed": "更新 World 固定节点失败",
     "pinSourceMissing": "无法固定：该 Space 已不存在"
   },
+  "spacePreview": {
+    "add": "添加 Space 预览",
+    "chooseTarget": "选择 Space",
+    "chooseTargetDescription": "选择要在此只读预览中显示的 Space。",
+    "loadingTargets": "正在加载 Space…",
+    "targetsUnavailable": "无法加载 Space。",
+    "noTargets": "没有其他可用的 Space。",
+    "openSpace": "打开 Space",
+    "loading": "正在加载 Space 预览…",
+    "unavailable": "预览不可用",
+    "unavailableDescription": "无法加载目标 Space。",
+    "retry": "重试",
+    "stale": "已过期",
+    "partial": "部分内容",
+    "untitledSpace": "未命名 Space",
+    "viewport": "{{title}} 的只读预览",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "resetView": "重置预览视图"
+  },
   "preview": {
     "tabStrip": "已打开的预览",
     "group": "预览分组",

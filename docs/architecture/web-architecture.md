@@ -77,6 +77,8 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 8. **Development playgrounds** belong in `pages/playground/`, use route-level lazy imports, are registered only when `import.meta.env.DEV` is true, and live outside `WorkspaceGuardLayout` so visual testing does not require an active workspace.
 9. **Keep the first-screen graph small** — everything statically reachable from `main.tsx` is evaluated before React's first paint, and on the desktop that is the dominant cold-start cost. The canvas route is lazy, the editor toolchain is reached only through dynamic imports, and shared vendor libraries have explicit `manualChunks` homes. See [desktop-startup.md § 3](./desktop-startup.md#3-the-first-screen-bundle-boundary) before adding a static import to anything the app shell reaches.
 
+Space Preview is the intentional exception to ordinary node rendering: it consumes a sanitized server scene through one target-keyed external-store cache and draws inert SVG instead of mounting target node components or a nested React Flow. See [space-preview.md](./space-preview.md).
+
 ### Toast duration contract
 
 [`Toast`](../../apps/web/src/components/Common/Toast.tsx) derives its default auto-dismiss duration from tone: `danger` toasts persist until dismissed, while `neutral`, `info`, `success`, and `warning` toasts dismiss after 3000 ms. Callers may explicitly set `duration` to override either default, including a positive duration for a transient danger message or `0` for any persistent message.

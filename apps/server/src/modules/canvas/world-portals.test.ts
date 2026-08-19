@@ -64,7 +64,7 @@ function portals(): Array<{
     position: { x: number; y: number };
     data: { targetCanvasId: string };
   }>;
-  return nodes.filter((node) => node.type === 'canvasRef');
+  return nodes.filter((node) => node.type === 'spacePreview');
 }
 
 beforeEach(() => {
@@ -89,8 +89,8 @@ afterEach(() => {
   rmSync(workspaceState.path, { recursive: true, force: true });
 });
 
-describe('World Portal reconciliation', () => {
-  it('creates one deterministic Portal per live Space and is idempotent', async () => {
+describe('World Space preview reconciliation', () => {
+  it('creates one deterministic preview per live Space and is idempotent', async () => {
     await reconcileWorldPortals();
 
     expect(
@@ -99,8 +99,8 @@ describe('World Portal reconciliation', () => {
         position: portal.position,
       })),
     ).toEqual([
-      { target: 'canvas-a', position: { x: 440, y: 0 } },
-      { target: 'canvas-b', position: { x: 880, y: 0 } },
+      { target: 'canvas-a', position: { x: 560, y: 0 } },
+      { target: 'canvas-b', position: { x: 1120, y: 0 } },
     ]);
     expect(getCanvasStore('canvas-world').read()?.version).toBe(1);
 
@@ -109,7 +109,7 @@ describe('World Portal reconciliation', () => {
     expect(getCanvasStore('canvas-world').read()?.version).toBe(1);
   });
 
-  it('preserves existing geometry and leaves broken Portals in place', async () => {
+  it('preserves existing geometry and removes previews for deleted Spaces', async () => {
     await reconcileWorldPortals();
     const worldStore = getCanvasStore('canvas-world');
     const world = worldStore.read();
@@ -121,7 +121,7 @@ describe('World Portal reconciliation', () => {
     const existing = nodes.find(
       (node) => node.data?.targetCanvasId === 'canvas-a',
     );
-    if (!existing) throw new Error('Missing Portal');
+    if (!existing) throw new Error('Missing Space preview');
     existing.position = { x: 1234, y: 5678 };
     worldStore.write(world);
 
@@ -129,6 +129,7 @@ describe('World Portal reconciliation', () => {
       recursive: true,
       force: true,
     });
+
     writeCanvas('Project C', 'canvas-c', 'Project C');
     refreshCanvasDirIndex();
     await reconcileWorldPortals();
@@ -141,7 +142,38 @@ describe('World Portal reconciliation', () => {
       portals()
         .map((portal) => portal.data.targetCanvasId)
         .sort(),
-    ).toEqual(['canvas-a', 'canvas-b', 'canvas-c']);
+    ).toEqual(['canvas-a', 'canvas-c']);
+  });
+
+  it('preserves legacy Portal identity, position, and size during migration', async () => {
+    writeCanvas('.world', 'canvas-world', 'World', [
+      {
+        id: 'portal-a',
+        type: 'canvasRef',
+        position: { x: 321, y: 654 },
+        style: { width: 720, height: 460 },
+        data: { targetCanvasId: 'canvas-a' },
+      },
+    ]);
+    refreshCanvasDirIndex();
+
+    await reconcileWorldPortals();
+
+    const migrated = (
+      getCanvasStore('canvas-world').read()?.state.nodes as Array<{
+        id: string;
+        type?: string;
+        position: { x: number; y: number };
+        style?: { width?: number; height?: number };
+        data?: { targetCanvasId?: string };
+      }>
+    ).find((node) => node.data?.targetCanvasId === 'canvas-a');
+    expect(migrated).toMatchObject({
+      id: 'portal-a',
+      type: 'spacePreview',
+      position: { x: 321, y: 654 },
+      style: { width: 720, height: 460 },
+    });
   });
 
   it('rejects duplicate or malformed Portal identities', async () => {
@@ -166,12 +198,12 @@ describe('World Portal reconciliation', () => {
     );
   });
 
-  it('protects live Portals while allowing a broken Portal to be removed', async () => {
+  it('protects live previews and removes them during reconciliation after deletion', async () => {
     await reconcileWorldPortals();
     const portal = portals().find(
       (candidate) => candidate.data.targetCanvasId === 'canvas-a',
     );
-    if (!portal) throw new Error('Missing Portal');
+    if (!portal) throw new Error('Missing Space preview');
     const removePortal: CanvasCommand = {
       type: 'DELETE_NODES',
       nodeIds: [portal.id as CanvasNodeId],
@@ -190,11 +222,7 @@ describe('World Portal reconciliation', () => {
       force: true,
     });
     refreshCanvasDirIndex();
-    await executeOnServer({
-      canvasId: 'canvas-world',
-      commands: [removePortal],
-      originator: { source: 'ui' },
-    });
+    await reconcileWorldPortals();
 
     expect(
       portals().some(
@@ -203,7 +231,7 @@ describe('World Portal reconciliation', () => {
     ).toBe(false);
   });
 
-  it('protects canonical Portal identity across full-state writes', async () => {
+  it('protects canonical preview identity across full-state writes', async () => {
     await reconcileWorldPortals();
     const previous = getCanvasStore('canvas-world').read()?.state.nodes;
     if (!previous) throw new Error('Missing World topology');
@@ -216,8 +244,8 @@ describe('World Portal reconciliation', () => {
       type?: string;
       position: { x: number; y: number };
     }>;
-    const portal = moved.find((node) => node.type === 'canvasRef');
-    if (!portal) throw new Error('Missing Portal');
+    const portal = moved.find((node) => node.type === 'spacePreview');
+    if (!portal) throw new Error('Missing Space preview');
     portal.position = { x: 999, y: 999 };
     expect(() =>
       assertWorldPortalTopologyAllowed('canvas-world', previous, moved),

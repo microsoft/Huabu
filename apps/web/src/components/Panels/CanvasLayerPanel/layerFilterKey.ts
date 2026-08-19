@@ -93,6 +93,7 @@ const FILTER_LABEL_KEY_BY_TYPE: Record<CanvasNodeType, LayerFilterLabelKey> = {
   audio: 'layers.filterLabels.audio',
   web: 'layers.filterLabels.web',
   frame: 'layers.filterLabels.frame',
+  spacePreview: 'layers.filterLabels.canvasRef',
   canvasRef: 'layers.filterLabels.canvasRef',
   frameRef: 'layers.filterLabels.frameRef',
   nodeRef: 'layers.filterLabels.nodeRef',

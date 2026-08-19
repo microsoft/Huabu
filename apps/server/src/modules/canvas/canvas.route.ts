@@ -34,6 +34,10 @@ import { CanvasNotFoundError, applyDeltasOnServer } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import {
+  getSpacePreviewScene,
+  SpacePreviewSceneError,
+} from './space-preview-scene.js';
+import {
   assertWorldPortalTopologyAllowed,
   WorldPortalMutationError,
 } from './world-portal-policy.js';
@@ -84,6 +88,7 @@ import type {
   GetCanvasEventsResponse,
   GetCanvasResponse,
   GetNodeContentResponse,
+  GetSpacePreviewSceneResponse,
   GetWorldReferencesResponse,
   GetThreadChangesResponse,
   ImportCanvasResponse,
@@ -1130,6 +1135,20 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     } catch (error) {
       if (error instanceof WorldReferenceResolutionError) {
         return reply.code(400).send({ message: error.message });
+      }
+      throw error;
+    }
+  });
+
+  fastify.get<{
+    Params: { canvasId: string };
+    Reply: ApiResult<GetSpacePreviewSceneResponse>;
+  }>('/:canvasId/preview-scene', async function (request, reply) {
+    try {
+      return reply.send(await getSpacePreviewScene(request.params.canvasId));
+    } catch (error) {
+      if (error instanceof SpacePreviewSceneError) {
+        return reply.code(error.statusCode).send({ message: error.message });
       }
       throw error;
     }

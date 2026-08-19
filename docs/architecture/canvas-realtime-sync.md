@@ -16,6 +16,8 @@ Two channels cooperate:
   staleness fingerprint) attributed to a `threadId`, rendered as a Keep/Revert
   card above the chat input.
 
+Space Preview does not open a target Canvas sync stream. It reads bounded snapshots through `GET /:canvasId/preview-scene`, shares them by target in a tab-local cache, and revalidates on a ten-second freshness interval and window focus. A target mutation therefore appears after revalidation rather than through the host Canvas SSE channel; see [space-preview.md](./space-preview.md).
+
 `version` (monotonic per canvas) is the concurrency primitive; a **dirty-node**
 filter guarantees an incoming agent write never clobbers a node the user is
 mid-editing.
