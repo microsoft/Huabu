@@ -62,7 +62,7 @@ function createHarness(options?: {
           : null,
       listSelectableProfileIds: () => options?.selectableIds ?? ['profile-a'],
     }),
-    readCanvasNodes: () =>
+    readCanvasNodes: async () =>
       options?.nodes === undefined
         ? [
             { id: NOTE_ID, type: 'note' },

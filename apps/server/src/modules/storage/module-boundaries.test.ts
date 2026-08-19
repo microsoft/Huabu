@@ -427,7 +427,6 @@ describe('root forwarding shims', () => {
     'storage/canvas-dirs.js': [
       'modules/agent/tools/world-target-read.test.ts',
       'modules/canvas/canvas-command-router.test.ts',
-      'modules/canvas/canvas-command-router.ts',
       'modules/canvas/canvas.route.ts',
       'modules/canvas/external-watcher.test.ts',
       'modules/canvas/external-watcher.ts',

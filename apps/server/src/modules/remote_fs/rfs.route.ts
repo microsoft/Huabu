@@ -317,7 +317,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       return reply.send({
-        views: interactiveViewService.list(
+        views: await interactiveViewService.list(
           request.params.canvasId,
           query.data.viewKey,
         ),
@@ -391,7 +391,10 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       return reply.send(
-        interactiveViewService.get(params.data.canvasId, params.data.nodeId),
+        await interactiveViewService.get(
+          params.data.canvasId,
+          params.data.nodeId,
+        ),
       );
     } catch (error) {
       if (error instanceof InteractiveViewServiceError) {
@@ -1081,7 +1084,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       try {
         position =
           creation.position ??
-          resolveAgentNodePosition(canvasId, parentNodeId ?? undefined);
+          (await resolveAgentNodePosition(canvasId, parentNodeId ?? undefined));
       } catch (error) {
         if (
           error instanceof AgentNodeCreationError &&

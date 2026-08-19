@@ -39,7 +39,7 @@ import { normalizeRel, safeResolve } from './fs-sandbox.js';
 import { readSkillFile, resolveSkillPath } from '../../../../prompt/index.js';
 import { parseFrontmatter } from '../../../../utils/markdown-frontmatter.js';
 import { IMAGE_MIME_MAP, isVisionImageMime } from '../../../../utils/mime.js';
-import { getCanvasStore } from '../../../storage/index.js';
+import { space } from '../../../storage/index.js';
 import { readCanvasMemory, readWorkspaceMemory } from '../../memory/index.js';
 
 import type { readParamsSchema } from '../definitions.js';
@@ -76,25 +76,26 @@ const NODE_FILE_RE = /^nodes\/[^/]+\.md$/;
  * content, and the same revision used by executor CAS. When supplied, the
  * turn read-set receives that revision for guarded follow-up writes.
  */
-function projectNodeRead(
+async function projectNodeRead(
   rel: string,
   canvasId: string,
   fileText: string,
   readSet?: Map<string, string>,
-):
+): Promise<
   | {
       content: string;
       frontmatter: Record<string, unknown>;
       rev: string;
     }
-  | undefined {
+  | undefined
+> {
   if (!NODE_FILE_RE.test(rel)) return undefined;
   const parsed = parseFrontmatter(fileText);
   const rawId = parsed.meta['id'];
   const nodeId = typeof rawId === 'string' && rawId ? rawId : undefined;
   if (!nodeId) return undefined;
   try {
-    const nc = getCanvasStore(canvasId).readNode(nodeId);
+    const nc = (await space(canvasId).nodes.read(nodeId))?.record;
     if (!nc) return undefined;
     const rev = nodeRevisionOf({
       content: nc.content,
@@ -260,7 +261,7 @@ export async function handleRead(
   }
 
   const text = buf.toString('utf8');
-  const nodeRead = projectNodeRead(rel, args.canvasId, text, readSet);
+  const nodeRead = await projectNodeRead(rel, args.canvasId, text, readSet);
   if (nodeRead) {
     return renderTextResponse(rel, nodeRead.content, offset, limit, {
       frontmatter: nodeRead.frontmatter,
