@@ -27,7 +27,8 @@ export type PreviewTab = {
   /**
    * A transient tab is the group's reusable inspection slot: the next
    * transient open replaces its target instead of appending a tab. Promoted
-   * to permanent by an explicit gesture (edit, double-click, Open to Side).
+   * to permanent by an explicit gesture (edit, double-click, or Pin). Moving
+   * it with Open to Side preserves its transient state.
    */
   transient: boolean;
   /** Monotonic activation stamp used to restore recent-target ordering. */
@@ -262,8 +263,9 @@ export function openTarget(
         next = moveTab(next, existing.id, { groupId: destinationGroupId });
       }
     }
-    // Revealing a target is an explicit visit, so it stops being disposable.
-    next = promoteTab(next, existing.id);
+    // A permanent open promotes an existing inspection slot. Repeated
+    // transient opens only reveal it; keeping it requires an explicit Pin.
+    if (!options.transient) next = promoteTab(next, existing.id);
     return { workspace: activateTab(next, existing.id), tabId: existing.id };
   }
 

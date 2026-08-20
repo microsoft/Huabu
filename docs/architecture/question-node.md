@@ -47,7 +47,7 @@ Like sketch nodes, a question node has two independent relationships with AI:
 | `agentBindingPolicy`   | ✅        | Optional `selectable` / `fixed`; absent means selectable, while service-created Agent Nodes use fixed before first send              |
 | `agentIcon`            | ✅        | External Agent's bind-time avatar fallback; current Profile icon wins while that Profile still exists                                |
 | `agentLaunchOverrides` | ✅        | Optional bounded cwd and additional-initial-preamble overrides for a service-created external Agent Node                             |
-| `agentMode`            | ✅        | `ask` (default) / `operate` for the internal agent                                                                                   |
+| `agentMode`            | ✅        | `operate` (default) / `ask` for the internal agent                                                                                   |
 | `errorMessage`         | ✅        | Set on `status === 'error'`                                                                                                          |
 | `viewed`               | ✅        | Drives unread terminal-state attention on the Agent avatar                                                                           |
 | `responseSummary`      | reserved  | Teaser field; not yet written by the runner                                                                                          |
@@ -112,7 +112,7 @@ Activating a `conversation` result row ([CanvasSearchResults.tsx](../../apps/web
 
 Double-click the node → `openInCompose()` ([QuestionNode.tsx](../../apps/web/src/components/Nodes/question/QuestionNode.tsx)). Creating a question through the toolbar placement flow or the connected-node picker also mints the thread and opens compose immediately. [`questionCompose.ts`](../../apps/web/src/components/Nodes/question/questionCompose.ts) opens the Question's Preview Workspace node tab and directs the input-focus request to that thread.
 
-- mints a `threadId` if missing, opens the chat panel in **compose mode**
+- mints a `threadId` if missing, opens the chat panel in **compose mode**, and defaults the built-in Huabu Agent to `operate`
 - inherits the canvas's last-used agent binding; user can switch agent
 - user types the question, hits send → first send writes `content` back to the node
 
@@ -137,7 +137,7 @@ As the canvas zooms out, a question node's agent mark **takes over** as the node
 
 All questions run through `/api/agent` ([agent.ts](../../apps/web/src/api/agent.ts) → [intent](../../apps/server/src/modules/canvas/node-neighbourhood.ts)). On first send `useAgentStream` ([useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)) locks `agentBinding` + `agentMode` onto the node:
 
-- **internal**: built-in agent, `agentMode` = `ask` (default) / `operate`
+- **internal**: built-in Huabu Agent, `agentMode` = `operate` (default) / `ask`
 - **external**: ACP agent resolved server-side from `profileId`
 
 `anchorNodeId` is sent so the server attaches spatial context (§5.3).

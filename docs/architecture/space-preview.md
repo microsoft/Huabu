@@ -1,7 +1,7 @@
 # Space Preview and World
 
 > Authoritative contract for view-only Space projection nodes and the preview-based World.
-> Last updated: 2026-08-18
+> Last updated: 2026-08-20
 
 ## 1. Product model
 
@@ -34,6 +34,8 @@ The scene viewport carries React Flow's `nodrag`, `nopan`, and `nowheel` classes
 The viewport is one labelled keyboard focus stop. Arrow keys pan, `+` and `-` zoom, `0` resets, and Escape releases viewport focus. The SVG scene is `aria-hidden`; title, freshness and failure status, retry, zoom controls, and the explicit Open Space action remain accessible controls.
 
 Explicit Open Space navigation is the only Phase 1 entry transition. Gesture-driven zoom-through remains deferred; responsive layout or preview resize never navigates.
+
+Ordinary Spaces expose Add Space Preview from the Canvas toolbar's Add Content dropdown. World omits this action because its preview membership is server-managed.
 
 ## Code entry points
 

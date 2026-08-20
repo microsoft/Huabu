@@ -131,9 +131,20 @@ describe('chatStore thread creation', () => {
       'canvas-1': first,
       'canvas-2': second,
     });
+    expect(selectThreadBinding(useChatStore.getState(), first)).toEqual(
+      INTERNAL,
+    );
     expect(selectThreadLastAction(useChatStore.getState(), first)).toBe(
       'operate',
     );
+  });
+
+  it('defaults a new independent thread to the built-in Huabu Agent', () => {
+    const created = useChatStore.getState().createThread();
+    const state = useChatStore.getState();
+
+    expect(selectThreadBinding(state, created)).toEqual(INTERNAL);
+    expect(selectThreadLastAction(state, created)).toBe('operate');
   });
 
   it('defaults external Canvas and independent threads to ask', () => {
