@@ -90,6 +90,10 @@ export {
   validateStorageProfile,
 } from './profile.js';
 export type { StorageProfile } from './profile.js';
+export {
+  assertValidNamespace,
+  SpaceNamespaceError,
+} from './ports/namespace.js';
 export { BlobNameError, normalizeBlobName } from './ports/blob.js';
 export type {
   BlobBackendKind,
@@ -123,6 +127,7 @@ export type {
   SpaceRenameInput,
   SpaceRenameResult,
   SpaceRepository,
+  SpaceSubstrate,
   SpaceTaskRuns,
   SpaceTasks,
   SpaceWriteInput,

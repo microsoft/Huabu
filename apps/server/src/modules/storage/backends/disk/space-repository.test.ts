@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -27,6 +28,7 @@ import { resetStorageCache } from './legacy/canvas-store-cache.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { DiskStructuredStore } from './structured-store.js';
 import { toSafeFilename } from '../../../../utils/naming.js';
+import { describeSpaceExtensionContract } from '../../ports/contracts/space-extension.contract.js';
 import { describeSpaceRepositoryContract } from '../../ports/contracts/space-repository.contract.js';
 
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
@@ -125,6 +127,25 @@ describeSpaceRepositoryContract('Disk', () => {
         repository: empty.spaces(),
         read: (canvasId: string) => empty.space(canvasId).read(),
       };
+    },
+  };
+});
+
+describeSpaceExtensionContract('Disk', () => {
+  const root = makeWorkspace('huabu-space-extension-contract-');
+  seedWorld(root);
+  const store = new DiskStructuredStore();
+  return {
+    repository: store.spaces(),
+    space: (canvasId: string) => store.space(canvasId),
+    // An owner of a Disk namespace writes files into its directory; nothing
+    // about the shape is storage's business, so the suite borrows the
+    // simplest one an owner could pick.
+    write: (substrate, value) =>
+      writeFileSync(path.join(substrate.directory, 'value'), value, 'utf8'),
+    read: (substrate) => {
+      const file = path.join(substrate.directory, 'value');
+      return existsSync(file) ? readFileSync(file, 'utf8') : null;
     },
   };
 });

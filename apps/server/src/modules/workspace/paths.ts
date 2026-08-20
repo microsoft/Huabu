@@ -9,10 +9,15 @@
  *
  *   - Workspace-level, no canvasId: `setting/` and the user memory file.
  *     Untouched by a backend switch.
- *   - Per-Space state owned by *other* domains — memory, ACP sessions, the
- *     debug prompt log — which need a materialized directory but not the Disk
- *     record layout. They anchor on the Space's Disk tree from the storage
- *     facade, so they no longer consult the Disk name index (§12.5.4).
+ *   - Per-Space state owned by *other* domains — the memory body and ACP
+ *     sessions — which need a materialized directory but not the Disk record
+ *     layout. They anchor on the Space's Disk tree from the storage facade,
+ *     so they no longer consult the Disk name index (§12.5.4).
+ *
+ * Two families have already left: memory-worker bookkeeping and the debug
+ * prompt log now build their own stores on the storage extension substrate
+ * (§6.4.4), which is a place rather than a path. The memory body follows as a
+ * blob, and ACP sessions with phase 6.
  *
  * The Disk record and blob layout moved to `storage/backends/disk/layout.ts`.
  *
@@ -24,10 +29,8 @@
  *   <spaceDir>/
  *     .memory/                      Space-scoped memory (AI-private)
  *       space.md                    Space memory body
- *       state.json                  memory worker bookkeeping
  *     .history/
  *       acp-sessions.json           per-thread ACP sessionId map (optional)
- *       chat/<threadId>.prompt.log  debug dump, opt-in
  *
  * Naming convention: anything prefixed with `.` is hidden / AI-private;
  * anything without the prefix is user-visible.
@@ -35,7 +38,6 @@
 
 import path from 'node:path';
 
-import { sanitizeId } from '../../utils/fs.js';
 import { space } from '../storage/index.js';
 import { getWorkspacePath } from '../workspace.js';
 
@@ -99,16 +101,6 @@ export function canvasMemoryPath(canvasId: string): string {
   return path.join(canvasMemoryDir(canvasId), 'space.md');
 }
 
-/**
- * Bookkeeping JSON for the memory worker, per canvas:
- *   `{ counter, lastAnalyzedAt, lastSeenThreadCursor }`
- *
- * Read/written by `modules/agent/memory/trigger.ts` (PR-B/C).
- */
-export function memoryStatePath(canvasId: string): string {
-  return path.join(canvasMemoryDir(canvasId), 'state.json');
-}
-
 // ─── Workspace-level setting / user skills ─────────────────────────────────
 
 /**
@@ -127,20 +119,6 @@ export function settingDir(): string {
 /** User skill root: `<workspace>/setting/skills/`. */
 export function userSkillsDir(): string {
   return path.join(settingDir(), 'skills');
-}
-
-/**
- * Human-readable debug dump of the assembled prompt sent to the agent,
- * one block per turn with strong turn separators. Append-only, written
- * only when the `HUABU_DEBUG_PROMPT` env flag is set. Never read by the
- * app — purely a developer post-mortem aid. See `conversation/prompt/debug-prompt.ts`.
- */
-export function chatPromptLogPath(canvasId: string, threadId: string): string {
-  return path.join(
-    legacyHistoryDir(canvasId),
-    'chat',
-    `${sanitizeId(threadId, 'threadId')}.prompt.log`,
-  );
 }
 
 /**
