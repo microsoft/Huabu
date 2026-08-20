@@ -366,7 +366,6 @@ ports:
 ```ts
 interface Storage {
   readonly profile: StorageProfile;
-  readonly workspacePath: string;
   readonly structured: StructuredStore;
   readonly blobs: BlobStore;
   space(canvasId: string): Space;
@@ -380,24 +379,32 @@ ports, so it is where the two are allowed to meet. The barrel exports a free
 `canvasBlobs()` is already called; that is an ergonomic shorthand for the same
 method, not a second design.
 
-`Space` is a **composition-layer facade, not a port type**.
-`StructuredStore.space()` keeps returning the structured-only `SpaceHandle`,
-`BlobStore.scope()` keeps returning a `BlobScope`, and neither port imports the
-other (§6.3). They are joined in the layer that already owns every cross-store
-rule: the blob-put precondition ("bytes only for a Space whose record exists")
-and the blob-first delete saga.
+**Both ports are reached the same way.** `StructuredStore.space(id)` returns
+the structured `SpaceHandle`; `BlobStore.space(id)` returns `SpaceBlobs`, one
+member per user-visible area. A Space is the unit the application addresses on
+either axis, so a port that made the caller assemble a descriptor first would
+be the odd one out — and the asymmetry was visible in the facade, which built
+four scope descriptors by hand beside one structured handle.
 
-The join cannot move down into a port, for three separate reasons:
+`Space` is a **composition-layer facade, not a port type**. The two ports keep
+their interfaces and their independence — neither imports the other (§6.3) —
+and are joined in the layer that already owns every cross-store rule: the
+blob-put precondition ("bytes only for a Space whose record exists") and the
+blob-first delete saga. The facade flattens both handles, so every durable part
+of a Space sits at one level and which axis stores it stays storage's business.
+
+The join cannot move down into a port, for two separate reasons:
 
 - the two axes are configured independently, so a `SpaceHandle` that vended
   blobs would oblige the Disk structured adapter to construct an Azure blob
-  scope;
+  handle;
 - deletion ordering deliberately keeps remote blob I/O outside any database
   transaction (§6.1); a handle owning both would move that ordering inside an
-  adapter;
-- `BlobScopeRef` is a union whose only member is `canvas` today. Workspace
-  assets and agent scratch have no Space, and a blob store reachable only
-  through a Space handle could not serve them.
+  adapter.
+
+A blob area with no Space — workspace assets, agent scratch — is a different
+entry point on the connection when something needs one, not a reason to make
+every caller name a descriptor today.
 
 What is wrong today is therefore only the spelling.
 `getStructuredStore().space(id)` and `canvasBlobs(id)` are two entry points —
@@ -517,10 +524,10 @@ bytes, not application records", with names that are the existing
 holds unchanged. One detail needs a decision and it has a cheap answer: the
 Disk adapter maps the single canvas scope onto `.artifacts/`, so a blob named
 `skill.md` would land in a hidden directory rather than at the Space root where
-a user authors it. Add one `BlobScopeRef` kind per user-visible area. That is a
-union member and a directory constant per adapter; it keeps the Disk layout a
-user sees unchanged, and it avoids hierarchical names, which §7.1 excluded for
-every backend and which would be the expensive answer to the same problem.
+a user authors it. Give `SpaceBlobs` one member per user-visible area. That is
+a member and a placement rule per adapter; it keeps the Disk layout a user sees
+unchanged, and it avoids hierarchical names, which §7.1 excluded for every
+backend and which would be the expensive answer to the same problem.
 
 Rename and per-key delete stay **unsupported**, as they are today. A human will
 eventually want to remove a `skill.md`, and the honest answer until some
@@ -620,8 +627,8 @@ port in
 contract suite is
 [`ports/contracts/blob-store.contract.ts`](../../apps/server/src/modules/storage/ports/contracts/blob-store.contract.ts).
 This section is a transcription of that file and must be updated with it; the
-code is authoritative when they disagree. The shape is connection → scope
-rather than one flat key space:
+code is authoritative when they disagree. The shape is connection → Space →
+area rather than one flat key space:
 
 ```ts
 interface BlobStore {
@@ -629,7 +636,14 @@ interface BlobStore {
   init(): Promise<void>;
   health(): Promise<StorageHealth>;
   close(): Promise<void>;
-  scope(ref: BlobScopeRef): BlobScope;
+  space(canvasId: string): SpaceBlobs;
+}
+
+interface SpaceBlobs {
+  readonly artifacts: BlobScope;
+  readonly guide: BlobScope;
+  readonly memory: BlobScope;
+  readonly uploads: BlobScope;
 }
 
 interface BlobScope {
@@ -660,7 +674,7 @@ they bind every future adapter:
   must emulate rather than a neutral one. It is accepted — callers pass
   `src`-shaped values and the basename rule is what makes that work — but it
   is the mirror image of the §13 risk about SQL backends emulating a directory
-  tree, and it should be revisited before a scope kind needs hierarchy.
+  tree, and it should be revisited before an area needs hierarchy.
 - **`put()` has no options.** Content type is not stored; it is inferred from
   the name at the HTTP boundary. That is sufficient while `sendBlob` is the
   only delivery path, and it is exactly what a signed-URL delivery capability
@@ -2262,15 +2276,21 @@ than by reading:
   can satisfy. The record became an argument, and each caller now reads in the
   shape its request has — which is what made `readMany` earn its place rather
   than merely have one.
-- **A staged mount must capture what it replaces when it is staged.**
-  Committing a Workspace path detaches the mount that no longer describes it,
-  so a `commit()` reading the process holder at swap time finds nothing to
-  close and drops the previous connections. Invisible on Disk, whose `close()`
-  is a no-op; a connection leak the moment SQLite lands.
+- **The staged mount was the wrong answer to a question nobody asked.** The
+  first implementation of §12.6.5 opened connections against a Workspace that
+  was not active yet, published them and the path in one synchronous block, and
+  captured the mount it replaced so a later `commit()` could close it — because
+  committing a path detaches the mount that no longer describes it, and a
+  `commit()` reading the process holder at swap time would find nothing to
+  close and leak the previous connections. Every part of that existed to move a
+  live process between two Workspaces. Issue #126 established that this is not
+  a product requirement; §12.6.5 below is the lifecycle that replaced it, and
+  the leak, the leases, the stale-mount check, and `Storage.workspacePath` all
+  went with the staging.
 - **A blob scope for the Space root cannot be a directory scope.** Its area is
   shared with `space.json` and every node directory, so `list()` would claim
-  storage's own records and `deleteAll()` would remove the Space. The
-  `space-guide` scope is bounded by its member names instead — a fixed set is a
+  storage's own records and `deleteAll()` would remove the Space. The `guide`
+  area is bounded by its member names instead — a fixed set is a
   tighter namespace than a directory, not a looser one.
 - **The resurrection guard belonged in the port.** Several owners each carried
   their own check that a Space directory still existed before writing ad-hoc
@@ -2278,7 +2298,7 @@ than by reading:
   states it once, and the per-owner guards were deleted rather than moved.
 
 One item in scope below was **narrowed deliberately**. Upload scratch received
-its own `BlobScopeRef` kind, so the area is named, swept on delete, and free to
+its own `SpaceBlobs` area, so it is named, swept on delete, and free to
 diverge in retention — but its writers still reach it through the `fs-sandbox`
 path, because RFS upload is a streaming HTTP handler and path classification,
 not the bare `readFileSync`/`writeFile` §6.4.2's exception describes. Routing
@@ -2314,12 +2334,12 @@ their async adapters own repository access once per request.
 #### 12.6.2 One `space(canvasId)` handle
 
 `Storage` gains `space(canvasId)`, the composition-layer facade of §6.4.1,
-joining the structured handle with the Space's blob scope and any
+joining the structured handle with the Space's blob areas and any
 backend-specific members; the barrel exports a free `space(canvasId)`
 shorthand for `getStorage().space(canvasId)`, matching how `canvasBlobs()` is
-already called. `StructuredStore` and `BlobStore` keep their current interfaces
-and their independence — neither imports the other — and the facade is the only
-new type. The existing `getStructuredStore().space(id)` and `canvasBlobs(id)`
+already called. `StructuredStore` and `BlobStore` keep their independence —
+neither imports the other — and both vend one handle per Space, so the facade
+is the only new type. The existing `getStructuredStore().space(id)` and `canvasBlobs(id)`
 call sites migrate to it.
 
 The residual Disk Space directory becomes `diskTree` on that handle, typed by
@@ -2371,12 +2391,12 @@ substrate is an Agenetes port change, not a storage one.
 
 **D — blob.** `skill.md`, the memory body (`.memory/space.md`), and upload
 scratch (`.upload/`) become blobs, each user-visible area getting its own
-`BlobScopeRef` kind so the Disk paths a user sees are unchanged and retention
+`SpaceBlobs` member so the Disk paths a user sees are unchanged and retention
 can diverge from artifacts later without moving bytes again. These qualify
 under §6.4.2's "simplifies Disk on its own merits" exception: each is a bare
 `readFileSync` / `writeFile` against a path the caller assembled, and the move
 retires those plus one resolver in the memory sandbox. The new machinery is a
-union member and a directory constant per area. Rename and per-key delete stay
+handle member and a directory constant per area. Rename and per-key delete stay
 unsupported, as they are today.
 
 Upload scratch got its scope kind — so the area is named, swept on delete, and
@@ -2419,15 +2439,32 @@ what is offered here is a place to put data. The first-party consumers in
 key/value helper **over** the substrate may be extracted into `utils/` if a
 second owner wants the same access shape, but never as a port member.
 
-#### 12.6.5 Workspace-scoped storage lifecycle and World bootstrap
+#### 12.6.5 One Workspace per process, and World bootstrap
 
-Storage construction receives the resolved Workspace path. Startup may hold
-only a validated profile while free mode has no active Workspace; activating
-one stages and initializes both backend connections, asks the structured
-collection to ensure its one stable World, commits the Workspace path,
-atomically swaps the process-wide storage holder, and then closes the previous
-connections. A failed stage leaves the old Workspace and connections active.
-Graceful Server shutdown closes the mounted stores.
+Startup may hold only a validated profile while there is no active Workspace;
+adopting one
+prepares and migrates the directory, commits the path, opens both backend
+connections, and asks the structured collection to ensure its one stable World.
+A failure at any step leaves the process unconfigured rather than
+half-activated. Graceful Server shutdown closes the mounted stores.
+
+**A process serves one Workspace.** Issue #126 settled that changing it is
+restart-bound, and that removed the whole staged-swap apparatus this section
+originally specified — no connection is opened against an inactive path, no
+mount is published atomically beside a path, nothing captures what it replaces,
+no operation lease keeps a request on one Workspace, and `Storage` carries no
+`workspacePath` to recognise a stale mount by. Asking a running server for a
+different Workspace returns `WORKSPACE_RESTART_REQUIRED` and mutates nothing.
+The Workspace is named at startup by `HUABU_WORKSPACE` (the operator's, locked,
+failing the boot if it cannot be opened), by `HUABU_WORKSPACE_STARTUP` (a
+shell's record of the user's own choice, which stays free mode and reports a
+failure through `WorkspaceInfo.startupError` so the client can pick again), or
+by the single runtime activation a still-unconfigured process accepts — the
+only route a browser deployment has, since `localStorage` cannot configure a
+server before it starts.
+
+This is also what lets a backend with no Workspace at all — Postgres paired
+with Azure Blob — stop answering a question that was never its own.
 
 `SpaceRepository.ensureWorld()` is the backend-neutral bootstrap hook. It
 returns the existing stable World or creates exactly one version-0 World when
@@ -2446,8 +2483,8 @@ its contents.
 
 The product-level harness is `storage/testing.ts`: it mounts a real profile
 onto a temporary Workspace through the production lifecycle — prepared
-Workspace, staged connections, `ensureWorld()`, atomic swap — rather than
-swapping in a stub. `product-boundary.test.ts` runs the exit criterion against
+Workspace, opened connections, `ensureWorld()` — rather than swapping in a
+stub. `product-boundary.test.ts` runs the exit criterion against
 every profile in `PRODUCT_STORAGE_PROFILES`, naming no directory, filename, or
 `space.json`; Phase 5 adds one entry to that list and the same behaviours are
 covered for SQLite. Elsewhere, product tests replace only storage connections
@@ -2472,9 +2509,9 @@ In scope: Canvas/agent/web/interactive-view/Task structured reads, World target
 reads, RFS node metadata, built-in file-tool node enrichment, external-note
 membership checks, the `space(canvasId)` facade and its `diskTree` member, the
 extension substrate and its first two namespaces, the disposition-D blob
-scopes, the capability matrix for the A families, storage mount/remount/close,
-World bootstrap, architecture documentation, and the shared product-level
-backend harness needed for Phase 5.
+areas, the capability matrix for the A families, storage mount/close, World
+bootstrap, architecture documentation, and the shared product-level backend
+harness needed for Phase 5.
 
 Out of scope: a SQLite adapter or schema, Disk→SQLite data migration, SQLite
 profile registration, Postgres/Azure, the portable change-notification
@@ -2495,14 +2532,13 @@ guarantees.
    The SQLite preview branch forks from Phase 4.5, so it does not yet satisfy
    the port it will be rebased onto. What it owes against the implemented
    §12.6, concretely:
-   - `SpaceRepository.ensureWorld()`, and a mount that survives being staged
-     against a Workspace that is not active yet;
+   - `SpaceRepository.ensureWorld()`, run once as part of opening the mount;
    - `SpaceNodes.readMany` / `list` / `stream`, agreeing with `read` about a
      node — the node contract asserts exactly this;
    - the `sqlite` case of `SpaceSubstrate`, plus destroying a namespace with
      the Space, which on Disk falls out of placement and there will not;
-   - one blob-scope placement per `BlobScopeRef` kind, or an explicit refusal
-     for an area it does not serve;
+   - one blob placement per `SpaceBlobs` area, or an explicit refusal for an
+     area it does not serve;
    - an entry in `PRODUCT_STORAGE_PROFILES`, which is what runs
      `product-boundary.test.ts` against it, and its place in the
      implemented-backend and selectable-backend lists.
@@ -2513,9 +2549,10 @@ guarantees.
    a row in `capabilities.ts` for each disposition-**A** family, plus whatever
    disposition **B** its own consumers turn out to need (§6.4.3). Its existing
    note that SQLite stays unselectable while physical Disk reads, World
-   bootstrap, blob placement, import/export, and Workspace remounting have one
-   authority only in the Disk profile is the same list §12.6 resolved — some by
-   porting, the rest by declaring.
+   bootstrap, blob placement, and import/export have one authority only in the
+   Disk profile is the same list §12.6 resolved — some by porting, the rest by
+   declaring. Workspace remounting is off that list entirely: there is no
+   remount to have an authority for.
 
    The honest measure of Phase 4.6 is how much of this list is _additive_.
    Nothing above asks for a feature module to change.
@@ -2672,9 +2709,9 @@ guarantees.
   name-derived value computed at the HTTP boundary, because signed delivery
   bypasses `sendBlob` entirely — which means `put()` grows an options
   parameter (§7.1).
-- Should any scope kind ever need hierarchical names? The contract currently
+- Should any blob area ever need hierarchical names? The contract currently
   collapses names to a single segment for every backend (§7.1). §6.4.3 proposes
-  answering "no" and adding a `BlobScopeRef` kind per user-visible area
+  answering "no" and giving each user-visible area its own `SpaceBlobs` member
   instead, so `skill.md`, the memory body, artifacts, and upload scratch stay
   where a user sees them today without the port learning paths.
 - Do user-authored blobs need rename and per-key delete? Answered "not until a

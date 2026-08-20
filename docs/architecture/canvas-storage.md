@@ -13,10 +13,13 @@ compatibility facade.
 **One handle per Space.** `space(canvasId)` vends every storage capability for
 one Space: its record (`read`/`write`), the parts it holds (`nodes`, `changes`,
 `tasks`, `events`), an isolated substrate for a namespace's own store
-(`extension`), one blob scope per user-visible area (`blobs`, `guide`,
+(`extension`), one blob scope per user-visible area (`artifacts`, `guide`,
 `memory`, `uploads`), and — where the backend has one — its directory
-(`diskTree`, `null` elsewhere). It is a composition-layer facade, not a port
-type: `StructuredStore` and `BlobStore` keep their interfaces and their
+(`diskTree`, `null` elsewhere). Both ports are reached the same way —
+`StructuredStore.space(id)` returns the structured handle, `BlobStore.space(id)`
+returns the blob areas — and the facade flattens them, so which axis holds a
+part is storage's business rather than its callers'. It is a composition-layer
+facade, not a port type: the two ports keep their interfaces and their
 independence, and are joined only in the layer that already owns every
 cross-store rule.
 
@@ -25,20 +28,29 @@ reads and writes all go through those ports. `CanvasStore` remains an internal
 Disk primitive and compatibility-test seam, not an application service, and
 nothing in production imports it.
 
-**A mount belongs to one Workspace.** Startup validates the profile without
-opening anything when free mode has no Workspace yet. Activating one prepares
-and migrates the directory in a disposable child process, then stages both
-backend connections, bootstraps the Workspace's World through
-`SpaceRepository.ensureWorld()`, and only then publishes the path and the
-mount together — in one synchronous block, so no request sees one moved
-without the other. Everything that can fail happens while the previous
-Workspace is still serving, and a failure leaves it serving. Graceful shutdown
-closes the mount. The child-process isolation is required because synchronous
-filesystem calls against cloud, network, or virtual drives can block
-indefinitely; a stuck preparation is terminated after 70 seconds with
+**A process serves one Workspace** (issue #126), so the storage lifecycle is
+linear: mount, serve, close. Startup validates the profile without opening
+anything when there is no Workspace yet; adopting one prepares and migrates
+the directory in a disposable child process, commits the path, opens both
+backend connections, and bootstraps the Workspace's World through
+`SpaceRepository.ensureWorld()`. A failure at any step leaves the process
+unconfigured rather than half-activated — the state the client already
+recovers from by showing the picker. Graceful shutdown closes the mount.
+Nothing in storage records _which_ Workspace it was opened against, because a
+mount that exists is the mount for the one this process serves.
+
+The child-process isolation is required because synchronous filesystem calls
+against cloud, network, or virtual drives can block indefinitely; a stuck
+preparation is terminated after 70 seconds with
 `WORKSPACE_ACTIVATION_TIMEOUT`. Concurrent activation attempts return
-`WORKSPACE_ACTIVATION_IN_PROGRESS`. Managed-mode startup prepares
-synchronously before the Server accepts requests, then mounts.
+`WORKSPACE_ACTIVATION_IN_PROGRESS`, and asking for a Workspace other than the
+active one returns `WORKSPACE_RESTART_REQUIRED` without mutating anything —
+the choice is valid, and applying it is the next process's job. The Workspace
+is named by `HUABU_WORKSPACE` (the operator's, locked, and a failure to open
+it fails the boot), by `HUABU_WORKSPACE_STARTUP` (the shell's record of the
+user's own choice, which stays free mode and reports a failure through
+`WorkspaceInfo.startupError`), or by the single runtime activation a
+still-unconfigured process accepts.
 
 The Disk-only capabilities a feature can still reach are named for the backend
 that has them: `space(canvasId).diskTree` for the Space directory, the sidecar
@@ -72,12 +84,12 @@ call site, sharing the matrix's wording.
     space.json                   # { canvasId, title, version, state:{nodes,edges,...}, createdAt, updatedAt }
     nodes/
       <safe(label)>.md            # frontmatter: id/type/label/src/... + content(markdown body)
-    .artifacts/                   # Disk BlobStore mapping for this Space
+    .artifacts/                   # `artifacts` blob area for this Space
       <artifactId><ext>           # raw uploads (PDF / image / video / cover)
-    skill.md                      # user-authored RFS access guide (space-guide blob scope)
-    .memory/                      # hidden, AI-private (space-memory blob scope)
+    skill.md                      # user-authored RFS access guide (`guide` blob area)
+    .memory/                      # hidden, AI-private (`memory` blob area)
       space.md                    # Space memory body
-    .upload/                      # hidden upload scratch (space-upload blob scope)
+    .upload/                      # hidden upload scratch (`uploads` blob area)
     .ext/<owner>.<name>/          # one directory per extension namespace
     .history/                     # hidden dir; also the Agenetes namespace storage.root
       chat_v2/                    # canonical chat log — owned by Agenetes L2, NOT CanvasStore
@@ -105,7 +117,7 @@ Key points:
 - Persistent `frameRef` and `nodeRef` nodes have no markdown sidecars and store only their respective type plus `{ target: { canvasId, nodeId } }` and World-owned React Flow state. A `frameRef` is a Container snapshot of a source Frame, may recursively own matching `frameRef` / `nodeRef` descendants, and never reconciles later source hierarchy changes; direct references remain children of the matching `canvasRef`. `SET_PORTAL_NODE_PINS` is their sole create/remove path.
 - `GET /api/canvas/:worldCanvasId/references` batch-resolves Portal titles and pinned source-node display data for both reference types without writing it into World topology. Results distinguish `ok`, `canvas-missing`, and `node-missing`; storage or parse failures remain request errors.
 - Node filenames are `safe(label).md`; the node's stable id lives in the `id:` frontmatter field.
-- The Disk `BlobStore` maps **one scope per user-visible area** of a Space: artifacts to `.artifacts/` (blobs named `<artifactId><ext>`, no manifest — the filename is the URL key), the memory body to `.memory/`, upload scratch to `.upload/`, and the user-authored guide to the Space root. Naming the areas is what keeps blob names flat; hierarchical names are excluded for every backend. Callers reach them as `space(canvasId).blobs` / `.memory` / `.uploads` / `.guide`: `put()` requires an existing Space record, while reads and `deleteAll()` remain available for recovery after a record goes missing. The guide scope is bounded by its **member names** rather than by a directory, because its area is the Space root — a scope that claimed the folder would list `space.json` and delete the Space on `deleteAll()`. Space deletion sweeps every area, since on a backend where dropping the record does not remove the area the bytes sit in, an unswept kind is an orphan. `CanvasStore` owns no artifact methods. Only the Disk blob and structured backends are implemented and selectable today.
+- `BlobStore.space(canvasId)` returns **one scope per user-visible area** of a Space, which Disk maps to: artifacts to `.artifacts/` (blobs named `<artifactId><ext>`, no manifest — the filename is the URL key), the memory body to `.memory/`, upload scratch to `.upload/`, and the user-authored guide to the Space root. Naming the areas is what keeps blob names flat; hierarchical names are excluded for every backend. Callers reach them through the facade as `space(canvasId).artifacts` / `.memory` / `.uploads` / `.guide`: `put()` requires an existing Space record, while reads and `deleteAll()` remain available for recovery after a record goes missing. The guide area is bounded by its **member names** rather than by a directory, because it sits at the Space root — a scope that claimed the folder would list `space.json` and delete the Space on `deleteAll()`. Space deletion sweeps every area, since on a backend where dropping the record does not remove the place the bytes sit in, an unswept area is an orphan. `CanvasStore` owns no artifact methods. Only the Disk blob and structured backends are implemented and selectable today.
 
 - **Storage lends a place, not a data API.** `space(canvasId).extension(namespace)` returns an isolated substrate — a reserved directory on Disk, a table prefix or schema on a future backend — that a namespace builds its own store on. Storage validates the `<owner>.<name>` token, creates the namespace on demand, and destroys it with the Space; it never sees what is inside, and offers no read or write of its own. A port member per feature would oblige every future backend to model data it has no stake in, and a namespaced key/value member would fix one access shape for every owner forever. `extension()` returns `null` for a Space that does not exist, which is what stops an owner's bookkeeping write from resurrecting a Space that was just deleted. Memory-worker state (`huabu.memory`) and the debug prompt log (`huabu.prompt.log`) are the first two namespaces.
 - Remote PDF preprocessing writes the already-fetched source bytes into the Space BlobStore as `artifact-<id>.pdf` before structured persistence and replaces the node's remote `src` with that key. As with other artifact imports, this blob write precedes the node write operation; a later structured persistence failure may therefore leave an unreferenced blob until Space deletion, while a blob-write failure degrades to retaining the remote URL.
@@ -122,7 +134,7 @@ Key points:
 
 | Path                           | Responsibility                                                                                                                                                                                                                                        |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ports/blob.ts`                | Backend-neutral `BlobStore` connection/scope contract for opaque bytes and bounded materialization leases.                                                                                                                                            |
+| `ports/blob.ts`                | Backend-neutral `BlobStore` connection, its per-Space `SpaceBlobs` areas, and bounded materialization leases.                                                                                                                                         |
 | `ports/structured.ts`          | Backend-neutral `StructuredStore`, the `SpaceRepository` collection, and the `SpaceHandle` composite: record read/ordered write, nodes, changes, Tasks, events, and the extension substrate.                                                          |
 | `ports/namespace.ts`           | The `<owner>.<name>` grammar for an extension namespace — the only thing storage validates about an extension.                                                                                                                                        |
 | `ports/contracts/`             | Reusable Space-collection, node, Space-write, log, blob, extension, and store suites; guarantees are the minimum every adapter implements.                                                                                                            |
@@ -130,7 +142,7 @@ Key points:
 | `backends/disk/legacy/`        | The legacy `CanvasStore` and its synchronous adapter primitives, bounded Workspace-qualified cache, and process-local node tombstones.                                                                                                                |
 | `compatibility/canvas.ts`      | Residual Disk reads plus direct-module create/delete test fixtures; lifecycle writers are not exported from the public storage barrel.                                                                                                                |
 | `space-lifecycle-admission.ts` | Backend-neutral, writer-preferring single-process coordinator shared by structured mutations and blob puts during a delete session.                                                                                                                   |
-| `profile.ts` and `storage.ts`  | Backend selection, cross-axis validation, the Workspace-scoped staged mount, the `space(canvasId)` facade, blob scopes, and the blob-first deletion saga.                                                                                             |
+| `profile.ts` and `storage.ts`  | Backend selection, cross-axis validation, the process-wide mount, the `space(canvasId)` facade, blob areas, and the blob-first deletion saga.                                                                                                         |
 | `capabilities.ts`              | Which product features a profile cannot serve, and why — consulted at startup and by each Disk-only feature's own refusal.                                                                                                                            |
 | `testing.ts`                   | Mounts a real profile onto a temporary Workspace through the production lifecycle, so a product test is written once and run against every profile.                                                                                                   |
 | `index.ts`                     | Public exports only; application code imports here rather than reaching into an adapter.                                                                                                                                                              |
@@ -140,9 +152,9 @@ The Disk structured adapter and compatibility facade resolve the same cached leg
 
 Canvas persistence DTOs and the write coordinator live under `modules/canvas/`; Disk record paths, name indexes, and directory-handle arbitration live inside the Disk adapter; boot migrations remain under `modules/workspace/migrations/`; generic filesystem and Markdown codecs live under `utils/`. `canvasRoot()` validates the identifier and then verifies that the resolved Space directory remains a strict descendant of the active Workspace before any downstream Disk operation receives it. `module-boundaries.test.ts` enforces the storage dependency direction, keeps the deprecated forwarding-shim importer lists shrinking, pins the exact production consumer list of the Disk `diskTree` capability, and reads `product-boundary.test.ts` to reject Disk vocabulary in the suite that is supposed to prove portability.
 
-Space deletion is serialized against composed blob puts by a writer-preferring admission coordinator and holds an active-Workspace lease across blob cleanup and structured destruction. `beginDelete()` acquires the exclusive session before blob I/O; `finish()` removes structured state, while `abort()` releases the fence without doing so. Blobs are swept before structure so a failed sweep can be retried while the Space record still names them. Puts already admitted may finish; a put queued behind a successful deletion rechecks existence and fails without recreating blobs, while a failed blob sweep leaves the record available for retry. Mutations through existing Space handles and repositories reject while deletion is active or queued; reads remain available for cleanup. Residual direct-filesystem features — bundle import/export, reveal, the built-in file tools, external-note claim, and Windows handle coordination — are outside this repository fence; they are declared Disk-only in the capability matrix rather than treated as blockers, and off Disk they are unavailable rather than emulated.
+Space deletion is serialized against composed blob puts by a writer-preferring admission coordinator keyed on the Space. `beginDelete()` acquires the exclusive session before blob I/O; `finish()` removes structured state, while `abort()` releases the fence without doing so. Blobs are swept before structure so a failed sweep can be retried while the Space record still names them. Puts already admitted may finish; a put queued behind a successful deletion rechecks existence and fails without recreating blobs, while a failed blob sweep leaves the record available for retry. Mutations through existing Space handles and repositories reject while deletion is active or queued; reads remain available for cleanup. Residual direct-filesystem features — bundle import/export, reveal, the built-in file tools, external-note claim, and Windows handle coordination — are outside this repository fence; they are declared Disk-only in the capability matrix rather than treated as blockers, and off Disk they are unavailable rather than emulated.
 
-Retained Disk Space repository and handle instances, blob scopes, and legacy `CanvasStore` instances reject use after the active Workspace changes. Each `spaces()` call returns a fresh Workspace-bound handle and each read rescans current Disk state. The Workspace-qualified LRU is cleared and rebuilt on the next lookup after a switch. The delete-session contract covers overlapping operations through one configured backend instance. Disk realizes it with the shared process-local coordinator; it is not a multi-process transaction or distributed lock, and a SQL adapter must supply an equivalent backend-instance fence using its own mechanisms.
+Retained Disk Space repository and handle instances, blob scopes, and legacy `CanvasStore` instances reject use after the active Workspace changes — a state production no longer reaches, and the guard that keeps a test moving between temporary Workspaces from reading a stale one. Each `spaces()` call returns a fresh Workspace-bound handle and each read rescans current Disk state. The Workspace-qualified LRU is cleared and rebuilt on the next lookup. The delete-session contract covers overlapping operations through one configured backend instance. Disk realizes it with the shared process-local coordinator; it is not a multi-process transaction or distributed lock, and a SQL adapter must supply an equivalent backend-instance fence using its own mechanisms.
 
 The `chat_v2/` two-tier log and `threads.json` remain owned by Agenetes L2 (`FileEventLogStore`, `FileTurnStore`, and `FileThreadStore`), wired in [agenetes/drivers.ts](../../apps/server/src/modules/agent/agenetes/drivers.ts); see [agent-architecture.md](./agent-architecture.md) §5. Workspace activation is coordinated by `apps/server/src/modules/workspace-activation.ts`; the isolated child entry is `workspace-prepare.worker.ts`, and the ordered migration sequence is centralized in `workspace-prepare.ts` with migration implementations under `modules/workspace/migrations/`.
 

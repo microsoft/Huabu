@@ -1,7 +1,7 @@
 # Desktop Cold Start
 
 > What the user sees between double-clicking Huabu and the canvas list appearing, and which parts of the system own each phase.
-> Last updated: 2026-07-31
+> Last updated: 2026-08-20
 
 ---
 
@@ -11,20 +11,22 @@
 app.whenReady()
   ├─ splash window opens                 ← first thing on screen
   ├─ shell-PATH probe, port allocation
-  ├─ server fork + TCP readiness wait
+  ├─ server fork + TCP readiness wait    ← HUABU_WORKSPACE_STARTUP = saved path,
+  │                                        so the server mounts while forking
   ├─ main window created (show: false), loadURL(http://127.0.0.1:<port>)
   ├─ renderer parses the entry graph     ← nothing paints during this
   ├─ 'ready-to-show'  → main window shown, splash closed
-  └─ renderer: init() → GET /api/workspace → PUT /api/workspace (activation)
+  └─ renderer: init() → GET /api/workspace → ready
+                        (first launch only: PUT /api/workspace to activate)
                                            ← WorkspaceLoadingScreen covers this
 ```
 
-When no remembered workspace can be activated, the workspace guard redirects to the stable `/setup` route instead of rendering the setup page inside the guard. This keeps the route that owns the post-activation navigation mounted while `selectWorkspace()` publishes `isReady`; after activation it navigates through `/` to `/spaces` (or World when enabled).
+When there is no remembered workspace, or the server reports it could not open one (`WorkspaceInfo.startupError`), the workspace guard redirects to the stable `/setup` route instead of rendering the setup page inside the guard. This keeps the route that owns the post-activation navigation mounted while `selectWorkspace()` publishes `isReady`; after activation it navigates through `/` to `/spaces` (or World when enabled).
 
 Two independent costs dominate a cold start:
 
 1. **Entry-graph evaluation.** One long synchronous task in the renderer. Its cost is the size of the first-screen JavaScript graph, and it is paid in full on the first launch after an install or an update, when Chromium's per-origin code cache is empty. (It is also paid on _every_ launch when the shell cannot get its preferred port, because the origin — and therefore the cache — changes with the port.)
-2. **Workspace activation.** The server always boots with no workspace; the remembered path lives in the main process, so the renderer has to `PUT /api/workspace` after it loads. Activation forks the preparation worker and runs the migration chain over the workspace root, which is sub-second on local disk and seconds on a cloud-sync mount (Google Drive, iCloud, OneDrive).
+2. **Workspace preparation.** The migration chain runs over the workspace root, which is sub-second on local disk and seconds on a cloud-sync mount (Google Drive, iCloud, OneDrive). Because the shell owns `workspace.json` and the server child, it hands the remembered path over at fork time as `HUABU_WORKSPACE_STARTUP` — so this happens in parallel with the window opening rather than after the renderer loads. The renderer only activates on a first launch, when there is nothing remembered to hand over. A process serves one workspace for its lifetime (issue #126): choosing another saves it and relaunches the app, which is the same sequence again.
 
 ## 2. Why the splash is a separate window
 
