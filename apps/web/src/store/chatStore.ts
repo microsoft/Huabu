@@ -236,8 +236,7 @@ function threadOf(state: ChatState, threadId: string): ChatThreadState {
     state.threadsById[threadId] ?? {
       ...EMPTY_THREAD,
       lastAction:
-        state.lastActionByThread[threadId] ??
-        defaultActionForBinding(binding),
+        state.lastActionByThread[threadId] ?? defaultActionForBinding(binding),
       binding,
       settings: state.settingsByThread[threadId] ?? EMPTY_THREAD.settings,
     }

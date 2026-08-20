@@ -141,8 +141,9 @@ describe('chatStore thread creation', () => {
       bindingMap: { 'canvas-external': EXTERNAL },
     });
 
-    const canvasThread =
-      useChatStore.getState().ensureCanvasThread('canvas-external');
+    const canvasThread = useChatStore
+      .getState()
+      .ensureCanvasThread('canvas-external');
     const independentThread = useChatStore
       .getState()
       .createThread({ binding: EXTERNAL });
