@@ -56,6 +56,7 @@ import {
   createSpace,
   deleteSpace,
   stageSpaceImport,
+  unavailableCapabilityMessage,
   getStructuredStore,
   type CanvasFile,
   type NodeContent,
@@ -1613,9 +1614,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
-    // The Space bundle is a Disk projection (proposal §6.4.3, disposition
-    // A); a portable export generated from records plus reachable blob
-    // references is a separate later design.
+    // Disk-only, declared as `space-bundle-export` in the capability matrix;
+    // a portable export generated from records plus reachable blob references
+    // is a separate later design.
     const tree = handle.diskTree;
     const canvasDir = tree?.directory();
     if (canvasDir === undefined || !existsSync(canvasDir)) {
@@ -1684,11 +1685,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       // format and nothing else (proposal §12.6.2).
       const staged = stageSpaceImport(targetCanvasId);
       if (!staged) {
-        // Phrased here only until the capability matrix owns the wording
-        // (§12.8), so a Disk-only refusal reads the same everywhere.
         return reply.code(400).send({
-          message:
-            'Space bundle import is not available on this storage backend.',
+          message: unavailableCapabilityMessage('space-bundle-import'),
         });
       }
       const stagingDir = staged.stagingDirectory;
