@@ -738,7 +738,7 @@ describe('Space export/import persistence', () => {
       change,
     ]);
     const blob = Buffer.from([0, 1, 2, 3, 255]);
-    await space('c1').blobs.put('asset.bin', blob);
+    await space('c1').artifacts.put('asset.bin', blob);
 
     const app = await buildApp();
     try {
@@ -790,7 +790,7 @@ describe('Space export/import persistence', () => {
       expect(await importedSpace.changes.read('thread-export')).toEqual(
         storedChanges,
       );
-      expect(await space(importedId).blobs.read('asset.bin')).toEqual(blob);
+      expect(await space(importedId).artifacts.read('asset.bin')).toEqual(blob);
     } finally {
       await app.close();
     }

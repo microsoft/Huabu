@@ -451,7 +451,7 @@ async function loadContextImage(
   if (!mimeType) return null;
   const { width, height } = nodeBoxSize(node);
   if (width <= 0 || height <= 0) return null;
-  const bytes = await handle.blobs.read(src);
+  const bytes = await handle.artifacts.read(src);
   if (!bytes) return null;
   return { node, resolvedSrc: src, bytes, mimeType, width, height };
 }
@@ -800,11 +800,11 @@ async function maybeResizeImageArtifact(
   src: string,
   maxEdge: number,
 ): Promise<{ src: string; width: number; height: number } | null> {
-  const blobs = handle.blobs;
+  const artifacts = handle.artifacts;
   const ext = path.extname(src).toLowerCase();
   const mimeType = IMAGE_EXT_MIME[ext];
   if (!mimeType) return null;
-  const bytes = await blobs.read(src);
+  const bytes = await artifacts.read(src);
   if (!bytes) return null;
   const dims = readImageDimensions(bytes, mimeType);
   if (!dims) return null;
@@ -816,7 +816,7 @@ async function maybeResizeImageArtifact(
   const originalStem = path.basename(src, path.extname(src));
   const id = `${originalStem}-resized-${maxEdge}`;
   const filename = `${id}.png`;
-  const cachedBytes = await blobs.read(filename);
+  const cachedBytes = await artifacts.read(filename);
   if (cachedBytes) {
     // Re-derive dimensions from the cached blob so the result is
     // accurate without paying for another resvg pass.
@@ -837,7 +837,7 @@ async function maybeResizeImageArtifact(
     dims.height,
     maxEdge,
   );
-  await blobs.put(filename, resized.png);
+  await artifacts.put(filename, resized.png);
   return { src: filename, width: resized.width, height: resized.height };
 }
 
@@ -1061,10 +1061,10 @@ export async function snapshotNodesToArtifacts(
         ? `sketch-raster-${fingerprint}`
         : `sketch-raster-${fingerprint}-${maxEdge}`;
     const filename = `${id}.png`;
-    const existing = await handle.blobs.head(filename);
+    const existing = await handle.artifacts.head(filename);
     if (!existing) {
       const png = await renderClusterPng(built.svg, built.width);
-      await handle.blobs.put(filename, png);
+      await handle.artifacts.put(filename, png);
     }
     results.push({
       src: filename,

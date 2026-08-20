@@ -335,7 +335,7 @@ async function singleArtifactProbe(
 ): Promise<(key: string) => boolean> {
   const key = extractArtifactKey(src);
   if (!key) return () => false;
-  const exists = (await space(canvasId).blobs.hasMany([key])).has(key);
+  const exists = (await space(canvasId).artifacts.hasMany([key])).has(key);
   return (candidate) => candidate === key && exists;
 }
 
@@ -518,7 +518,7 @@ async function hydrateNodeContent(
   const present =
     referenced.size === 0
       ? new Set<string>()
-      : await handle.blobs.hasMany([...referenced]);
+      : await handle.artifacts.hasMany([...referenced]);
   const artifactExists = (key: string): boolean => present.has(key);
 
   return nodes.map((node) => {

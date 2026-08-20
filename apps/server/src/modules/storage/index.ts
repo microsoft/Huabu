@@ -117,7 +117,7 @@ export {
   SPACE_GUIDE_BLOB_NAMES,
   SPACE_GUIDE_SKILL_NAME,
   SPACE_MEMORY_BLOB_NAME,
-  spaceBlobScopes,
+  spaceBlobAreas,
 } from './ports/blob.js';
 export type {
   BlobBackendKind,
@@ -126,8 +126,8 @@ export type {
   BlobRange,
   BlobRead,
   BlobScope,
-  BlobScopeRef,
   BlobStore,
+  SpaceBlobs,
 } from './ports/blob.js';
 export type { StorageHealth } from './ports/common.js';
 export type {

@@ -273,7 +273,7 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
       src: 'old.svg',
       content: '',
     });
-    await space('c1').blobs.put(
+    await space('c1').artifacts.put(
       'new.svg',
       Buffer.from(
         '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>',
@@ -329,7 +329,7 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
       src: 'pic.svg',
       content: '',
     });
-    await space('c1').blobs.put(
+    await space('c1').artifacts.put(
       'pic.svg',
       Buffer.from(
         '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>',

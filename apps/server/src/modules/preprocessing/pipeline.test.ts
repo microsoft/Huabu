@@ -35,7 +35,7 @@ function deps(release: () => Promise<void>) {
         canvasId: request.canvasId,
         read: async () => null,
       } as unknown as SpaceNodes,
-      blobs: { materialize, put } as unknown as BlobScope,
+      artifacts: { materialize, put } as unknown as BlobScope,
       provider: {} as ProviderManager,
     },
   };

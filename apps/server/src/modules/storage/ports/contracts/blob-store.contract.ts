@@ -30,11 +30,12 @@ import {
   SPACE_GUIDE_SKILL_NAME,
 } from '../blob.js';
 
-import type { BlobScope, BlobScopeRef, BlobStore } from '../blob.js';
+import type { BlobScope, BlobStore } from '../blob.js';
 
 export interface BlobContractHarness {
   store: BlobStore;
-  ref: BlobScopeRef;
+  /** The Space every case addresses. */
+  canvasId: string;
   /** Release any resources the harness allocated. */
   cleanup?: () => Promise<void> | void;
 }
@@ -63,7 +64,7 @@ export function describeBlobStoreContract(
     async function scope(): Promise<BlobScope> {
       harness = await createHarness();
       await harness.store.init();
-      return harness.store.scope(harness.ref);
+      return harness.store.space(harness.canvasId).artifacts;
     }
 
     afterEach(async () => {
@@ -72,8 +73,8 @@ export function describeBlobStoreContract(
     });
 
     /**
-     * A member-bounded scope is a real scope, not a filtered view of a
-     * directory. Disk maps `space-guide` onto the Space root — shared with
+     * A member-bounded area is a real scope, not a filtered view of a
+     * directory. Disk maps `guide` onto the Space root — shared with
      * `space.json` and every node directory — so a scope that answered for
      * the folder would list storage's own records and take the Space with it
      * on `deleteAll()`. These pin the boundary that makes the mapping safe.
@@ -82,10 +83,7 @@ export function describeBlobStoreContract(
       const h = await createHarness();
       harness = h;
       await h.store.init();
-      const guide = h.store.scope({
-        kind: 'space-guide',
-        canvasId: h.ref.canvasId,
-      });
+      const guide = h.store.space(h.canvasId).guide;
 
       await guide.put(SPACE_GUIDE_SKILL_NAME, Buffer.from('# guide'));
       expect(await guide.read(SPACE_GUIDE_SKILL_NAME)).toEqual(
@@ -108,11 +106,7 @@ export function describeBlobStoreContract(
       const h = await createHarness();
       harness = h;
       await h.store.init();
-      const artifacts = h.store.scope(h.ref);
-      const guide = h.store.scope({
-        kind: 'space-guide',
-        canvasId: h.ref.canvasId,
-      });
+      const { artifacts, guide } = h.store.space(h.canvasId);
       await artifacts.put('kept.bin', Buffer.from('artifact'));
       await guide.put(SPACE_GUIDE_SKILL_NAME, Buffer.from('# guide'));
 
@@ -383,16 +377,13 @@ export function describeBlobStoreContract(
       }
     });
 
-    it('isolates scopes from one another', async () => {
+    it('isolates Spaces and areas from one another', async () => {
       const s = await createHarness();
       harness = s;
       await s.store.init();
 
-      const a = s.store.scope(s.ref);
-      const b = s.store.scope({
-        kind: 'space-artifacts',
-        canvasId: 'other-canvas-id',
-      });
+      const a = s.store.space(s.canvasId).artifacts;
+      const b = s.store.space('other-canvas-id').artifacts;
 
       await a.put('shared-name.txt', Buffer.from('from a'));
       expect(await b.head('shared-name.txt')).toBeNull();

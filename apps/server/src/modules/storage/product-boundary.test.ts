@@ -208,19 +208,19 @@ forEachProductProfile((profile: StorageProfile, label: string) => {
       const m = await seedSpace(canvasId);
       const handle = m.storage.space(canvasId);
 
-      await handle.blobs.put('artifact.bin', Buffer.from('artifact bytes'));
+      await handle.artifacts.put('artifact.bin', Buffer.from('artifact bytes'));
       await handle.memory.put(SPACE_MEMORY_BLOB_NAME, Buffer.from('# memory'));
       await handle.guide.put(SPACE_GUIDE_SKILL_NAME, Buffer.from('# guide'));
       await handle.uploads.put('staged.bin', Buffer.from('staged bytes'));
 
-      expect(await handle.blobs.read('artifact.bin')).toEqual(
+      expect(await handle.artifacts.read('artifact.bin')).toEqual(
         Buffer.from('artifact bytes'),
       );
       expect(await handle.memory.read(SPACE_MEMORY_BLOB_NAME)).toEqual(
         Buffer.from('# memory'),
       );
       // Areas are separate namespaces, so one area's name is not another's.
-      expect(await handle.blobs.read(SPACE_MEMORY_BLOB_NAME)).toBeNull();
+      expect(await handle.artifacts.read(SPACE_MEMORY_BLOB_NAME)).toBeNull();
       expect((await handle.uploads.list()).map((info) => info.name)).toEqual([
         'staged.bin',
       ]);
@@ -233,7 +233,7 @@ forEachProductProfile((profile: StorageProfile, label: string) => {
       await expect(
         m.storage
           .space('space-product-absent')
-          .blobs.put('orphan.bin', Buffer.from('x')),
+          .artifacts.put('orphan.bin', Buffer.from('x')),
       ).rejects.toThrow();
     });
 
@@ -324,7 +324,7 @@ forEachProductProfile((profile: StorageProfile, label: string) => {
       const canvasId = 'space-product-delete';
       const m = await seedSpace(canvasId);
       const handle = m.storage.space(canvasId);
-      await handle.blobs.put('artifact.bin', Buffer.from('bytes'));
+      await handle.artifacts.put('artifact.bin', Buffer.from('bytes'));
       await handle.memory.put(SPACE_MEMORY_BLOB_NAME, Buffer.from('# memory'));
 
       await expect(deleteSpace(canvasId)).resolves.toEqual({
@@ -337,7 +337,7 @@ forEachProductProfile((profile: StorageProfile, label: string) => {
       await expect(after.nodes.list()).resolves.toEqual(new Map());
       // Every area, not only artifacts: an unswept one is an orphan on a
       // backend where dropping the record does not remove the area.
-      expect(await after.blobs.read('artifact.bin')).toBeNull();
+      expect(await after.artifacts.read('artifact.bin')).toBeNull();
       expect(await after.memory.read(SPACE_MEMORY_BLOB_NAME)).toBeNull();
       await expect(m.storage.structured.spaces().list()).resolves.toEqual([]);
     });
