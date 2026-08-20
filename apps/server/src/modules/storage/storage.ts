@@ -34,6 +34,7 @@ import { DiskBlobStore } from './backends/disk/blob-store.js';
 import { stageDiskSpaceImport } from './backends/disk/space-import.js';
 import { diskSpaceTree } from './backends/disk/space-tree.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
+import { spaceBlobScopes } from './ports/blob.js';
 import {
   DiskWorkspaceRepository,
   workspaceRegistryPath,
@@ -55,6 +56,7 @@ import type {
   BlobRange,
   BlobRead,
   BlobScope,
+  BlobScopeRef,
   BlobStore,
 } from './ports/blob.js';
 import type { StorageHealth } from './ports/common.js';
@@ -144,12 +146,23 @@ export interface Storage {
  */
 export interface Space extends SpaceHandle {
   /**
-   * This Space's blobs, with the cross-store precondition applied.
+   * This Space's artifacts, with the cross-store precondition applied.
    *
    * Bytes may only be added to a Space whose record exists. Reads and
    * `deleteAll()` stay available for cleanup when a record has already gone.
+   *
+   * The unqualified name because artifacts are what almost every caller
+   * means. The other areas below are the same guarded scope over a different
+   * {@link BlobScopeRef} kind — one member each, so a caller reaches every
+   * area of a Space from the one handle rather than assembling a scope ref.
    */
   readonly blobs: BlobScope;
+  /** User-authored guide documents at the Space root (`skill.md`). */
+  readonly guide: BlobScope;
+  /** The agent's private memory document. */
+  readonly memory: BlobScope;
+  /** Scratch an upload lands in before anything claims it. */
+  readonly uploads: BlobScope;
   /**
    * Disk's directory for this Space. `null` on every other backend.
    *
@@ -173,7 +186,10 @@ function composeSpace(storage: Storage, canvasId: string): Space {
     tasks: handle.tasks,
     events: handle.events,
     extension: (namespace) => handle.extension(namespace),
-    blobs: guardedBlobScope(storage, canvasId),
+    blobs: guardedBlobScope(storage, { kind: 'space-artifacts', canvasId }),
+    guide: guardedBlobScope(storage, { kind: 'space-guide', canvasId }),
+    memory: guardedBlobScope(storage, { kind: 'space-memory', canvasId }),
+    uploads: guardedBlobScope(storage, { kind: 'space-upload', canvasId }),
     diskTree:
       storage.profile.structured.kind === 'disk'
         ? diskSpaceTree(canvasId)
@@ -437,7 +453,15 @@ export async function deleteSpace(
     try {
       // Preserve the old retryable cleanup behavior: sweep even when the
       // structured record is already absent, so orphan blobs can be removed.
-      await storage.blobs.scope({ kind: 'canvas', canvasId }).deleteAll();
+      // Every area, not just artifacts: a Space's bytes are spread across one
+      // scope per user-visible area, and on a backend where dropping the
+      // structured record does not remove the area they sit in, an unswept
+      // kind is an orphan.
+      await Promise.all(
+        spaceBlobScopes(canvasId).map((ref) =>
+          storage.blobs.scope(ref).deleteAll(),
+        ),
+      );
       return await started.session.finish();
     } catch (error) {
       await started.session.abort();
@@ -460,9 +484,10 @@ export async function deleteSpace(
  * one Space facade is composed entirely from the connections it was built
  * against — a scope that re-resolved the holder could outlive them.
  */
-function guardedBlobScope(storage: Storage, canvasId: string): BlobScope {
+function guardedBlobScope(storage: Storage, ref: BlobScopeRef): BlobScope {
+  const { canvasId } = ref;
   const workspacePath = activeWorkspacePath();
-  const delegate = storage.blobs.scope({ kind: 'canvas', canvasId });
+  const delegate = storage.blobs.scope(ref);
 
   async function requireSpace(): Promise<void> {
     const record = await storage.structured.space(canvasId).read();

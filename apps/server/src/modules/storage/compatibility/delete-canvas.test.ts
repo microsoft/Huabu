@@ -20,6 +20,7 @@ import { artifactPath, canvasJsonPath } from '../backends/disk/layout.js';
 import { resetStorageCache } from '../backends/disk/legacy/canvas-store-cache.js';
 import { DiskStructuredStore } from '../backends/disk/structured-store.js';
 import { getCanvasStore } from '../index.js';
+import { spaceBlobScopes } from '../ports/blob.js';
 import {
   composeStorage,
   space,
@@ -243,7 +244,12 @@ describe('deleteSpace composition', () => {
 
     // Blobs first: after the structured record is gone nothing names them,
     // so a failed sweep on a remote backend would strand them permanently.
-    expect(blobs.recordPresentAtSweep).toEqual([true]);
+    // One sweep per user-visible area — a Space's bytes are spread across a
+    // scope each, and an unswept kind is an orphan on a backend where
+    // dropping the record does not remove the area they sit in.
+    expect(blobs.recordPresentAtSweep).toEqual(
+      spaceBlobScopes('canvas-a').map(() => true),
+    );
     expect(existsSync(artifactPath('canvas-a', 'art_1.png'))).toBe(false);
     expect(existsSync(canvasJsonPath('canvas-a'))).toBe(false);
   });
@@ -340,7 +346,7 @@ describe('deleteSpace composition', () => {
     await putting;
     await expect(deleting).resolves.toEqual({ ok: true, reason: 'deleted' });
 
-    expect(controlled.deleteCalls).toBe(1);
+    expect(controlled.deleteCalls).toBe(spaceBlobScopes('canvas-a').length);
     expect(existsSync(canvasJsonPath('canvas-a'))).toBe(false);
     expect(existsSync(artifactPath('canvas-a', 'in-flight.bin'))).toBe(false);
   });

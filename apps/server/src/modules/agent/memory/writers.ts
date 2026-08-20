@@ -12,10 +12,14 @@
  *                                          unique substring (Claude
  *                                          Code style edit).
  *
- * Both take an already-sandbox-resolved absolute path; callers
- * (currently `tools/handlers/fs-write.ts`) own the path → tier
- * mapping. The `tier` knob here is purely for behaviour that varies
- * by destination:
+ * Both take a {@link MemoryDocument} — where the bytes live, resolved by the
+ * caller (currently `tools/handlers/fs-write.ts`), which owns the tier
+ * mapping. The indirection exists because the tiers no longer share a
+ * substrate: the Workspace-scoped ones are files, while a Space's memory body
+ * is a blob under its own scope (proposal §6.4.3, disposition D). Everything
+ * below is rules about the *content*, so none of it should know which.
+ *
+ * The `tier` knob is purely for behaviour that varies by destination:
  *
  *   - cap enforcement (workspace + canvas only — skill bodies are
  *     allowed to grow larger)
@@ -38,6 +42,58 @@ import { atomicWriteText, mkdirp } from '../../../utils/fs.js';
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
 
 import type { MemoryLogger } from './index.js';
+import type { BlobScope } from '../../storage/index.js';
+
+// ─── Where a document lives ────────────────────────────────────────────────
+
+/**
+ * One memory document, addressed however its tier stores it.
+ *
+ * `target` is what a {@link WriteResult} names, so it is the caller's own
+ * vocabulary rather than a physical location — an agent that reads
+ * `memory/space.md` should see that spelling back, not wherever the bytes
+ * happen to sit.
+ */
+export interface MemoryDocument {
+  readonly target: string;
+  read(): Promise<string | null>;
+  write(body: string): Promise<void>;
+}
+
+/** A document that is a real file — the Workspace-scoped tiers. */
+export function fileDocument(
+  absPath: string,
+  parentDir: string,
+): MemoryDocument {
+  return {
+    target: absPath,
+    async read(): Promise<string | null> {
+      return existsSync(absPath) ? readFileSync(absPath, 'utf8') : null;
+    },
+    async write(body: string): Promise<void> {
+      mkdirp(parentDir);
+      atomicWriteText(absPath, body);
+    },
+  };
+}
+
+/** A document that is a blob — a Space's memory body. */
+export function blobDocument(
+  scope: BlobScope,
+  name: string,
+  target: string,
+): MemoryDocument {
+  return {
+    target,
+    async read(): Promise<string | null> {
+      const bytes = await scope.read(name);
+      return bytes === null ? null : bytes.toString('utf8');
+    },
+    async write(body: string): Promise<void> {
+      await scope.put(name, Buffer.from(body, 'utf8'));
+    },
+  };
+}
 
 // ─── Concurrency guards ────────────────────────────────────────────────────
 //
@@ -71,10 +127,8 @@ export const SKILL_CREATE_RATIONALE_MIN = 20;
 
 interface CommonArgs {
   tier: MemoryTier;
-  /** Absolute path, already sandbox-validated by the caller. */
-  absPath: string;
-  /** Directory to `mkdirp` before writing. */
-  parentDir: string;
+  /** Where the bytes live, already sandbox-validated by the caller. */
+  document: MemoryDocument;
   /**
    * Required when `tier === 'skill'` — used to invalidate the user
    * skill loader cache after a successful write. Ignored otherwise.
@@ -102,24 +156,24 @@ export async function overwriteMemoryFile(
   return runForTier(args.tier, () => doOverwrite(args));
 }
 
-function doOverwrite(args: OverwriteArgs): WriteResult {
+async function doOverwrite(args: OverwriteArgs): Promise<WriteResult> {
+  const { target } = args.document;
   try {
     const body = ensureTrailingNewline(args.body);
     if (args.tier !== 'skill') {
       const capCheck = checkCap(body);
-      if (!capCheck.ok) return reject(args.absPath, capCheck.reason);
+      if (!capCheck.ok) return reject(target, capCheck.reason);
     }
-    mkdirp(args.parentDir);
-    atomicWriteText(args.absPath, body);
+    await args.document.write(body);
     if (args.tier === 'skill' && args.skillId) {
       invalidateUserSkill(args.skillId);
     }
     args.logger?.info(
-      `[memory] ${args.tier} overwritten at ${args.absPath} (${body.length} bytes)`,
+      `[memory] ${args.tier} overwritten at ${target} (${body.length} bytes)`,
     );
-    return { ok: true, target: args.absPath, reason: 'overwritten' };
+    return { ok: true, target, reason: 'overwritten' };
   } catch (err) {
-    return rejectFromError(err, args.absPath);
+    return rejectFromError(err, target);
   }
 }
 
@@ -147,34 +201,32 @@ export async function replaceStringInMemoryFile(
   return runForTier(args.tier, () => doReplaceString(args));
 }
 
-function doReplaceString(args: ReplaceStringArgs): WriteResult {
+async function doReplaceString(args: ReplaceStringArgs): Promise<WriteResult> {
+  const { target } = args.document;
   try {
     if (typeof args.oldString !== 'string' || args.oldString.length === 0) {
-      return reject(args.absPath, 'oldString is required and non-empty');
+      return reject(target, 'oldString is required and non-empty');
     }
     if (typeof args.newString !== 'string') {
-      return reject(args.absPath, 'newString is required (use "" to delete)');
+      return reject(target, 'newString is required (use "" to delete)');
     }
     if (args.oldString === args.newString) {
-      return reject(args.absPath, 'oldString and newString are identical');
+      return reject(target, 'oldString and newString are identical');
     }
-    if (!existsSync(args.absPath)) {
+    const before = await args.document.read();
+    if (before === null) {
       return reject(
-        args.absPath,
+        target,
         `file does not exist — use mode="overwrite" to create it`,
       );
     }
-    const before = readFileSync(args.absPath, 'utf8');
     const idx = before.indexOf(args.oldString);
     if (idx === -1) {
-      return reject(
-        args.absPath,
-        'oldString not found in file — no edit applied',
-      );
+      return reject(target, 'oldString not found in file — no edit applied');
     }
     if (before.indexOf(args.oldString, idx + 1) !== -1) {
       return reject(
-        args.absPath,
+        target,
         'oldString matches multiple times — add more surrounding context to make it unique',
       );
     }
@@ -185,19 +237,18 @@ function doReplaceString(args: ReplaceStringArgs): WriteResult {
     );
     if (args.tier !== 'skill') {
       const capCheck = checkCap(after);
-      if (!capCheck.ok) return reject(args.absPath, capCheck.reason);
+      if (!capCheck.ok) return reject(target, capCheck.reason);
     }
-    mkdirp(args.parentDir);
-    atomicWriteText(args.absPath, after);
+    await args.document.write(after);
     if (args.tier === 'skill' && args.skillId) {
       invalidateUserSkill(args.skillId);
     }
     args.logger?.info(
-      `[memory] ${args.tier} edited at ${args.absPath} (${after.length} bytes)`,
+      `[memory] ${args.tier} edited at ${target} (${after.length} bytes)`,
     );
-    return { ok: true, target: args.absPath, reason: 'edited' };
+    return { ok: true, target, reason: 'edited' };
   } catch (err) {
-    return rejectFromError(err, args.absPath);
+    return rejectFromError(err, target);
   }
 }
 
