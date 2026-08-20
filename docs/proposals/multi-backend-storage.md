@@ -1093,9 +1093,9 @@ The post-implementation adversarial pass hardened the existing Disk behavior
 without widening the portable contract. Disk reads now distinguish ENOENT
 from corrupt or unreadable durable state; JSONL readers tolerate only a final
 unterminated crash fragment and validate event/delta row shapes; cache entries
-and retained handles are Workspace-qualified; and Space deletion has a
-process-local admission gate plus an active-Workspace lease spanning blob and
-structured cleanup. The executor's multi-file rollback remains a
+and retained handles were Workspace-qualified (§12.6.5 later removed both,
+once a process could only ever serve one Workspace); and Space deletion has a
+process-local admission gate spanning blob and structured cleanup. The executor's multi-file rollback remains a
 Disk/application implementation detail, not a new generic transaction API.
 External-note watcher recovery is owned by a separate watcher-recovery PR and
 is not part of Phase 2. Coordination across multiple server processes and a
@@ -2286,7 +2286,10 @@ than by reading:
   live process between two Workspaces. Issue #126 established that this is not
   a product requirement; §12.6.5 below is the lifecycle that replaced it, and
   the leak, the leases, the stale-mount check, and `Storage.workspacePath` all
-  went with the staging.
+  went with the staging. So did every "which Workspace am I?" check underneath:
+  the Disk handles, repositories, blob scopes, instance cache, and node fences
+  no longer record one, because committing a Workspace drops all of them
+  together and a process never has a second.
 - **A blob scope for the Space root cannot be a directory scope.** Its area is
   shared with `space.json` and every node directory, so `list()` would claim
   storage's own records and `deleteAll()` would remove the Space. The `guide`

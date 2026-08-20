@@ -4,9 +4,6 @@
 /** Disk implementation of the asynchronous node-record port. */
 
 import { createHash } from 'node:crypto';
-import path from 'node:path';
-
-import { getWorkspacePath } from '../../../workspace.js';
 
 import type { CanvasStore } from './legacy/canvas-store.js';
 import type { NodeContent } from '../../../canvas/persistence-types.js';
@@ -43,16 +40,13 @@ export class DiskSpaceNodes implements SpaceNodes {
   readonly canvasId: string;
 
   readonly #store: CanvasStore;
-  readonly #workspacePath: string;
 
   constructor(store: CanvasStore) {
     this.#store = store;
     this.canvasId = store.canvasId;
-    this.#workspacePath = path.resolve(getWorkspacePath());
   }
 
   async read(nodeId: string): Promise<NodeSnapshot | null> {
-    this.#assertActiveWorkspace();
     const record = this.#store.readNodeStrict(nodeId);
     return record === null ? null : snapshotOf(record);
   }
@@ -70,7 +64,6 @@ export class DiskSpaceNodes implements SpaceNodes {
   async readMany(
     nodeIds: readonly string[],
   ): Promise<Map<string, NodeSnapshot>> {
-    this.#assertActiveWorkspace();
     const out = new Map<string, NodeSnapshot>();
     for (const nodeId of new Set(nodeIds)) {
       const record = this.#store.readNodeStrict(nodeId);
@@ -80,7 +73,6 @@ export class DiskSpaceNodes implements SpaceNodes {
   }
 
   async list(): Promise<Map<string, NodeSnapshot>> {
-    this.#assertActiveWorkspace();
     return snapshotsOf(await this.#store.readAllNodes());
   }
 
@@ -88,7 +80,6 @@ export class DiskSpaceNodes implements SpaceNodes {
     onNode: (snapshot: NodeSnapshot) => void,
     options?: NodeStreamOptions,
   ): Promise<Map<string, NodeSnapshot>> {
-    this.#assertActiveWorkspace();
     const contents = await this.#store.streamAllNodes(
       (_id, content) => onNode(snapshotOf(content)),
       options?.signal,
@@ -97,7 +88,6 @@ export class DiskSpaceNodes implements SpaceNodes {
   }
 
   async put(input: NodePutInput): Promise<NodePutResult> {
-    this.#assertActiveWorkspace();
     if (input.record.nodeId !== input.nodeId) {
       throw new Error(
         `SpaceNodes(${this.canvasId}) nodeId mismatch: ` +
@@ -170,16 +160,6 @@ export class DiskSpaceNodes implements SpaceNodes {
   }
 
   async delete(nodeId: string): Promise<NodeDeleteResult> {
-    this.#assertActiveWorkspace();
     return this.#store.deleteNode(nodeId);
-  }
-
-  #assertActiveWorkspace(): void {
-    if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
-      throw new Error(
-        `SpaceNodes(${this.canvasId}) belongs to an inactive workspace. ` +
-          'Resolve a fresh Space handle after workspace activation.',
-      );
-    }
   }
 }

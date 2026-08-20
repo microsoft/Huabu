@@ -44,7 +44,6 @@ import {
   toFrontmatter,
 } from '../../../../../utils/markdown-frontmatter.js';
 import { toSafeFilename } from '../../../../../utils/naming.js';
-import { getWorkspacePath } from '../../../../workspace.js';
 import { assertSpaceMutationAllowed } from '../../../space-lifecycle-admission.js';
 import {
   patchCanvasDirTitle,
@@ -297,8 +296,6 @@ function readNodeSidecar(
 
 export class CanvasStore {
   readonly canvasId: string;
-  /** Workspace this handle was created for; handles never follow activation. */
-  readonly #workspacePath: string;
   private nodes: NameIndex<NodeFileEntry> | null = null;
   /** Whether the cached index was built without swallowing sidecar failures. */
   private nodeIndexIsConclusive = false;
@@ -323,24 +320,8 @@ export class CanvasStore {
   /** Live ids from the latest structural write, reconciled after log commit. */
   private deferredTombstoneReconciliationNodeIds: Set<string> | null = null;
 
-  constructor(canvasId: string, workspacePath = getWorkspacePath()) {
+  constructor(canvasId: string) {
     this.canvasId = sanitizeId(canvasId, 'canvasId');
-    this.#workspacePath = path.resolve(workspacePath);
-  }
-
-  /**
-   * A cached handle is scoped to the workspace that created it. Without this
-   * guard, a caller retaining a handle across `setWorkspacePath()` would send
-   * its cached node filename/index state into the newly-active workspace.
-   */
-  private assertActiveWorkspace(): void {
-    const active = path.resolve(getWorkspacePath());
-    if (active !== this.#workspacePath) {
-      throw new Error(
-        `CanvasStore(${this.canvasId}) belongs to an inactive workspace. ` +
-          `Resolve a fresh Space handle after workspace activation.`,
-      );
-    }
   }
 
   // ── Canvas structure ─────────────────────────────────────────────────────
@@ -355,7 +336,6 @@ export class CanvasStore {
    * would silently strip the user's typed characters from the title.
    */
   read(): CanvasFile | null {
-    this.assertActiveWorkspace();
     let file = readJson<CanvasFile>(canvasJsonPath(this.canvasId));
     if (!file) {
       refreshCanvasDirIndex();
@@ -368,7 +348,6 @@ export class CanvasStore {
 
   /** @internal Apply legacy Finder-title semantics without rereading disk. */
   reconcileValidatedRecord(file: CanvasFile): CanvasFile {
-    this.assertActiveWorkspace();
     if (file.canvasId !== this.canvasId) {
       throw new Error(
         `CanvasStore(${this.canvasId}) cannot reconcile record "${file.canvasId}"`,
@@ -409,7 +388,6 @@ export class CanvasStore {
   }
 
   private writeRecord(canvas: CanvasFile, reconcileTombstones: boolean): void {
-    this.assertActiveWorkspace();
     assertSpaceMutationAllowed(this.canvasId);
     if (canvas.canvasId !== this.canvasId) {
       throw new Error(
@@ -425,7 +403,7 @@ export class CanvasStore {
     const reconcileNodeIds = new Set<string>();
     if (reconcileTombstones) {
       const tombstonedLiveIds = [...liveNodeIds].filter((id) =>
-        isNodeTombstoned(this.#workspacePath, this.canvasId, id),
+        isNodeTombstoned(this.canvasId, id),
       );
       if (tombstonedLiveIds.length > 0) {
         const previous = readJson<CanvasFile>(canvasJsonPath(this.canvasId));
@@ -456,7 +434,7 @@ export class CanvasStore {
       return;
     }
     for (const id of reconcileNodeIds) {
-      clearNodeTombstone(this.#workspacePath, this.canvasId, id);
+      clearNodeTombstone(this.canvasId, id);
     }
   }
 
@@ -519,7 +497,6 @@ export class CanvasStore {
     },
     callback: () => T,
   ): T {
-    this.assertActiveWorkspace();
     if (this.nodeMutationTransactionDepth > 0) {
       throw new Error('CanvasStore node mutation transactions cannot nest');
     }
@@ -536,7 +513,6 @@ export class CanvasStore {
     // mutex, on the hottest write path there is.
 
     const tombstoneSnapshot = captureNodeTombstones(
-      this.#workspacePath,
       this.canvasId,
       options.affectedNodeIds,
     );
@@ -548,15 +524,11 @@ export class CanvasStore {
       // `callback` includes the structural write and delta-log append. Only
       // after both return successfully may a listed id clear its tombstone.
       for (const id of this.deferredTombstoneReconciliationNodeIds) {
-        clearNodeTombstone(this.#workspacePath, this.canvasId, id);
+        clearNodeTombstone(this.canvasId, id);
       }
       return result;
     } catch (error) {
-      restoreNodeTombstones(
-        this.#workspacePath,
-        this.canvasId,
-        tombstoneSnapshot,
-      );
+      restoreNodeTombstones(this.canvasId, tombstoneSnapshot);
       throw error;
     } finally {
       this.deferredTombstoneReconciliationNodeIds = null;
@@ -570,7 +542,6 @@ export class CanvasStore {
    * throwing so the route layer can map it to a 409.
    */
   renameSelf(newTitle: string | null): RenameSelfResult {
-    this.assertActiveWorkspace();
     assertSpaceMutationAllowed(this.canvasId);
     if (isWorldCanvasId(this.canvasId)) {
       return { ok: false, reason: 'forbidden' };
@@ -668,7 +639,6 @@ export class CanvasStore {
    * `readdir`; per-file contents are only re-read when a rescan fires.
    */
   revalidateNodeForRead(nodeId: string, strict = false): void {
-    this.assertActiveWorkspace();
     const idx = this.nodeIndex(strict);
     if (this.nodeDuplicateIds.has(nodeId) || this.nodeIndexCountStale(idx)) {
       this.invalidateNodeIndex();
@@ -683,7 +653,6 @@ export class CanvasStore {
    * populated the set, so no extra scan happens there.
    */
   isDuplicateNode(nodeId: string): boolean {
-    this.assertActiveWorkspace();
     this.nodeIndex();
     return this.nodeDuplicateIds.has(nodeId);
   }
@@ -696,7 +665,6 @@ export class CanvasStore {
    * O(directory size) — only called on the rare duplicate path.
    */
   duplicateNodeFiles(nodeId: string): string[] {
-    this.assertActiveWorkspace();
     return this.duplicateNodeFilenames(nodeId);
   }
 
@@ -781,12 +749,10 @@ export class CanvasStore {
    * not match `toSafeFilename(label)` (dedupe suffixes, external renames).
    */
   nodeIdForFilename(filename: string): string | null {
-    this.assertActiveWorkspace();
     return this.nodeIndex().findByName(filename)?.id ?? null;
   }
 
   readNode(nodeId: string): NodeContent | null {
-    this.assertActiveWorkspace();
     const filename = this.nodeFilenameOf(nodeId);
     const fullPath = nodeFilePath(this.canvasId, filename);
     let raw = readText(fullPath);
@@ -821,7 +787,6 @@ export class CanvasStore {
    * outcome instead of overwriting either file.
    */
   readNodeStrict(nodeId: string): NodeContent | null {
-    this.assertActiveWorkspace();
     this.revalidateNodeForRead(nodeId, true);
 
     const read = (filename: string): string | null =>
@@ -883,7 +848,6 @@ export class CanvasStore {
   async readAllNodes(options?: {
     strict?: boolean;
   }): Promise<Map<string, NodeContent>> {
-    this.assertActiveWorkspace();
     const generation = this.nodeIndexGeneration;
     const contents = new Map<string, NodeContent>();
     const idx = new NameIndex<NodeFileEntry>();
@@ -953,7 +917,6 @@ export class CanvasStore {
     onNode: (id: string, content: NodeContent) => void,
     signal?: { readonly aborted: boolean },
   ): Promise<Map<string, NodeContent>> {
-    this.assertActiveWorkspace();
     const generation = this.nodeIndexGeneration;
     const contents = new Map<string, NodeContent>();
     const idx = new NameIndex<NodeFileEntry>();
@@ -1005,7 +968,6 @@ export class CanvasStore {
     content: NodeContent,
     opts: { strictRename?: boolean } = {},
   ): RenameResult {
-    this.assertActiveWorkspace();
     if (content.nodeId !== nodeId) {
       throw new Error(
         `nodeId mismatch: argument="${nodeId}" payload="${content.nodeId}"`,
@@ -1193,7 +1155,6 @@ export class CanvasStore {
    * `.md` stays on disk as a permanent orphan.
    */
   deleteNode(nodeId: string): 'deleted' | 'absent' {
-    this.assertActiveWorkspace();
     // Keep idempotent delete semantics, but do not retain a tombstone for an
     // id whose Space itself does not exist.
     if (
@@ -1211,7 +1172,7 @@ export class CanvasStore {
     // in-flight write cannot resurrect the sidecar regardless of which delete
     // branch we take. The process registry outlives an evicted LRU instance
     // and expires the entry on its own timer.
-    markNodeDeleted(this.#workspacePath, this.canvasId, nodeId);
+    markNodeDeleted(this.canvasId, nodeId);
 
     const idx = this.nodeIndex();
     const filename = idx.get(nodeId)?.filename ?? this.nodeFilenameOf(nodeId);
@@ -1259,8 +1220,7 @@ export class CanvasStore {
    * recently-deleted id (the common case short-circuits on an empty map).
    */
   isNodeWriteSuppressed(nodeId: string): boolean {
-    this.assertActiveWorkspace();
-    if (!isNodeTombstoned(this.#workspacePath, this.canvasId, nodeId)) {
+    if (!isNodeTombstoned(this.canvasId, nodeId)) {
       return false;
     }
     // An authoritative INSERT (undo/revert or explicit id reuse) may recreate
@@ -1309,7 +1269,6 @@ export class CanvasStore {
    * un-coalesced sidecar.
    */
   readChanges(threadId: string): CanvasChangeRecord[] {
-    this.assertActiveWorkspace();
     return coalesceChanges(
       readJson<CanvasChangeRecord[]>(changesPath(this.canvasId, threadId)) ??
         [],
@@ -1332,7 +1291,6 @@ export class CanvasStore {
     threadId: string,
     records: CanvasChangeRecord[],
   ): CanvasChangeRecord[] {
-    this.assertActiveWorkspace();
     this.requireExistingSpaceForMutation('append change records');
     const existing = this.readChanges(threadId);
     const merged = coalesceChanges([...existing, ...records]);
@@ -1345,7 +1303,6 @@ export class CanvasStore {
    * record, or null when the id was not present.
    */
   removeChange(threadId: string, changeId: string): CanvasChangeRecord | null {
-    this.assertActiveWorkspace();
     this.requireExistingSpaceForMutation('remove a change record');
     const existing = this.readChanges(threadId);
     const idx = existing.findIndex((r) => r.id === changeId);
@@ -1367,7 +1324,6 @@ export class CanvasStore {
   appendEvents(
     events: ReadonlyArray<{ payload: RecentAction; ts?: number }>,
   ): void {
-    this.assertActiveWorkspace();
     this.requireExistingSpaceForMutation('append events');
     if (events.length === 0) return;
     const now = Date.now();
@@ -1383,7 +1339,6 @@ export class CanvasStore {
    * most recent `limit` records are returned (tail read).
    */
   readEvents(limit?: number): CanvasEvent[] {
-    this.assertActiveWorkspace();
     return readJsonLines<CanvasEvent>(eventsPath(this.canvasId), limit);
   }
 
@@ -1400,7 +1355,6 @@ export class CanvasStore {
   // crash mid-write drops the trailing partial line on read.
 
   appendDeltaLogEntry(entry: DeltaLogEntry): void {
-    this.assertActiveWorkspace();
     this.requireExistingSpaceForMutation('append a delta');
     appendJsonLine<DeltaLogEntry>(deltaLogPath(this.canvasId), entry);
   }
@@ -1412,7 +1366,6 @@ export class CanvasStore {
    * guarantees monotonic appends).
    */
   readDeltaLogSince(fromVersion: number): DeltaLogEntry[] {
-    this.assertActiveWorkspace();
     const all = readJsonLines<DeltaLogEntry>(deltaLogPath(this.canvasId));
     if (fromVersion <= 0) return all;
     return all.filter((row) => row.version > fromVersion);
@@ -1427,7 +1380,6 @@ export class CanvasStore {
    * out-of-order append without paying O(log size) on every write.
    */
   lastDeltaLogEntry(): DeltaLogEntry | null {
-    this.assertActiveWorkspace();
     const tail = readJsonLines<DeltaLogEntry>(deltaLogPath(this.canvasId), 1);
     return tail[tail.length - 1] ?? null;
   }
@@ -1442,7 +1394,6 @@ export class CanvasStore {
 
   /** Recursively delete the entire canvas directory. */
   destroy(): boolean {
-    this.assertActiveWorkspace();
     if (isWorldCanvasId(this.canvasId)) {
       throw new Error('World canvas cannot be deleted');
     }
@@ -1450,7 +1401,7 @@ export class CanvasStore {
     if (!existsSync(root)) {
       unregisterCanvasDir(this.canvasId);
       this.invalidateNodeIndex();
-      clearSpaceNodeTombstones(this.#workspacePath, this.canvasId);
+      clearSpaceNodeTombstones(this.canvasId);
       return false;
     }
     rmSync(root, {
@@ -1461,7 +1412,7 @@ export class CanvasStore {
     });
     unregisterCanvasDir(this.canvasId);
     this.invalidateNodeIndex();
-    clearSpaceNodeTombstones(this.#workspacePath, this.canvasId);
+    clearSpaceNodeTombstones(this.canvasId);
     return true;
   }
 }

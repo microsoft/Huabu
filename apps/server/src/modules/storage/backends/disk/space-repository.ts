@@ -73,7 +73,6 @@ export class DiskSpaceRepository implements SpaceRepository {
   }
 
   async list(): Promise<CanvasSummary[]> {
-    this.#assertActiveWorkspace();
     refreshCanvasDirIndex();
 
     return listCanvasDirEntries().map((entry) => {
@@ -88,7 +87,6 @@ export class DiskSpaceRepository implements SpaceRepository {
   }
 
   async worldId(): Promise<string> {
-    this.#assertActiveWorkspace();
     return this.#requireWorld();
   }
 
@@ -107,7 +105,6 @@ export class DiskSpaceRepository implements SpaceRepository {
    * World is a new member of the collection every later read resolves through.
    */
   async ensureWorld(): Promise<string> {
-    this.#assertActiveWorkspace();
     const canvasId = ensureWorldCanvasOnDisk(this.#workspacePath);
     // A freshly created World is a new member of the collection every later
     // read resolves through.
@@ -116,7 +113,6 @@ export class DiskSpaceRepository implements SpaceRepository {
   }
 
   async create(input: SpaceCreateInput): Promise<SpaceCreateResult> {
-    this.#assertActiveWorkspace();
     const canvasId = sanitizeId(input.canvasId, 'canvasId');
     assertSpaceMutationAllowed(canvasId);
     // Creation owns membership allocation. Refresh here rather than relying
@@ -154,7 +150,6 @@ export class DiskSpaceRepository implements SpaceRepository {
   }
 
   async beginDelete(input: SpaceDeleteInput): Promise<SpaceBeginDeleteResult> {
-    this.#assertActiveWorkspace();
     const canvasId = sanitizeId(input.canvasId, 'canvasId');
     // Revalidate the protected World identity before a destructive session,
     // as the old composition path did before touching blobs.
@@ -201,7 +196,6 @@ export class DiskSpaceRepository implements SpaceRepository {
   }
 
   async rename(input: SpaceRenameInput): Promise<SpaceRenameResult> {
-    this.#assertActiveWorkspace();
     const canvasId = sanitizeId(input.canvasId, 'canvasId');
     assertSpaceMutationAllowed(canvasId);
     if (this.#isWorld(canvasId)) {
@@ -269,15 +263,6 @@ export class DiskSpaceRepository implements SpaceRepository {
   #requireWorld(): string {
     refreshCanvasDirIndex();
     return requireWorldCanvasId();
-  }
-
-  #assertActiveWorkspace(): void {
-    if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
-      throw new Error(
-        'Space repository belongs to an inactive workspace. ' +
-          'Resolve a fresh Space repository after workspace activation.',
-      );
-    }
   }
 
   #conflictingTitle(directoryName: string): string | null {

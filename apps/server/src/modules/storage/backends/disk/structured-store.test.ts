@@ -288,17 +288,6 @@ describe('Disk Space Tasks', () => {
       /references missing Task/,
     );
   });
-
-  it('rejects a retained handle after the active Workspace changes', async () => {
-    const retained = store.space('canvas-empty').tasks;
-    const replacement = freshWorkspace('huabu-task-repo-next-');
-
-    await expect(retained.read()).rejects.toThrow(/inactive workspace/);
-
-    workspaceState.path = root;
-    resetStorageCache();
-    rmSync(replacement, { recursive: true, force: true });
-  });
 });
 
 /**

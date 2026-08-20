@@ -26,6 +26,8 @@
 
 import { isWorkspaceConfigured } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
+import { resetStorageCache } from './backends/disk/legacy/canvas-store-cache.js';
+import { clearAllNodeTombstones } from './backends/disk/legacy/node-tombstones.js';
 import { stageDiskSpaceImport } from './backends/disk/space-import.js';
 import { diskSpaceTree } from './backends/disk/space-tree.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
@@ -302,16 +304,23 @@ export async function mountStorage(
 }
 
 /**
- * Drop the mount without closing it.
+ * Drop the process's storage state without closing it.
  *
  * The synchronous counterpart to {@link closeStorage}, for a caller that
  * cannot await — {@link commitWorkspacePath} publishing a Workspace, and the
  * tests that move between temporary ones. A backend whose `close()` matters is
  * one {@link ensure} refuses to rebuild here anyway, so nothing that holds a
  * connection is reachable through this path.
+ *
+ * The mount, the Disk adapter's instance cache, and its node fences go
+ * together: all three describe whichever Workspace was active, and none of
+ * them carries an answer to *which* one, because a process only ever has the
+ * one.
  */
 export function resetStorage(): void {
   current = null;
+  resetStorageCache();
+  clearAllNodeTombstones();
 }
 
 /** Close the active mount. Called on graceful Server shutdown. */
