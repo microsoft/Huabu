@@ -90,11 +90,13 @@ describe('storage module tree', () => {
       'index.ts',
       'module-boundaries.test.ts',
       'paths.ts',
+      'product-boundary.test.ts',
       'profile.test.ts',
       'profile.ts',
       'space-lifecycle-admission.ts',
       'storage.test.ts',
       'storage.ts',
+      'testing.ts',
     ]);
   });
 
@@ -341,6 +343,62 @@ describe('Disk Space tree capability', () => {
     // Living under `backends/disk/` is what the `ports/` census already
     // guarantees; this states the intent the file exists to carry.
     expect(tree).toMatch(/not a port/i);
+  });
+});
+
+/**
+ * The product suite proves the exit criterion only while it stays ignorant of
+ * the backend (proposal §12.6.6).
+ *
+ * A case that reaches for a directory or a filename has stopped being
+ * evidence that anything is portable — it would keep passing for Disk and
+ * fail for the first backend that has neither, which is exactly backwards
+ * from what the suite is for. Enforced by reading the source, because the
+ * failure mode is a helpful-looking assertion someone adds later.
+ */
+describe('product boundary suite stays backend-blind', () => {
+  const SUITE = 'modules/storage/product-boundary.test.ts';
+
+  it('names no Disk record, blob, or directory vocabulary', () => {
+    // Quoted forms for the hidden tiers, so a scope *member* named `memory`
+    // — which is portable vocabulary — is not confused for the directory
+    // `.memory/`, which is not.
+    const DISK_VOCABULARY = [
+      "'space.json'",
+      "'.artifacts",
+      "'.history",
+      "'.memory",
+      "'.upload",
+      "'.world",
+      'diskTree',
+      'canvasRoot',
+      'nodesDir',
+      'readFileSync',
+      'existsSync',
+      'mkdirSync',
+    ];
+    const source = read(SUITE);
+    const found = DISK_VOCABULARY.filter((token) => source.includes(token));
+
+    expect(found).toEqual([]);
+  });
+
+  it('reaches storage only through the portable surface and the harness', () => {
+    const allowed = new Set([
+      'modules/storage/storage',
+      'modules/storage/testing',
+      'modules/storage/profile',
+      'modules/storage/ports/blob',
+      'modules/canvas/persistence-types',
+    ]);
+    const violations = specifiersOf(SUITE)
+      .map((spec) => resolveSpecifier(SUITE, spec))
+      .filter((target): target is string => target !== null)
+      .filter((target) => !allowed.has(target));
+
+    // A backend import would let a case assert against an adapter directly,
+    // which is what the per-adapter suites are for.
+    expect(violations).toEqual([]);
   });
 });
 
