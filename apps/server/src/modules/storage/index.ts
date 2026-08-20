@@ -74,6 +74,7 @@ export {
   mountStorage,
   setStorageForTesting,
   space,
+  stageSpaceImport,
   stageStorage,
   storageHealth,
 } from './storage.js';
@@ -84,6 +85,7 @@ export type {
   Storage,
 } from './storage.js';
 export type { DiskSpaceTree } from './backends/disk/space-tree.js';
+export type { DiskSpaceImport } from './backends/disk/space-import.js';
 export {
   parseStorageProfile,
   StorageProfileError,

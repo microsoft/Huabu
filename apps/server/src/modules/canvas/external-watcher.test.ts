@@ -261,15 +261,17 @@ describe('openExternalNoteSession', () => {
     ]);
 
     const first = await openExternalNoteSession('canvas-a', vi.fn());
+    const afterFirst = spaceHandle.read.mock.calls.length;
     const second = await openExternalNoteSession('canvas-a', vi.fn());
 
     const readPaths = fileIO.readFile.mock.calls.map(([filePath]) => filePath);
     expect(
       readPaths.filter((filePath) => filePath.endsWith('.md')),
     ).toHaveLength(2);
-    expect(
-      readPaths.filter((filePath) => filePath.endsWith('space.json')),
-    ).toHaveLength(1);
+    // Topology comes from the Space record now, not a file beside `nodes/`,
+    // so the invariant is counted on the port: the second subscriber shares
+    // the first's scan and pays only for its own snapshot.
+    expect(spaceHandle.read.mock.calls.length - afterFirst).toBe(1);
     expect(fileIO.readdir).toHaveBeenCalledTimes(1);
     expect(first.snapshot).toHaveLength(2);
 

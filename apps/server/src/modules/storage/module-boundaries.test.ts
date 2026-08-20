@@ -402,6 +402,92 @@ describe('product boundary suite stays backend-blind', () => {
   });
 });
 
+/**
+ * Phase 4.6's exit criterion, at the import level (proposal §12.6.6).
+ *
+ * The `workspace module names no backend` group above pinned Phase 4.5's
+ * correction for one module. The criterion is wider: **no** production module
+ * outside `storage/` may name how a backend stores a Space, because that is
+ * exactly the knowledge a second adapter would have to re-satisfy.
+ *
+ * Migrations are exempt — they rewrite frozen historical on-disk shapes, which
+ * is the one legitimate reason to know a layout that is no longer current.
+ * Tests are exempt for the same reason they may name an adapter: a test that
+ * names one is choosing its subject.
+ */
+describe('no production module outside storage names a Disk layout', () => {
+  /** Members of `backends/disk/layout.ts` and the Disk directory index. */
+  const DISK_LAYOUT = [
+    'SPACE_JSON_FILENAME',
+    'WORLD_CANVAS_DIR_NAME',
+    'canvasJsonPath',
+    'nodesDir',
+    'nodeFilePath',
+    'ARTIFACTS_DIR_NAME',
+    'artifactsDir',
+    'artifactPath',
+    'HISTORY_DIR_NAME',
+    'historyDir',
+    'chatDir',
+    'tasksPath',
+    'eventsPath',
+    'deltaLogPath',
+    'changesPath',
+    'canvasRoot',
+    'spaceMemoryDir',
+    'spaceUploadDir',
+    'suggestCanvasDir',
+    'registerCanvasDir',
+    'renameCanvasDirOnDisk',
+  ];
+
+  it('imports no Disk layout symbol', () => {
+    const violations: string[] = [];
+    for (const file of sourceFiles) {
+      if (file.startsWith('modules/storage/')) continue;
+      if (file.endsWith('.test.ts')) continue;
+      if (file.startsWith('modules/workspace/migrations/')) continue;
+
+      // Import-level, deliberately: a local variable that happens to be
+      // called `artifactPath` is not a violation, while importing the symbol
+      // is. The check is about where knowledge comes from, not vocabulary.
+      const source = read(file);
+      const imported = new Set<string>();
+      for (const match of source.matchAll(
+        /import\s*(?:type\s*)?\{([^}]*)\}\s*from/g,
+      )) {
+        for (const raw of match[1].split(',')) {
+          const name = raw
+            .trim()
+            .replace(/^type\s+/, '')
+            .split(/\s+as\s+/)[0];
+          if (name) imported.add(name.trim());
+        }
+      }
+      for (const symbol of DISK_LAYOUT) {
+        if (imported.has(symbol)) violations.push(`${file} → ${symbol}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('rejects a production import of the legacy CanvasStore', () => {
+    const violations = sourceFiles
+      .filter((file) => !file.startsWith('modules/storage/'))
+      .filter((file) => !file.endsWith('.test.ts'))
+      .filter((file) =>
+        specifiersOf(file).some((spec) => {
+          const target = resolveSpecifier(file, spec);
+          return target?.includes('legacy/canvas-store') === true;
+        }),
+      );
+
+    // The root forwarding shim that used to make this reachable had no
+    // importers left and was deleted; this keeps the path closed.
+    expect(violations).toEqual([]);
+  });
+});
+
 describe('structured write authority', () => {
   it('does not expose compatibility create/delete writers from the public barrel', () => {
     expect(read('modules/storage/index.ts')).not.toMatch(
@@ -488,8 +574,8 @@ describe('root forwarding shims', () => {
     'storage/paths.js': [
       'modules/canvas/canvas-content-cas.test.ts',
       'modules/canvas/canvas.route.test.ts',
-      'modules/canvas/canvas.route.ts',
-      'modules/canvas/external-watcher.ts',
+      // The one production importer left is a migration, which rewrites a
+      // frozen historical on-disk shape and is exempt by construction.
       'modules/workspace/migrations/migrate-acp-sessions.ts',
     ],
   };

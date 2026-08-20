@@ -32,6 +32,7 @@ import {
   isWorkspaceConfigured,
 } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
+import { stageDiskSpaceImport } from './backends/disk/space-import.js';
 import { diskSpaceTree } from './backends/disk/space-tree.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import { spaceBlobScopes } from './ports/blob.js';
@@ -44,6 +45,7 @@ import {
 } from './profile.js';
 import { withSpacePutAdmission } from './space-lifecycle-admission.js';
 
+import type { DiskSpaceImport } from './backends/disk/space-import.js';
 import type { DiskSpaceTree } from './backends/disk/space-tree.js';
 import type {
   BlobInfo,
@@ -608,6 +610,19 @@ function guardedBlobScope(storage: Storage, ref: BlobScopeRef): BlobScope {
 export async function storageHealth(): Promise<StorageHealth[]> {
   const storage = ensure();
   return Promise.all([storage.structured.health(), storage.blobs.health()]);
+}
+
+/**
+ * Open a staging area for one imported Space, or `null` off Disk.
+ *
+ * Bundle import is Disk-only and declared as such. It is not a member of
+ * {@link Space} because it addresses a Space that does not exist yet — there
+ * is nothing to hang it off until it has been published.
+ */
+export function stageSpaceImport(canvasId: string): DiskSpaceImport | null {
+  return ensure().profile.structured.kind === 'disk'
+    ? stageDiskSpaceImport(canvasId)
+    : null;
 }
 
 /**

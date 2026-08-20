@@ -19,7 +19,7 @@
  * the accessor.
  */
 
-import { canvasRoot } from './layout.js';
+import { canvasRoot, nodesDir } from './layout.js';
 import { getCanvasStore } from './legacy/canvas-store-cache.js';
 
 /** A node sidecar, as RFS and the file tools address one. */
@@ -58,6 +58,16 @@ export interface DiskSpaceTree {
    */
   nodeIdForPath(relativePath: string): string | null;
   /**
+   * Where this Space's node sidecars are, for a feature that shows a user
+   * their own files.
+   *
+   * `directory()` plus a segment the caller would otherwise have to know. The
+   * point of the capability is that the layout has one owner, so a consumer
+   * asking "which folder holds the notes" gets an answer rather than assembles
+   * one.
+   */
+  nodesDirectory(): string;
+  /**
    * Every sidecar filename currently claiming `nodeId`; empty when there is
    * no conflict.
    *
@@ -75,6 +85,7 @@ export function diskSpaceTree(canvasId: string): DiskSpaceTree {
   return {
     canvasId,
     directory: () => canvasRoot(canvasId),
+    nodesDirectory: () => nodesDir(canvasId),
     nodeIdForPath: (relativePath: string) => {
       const filename = NODE_SIDECAR_RE.exec(relativePath)?.[1];
       if (filename === undefined) return null;
