@@ -22,6 +22,7 @@
  */
 
 import { getCanvasStore } from './legacy/canvas-store-cache.js';
+import { createDiskSpaceExtension } from './space-extension.js';
 import { createDiskSpaceLogs } from './space-logs.js';
 import { DiskSpaceNodes } from './space-nodes.js';
 import { createDiskSpaceRecordReader } from './space-record.js';
@@ -54,14 +55,18 @@ export class DiskStructuredStore implements StructuredStore {
     // `getCanvasStore` validates the id and owns the instance cache.
     const store = getCanvasStore(canvasId);
     const { events, changes } = createDiskSpaceLogs(store);
+    const read = createDiskSpaceRecordReader(store);
     return {
       canvasId: store.canvasId,
-      read: createDiskSpaceRecordReader(store),
+      read,
       write: createDiskSpaceWrite(store),
       nodes: new DiskSpaceNodes(store),
       changes,
       tasks: new DiskSpaceTasks(store),
       events,
+      // Shares the handle's own record read, so the existence check that
+      // guards a substrate is the same one every other member answers to.
+      extension: createDiskSpaceExtension(store, read),
     };
   }
 }

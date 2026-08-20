@@ -172,6 +172,7 @@ function composeSpace(storage: Storage, canvasId: string): Space {
     changes: handle.changes,
     tasks: handle.tasks,
     events: handle.events,
+    extension: (namespace) => handle.extension(namespace),
     blobs: guardedBlobScope(storage, canvasId),
     diskTree:
       storage.profile.structured.kind === 'disk'

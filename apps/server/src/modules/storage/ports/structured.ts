@@ -250,7 +250,63 @@ export interface SpaceHandle {
    * learns nothing from. A second kind of past record can reintroduce it.
    */
   readonly events: SpaceEvents;
+  /**
+   * An isolated place for one namespace to build its own store on.
+   *
+   * The port hands over a *connection point* and nothing else. It never sees
+   * what the owner puts there, has no opinion about the shape, and offers no
+   * read or write of its own — because the alternative is one port member per
+   * feature (`memory`, `acpSessions`, `promptLogs`), obliging every future
+   * backend to model data it has no stake in. §12.5.7 rejected exactly that
+   * when it declined a `SpaceChats.list()` port.
+   *
+   * A namespaced opaque key/value member would be the obvious repair and is
+   * also wrong: it fixes one access shape — whole-value rewrite, no queries,
+   * no indexes — for every owner forever, and an owner with real query needs
+   * then encodes its own index inside an opaque value. So the owner brings its
+   * own store implementation and its own queries, per backend kind, and
+   * storage supplies only the place (§6.4.4).
+   *
+   * Storage keeps *lifecycle*, because only it can: a namespace is created on
+   * demand here and destroyed with the Space, which keeps
+   * {@link SpaceRepository.beginDelete} whole without any owner registering a
+   * cleanup hook — the one operation an owner could not perform without
+   * knowing a layout that is not its own.
+   *
+   * Returns `null` when the Space does not exist. That is deliberate and
+   * load-bearing: an owner writing through an ad-hoc path could recreate a
+   * Space that was just deleted, leaving a stub behind, and every such owner
+   * grew its own existence guard. Refusing to hand out a substrate for a Space
+   * that is gone puts that guard in the one place that can state it.
+   *
+   * Two consequences to accept openly rather than design against. The backend
+   * kind is part of the extension API, so an owner written against one kind
+   * does not load under another — inherent in letting owners write their own
+   * queries, and the alternative is the lowest common denominator this member
+   * exists to avoid. And the substrate is *unfenced*: the namespace bounds an
+   * owner by convention, not by enforcement. Extensions are in-process code,
+   * trusted at the same level as the Server.
+   *
+   * @param namespace Isolation token, `<owner>.<name>` (see
+   *   {@link assertValidNamespace}). Storage guarantees it is unique and
+   *   unshared, and guarantees nothing about what is inside.
+   */
+  extension(namespace: string): Promise<SpaceSubstrate | null>;
 }
+
+/**
+ * What a namespace gets to build on, discriminated by the live backend.
+ *
+ * One member per backend that exists, like {@link StructuredBackendKind} and
+ * for the same reason: a union that named `sqlite` today would advertise a
+ * substrate no adapter can supply. It grows with each adapter — a table prefix
+ * for SQLite, a schema for Postgres — and an owner switches on `kind`.
+ */
+export type SpaceSubstrate = {
+  readonly kind: 'disk';
+  /** A directory reserved for this namespace, created and ready to write. */
+  readonly directory: string;
+};
 
 // ─── The ordered Space write ─────────────────────────────────────────────────
 
