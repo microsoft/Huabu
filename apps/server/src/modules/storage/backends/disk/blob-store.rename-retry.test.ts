@@ -38,10 +38,7 @@ describe('DiskBlobStore retry cleanup', () => {
     testState.renameAsync.mockRejectedValue(error);
 
     try {
-      const scope = new DiskBlobStore().scope({
-        kind: 'space-artifacts',
-        canvasId: 'canvas-under-test',
-      });
+      const scope = new DiskBlobStore().space('canvas-under-test').artifacts;
 
       await expect(scope.put('blocked.bin', Buffer.from('bytes'))).rejects.toBe(
         error,

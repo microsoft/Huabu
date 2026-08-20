@@ -4,9 +4,9 @@
 /**
  * Disk implementation of the blob port.
  *
- * Maps a canvas scope to `<canvasDir>/.artifacts/`, preserving the layout
- * the workspace format has always used: one file per blob, named by the
- * URL key, no manifest indirection.
+ * Maps each area of a Space to a directory under its Space folder, preserving
+ * the layout the workspace format has always used: one file per blob, named by
+ * the URL key, no manifest indirection.
  *
  * Each scope is bound to the workspace active when it is created. A fresh
  * scope follows a free-mode workspace switch; a retained scope rejects the
@@ -47,8 +47,8 @@ import type {
   BlobRange,
   BlobRead,
   BlobScope,
-  BlobScopeRef,
   BlobStore,
+  SpaceBlobs,
 } from '../../ports/blob.js';
 import type { StorageHealth } from '../../ports/common.js';
 import type { Readable } from 'node:stream';
@@ -66,32 +66,34 @@ function isTempEntry(entry: string): boolean {
   return entry.startsWith(TEMP_PREFIX);
 }
 
-/** Resolve a scope to its backing directory. */
+/** The areas of a Space, as this adapter places them. */
+type SpaceBlobArea = keyof SpaceBlobs;
+
 /**
- * Where one scope's bytes sit, and which names it owns there.
+ * Where one area's bytes sit, and which names it owns there.
  *
- * `members: null` means the directory *is* the scope — everything in it
- * belongs. A name list means the scope is bounded by its members instead, for
- * an area shared with files that are not blobs at all.
+ * `members: null` means the directory *is* the area — everything in it
+ * belongs. A name list means the area is bounded by its members instead, for
+ * a directory shared with files that are not blobs at all.
  */
 interface ScopePlacement {
   readonly directory: string;
   readonly members: readonly string[] | null;
 }
 
-function scopePlacement(ref: BlobScopeRef): ScopePlacement {
-  switch (ref.kind) {
-    case 'space-artifacts':
-      return { directory: artifactsDir(ref.canvasId), members: null };
-    case 'space-memory':
-      return { directory: spaceMemoryDir(ref.canvasId), members: null };
-    case 'space-upload':
-      return { directory: spaceUploadDir(ref.canvasId), members: null };
-    case 'space-guide':
+function scopePlacement(area: SpaceBlobArea, canvasId: string): ScopePlacement {
+  switch (area) {
+    case 'artifacts':
+      return { directory: artifactsDir(canvasId), members: null };
+    case 'memory':
+      return { directory: spaceMemoryDir(canvasId), members: null };
+    case 'uploads':
+      return { directory: spaceUploadDir(canvasId), members: null };
+    case 'guide':
       // The Space root, which also holds `space.json` and every node
-      // directory — so this scope is the guide names, not the folder.
+      // directory — so this area is the guide names, not the folder.
       return {
-        directory: canvasRoot(ref.canvasId),
+        directory: canvasRoot(canvasId),
         members: SPACE_GUIDE_BLOB_NAMES,
       };
   }
@@ -108,11 +110,13 @@ function isMissing(err: unknown): boolean {
 }
 
 class DiskBlobScope implements BlobScope {
-  readonly #ref: BlobScopeRef;
+  readonly #area: SpaceBlobArea;
+  readonly #canvasId: string;
   readonly #workspacePath: string;
 
-  constructor(ref: BlobScopeRef) {
-    this.#ref = ref;
+  constructor(area: SpaceBlobArea, canvasId: string) {
+    this.#area = area;
+    this.#canvasId = canvasId;
     this.#workspacePath = path.resolve(getWorkspacePath());
   }
 
@@ -120,14 +124,14 @@ class DiskBlobScope implements BlobScope {
     const active = path.resolve(getWorkspacePath());
     if (active !== this.#workspacePath) {
       throw new Error(
-        `DiskBlobScope(${this.#ref.canvasId}) belongs to an inactive workspace. ` +
+        `DiskBlobScope(${this.#canvasId}) belongs to an inactive workspace. ` +
           `Resolve a fresh scope after workspace activation.`,
       );
     }
     // Resolve once per operation, before its first await. Every later path in
     // that operation is derived from this absolute directory, so a workspace
     // switch cannot combine a temp in A with a destination in B.
-    return scopePlacement(this.#ref);
+    return scopePlacement(this.#area, this.#canvasId);
   }
 
   /** Names this scope owns in `dir`, given what is actually there. */
@@ -157,7 +161,7 @@ class DiskBlobScope implements BlobScope {
     const safe = normalizeBlobName(name);
     if (placement.members && !placement.members.includes(safe)) {
       throw new BlobNameError(
-        `"${safe}" is not a member of the ${this.#ref.kind} scope. ` +
+        `"${safe}" is not a member of the ${this.#area} area. ` +
           `It holds: ${placement.members.join(', ')}.`,
       );
     }
@@ -296,7 +300,7 @@ class DiskBlobScope implements BlobScope {
       return;
     }
     // Removing the directory would take the Space with it. Only the members
-    // are this scope's to delete.
+    // are this area's to delete.
     await Promise.all(
       placement.members.map((name) =>
         rm(blobPath(placement.directory, name), { force: true }),
@@ -309,7 +313,7 @@ export class DiskBlobStore implements BlobStore {
   readonly kind = 'disk' as const;
 
   async init(): Promise<void> {
-    // Scope directories are created on first write; nothing to prepare.
+    // Area directories are created on first write; nothing to prepare.
   }
 
   async health(): Promise<StorageHealth> {
@@ -318,7 +322,12 @@ export class DiskBlobStore implements BlobStore {
 
   async close(): Promise<void> {}
 
-  scope(ref: BlobScopeRef): BlobScope {
-    return new DiskBlobScope(ref);
+  space(canvasId: string): SpaceBlobs {
+    return {
+      artifacts: new DiskBlobScope('artifacts', canvasId),
+      guide: new DiskBlobScope('guide', canvasId),
+      memory: new DiskBlobScope('memory', canvasId),
+      uploads: new DiskBlobScope('uploads', canvasId),
+    };
   }
 }

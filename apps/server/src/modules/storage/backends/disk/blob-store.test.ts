@@ -28,7 +28,7 @@ describeBlobStoreContract('DiskBlobStore', () => {
   workspaceState.path = root;
   return {
     store: new DiskBlobStore(),
-    ref: { kind: 'space-artifacts', canvasId: 'canvas-under-test' },
+    canvasId: 'canvas-under-test',
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
 });
@@ -54,10 +54,7 @@ describe('DiskBlobStore temp file hygiene', () => {
   });
 
   it('cleans up after both successful and failed writes', async () => {
-    const scope = new DiskBlobStore().scope({
-      kind: 'space-artifacts',
-      canvasId,
-    });
+    const scope = new DiskBlobStore().space(canvasId).artifacts;
 
     await scope.put('kept.bin', Buffer.from('fine'));
     await scope.put('streamed.bin', Readable.from([Buffer.from('also fine')]));
@@ -80,10 +77,7 @@ describe('DiskBlobStore temp file hygiene', () => {
   });
 
   it('cleans up siblings from concurrent writers to one key', async () => {
-    const scope = new DiskBlobStore().scope({
-      kind: 'space-artifacts',
-      canvasId: 'concurrent-canvas',
-    });
+    const scope = new DiskBlobStore().space('concurrent-canvas').artifacts;
 
     await Promise.all(
       Array.from({ length: 8 }, (_, i) =>
@@ -98,10 +92,7 @@ describe('DiskBlobStore temp file hygiene', () => {
 
   it('binds in-flight paths to their original workspace and rejects a held scope after activation', async () => {
     const otherRoot = mkdtempSync(path.join(tmpdir(), 'huabu-blob-switched-'));
-    const scope = new DiskBlobStore().scope({
-      kind: 'space-artifacts',
-      canvasId,
-    });
+    const scope = new DiskBlobStore().space(canvasId).artifacts;
     let signalStarted = (): void => {};
     const started = new Promise<void>((resolve) => {
       signalStarted = resolve;

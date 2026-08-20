@@ -84,7 +84,7 @@ const interactiveViewRoutes: FastifyPluginAsync = async (app) => {
       const sent = await sendBlob(
         request,
         reply,
-        space(params.data.canvasId).blobs,
+        space(params.data.canvasId).artifacts,
         resource.rendererArtifact,
       );
       if (!sent) {

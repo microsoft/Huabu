@@ -363,7 +363,7 @@ export class InteractiveViewService {
       : null;
     const rendererExists = request.rendererArtifact.startsWith('upload/')
       ? stagedPath !== null && existsSync(stagedPath)
-      : Boolean(await space(canvasId).blobs.head(request.rendererArtifact));
+      : Boolean(await space(canvasId).artifacts.head(request.rendererArtifact));
     if (!rendererExists) {
       throw new InteractiveViewServiceError(
         'renderer_not_found',

@@ -304,7 +304,7 @@ async function copyToArtifact(
     const id = createId('artifact');
     const key = `${id}${ext}`;
     const buffer = await readFile(absPath);
-    await space(canvasId).blobs.put(key, buffer);
+    await space(canvasId).artifacts.put(key, buffer);
 
     // Move semantics: reclaim RFS scratch uploads once they are safely
     // stored. Never delete user node files or other canvas content —
@@ -360,7 +360,7 @@ async function downloadToArtifact(
     }
     const ext = pickDownloadExt(pathname, contentType);
     const key = `${createId('artifact')}${ext}`;
-    await space(canvasId).blobs.put(key, buffer);
+    await space(canvasId).artifacts.put(key, buffer);
     return key;
   } catch (err) {
     log.warn({ err, url }, 'Failed to download online node src into artifacts');

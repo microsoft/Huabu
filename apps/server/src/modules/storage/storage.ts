@@ -35,7 +35,7 @@ import { DiskBlobStore } from './backends/disk/blob-store.js';
 import { stageDiskSpaceImport } from './backends/disk/space-import.js';
 import { diskSpaceTree } from './backends/disk/space-tree.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
-import { spaceBlobScopes } from './ports/blob.js';
+import { spaceBlobAreas } from './ports/blob.js';
 import {
   parseStorageProfile,
   requiresExplicitInit,
@@ -53,8 +53,8 @@ import type {
   BlobRange,
   BlobRead,
   BlobScope,
-  BlobScopeRef,
   BlobStore,
+  SpaceBlobs,
 } from './ports/blob.js';
 import type { StorageHealth } from './ports/common.js';
 import type {
@@ -132,38 +132,21 @@ export interface Storage {
  * One Space across every axis that holds part of it.
  *
  * A **composition-layer facade, not a port type**. `StructuredStore.space()`
- * keeps returning the structured-only {@link SpaceHandle}, `BlobStore.scope()`
- * keeps returning a {@link BlobScope}, and neither port imports the other.
- * They are joined here because this is the only object in the process that
- * holds both, and because this layer already owns every cross-store rule: the
- * blob-put precondition and the blob-first delete saga.
+ * returns the structured {@link SpaceHandle}, `BlobStore.space()` returns the
+ * {@link SpaceBlobs} areas, and neither port imports the other. They are
+ * joined here because this is the only object in the process that holds both,
+ * and because this layer already owns the one cross-store rule the join needs:
+ * bytes may only be added to a Space whose record exists.
  *
  * The join cannot move down into a port. The two axes are configured
  * independently, so a `SpaceHandle` that vended blobs would oblige the Disk
- * structured adapter to construct an Azure blob scope; deletion ordering
- * deliberately keeps remote blob I/O outside any database transaction; and
- * `BlobScopeRef` covers scopes that have no Space at all, which a blob store
- * reachable only through a Space handle could not serve.
+ * structured adapter to construct an Azure blob handle, and deletion ordering
+ * deliberately keeps remote blob I/O outside any database transaction.
+ *
+ * Every member is a durable part of one Space, flat: which axis stores a part
+ * is this module's business, not its callers' (§6.4.1).
  */
-export interface Space extends SpaceHandle {
-  /**
-   * This Space's artifacts, with the cross-store precondition applied.
-   *
-   * Bytes may only be added to a Space whose record exists. Reads and
-   * `deleteAll()` stay available for cleanup when a record has already gone.
-   *
-   * The unqualified name because artifacts are what almost every caller
-   * means. The other areas below are the same guarded scope over a different
-   * {@link BlobScopeRef} kind — one member each, so a caller reaches every
-   * area of a Space from the one handle rather than assembling a scope ref.
-   */
-  readonly blobs: BlobScope;
-  /** User-authored guide documents at the Space root (`skill.md`). */
-  readonly guide: BlobScope;
-  /** The agent's private memory document. */
-  readonly memory: BlobScope;
-  /** Scratch an upload lands in before anything claims it. */
-  readonly uploads: BlobScope;
+export interface Space extends SpaceHandle, SpaceBlobs {
   /**
    * Disk's directory for this Space. `null` on every other backend.
    *
@@ -178,6 +161,9 @@ export interface Space extends SpaceHandle {
 
 function composeSpace(storage: Storage, canvasId: string): Space {
   const handle = storage.structured.space(canvasId);
+  const blobs = storage.blobs.space(canvasId);
+  const guarded = (scope: BlobScope): BlobScope =>
+    guardedBlobScope(storage, canvasId, scope);
   return {
     canvasId: handle.canvasId,
     read: () => handle.read(),
@@ -187,10 +173,10 @@ function composeSpace(storage: Storage, canvasId: string): Space {
     tasks: handle.tasks,
     events: handle.events,
     extension: (namespace) => handle.extension(namespace),
-    blobs: guardedBlobScope(storage, { kind: 'space-artifacts', canvasId }),
-    guide: guardedBlobScope(storage, { kind: 'space-guide', canvasId }),
-    memory: guardedBlobScope(storage, { kind: 'space-memory', canvasId }),
-    uploads: guardedBlobScope(storage, { kind: 'space-upload', canvasId }),
+    artifacts: guarded(blobs.artifacts),
+    guide: guarded(blobs.guide),
+    memory: guarded(blobs.memory),
+    uploads: guarded(blobs.uploads),
     diskTree:
       storage.profile.structured.kind === 'disk'
         ? diskSpaceTree(canvasId)
@@ -527,8 +513,8 @@ export async function deleteSpace(
       // structured record does not remove the area they sit in, an unswept
       // kind is an orphan.
       await Promise.all(
-        spaceBlobScopes(canvasId).map((ref) =>
-          storage.blobs.scope(ref).deleteAll(),
+        spaceBlobAreas(storage.blobs.space(canvasId)).map((area) =>
+          area.deleteAll(),
         ),
       );
       return await started.session.finish();
@@ -542,7 +528,7 @@ export async function deleteSpace(
 }
 
 /**
- * Blob scope for one Space, with the cross-store precondition applied.
+ * One blob area, with the cross-store precondition applied.
  *
  * The raw BlobStore intentionally knows nothing about structured lifecycle,
  * so composition owns the one cross-store invariant: bytes may only be added
@@ -553,10 +539,12 @@ export async function deleteSpace(
  * one Space facade is composed entirely from the connections it was built
  * against — a scope that re-resolved the holder could outlive them.
  */
-function guardedBlobScope(storage: Storage, ref: BlobScopeRef): BlobScope {
-  const { canvasId } = ref;
+function guardedBlobScope(
+  storage: Storage,
+  canvasId: string,
+  delegate: BlobScope,
+): BlobScope {
   const workspacePath = activeWorkspacePath();
-  const delegate = storage.blobs.scope(ref);
 
   async function requireSpace(): Promise<void> {
     const record = await storage.structured.space(canvasId).read();
