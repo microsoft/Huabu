@@ -7,17 +7,32 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const physicalState = vi.hoisted(() => ({ root: '' }));
+const physicalState = vi.hoisted(() => ({
+  root: '',
+  canvasMemory: null as string | null,
+}));
 
 vi.mock('../agent.service.js', () => ({ runAgent: vi.fn() }));
 vi.mock('../../../prompt/index.js', () => ({
   loadAgent: vi.fn(),
   listSkills: vi.fn(),
 }));
-vi.mock('../../storage/index.js', () => ({ getStructuredStore: vi.fn() }));
+vi.mock('../../storage/index.js', () => ({
+  getStructuredStore: vi.fn(),
+  // The memory body is a blob under the Space's own scope now, so the
+  // snapshot reads it through here rather than off a path.
+  space: (canvasId: string) => ({
+    memory: {
+      read: async () =>
+        physicalState.canvasMemory === null
+          ? null
+          : Buffer.from(physicalState.canvasMemory, 'utf8'),
+      canvasId,
+    },
+  }),
+  SPACE_MEMORY_BLOB_NAME: 'space.md',
+}));
 vi.mock('../../workspace/paths.js', () => ({
-  canvasMemoryPath: (canvasId: string) =>
-    `${physicalState.root}/${canvasId}/.memory/space.md`,
   workspaceMemoryPath: () => `${physicalState.root}/setting/user.md`,
 }));
 

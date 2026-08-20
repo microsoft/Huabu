@@ -39,7 +39,7 @@ describe('DiskBlobStore retry cleanup', () => {
 
     try {
       const scope = new DiskBlobStore().scope({
-        kind: 'canvas',
+        kind: 'space-artifacts',
         canvasId: 'canvas-under-test',
       });
 

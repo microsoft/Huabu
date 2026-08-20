@@ -11,11 +11,8 @@
  * there is no pushed copy to drift from (see the proposal §6c).
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import path from 'node:path';
-
 import { renderPromptFile } from '../../prompt/agents/loader.js';
-import { space } from '../storage/index.js';
+import { space, SPACE_GUIDE_SKILL_NAME } from '../storage/index.js';
 
 /** PROMPT-ROOT-relative path of the bundled access guide. */
 const ACCESS_GUIDE_TEMPLATE = 'external-agent/access-huabu.md';
@@ -39,19 +36,15 @@ export function resolveBundledRootSkill(): string {
  * override when it exists, otherwise the bundled default. Returned as raw
  * markdown text (served with `Content-Type: text/markdown`).
  */
-export function resolveCanvasSkill(canvasId: string): string {
-  // A user-authored override read from the Space root. Disposition D
-  // (proposal §6.4.3): it becomes a blob under its own scope kind, at which
-  // point this reads through the port and the branch goes away. Until then a
-  // backend without a directory simply has no override to find.
-  const tree = space(canvasId).diskTree;
-  if (tree) {
-    const override = path.join(tree.directory(), 'skill.md');
-    if (existsSync(override)) {
-      return readFileSync(override, 'utf8');
-    }
-  }
-  return resolveBundledRootSkill();
+export async function resolveCanvasSkill(canvasId: string): Promise<string> {
+  // A user-authored override, read as a blob under the Space's guide scope
+  // (proposal §6.4.3, disposition D). The scope is the Space root bounded to
+  // the guide names, so the file a user authors is exactly where they left it
+  // and this no longer assembles a path.
+  const override = await space(canvasId).guide.read(SPACE_GUIDE_SKILL_NAME);
+  return override === null
+    ? resolveBundledRootSkill()
+    : override.toString('utf8');
 }
 
 /** Resolve one fixed, authenticated advanced guide. */

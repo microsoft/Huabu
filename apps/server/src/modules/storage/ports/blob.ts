@@ -26,10 +26,70 @@ export type BlobBackendKind = 'disk' | 'azure';
 /**
  * Identifies a bounded namespace of blobs within a connection.
  *
- * A one-member union today. Adding a scope kind (workspace assets, agent
- * scratch) extends this type; the connection interface is unaffected.
+ * One kind per **user-visible area**, not one per Space. That distinction is
+ * what keeps names flat: a Space's bytes live in several places a user can
+ * tell apart — the artifacts the app writes, the guide they author, the memory
+ * the agent keeps, the scratch an upload lands in — and the alternative to
+ * naming those areas is hierarchical blob names, which §7.1 excluded for every
+ * backend. A kind is a union member and one placement rule per adapter; a path
+ * separator inside a name is a contract change.
+ *
+ * It also lets retention diverge later — scratch is not an artifact — without
+ * moving any bytes a second time.
+ *
+ * Adding a scope with no Space (workspace assets, agent scratch) extends this
+ * type the same way; the connection interface is unaffected.
  */
-export type BlobScopeRef = { kind: 'canvas'; canvasId: string };
+export type BlobScopeRef =
+  /** Artifacts the application writes and the client fetches by key. */
+  | { kind: 'space-artifacts'; canvasId: string }
+  /**
+   * User-authored guide documents at the Space root.
+   *
+   * Bounded by {@link SPACE_GUIDE_BLOB_NAMES} rather than by a directory,
+   * because the area a user authors in *is* the Space root — which also holds
+   * storage's own record. A scope that claimed the whole directory would list
+   * `space.json` and delete the Space on `deleteAll()`. Naming the members is
+   * what makes the boundary real, and a fixed set is a tighter namespace than
+   * a directory, not a looser one.
+   */
+  | { kind: 'space-guide'; canvasId: string }
+  /** The agent's private memory document for a Space. */
+  | { kind: 'space-memory'; canvasId: string }
+  /** Scratch an upload lands in before anything claims it. */
+  | { kind: 'space-upload'; canvasId: string };
+
+/**
+ * Every blob name the `space-guide` scope may hold.
+ *
+ * Product vocabulary rather than adapter detail: these are the documents a
+ * user is invited to author at the Space root, so the set belongs beside the
+ * scope it defines.
+ */
+export const SPACE_GUIDE_SKILL_NAME = 'skill.md';
+
+export const SPACE_GUIDE_BLOB_NAMES: readonly string[] = [
+  SPACE_GUIDE_SKILL_NAME,
+];
+
+/** The one blob in the `space-memory` scope: the agent's memory document. */
+export const SPACE_MEMORY_BLOB_NAME = 'space.md';
+
+/**
+ * Every scope holding bytes for one Space.
+ *
+ * Deletion has to sweep all of them, and a kind added without being swept
+ * would orphan bytes on a backend where dropping the Space does not remove
+ * the area they sit in. Derived here so the saga cannot fall behind the union.
+ */
+export function spaceBlobScopes(canvasId: string): readonly BlobScopeRef[] {
+  return [
+    { kind: 'space-artifacts', canvasId },
+    { kind: 'space-guide', canvasId },
+    { kind: 'space-memory', canvasId },
+    { kind: 'space-upload', canvasId },
+  ];
+}
 
 export interface BlobInfo {
   /** Scope-relative name, e.g. `artifact_abc123.png`. */

@@ -94,7 +94,14 @@ export {
   assertValidNamespace,
   SpaceNamespaceError,
 } from './ports/namespace.js';
-export { BlobNameError, normalizeBlobName } from './ports/blob.js';
+export {
+  BlobNameError,
+  normalizeBlobName,
+  SPACE_GUIDE_BLOB_NAMES,
+  SPACE_GUIDE_SKILL_NAME,
+  SPACE_MEMORY_BLOB_NAME,
+  spaceBlobScopes,
+} from './ports/blob.js';
 export type {
   BlobBackendKind,
   BlobInfo,

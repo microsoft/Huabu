@@ -89,18 +89,6 @@ export function workspaceMemoryPath(): string {
   return path.join(settingDir(), 'user.md');
 }
 
-/** Hidden directory holding canvas-scoped canvas memory + bookkeeping. */
-export const WORKING_MEMORY_DIR_NAME = '.memory';
-
-export function canvasMemoryDir(canvasId: string): string {
-  return path.join(spaceRoot(canvasId), WORKING_MEMORY_DIR_NAME);
-}
-
-/** Working memory body for a canvas. */
-export function canvasMemoryPath(canvasId: string): string {
-  return path.join(canvasMemoryDir(canvasId), 'space.md');
-}
-
 // ─── Workspace-level setting / user skills ─────────────────────────────────
 
 /**

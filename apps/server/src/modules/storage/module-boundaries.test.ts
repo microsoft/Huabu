@@ -306,11 +306,10 @@ describe('Disk Space tree capability', () => {
     // B, deferred — RFS's sidecar-to-record mapping. Portable in principle,
     // Disk's in practice until a second backend has a file plane at all.
     'modules/remote_fs/node-meta.ts',
-    // D — the per-Space RFS access guide, headed for a blob.
-    'modules/remote_fs/skill.ts',
-    // D and C — the memory body, and ACP session state until phase 6. The
-    // memory bookkeeping and the debug prompt log have already left, onto the
-    // extension substrate.
+    // C — ACP session state, which leaves with phase 6's `Namespace` change.
+    // Everything else this module addressed has already left: the memory
+    // bookkeeping and debug prompt log onto the extension substrate, the
+    // memory body and the RFS access guide into blob scopes.
     'modules/workspace/paths.ts',
   ].sort();
 

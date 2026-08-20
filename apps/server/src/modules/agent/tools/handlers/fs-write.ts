@@ -32,20 +32,19 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { normalizeRel } from './fs-sandbox.js';
-import {
-  canvasMemoryDir,
-  settingDir,
-  userSkillsDir,
-} from '../../../workspace/paths.js';
+import { space, SPACE_MEMORY_BLOB_NAME } from '../../../storage/index.js';
+import { settingDir, userSkillsDir } from '../../../workspace/paths.js';
 import {
   resolveLongTermPath,
   resolveUserSkillPath,
-  resolveWorkingMemoryPath,
 } from '../../memory/sandbox.js';
 import {
+  blobDocument,
+  fileDocument,
   overwriteMemoryFile,
   replaceStringInMemoryFile,
   SKILL_CREATE_RATIONALE_MIN,
+  type MemoryDocument,
   type MemoryTier,
   type WriteResult,
 } from '../../memory/writers.js';
@@ -79,7 +78,7 @@ export async function handleFsWrite(args: FsWriteArgs): Promise<string> {
   // future literal added to the schema produces a clear runtime error
   // until the dispatcher is updated.
   return reject(
-    target.absPath,
+    target.document.target,
     `unknown mode: ${(args as { mode?: string }).mode ?? '(missing)'}`,
   );
 }
@@ -88,9 +87,16 @@ export async function handleFsWrite(args: FsWriteArgs): Promise<string> {
 
 interface ResolvedTarget {
   tier: MemoryTier;
-  absPath: string;
-  parentDir: string;
+  /** Where the bytes live — a file for the Workspace tiers, a blob for a
+   * Space's memory body. */
+  document: MemoryDocument;
   skillId?: string;
+  /**
+   * Skill tier only. The create-rationale rule asks whether the file exists
+   * yet and where its parent is, which are questions about a real path — and
+   * user skills are Workspace-scoped, so they have one.
+   */
+  skillPaths?: { absPath: string; parentDir: string };
   /** The normalised relative path, for error messages. */
   path: string;
 }
@@ -106,8 +112,7 @@ function resolveTarget(
   if (rel === 'memory/user.md') {
     return {
       tier: 'workspace',
-      absPath: resolveLongTermPath(),
-      parentDir: settingDir(),
+      document: fileDocument(resolveLongTermPath(), settingDir()),
       path: rel,
     };
   }
@@ -122,8 +127,15 @@ function resolveTarget(
     }
     return {
       tier: 'canvas',
-      absPath: resolveWorkingMemoryPath(args.canvasId),
-      parentDir: canvasMemoryDir(args.canvasId),
+      // A blob under the Space's own memory scope (proposal §6.4.3,
+      // disposition D). The agent still sees the path it asked for; the
+      // sandbox resolver this used to need is gone, and so is the ad-hoc
+      // write against a directory it assembled.
+      document: blobDocument(
+        space(args.canvasId).memory,
+        SPACE_MEMORY_BLOB_NAME,
+        rel,
+      ),
       path: rel,
     };
   }
@@ -144,10 +156,11 @@ function resolveTarget(
     const skillId = segs[1];
     try {
       const absPath = resolveUserSkillPath(skillId);
+      const parentDir = path.dirname(absPath);
       return {
         tier: 'skill',
-        absPath,
-        parentDir: path.dirname(absPath),
+        document: fileDocument(absPath, parentDir),
+        skillPaths: { absPath, parentDir },
         skillId,
         path: rel,
       };
@@ -169,7 +182,7 @@ async function handleOverwrite(
   target: ResolvedTarget,
 ): Promise<string> {
   if (typeof args.body !== 'string') {
-    return reject(target.absPath, 'mode="overwrite" requires "body"');
+    return reject(target.document.target, 'mode="overwrite" requires "body"');
   }
 
   // Skill create rule: when the target file does not yet exist on a
@@ -178,11 +191,15 @@ async function handleOverwrite(
   // hard-require a rationale (≥ N chars) here so the LLM cannot
   // sneak a new skill in without justifying why an existing one
   // could not be edited.
-  if (target.tier === 'skill' && !existsSync(target.absPath)) {
+  if (
+    target.tier === 'skill' &&
+    target.skillPaths &&
+    !existsSync(target.skillPaths.absPath)
+  ) {
     const r = (args.rationale ?? '').trim();
     if (r.length < SKILL_CREATE_RATIONALE_MIN) {
       return reject(
-        target.absPath,
+        target.document.target,
         `skill create rejected: provide a "rationale" (>= ${SKILL_CREATE_RATIONALE_MIN} chars) explaining why no existing skill can be updated`,
       );
     }
@@ -190,9 +207,9 @@ async function handleOverwrite(
     // exists even before the writer's mkdirp runs, so a malformed
     // resolveUserSkillPath result surfaces as a clear error here
     // rather than mid-write.
-    if (!target.parentDir.startsWith(userSkillsDir())) {
+    if (!target.skillPaths.parentDir.startsWith(userSkillsDir())) {
       return reject(
-        target.absPath,
+        target.document.target,
         'skill target escapes the user skills sandbox',
       );
     }
@@ -200,8 +217,7 @@ async function handleOverwrite(
 
   const result = await overwriteMemoryFile({
     tier: target.tier,
-    absPath: target.absPath,
-    parentDir: target.parentDir,
+    document: target.document,
     skillId: target.skillId,
     body: args.body,
   });
@@ -213,15 +229,20 @@ async function handleReplaceString(
   target: ResolvedTarget,
 ): Promise<string> {
   if (typeof args.oldString !== 'string') {
-    return reject(target.absPath, 'mode="replace_string" requires "oldString"');
+    return reject(
+      target.document.target,
+      'mode="replace_string" requires "oldString"',
+    );
   }
   if (typeof args.newString !== 'string') {
-    return reject(target.absPath, 'mode="replace_string" requires "newString"');
+    return reject(
+      target.document.target,
+      'mode="replace_string" requires "newString"',
+    );
   }
   const result = await replaceStringInMemoryFile({
     tier: target.tier,
-    absPath: target.absPath,
-    parentDir: target.parentDir,
+    document: target.document,
     skillId: target.skillId,
     oldString: args.oldString,
     newString: args.newString,

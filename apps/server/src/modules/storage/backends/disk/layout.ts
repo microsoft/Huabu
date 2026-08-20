@@ -80,6 +80,26 @@ export function artifactsDir(canvasId: string): string {
   return path.join(canvasRoot(canvasId), ARTIFACTS_DIR_NAME);
 }
 
+/**
+ * Hidden directory holding the agent's private memory document.
+ *
+ * Named here rather than in the workspace module because it is now a blob
+ * scope's placement — where Disk puts the bytes of one user-visible area —
+ * and every other such placement already lives beside this one.
+ */
+export const MEMORY_DIR_NAME = '.memory';
+
+export function spaceMemoryDir(canvasId: string): string {
+  return path.join(canvasRoot(canvasId), MEMORY_DIR_NAME);
+}
+
+/** Hidden scratch an upload lands in before anything claims it. */
+export const UPLOAD_DIR_NAME = '.upload';
+
+export function spaceUploadDir(canvasId: string): string {
+  return path.join(canvasRoot(canvasId), UPLOAD_DIR_NAME);
+}
+
 export function artifactPath(canvasId: string, filename: string): string {
   const base = path.basename(filename);
   if (!base || base === '.' || base === '..') {

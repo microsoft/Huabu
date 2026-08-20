@@ -24,7 +24,11 @@ import { Readable } from 'node:stream';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { BlobLeaseError, BlobNameError } from '../blob.js';
+import {
+  BlobLeaseError,
+  BlobNameError,
+  SPACE_GUIDE_SKILL_NAME,
+} from '../blob.js';
 
 import type { BlobScope, BlobScopeRef, BlobStore } from '../blob.js';
 
@@ -65,6 +69,59 @@ export function describeBlobStoreContract(
     afterEach(async () => {
       await harness?.cleanup?.();
       harness = null;
+    });
+
+    /**
+     * A member-bounded scope is a real scope, not a filtered view of a
+     * directory. Disk maps `space-guide` onto the Space root — shared with
+     * `space.json` and every node directory — so a scope that answered for
+     * the folder would list storage's own records and take the Space with it
+     * on `deleteAll()`. These pin the boundary that makes the mapping safe.
+     */
+    it('answers only for the names a bounded scope owns', async () => {
+      const h = await createHarness();
+      harness = h;
+      await h.store.init();
+      const guide = h.store.scope({
+        kind: 'space-guide',
+        canvasId: h.ref.canvasId,
+      });
+
+      await guide.put(SPACE_GUIDE_SKILL_NAME, Buffer.from('# guide'));
+      expect(await guide.read(SPACE_GUIDE_SKILL_NAME)).toEqual(
+        Buffer.from('# guide'),
+      );
+      expect((await guide.list()).map((info) => info.name)).toEqual([
+        SPACE_GUIDE_SKILL_NAME,
+      ]);
+
+      // A name outside the scope is refused before it reaches the backend,
+      // rather than resolving to whatever sits next to the members.
+      await expect(guide.read('space.json')).rejects.toThrow();
+      await expect(guide.head('space.json')).rejects.toThrow();
+      await expect(
+        guide.put('space.json', Buffer.from('{}')),
+      ).rejects.toThrow();
+    });
+
+    it('deletes only its members when a scope is bounded by name', async () => {
+      const h = await createHarness();
+      harness = h;
+      await h.store.init();
+      const artifacts = h.store.scope(h.ref);
+      const guide = h.store.scope({
+        kind: 'space-guide',
+        canvasId: h.ref.canvasId,
+      });
+      await artifacts.put('kept.bin', Buffer.from('artifact'));
+      await guide.put(SPACE_GUIDE_SKILL_NAME, Buffer.from('# guide'));
+
+      await guide.deleteAll();
+
+      expect(await guide.read(SPACE_GUIDE_SKILL_NAME)).toBeNull();
+      // The neighbours are not this scope's to remove — on Disk they are the
+      // Space itself.
+      expect(await artifacts.read('kept.bin')).toEqual(Buffer.from('artifact'));
     });
 
     it('reports its backend kind and health', async () => {
@@ -332,7 +389,10 @@ export function describeBlobStoreContract(
       await s.store.init();
 
       const a = s.store.scope(s.ref);
-      const b = s.store.scope({ kind: 'canvas', canvasId: 'other-canvas-id' });
+      const b = s.store.scope({
+        kind: 'space-artifacts',
+        canvasId: 'other-canvas-id',
+      });
 
       await a.put('shared-name.txt', Buffer.from('from a'));
       expect(await b.head('shared-name.txt')).toBeNull();

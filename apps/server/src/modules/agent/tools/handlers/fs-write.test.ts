@@ -13,25 +13,26 @@
  *   ✓ result envelope shape (`{ ok, target, reason }`) for both ok and reject
  */
 
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { handleFsWrite } from './fs-write.js';
+import { createSpace, space } from '../../../storage/index.js';
 import {
-  canvasMemoryPath,
   userSkillsDir,
   workspaceMemoryPath,
 } from '../../../workspace/paths.js';
 import { setWorkspacePath } from '../../../workspace.js';
+
+/** Where Disk places the Space memory blob. */
+function memoryBlobFile(canvasId: string): string {
+  const tree = space(canvasId).diskTree;
+  if (!tree) throw new Error('Expected the Disk backend in this test');
+  return join(tree.directory(), '.memory', 'space.md');
+}
 
 interface ParsedResult {
   ok: boolean;
@@ -46,15 +47,14 @@ function parse(raw: string): ParsedResult {
 let tmp: string;
 const canvasId = 'cv-fs-write-test';
 
-beforeEach(() => {
+beforeEach(async () => {
   tmp = mkdtempSync(join(tmpdir(), 'huabu-fs-write-'));
   setWorkspacePath(tmp);
-  // `canvasRoot(canvasId)` falls back to `<workspace>/<canvasId>` when the
-  // canvas-dir index has no entry for the id (see `canvasDirName` in
-  // `storage/backends/disk/canvas-dirs.ts`). We just need the directory to
-  // exist so
-  // writes can land in it.
-  mkdirSync(join(tmp, canvasId), { recursive: true });
+  // A real Space, not just a directory: the memory body is a blob under the
+  // Space's own scope now, and blobs may only be written for a Space whose
+  // record exists.
+  const created = await createSpace(canvasId, canvasId);
+  if (!created.ok) throw new Error('Expected to create the Space');
 });
 
 afterEach(() => {
@@ -172,8 +172,9 @@ describe('handleFsWrite — overwrite', () => {
       } as never),
     );
     expect(r.ok).toBe(true);
-    expect(r.target).toBe(canvasMemoryPath(canvasId));
-    expect(readFileSync(canvasMemoryPath(canvasId), 'utf8')).toBe(
+    // The agent sees back the path it asked for, not wherever the bytes sit.
+    expect(r.target).toBe('memory/space.md');
+    expect(readFileSync(memoryBlobFile(canvasId), 'utf8')).toBe(
       'canvas briefing\n',
     );
   });
