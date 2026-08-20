@@ -1533,7 +1533,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           e.stopPropagation();
           // Expand any expandable node type on double-click.
           if (EXPANDABLE_TYPES.has(node.type ?? '')) {
-            openPreviewNode(node.id);
+            openPreviewNode(node.id, { transient: true });
           }
         }}
         onEdgeDoubleClick={(e, edge) => {

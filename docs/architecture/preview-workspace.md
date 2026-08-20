@@ -66,9 +66,9 @@ Titles are derived at render time. Node tabs use the current node label; Chat ta
 
 `openChat` activates the most recently used unbound Chat target or creates a new thread and tab when none exists. New conversation always creates an independent `threadId`.
 
-Open to Side moves the existing semantic target into the other group instead of duplicating it. Saving an unbound Chat as a Question replaces that tab's target in place, preserving tab identity, position, messages, and draft continuity.
+Open to Side moves the existing semantic target into the other group instead of duplicating it and preserves whether the tab is transient or permanent. Saving an unbound Chat as a Question replaces that tab's target in place, preserving tab identity, position, messages, and draft continuity.
 
-Canvas search results and connected-node navigation open transiently. Explicit node opens, Question compose or replay, and new Chat opens are permanent.
+Canvas node double-clicks, search results, and connected-node navigation open transiently. Question compose or replay and new Chat opens are permanent.
 
 ## 4. Rendering and Chat sessions
 
@@ -76,7 +76,7 @@ Each group mounts its active tab plus at most one warm inactive tab selected by 
 
 Chat, Question, Note, Text, PDF, and Office tabs are eligible for the warm slot. Eligibility follows the resolved renderer, so a valid World `nodeRef` that presents a source Question is treated as a Question rather than as a generic reference. Web, Audio, Video, and other node types are not retained because hidden native media or iframe work can outlive React Effect cleanup. Closing or replacing a warm tab, deleting its node, or advancing the slot to a more recently active eligible tab unmounts the old tree. The shared runtime scroll cache remains the cold-restore fallback after a real unmount.
 
-`PreviewRenderer` resolves node targets against the current Canvas nodes and World references. Ordinary nodes render through `ExpandedNodePanel`; Question nodes and unbound Chat targets render through `ChatPanel`.
+`PreviewRenderer` resolves node targets against the current Canvas nodes and World references. Ordinary nodes render through `ExpandedNodePanel`; Question nodes and unbound Chat targets render through `ChatPanel`. An ordinary node's AI summary can be dismissed for the lifetime of the mounted preview without mutating node data.
 
 Every mounted `ChatPanel` receives an explicit `ChatSession` and owning preview tab ID. There is no globally current Chat thread or Question replay pointer, so two groups can render independent conversations without sharing messages, drafts, bindings, attachments, settings, loading state, or stream control.
 
@@ -98,7 +98,7 @@ Pointer dragging keeps a faded source placeholder in the tab strip, portals a la
 
 Closing an active tab selects the nearest remaining tab in the same group. Moving or closing the final tab in a secondary group removes that group. The workspace keeps one empty primary group as its valid empty state.
 
-A transient tab is one reusable inspection slot per group. Opening another transient target replaces that slot; double-clicking the tab or committing a persistent mutation through its renderer promotes it in place.
+A transient tab is one reusable inspection slot per group. Opening another transient target replaces that slot; using its Pin action, double-clicking the tab, or committing a persistent mutation through its renderer promotes it in place. Moving a transient tab into a side group does not promote it.
 
 Permanent tabs are never closed automatically. A group may retain any number of permanent tabs; users close them explicitly, while transient browsing continues to reuse the group's inspection slot.
 

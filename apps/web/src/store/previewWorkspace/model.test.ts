@@ -221,6 +221,33 @@ describe('transient tabs', () => {
     expect(revisited.tabs['t1'].transient).toBe(false);
   });
 
+  it('keeps the slot transient when its target is browsed again', () => {
+    const first = open(emptyWorkspace(), node('a'), 't1', {
+      transient: true,
+    }).workspace;
+    const revisited = open(first, node('a'), 'unused', {
+      transient: true,
+    }).workspace;
+
+    expect(revisited.tabs['t1'].transient).toBe(true);
+  });
+
+  it('keeps a transient tab transient when moving it to the side', () => {
+    const first = open(emptyWorkspace(), node('a'), 't1', {
+      transient: true,
+    }).workspace;
+    const second = open(first, node('b'), 't2').workspace;
+    const sided = open(second, node('a'), 'unused', {
+      transient: true,
+      openToSide: true,
+    }).workspace;
+
+    expect(sided.tabs['t1'].transient).toBe(true);
+    expect(sided.groups).toHaveLength(2);
+    expect(tabIdsOf(sided, 0)).toEqual(['t2']);
+    expect(tabIdsOf(sided, 1)).toEqual(['t1']);
+  });
+
   it('keeps each group inspection slot separate', () => {
     const a = open(emptyWorkspace(), node('a'), 't1', {
       transient: true,

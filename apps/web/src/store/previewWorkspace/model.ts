@@ -262,8 +262,9 @@ export function openTarget(
         next = moveTab(next, existing.id, { groupId: destinationGroupId });
       }
     }
-    // Revealing a target is an explicit visit, so it stops being disposable.
-    next = promoteTab(next, existing.id);
+    // A permanent open promotes an existing inspection slot. Repeated
+    // transient opens only reveal it; keeping it requires an explicit Pin.
+    if (!options.transient) next = promoteTab(next, existing.id);
     return { workspace: activateTab(next, existing.id), tabId: existing.id };
   }
 
