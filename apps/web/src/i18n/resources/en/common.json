@@ -829,7 +829,7 @@
       "agent": "Agent"
     },
     "resources": {
-      "uploadOrLink": "Upload or Link",
+      "addContent": "Add Content",
       "uploadFiles": "Upload Files",
       "addLinks": "Add Links",
       "uploadTitle": "Upload Local Files",

@@ -829,7 +829,7 @@
       "agent": "Agent"
     },
     "resources": {
-      "uploadOrLink": "上传或添加链接",
+      "addContent": "添加内容",
       "uploadFiles": "上传文件",
       "addLinks": "添加链接",
       "uploadTitle": "上传本地文件",
