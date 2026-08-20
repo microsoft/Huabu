@@ -64,7 +64,7 @@ Titles are derived at render time. Node tabs use the current node label; Chat ta
 
 `openPreviewNode` is the user-facing node adapter. It settles the previously active editable Note or Text when necessary, expands the right panel, opens the node target, and requests editor focus for an explicitly opened Note.
 
-`openChat` activates the most recently used unbound Chat target or creates a new thread and tab when none exists. New conversation always creates an independent `threadId`.
+`openChat` activates the most recently used unbound Chat target or creates a new thread and tab when none exists. New conversation always creates an independent `threadId`. A thread with no persisted selection defaults to the built-in Huabu Agent in `operate` mode; persisted per-thread and per-Canvas selections still take precedence.
 
 Open to Side moves the existing semantic target into the other group instead of duplicating it and preserves whether the tab is transient or permanent. Saving an unbound Chat as a Question replaces that tab's target in place, preserving tab identity, position, messages, and draft continuity.
 
