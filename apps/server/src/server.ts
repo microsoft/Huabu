@@ -7,7 +7,11 @@ import { app } from './app.js';
 import { resolveBindHost } from './bind-host.js';
 import { prewarmOAuthCredentials } from './modules/agent/oauth.js';
 import { resolveDeploymentConfig } from './modules/security/deployment-config.js';
-import { initStorage } from './modules/storage/index.js';
+import {
+  describeUnavailableCapabilities,
+  initStorage,
+  parseStorageProfile,
+} from './modules/storage/index.js';
 import { initializeSecretStore } from './security/secret-store.js';
 import { getLogger } from './utils/logger.js';
 
@@ -37,14 +41,21 @@ async function start(): Promise<void> {
     // mode there is no Workspace yet, so this validates the profile and the
     // mount waits for activation.
     const storage = await initStorage();
+    const profile = storage?.profile ?? parseStorageProfile();
     log.info(
       {
-        structured: storage?.profile.structured.kind,
-        blobs: storage?.profile.blobs.kind,
+        structured: profile.structured.kind,
+        blobs: profile.blobs.kind,
         workspace: storage ? 'mounted' : 'awaiting activation',
       },
       'Storage backends ready',
     );
+    // Not a warning about a misconfiguration — a stated product limitation of
+    // the selected profile, said up front rather than when a user clicks the
+    // button (proposal §6.4.2). Startup continues either way.
+    for (const line of describeUnavailableCapabilities(profile)) {
+      log.info({ capability: line }, 'Storage capability unavailable');
+    }
 
     await initializeSecretStore();
     await app.listen({ port: PORT, host: HOST });

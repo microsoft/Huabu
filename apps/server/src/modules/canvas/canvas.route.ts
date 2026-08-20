@@ -1597,9 +1597,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
-    // The Space bundle is a Disk projection (proposal §6.4.3, disposition
-    // A); a portable export generated from records plus reachable blob
-    // references is a separate later design.
+    // Disk-only, declared as `space-bundle-export` in the capability matrix;
+    // a portable export generated from records plus reachable blob references
+    // is a separate later design.
     const tree = space(canvasId).diskTree;
     const canvasDir = tree?.directory();
     if (canvasDir === undefined || !existsSync(canvasDir)) {

@@ -95,8 +95,8 @@ const externalRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       return reply.code(404).send({ message: 'External note not found' });
     }
 
-    // External-note claim is Disk-only (proposal §6.4.3, disposition A): it
-    // exists to adopt documents that arrived without going through the
+    // Disk-only, declared as `external-note-discovery` in the capability
+    // matrix: it adopts documents that arrived without going through the
     // application, and no database backend has such an arrival path.
     const tree = space(canvasId).diskTree;
     if (!tree) {

@@ -85,6 +85,8 @@ describe('storage module tree', () => {
 
     expect(rootFiles.sort()).toEqual([
       'canvas-dirs.ts',
+      'capabilities.test.ts',
+      'capabilities.ts',
       'index.ts',
       'module-boundaries.test.ts',
       'paths.ts',

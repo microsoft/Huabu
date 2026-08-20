@@ -89,6 +89,14 @@ export {
   StorageProfileError,
   validateStorageProfile,
 } from './profile.js';
+export {
+  describeUnavailableCapabilities,
+  hasStorageCapability,
+  STORAGE_CAPABILITIES,
+  unavailableCapabilities,
+  unavailableCapabilityMessage,
+} from './capabilities.js';
+export type { StorageCapability } from './capabilities.js';
 export type { StorageProfile } from './profile.js';
 export {
   assertValidNamespace,
