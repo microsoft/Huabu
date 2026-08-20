@@ -99,6 +99,16 @@ describe('chatStore thread-scoped state', () => {
     expect(selectThreadLastAction(state, 'thread-b')).toBe('operate');
   });
 
+  it('defaults an uncached external thread to ask', () => {
+    useChatStore.setState({
+      bindingByThread: { 'thread-external': EXTERNAL },
+    });
+
+    expect(
+      selectThreadLastAction(useChatStore.getState(), 'thread-external'),
+    ).toBe('ask');
+  });
+
   it('returns stable defaults for an uncached thread', () => {
     const state = useChatStore.getState();
     const first = selectThreadMessages(state, 'missing');
@@ -135,6 +145,23 @@ describe('chatStore thread creation', () => {
 
     expect(selectThreadBinding(state, created)).toEqual(INTERNAL);
     expect(selectThreadLastAction(state, created)).toBe('operate');
+  });
+
+  it('defaults external Canvas and independent threads to ask', () => {
+    useChatStore.setState({
+      bindingMap: { 'canvas-external': EXTERNAL },
+    });
+
+    const canvasThread = useChatStore
+      .getState()
+      .ensureCanvasThread('canvas-external');
+    const independentThread = useChatStore
+      .getState()
+      .createThread({ binding: EXTERNAL });
+
+    const state = useChatStore.getState();
+    expect(selectThreadLastAction(state, canvasThread)).toBe('ask');
+    expect(selectThreadLastAction(state, independentThread)).toBe('ask');
   });
 
   it('creates a loaded thread without moving another renderer', () => {
