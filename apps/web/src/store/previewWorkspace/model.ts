@@ -27,7 +27,8 @@ export type PreviewTab = {
   /**
    * A transient tab is the group's reusable inspection slot: the next
    * transient open replaces its target instead of appending a tab. Promoted
-   * to permanent by an explicit gesture (edit, double-click, Open to Side).
+   * to permanent by an explicit gesture (edit, double-click, or Pin). Moving
+   * it with Open to Side preserves its transient state.
    */
   transient: boolean;
   /** Monotonic activation stamp used to restore recent-target ordering. */

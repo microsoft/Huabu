@@ -1,7 +1,7 @@
 # Unified Preview Workspace
 
 Status: Shipped
-Last updated: 2026-08-12
+Last updated: 2026-08-20
 
 The shipped system is documented in [`docs/architecture/preview-workspace.md`](../architecture/preview-workspace.md). This proposal is retained as design and migration history and is not authoritative for current behavior.
 
@@ -207,7 +207,7 @@ Titles are single-line, middle-of-string truncated with the full label in the ac
 
 Without a bound, double-clicking through a Canvas produces an unusable tab strip. Two independent mechanisms apply, mirroring the editor model.
 
-A **transient tab** is the primary defence. Opening a target for inspection reuses the group's existing transient tab instead of appending a new one, so browsing many nodes never grows the strip beyond one tab. The tab is rendered in italics and is promoted to a permanent tab by an explicit gesture — editing its content, double-clicking the tab, or Open to Side. Which entry points open transiently is deliberately narrow: Canvas search results and connected-node navigation open transiently, while Question compose, Question replay, New Chat, and explicit node open are permanent.
+A **transient tab** is the primary defence. Opening a target for inspection reuses the group's existing transient tab instead of appending a new one, so browsing many nodes never grows the strip beyond one tab. The tab is rendered in italics and is promoted to a permanent tab by editing its content, double-clicking the tab, or using Pin. Open to Side moves the tab while preserving whether it is transient or permanent. Which entry points open transiently is deliberately narrow: Canvas search results and connected-node navigation open transiently, while Question compose, Question replay, New Chat, and explicit node open are permanent.
 
 Permanent tabs are never closed automatically. The transient inspection slot remains the browsing backstop, while explicitly opened or promoted tabs stay available until the user closes them or their target node is deleted.
 
