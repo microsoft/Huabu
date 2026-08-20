@@ -26,7 +26,7 @@ import { DiskSpaceNodes } from './space-nodes.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { DiskStructuredStore } from './structured-store.js';
 import { ensureWorldCanvasOnDisk } from './world-canvas.js';
-import { getWorkspacePath, setWorkspacePath } from '../../../workspace.js';
+import { setWorkspacePath } from '../../../workspace.js';
 import { describeSpaceNodesContract } from '../../ports/contracts/space-nodes.contract.js';
 
 import type { NodeContent } from '../../../canvas/persistence-types.js';
@@ -70,10 +70,7 @@ describe('DiskSpaceNodes', () => {
 
   beforeEach(async () => {
     workspacePath = freshWorkspace('huabu-node-repository-');
-    const created = await new DiskSpaceRepository(
-      getWorkspacePath(),
-      () => 1,
-    ).create({
+    const created = await new DiskSpaceRepository(() => 1).create({
       canvasId: 'canvas-a',
       title: 'Shared title',
     });

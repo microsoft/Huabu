@@ -116,7 +116,7 @@ class DiskSpaceLogCoordinator {
   }
 
   private requireSpace(): void {
-    assertSpaceMutationAllowed(this.#workspacePath, this.#store.canvasId);
+    assertSpaceMutationAllowed(this.#store.canvasId);
     if (!readDiskSpaceRecord(this.#store)) {
       throw new Error(
         `Space logs(${this.#store.canvasId}) cannot write logs for a missing Space`,

@@ -35,6 +35,15 @@ interface WorkspacePersistence {
   load: () => Promise<{ path: string | null; recent: string[] }>;
   save: (path: string) => Promise<string[]>;
   remove: (path: string) => Promise<string[]>;
+  /**
+   * Restart onto the saved path, or `null` where nothing can.
+   *
+   * A server process serves one workspace for its lifetime, so a second
+   * choice only takes effect on restart. The Electron shell owns both the
+   * saved path and the server child, so it can do it; a browser tab cannot
+   * restart the server it is talking to, and says so instead.
+   */
+  restart: (() => Promise<void>) | null;
 }
 
 function loadLocalStorageRecents(): string[] {
@@ -75,6 +84,7 @@ const localStoragePersistence: WorkspacePersistence = {
     }
     return list;
   },
+  restart: null,
 };
 
 /**
@@ -88,11 +98,13 @@ interface ElectronWorkspaceLike {
   removeRecent: (
     path: string,
   ) => Promise<{ path: string | null; recent: string[] }>;
+  restart?: () => Promise<void>;
 }
 
 function makeElectronPersistence(
   api: ElectronWorkspaceLike,
 ): WorkspacePersistence {
+  const restart = api.restart;
   return {
     load: async () => {
       const snap = await api.get();
@@ -118,6 +130,7 @@ function makeElectronPersistence(
       const snap = await api.removeRecent(path);
       return snap.recent;
     },
+    restart: restart ? (): Promise<void> => restart() : null,
   };
 }
 
@@ -157,6 +170,15 @@ interface WorkspaceState {
   isSyncing: boolean;
   /** Last sync error, if any. */
   error: string | null;
+  /**
+   * A saved choice this server process will not adopt.
+   *
+   * Set when the user picks a different Home folder while one is already
+   * open and nothing here can restart the server — a browser tab. The
+   * selection is persisted, so the next launch opens it; until then the
+   * current one keeps serving.
+   */
+  pendingWorkspacePath: string | null;
 
   /**
    * Number of canvases currently in the active workspace. `null` means
@@ -220,8 +242,18 @@ function emitWorkspaceChanged(): void {
   window.dispatchEvent(new Event('workspace-changed'));
 }
 
+/** Whether the server refused because this process already has a workspace. */
+function isRestartRequired(error: unknown): boolean {
+  return (
+    error instanceof ApiError && error.code === 'WORKSPACE_RESTART_REQUIRED'
+  );
+}
+
 function workspaceActivationError(error: unknown, path: string): string {
   if (error instanceof ApiError) {
+    if (error.code === 'WORKSPACE_RESTART_REQUIRED') {
+      return i18n.t('workspace.restartRequired', { path });
+    }
     if (error.code === 'WORKSPACE_ACTIVATION_TIMEOUT') {
       const seconds =
         typeof (error.details as { seconds?: unknown } | undefined)?.seconds ===
@@ -263,6 +295,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   isReady: false,
   isSyncing: false,
   error: null,
+  pendingWorkspacePath: null,
   canvasCount: null,
 
   setWorldEnabled: (worldEnabled) => {
@@ -310,6 +343,17 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }
 
     set(fromInfo(info));
+
+    // A remembered folder the server could not open — moved, renamed, or on a
+    // drive that is not mounted. It came up serving nothing, so this is the
+    // picker with a reason rather than a first launch.
+    if (info.startupError) {
+      set({
+        error: i18n.t('workspace.startupFailed', {
+          reason: info.startupError,
+        }),
+      });
+    }
 
     // ── Managed mode: server has already activated; nothing to do. ──
     if (info.mode === 'managed') {
@@ -366,17 +410,48 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     return false;
   },
 
+  /**
+   * Choose the Home folder.
+   *
+   * Two outcomes, and which one applies is the server's to say. With nothing
+   * open yet it activates and the app is ready. With a folder already open
+   * this process will not change what it is serving, so the choice is saved
+   * and applied by a restart — performed here where a shell can do it, and
+   * reported for the user to do where none can.
+   */
   selectWorkspace: async (path: string) => {
     if (get().mode === 'managed') {
       throw new Error('Workspace is locked by the server (managed mode)');
     }
-    set({ isSyncing: true, error: null, canvasCount: null });
+    set({
+      isSyncing: true,
+      error: null,
+      pendingWorkspacePath: null,
+      canvasCount: null,
+    });
     try {
       const info = await putWorkspacePath(path);
       const recent = await persistence.save(path);
       set({ ...fromInfo(info), recentWorkspaces: recent, isSyncing: false });
       emitWorkspaceChanged();
     } catch (err) {
+      if (isRestartRequired(err)) {
+        // Save first, then restart: the restart is what opens it, so a
+        // relaunch that raced an unsaved choice would reopen the old folder.
+        const recent = await persistence.save(path);
+        set({ recentWorkspaces: recent });
+        if (persistence.restart) {
+          set({ error: i18n.t('workspace.restarting', { path }) });
+          await persistence.restart();
+          return;
+        }
+        set({
+          pendingWorkspacePath: path,
+          error: workspaceActivationError(err, path),
+          isSyncing: false,
+        });
+        throw err;
+      }
       const message = workspaceActivationError(err, path);
       set({ error: message, isSyncing: false });
       throw err;

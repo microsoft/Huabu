@@ -22,7 +22,14 @@ export const workspaceModeSchema = z.enum(['free', 'managed']);
 export type WorkspaceMode = z.infer<typeof workspaceModeSchema>;
 
 export const workspaceCapabilitiesSchema = z.object({
-  /** Whether the user is allowed to change workspace at runtime. */
+  /**
+   * Whether the user may choose the workspace at all.
+   *
+   * False only in managed mode, where the operator fixed it. True does not
+   * mean the running server will adopt the choice: a process serves one
+   * workspace for its lifetime, so once `configured` is true a different
+   * selection is saved and applied on restart.
+   */
   canChangeWorkspace: z.boolean(),
   /** Whether the server can show a native folder picker. */
   nativePicker: z.boolean(),
@@ -38,6 +45,15 @@ export const workspaceInfoSchema = z.object({
   name: z.string().nullable(),
   /** Stable hidden World canvas identity, or null before configuration. */
   worldCanvasId: z.string().min(1).nullable(),
+  /**
+   * Why the workspace this server was started on could not be opened.
+   *
+   * Non-null only when the process was given a remembered path and failed to
+   * open it — a folder that moved, was renamed, or sits on a drive that is not
+   * mounted. The server then serves nothing, so the client shows the picker;
+   * this is what distinguishes that from a first launch.
+   */
+  startupError: z.string().nullable(),
   capabilities: workspaceCapabilitiesSchema,
 });
 export type WorkspaceInfo = z.infer<typeof workspaceInfoSchema>;

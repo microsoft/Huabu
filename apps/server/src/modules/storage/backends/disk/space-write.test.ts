@@ -23,7 +23,7 @@ import { DiskSpaceRepository } from './space-repository.js';
 import { createDiskSpaceWrite } from './space-write.js';
 import { DiskStructuredStore } from './structured-store.js';
 import { ensureWorldCanvasOnDisk } from './world-canvas.js';
-import { getWorkspacePath, setWorkspacePath } from '../../../workspace.js';
+import { setWorkspacePath } from '../../../workspace.js';
 import { describeSpaceWriteContract } from '../../ports/contracts/space-write.contract.js';
 
 import type {
@@ -95,10 +95,7 @@ describe('Disk ordered Space write', () => {
 
   beforeEach(async () => {
     workspacePath = freshWorkspace('huabu-ordered-writer-');
-    const created = await new DiskSpaceRepository(
-      getWorkspacePath(),
-      () => 1,
-    ).create({
+    const created = await new DiskSpaceRepository(() => 1).create({
       canvasId: 'canvas-a',
       title: 'Shared title',
     });

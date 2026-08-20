@@ -456,9 +456,8 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
 
   // Ensure the data directory exists so the server doesn't have to
   // race-condition on first-use creation. The workspace directory is
-  // intentionally NOT pre-created: in free mode the user picks it via
-  // the in-app UI (folder picker / path input), and the web client
-  // persists the selection across launches via localStorage.
+  // intentionally NOT pre-created: on first launch the user picks it via the
+  // in-app UI (folder picker / path input), and we remember it from then on.
   mkdirSync(dataDir, { recursive: true });
 
   if (IS_DEV && webDistPath && !existsSync(webDistPath)) {
@@ -469,8 +468,17 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
     );
   }
 
-  // Notably absent: HUABU_WORKSPACE. Omitting it puts the server in
-  // free mode, so the web UI shows its workspace picker on first launch.
+  // The workspace the user last chose, handed to the server at fork.
+  //
+  // A server process serves one workspace for its lifetime, so this is where
+  // the choice takes effect — the shell owns both `workspace.json` and the
+  // child process, which makes it the only thing that can apply a new one.
+  // Deliberately *not* `HUABU_WORKSPACE`: that is the operator's lock, and it
+  // hides the path, removes the picker, and fails the boot when the folder
+  // cannot be opened. This is the user's own choice, so it stays free mode —
+  // the picker remains available and a folder that has gone missing lands the
+  // user back on it instead of killing the app. Absent on first launch, which
+  // is what shows the picker then.
   //
   // External-agent (ACP) integration: the server embeds an `agentlet`
   // daemon supervisor (`DaemonSupervisor`) which fork()s the daemon
@@ -480,12 +488,15 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
   // in dev it falls back to `external/agentlet/packages/local/dist/index.js`.
   // No env var injection is needed here \u2014 the resolver in
   // `daemon-supervisor.ts` covers both layouts.
+  const savedWorkspace = readWorkspaceStore().path;
+
   return {
     ...process.env,
     SERVER_PORT: String(port),
     HUABU_BIND_HOST: '127.0.0.1',
     HUABU_DATA_DIR: dataDir,
     HUABU_SECRET_BRIDGE: '1',
+    ...(savedWorkspace ? { HUABU_WORKSPACE_STARTUP: savedWorkspace } : {}),
     ...(webDistPath ? { WEB_DIST_PATH: webDistPath } : {}),
     NODE_ENV: IS_DEV ? 'development' : 'production',
   };
@@ -784,6 +795,19 @@ function registerWorkspaceIpc(): void {
     };
     writeWorkspaceStore(next);
     return next;
+  });
+
+  /**
+   * Restart the app so the server comes up on the saved workspace.
+   *
+   * The renderer calls this after `workspace:set` when a workspace is already
+   * active. Relaunching the whole app rather than re-forking the server keeps
+   * one rule about what a running process is looking at: the window, its
+   * caches, and the server all start again on the same choice.
+   */
+  ipcMain.handle('workspace:restart', () => {
+    app.relaunch();
+    app.quit();
   });
 
   ipcMain.handle('workspace:remove-recent', (_event, rawPath: unknown) => {

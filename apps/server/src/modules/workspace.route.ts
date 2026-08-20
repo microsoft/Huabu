@@ -14,10 +14,12 @@ import {
   activateWorkspacePath,
   WorkspaceActivationInProgressError,
   WorkspaceActivationTimeoutError,
+  WorkspaceRestartRequiredError,
 } from './workspace-activation.js';
 import {
   getWorkspaceName,
   getWorkspacePath,
+  getWorkspaceStartupError,
   isManagedMode,
   isWorkspaceConfigured,
 } from './workspace.js';
@@ -166,6 +168,7 @@ async function buildWorkspaceState(): Promise<WorkspaceInfo> {
     worldCanvasId: configured
       ? await getStructuredStore().spaces().worldId()
       : null,
+    startupError: getWorkspaceStartupError(),
     capabilities: {
       canChangeWorkspace: !managed,
       nativePicker: !managed && canShowNativePicker(),
@@ -285,6 +288,13 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
           e.message,
           'WORKSPACE_ACTIVATION_IN_PROGRESS',
         );
+      }
+      // Not a rejection of the choice — the path is valid and the client
+      // should save it. This process just cannot be the one to open it.
+      if (e instanceof WorkspaceRestartRequiredError) {
+        return sendError(reply, 409, e.message, 'WORKSPACE_RESTART_REQUIRED', {
+          path: e.requestedPath,
+        });
       }
       return sendError(reply, 400, (e as Error).message);
     }

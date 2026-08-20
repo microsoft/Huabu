@@ -284,7 +284,7 @@ describe('DiskSpaceRepository lifecycle', () => {
   it('persists the de-duplicated title and reports explicit delete outcomes', async () => {
     const root = makeWorkspace('huabu-space-lifecycle-titles-');
     seedWorld(root);
-    const spaces = new DiskSpaceRepository(workspaceState.path, () => 1);
+    const spaces = new DiskSpaceRepository(() => 1);
     const first = await spaces.create({
       canvasId: 'canvas-a',
       title: 'Shared title',
@@ -319,7 +319,7 @@ describe('DiskSpaceRepository lifecycle', () => {
   it('refreshes membership before allocating around an externally imported Space', async () => {
     const root = makeWorkspace('huabu-space-lifecycle-imported-');
     seedWorld(root);
-    const spaces = new DiskSpaceRepository(workspaceState.path, () => 1);
+    const spaces = new DiskSpaceRepository(() => 1);
     await spaces.create({ canvasId: 'warm-index', title: 'Warm index' });
     const importedRoot = path.join(root, 'Taken');
     mkdirSync(importedRoot, { recursive: true });
@@ -354,7 +354,7 @@ describe('DiskSpaceRepository lifecycle', () => {
   it('keeps an allocated null title consistent in the record and the listing', async () => {
     const root = makeWorkspace('huabu-space-lifecycle-null-title-');
     seedWorld(root);
-    const spaces = new DiskSpaceRepository(workspaceState.path, () => 1);
+    const spaces = new DiskSpaceRepository(() => 1);
     await spaces.create({
       canvasId: 'physical-name-owner',
       title: 'null-title-space',

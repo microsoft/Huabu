@@ -387,7 +387,7 @@ export class CanvasStore {
         updatedAt: Date.now(),
       };
       try {
-        assertSpaceMutationAllowed(this.#workspacePath, this.canvasId);
+        assertSpaceMutationAllowed(this.canvasId);
         atomicWriteJson(canvasJsonPath(this.canvasId), next);
         patchCanvasDirTitle(this.canvasId, visibleTitle);
         return next;
@@ -410,7 +410,7 @@ export class CanvasStore {
 
   private writeRecord(canvas: CanvasFile, reconcileTombstones: boolean): void {
     this.assertActiveWorkspace();
-    assertSpaceMutationAllowed(this.#workspacePath, this.canvasId);
+    assertSpaceMutationAllowed(this.canvasId);
     if (canvas.canvasId !== this.canvasId) {
       throw new Error(
         `CanvasStore(${this.canvasId}) refusing to write canvas with id "${canvas.canvasId}"`,
@@ -467,7 +467,7 @@ export class CanvasStore {
    * the legacy reader can self-heal and rewrite them.
    */
   private readValidSpaceForMutation(operation: string): CanvasFile | null {
-    assertSpaceMutationAllowed(this.#workspacePath, this.canvasId);
+    assertSpaceMutationAllowed(this.canvasId);
     try {
       let record = readValidCanvasFile(
         canvasJsonPath(this.canvasId),
@@ -492,7 +492,7 @@ export class CanvasStore {
 
   private requireExistingSpaceForMutation(operation: string): void {
     if (this.nodeMutationTransactionDepth > 0) {
-      assertSpaceMutationAllowed(this.#workspacePath, this.canvasId);
+      assertSpaceMutationAllowed(this.canvasId);
       return;
     }
     const record = this.readValidSpaceForMutation(operation);
@@ -571,7 +571,7 @@ export class CanvasStore {
    */
   renameSelf(newTitle: string | null): RenameSelfResult {
     this.assertActiveWorkspace();
-    assertSpaceMutationAllowed(this.#workspacePath, this.canvasId);
+    assertSpaceMutationAllowed(this.canvasId);
     if (isWorldCanvasId(this.canvasId)) {
       return { ok: false, reason: 'forbidden' };
     }

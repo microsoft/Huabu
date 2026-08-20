@@ -321,7 +321,10 @@
     "clickToSwitch": "Click to switch",
     "openPathFailed": "Failed to open path",
     "activationTimeout": "Opening Home folder “{{path}}” took longer than {{seconds}} seconds. Check that the cloud or network drive is available, then try again.",
-    "activationInProgress": "Another Home folder is still opening. Please wait for it to finish."
+    "activationInProgress": "Another Home folder is still opening. Please wait for it to finish.",
+    "restartRequired": "“{{path}}” has been saved as your Home folder. Restart the server to open it.",
+    "restarting": "Restarting to open “{{path}}”…",
+    "startupFailed": "Could not open your saved Home folder: {{reason}} Choose a folder to continue."
   },
   "canvasList": {
     "title": "Spaces",

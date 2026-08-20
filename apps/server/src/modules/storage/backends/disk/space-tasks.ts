@@ -129,7 +129,7 @@ export class DiskSpaceTasks implements SpaceTasks {
   }
 
   #requireSpace(): void {
-    assertSpaceMutationAllowed(this.#workspacePath, this.#store.canvasId);
+    assertSpaceMutationAllowed(this.#store.canvasId);
     if (!readDiskSpaceRecord(this.#store)) {
       throw new Error(
         `Space Tasks(${this.#store.canvasId}) cannot write a missing Space`,

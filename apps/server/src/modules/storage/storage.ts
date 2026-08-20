@@ -8,29 +8,23 @@
  * validated {@link StorageProfile} and holds them for the process. This is
  * the only place that maps a backend kind to an adapter.
  *
- * A mount belongs to one Workspace. Switching Workspaces is therefore a
- * remount rather than a reconfiguration in place, and the lifecycle that does
- * it — {@link stageStorage} / {@link StagedStorage.commit} — exists so every
- * step that can fail happens while the previous Workspace is still serving
- * (proposal §12.6.5). Call {@link initStorage} from the server entry point so
- * a bad profile fails at startup with an actionable message, before anything
+ * The lifecycle is linear, because the Workspace a process serves is fixed
+ * for its lifetime (proposal §12.6.5): mount once, serve, close on shutdown.
+ * Selecting a different Workspace is a restart, so there is no remount, no
+ * staged swap, and nothing here has to describe *which* Workspace it was
+ * opened against — a mount that exists is the mount for the Workspace this
+ * process serves. Call {@link initStorage} from the server entry point so a
+ * bad profile fails at startup with an actionable message, before anything
  * has been opened.
  *
- * Anything that reaches for storage without going through a mount — tests,
- * scripts, the synchronous Workspace switch — builds the adapters on demand.
- * That path is synchronous, so it cannot `await init()`, and it is therefore
- * only legal for backends that have nothing to open; see
- * {@link requiresExplicitInit}. It is not a lazy version of the mount, and a
- * connection-holding backend must not be reached through it.
+ * Anything that reaches for storage without a mount — tests, scripts — builds
+ * the adapters on demand. That path is synchronous, so it cannot `await
+ * init()`, and it is therefore only legal for backends that have nothing to
+ * open; see {@link requiresExplicitInit}. It is not a lazy version of the
+ * mount, and a connection-holding backend must not be reached through it.
  */
 
-import path from 'node:path';
-
-import {
-  acquireWorkspaceOperationLease,
-  getWorkspacePath,
-  isWorkspaceConfigured,
-} from '../workspace.js';
+import { isWorkspaceConfigured } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
 import { stageDiskSpaceImport } from './backends/disk/space-import.js';
 import { diskSpaceTree } from './backends/disk/space-tree.js';
@@ -76,19 +70,6 @@ export type SpaceDeleteOutcome =
   | SpaceDeleteFinishResult
   | { readonly ok: false; readonly reason: 'world-forbidden' };
 
-function activeWorkspacePath(): string {
-  return path.resolve(getWorkspacePath());
-}
-
-function assertActiveWorkspace(workspacePath: string, canvasId: string): void {
-  if (activeWorkspacePath() !== workspacePath) {
-    throw new Error(
-      `Blob scope for Space "${canvasId}" belongs to an inactive workspace. ` +
-        `Resolve a fresh scope after workspace activation.`,
-    );
-  }
-}
-
 /**
  * Release a rejected streaming body that storage never fully consumed.
  *
@@ -107,14 +88,6 @@ function drainRejectedBody(body: Readable | Buffer): void {
 
 export interface Storage {
   readonly profile: StorageProfile;
-  /**
-   * Workspace these connections were opened against.
-   *
-   * A mount belongs to one Workspace. Switching Workspaces is a remount, not
-   * a reconfiguration of the connections in place, so this is what makes a
-   * stale mount recognisable rather than silently serving the wrong data.
-   */
-  readonly workspacePath: string;
   readonly structured: StructuredStore;
   readonly blobs: BlobStore;
   /**
@@ -194,13 +167,10 @@ function buildBlobStore(profile: StorageProfile): BlobStore {
   }
 }
 
-function buildStructuredStore(
-  profile: StorageProfile,
-  workspacePath: string,
-): StructuredStore {
+function buildStructuredStore(profile: StorageProfile): StructuredStore {
   switch (profile.structured.kind) {
     case 'disk':
-      return new DiskStructuredStore(workspacePath);
+      return new DiskStructuredStore();
     default:
       throw new Error(
         `Unsupported structured backend: ${profile.structured.kind}`,
@@ -219,13 +189,11 @@ function buildStructuredStore(
  */
 export function composeStorage(
   profile: StorageProfile,
-  workspacePath: string,
   structured: StructuredStore,
   blobs: BlobStore,
 ): Storage {
   return {
     profile,
-    workspacePath: path.resolve(workspacePath),
     structured,
     blobs,
     // Composes from the receiver, not from a captured local. Substituting one
@@ -239,20 +207,16 @@ export function composeStorage(
 }
 
 /**
- * Validate a profile and construct both connections for one Workspace.
+ * Validate a profile and construct both connections.
  *
  * Does not `init()` — opening is the mount's job, so a caller can build a
  * connection it has not committed to using.
  */
-export function createStorage(
-  profile: StorageProfile,
-  workspacePath: string,
-): Storage {
+export function createStorage(profile: StorageProfile): Storage {
   validateStorageProfile(profile);
   return composeStorage(
     profile,
-    workspacePath,
-    buildStructuredStore(profile, workspacePath),
+    buildStructuredStore(profile),
     buildBlobStore(profile),
   );
 }
@@ -284,26 +248,18 @@ function serializeSpaceCreate<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 function ensure(): Storage {
-  const workspacePath = activeWorkspacePath();
-  if (current) {
-    if (current.workspacePath === workspacePath) return current;
-    // The active Workspace moved without going through the mount lifecycle —
-    // the synchronous `setWorkspacePath` path, and the tests that drive it.
-    // Drop the stale mount rather than serving another Workspace's data
-    // through it; the rebuild below either succeeds or says why it cannot.
-    current = null;
-  }
+  if (current) return current;
 
   const profile = parseStorageProfile();
   // Build first, so an unimplemented backend reports that rather than the
   // mount complaint below.
-  const storage = createStorage(profile, workspacePath);
+  const storage = createStorage(profile);
   if (requiresExplicitInit(profile)) {
     throw new StorageProfileError(
-      `Storage is not mounted on the active Workspace. The ` +
+      `Storage was used before it was mounted. The ` +
         `"${profile.structured.kind}" / "${profile.blobs.kind}" profile has ` +
-        `connections to open, and this path cannot await init(). Activate the ` +
-        `Workspace through the mount lifecycle instead.`,
+        `connections to open, and this path cannot await init(). Mount it ` +
+        `during startup instead.`,
     );
   }
   current = storage;
@@ -311,35 +267,6 @@ function ensure(): Storage {
 }
 
 // ─── Workspace mount lifecycle ──────────────────────────────────────────────
-
-/**
- * Connections opened for a Workspace that is not active yet.
- *
- * Staging exists so activation can fail without consequences. Everything that
- * can go wrong — an unimplemented backend, a connection that will not open, a
- * namespace whose World is malformed — happens here, while the previous
- * Workspace and its connections are still serving. Only {@link commit} makes
- * the new mount reachable, and it cannot fail.
- */
-export interface StagedStorage {
-  readonly storage: Storage;
-  /**
-   * Publish this mount and close the one it replaced.
-   *
-   * `publish` is the caller's own commit — for a Workspace switch, making the
-   * new path the active one. It runs in the same synchronous block as the
-   * swap, so no request can land in a gap where the path has moved but the
-   * mount serving it has not. Closing the replaced connections happens after,
-   * where a slow close cannot delay the first request against the new
-   * Workspace.
-   *
-   * A `publish` that throws leaves the active mount exactly as it was; the
-   * caller should then {@link abort}. The swap itself cannot fail.
-   */
-  commit(publish?: () => void): Promise<void>;
-  /** Close the staged connections. The active mount is untouched. */
-  abort(): Promise<void>;
-}
 
 async function closeQuietly(storage: Storage): Promise<void> {
   await Promise.all([
@@ -349,102 +276,66 @@ async function closeQuietly(storage: Storage): Promise<void> {
 }
 
 /**
- * Open connections for `workspacePath` and bootstrap its World.
+ * Open both connections for the active Workspace and bootstrap its World.
  *
- * Does not touch the active mount, the active Workspace path, or any
- * process-wide state. A rejection here leaves the previous Workspace fully
- * serving, which is the whole point of separating this from {@link
- * StagedStorage.commit} (proposal §12.6.5).
+ * The whole lifecycle, because a process serves one Workspace: this runs once,
+ * after the Workspace path has been committed and before anything is served.
+ * A rejection leaves the process with no mount, which is the honest outcome —
+ * the alternative is serving a Workspace whose World was never established.
  */
-export async function stageStorage(
-  workspacePath: string,
+export async function mountStorage(
   profile: StorageProfile = parseStorageProfile(),
-): Promise<StagedStorage> {
-  // The mount this one replaces, captured now rather than at commit time.
-  // Committing a Workspace path detaches the mount that no longer describes
-  // it, so by the time the swap runs there may be nothing left to read — and
-  // the connections would never be closed.
-  const replaced = current;
-  const storage = createStorage(profile, workspacePath);
+): Promise<Storage> {
+  await closeStorage();
+  const storage = createStorage(profile);
   try {
     await Promise.all([storage.structured.init(), storage.blobs.init()]);
     // Every backend meets an empty namespace the first time it is mounted, and
-    // a Workspace with no World has no Portal target. This runs before the
-    // path is committed, so it must address the Workspace being staged rather
-    // than the active one — which is why the connection is constructed with an
-    // explicit path.
+    // a Workspace with no World has no Portal target.
     await storage.structured.spaces().ensureWorld();
   } catch (error) {
     await closeQuietly(storage);
     throw error;
   }
-
-  return {
-    storage,
-    async commit(publish?: () => void): Promise<void> {
-      publish?.();
-      current = storage;
-      if (replaced && replaced !== storage) await closeQuietly(replaced);
-    },
-    /** Leaves `replaced` alone — it is still the active mount. */
-    abort(): Promise<void> {
-      return closeQuietly(storage);
-    },
-  };
+  current = storage;
+  return storage;
 }
 
 /**
- * Mount storage onto `workspacePath` in one step.
+ * Drop the mount without closing it.
  *
- * For callers that have nothing to do between staging and publishing. An
- * activation that must commit the Workspace path between the two — every
- * runtime switch — drives {@link stageStorage} directly instead.
+ * The synchronous counterpart to {@link closeStorage}, for a caller that
+ * cannot await — {@link commitWorkspacePath} publishing a Workspace, and the
+ * tests that move between temporary ones. A backend whose `close()` matters is
+ * one {@link ensure} refuses to rebuild here anyway, so nothing that holds a
+ * connection is reachable through this path.
  */
-export async function mountStorage(
-  workspacePath: string,
-  profile?: StorageProfile,
-): Promise<Storage> {
-  const staged = await stageStorage(workspacePath, profile);
-  await staged.commit();
-  return staged.storage;
-}
-
-/**
- * Detach the current mount without closing it, returning what was detached.
- *
- * The escape hatch for the synchronous Workspace switch, which cannot await a
- * close. Returning the detached mount rather than closing it here keeps the
- * decision with the caller: a backend whose `close()` matters is one that
- * cannot be reached through the synchronous path anyway, because `ensure()`
- * refuses to build it.
- */
-export function detachStorage(): Storage | null {
-  const previous = current;
+export function resetStorage(): void {
   current = null;
-  return previous;
 }
 
 /** Close the active mount. Called on graceful Server shutdown. */
 export async function closeStorage(): Promise<void> {
-  const previous = detachStorage();
+  const previous = current;
+  current = null;
   if (previous) await closeQuietly(previous);
 }
 
 /**
- * Validate the configured profile, and mount it when a Workspace is already
- * active.
+ * Validate the configured profile, and mount it when a Workspace is active.
  *
  * Called at server boot so an unknown or unimplemented backend fails there
- * with an actionable message rather than on the first upload. In free mode
- * there is no Workspace yet, so this validates and returns without opening
- * anything; the mount happens when one is activated.
+ * with an actionable message rather than on the first upload. A free-mode
+ * process may still be waiting for the user to choose a folder, so this
+ * validates and returns without opening anything; the mount then happens when
+ * one is activated, once.
  */
 export async function initStorage(
   profile: StorageProfile = parseStorageProfile(),
 ): Promise<Storage | null> {
   validateStorageProfile(profile);
   if (!isWorkspaceConfigured()) return null;
-  return mountStorage(activeWorkspacePath(), profile);
+  return mountStorage(profile);
 }
 
 export function getStorage(): Storage {
@@ -463,28 +354,19 @@ export function getStructuredStore(): StructuredStore {
  * Create one ordinary Space through the selected structured backend.
  *
  * Default-title allocation and lifecycle creation share one process-local
- * serialization point. The Workspace lease is acquired before queueing, so
- * an async catalogue read cannot strand the request in a newly activated
- * Workspace and concurrent defaults remain Untitled, Untitled (1), ... .
+ * serialization point, so concurrent defaults remain Untitled, Untitled (1),
+ * ... rather than colliding on one name.
  */
 export function createSpace(
   canvasId: string,
   title?: string | null,
 ): Promise<SpaceCreateResult> {
   const structured = ensure().structured;
-  const workspaceLease = acquireWorkspaceOperationLease();
   return serializeSpaceCreate(async () => {
-    try {
-      // One repository instance spans the read and the create, so a Workspace
-      // switch between them is rejected by the handle rather than silently
-      // creating the Space in the newly activated Workspace.
-      const spaces = structured.spaces();
-      const effectiveTitle =
-        title === undefined ? defaultSpaceTitle(await spaces.list()) : title;
-      return await spaces.create({ canvasId, title: effectiveTitle });
-    } finally {
-      workspaceLease.release();
-    }
+    const spaces = structured.spaces();
+    const effectiveTitle =
+      title === undefined ? defaultSpaceTitle(await spaces.list()) : title;
+    return spaces.create({ canvasId, title: effectiveTitle });
   });
 }
 
@@ -500,30 +382,25 @@ export function createSpace(
 export async function deleteSpace(
   canvasId: string,
 ): Promise<SpaceDeleteOutcome> {
-  const workspaceLease = acquireWorkspaceOperationLease();
+  const storage = ensure();
+  const started = await storage.structured.spaces().beginDelete({ canvasId });
+  if (!started.ok) return started;
   try {
-    const storage = ensure();
-    const started = await storage.structured.spaces().beginDelete({ canvasId });
-    if (!started.ok) return started;
-    try {
-      // Preserve the old retryable cleanup behavior: sweep even when the
-      // structured record is already absent, so orphan blobs can be removed.
-      // Every area, not just artifacts: a Space's bytes are spread across one
-      // scope per user-visible area, and on a backend where dropping the
-      // structured record does not remove the area they sit in, an unswept
-      // kind is an orphan.
-      await Promise.all(
-        spaceBlobAreas(storage.blobs.space(canvasId)).map((area) =>
-          area.deleteAll(),
-        ),
-      );
-      return await started.session.finish();
-    } catch (error) {
-      await started.session.abort();
-      throw error;
-    }
-  } finally {
-    workspaceLease.release();
+    // Preserve the old retryable cleanup behavior: sweep even when the
+    // structured record is already absent, so orphan blobs can be removed.
+    // Every area, not just artifacts: a Space's bytes are spread across one
+    // area per user-visible place, and on a backend where dropping the
+    // structured record does not remove that place, an unswept area is an
+    // orphan.
+    await Promise.all(
+      spaceBlobAreas(storage.blobs.space(canvasId)).map((area) =>
+        area.deleteAll(),
+      ),
+    );
+    return await started.session.finish();
+  } catch (error) {
+    await started.session.abort();
+    throw error;
   }
 }
 
@@ -544,8 +421,6 @@ function guardedBlobScope(
   canvasId: string,
   delegate: BlobScope,
 ): BlobScope {
-  const workspacePath = activeWorkspacePath();
-
   async function requireSpace(): Promise<void> {
     const record = await storage.structured.space(canvasId).read();
     if (!record) {
@@ -556,16 +431,10 @@ function guardedBlobScope(
   return {
     async put(name: string, body: Readable | Buffer): Promise<BlobInfo> {
       try {
-        return await withSpacePutAdmission(
-          workspacePath,
-          canvasId,
-          async () => {
-            assertActiveWorkspace(workspacePath, canvasId);
-            await requireSpace();
-            assertActiveWorkspace(workspacePath, canvasId);
-            return delegate.put(name, body);
-          },
-        );
+        return await withSpacePutAdmission(canvasId, async () => {
+          await requireSpace();
+          return delegate.put(name, body);
+        });
       } catch (error) {
         drainRejectedBody(body);
         throw error;

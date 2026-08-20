@@ -9,9 +9,9 @@ import { prewarmOAuthCredentials } from './modules/agent/oauth.js';
 import { resolveDeploymentConfig } from './modules/security/deployment-config.js';
 import {
   describeUnavailableCapabilities,
-  initStorage,
   parseStorageProfile,
 } from './modules/storage/index.js';
+import { mountStartupWorkspace } from './modules/workspace-activation.js';
 import { initializeSecretStore } from './security/secret-store.js';
 import { getLogger } from './utils/logger.js';
 
@@ -37,16 +37,16 @@ async function start(): Promise<void> {
     }
 
     // Before anything serves: an unknown or unimplemented backend must
-    // fail here with an actionable message, not on the first upload. In free
-    // mode there is no Workspace yet, so this validates the profile and the
-    // mount waits for activation.
-    const storage = await initStorage();
+    // fail here with an actionable message, not on the first upload. A
+    // process with no Workspace yet has nothing to mount, so this validates
+    // the profile and the mount waits for the one activation.
+    const storage = await mountStartupWorkspace();
     const profile = storage?.profile ?? parseStorageProfile();
     log.info(
       {
         structured: profile.structured.kind,
         blobs: profile.blobs.kind,
-        workspace: storage ? 'mounted' : 'awaiting activation',
+        workspace: storage ? 'mounted' : 'awaiting selection',
       },
       'Storage backends ready',
     );

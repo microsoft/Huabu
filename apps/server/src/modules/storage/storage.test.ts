@@ -4,11 +4,11 @@
 /**
  * The Workspace mount lifecycle (proposal §12.6.5).
  *
- * What these cases are really about is the ordering guarantee: everything that
- * can fail happens while the previous Workspace is still serving, and the swap
- * that makes a new mount reachable cannot fail. That is only observable across
- * two Workspaces, so every case here drives a real Disk profile against two
- * temporary roots rather than a stub.
+ * A process serves one Workspace, so the lifecycle is mount, serve, close.
+ * What these cases pin is what "mounted" has to mean before anything is
+ * served — an opened connection on each axis and a World that exists — and
+ * that a mount which cannot reach that state is not published at all. Every
+ * case drives a real Disk profile against a temporary root rather than a stub.
  */
 
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -25,10 +25,6 @@ vi.mock('../workspace.js', () => ({
     return workspaceState.path;
   },
   isWorkspaceConfigured: () => workspaceState.path !== '',
-  acquireWorkspaceOperationLease: () => ({
-    workspacePath: workspaceState.path,
-    release: () => {},
-  }),
 }));
 
 import { refreshCanvasDirIndex } from './backends/disk/canvas-dirs.js';
@@ -37,11 +33,11 @@ import {
   closeStorage,
   composeStorage,
   createStorage,
-  detachStorage,
   getStorage,
   initStorage,
+  mountStorage,
+  resetStorage,
   setStorageForTesting,
-  stageStorage,
 } from './storage.js';
 
 import type { BlobStore } from './ports/blob.js';
@@ -66,10 +62,10 @@ function makeWorkspace(prefix: string): string {
   return mkdtempSync(path.join(tmpdir(), prefix));
 }
 
-/** Activate `root` the way the synchronous switch does. */
+/** Activate `root` the way startup does, before anything is mounted. */
 function activate(root: string): void {
   workspaceState.path = root;
-  detachStorage();
+  resetStorage();
   resetStorageCache();
   refreshCanvasDirIndex();
 }
@@ -85,7 +81,7 @@ function seedWorld(root: string, record: unknown = WORLD_RECORD): void {
 }
 
 /** A mount whose connections record whether they were closed. */
-function countingStorage(root: string): {
+function countingStorage(): {
   storage: ReturnType<typeof composeStorage>;
   closed: () => number;
 } {
@@ -93,11 +89,10 @@ function countingStorage(root: string): {
   const count = async (): Promise<void> => {
     closes += 1;
   };
-  const real = createStorage(DISK, root);
+  const real = createStorage(DISK);
   return {
     storage: composeStorage(
       DISK,
-      root,
       { ...real.structured, close: count } as unknown as StructuredStore,
       { ...real.blobs, close: count } as unknown as BlobStore,
     ),
@@ -106,97 +101,24 @@ function countingStorage(root: string): {
 }
 
 afterEach(() => {
-  detachStorage();
+  resetStorage();
   workspaceState.path = '';
   resetStorageCache();
   refreshCanvasDirIndex();
 });
 
 describe('storage mount lifecycle', () => {
-  it('bootstraps the Workspace being staged, not the active one', async () => {
-    const active = makeWorkspace('huabu-mount-active-');
-    seedWorld(active);
+  it('mounts at startup when a Workspace is active', async () => {
+    const active = makeWorkspace('huabu-mount-startup-');
     activate(active);
-    const target = makeWorkspace('huabu-mount-target-');
 
-    const staged = await stageStorage(target, DISK);
+    const mounted = await initStorage(DISK);
 
-    // The staged Workspace got its World even though it is not active yet —
-    // the whole reason the connection is constructed with an explicit path.
-    expect(existsSync(path.join(target, '.world', 'space.json'))).toBe(true);
-    expect(staged.storage.workspacePath).toBe(target);
-    // Nothing about the active Workspace moved.
-    expect(getStorage().workspacePath).toBe(active);
-
-    await staged.abort();
-  });
-
-  it('leaves the previous mount serving when staging fails', async () => {
-    const active = makeWorkspace('huabu-mount-keep-active-');
-    seedWorld(active);
-    activate(active);
-    const before = getStorage();
-
-    // An established World that is malformed is an integrity error, never a
-    // signal to mint a replacement identity — so bootstrap refuses.
-    const target = makeWorkspace('huabu-mount-bad-world-');
-    seedWorld(target, { canvasId: 'broken' });
-
-    await expect(stageStorage(target, DISK)).rejects.toThrow();
-
-    expect(getStorage()).toBe(before);
-    expect(getStorage().workspacePath).toBe(active);
-    expect(workspaceState.path).toBe(active);
-  });
-
-  it('publishes the staged mount and closes the one it replaced', async () => {
-    const active = makeWorkspace('huabu-mount-swap-active-');
-    seedWorld(active);
-    activate(active);
-    const previous = countingStorage(active);
-    setStorageForTesting(previous.storage);
-
-    const target = makeWorkspace('huabu-mount-swap-target-');
-    const staged = await stageStorage(target, DISK);
-    expect(previous.closed()).toBe(0);
-
-    // The real sequence: the Workspace path and the mount are published
-    // together. Committing the path detaches the mount that no longer
-    // describes it, which is exactly the case that used to leave the replaced
-    // connections unclosed.
-    await staged.commit(() => {
-      workspaceState.path = target;
-      detachStorage();
-    });
-
-    expect(getStorage()).toBe(staged.storage);
-    // Both axes of the replaced mount are released.
-    expect(previous.closed()).toBe(2);
-  });
-
-  it('closes the staged connections on abort and keeps the active mount', async () => {
-    const active = makeWorkspace('huabu-mount-abort-active-');
-    seedWorld(active);
-    activate(active);
-    const before = getStorage();
-
-    const target = makeWorkspace('huabu-mount-abort-target-');
-    const staged = await stageStorage(target, DISK);
-    await staged.abort();
-
-    expect(getStorage()).toBe(before);
-  });
-
-  it('closes the active mount on shutdown', async () => {
-    const active = makeWorkspace('huabu-mount-close-');
-    seedWorld(active);
-    activate(active);
-    const mounted = countingStorage(active);
-    setStorageForTesting(mounted.storage);
-
-    await closeStorage();
-
-    expect(mounted.closed()).toBe(2);
+    expect(mounted).not.toBeNull();
+    expect(getStorage()).toBe(mounted);
+    // Startup meets an empty namespace on first run, and the mount is what
+    // bootstraps it.
+    expect(existsSync(path.join(active, '.world', 'space.json'))).toBe(true);
   });
 
   it('validates the profile without mounting when no Workspace is active', async () => {
@@ -207,32 +129,58 @@ describe('storage mount lifecycle', () => {
     await expect(initStorage(DISK)).resolves.toBeNull();
   });
 
-  it('mounts at startup when a Workspace is already active', async () => {
-    const active = makeWorkspace('huabu-mount-managed-');
+  it('publishes nothing when the World cannot be bootstrapped', async () => {
+    const active = makeWorkspace('huabu-mount-bad-world-');
+    // An established World that is malformed is an integrity error, never a
+    // signal to mint a replacement identity — so bootstrap refuses.
+    seedWorld(active, { canvasId: 'broken' });
     activate(active);
 
-    const mounted = await initStorage(DISK);
+    await expect(mountStorage(DISK)).rejects.toThrow();
 
-    expect(mounted?.workspacePath).toBe(active);
-    // Managed startup meets an empty namespace on first run, and the mount is
-    // what bootstraps it.
-    expect(existsSync(path.join(active, '.world', 'space.json'))).toBe(true);
+    // A half-mounted Workspace is the one outcome this must not produce: the
+    // lazy rebuild below is a fresh attempt, not the failed mount published.
+    const rebuilt = getStorage();
+    await expect(rebuilt.structured.spaces().worldId()).rejects.toThrow();
   });
 
-  it('drops a mount left behind by a Workspace that moved underneath it', async () => {
-    const first = makeWorkspace('huabu-mount-drift-first-');
-    seedWorld(first);
-    activate(first);
-    expect(getStorage().workspacePath).toBe(first);
+  it('closes the mount it replaces', async () => {
+    const active = makeWorkspace('huabu-mount-replace-');
+    seedWorld(active);
+    activate(active);
+    const previous = countingStorage();
+    setStorageForTesting(previous.storage);
 
-    // The synchronous switch detaches; this asserts the guard behind it, for
-    // any path that changes the active Workspace without one.
-    const second = makeWorkspace('huabu-mount-drift-second-');
-    seedWorld(second);
-    workspaceState.path = second;
-    resetStorageCache();
-    refreshCanvasDirIndex();
+    await mountStorage(DISK);
 
-    expect(getStorage().workspacePath).toBe(second);
+    // Both axes of the replaced mount are released. On Disk `close()` is a
+    // no-op, so nothing here would notice a leak — SQLite would.
+    expect(previous.closed()).toBe(2);
+  });
+
+  it('closes the active mount on shutdown', async () => {
+    const active = makeWorkspace('huabu-mount-close-');
+    seedWorld(active);
+    activate(active);
+    const mounted = countingStorage();
+    setStorageForTesting(mounted.storage);
+
+    await closeStorage();
+
+    expect(mounted.closed()).toBe(2);
+  });
+
+  it('rebuilds after the mount is dropped', async () => {
+    const active = makeWorkspace('huabu-mount-reset-');
+    seedWorld(active);
+    activate(active);
+    const mounted = await initStorage(DISK);
+
+    resetStorage();
+
+    // Dropping the mount is what `commitWorkspacePath` does when a test moves
+    // between temporary Workspaces. Disk has nothing to open, so the next use
+    // rebuilds rather than refusing.
+    expect(getStorage()).not.toBe(mounted);
   });
 });

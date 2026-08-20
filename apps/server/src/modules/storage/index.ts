@@ -66,24 +66,18 @@ export {
   createSpace,
   createStorage,
   deleteSpace,
-  detachStorage,
   getBlobStore,
   getStorage,
   getStructuredStore,
   initStorage,
   mountStorage,
+  resetStorage,
   setStorageForTesting,
   space,
   stageSpaceImport,
-  stageStorage,
   storageHealth,
 } from './storage.js';
-export type {
-  Space,
-  SpaceDeleteOutcome,
-  StagedStorage,
-  Storage,
-} from './storage.js';
+export type { Space, SpaceDeleteOutcome, Storage } from './storage.js';
 export type { DiskSpaceTree } from './backends/disk/space-tree.js';
 export type { DiskSpaceImport } from './backends/disk/space-import.js';
 export {

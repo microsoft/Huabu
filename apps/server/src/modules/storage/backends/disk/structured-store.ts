@@ -29,31 +29,12 @@ import { createDiskSpaceRecordReader } from './space-record.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { DiskSpaceTasks } from './space-tasks.js';
 import { createDiskSpaceWrite } from './space-write.js';
-import { getWorkspacePath } from '../../../workspace.js';
 
 import type { StorageHealth } from '../../ports/common.js';
 import type { SpaceHandle, StructuredStore } from '../../ports/structured.js';
 
 export class DiskStructuredStore implements StructuredStore {
   readonly kind = 'disk' as const;
-
-  readonly #workspacePath: string;
-
-  /**
-   * @param workspacePath Workspace this connection is mounted on. Defaults to
-   *   the active one, which is what every caller outside the mount lifecycle
-   *   means.
-   *
-   * The lifecycle passes it explicitly because a mount is staged *before* its
-   * Workspace becomes active: `ensureWorld()` has to bootstrap the Workspace
-   * being activated, not the one being replaced (proposal §12.6.5). The rest
-   * of the adapter still resolves through the active-Workspace layout and
-   * guards against a mismatch, so a staged connection is usable for bootstrap
-   * and nothing else until the swap.
-   */
-  constructor(workspacePath: string = getWorkspacePath()) {
-    this.#workspacePath = workspacePath;
-  }
 
   async init(): Promise<void> {
     // The workspace directory is prepared by `workspace-prepare.ts`; Space
@@ -67,7 +48,7 @@ export class DiskStructuredStore implements StructuredStore {
   async close(): Promise<void> {}
 
   spaces(): DiskSpaceRepository {
-    return new DiskSpaceRepository(this.#workspacePath);
+    return new DiskSpaceRepository();
   }
 
   space(canvasId: string): SpaceHandle {

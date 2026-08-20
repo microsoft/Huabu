@@ -15,13 +15,19 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { stageStorage } from './storage/index.js';
+import { initStorage, mountStorage } from './storage/index.js';
 import {
+  clearWorkspacePath,
   commitWorkspacePath,
+  getWorkspacePath,
   isManagedMode,
+  isWorkspaceConfigured,
+  reportWorkspaceStartupFailure,
   resolveWorkspacePath,
 } from './workspace.js';
 import { getLogger } from '../utils/logger.js';
+
+import type { Storage } from './storage/index.js';
 
 const DEFAULT_ACTIVATION_TIMEOUT_MS = 70_000;
 
@@ -60,6 +66,29 @@ export class WorkspaceActivationInProgressError extends Error {
   constructor() {
     super('Another workspace activation is already in progress');
     this.name = 'WorkspaceActivationInProgressError';
+  }
+}
+
+/**
+ * Raised when the caller asks for a workspace other than the active one.
+ *
+ * Not a failure of the request — the choice is valid and the client should
+ * persist it. What cannot happen is this process serving it: connections,
+ * caches, and directory indexes are opened against one workspace and the
+ * machinery to move a live process between two of them costs more than the
+ * feature is worth (issue #126). The client saves the path and restarts.
+ */
+export class WorkspaceRestartRequiredError extends Error {
+  /** The workspace the caller asked for, to persist for the next launch. */
+  readonly requestedPath: string;
+
+  constructor(requestedPath: string) {
+    super(
+      'Changing the workspace takes effect after a restart. The selection has ' +
+        'been validated; save it and start the server again to open it.',
+    );
+    this.name = 'WorkspaceRestartRequiredError';
+    this.requestedPath = requestedPath;
   }
 }
 
@@ -178,15 +207,19 @@ export function runWorkspacePreparation(
 }
 
 /**
- * Prepare a free-mode workspace and commit it only after full success.
+ * Prepare and open the one workspace this process will serve.
  *
- * Ordering is the contract (proposal §12.6.5). The disposable child prepares
- * and migrates the directory; storage then stages its connections against the
- * *new* path and bootstraps its World; only once both have succeeded is the
- * Workspace path committed and the mount published. Anything that fails before
- * the commit leaves the previous Workspace and its connections serving, which
- * is why staging is separate from publishing — a half-activated Workspace is
- * the one outcome this sequence exists to prevent.
+ * Free mode's first — and only — activation. The disposable child prepares and
+ * migrates the directory, the path is committed, and storage mounts against
+ * it; the sequence is linear because there is no previous workspace to keep
+ * serving while it runs (proposal §12.6.5). A failure leaves the process
+ * unconfigured, which is the state the client already knows how to recover
+ * from, rather than half-activated.
+ *
+ * Asking for a *different* workspace once one is active raises
+ * {@link WorkspaceRestartRequiredError} without touching a thing. Asking for
+ * the active one again is a no-op, because the client re-sends its remembered
+ * path on every boot and a second tab must not be told to restart.
  */
 export async function activateWorkspacePath(
   newPath: string,
@@ -197,26 +230,52 @@ export async function activateWorkspacePath(
       'Server is in managed mode; the workspace is fixed at startup',
     );
   }
+  const resolvedPath = resolveWorkspacePath(newPath);
+  if (isWorkspaceConfigured()) {
+    if (getWorkspacePath() === resolvedPath) return;
+    throw new WorkspaceRestartRequiredError(resolvedPath);
+  }
   if (activationInProgress) {
     throw new WorkspaceActivationInProgressError();
   }
 
-  const resolvedPath = resolveWorkspacePath(newPath);
   activationInProgress = true;
   try {
     await runWorkspacePreparation(resolvedPath, options);
-    const staged = await stageStorage(resolvedPath);
+    commitWorkspacePath(resolvedPath);
     try {
-      // The path and the mount that serves it are published together, so no
-      // request can observe one without the other.
-      await staged.commit(() => commitWorkspacePath(resolvedPath));
+      await mountStorage();
     } catch (error) {
-      // The path change was refused — an in-flight operation still holds the
-      // previous Workspace. Discard the connections nobody will reach.
-      await staged.abort();
+      // The path is committed but nothing serves it. Unconfigure rather than
+      // leave a workspace that looks active and has no store behind it — the
+      // client would then be told it is ready, and every later request would
+      // fail in a place that cannot explain why.
+      clearWorkspacePath();
       throw error;
     }
   } finally {
     activationInProgress = false;
+  }
+}
+
+/**
+ * Open storage on the workspace this process was started on.
+ *
+ * The startup counterpart to {@link activateWorkspacePath}, and the same
+ * failure rule as {@link initWorkspaceFromEnv}: an operator's workspace that
+ * will not open fails the boot, a shell-chosen one leaves the process
+ * unconfigured with the reason recorded, and a process with no workspace yet
+ * only has its profile validated. Returns the mount, or `null` when there was
+ * nothing to mount.
+ */
+export async function mountStartupWorkspace(): Promise<Storage | null> {
+  try {
+    return await initStorage();
+  } catch (error) {
+    // Nothing was configured, so this is the profile itself refusing — a
+    // misconfiguration no workspace choice can recover from.
+    if (isManagedMode() || !isWorkspaceConfigured()) throw error;
+    reportWorkspaceStartupFailure(error);
+    return null;
   }
 }

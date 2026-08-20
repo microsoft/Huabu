@@ -38,23 +38,11 @@ import type {
 } from '../ports/blob.js';
 import type { Readable } from 'node:stream';
 
-const workspaceState = vi.hoisted(() => ({ path: '', leaseCount: 0 }));
+const workspaceState = vi.hoisted(() => ({ path: '' }));
 
 vi.mock('../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
-  acquireWorkspaceOperationLease: () => {
-    const workspacePath = workspaceState.path;
-    workspaceState.leaseCount += 1;
-    let released = false;
-    return Object.freeze({
-      workspacePath,
-      release: () => {
-        if (released) return;
-        released = true;
-        workspaceState.leaseCount -= 1;
-      },
-    });
-  },
+  isWorkspaceConfigured: () => workspaceState.path !== '',
 }));
 
 /** Every area of one Space, each wrapped the same way. */
@@ -215,7 +203,6 @@ function installBlobStore(next: BlobStore): void {
   restoreStorage = setStorageForTesting(
     composeStorage(
       { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
-      workspaceState.path,
       new DiskStructuredStore(),
       next,
     ),
@@ -224,7 +211,6 @@ function installBlobStore(next: BlobStore): void {
 
 beforeEach(() => {
   workspaceState.path = mkdtempSync(path.join(tmpdir(), 'huabu-delete-'));
-  workspaceState.leaseCount = 0;
   writeCanvas('.world', 'canvas-world', 'World');
   writeCanvas('Project A', 'canvas-a', 'Project A');
   refreshCanvasDirIndex();
@@ -234,7 +220,6 @@ beforeEach(() => {
   restoreStorage = setStorageForTesting(
     composeStorage(
       { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
-      workspaceState.path,
       new DiskStructuredStore(),
       blobs,
     ),
@@ -242,7 +227,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  expect(workspaceState.leaseCount).toBe(0);
   restoreStorage();
   resetStorageCache();
   rmSync(workspaceState.path, { recursive: true, force: true });
@@ -376,7 +360,6 @@ describe('deleteSpace composition', () => {
 
     const deleting = deleteSpace('canvas-a');
     await controlled.deleteStarted.promise;
-    expect(workspaceState.leaseCount).toBe(1);
     const putting = space('canvas-a').artifacts.put(
       'too-late.bin',
       Buffer.from('orphan'),
@@ -387,7 +370,6 @@ describe('deleteSpace composition', () => {
 
     controlled.releaseDeletes();
     await expect(deleting).resolves.toEqual({ ok: true, reason: 'deleted' });
-    expect(workspaceState.leaseCount).toBe(0);
     await expect(putting).rejects.toThrow(/missing Space/);
 
     expect(controlled.putCalls).toBe(0);
