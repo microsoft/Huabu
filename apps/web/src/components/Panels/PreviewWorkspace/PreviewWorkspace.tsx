@@ -276,7 +276,10 @@ export function PreviewWorkspace({
       // target, so it goes through the same open path (§8).
       if (tab) {
         settleTab(tabId);
-        openPreviewTarget(tab.target, { openToSide: true });
+        openPreviewTarget(tab.target, {
+          openToSide: true,
+          transient: tab.transient,
+        });
       }
     },
     [openPreviewTarget, settleTab],

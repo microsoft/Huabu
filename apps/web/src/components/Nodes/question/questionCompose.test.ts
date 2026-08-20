@@ -4,7 +4,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import useCanvasStore from '@/store/canvasStore';
-import { selectThreadBinding, useChatStore } from '@/store/chatStore';
+import {
+  selectThreadBinding,
+  selectThreadLastAction,
+  useChatStore,
+} from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import {
@@ -62,6 +66,9 @@ describe('Question conversation presentation', () => {
 
     expect(selectActiveNodeId(usePreviewWorkspaceStore.getState())).toBe(
       'question-1',
+    );
+    expect(selectThreadLastAction(useChatStore.getState(), 'thread-1')).toBe(
+      'operate',
     );
     expect(usePanelStore.getState().focusChatInputRequest?.threadId).toBe(
       'thread-1',

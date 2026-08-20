@@ -15,7 +15,7 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { MessageSquare, X } from 'lucide-react';
+import { MessageSquare, Pin, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { getNodeIcon } from '@/config/nodeIcons';
@@ -36,7 +36,7 @@ type PreviewTabProps = {
   panelElementId: string;
   onActivate: () => void;
   onClose: () => void;
-  /** Promotes a transient tab, matching the editor's double-click gesture. */
+  /** Promotes a transient tab through its explicit Pin action. */
   onPromote: () => void;
   /** Strip-level navigation; the tab owns it because it holds the focus. */
   onNavigate: (e: React.KeyboardEvent) => void;
@@ -142,7 +142,9 @@ export function PreviewTab({
       tabIndex={isActive ? 0 : -1}
       data-preview-tab-id={tab.id}
       onClick={onActivate}
-      onDoubleClick={onPromote}
+      onDoubleClick={() => {
+        if (tab.transient) onPromote();
+      }}
       onKeyDown={(e) => {
         listeners?.onKeyDown?.(e);
         if (e.defaultPrevented) return;
@@ -174,36 +176,70 @@ export function PreviewTab({
           'after:bg-info after:absolute after:inset-y-1 after:right-0 after:z-10 after:w-0.5 after:rounded-full',
       )}
     >
-      {Icon && <Icon size={14} className="shrink-0" />}
+      {Icon && (
+        <Icon
+          size={14}
+          data-testid="preview-tab-icon"
+          className="group-hover:text-fg-subtle shrink-0 transition-colors"
+        />
+      )}
       <Tooltip
         content={tabDescription}
         placement="bottom"
         wrapperClassName="inline-flex min-w-0"
       >
-        <span className="min-w-0 truncate">{title}</span>
+        <span
+          data-testid="preview-tab-title"
+          className="group-hover:text-fg-subtle min-w-0 truncate transition-colors"
+        >
+          {title}
+        </span>
       </Tooltip>
-      <Button
-        variant="ghost"
-        iconOnly
-        size="sm"
-        title={t('actions.close')}
-        aria-label={t('preview.closeTab', { title })}
-        tooltipPlacement="bottom"
-        tooltipWrapperClassName="inline-flex shrink-0"
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClose();
-        }}
+      <div
+        data-testid="preview-tab-actions"
         className={cn(
-          'shrink-0 rounded !p-0.5',
-          // Kept out of the way until the tab is hovered or focused, so the
-          // strip stays quiet, but never hidden from keyboards.
-          !isActive && 'opacity-0 group-hover:opacity-100 focus:opacity-100',
+          'pointer-events-none absolute right-1 z-10 flex items-center gap-0 opacity-0 transition-opacity',
+          'group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100',
+          isActive ? 'bg-surface' : 'bg-hover',
         )}
       >
-        <X size={13} />
-      </Button>
+        {tab.transient && (
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
+            title={t('preview.keepTab')}
+            aria-label={t('preview.keepTabLabel', { title })}
+            tooltipPlacement="bottom"
+            tooltipWrapperClassName="inline-flex"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPromote();
+            }}
+            className="rounded p-0.5"
+          >
+            <Pin size={13} />
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
+          title={t('actions.close')}
+          aria-label={t('preview.closeTab', { title })}
+          tooltipPlacement="bottom"
+          tooltipWrapperClassName="inline-flex"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          className="rounded p-0.5"
+        >
+          <X size={13} />
+        </Button>
+      </div>
     </div>
   );
 }
