@@ -1,7 +1,7 @@
 # Multi-Backend Storage
 
-Status: Phases 1–4.5 implemented; Phase 4.6 specified in §6.4 and §12.6
-Last updated: 2026-08-19
+Status: Phases 1–4.6 implemented
+Last updated: 2026-08-20
 
 > **Scope and decision confidence.** This proposal records the two-port
 > `StructuredStore` / `BlobStore` split and their target backend families as
@@ -48,14 +48,15 @@ Last updated: 2026-08-19
 > review are recorded in place, including the CAS race ordering (§12.2.5),
 > log-family interface segregation (§12.2.6), and retained-handle Workspace
 > guards (§12.2.4). Phase 4.5 moved storage-owned Disk layout behind the
-> storage boundary in PR #93 and is the newest implemented phase. Phase 4.6 is
-> specified in §6.4 and §12.6 and is **not implemented**: it is the whole
-> remaining bridge between the portable contracts and a second structured
-> adapter — application reads off `CanvasStore`, one `space(canvasId)` handle,
-> a disposition for every residual per-Space file, and a Workspace mount
-> lifecycle. No SQLite, Postgres, or Azure adapter exists on `main`. §12 is the
-> authoritative phase plan; the decision table in §2 marks what each phase
-> has actually settled.
+> storage boundary in PR #93. Phase 4.6 is specified in §6.4 and §12.6 and is
+> **implemented**: it is the whole bridge between the portable contracts and a
+> second structured adapter — production reads off `CanvasStore`, one
+> `space(canvasId)` handle joining both ports, a disposition acted on for every
+> residual per-Space file, a Workspace mount lifecycle, and a product-level
+> suite that runs against every profile in `PRODUCT_STORAGE_PROFILES`. No
+> SQLite, Postgres, or Azure adapter exists on `main`; what Phase 5 owes is
+> listed in §12.7. §12 is the authoritative phase plan; the decision table in
+> §2 marks what each phase has actually settled.
 >
 > **Revision, 2026-08-19.** A first attempt at Phase 4.6 was written and
 > withdrawn without merging. It collapsed every consumer that needs a real
@@ -108,9 +109,9 @@ built above these ports, but its form is intentionally unresolved here.
 | Blob key, staging, deletion, and GC semantics          | Proposed / open           | Names are the existing `<artifactId><ext>` keys; `deleteAll()` covers Space destruction. Staging, reference counting, and GC remain undesigned. Per-key deletion stays out of the public port, but the absence of any cleanup path is what makes atomic replace mandatory (§6.2).                                                                                                          |
 | Space-handle identity and caching                      | **Corrected** (P1)        | `space(id)` returning a stable handle is bounded by the LRU behind it, not guaranteed. In-memory tombstones and the filename index are therefore adapter-local caches, never durable state (§12.1.1, §12.2.4).                                                                                                                                                                             |
 | Backend selection scope                                | Open                      | Process-global today because the profile is read from env. Per-Workspace or per-Space selection has not been fixed.                                                                                                                                                                                                                                                                        |
-| Unified per-Space handle                               | **Settled direction**     | One composition-layer `space(canvasId)` vends every storage capability for one Space: its structured parts, its blob scope, and any backend-specific extras. The two ports stay independent and are joined above them, never inside one (§6.4.1).                                                                                                                                          |
-| Storage for owners outside this port                   | **Settled direction**     | The Space handle vends an isolated _substrate_ per namespace — a directory, a table prefix, a schema — and the owner brings its own store implementation and SQL. Storage owns namespace isolation and lifecycle only, and never sees the data (§6.4.4).                                                                                                                                   |
-| Disposition of residual per-Space files                | **Settled direction**     | Four outcomes, not one: Disk-only and unimplemented elsewhere; portable capability with a per-backend implementation; a structured record; or a blob. The withdrawn Phase 4.6 attempt applied the first of the four to all of them; §6.4.3 assigns each family individually and §12.6 builds them (§6.4.2).                                                                                |
+| Unified per-Space handle                               | **Accepted** (P4.6)       | One composition-layer `space(canvasId)` vends every storage capability for one Space: its structured parts, its blob scope, and any backend-specific extras. The two ports stay independent and are joined above them, never inside one (§6.4.1).                                                                                                                                          |
+| Storage for owners outside this port                   | **Accepted** (P4.6)       | The Space handle vends an isolated _substrate_ per namespace — a directory, a table prefix, a schema — and the owner brings its own store implementation and SQL. Storage owns namespace isolation and lifecycle only, and never sees the data (§6.4.4).                                                                                                                                   |
+| Disposition of residual per-Space files                | **Accepted** (P4.6)       | Four outcomes, not one: Disk-only and unimplemented elsewhere; portable capability with a per-backend implementation; a structured record; or a blob. Each family is assigned in §6.4.3 and acted on in §12.6 — A declared in a capability matrix, C on the extension substrate, D as blob scopes, B deferred to the adapter that needs it.                                                |
 | Logical filesystem view                                | Open                      | A possible `SpaceFileView` above both stores; name and contract are not accepted yet. §6.4 narrows what such a view would have to synthesize — named files become blobs — without deciding to build it.                                                                                                                                                                                    |
 | Real agent workspace                                   | Open                      | Materialized directory, OS mount, protocol-only access, or a combination remain under evaluation.                                                                                                                                                                                                                                                                                          |
 | Agent-authored filesystem write-back                   | Open                      | Read-only projection, explicit checkout/commit, and live bidirectional sync are alternatives, not decisions.                                                                                                                                                                                                                                                                               |
@@ -474,7 +475,7 @@ handle already writes — which is worth doing whenever it comes up.
 
 Every consumer that reaches a Space as a filesystem tree today, with its
 disposition. Every assignment is settled; what is deferred is _when_ each is
-built, not _where_ it goes — §12.6 builds most of them (§6.4.2, §12.7).
+built, not _where_ it goes — §12.6 built most of them (§6.4.2, §12.7).
 
 | Consumer                                                   | What it does today                                             | Disposition                                                                                                                                                                                                                                 |
 | ---------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2231,7 +2232,7 @@ no working behavior moves. The `latestChatTs` field and its
 `lastSeenThreadCursor` plumbing survive the removal because they are the
 resume point such a digest would need.
 
-### 12.6 Phase 4.6 — one Space handle, backend-neutral application, and Workspace mount
+### 12.6 Phase 4.6 — one Space handle, backend-neutral application, and Workspace mount — **implemented**
 
 Phase 4.6 closes the whole application-side gap between the portable storage
 contracts and a second structured adapter. It contains no SQLite schema,
@@ -2249,7 +2250,41 @@ exit criterion has two halves:
 An earlier attempt at this phase satisfied the first half only, and reached the
 second by fencing the residual filesystem population behind a separate free
 function under a single disposition. §6.4 explains why that was one answer too
-few. This specification replaces it; nothing from the attempt is depended upon.
+few. This specification replaced it; nothing from the attempt was depended upon.
+
+**Implemented.** What landed matches the specification below, with four
+findings worth carrying forward because each was surfaced by building rather
+than by reading:
+
+- **`node-prompt` could not stay store-aware.** It is a pure merge that took a
+  `CanvasStore` solely to lazily read a record its caller had not supplied,
+  which made a pure function into a synchronous Disk dependency no async port
+  can satisfy. The record became an argument, and each caller now reads in the
+  shape its request has — which is what made `readMany` earn its place rather
+  than merely have one.
+- **A staged mount must capture what it replaces when it is staged.**
+  Committing a Workspace path detaches the mount that no longer describes it,
+  so a `commit()` reading the process holder at swap time finds nothing to
+  close and drops the previous connections. Invisible on Disk, whose `close()`
+  is a no-op; a connection leak the moment SQLite lands.
+- **A blob scope for the Space root cannot be a directory scope.** Its area is
+  shared with `space.json` and every node directory, so `list()` would claim
+  storage's own records and `deleteAll()` would remove the Space. The
+  `space-guide` scope is bounded by its member names instead — a fixed set is a
+  tighter namespace than a directory, not a looser one.
+- **The resurrection guard belonged in the port.** Several owners each carried
+  their own check that a Space directory still existed before writing ad-hoc
+  bookkeeping into it. `extension()` returning `null` for an absent Space
+  states it once, and the per-owner guards were deleted rather than moved.
+
+One item in scope below was **narrowed deliberately**. Upload scratch received
+its own `BlobScopeRef` kind, so the area is named, swept on delete, and free to
+diverge in retention — but its writers still reach it through the `fs-sandbox`
+path, because RFS upload is a streaming HTTP handler and path classification,
+not the bare `readFileSync`/`writeFile` §6.4.2's exception describes. Routing
+it through the port would have added machinery rather than retiring any: the
+sandbox still needs the physical path for the Disk-only file tools. It moves
+with RFS's path vocabulary (disposition B), not before.
 
 #### 12.6.1 Portable read completion
 
@@ -2344,6 +2379,14 @@ retires those plus one resolver in the memory sandbox. The new machinery is a
 union member and a directory constant per area. Rename and per-key delete stay
 unsupported, as they are today.
 
+Upload scratch got its scope kind — so the area is named, swept on delete, and
+free to diverge in retention — but its writers still reach it through the
+`fs-sandbox` path. RFS upload is a streaming HTTP handler plus path
+classification, not the bare `readFileSync` / `writeFile` the exception above
+describes, and routing it through the port would add machinery rather than
+retire any: the sandbox still needs the physical path for the Disk-only file
+tools. It moves with RFS's path vocabulary (**B**), not before.
+
 **B — deferred to the adapter that needs it.** The portable change-notification
 capability and RFS's backend-neutral path vocabulary are assigned but not
 built: change notification's only consumer today is the Disk-only external-note
@@ -2421,7 +2464,7 @@ shim-importer snapshots pin which ones do.
 
 One behavioural hardening rides along and is not implied by either half of the
 criterion: two Space directories carrying the same `canvasId` resolve last-wins
-today, and will raise from the directory scan. That makes a Finder-side
+today, and now raise from the directory scan. That makes a Finder-side
 duplication a loud failure of every catalogue read rather than a Space that
 silently resolves to an arbitrary copy.
 
@@ -2450,22 +2493,32 @@ guarantees.
    rejecting it until the required capability matrix is satisfied.
 
    The SQLite preview branch forks from Phase 4.5, so it does not yet satisfy
-   the port it will be rebased onto. What it owes against §12.6, concretely:
-   `SpaceRepository.ensureWorld()`; `SpaceNodes.readMany` / `list` / `stream`;
-   the `sqlite` case of the extension substrate (§6.4.4); an entry in
-   `PRODUCT_STORAGE_PROFILES`, which is what runs the product-level boundary
-   suite against it; and its place in the implemented-backend and
-   selectable-backend lists.
+   the port it will be rebased onto. What it owes against the implemented
+   §12.6, concretely:
+   - `SpaceRepository.ensureWorld()`, and a mount that survives being staged
+     against a Workspace that is not active yet;
+   - `SpaceNodes.readMany` / `list` / `stream`, agreeing with `read` about a
+     node — the node contract asserts exactly this;
+   - the `sqlite` case of `SpaceSubstrate`, plus destroying a namespace with
+     the Space, which on Disk falls out of placement and there will not;
+   - one blob-scope placement per `BlobScopeRef` kind, or an explicit refusal
+     for an area it does not serve;
+   - an entry in `PRODUCT_STORAGE_PROFILES`, which is what runs
+     `product-boundary.test.ts` against it, and its place in the
+     implemented-backend and selectable-backend lists.
 
    It owes **no** Space directory and no portable materialization. A backend
    that keeps Spaces in tables does not have a tree, and §6.4.2 makes that a
    declared outcome rather than something to fabricate: what it owes instead is
-   an entry in the capability matrix declaring the disposition-**A** families
-   unavailable, plus whatever disposition **B** its own consumers turn out to
-   need (§6.4.3). Its existing note that SQLite stays unselectable while
-   physical Disk reads, World bootstrap, blob placement, import/export, and
-   Workspace remounting have one authority only in the Disk profile is the same
-   list §12.6 resolves — some by porting, the rest by declaring.
+   a row in `capabilities.ts` for each disposition-**A** family, plus whatever
+   disposition **B** its own consumers turn out to need (§6.4.3). Its existing
+   note that SQLite stays unselectable while physical Disk reads, World
+   bootstrap, blob placement, import/export, and Workspace remounting have one
+   authority only in the Disk profile is the same list §12.6 resolved — some by
+   porting, the rest by declaring.
+
+   The honest measure of Phase 4.6 is how much of this list is _additive_.
+   Nothing above asks for a feature module to change.
 
 6. Migrate the currently synchronous Agenetes persistence ports without
    changing their persist-before-notify, sequence, and fencing semantics. This
