@@ -57,19 +57,12 @@ import {
   resolveAllowedHostnames,
 } from './modules/security/index.js';
 import webRoutes from './modules/web/web.route.js';
-import {
-  initWorkspaceFromEnv,
-  isWorkspaceConfigured,
-} from './modules/workspace.js';
+import { isWorkspaceConfigured } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
 import { preloadSkills } from './prompt/index.js';
 import { getPersistedSecret, setSecrets } from './security/secret-store.js';
 import { MAX_UPLOAD_BYTES } from './upload-limits.js';
 import { logger } from './utils/logger.js';
-
-// Lock the workspace at startup if HUABU_WORKSPACE is set (managed mode).
-// In free mode this is a no-op and the client will activate at runtime.
-initWorkspaceFromEnv();
 
 // Eagerly scan + validate every SKILL.md frontmatter at boot so a malformed
 // skill (missing `appliesTo`, mismatched `id`, etc.) crashes the process at
@@ -357,9 +350,8 @@ if (bundledAgentTeamsPath) {
 } else {
   app.log.warn('[agent-team] bundled collection not found');
 }
-// Release every active external-note session on shutdown. Their `fs.watch`
-// handles are otherwise only closed on a workspace switch, so a
-// force-terminated process leaves them open — and on virtual/network
+// Release every active external-note session on shutdown. A force-terminated
+// process otherwise leaves its `fs.watch` handles open — and on virtual/network
 // filesystems (Google Drive) an abandoned watch request can stay wedged
 // after the process is gone. Closing them here lets `app.close()` (driven
 // by the SIGTERM/SIGINT handlers in server.ts) tear them down gracefully.

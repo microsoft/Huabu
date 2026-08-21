@@ -8,7 +8,6 @@ import path from 'node:path';
 
 import { validatePathSchema, workspacePathSchema } from '@huabu/shared';
 
-import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import { getStructuredStore } from './storage/index.js';
 import {
   activateWorkspacePath,
@@ -186,8 +185,10 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ────────────────────────────────────────────────────────────
-  // The endpoints below mutate the active workspace and only exist
-  // in free mode. Managed mode rejects them with 403.
+  // The endpoints below administer free-mode workspace selection. PUT
+  // activates the first path in this process or validates a later choice for
+  // restart; it never switches an already-active process. Managed mode rejects
+  // all of them with 403.
   // ────────────────────────────────────────────────────────────
 
   app.post<{ Reply: ApiResult<PickFolderResult> }>(
@@ -265,9 +266,6 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       await activateWorkspacePath(parsed.data.path);
-      // The dispatcher holds workspace-scoped state of its own; storage drops
-      // its caches as part of committing the path.
-      resetPreprocessDispatcher();
       return await buildWorkspaceState();
     } catch (e) {
       if (e instanceof WorkspaceActivationTimeoutError) {

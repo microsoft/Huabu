@@ -82,22 +82,46 @@ describe('workspace activation isolation', () => {
 
   /**
    * The restart rule (issue #126). A process serves one workspace, so the
-   * second choice is the client's to persist and the next process's to open —
-   * and refusing it has to leave this process exactly as it was, including not
-   * running preparation against the folder it was asked for.
+   * second choice is validated without changing the active process, then the
+   * client persists it for the next launch.
    */
-  it('refuses a different workspace once one is active, and touches nothing', async () => {
+  it('validates a different workspace before requiring a restart', async () => {
     const active = tempDir('huabu-workspace-active-');
     const other = tempDir('huabu-workspace-other-');
     setWorkspacePath(active);
-    // A worker that would fail loudly if it ever ran.
-    const workerPath = worker(`process.send({ ok: false, message: 'ran' });`);
+    const workerPath = worker(`process.send({ ok: true });`);
 
     const refusal = activateWorkspacePath(other, { workerPath });
     await expect(refusal).rejects.toBeInstanceOf(WorkspaceRestartRequiredError);
     await expect(refusal).rejects.toMatchObject({
       requestedPath: path.resolve(other),
     });
+    expect(getWorkspacePath()).toBe(path.resolve(active));
+  });
+
+  it('does not request a restart when validating the next workspace fails', async () => {
+    const active = tempDir('huabu-workspace-active-');
+    const other = tempDir('huabu-workspace-other-');
+    setWorkspacePath(active);
+    const workerPath = worker(
+      `process.send({ ok: false, message: 'target cannot be prepared' });`,
+    );
+
+    await expect(activateWorkspacePath(other, { workerPath })).rejects.toThrow(
+      'target cannot be prepared',
+    );
+    expect(getWorkspacePath()).toBe(path.resolve(active));
+  });
+
+  it('bounds validation of the next workspace without changing the active one', async () => {
+    const active = tempDir('huabu-workspace-active-');
+    const other = tempDir('huabu-workspace-other-');
+    setWorkspacePath(active);
+    const workerPath = worker(`setInterval(() => {}, 1_000);`);
+
+    await expect(
+      activateWorkspacePath(other, { workerPath, timeoutMs: 30 }),
+    ).rejects.toBeInstanceOf(WorkspaceActivationTimeoutError);
     expect(getWorkspacePath()).toBe(path.resolve(active));
   });
 

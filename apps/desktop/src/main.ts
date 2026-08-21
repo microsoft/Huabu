@@ -194,6 +194,15 @@ function resolveIconPath(filename: string): string | undefined {
 const PREFERRED_PORT = 3001;
 
 /**
+ * The backend may spend up to 70 seconds validating or recovering a saved
+ * workspace before it starts listening. Keep the Electron-owned readiness
+ * budget above that bound so the shell does not kill a healthy recovery and
+ * retry it indefinitely. External development servers retain waitForPort's
+ * shorter default because Electron does not own their startup lifecycle.
+ */
+const OWNED_SERVER_READY_TIMEOUT_MS = 90_000;
+
+/**
  * How much of the server's stderr to keep in memory at any given time.
  * On non-zero exit we dump this ring buffer to a `crash-<ts>-exit<code>.log`
  * file under `app.getPath('logs')/crashes/` for post-mortem investigation.
@@ -1359,7 +1368,11 @@ app.whenReady().then(async () => {
         tried.add(candidate);
         try {
           await startServer(candidate);
-          await waitForPort(candidate, 20_000, serverExitPromise ?? undefined);
+          await waitForPort(
+            candidate,
+            OWNED_SERVER_READY_TIMEOUT_MS,
+            serverExitPromise ?? undefined,
+          );
           serverPort = candidate;
           lastErr = null;
           break;

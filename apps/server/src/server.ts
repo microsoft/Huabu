@@ -8,6 +8,7 @@ import { resolveBindHost } from './bind-host.js';
 import { prewarmOAuthCredentials } from './modules/agent/oauth.js';
 import { resolveDeploymentConfig } from './modules/security/deployment-config.js';
 import { initStorage } from './modules/storage/index.js';
+import { initWorkspaceFromEnv } from './modules/workspace.js';
 import { initializeSecretStore } from './security/secret-store.js';
 import { getLogger } from './utils/logger.js';
 
@@ -25,6 +26,10 @@ const HOST = resolveBindHost();
 
 async function start(): Promise<void> {
   try {
+    // Prepare the one startup workspace in an isolated, bounded child before
+    // storage or request handlers can open workspace-scoped state.
+    await initWorkspaceFromEnv();
+
     const deployment = resolveDeploymentConfig();
     if (deployment.bindScope === 'network') {
       log.warn(

@@ -4,9 +4,9 @@
 /**
  * Synchronous, on-disk workspace preparation.
  *
- * Runtime workspace switches execute this function in a disposable child
- * process so a slow virtual filesystem cannot block the Server event loop.
- * Startup and tests may still call it in-process through `setWorkspacePath`.
+ * Production startup and free-mode activation execute this function in a
+ * disposable child so a slow virtual filesystem cannot block the Server event
+ * loop. Tests may still call it in-process through `setWorkspacePath`.
  */
 
 import { mkdirSync } from 'node:fs';

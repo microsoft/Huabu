@@ -21,6 +21,14 @@ const RECENT_PATHS_KEY = 'huabu:recent-workspaces';
 const MAX_RECENT = 5;
 const WORLD_ENABLED_KEY = 'huabu:world-enabled';
 
+function readLocalStorageValue(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Storage backend abstraction. In Electron we delegate to the main
  * process (file under `userData/workspace.json`) so the saved
@@ -69,7 +77,7 @@ function pushLocalStorageRecent(path: string): string[] {
 
 const localStoragePersistence: WorkspacePersistence = {
   load: async () => ({
-    path: localStorage.getItem(FREE_PATH_KEY),
+    path: readLocalStorageValue(FREE_PATH_KEY),
     recent: loadLocalStorageRecents(),
   }),
   save: async (path: string) => {
@@ -115,7 +123,7 @@ function makeElectronPersistence(
       // active path — stale recents from a different port partition
       // aren't worth preserving.
       if (!snap.path) {
-        const legacyPath = localStorage.getItem(FREE_PATH_KEY);
+        const legacyPath = readLocalStorageValue(FREE_PATH_KEY);
         if (legacyPath) {
           return await api.set(legacyPath);
         }
@@ -143,6 +151,7 @@ function getPersistence(): WorkspacePersistence {
 }
 
 const persistence = getPersistence();
+let workspaceInitInFlight: Promise<boolean> | null = null;
 
 interface WorkspaceState {
   /** Server operating mode. `null` until the first `init()` call. */
@@ -271,6 +280,11 @@ function workspaceActivationError(error: unknown, path: string): string {
     : i18n.t('workspace.openPathFailed');
 }
 
+function workspacePersistenceError(error: unknown, path: string): string {
+  const reason = error instanceof Error ? error.message : String(error);
+  return i18n.t('workspace.persistenceFailed', { path, reason });
+}
+
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   mode: null,
   capabilities: null,
@@ -280,14 +294,14 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   // persistence (Electron file or localStorage) immediately after.
   workspacePath:
     typeof localStorage !== 'undefined'
-      ? localStorage.getItem(FREE_PATH_KEY)
+      ? readLocalStorageValue(FREE_PATH_KEY)
       : null,
   workspaceName: null,
   worldCanvasId: null,
   worldEnabled:
     typeof localStorage === 'undefined'
       ? false
-      : localStorage.getItem(WORLD_ENABLED_KEY) === 'true',
+      : readLocalStorageValue(WORLD_ENABLED_KEY) === 'true',
   spaceTitles: {},
   spaceTitlesLoaded: false,
   recentWorkspaces:
@@ -314,110 +328,160 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     });
   },
 
-  init: async () => {
-    set({ isSyncing: true, error: null });
+  init: () => {
+    if (workspaceInitInFlight) return workspaceInitInFlight;
 
-    // Pull the persisted snapshot up-front so we have an authoritative
-    // value regardless of whether we're using the Electron-backed
-    // store or plain localStorage. Doing this BEFORE the server call
-    // also lets us refresh the synchronous bootstrap value if the
-    // Electron file disagrees with localStorage.
-    const persisted = await persistence.load().catch(() => ({
-      path: null as string | null,
-      recent: [] as string[],
-    }));
-    set({
-      workspacePath: persisted.path,
-      recentWorkspaces: persisted.recent,
-    });
+    const initPromise = (async (): Promise<boolean> => {
+      set({ isSyncing: true, error: null });
 
-    let info: WorkspaceInfo;
-    try {
-      info = await getWorkspaceInfo();
-    } catch (err) {
+      // Pull the persisted snapshot up-front so we have an authoritative
+      // value regardless of whether we're using the Electron-backed
+      // store or plain localStorage. Doing this BEFORE the server call
+      // also lets us refresh the synchronous bootstrap value if the
+      // Electron file disagrees with localStorage.
+      const persisted = await persistence.load().catch(() => ({
+        path: null as string | null,
+        recent: [] as string[],
+      }));
       set({
-        error: err instanceof Error ? err.message : 'Server unreachable',
-        isSyncing: false,
+        workspacePath: persisted.path,
+        recentWorkspaces: persisted.recent,
       });
-      return false;
-    }
 
-    set(fromInfo(info));
-
-    // A remembered folder the server could not open — moved, renamed, or on a
-    // drive that is not mounted. It came up serving nothing, so this is the
-    // picker with a reason rather than a first launch.
-    if (info.startupError) {
-      set({
-        error: i18n.t('workspace.startupFailed', {
-          reason: info.startupError,
-        }),
-      });
-    }
-
-    // ── Managed mode: server has already activated; nothing to do. ──
-    if (info.mode === 'managed') {
-      // Free-mode leftovers are meaningless here.
+      let info: WorkspaceInfo;
       try {
-        await persistence.remove(persisted.path ?? '');
-      } catch {
-        // best-effort cleanup
-      }
-      localStorage.removeItem(FREE_PATH_KEY);
-      set({ isSyncing: false });
-      if (info.configured) emitWorkspaceChanged();
-      return info.configured;
-    }
-
-    // ── Free mode ──
-    // Server already activated (e.g. another tab beat us to it).
-    if (info.configured && info.path) {
-      const recent = await persistence.save(info.path);
-      set({ recentWorkspaces: recent, isSyncing: false });
-      emitWorkspaceChanged();
-      return true;
-    }
-
-    // The server was handed a remembered folder and could not open it. It has
-    // already paid for that attempt — up to 70 seconds when the drive is
-    // unavailable — so do not spend it again on the same path. Show the
-    // picker with the reason set above, and leave the saved path alone so a
-    // drive that comes back is still remembered.
-    if (info.startupError) {
-      set({ isSyncing: false });
-      return false;
-    }
-
-    // Try to auto-activate using the remembered absolute path.
-    const savedPath = persisted.path;
-    if (savedPath) {
-      try {
-        const next = await putWorkspacePath(savedPath);
-        const recent = await persistence.save(savedPath);
+        info = await getWorkspaceInfo();
+      } catch (err) {
         set({
-          ...fromInfo(next),
+          error: err instanceof Error ? err.message : 'Server unreachable',
+          isSyncing: false,
+        });
+        return false;
+      }
+
+      set(fromInfo(info));
+
+      // A remembered folder the server could not open — moved, renamed, or on a
+      // drive that is not mounted. It came up serving nothing, so this is the
+      // picker with a reason rather than a first launch.
+      if (info.startupError) {
+        set({
+          error: i18n.t('workspace.startupFailed', {
+            reason: info.startupError,
+          }),
+        });
+      }
+
+      // ── Managed mode: server has already activated; nothing to do. ──
+      if (info.mode === 'managed') {
+        // Free-mode leftovers are meaningless here.
+        try {
+          await persistence.remove(persisted.path ?? '');
+        } catch {
+          // best-effort cleanup
+        }
+        try {
+          localStorage.removeItem(FREE_PATH_KEY);
+        } catch {
+          // best-effort cleanup
+        }
+        set({ isSyncing: false, pendingWorkspacePath: null });
+        if (info.configured) emitWorkspaceChanged();
+        return info.configured;
+      }
+
+      // ── Free mode ──
+      // Server already activated (e.g. another tab beat us to it).
+      if (info.configured && info.path) {
+        const pendingPath =
+          persisted.path && persisted.path !== info.path
+            ? persisted.path
+            : null;
+        let recent = persisted.recent;
+        let error: string | null = null;
+
+        // A different persisted path is the user's validated choice for the
+        // next process. Never replace it with the old path this process still
+        // serves. When both agree, refresh recency best-effort.
+        if (!pendingPath) {
+          try {
+            recent = await persistence.save(info.path);
+          } catch (err) {
+            error = workspacePersistenceError(err, info.path);
+          }
+        }
+
+        set({
           recentWorkspaces: recent,
+          pendingWorkspacePath: pendingPath,
+          error,
           isSyncing: false,
         });
         emitWorkspaceChanged();
         return true;
-      } catch (err) {
-        // Stored path is invalid (e.g. cross-platform leftover). Drop it
-        // and fall through to setup so the user picks a fresh one.
-        try {
-          await persistence.remove(savedPath);
-        } catch {
-          // best-effort cleanup
-        }
-        set({
-          workspacePath: null,
-          error: workspaceActivationError(err, savedPath),
-        });
       }
-    }
 
-    set({ isSyncing: false });
-    return false;
+      // The server was handed a remembered folder and could not open it. It has
+      // already paid for that attempt — up to 70 seconds when the drive is
+      // unavailable — so do not spend it again on the same path. Show the
+      // picker with the reason set above, and leave the saved path alone so a
+      // drive that comes back is still remembered.
+      if (info.startupError) {
+        set({ isSyncing: false, pendingWorkspacePath: null });
+        return false;
+      }
+
+      // Try to auto-activate using the remembered absolute path.
+      const savedPath = persisted.path;
+      if (savedPath) {
+        try {
+          const next = await putWorkspacePath(savedPath);
+          let recent = persisted.recent;
+          let error: string | null = null;
+          try {
+            recent = await persistence.save(savedPath);
+          } catch (err) {
+            error = workspacePersistenceError(err, savedPath);
+          }
+          set({
+            ...fromInfo(next),
+            recentWorkspaces: recent,
+            pendingWorkspacePath: null,
+            error,
+            isSyncing: false,
+          });
+          emitWorkspaceChanged();
+          return true;
+        } catch (err) {
+          // Stored path is invalid (e.g. cross-platform leftover). Drop it
+          // and fall through to setup so the user picks a fresh one.
+          try {
+            await persistence.remove(savedPath);
+          } catch {
+            // best-effort cleanup
+          }
+          set({
+            workspacePath: null,
+            pendingWorkspacePath: null,
+            error: workspaceActivationError(err, savedPath),
+          });
+        }
+      }
+
+      set({ isSyncing: false });
+      return false;
+    })();
+
+    workspaceInitInFlight = initPromise;
+    void initPromise.then(
+      () => {
+        if (workspaceInitInFlight === initPromise) workspaceInitInFlight = null;
+      },
+      () => {
+        if (workspaceInitInFlight === initPromise) workspaceInitInFlight = null;
+      },
+    );
+    return initPromise;
   },
 
   /**
@@ -433,37 +497,82 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     if (get().mode === 'managed') {
       throw new Error('Workspace is locked by the server (managed mode)');
     }
+    const previousPendingPath = get().pendingWorkspacePath;
     set({
       isSyncing: true,
       error: null,
-      pendingWorkspacePath: null,
       canvasCount: null,
     });
     try {
       const info = await putWorkspacePath(path);
-      const recent = await persistence.save(path);
-      set({ ...fromInfo(info), recentWorkspaces: recent, isSyncing: false });
+      let recent: string[];
+      try {
+        recent = await persistence.save(path);
+      } catch (err) {
+        set({
+          ...fromInfo(info),
+          pendingWorkspacePath: null,
+          error: workspacePersistenceError(err, path),
+          isSyncing: false,
+        });
+        emitWorkspaceChanged();
+        throw err;
+      }
+      set({
+        ...fromInfo(info),
+        recentWorkspaces: recent,
+        pendingWorkspacePath: null,
+        isSyncing: false,
+      });
       emitWorkspaceChanged();
     } catch (err) {
       if (isRestartRequired(err)) {
         // Save first, then restart: the restart is what opens it, so a
         // relaunch that raced an unsaved choice would reopen the old folder.
-        const recent = await persistence.save(path);
+        let recent: string[];
+        try {
+          recent = await persistence.save(path);
+        } catch (persistenceError) {
+          set({
+            pendingWorkspacePath: previousPendingPath,
+            error: workspacePersistenceError(persistenceError, path),
+            isSyncing: false,
+          });
+          throw persistenceError;
+        }
         set({ recentWorkspaces: recent });
         if (persistence.restart) {
-          set({ error: i18n.t('workspace.restarting', { path }) });
-          await persistence.restart();
-          return;
+          set({
+            pendingWorkspacePath: path,
+            error: i18n.t('workspace.restarting', { path }),
+          });
+          try {
+            await persistence.restart();
+            return;
+          } catch (restartError) {
+            set({
+              error: workspacePersistenceError(restartError, path),
+              isSyncing: false,
+            });
+            throw restartError;
+          }
         }
         set({
           pendingWorkspacePath: path,
-          error: workspaceActivationError(err, path),
+          error: null,
           isSyncing: false,
         });
         throw err;
       }
       const message = workspaceActivationError(err, path);
-      set({ error: message, isSyncing: false });
+      // If activation itself succeeded but persistence failed, the inner catch
+      // already published the authoritative active state and message.
+      if (!get().isSyncing) throw err;
+      set({
+        pendingWorkspacePath: previousPendingPath,
+        error: message,
+        isSyncing: false,
+      });
       throw err;
     }
   },

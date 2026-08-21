@@ -72,10 +72,9 @@ export interface StructuredStore {
   /**
    * Return a repository for the currently-bound Space collection.
    *
-   * Handles are scoped to the backend namespace that was active when they
-   * were created. A caller that changes Workspace must resolve a fresh
-   * handle; retained Disk handles reject instead of reading the newly active
-   * Workspace.
+   * A production process serves one Workspace for its lifetime, so every
+   * derived handle belongs to that fixed namespace. Tests that reset the
+   * process-local Workspace must resolve fresh handles afterwards.
    */
   spaces(): SpaceRepository;
   /**

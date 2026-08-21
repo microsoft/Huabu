@@ -96,10 +96,10 @@ let workspaceGeneration = 0;
 let nextSessionGeneration = 1;
 
 /**
- * Stamp identifying the workspace and session a piece of async work started
- * under. A slow cloud-drive read may resolve long after a workspace switch or
- * after the Space was closed and reopened; comparing stamps stops it from
- * repopulating unrelated state.
+ * Stamp identifying the workspace generation and session a piece of async work
+ * started under. A slow cloud-drive read may resolve after process teardown, a
+ * test-only workspace reset, or a Space close/reopen; comparing stamps stops
+ * it from repopulating unrelated state.
  */
 function stampOf(session: ActiveSpaceWatch): string {
   return `${workspaceGeneration}:${session.sessionGeneration}`;
@@ -614,10 +614,9 @@ function resyncSession(session: ActiveSpaceWatch): void {
 
 /**
  * Tear every active session down and tell its subscribers the Space is now
- * empty. Called on workspace switch and shutdown: the previous workspace's
- * canvasIds are meaningless afterwards, and the client reconnects its stream
- * when it navigates into the new workspace. Bumping the workspace generation
- * rejects any scan or event still in flight from the previous workspace.
+ * empty. Called on shutdown, failed startup cleanup, and test-only workspace
+ * resets. Bumping the workspace generation rejects any scan or event still in
+ * flight from the previous namespace.
  */
 function destroyAllSessions(): void {
   for (const session of [...sessions.values()]) {
@@ -630,9 +629,7 @@ function destroyAllSessions(): void {
 /**
  * Drop every active external-note session and release its handles.
  *
- * Called on workspace switch (the previous workspace's canvasIds are
- * meaningless afterwards, and the client reconnects its stream when it
- * navigates into the new workspace) and on server shutdown, so live
+ * Called on server shutdown and process-local workspace cleanup, so live
  * `fs.watch` handles are released cleanly instead of being force-killed —
  * on virtual/network filesystems (Google Drive) a force-terminated process
  * can leave in-flight watch requests wedged.

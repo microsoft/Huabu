@@ -311,7 +311,8 @@
     "welcome": "欢迎使用 {{appName}}",
     "intro": "选择一个 Home 文件夹来保存你的 Space、笔记和产物。",
     "folder": "Home 文件夹",
-    "pathPlaceholder": "输入绝对路径，然后按 Enter",
+    "pathPlaceholder": "输入绝对路径",
+    "useFolder": "使用此 Home 文件夹",
     "recent": "最近的 Home 文件夹",
     "removeRecent": "从最近列表中移除",
     "path": "路径：{{path}}",
@@ -323,8 +324,14 @@
     "activationTimeout": "打开“{{path}}”已超过 {{seconds}} 秒。请检查云盘或网络磁盘是否可用，然后重试。",
     "activationInProgress": "另一个主目录仍在打开，请等待其完成。",
     "restartRequired": "已将“{{path}}”保存为你的 Home 文件夹。重启服务器后生效。",
+    "restartTitle": "需要重启",
+    "restartDescription": "新的 Home 文件夹已经保存并验证。请重启 Huabu 或托管它的服务器以打开该文件夹。",
+    "activeHome": "当前使用",
+    "pendingHome": "重启后使用",
+    "continueCurrent": "继续使用当前 Home 文件夹",
     "restarting": "正在重启以打开“{{path}}”…",
-    "startupFailed": "无法打开已保存的 Home 文件夹：{{reason}} 请选择一个文件夹以继续。"
+    "startupFailed": "无法打开已保存的 Home 文件夹：{{reason}} 请选择一个文件夹以继续。",
+    "persistenceFailed": "无法保存“{{path}}”供下次启动使用：{{reason}}"
   },
   "canvasList": {
     "title": "Space",

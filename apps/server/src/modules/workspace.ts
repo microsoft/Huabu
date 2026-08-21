@@ -53,6 +53,10 @@ import path from 'node:path';
 import { resetExternalNoteSessions } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
 import { resetStorage } from './storage/index.js';
+import {
+  runWorkspacePreparation,
+  type WorkspacePreparationOptions,
+} from './workspace-preparation-process.js';
 import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import { invalidateUserSkill } from '../prompt/index.js';
 
@@ -90,7 +94,9 @@ export function isWorkspaceConfigured(): boolean {
  * has a user whose folder moved, was renamed, or lives on a drive that is not
  * mounted today, and the recovery for that is the picker.
  */
-export function initWorkspaceFromEnv(): void {
+export async function initWorkspaceFromEnv(
+  options: WorkspacePreparationOptions = {},
+): Promise<void> {
   const managedPath = readEnvPath(ENV_KEY);
   const startupPath = managedPath ? null : readEnvPath(STARTUP_ENV_KEY);
   const resolvedPath = managedPath ?? startupPath;
@@ -99,7 +105,7 @@ export function initWorkspaceFromEnv(): void {
   if (!resolvedPath) return;
 
   try {
-    prepareWorkspaceOnDisk(resolvedPath);
+    await runWorkspacePreparation(resolvedPath, options);
     commitWorkspacePath(resolvedPath);
   } catch (error) {
     if (_managed) throw error;

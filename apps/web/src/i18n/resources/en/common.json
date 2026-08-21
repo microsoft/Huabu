@@ -311,7 +311,8 @@
     "welcome": "Welcome to {{appName}}",
     "intro": "Choose a Home folder to store your Spaces, notes, and artifacts.",
     "folder": "Home folder",
-    "pathPlaceholder": "Type an absolute path, then press Enter",
+    "pathPlaceholder": "Type an absolute path",
+    "useFolder": "Use this Home folder",
     "recent": "Recent Home folders",
     "removeRecent": "Remove from recent",
     "path": "Path: {{path}}",
@@ -323,8 +324,14 @@
     "activationTimeout": "Opening Home folder “{{path}}” took longer than {{seconds}} seconds. Check that the cloud or network drive is available, then try again.",
     "activationInProgress": "Another Home folder is still opening. Please wait for it to finish.",
     "restartRequired": "“{{path}}” has been saved as your Home folder. Restart the server to open it.",
+    "restartTitle": "Restart required",
+    "restartDescription": "Your next Home folder is saved and validated. Restart Huabu, or the server hosting it, to open that folder.",
+    "activeHome": "Active now",
+    "pendingHome": "After restart",
+    "continueCurrent": "Continue with the current Home folder",
     "restarting": "Restarting to open “{{path}}”…",
-    "startupFailed": "Could not open your saved Home folder: {{reason}} Choose a folder to continue."
+    "startupFailed": "Could not open your saved Home folder: {{reason}} Choose a folder to continue.",
+    "persistenceFailed": "Could not save “{{path}}” for the next launch: {{reason}}"
   },
   "canvasList": {
     "title": "Spaces",

@@ -366,7 +366,7 @@ function rescanUserSkills(
 /**
  * Ensure the user cache reflects the current workspace + on-disk state.
  *
- * - Re-keys on workspace switch (full rebuild).
+ * - Re-keys if tests reset the process-local workspace (full rebuild).
  * - Throttles full re-scans via {@link USER_SCAN_TTL_MS}; pass
  *   `forceFresh=true` to bypass.
  */
@@ -505,8 +505,8 @@ export function invalidateSkillCache(): void {
  *   - `fs_write` on a `skills/<id>/SKILL.md` path after a successful
  *     write: pass the id so the very next `read("skills/<id>/SKILL.md")`
  *     sees fresh content without waiting for the TTL.
- *   - `setWorkspacePath()` after activation: invalidates everything
- *     so the new workspace's user skills replace the old ones.
+ *   - Initial workspace commit (and test-only workspace resets): invalidates
+ *     everything so no cache survives a namespace boundary.
  */
 export function invalidateUserSkill(id?: string): void {
   if (id === undefined) {

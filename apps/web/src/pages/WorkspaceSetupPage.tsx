@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { FolderOpen, X } from 'lucide-react';
+import { FolderOpen, RefreshCw, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useNavigate } from 'react-router-dom';
@@ -30,6 +30,8 @@ export default function WorkspaceSetupPage() {
   const mode = useWorkspaceStore((s) => s.mode);
   const isSyncing = useWorkspaceStore((s) => s.isSyncing);
   const recentWorkspaces = useWorkspaceStore((s) => s.recentWorkspaces);
+  const activeWorkspacePath = useWorkspaceStore((s) => s.workspacePath);
+  const pendingWorkspacePath = useWorkspaceStore((s) => s.pendingWorkspacePath);
   const removeRecentWorkspace = useWorkspaceStore(
     (s) => s.removeRecentWorkspace,
   );
@@ -64,6 +66,8 @@ export default function WorkspaceSetupPage() {
         <FreeSetup
           isSyncing={isSyncing}
           storeError={storeError}
+          activeWorkspacePath={activeWorkspacePath}
+          pendingWorkspacePath={pendingWorkspacePath}
           recentWorkspaces={recentWorkspaces}
           removeRecentWorkspace={removeRecentWorkspace}
           selectWorkspace={selectWorkspace}
@@ -81,6 +85,8 @@ export default function WorkspaceSetupPage() {
 interface FreeSetupProps {
   isSyncing: boolean;
   storeError: string | null;
+  activeWorkspacePath: string | null;
+  pendingWorkspacePath: string | null;
   recentWorkspaces: string[];
   removeRecentWorkspace: (path: string) => void;
   selectWorkspace: (path: string) => Promise<void>;
@@ -90,6 +96,8 @@ interface FreeSetupProps {
 function FreeSetup({
   isSyncing,
   storeError,
+  activeWorkspacePath,
+  pendingWorkspacePath,
   recentWorkspaces,
   removeRecentWorkspace,
   selectWorkspace,
@@ -100,6 +108,7 @@ function FreeSetup({
   const [pathInput, setPathInput] = useState('');
 
   const isLoading = isSyncing;
+  const hasPathInput = pathInput.trim().length > 0;
 
   /** Activate a path (typed, picked or recent) and navigate on success. */
   const activate = async (path: string) => {
@@ -124,6 +133,57 @@ function FreeSetup({
 
   return (
     <>
+      {pendingWorkspacePath && (
+        <section
+          className="border-warning bg-warning-bg/45 mb-6 rounded-lg border p-4"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-start gap-3">
+            <RefreshCw className="text-warning mt-0.5 size-4 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <h2 className="text-fg-default text-sm font-semibold">
+                {t('workspace.restartTitle')}
+              </h2>
+              <p className="text-fg-muted mt-1 text-xs leading-relaxed">
+                {t('workspace.restartDescription')}
+              </p>
+              <dl className="mt-3 space-y-2 text-xs">
+                {activeWorkspacePath && (
+                  <div>
+                    <dt className="text-fg-subtle font-medium">
+                      {t('workspace.activeHome')}
+                    </dt>
+                    <dd className="text-fg-muted mt-0.5 break-all">
+                      {activeWorkspacePath}
+                    </dd>
+                  </div>
+                )}
+                <div>
+                  <dt className="text-fg-default font-medium">
+                    {t('workspace.pendingHome')}
+                  </dt>
+                  <dd className="text-fg-default mt-0.5 break-all">
+                    {pendingWorkspacePath}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+          {activeWorkspacePath && (
+            <Button
+              variant="outline"
+              tone="neutral"
+              size="sm"
+              className="mt-4 w-full"
+              onClick={onActivated}
+            >
+              {t('workspace.continueCurrent')}
+            </Button>
+          )}
+        </section>
+      )}
+
       {/* Path input + optional native folder picker */}
       <label className="text-fg-subtle mb-1.5 block text-xs font-medium">
         {t('workspace.folder')}
@@ -140,6 +200,15 @@ function FreeSetup({
         disabled={isLoading}
         className="gap-2"
       />
+      <Button
+        variant={hasPathInput ? 'solid' : 'outline'}
+        tone={hasPathInput ? 'info' : 'neutral'}
+        className="disabled:bg-hover disabled:text-fg-muted mt-3 w-full disabled:opacity-100"
+        onClick={() => void handleSubmitPath()}
+        disabled={isLoading || !hasPathInput}
+      >
+        {t('workspace.useFolder')}
+      </Button>
 
       {/* Recent workspaces */}
       {recentWorkspaces.length > 0 && (
