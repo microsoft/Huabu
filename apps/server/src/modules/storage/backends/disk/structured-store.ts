@@ -7,11 +7,8 @@
  * Builds a composite {@link SpaceHandle} on demand over the legacy per-Space
  * object that `getCanvasStore` already caches. It adds **no cache of its
  * own**: a second cache would have to be invalidated in lockstep with the
- * first, and `resetStorageCache()` — called on workspace switch — clears only
- * the legacy map, so a separately cached composite would survive a workspace
- * change still wrapping the previous workspace's object. The handle is a few
- * field assignments over an object the existing cache returns, so there is
- * nothing to gain by caching it twice.
+ * first, and the handle is a few field assignments over an object the existing
+ * cache returns, so there is nothing to gain by caching it twice.
  *
  * Because the record, log-backed, and node adapters all wrap the *same* legacy
  * object the compatibility facade resolves, a write through either view is

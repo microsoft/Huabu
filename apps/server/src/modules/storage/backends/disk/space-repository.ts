@@ -72,7 +72,6 @@ export class DiskSpaceRepository implements SpaceRepository {
   }
 
   async list(): Promise<CanvasSummary[]> {
-    this.#assertActiveWorkspace();
     refreshCanvasDirIndex();
 
     return listCanvasDirEntries().map((entry) => {
@@ -87,14 +86,12 @@ export class DiskSpaceRepository implements SpaceRepository {
   }
 
   async worldId(): Promise<string> {
-    this.#assertActiveWorkspace();
     return this.#requireWorld();
   }
 
   async create(input: SpaceCreateInput): Promise<SpaceCreateResult> {
-    this.#assertActiveWorkspace();
     const canvasId = sanitizeId(input.canvasId, 'canvasId');
-    assertSpaceMutationAllowed(this.#workspacePath, canvasId);
+    assertSpaceMutationAllowed(canvasId);
     // Creation owns membership allocation. Refresh here rather than relying
     // on a caller having listed first: an externally imported Space must
     // participate in both stable-id and directory-name collision checks.
@@ -130,7 +127,6 @@ export class DiskSpaceRepository implements SpaceRepository {
   }
 
   async beginDelete(input: SpaceDeleteInput): Promise<SpaceBeginDeleteResult> {
-    this.#assertActiveWorkspace();
     const canvasId = sanitizeId(input.canvasId, 'canvasId');
     // Revalidate the protected World identity before a destructive session,
     // as the old composition path did before touching blobs.
@@ -139,10 +135,7 @@ export class DiskSpaceRepository implements SpaceRepository {
     }
 
     const store = getCanvasStore(canvasId);
-    const release = await beginSpaceDeleteAdmission(
-      this.#workspacePath,
-      canvasId,
-    );
+    const release = await beginSpaceDeleteAdmission(canvasId);
     let state: 'open' | 'finishing' | 'closed' = 'open';
     const close = (): void => {
       if (state === 'closed') return;
@@ -180,9 +173,8 @@ export class DiskSpaceRepository implements SpaceRepository {
   }
 
   async rename(input: SpaceRenameInput): Promise<SpaceRenameResult> {
-    this.#assertActiveWorkspace();
     const canvasId = sanitizeId(input.canvasId, 'canvasId');
-    assertSpaceMutationAllowed(this.#workspacePath, canvasId);
+    assertSpaceMutationAllowed(canvasId);
     if (this.#isWorld(canvasId)) {
       return { ok: false, reason: 'world-forbidden' };
     }
@@ -248,15 +240,6 @@ export class DiskSpaceRepository implements SpaceRepository {
   #requireWorld(): string {
     refreshCanvasDirIndex();
     return requireWorldCanvasId();
-  }
-
-  #assertActiveWorkspace(): void {
-    if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
-      throw new Error(
-        'Space repository belongs to an inactive workspace. ' +
-          'Resolve a fresh Space repository after workspace activation.',
-      );
-    }
   }
 
   #conflictingTitle(directoryName: string): string | null {

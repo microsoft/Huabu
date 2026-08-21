@@ -9,12 +9,9 @@
  * which owns the version check and the node/delta batch around it.
  */
 
-import path from 'node:path';
-
 import { refreshCanvasDirIndex } from './canvas-dirs.js';
 import { canvasJsonPath } from './layout.js';
 import { readValidCanvasFile } from './space-record-validation.js';
-import { getWorkspacePath } from '../../../workspace.js';
 
 import type { CanvasStore } from './legacy/canvas-store.js';
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
@@ -23,21 +20,14 @@ import type { SpaceHandle } from '../../ports/structured.js';
 /**
  * Bind the record read for one Space handle.
  *
- * The workspace active at bind time is captured here, so a handle retained
- * across a workspace switch rejects rather than reading the newly active
- * workspace — the same guard the other Disk parts carry.
+ * The port's read is asynchronous while the Disk one is not, so this is the
+ * whole adapter: one shared reader, so every member of a handle answers to
+ * the same view of the record.
  */
 export function createDiskSpaceRecordReader(
   store: CanvasStore,
 ): SpaceHandle['read'] {
-  const workspacePath = path.resolve(getWorkspacePath());
   return async function readSpaceRecord(): Promise<CanvasFile | null> {
-    if (path.resolve(getWorkspacePath()) !== workspacePath) {
-      throw new Error(
-        `Space record(${store.canvasId}) belongs to an inactive workspace. ` +
-          'Resolve a fresh Space handle after workspace activation.',
-      );
-    }
     return readDiskSpaceRecord(store);
   };
 }

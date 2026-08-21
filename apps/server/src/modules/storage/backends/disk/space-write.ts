@@ -24,12 +24,9 @@
  * lock. A comment is not a mechanism.
  */
 
-import path from 'node:path';
-
 import { runCanvasPersistenceTransaction } from './canvas-persistence-transaction.js';
 import { canvasFileShapeError } from './space-record-validation.js';
 import { readDiskSpaceRecord } from './space-record.js';
-import { getWorkspacePath } from '../../../workspace.js';
 
 import type { CanvasStore } from './legacy/canvas-store.js';
 import type {
@@ -53,21 +50,9 @@ function nodeMutationError(mutation: SpaceNodeMutation, detail: string): Error {
  * Bind the ordered write to one Space.
  *
  * A closure rather than a class: this is the Space's write action, so the only
- * thing it needs to own is the store it writes through and the Workspace it
- * was resolved in.
+ * thing it needs to own is the store it writes through.
  */
 export function createDiskSpaceWrite(store: CanvasStore): SpaceHandle['write'] {
-  const boundWorkspacePath = path.resolve(getWorkspacePath());
-
-  function assertActiveWorkspace(): void {
-    if (path.resolve(getWorkspacePath()) !== boundWorkspacePath) {
-      throw new Error(
-        `SpaceWrite(${store.canvasId}) belongs to an inactive workspace. ` +
-          'Resolve a fresh Space handle after workspace activation.',
-      );
-    }
-  }
-
   function validateInput(input: SpaceWriteInput): void {
     if (!Number.isFinite(input.expectedVersion)) {
       throw new TypeError('expectedVersion must be a finite number');
@@ -146,7 +131,6 @@ export function createDiskSpaceWrite(store: CanvasStore): SpaceHandle['write'] {
   return async function write(
     input: SpaceWriteInput,
   ): Promise<SpaceWriteResult> {
-    assertActiveWorkspace();
     validateInput(input);
 
     const current = readDiskSpaceRecord(store);

@@ -7,10 +7,6 @@
  * Maps a canvas scope to `<canvasDir>/.artifacts/`, preserving the layout
  * the workspace format has always used: one file per blob, named by the
  * URL key, no manifest indirection.
- *
- * Each scope is bound to the workspace active when it is created. A fresh
- * scope follows a free-mode workspace switch; a retained scope rejects the
- * next operation instead of silently redirecting it into the new workspace.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -28,7 +24,6 @@ import { pipeline } from 'node:stream/promises';
 
 import { artifactsDir } from './layout.js';
 import { renameOverWithRetry } from '../../../../utils/fs.js';
-import { getWorkspacePath } from '../../../workspace.js';
 import { createBlobLease, normalizeBlobName } from '../../ports/blob.js';
 
 import type {
@@ -73,24 +68,19 @@ function isMissing(err: unknown): boolean {
 
 class DiskBlobScope implements BlobScope {
   readonly #ref: BlobScopeRef;
-  readonly #workspacePath: string;
 
   constructor(ref: BlobScopeRef) {
     this.#ref = ref;
-    this.#workspacePath = path.resolve(getWorkspacePath());
   }
 
+  /**
+   * Resolve once per operation, before its first await.
+   *
+   * Every later path in that operation derives from this absolute directory,
+   * so an externally renamed Space directory cannot combine a temp file under
+   * the old name with a destination under the new one.
+   */
   #resolveDir(): string {
-    const active = path.resolve(getWorkspacePath());
-    if (active !== this.#workspacePath) {
-      throw new Error(
-        `DiskBlobScope(${this.#ref.canvasId}) belongs to an inactive workspace. ` +
-          `Resolve a fresh scope after workspace activation.`,
-      );
-    }
-    // Resolve once per operation, before its first await. Every later path in
-    // that operation is derived from this absolute directory, so a workspace
-    // switch cannot combine a temp in A with a destination in B.
     return scopeDir(this.#ref);
   }
 

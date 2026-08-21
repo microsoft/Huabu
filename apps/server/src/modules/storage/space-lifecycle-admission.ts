@@ -96,64 +96,51 @@ class SpaceLifecycleGate {
 
 const gates = new Map<string, SpaceLifecycleGate>();
 
-function key(workspacePath: string, canvasId: string): string {
-  return `${workspacePath}\0${canvasId}`;
-}
-
-function gateFor(workspacePath: string, canvasId: string): SpaceLifecycleGate {
-  const gateKey = key(workspacePath, canvasId);
-  let gate = gates.get(gateKey);
+/**
+ * Keyed by Space alone.
+ *
+ * A process serves one Workspace for its lifetime, so a Space id already
+ * denotes one Space; a Workspace component in the key would distinguish
+ * nothing.
+ */
+function gateFor(canvasId: string): SpaceLifecycleGate {
+  let gate = gates.get(canvasId);
   if (!gate) {
     gate = new SpaceLifecycleGate();
-    gates.set(gateKey, gate);
+    gates.set(canvasId, gate);
   }
   return gate;
 }
 
-async function withPutAdmission<T>(
-  workspacePath: string,
+export async function withSpacePutAdmission<T>(
   canvasId: string,
   operation: () => Promise<T>,
 ): Promise<T> {
-  const gateKey = key(workspacePath, canvasId);
-  const gate = gateFor(workspacePath, canvasId);
+  const gate = gateFor(canvasId);
   try {
     return await gate.withPut(operation);
   } finally {
-    if (gate.idle && gates.get(gateKey) === gate) gates.delete(gateKey);
+    if (gate.idle && gates.get(canvasId) === gate) gates.delete(canvasId);
   }
 }
 
-export function withSpacePutAdmission<T>(
-  workspacePath: string,
-  canvasId: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  return withPutAdmission(workspacePath, canvasId, operation);
-}
-
 export async function beginSpaceDeleteAdmission(
-  workspacePath: string,
   canvasId: string,
 ): Promise<() => void> {
-  const gateKey = key(workspacePath, canvasId);
-  const gate = gateFor(workspacePath, canvasId);
+  const gate = gateFor(canvasId);
   const releaseGate = await gate.acquireDelete();
   let released = false;
   return () => {
     if (released) return;
     released = true;
     releaseGate();
-    if (gate.idle && gates.get(gateKey) === gate) gates.delete(gateKey);
+    if (gate.idle && gates.get(canvasId) === gate) gates.delete(canvasId);
   };
 }
 
 /** Reject a structured mutation once deletion is active or queued. */
-export function assertSpaceMutationAllowed(
-  workspacePath: string,
-  canvasId: string,
-): void {
-  if (gates.get(key(workspacePath, canvasId))?.deletionPending) {
+export function assertSpaceMutationAllowed(canvasId: string): void {
+  if (gates.get(canvasId)?.deletionPending) {
     throw new Error(
       `Cannot mutate Space "${canvasId}" while deletion is pending`,
     );

@@ -93,7 +93,7 @@ describe('DiskBlobStore temp file hygiene', () => {
     ).toEqual(['hot.bin']);
   });
 
-  it('binds in-flight paths to their original workspace and rejects a held scope after activation', async () => {
+  it("resolves an operation's paths once, before its first await", async () => {
     const otherRoot = mkdtempSync(path.join(tmpdir(), 'huabu-blob-switched-'));
     const scope = new DiskBlobStore().scope({ kind: 'canvas', canvasId });
     let signalStarted = (): void => {};
@@ -122,12 +122,11 @@ describe('DiskBlobStore temp file hygiene', () => {
       expect(
         readFileSync(path.join(root, canvasId, '.artifacts', 'bound.bin')),
       ).toEqual(Buffer.from('bound bytes'));
+      // Every path in one operation derives from the directory it resolved
+      // before its first await, so a Space directory that moves underneath a
+      // streaming write cannot land the temp file in one place and the
+      // destination in another.
       expect(existsSync(path.join(otherRoot, canvasId))).toBe(false);
-
-      await expect(scope.read('bound.bin')).rejects.toThrow(
-        /inactive workspace/,
-      );
-      await expect(scope.deleteAll()).rejects.toThrow(/inactive workspace/);
     } finally {
       workspaceState.path = root;
       rmSync(otherRoot, { recursive: true, force: true });

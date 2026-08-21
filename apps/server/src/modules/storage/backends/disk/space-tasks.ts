@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import path from 'node:path';
-
 import {
   taskRecordSchema,
   taskRunCompletionSchema,
@@ -17,7 +15,6 @@ import {
 import { tasksPath } from './layout.js';
 import { readDiskSpaceRecord } from './space-record.js';
 import { atomicWriteJson, readJsonStrict } from '../../../../utils/fs.js';
-import { getWorkspacePath } from '../../../workspace.js';
 import { assertSpaceMutationAllowed } from '../../space-lifecycle-admission.js';
 
 import type { CanvasStore } from './legacy/canvas-store.js';
@@ -28,6 +25,7 @@ import type {
   TaskRunUpdate,
 } from '../../ports/structured.js';
 
+/** In-flight Task mutations, one chain per Space. */
 const taskMutationChains = new Map<string, Promise<unknown>>();
 
 async function withTaskMutationMutex<T>(
@@ -103,11 +101,9 @@ export class DiskSpaceTasks implements SpaceTasks {
   readonly runs: SpaceTaskRuns;
 
   readonly #store: CanvasStore;
-  readonly #workspacePath: string;
 
   constructor(store: CanvasStore) {
     this.#store = store;
-    this.#workspacePath = path.resolve(getWorkspacePath());
     this.runs = Object.freeze({
       create: (run: TaskRunRecord) => this.#createRun(run),
       update: (runId: string, update: TaskRunUpdate) =>
@@ -120,16 +116,8 @@ export class DiskSpaceTasks implements SpaceTasks {
     });
   }
 
-  #assertActiveWorkspace(): void {
-    if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
-      throw new Error(
-        `Space Tasks(${this.#store.canvasId}) belong to an inactive workspace`,
-      );
-    }
-  }
-
   #requireSpace(): void {
-    assertSpaceMutationAllowed(this.#workspacePath, this.#store.canvasId);
+    assertSpaceMutationAllowed(this.#store.canvasId);
     if (!readDiskSpaceRecord(this.#store)) {
       throw new Error(
         `Space Tasks(${this.#store.canvasId}) cannot write a missing Space`,
@@ -138,7 +126,6 @@ export class DiskSpaceTasks implements SpaceTasks {
   }
 
   async read(): Promise<TaskStoreSnapshot> {
-    this.#assertActiveWorkspace();
     return readTaskStore(this.#store.canvasId);
   }
 
@@ -248,10 +235,7 @@ export class DiskSpaceTasks implements SpaceTasks {
   }
 
   async #mutate<T>(apply: (snapshot: TaskStoreSnapshot) => T): Promise<T> {
-    this.#assertActiveWorkspace();
-    const key = `${this.#workspacePath}\0${this.#store.canvasId}`;
-    return withTaskMutationMutex(key, () => {
-      this.#assertActiveWorkspace();
+    return withTaskMutationMutex(this.#store.canvasId, () => {
       this.#requireSpace();
       const current = readTaskStore(this.#store.canvasId);
       const next: TaskStoreSnapshot = {

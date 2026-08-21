@@ -234,16 +234,13 @@ describe('DiskSpaceRepository membership', () => {
     await expect(spaces.worldId()).rejects.toBeInstanceOf(SyntaxError);
   });
 
-  it('rejects a retained handle after the active Workspace changes', async () => {
-    const firstRoot = makeWorkspace('huabu-space-membership-stale-a-');
+  it('reads the Workspace that is active when it is resolved', async () => {
+    const firstRoot = makeWorkspace('huabu-space-membership-a-');
     seedWorld(firstRoot, 'world-a');
-    const held = new DiskSpaceRepository();
-    await expect(held.worldId()).resolves.toBe('world-a');
+    await expect(new DiskSpaceRepository().worldId()).resolves.toBe('world-a');
 
-    const secondRoot = makeWorkspace('huabu-space-membership-stale-b-');
+    const secondRoot = makeWorkspace('huabu-space-membership-b-');
     seedWorld(secondRoot, 'world-b');
-    await expect(held.list()).rejects.toThrow(/inactive workspace/i);
-    await expect(held.worldId()).rejects.toThrow(/inactive workspace/i);
     await expect(new DiskSpaceRepository().worldId()).resolves.toBe('world-b');
   });
 });

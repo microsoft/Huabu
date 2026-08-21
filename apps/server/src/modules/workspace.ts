@@ -52,6 +52,7 @@ import path from 'node:path';
 
 import { resetExternalNoteSessions } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
+import { resetStorage } from './storage/index.js';
 import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import { invalidateUserSkill } from '../prompt/index.js';
 
@@ -226,14 +227,17 @@ export function commitWorkspacePath(resolvedPath: string): void {
 /**
  * Drop everything built against whichever workspace was active.
  *
- * A directory index, a skill cache, and the external-note watchers are all
- * workspace-scoped. The import cycle with the prompt loader (which depends on
- * `getWorkspacePath` from this module) is safe because Node ESM allows cycles
- * as long as no top-level code on either side dereferences the late-bound
- * import — `invalidateUserSkill` is only called from inside a function body,
- * after both modules have finished evaluating.
+ * Storage's caches and fences, the directory index, the skill cache, and the
+ * external-note watchers are all workspace-scoped, and none of them names a
+ * workspace any more — dropping them here is what lets them stop. The import
+ * cycles with storage and the prompt loader (both depend on
+ * `getWorkspacePath` from this module) are safe because Node ESM allows
+ * cycles as long as no top-level code on either side dereferences the
+ * late-bound import — each of these is only called from inside a function
+ * body, after both modules have finished evaluating.
  */
 function dropWorkspaceScopedState(): void {
+  resetStorage();
   refreshCanvasDirIndex();
   invalidateUserSkill();
   resetExternalNoteSessions();

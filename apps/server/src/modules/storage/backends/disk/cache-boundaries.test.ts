@@ -120,7 +120,13 @@ describe('CanvasStore cache boundaries', () => {
     expect(afterEviction.isNodeWriteSuppressed('n1')).toBe(false);
   });
 
-  it('invalidates cache state on a direct workspace switch and rejects a held handle', () => {
+  /**
+   * A process serves one Workspace, so nothing here carries an answer to
+   * "which Workspace am I?" — committing one drops the cached instances and
+   * their warm filename indexes instead. That is the whole invariant: after a
+   * commit, every handle is new.
+   */
+  it('drops cached instances when a Workspace is committed', () => {
     const firstRoot = activateWorkspace('huabu-cache-workspace-a-');
     createSpace('shared-id', 'First');
     const held = getCanvasStore('shared-id');
@@ -133,20 +139,15 @@ describe('CanvasStore cache boundaries', () => {
     expect(active).not.toBe(held);
     expect(active.writeNode('node-b', note('node-b', 'From B')).ok).toBe(true);
     expect(active.nodeIdForFilename('From B.md')).toBe('node-b');
+    // A's warm index is not consulted for B's Space.
+    expect(active.nodeIdForFilename('From A.md')).toBeNull();
 
-    // The old instance has a warm filename index from workspace A. It must not
-    // be allowed to consult that index — or the new workspace's disk — while B
-    // is active.
-    expect(() => held.nodeIdForFilename('From B.md')).toThrow(
-      /inactive workspace.*Resolve a fresh Space handle/s,
-    );
-    expect(() => held.readNode('node-a')).toThrow(/inactive workspace/);
-
-    // Switching back also invalidates B's cache rather than reviving A's old
-    // instance and its potentially stale in-memory index.
+    // Committing back to A also drops B's instance rather than reviving one
+    // whose in-memory index describes the other Workspace.
     setWorkspacePath(firstRoot);
     const reopened = getCanvasStore('shared-id');
     expect(reopened).not.toBe(held);
+    expect(reopened).not.toBe(active);
     expect(reopened.nodeIdForFilename('From A.md')).toBe('node-a');
   });
 
@@ -166,11 +167,10 @@ describe('CanvasStore cache boundaries', () => {
     expect(getCanvasStore('canvas-b').read()?.canvasId).toBe('canvas-b');
   });
 
-  it('rejects a held event repository after a workspace switch', async () => {
+  it('reads the committed Workspace through a freshly resolved handle', async () => {
     activateWorkspace('huabu-log-workspace-a-');
     createSpace('shared-id', 'First');
-    const held = new DiskStructuredStore().space('shared-id');
-    await held.events.append([
+    await new DiskStructuredStore().space('shared-id').events.append([
       {
         payload: {
           action: 'node_selected',
@@ -193,47 +193,34 @@ describe('CanvasStore cache boundaries', () => {
       },
     ]);
 
-    // This read uses strict JSONL helpers directly. Without its own
-    // workspace-lifetime guard, the retained A facade would silently read
-    // B's same-id file instead of rejecting the stale handle.
-    await expect(held.events.read()).rejects.toThrow(/inactive workspace/);
+    // The same Space id in two Workspaces is two different logs, and the
+    // handle resolved after the commit reads the one that is active.
     expect((await active.events.read()).map((event) => event.ts)).toEqual([2]);
   });
 
-  it('guards a held record repository before probing the active workspace', async () => {
+  it("reports a corrupt record rather than the previous Workspace's copy", async () => {
     activateWorkspace('huabu-record-workspace-a-');
-    const first = createSpace('shared-id', 'First');
-    const held = new DiskStructuredStore().space('shared-id');
-    await expect(held.read()).resolves.toMatchObject({ title: 'First' });
+    createSpace('shared-id', 'First');
+    await expect(
+      new DiskStructuredStore().space('shared-id').read(),
+    ).resolves.toMatchObject({ title: 'First' });
 
     activateWorkspace('huabu-record-workspace-b-');
     createSpace('shared-id', 'Second');
-    const active = new DiskStructuredStore().space('shared-id');
-    await expect(active.read()).resolves.toMatchObject({
-      title: 'Second',
-    });
-
-    await expect(held.read()).rejects.toThrow(/inactive workspace/);
     await expect(
-      held.write({
-        expectedVersion: first.version,
-        nextRecord: {
-          ...first,
-          version: first.version + 1,
-          updatedAt: first.updatedAt + 1,
-        },
-        nodeMutations: [],
-      }),
-    ).rejects.toThrow(/inactive workspace/);
+      new DiskStructuredStore().space('shared-id').read(),
+    ).resolves.toMatchObject({ title: 'Second' });
 
-    // Even a corrupt same-id record in B must not leak through the strict
-    // probe as a SyntaxError before the retained A handle is rejected.
+    // A same-id record the user broke by hand surfaces as the integrity error
+    // it is. Nothing falls back to the copy another Workspace happens to hold.
     writeFileSync(
       path.join(canvasRoot('shared-id'), SPACE_JSON_FILENAME),
       '{broken',
       'utf8',
     );
-    await expect(held.read()).rejects.toThrow(/inactive workspace/);
+    await expect(
+      new DiskStructuredStore().space('shared-id').read(),
+    ).rejects.toThrow();
   });
 
   it('does not create a Space directory for a node write to a missing Space', async () => {

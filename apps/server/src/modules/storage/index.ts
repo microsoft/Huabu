@@ -69,6 +69,7 @@ export {
   getStorage,
   getStructuredStore,
   initStorage,
+  resetStorage,
   setStorageForTesting,
   spaceDirectory,
   storageHealth,

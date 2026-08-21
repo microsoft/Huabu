@@ -21,11 +21,10 @@
  * through it.
  */
 
-import path from 'node:path';
-
-import { getWorkspacePath } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
 import { canvasRoot } from './backends/disk/layout.js';
+import { resetStorageCache } from './backends/disk/legacy/canvas-store-cache.js';
+import { clearAllNodeTombstones } from './backends/disk/legacy/node-tombstones.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import {
   parseStorageProfile,
@@ -62,19 +61,6 @@ import type { Readable } from 'node:stream';
 export type SpaceDeleteOutcome =
   | SpaceDeleteFinishResult
   | { readonly ok: false; readonly reason: 'world-forbidden' };
-
-function activeWorkspacePath(): string {
-  return path.resolve(getWorkspacePath());
-}
-
-function assertActiveWorkspace(workspacePath: string, canvasId: string): void {
-  if (activeWorkspacePath() !== workspacePath) {
-    throw new Error(
-      `Blob scope for Space "${canvasId}" belongs to an inactive workspace. ` +
-        `Resolve a fresh scope after workspace activation.`,
-    );
-  }
-}
 
 /**
  * Release a rejected streaming body that storage never fully consumed.
@@ -257,7 +243,6 @@ export async function deleteSpace(
  */
 export function canvasBlobs(canvasId: string): BlobScope {
   const storage = ensure();
-  const workspacePath = activeWorkspacePath();
   const delegate = storage.blobs.scope({ kind: 'canvas', canvasId });
 
   async function requireSpace(): Promise<void> {
@@ -270,16 +255,10 @@ export function canvasBlobs(canvasId: string): BlobScope {
   return {
     async put(name: string, body: Readable | Buffer): Promise<BlobInfo> {
       try {
-        return await withSpacePutAdmission(
-          workspacePath,
-          canvasId,
-          async () => {
-            assertActiveWorkspace(workspacePath, canvasId);
-            await requireSpace();
-            assertActiveWorkspace(workspacePath, canvasId);
-            return delegate.put(name, body);
-          },
-        );
+        return await withSpacePutAdmission(canvasId, async () => {
+          await requireSpace();
+          return delegate.put(name, body);
+        });
       } catch (error) {
         drainRejectedBody(body);
         throw error;
@@ -331,6 +310,20 @@ export async function storageHealth(): Promise<StorageHealth[]> {
  */
 export function spaceDirectory(canvasId: string): string {
   return canvasRoot(canvasId);
+}
+
+/**
+ * Drop everything the process built against whichever workspace was active.
+ *
+ * The Disk adapter's instance cache and its node fences go together: both
+ * describe the workspace being served, and neither carries an answer to
+ * *which* one, because a process only ever has the one. Called by
+ * `commitWorkspacePath`, which is what keeps that true for a test moving
+ * through several temporary workspaces.
+ */
+export function resetStorage(): void {
+  resetStorageCache();
+  clearAllNodeTombstones();
 }
 
 /**

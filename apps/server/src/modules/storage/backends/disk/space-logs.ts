@@ -18,8 +18,6 @@
  * by its own tests.
  */
 
-import path from 'node:path';
-
 import { canvasEventInputSchema, canvasEventRecordSchema } from '@huabu/shared';
 import {
   coalesceChanges,
@@ -33,7 +31,6 @@ import {
   readJsonLinesStrict,
   readJsonStrict,
 } from '../../../../utils/fs.js';
-import { getWorkspacePath } from '../../../workspace.js';
 import { assertSpaceMutationAllowed } from '../../space-lifecycle-admission.js';
 
 import type { CanvasStore } from './legacy/canvas-store.js';
@@ -99,24 +96,13 @@ export interface DiskSpaceLogs {
 
 class DiskSpaceLogCoordinator {
   readonly #store: CanvasStore;
-  readonly #workspacePath: string;
 
   constructor(store: CanvasStore) {
     this.#store = store;
-    this.#workspacePath = path.resolve(getWorkspacePath());
-  }
-
-  private assertActiveWorkspace(): void {
-    if (path.resolve(getWorkspacePath()) !== this.#workspacePath) {
-      throw new Error(
-        `Space logs(${this.#store.canvasId}) belong to an inactive workspace. ` +
-          'Resolve a fresh Space handle after workspace activation.',
-      );
-    }
   }
 
   private requireSpace(): void {
-    assertSpaceMutationAllowed(this.#workspacePath, this.#store.canvasId);
+    assertSpaceMutationAllowed(this.#store.canvasId);
     if (!readDiskSpaceRecord(this.#store)) {
       throw new Error(
         `Space logs(${this.#store.canvasId}) cannot write logs for a missing Space`,
@@ -127,7 +113,6 @@ class DiskSpaceLogCoordinator {
   // ── Events ────────────────────────────────────────────────────────────────
 
   async appendEvents(events: readonly NewCanvasEvent[]): Promise<void> {
-    this.assertActiveWorkspace();
     if (events.length === 0) return;
     events.forEach(validateEventInput);
     this.requireSpace();
@@ -137,14 +122,12 @@ class DiskSpaceLogCoordinator {
   }
 
   async readEvents(limit?: number): Promise<CanvasEvent[]> {
-    this.assertActiveWorkspace();
     return readValidatedEvents(eventsPath(this.#store.canvasId), limit);
   }
 
   // ── Change-review records ─────────────────────────────────────────────────
 
   async readChanges(threadId: string): Promise<CanvasChangeRecord[]> {
-    this.assertActiveWorkspace();
     return coalesceChanges(
       readJsonArray<CanvasChangeRecord>(
         changesPath(this.#store.canvasId, threadId),
@@ -157,7 +140,6 @@ class DiskSpaceLogCoordinator {
     threadId: string,
     records: readonly CanvasChangeRecord[],
   ): Promise<CanvasChangeRecord[]> {
-    this.assertActiveWorkspace();
     this.requireSpace();
     const filePath = changesPath(this.#store.canvasId, threadId);
     const existing = coalesceChanges(
@@ -172,7 +154,6 @@ class DiskSpaceLogCoordinator {
     threadId: string,
     changeId: string,
   ): Promise<CanvasChangeRecord | null> {
-    this.assertActiveWorkspace();
     this.requireSpace();
     const filePath = changesPath(this.#store.canvasId, threadId);
     const existing = coalesceChanges(
