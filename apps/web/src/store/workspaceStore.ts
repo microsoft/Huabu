@@ -378,6 +378,16 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       return true;
     }
 
+    // The server was handed a remembered folder and could not open it. It has
+    // already paid for that attempt — up to 70 seconds when the drive is
+    // unavailable — so do not spend it again on the same path. Show the
+    // picker with the reason set above, and leave the saved path alone so a
+    // drive that comes back is still remembered.
+    if (info.startupError) {
+      set({ isSyncing: false });
+      return false;
+    }
+
     // Try to auto-activate using the remembered absolute path.
     const savedPath = persisted.path;
     if (savedPath) {

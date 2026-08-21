@@ -468,6 +468,15 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
     );
   }
 
+  // External-agent (ACP) integration: the server embeds an `agentlet`
+  // daemon supervisor (`DaemonSupervisor`) which fork()s the daemon
+  // entry point itself. In packaged builds the entry resolves to
+  // `<resources>/server/agentlet/index.js` (copied by tsup + bundled
+  // by electron-builder, see ./electron-builder.yml extraResources);
+  // in dev it falls back to `external/agentlet/packages/local/dist/index.js`.
+  // No env var injection is needed here \u2014 the resolver in
+  // `daemon-supervisor.ts` covers both layouts.
+
   // The workspace the user last chose, handed to the server at fork.
   //
   // A server process serves one workspace for its lifetime, so this is where
@@ -479,15 +488,6 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
   // the picker remains available and a folder that has gone missing lands the
   // user back on it instead of killing the app. Absent on first launch, which
   // is what shows the picker then.
-  //
-  // External-agent (ACP) integration: the server embeds an `agentlet`
-  // daemon supervisor (`DaemonSupervisor`) which fork()s the daemon
-  // entry point itself. In packaged builds the entry resolves to
-  // `<resources>/server/agentlet/index.js` (copied by tsup + bundled
-  // by electron-builder, see ./electron-builder.yml extraResources);
-  // in dev it falls back to `external/agentlet/packages/local/dist/index.js`.
-  // No env var injection is needed here \u2014 the resolver in
-  // `daemon-supervisor.ts` covers both layouts.
   const savedWorkspace = readWorkspaceStore().path;
 
   return {
