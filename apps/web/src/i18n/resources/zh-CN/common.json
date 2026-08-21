@@ -321,7 +321,10 @@
     "clickToSwitch": "点击切换",
     "openPathFailed": "打开路径失败",
     "activationTimeout": "打开“{{path}}”已超过 {{seconds}} 秒。请检查云盘或网络磁盘是否可用，然后重试。",
-    "activationInProgress": "另一个主目录仍在打开，请等待其完成。"
+    "activationInProgress": "另一个主目录仍在打开，请等待其完成。",
+    "restartRequired": "已将“{{path}}”保存为你的 Home 文件夹。重启服务器后生效。",
+    "restarting": "正在重启以打开“{{path}}”…",
+    "startupFailed": "无法打开已保存的 Home 文件夹：{{reason}} 请选择一个文件夹以继续。"
   },
   "canvasList": {
     "title": "Space",

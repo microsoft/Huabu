@@ -87,6 +87,14 @@ contextBridge.exposeInMainWorld('electronBridge', {
         'workspace:remove-recent',
         path,
       ) as Promise<WorkspaceStoreSnapshot>,
+    /**
+     * Restart the app onto the saved workspace.
+     *
+     * A server process serves one workspace for its lifetime, so this is how a
+     * new choice takes effect. Never resolves — the app is on its way down.
+     */
+    restart: (): Promise<void> =>
+      ipcRenderer.invoke('workspace:restart') as Promise<void>,
   },
 
   window: {

@@ -23,10 +23,7 @@
 
 import path from 'node:path';
 
-import {
-  acquireWorkspaceOperationLease,
-  getWorkspacePath,
-} from '../workspace.js';
+import { getWorkspacePath } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
 import { canvasRoot } from './backends/disk/layout.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
@@ -208,28 +205,19 @@ export function getStructuredStore(): StructuredStore {
  * Create one ordinary Space through the selected structured backend.
  *
  * Default-title allocation and lifecycle creation share one process-local
- * serialization point. The Workspace lease is acquired before queueing, so
- * an async catalogue read cannot strand the request in a newly activated
- * Workspace and concurrent defaults remain Untitled, Untitled (1), ... .
+ * serialization point, so concurrent defaults remain Untitled, Untitled (1),
+ * ... rather than racing for the same name.
  */
 export function createSpace(
   canvasId: string,
   title?: string | null,
 ): Promise<SpaceCreateResult> {
   const structured = ensure().structured;
-  const workspaceLease = acquireWorkspaceOperationLease();
   return serializeSpaceCreate(async () => {
-    try {
-      // One repository instance spans the read and the create, so a Workspace
-      // switch between them is rejected by the handle rather than silently
-      // creating the Space in the newly activated Workspace.
-      const spaces = structured.spaces();
-      const effectiveTitle =
-        title === undefined ? defaultSpaceTitle(await spaces.list()) : title;
-      return await spaces.create({ canvasId, title: effectiveTitle });
-    } finally {
-      workspaceLease.release();
-    }
+    const spaces = structured.spaces();
+    const effectiveTitle =
+      title === undefined ? defaultSpaceTitle(await spaces.list()) : title;
+    return spaces.create({ canvasId, title: effectiveTitle });
   });
 }
 
@@ -245,22 +233,17 @@ export function createSpace(
 export async function deleteSpace(
   canvasId: string,
 ): Promise<SpaceDeleteOutcome> {
-  const workspaceLease = acquireWorkspaceOperationLease();
+  const storage = ensure();
+  const started = await storage.structured.spaces().beginDelete({ canvasId });
+  if (!started.ok) return started;
   try {
-    const storage = ensure();
-    const started = await storage.structured.spaces().beginDelete({ canvasId });
-    if (!started.ok) return started;
-    try {
-      // Preserve the old retryable cleanup behavior: sweep even when the
-      // structured record is already absent, so orphan blobs can be removed.
-      await storage.blobs.scope({ kind: 'canvas', canvasId }).deleteAll();
-      return await started.session.finish();
-    } catch (error) {
-      await started.session.abort();
-      throw error;
-    }
-  } finally {
-    workspaceLease.release();
+    // Preserve the old retryable cleanup behavior: sweep even when the
+    // structured record is already absent, so orphan blobs can be removed.
+    await storage.blobs.scope({ kind: 'canvas', canvasId }).deleteAll();
+    return await started.session.finish();
+  } catch (error) {
+    await started.session.abort();
+    throw error;
   }
 }
 

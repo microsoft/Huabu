@@ -30,6 +30,13 @@ interface ElectronWorkspaceApi {
   get: () => Promise<WorkspaceStoreSnapshot>;
   set: (path: string) => Promise<WorkspaceStoreSnapshot>;
   removeRecent: (path: string) => Promise<WorkspaceStoreSnapshot>;
+  /**
+   * Restart the app onto the saved workspace.
+   *
+   * Present only on builds whose shell can apply a new workspace, which is
+   * what makes switching offerable at all once one is active. Never resolves.
+   */
+  restart?: () => Promise<void>;
 }
 
 interface ElectronWindowApi {

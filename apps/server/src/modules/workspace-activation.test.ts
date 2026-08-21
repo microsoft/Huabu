@@ -10,8 +10,14 @@ import {
   runWorkspacePreparation,
   WorkspaceActivationInProgressError,
   WorkspaceActivationTimeoutError,
+  WorkspaceRestartRequiredError,
 } from './workspace-activation.js';
-import { getWorkspacePath, setWorkspacePath } from './workspace.js';
+import {
+  clearWorkspacePath,
+  getWorkspacePath,
+  isWorkspaceConfigured,
+  setWorkspacePath,
+} from './workspace.js';
 
 describe('workspace activation isolation', () => {
   const roots: string[] = [];
@@ -29,7 +35,14 @@ describe('workspace activation isolation', () => {
     return file;
   }
 
+  beforeEach(() => {
+    // Every case decides for itself whether a workspace is already active,
+    // because that is the branch under test.
+    clearWorkspacePath();
+  });
+
   afterAll(() => {
+    clearWorkspacePath();
     for (const root of roots) {
       rmSync(root, { recursive: true, force: true });
     }
@@ -55,16 +68,50 @@ describe('workspace activation isolation', () => {
     ).rejects.toBeInstanceOf(WorkspaceActivationTimeoutError);
   });
 
-  it('keeps the previous workspace active after preparation times out', async () => {
-    const previous = tempDir('huabu-workspace-previous-');
+  it('leaves the process unconfigured when preparation times out', async () => {
     const next = tempDir('huabu-workspace-next-');
     const workerPath = worker(`setInterval(() => {}, 1_000);`);
-    setWorkspacePath(previous);
 
     await expect(
       activateWorkspacePath(next, { workerPath, timeoutMs: 30 }),
     ).rejects.toBeInstanceOf(WorkspaceActivationTimeoutError);
-    expect(getWorkspacePath()).toBe(path.resolve(previous));
+    // Nothing half-activated: the client sees the same state it started from
+    // and can pick again.
+    expect(isWorkspaceConfigured()).toBe(false);
+  });
+
+  /**
+   * The restart rule (issue #126). A process serves one workspace, so the
+   * second choice is the client's to persist and the next process's to open —
+   * and refusing it has to leave this process exactly as it was, including not
+   * running preparation against the folder it was asked for.
+   */
+  it('refuses a different workspace once one is active, and touches nothing', async () => {
+    const active = tempDir('huabu-workspace-active-');
+    const other = tempDir('huabu-workspace-other-');
+    setWorkspacePath(active);
+    // A worker that would fail loudly if it ever ran.
+    const workerPath = worker(`process.send({ ok: false, message: 'ran' });`);
+
+    const refusal = activateWorkspacePath(other, { workerPath });
+    await expect(refusal).rejects.toBeInstanceOf(WorkspaceRestartRequiredError);
+    await expect(refusal).rejects.toMatchObject({
+      requestedPath: path.resolve(other),
+    });
+    expect(getWorkspacePath()).toBe(path.resolve(active));
+  });
+
+  it('accepts the active workspace again without reactivating it', async () => {
+    const active = tempDir('huabu-workspace-idempotent-');
+    setWorkspacePath(active);
+    const workerPath = worker(`process.send({ ok: false, message: 'ran' });`);
+
+    // The client re-sends its remembered path on every boot, and a second tab
+    // must not be told to restart.
+    await expect(
+      activateWorkspacePath(active, { workerPath }),
+    ).resolves.toBeUndefined();
+    expect(getWorkspacePath()).toBe(path.resolve(active));
   });
 
   it('rejects a concurrent activation while preparation is running', async () => {
