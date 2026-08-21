@@ -2045,10 +2045,13 @@ resume point such a digest would need.
 ### Composition and migration
 
 - Which backend combinations are supported product configurations?
-- What happens to open connections on a free-mode Workspace switch? Today the
-  switch resets the Space-instance cache but never rebuilds the storage
-  holder, which is invisible only because both Disk adapters are stateless and
-  resolve the workspace path per call.
+- ~~What happens to open connections on a free-mode Workspace switch?~~
+  **Decided (issue #126): there is no switch.** A process serves one
+  Workspace for its lifetime; choosing another persists the choice and takes
+  effect on restart, and a running Server returns `WORKSPACE_RESTART_REQUIRED`
+  rather than moving. A connection-holding backend therefore opens once at
+  startup and closes at shutdown, with no staged publication, no detach, and
+  no Workspace identity carried by a handle or a cache key.
 - Can a Workspace change either backend after creation, and is migration
   online or offline?
 - How are backups and restores made consistent across structured and blob
