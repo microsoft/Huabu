@@ -61,6 +61,17 @@ describe('Question conversation presentation', () => {
     });
   });
 
+  it('opens an authored Question transiently when requested by inspection', () => {
+    enterQuestionConversation(view, undefined, 'canvas-1', 'bottom', {
+      transient: true,
+    });
+
+    const activeTab = Object.values(
+      usePreviewWorkspaceStore.getState().workspace.tabs,
+    )[0];
+    expect(activeTab.transient).toBe(true);
+  });
+
   it('opens Question compose as a workspace tab and focuses its thread', () => {
     enterQuestionCompose(view, 'canvas-1');
 
@@ -73,6 +84,15 @@ describe('Question conversation presentation', () => {
     expect(usePanelStore.getState().focusChatInputRequest?.threadId).toBe(
       'thread-1',
     );
+  });
+
+  it('opens Question compose transiently when requested by inspection', () => {
+    enterQuestionCompose(view, 'canvas-1', undefined, { transient: true });
+
+    const activeTab = Object.values(
+      usePreviewWorkspaceStore.getState().workspace.tabs,
+    )[0];
+    expect(activeTab.transient).toBe(true);
   });
 
   it('inherits the Canvas binding for a new Question thread', () => {

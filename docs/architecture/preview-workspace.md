@@ -68,7 +68,7 @@ Titles are derived at render time. Node tabs use the current node label; Chat ta
 
 Open to Side moves the existing semantic target into the other group instead of duplicating it and preserves whether the tab is transient or permanent. Saving an unbound Chat as a Question replaces that tab's target in place, preserving tab identity, position, messages, and draft continuity.
 
-Canvas node double-clicks, search results, and connected-node navigation open transiently. Question compose or replay and new Chat opens are permanent.
+Canvas node double-clicks, Question toolbar compose or replay actions, search results, and connected-node navigation open transiently. New Chat opens are permanent.
 
 ## 4. Rendering and Chat sessions
 
