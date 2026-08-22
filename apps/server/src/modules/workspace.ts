@@ -255,6 +255,20 @@ export function commitWorkspaceHandle(workspace: WorkspaceHandle): void {
   resetExternalNoteSessions();
 }
 
+/** Refresh metadata for the active Workspace without switching namespaces. */
+export function updateActiveWorkspaceHandle(
+  workspace: WorkspaceHandle,
+): boolean {
+  if (_workspaceHandle?.workspaceId !== workspace.workspaceId) return false;
+  if (_workspaceHandle.workspacePath !== workspace.workspacePath) {
+    throw new Error(
+      'Cannot change the active Workspace path during metadata update',
+    );
+  }
+  _workspaceHandle = workspace;
+  return true;
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Internal helpers
 // ──────────────────────────────────────────────────────────────────────

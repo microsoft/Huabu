@@ -176,11 +176,11 @@ export function runWorkspacePreparation(
   });
 }
 
-/** Prepare a free-mode workspace and commit it only after full success. */
-export async function activateWorkspacePath(
+/** Prepare a free-mode Workspace without changing the active Workspace. */
+export async function prepareWorkspacePath(
   newPath: string,
   options: PreparationOptions = {},
-): Promise<void> {
+): Promise<string> {
   if (isManagedMode()) {
     throw new Error(
       'Server is in managed mode; the workspace is fixed at startup',
@@ -194,8 +194,16 @@ export async function activateWorkspacePath(
   activationInProgress = true;
   try {
     await runWorkspacePreparation(resolvedPath, options);
-    commitWorkspacePath(resolvedPath);
+    return resolvedPath;
   } finally {
     activationInProgress = false;
   }
+}
+
+/** Prepare a free-mode workspace and commit it only after full success. */
+export async function activateWorkspacePath(
+  newPath: string,
+  options: PreparationOptions = {},
+): Promise<void> {
+  commitWorkspacePath(await prepareWorkspacePath(newPath, options));
 }

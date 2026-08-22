@@ -5,10 +5,10 @@
  * Workspace storage port — membership and stable Workspace identity.
  *
  * A Workspace is the namespace that owns Spaces. The repository manages that
- * collection; a handle identifies one member and carries the materialized path
- * used by the Disk adapter. A database adapter can retain the same identity and
- * repository shape while replacing the path with its own materialization
- * capability when that backend is implemented.
+ * collection; a handle identifies one member and, for the currently implemented
+ * Disk profile, carries its materialized path. A non-directory structured
+ * adapter must extend this locator contract when it is implemented rather than
+ * manufacture a fake filesystem path.
  *
  * This file may not import a backend implementation or application workspace
  * lifecycle policy.
@@ -25,4 +25,7 @@ export interface WorkspaceRepository {
   get(workspaceId: string): WorkspaceHandle | null;
   getByPath(workspacePath: string): WorkspaceHandle | null;
   list(): readonly WorkspaceHandle[];
+  rename(workspaceId: string, name: string): WorkspaceHandle | null;
+  /** Forget one handle without deleting any Workspace-owned data. */
+  remove(workspaceId: string): boolean;
 }

@@ -106,4 +106,30 @@ describe('DiskWorkspaceRepository', () => {
       '{ definitely not json',
     );
   });
+
+  it('renames a Workspace durably and updates both indexes', () => {
+    const root = tempDir('huabu-workspace-rename-');
+    const repository = new DiskWorkspaceRepository();
+    const original = repository.open(root);
+
+    const renamed = repository.rename(original.workspaceId, 'Research');
+
+    expect(renamed).toEqual({ ...original, name: 'Research' });
+    expect(repository.get(original.workspaceId)).toEqual(renamed);
+    expect(repository.getByPath(root)).toEqual(renamed);
+    expect(new DiskWorkspaceRepository().open(root)).toEqual(renamed);
+  });
+
+  it('unregisters a Workspace without deleting its manifest', () => {
+    const root = tempDir('huabu-workspace-remove-');
+    const repository = new DiskWorkspaceRepository();
+    const workspace = repository.open(root);
+
+    expect(repository.remove(workspace.workspaceId)).toBe(true);
+    expect(repository.get(workspace.workspaceId)).toBeNull();
+    expect(repository.getByPath(root)).toBeNull();
+    expect(readFileSync(manifestPath(root), 'utf8')).toContain(
+      workspace.workspaceId,
+    );
+  });
 });

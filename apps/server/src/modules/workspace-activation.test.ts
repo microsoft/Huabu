@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import {
   activateWorkspacePath,
+  prepareWorkspacePath,
   runWorkspacePreparation,
   WorkspaceActivationInProgressError,
   WorkspaceActivationTimeoutError,
@@ -64,6 +65,18 @@ describe('workspace activation isolation', () => {
     await expect(
       activateWorkspacePath(next, { workerPath, timeoutMs: 30 }),
     ).rejects.toBeInstanceOf(WorkspaceActivationTimeoutError);
+    expect(getWorkspacePath()).toBe(path.resolve(previous));
+  });
+
+  it('prepares a Workspace without changing the active Workspace', async () => {
+    const previous = tempDir('huabu-workspace-previous-');
+    const next = tempDir('huabu-workspace-prepared-');
+    const workerPath = worker(`process.send({ ok: true });`);
+    setWorkspacePath(previous);
+
+    await expect(
+      prepareWorkspacePath(next, { workerPath, timeoutMs: 1_000 }),
+    ).resolves.toBe(path.resolve(next));
     expect(getWorkspacePath()).toBe(path.resolve(previous));
   });
 

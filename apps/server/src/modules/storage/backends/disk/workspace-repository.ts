@@ -22,6 +22,8 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+import { atomicWriteJson } from '../../../../utils/fs.js';
+
 import type {
   WorkspaceHandle,
   WorkspaceRepository,
@@ -146,5 +148,34 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
 
   list(): readonly WorkspaceHandle[] {
     return [...this.#byId.values()];
+  }
+
+  rename(workspaceId: string, rawName: string): WorkspaceHandle | null {
+    const current = this.#byId.get(workspaceId);
+    if (!current) return null;
+
+    const name = rawName.trim();
+    if (!name) throw new Error('Workspace name is required');
+    const filePath = manifestPath(current.workspacePath);
+    const manifest = readManifest(filePath);
+    if (manifest.workspaceId !== workspaceId) {
+      throw new Error(
+        `Workspace identity at ${current.workspacePath} changed from ${workspaceId} to ${manifest.workspaceId}`,
+      );
+    }
+    atomicWriteJson(filePath, { ...manifest, name });
+
+    const updated: WorkspaceHandle = Object.freeze({ ...current, name });
+    this.#byId.set(workspaceId, updated);
+    this.#byPath.set(current.workspacePath, updated);
+    return updated;
+  }
+
+  remove(workspaceId: string): boolean {
+    const current = this.#byId.get(workspaceId);
+    if (!current) return false;
+    this.#byId.delete(workspaceId);
+    this.#byPath.delete(current.workspacePath);
+    return true;
   }
 }
