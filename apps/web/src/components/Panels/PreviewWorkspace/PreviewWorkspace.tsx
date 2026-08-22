@@ -467,6 +467,19 @@ export function PreviewWorkspace({
               <PreviewGroup
                 group={group}
                 workspace={workspace}
+                adjacentNodeTarget={
+                  isSplit
+                    ? (() => {
+                        const otherGroup = workspace.groups[1 - index];
+                        const otherTarget = otherGroup?.activeTabId
+                          ? workspace.tabs[otherGroup.activeTabId]?.target
+                          : undefined;
+                        return otherTarget?.kind === 'node'
+                          ? otherTarget
+                          : undefined;
+                      })()
+                    : undefined
+                }
                 isFocused={group.id === workspace.activeGroupId}
                 onFocus={() => setActiveGroup(group.id)}
                 onActivate={activateWorkspaceTab}

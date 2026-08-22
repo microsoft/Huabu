@@ -218,6 +218,31 @@ describe('renderEnvelopeMessages', () => {
     );
   });
 
+  it('renders a source-only attachment as a node reference', async () => {
+    const { messages } = await renderEnvelopeMessages(
+      makeEnvelope({
+        text: 'use this source',
+        attachments: [
+          {
+            type: 'text',
+            source: 'selection',
+            label: 'Adjacent note',
+            originNodeId: 'node-adjacent',
+          },
+        ],
+      }),
+      NO_CANVAS,
+    );
+
+    const flat = textOf(messages[0].content);
+    expect(flat).toContain(
+      '<attachment type="node" name="Adjacent note" origin="node-adjacent" />',
+    );
+    expect(flat.indexOf('origin="node-adjacent"')).toBeLessThan(
+      flat.indexOf('<user_request>'),
+    );
+  });
+
   it('places the sketch-raster hint with the selection visuals', async () => {
     const { messages } = await renderEnvelopeMessages(
       makeEnvelope({

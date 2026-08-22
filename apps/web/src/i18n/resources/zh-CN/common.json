@@ -629,6 +629,7 @@
     "attachedImageAlt": "已附加图片",
     "removeAttachment": "移除附件",
     "lockSelectionAttachment": "将此选区保留为附件",
+    "addAdjacentNodeSource": "将另一栏节点添加为来源",
     "attachmentSource": "来源：",
     "attachmentContent": "内容：",
     "stopGenerating": "停止生成",

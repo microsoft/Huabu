@@ -163,11 +163,15 @@ export async function buildAttachmentParts(
       }
 
       case 'text': {
-        // Text excerpted from a node — content is always present
         if (att.content && att.content.trim().length > 0) {
           parts.push({
             type: 'text',
             text: `<attachment type="text"${originAttr}>\n${escapeXmlText(att.content)}\n</attachment>`,
+          });
+        } else if (originIds.length > 0) {
+          parts.push({
+            type: 'text',
+            text: `<attachment type="node" name="${escapeXmlAttr(label)}"${originAttr} />`,
           });
         }
         break;

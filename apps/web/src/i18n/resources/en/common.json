@@ -629,6 +629,7 @@
     "attachedImageAlt": "Attached image",
     "removeAttachment": "Remove attachment",
     "lockSelectionAttachment": "Keep this selection as an attachment",
+    "addAdjacentNodeSource": "Add the node from the other pane as a source",
     "attachmentSource": "Source:",
     "attachmentContent": "Content:",
     "stopGenerating": "Stop generating",
