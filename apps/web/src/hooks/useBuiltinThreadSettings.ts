@@ -165,23 +165,18 @@ export function useBuiltinThreadSettings({
       // honour (off/absent stay), so the UI never shows a stale effort.
       const nextEfforts =
         models.find((m) => m.id === modelId)?.reasoningEfforts ?? [];
-      setSettingsState((current) => {
-        const prior =
-          current.threadId === threadId ? current.settings : cachedSettings;
-        return {
-          threadId,
-          settings: {
-            ...prior,
-            modelId,
-            reasoningEffort:
-              prior.reasoningEffort &&
-              prior.reasoningEffort !== 'off' &&
-              !nextEfforts.includes(prior.reasoningEffort)
-                ? null
-                : prior.reasoningEffort,
-          },
-        };
-      });
+      const nextSettings = {
+        ...settings,
+        modelId,
+        reasoningEffort:
+          settings.reasoningEffort &&
+          settings.reasoningEffort !== 'off' &&
+          !nextEfforts.includes(settings.reasoningEffort)
+            ? null
+            : settings.reasoningEffort,
+      };
+      setSettingsState({ threadId, settings: nextSettings });
+      setThreadSettings(threadId, nextSettings);
       // No persisted record yet → hold locally; the first message carries
       // it (skip the POST so nothing 404s).
       if (!threadHasMessages) return;
@@ -201,22 +196,23 @@ export function useBuiltinThreadSettings({
         // the next settings fetch.
       }
     },
-    [threadId, canvasId, threadHasMessages, models, cachedSettings],
+    [
+      threadId,
+      canvasId,
+      threadHasMessages,
+      models,
+      settings,
+      setThreadSettings,
+    ],
   );
 
   const selectReasoningEffort = useCallback(
     async (reasoningEffort: string) => {
       if (!threadId) return;
       mutationGenRef.current += 1;
-      setSettingsState((current) => ({
-        threadId,
-        settings: {
-          ...(current.threadId === threadId
-            ? current.settings
-            : cachedSettings),
-          reasoningEffort,
-        },
-      }));
+      const nextSettings = { ...settings, reasoningEffort };
+      setSettingsState({ threadId, settings: nextSettings });
+      setThreadSettings(threadId, nextSettings);
       if (!threadHasMessages) return;
       try {
         await setChatThreadReasoningEffort(
@@ -228,7 +224,7 @@ export function useBuiltinThreadSettings({
         // Keep the optimistic value; carried on the next send.
       }
     },
-    [threadId, canvasId, threadHasMessages, cachedSettings],
+    [threadId, canvasId, threadHasMessages, settings, setThreadSettings],
   );
 
   // The effective model id: the per-thread override, else the global default.

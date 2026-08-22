@@ -26,9 +26,12 @@ vi.mock('@/api/llm', () => ({
 }));
 
 const THREAD_ID = 'thread-idle';
+let settingsSeenAfterSelection:
+  | { modelId: string | null; reasoningEffort: string | null }
+  | undefined;
 
 function Harness() {
-  const { settings } = useBuiltinThreadSettings({
+  const { settings, selectReasoningEffort } = useBuiltinThreadSettings({
     threadId: THREAD_ID,
     canvasId: 'canvas-1',
     provider: 'test-provider',
@@ -37,9 +40,23 @@ function Harness() {
     threadHasMessages: false,
   });
   return (
-    <span>
-      {settings.modelId}:{settings.reasoningEffort}
-    </span>
+    <>
+      <span data-testid="settings">
+        {settings.modelId}:{settings.reasoningEffort}
+      </span>
+      <button
+        type="button"
+        onClick={async () => {
+          await selectReasoningEffort('medium');
+          settingsSeenAfterSelection = selectThreadSettings(
+            useChatStore.getState(),
+            THREAD_ID,
+          );
+        }}
+      >
+        Select medium
+      </button>
+    </>
   );
 }
 
@@ -47,6 +64,7 @@ let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
 beforeEach(() => {
+  settingsSeenAfterSelection = undefined;
   apiMocks.getModels.mockClear();
   apiMocks.getSettings.mockReset();
   apiMocks.getSettings.mockRejectedValue(new Error('Thread not found'));
@@ -77,11 +95,33 @@ describe('useBuiltinThreadSettings', () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toBe('model-1:high');
+    expect(
+      container.querySelector('[data-testid="settings"]')?.textContent,
+    ).toBe('model-1:high');
     expect(selectThreadSettings(useChatStore.getState(), THREAD_ID)).toEqual({
       modelId: 'model-1',
       reasoningEffort: 'high',
     });
     expect(apiMocks.getSettings).not.toHaveBeenCalled();
+  });
+
+  it('updates the send-path cache before a pre-first-message selection returns', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<Harness />);
+    });
+
+    await act(async () => {
+      container?.querySelector('button')?.click();
+      await Promise.resolve();
+    });
+
+    expect(settingsSeenAfterSelection).toEqual({
+      modelId: 'model-1',
+      reasoningEffort: 'medium',
+    });
   });
 });
