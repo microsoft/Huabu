@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const workspaceState = vi.hoisted(() => ({
   configured: false,
   managed: false,
+  workspaceId: '00000000-0000-4000-8000-000000000001',
   path: '/tmp/sediment-workspace-route',
   name: 'sediment-workspace-route',
 }));
@@ -15,6 +16,14 @@ vi.mock('./workspace.js', async (importOriginal) => {
   const actual = await importOriginal<typeof WorkspaceModule>();
   return {
     ...actual,
+    getWorkspaceHandle: () =>
+      workspaceState.configured
+        ? {
+            workspaceId: workspaceState.workspaceId,
+            workspacePath: workspaceState.path,
+            name: workspaceState.name,
+          }
+        : null,
     getWorkspaceName: () =>
       workspaceState.configured ? workspaceState.name : null,
     getWorkspacePath: () => workspaceState.path,
@@ -60,6 +69,7 @@ async function buildApp() {
 beforeEach(() => {
   workspaceState.configured = false;
   workspaceState.managed = false;
+  workspaceState.workspaceId = '00000000-0000-4000-8000-000000000001';
   workspaceState.path = '/tmp/sediment-workspace-route';
   workspaceState.name = 'sediment-workspace-route';
   worldId.mockReset().mockResolvedValue('world-id');
@@ -88,6 +98,7 @@ describe('workspace Space repository integration', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json()).toMatchObject({
         configured: true,
+        workspaceId: '00000000-0000-4000-8000-000000000001',
         worldCanvasId: 'world-id',
       });
       expect(spaces).toHaveBeenCalledTimes(1);
@@ -105,6 +116,7 @@ describe('workspace Space repository integration', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json()).toMatchObject({
         configured: false,
+        workspaceId: null,
         worldCanvasId: null,
       });
       expect(getStructuredStore).not.toHaveBeenCalled();
@@ -125,6 +137,7 @@ describe('workspace Space repository integration', () => {
       expect(response.statusCode).toBe(200);
       expect(response.json()).toMatchObject({
         configured: true,
+        workspaceId: '00000000-0000-4000-8000-000000000001',
         path: '/tmp/new-workspace',
         name: 'new-workspace',
         worldCanvasId: 'world-id',
@@ -148,6 +161,26 @@ describe('workspace Space repository integration', () => {
 
       expect(response.statusCode).toBe(400);
       expect(response.json()).toEqual({ message: 'World record is corrupt' });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps managed-mode path privacy while returning the stable identity', async () => {
+    workspaceState.configured = true;
+    workspaceState.managed = true;
+    const app = await buildApp();
+    try {
+      const response = await app.inject({ method: 'GET', url: '/workspace' });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        mode: 'managed',
+        configured: true,
+        workspaceId: '00000000-0000-4000-8000-000000000001',
+        path: null,
+        name: 'sediment-workspace-route',
+      });
     } finally {
       await app.close();
     }

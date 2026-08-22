@@ -11,7 +11,10 @@
 
 import { mkdirSync } from 'node:fs';
 
-import { ensureWorldCanvasOnDisk } from './storage/index.js';
+import {
+  ensureWorldCanvasOnDisk,
+  getStructuredStore,
+} from './storage/index.js';
 import { migrateLegacyAcpSessions } from './workspace/migrations/migrate-acp-sessions.js';
 import {
   migrateLegacyAgenetesThreads,
@@ -31,6 +34,9 @@ import { renderExternalAgentSystemPreamble } from '../prompt/external-agent/syst
  */
 export function prepareWorkspaceOnDisk(workspacePath: string): void {
   mkdirSync(workspacePath, { recursive: true });
+  // Adopt Home folders created by older Huabu versions before any other
+  // migration runs. Managed and free mode therefore share one identity path.
+  getStructuredStore().workspaces().open(workspacePath);
   // Demo-stage rename: canvas.json -> space.json, .memory/canvas.md ->
   // .memory/space.md, setting/.huabu.md -> setting/user.md. Runs first so
   // later readers / migrations see the new names. DELETE-ME later.

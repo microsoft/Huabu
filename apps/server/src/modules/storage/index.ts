@@ -93,6 +93,10 @@ export type {
 } from './ports/blob.js';
 export type { StorageHealth } from './ports/common.js';
 export type {
+  WorkspaceHandle,
+  WorkspaceRepository,
+} from './ports/workspace.js';
+export type {
   NewCanvasEvent,
   NodeDeleteResult,
   NodePutInput,

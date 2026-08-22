@@ -32,9 +32,11 @@ export type WorkspaceCapabilities = z.infer<typeof workspaceCapabilitiesSchema>;
 export const workspaceInfoSchema = z.object({
   mode: workspaceModeSchema,
   configured: z.boolean(),
+  /** Stable Workspace identity, or null before configuration. */
+  workspaceId: z.string().uuid().nullable(),
   /** Free-mode active absolute path. Always null in managed mode. */
   path: z.string().nullable(),
-  /** Display label (basename of the active path), or null. */
+  /** Persisted display label (defaults to the active path basename), or null. */
   name: z.string().nullable(),
   /** Stable hidden World canvas identity, or null before configuration. */
   worldCanvasId: z.string().min(1).nullable(),

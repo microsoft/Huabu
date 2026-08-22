@@ -139,6 +139,8 @@ interface WorkspaceState {
 
   /** The active absolute workspace path (free mode), or null. */
   workspacePath: string | null;
+  /** Stable server-owned Workspace identity, or null before configuration. */
+  workspaceId: string | null;
   /** Display label (basename of the active workspace), or null. */
   workspaceName: string | null;
   /** Stable hidden World canvas identity, or null before configuration. */
@@ -197,6 +199,7 @@ function fromInfo(info: WorkspaceInfo): Partial<WorkspaceState> {
   return {
     mode: info.mode,
     capabilities: info.capabilities,
+    workspaceId: info.workspaceId,
     workspacePath: info.path,
     workspaceName: info.name,
     worldCanvasId: info.worldCanvasId,
@@ -250,6 +253,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     typeof localStorage !== 'undefined'
       ? localStorage.getItem(FREE_PATH_KEY)
       : null,
+  workspaceId: null,
   workspaceName: null,
   worldCanvasId: null,
   worldEnabled:

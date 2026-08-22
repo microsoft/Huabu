@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -65,6 +65,18 @@ describe('workspace activation isolation', () => {
       activateWorkspacePath(next, { workerPath, timeoutMs: 30 }),
     ).rejects.toBeInstanceOf(WorkspaceActivationTimeoutError);
     expect(getWorkspacePath()).toBe(path.resolve(previous));
+  });
+
+  it('adopts a legacy path after an isolated worker succeeds', async () => {
+    const target = tempDir('huabu-workspace-adopted-');
+    const workerPath = worker(`process.send({ ok: true });`);
+
+    await activateWorkspacePath(target, { workerPath, timeoutMs: 1_000 });
+
+    expect(existsSync(path.join(target, '.huabu', 'workspace.json'))).toBe(
+      true,
+    );
+    expect(getWorkspacePath()).toBe(path.resolve(target));
   });
 
   it('rejects a concurrent activation while preparation is running', async () => {

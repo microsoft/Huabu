@@ -28,12 +28,14 @@ import { createDiskSpaceRecordReader } from './space-record.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { DiskSpaceTasks } from './space-tasks.js';
 import { createDiskSpaceWrite } from './space-write.js';
+import { DiskWorkspaceRepository } from './workspace-repository.js';
 
 import type { StorageHealth } from '../../ports/common.js';
 import type { SpaceHandle, StructuredStore } from '../../ports/structured.js';
 
 export class DiskStructuredStore implements StructuredStore {
   readonly kind = 'disk' as const;
+  readonly #workspaces = new DiskWorkspaceRepository();
 
   async init(): Promise<void> {
     // The workspace directory is prepared by `workspace-prepare.ts`; Space
@@ -45,6 +47,10 @@ export class DiskStructuredStore implements StructuredStore {
   }
 
   async close(): Promise<void> {}
+
+  workspaces(): DiskWorkspaceRepository {
+    return this.#workspaces;
+  }
 
   spaces(): DiskSpaceRepository {
     return new DiskSpaceRepository();

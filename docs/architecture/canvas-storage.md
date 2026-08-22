@@ -12,6 +12,8 @@ Runtime Home-folder activation prepares and migrates the selected directory in a
 
 ```
 <workspace>/
+  .huabu/
+    workspace.json                # stable Workspace identity + display name
   .world/                         # hidden workspace-owned World Canvas
     space.json                    # stable generated canvasId; normal Canvas topology
   setting/                        # user-owned, cross-canvas

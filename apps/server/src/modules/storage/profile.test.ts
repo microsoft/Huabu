@@ -9,6 +9,7 @@ import {
   StorageProfileError,
   validateStorageProfile,
 } from './profile.js';
+import { createStorage, initStorage, setStorageForTesting } from './storage.js';
 
 describe('parseStorageProfile', () => {
   it('defaults both axes to disk', () => {
@@ -97,5 +98,21 @@ describe('requiresExplicitInit', () => {
     { structured: { kind: 'disk' }, blobs: { kind: 'azure' } },
   ] as const)('requires an awaited init for %j', (profile) => {
     expect(requiresExplicitInit(profile)).toBe(true);
+  });
+});
+
+describe('storage initialization', () => {
+  it('keeps adapters first used during managed Workspace bootstrap', async () => {
+    const profile = {
+      structured: { kind: 'disk' as const },
+      blobs: { kind: 'disk' as const },
+    };
+    const storage = createStorage(profile);
+    const restore = setStorageForTesting(storage);
+    try {
+      expect(await initStorage(profile)).toBe(storage);
+    } finally {
+      restore();
+    }
   });
 });

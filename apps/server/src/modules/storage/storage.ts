@@ -186,7 +186,15 @@ function ensure(): Storage {
 export async function initStorage(
   profile: StorageProfile = parseStorageProfile(),
 ): Promise<Storage> {
-  const storage = createStorage(profile);
+  const storage = current ?? createStorage(profile);
+  if (
+    storage.profile.structured.kind !== profile.structured.kind ||
+    storage.profile.blobs.kind !== profile.blobs.kind
+  ) {
+    throw new StorageProfileError(
+      'Storage was initialized with a different profile than the adapters already in use.',
+    );
+  }
   await Promise.all([storage.structured.init(), storage.blobs.init()]);
   current = storage;
   return storage;

@@ -8,6 +8,7 @@ import path from 'node:path';
 import {
   acquireWorkspaceOperationLease,
   commitWorkspacePath,
+  getWorkspaceHandle,
   getWorkspacePath,
   setWorkspacePath,
   WorkspaceOperationInProgressError,
@@ -74,5 +75,19 @@ describe('workspace operation leases', () => {
     expect(() => setWorkspacePath(next)).not.toThrow();
     expect(existsSync(next)).toBe(true);
     expect(getWorkspacePath()).toBe(path.resolve(next));
+  });
+
+  it('keeps the active path and manifest identity in one Workspace handle', () => {
+    const current = tempDir('huabu-workspace-handle-');
+    setWorkspacePath(current);
+
+    const handle = getWorkspaceHandle();
+    expect(handle).toMatchObject({
+      workspacePath: path.resolve(current),
+      name: path.basename(current),
+    });
+    expect(handle?.workspaceId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
   });
 });
