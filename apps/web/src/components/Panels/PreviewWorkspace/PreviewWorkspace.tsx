@@ -261,8 +261,7 @@ export function PreviewWorkspace({
   const closeWorkspaceTab = (tabId: string) => {
     const currentWorkspace = usePreviewWorkspaceStore.getState().workspace;
     const isFinalTab = Object.keys(currentWorkspace.tabs).length === 1;
-    settleTab(tabId);
-    closeTab(tabId);
+    closeTab(tabId, settleTab);
     if (isFinalTab) onCollapse?.();
   };
   const openPreviewTarget = usePreviewWorkspaceStore(
@@ -276,10 +275,14 @@ export function PreviewWorkspace({
       // target, so it goes through the same open path (§8).
       if (tab) {
         settleTab(tabId);
-        openPreviewTarget(tab.target, {
-          openToSide: true,
-          transient: tab.transient,
-        });
+        openPreviewTarget(
+          tab.target,
+          {
+            openToSide: true,
+            transient: tab.transient,
+          },
+          settleTab,
+        );
       }
     },
     [openPreviewTarget, settleTab],
@@ -337,7 +340,7 @@ export function PreviewWorkspace({
       );
       if (!destination) return;
       settleTab(tabId);
-      moveTab(tabId, destination);
+      moveTab(tabId, destination, settleTab);
       activateTab(tabId);
     },
     [activateTab, clearTabDrag, moveTab, settleTab],

@@ -48,6 +48,29 @@ export type LegacyChatSeed = {
   questionNodeId?: string;
 };
 
+export type BeforePreviewTabRemoved = (tabId: string) => void;
+
+function commitWorkspace(
+  state: PreviewWorkspaceState,
+  workspace: CanvasPreviewWorkspace,
+  beforeTabRemoved?: BeforePreviewTabRemoved,
+): Partial<PreviewWorkspaceState> {
+  const removedTabIds = Object.keys(state.workspace.tabs).filter(
+    (tabId) => !workspace.tabs[tabId],
+  );
+  for (const tabId of removedTabIds) beforeTabRemoved?.(tabId);
+
+  return {
+    workspace,
+    ...(state.nodeFocusRequest && !workspace.tabs[state.nodeFocusRequest.tabId]
+      ? { nodeFocusRequest: null }
+      : {}),
+    ...(state.chatOpenRequest && !workspace.tabs[state.chatOpenRequest.tabId]
+      ? { chatOpenRequest: null }
+      : {}),
+  };
+}
+
 export type PreviewWorkspaceState = {
   /** Canvas whose layout is currently in memory; `''` before the first load. */
   canvasId: string;
@@ -77,16 +100,18 @@ export type PreviewWorkspaceState = {
   openPreviewTarget: (
     target: PreviewTarget,
     options?: OpenPreviewTargetOptions,
+    beforeTabRemoved?: BeforePreviewTabRemoved,
   ) => string;
-  closeTab: (tabId: string) => void;
+  closeTab: (tabId: string, beforeTabRemoved?: BeforePreviewTabRemoved) => void;
   activateTab: (tabId: string) => void;
   promoteTab: (tabId: string) => void;
   moveTab: (
     tabId: string,
     destination: { groupId: string; index?: number },
+    beforeTabRemoved?: BeforePreviewTabRemoved,
   ) => void;
   replaceTabTarget: (tabId: string, target: PreviewTarget) => void;
-  mergeGroups: () => void;
+  mergeGroups: (beforeTabRemoved?: BeforePreviewTabRemoved) => void;
   setActiveGroup: (groupId: string) => void;
   setSplitRatio: (ratio: number) => void;
   requestNodeFocus: (tabId: string) => void;
@@ -129,25 +154,18 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       if (canvasId) writeWorkspace(canvasId, workspace);
     },
 
-    openPreviewTarget: (target, options) => {
-      const opened = openTarget(get().workspace, target, options);
+    openPreviewTarget: (target, options, beforeTabRemoved) => {
+      const state = get();
+      const opened = openTarget(state.workspace, target, options);
       if (!opened.tabId) return '';
-      set({ workspace: opened.workspace });
+      set(commitWorkspace(state, opened.workspace, beforeTabRemoved));
       return opened.tabId;
     },
 
-    closeTab: (tabId) => {
+    closeTab: (tabId, beforeTabRemoved) => {
       const state = get();
       const workspace = closeTab(state.workspace, tabId);
-      set({
-        workspace,
-        ...(state.nodeFocusRequest?.tabId === tabId
-          ? { nodeFocusRequest: null }
-          : {}),
-        ...(state.chatOpenRequest?.tabId === tabId
-          ? { chatOpenRequest: null }
-          : {}),
-      });
+      set(commitWorkspace(state, workspace, beforeTabRemoved));
     },
 
     activateTab: (tabId) =>
@@ -156,14 +174,21 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
     promoteTab: (tabId) =>
       set({ workspace: promoteTab(get().workspace, tabId) }),
 
-    moveTab: (tabId, destination) =>
-      set({ workspace: moveTab(get().workspace, tabId, destination) }),
+    moveTab: (tabId, destination, beforeTabRemoved) => {
+      const state = get();
+      const workspace = moveTab(state.workspace, tabId, destination);
+      set(commitWorkspace(state, workspace, beforeTabRemoved));
+    },
 
     replaceTabTarget: (tabId, target) => {
       set({ workspace: replaceTabTarget(get().workspace, tabId, target) });
     },
 
-    mergeGroups: () => set({ workspace: mergeGroups(get().workspace) }),
+    mergeGroups: (beforeTabRemoved) => {
+      const state = get();
+      const workspace = mergeGroups(state.workspace);
+      set(commitWorkspace(state, workspace, beforeTabRemoved));
+    },
 
     setActiveGroup: (groupId) =>
       set({ workspace: setActiveGroup(get().workspace, groupId) }),
@@ -206,10 +231,11 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
       ),
 
     validate: (liveNodeIds) => {
-      const { canvasId, workspace } = get();
+      const state = get();
+      const { canvasId, workspace } = state;
       if (!canvasId) return;
       const validated = validateWorkspace(workspace, canvasId, liveNodeIds);
-      set({ workspace: validated });
+      set(commitWorkspace(state, validated));
     },
   }),
 );
