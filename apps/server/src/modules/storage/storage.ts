@@ -23,6 +23,7 @@
 
 import path from 'node:path';
 
+import { getDataDir } from '../../data-dir.js';
 import {
   acquireWorkspaceOperationLease,
   getWorkspacePath,
@@ -114,7 +115,7 @@ function buildBlobStore(profile: StorageProfile): BlobStore {
 function buildStructuredStore(profile: StorageProfile): StructuredStore {
   switch (profile.structured.kind) {
     case 'disk':
-      return new DiskStructuredStore();
+      return new DiskStructuredStore(getDataDir());
     default:
       throw new Error(
         `Unsupported structured backend: ${profile.structured.kind}`,

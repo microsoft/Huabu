@@ -1,6 +1,6 @@
 # Canvas Storage Architecture
 
-> Last updated: 2026-08-18
+> Last updated: 2026-08-22
 
 ## 1. Overview
 
@@ -11,6 +11,10 @@ Runtime Home-folder activation prepares and migrates the selected directory in a
 ## 2. Disk Layout
 
 ```
+<HUABU_DATA_DIR>/
+  storage/disk/
+    workspaces.json               # durable workspaceId -> absolute path index
+
 <workspace>/
   .huabu/
     workspace.json                # stable Workspace identity + display name
@@ -42,6 +46,7 @@ Runtime Home-folder activation prepares and migrates the selected directory in a
 
 Key points:
 
+- `storage/disk/workspaces.json` is the Disk backend's discovery index and stores only `schemaVersion` plus `{ workspaceId, workspacePath }` entries. Identity and display metadata remain authoritative in each Workspace's own `.huabu/workspace.json`. Opening an externally moved Workspace reads that manifest and replaces the indexed path for the same id; two live paths carrying the same id are rejected as a copied-identity conflict. Unregistering removes only the index entry and never deletes the Workspace directory or manifest.
 - An ordinary Space **directory name** is derived from its title via `toSafeFilename(title)`, not from `canvasId`. The stable `canvasId` only lives inside `space.json`; the World is the reserved `.world` exception.
 - `SpaceRepository.list()` rescans on every call, returns ordinary Spaces only, skips ordinary directories without `space.json`, rejects malformed records (including a corrupt established World), and leaves ordering to the caller. `worldId()` resolves the hidden World from the same rescan and rejects missing or malformed state; it is the single World resolution point the collection's own create/delete/rename refusals also go through.
 - The `canvasId -> directory name` index in `canvas-dirs.ts` is invalidated **lazily**, never by a live filesystem watcher. Catalogue reads and the World resolvers re-scan unconditionally, server-owned create/rename register the new directory directly, and `CanvasStore.read()` re-scans and retries when `space.json` is missing — which is also how a Finder-side Space rename is adopted as the new title. A stale index therefore self-heals on the next read of the affected Space.
@@ -69,6 +74,7 @@ Key points:
 | Path                                            | Responsibility                                                                                                                                                      |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ports/blob.ts`                                 | Backend-neutral `BlobStore` connection/scope contract for opaque bytes and bounded materialization leases.                                                          |
+| `ports/workspace.ts`                            | Backend-neutral Workspace identity, membership, and locator repository.                                                                                             |
 | `ports/structured.ts`                           | Backend-neutral `StructuredStore`, the `SpaceRepository` collection, and the `SpaceHandle` composite: record read/ordered write, nodes, changes, Tasks, and events. |
 | `ports/contracts/`                              | Reusable Space-collection, node, Space-write, log, blob, and store suites; guarantees are the minimum every adapter implements.                                     |
 | `backends/disk/`                                | Disk implementations plus before-image restoration for rejected in-process ordered batches; no journal or startup recovery.                                         |
@@ -81,7 +87,7 @@ Key points:
 
 The Disk structured adapter and compatibility facade resolve the same cached legacy object, so migration does not create two in-memory authorities. All portable repository methods are async. `SpaceRepository` owns membership reads, structured create/rename, and an exclusive `beginDelete()` session; composition holds that session across the existing blob-first delete saga and then calls `finish()` or `abort()`. Every Space-record write goes through `SpaceHandle.write`, which is the version-checked replacement with the node and delta batch attached; `SpaceHandle.read` reads only. `SpaceNodes` returns complete records plus revision tokens without exposing filenames. `write` preserves the old node mutations → Space record → optional delta order. When a normal in-process node → record → delta batch rejects, the adapter must restore that batch's prestate before returning the rejection. An explicit title rename remains the preceding ordered, best-effort boundary and is not rolled back with the batch. The port does not promise process-crash or power-loss recovery, a determinate result after an unknown remote outcome, multi-process serialization, idempotent retry, or publication. Disk meets the in-process restoration requirement with its existing before-image rollback; a SQL adapter may use a native transaction.
 
-Canvas persistence DTOs and the write coordinator live under `modules/canvas/`; physical Workspace paths, name indexes, directory-handle arbitration, and boot migrations live under `modules/workspace/`; generic filesystem and Markdown codecs live under `utils/`. `canvasRoot()` validates the identifier and then verifies that the resolved Space directory remains a strict descendant of the active Workspace before any downstream Disk operation receives it. `module-boundaries.test.ts` enforces the storage dependency direction and prevents new consumers of the forwarding shims.
+Canvas persistence DTOs and the write coordinator live under `modules/canvas/`; Workspace identity, durable membership, and Disk locators live under `modules/storage/`, while active-Workspace lifecycle and boot migrations remain under `modules/workspace/`; generic filesystem and Markdown codecs live under `utils/`. `canvasRoot()` validates the identifier and then verifies that the resolved Space directory remains a strict descendant of the active Workspace before any downstream Disk operation receives it. `module-boundaries.test.ts` enforces the storage dependency direction and prevents new consumers of the forwarding shims.
 
 Space deletion is serialized against composed blob puts by a writer-preferring admission coordinator and holds an active-Workspace lease across blob cleanup and structured destruction. `beginDelete()` acquires the exclusive session before blob I/O; `finish()` removes structured state, while `abort()` releases the fence without doing so. Blobs are swept before structure so a failed sweep can be retried while the Space record still names them. Puts already admitted may finish; a put queued behind a successful deletion rechecks existence and fails without recreating blobs, while a failed blob sweep leaves the record available for retry. Mutations through existing Space handles and repositories reject while deletion is active or queued; reads remain available for cleanup. Residual direct-filesystem capabilities such as ZIP import, RFS upload/delete, and external-note claim are outside this repository fence and remain blockers for a non-Disk profile.
 

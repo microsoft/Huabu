@@ -21,6 +21,8 @@
  * Space has one long-lived instance.
  */
 
+import path from 'node:path';
+
 import { getCanvasStore } from './legacy/canvas-store-cache.js';
 import { createDiskSpaceLogs } from './space-logs.js';
 import { DiskSpaceNodes } from './space-nodes.js';
@@ -28,14 +30,24 @@ import { createDiskSpaceRecordReader } from './space-record.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { DiskSpaceTasks } from './space-tasks.js';
 import { createDiskSpaceWrite } from './space-write.js';
-import { DiskWorkspaceRepository } from './workspace-repository.js';
+import {
+  DiskWorkspaceRepository,
+  WORKSPACE_REGISTRY_FILENAME,
+} from './workspace-repository.js';
 
 import type { StorageHealth } from '../../ports/common.js';
 import type { SpaceHandle, StructuredStore } from '../../ports/structured.js';
 
 export class DiskStructuredStore implements StructuredStore {
   readonly kind = 'disk' as const;
-  readonly #workspaces = new DiskWorkspaceRepository();
+  readonly #workspaces: DiskWorkspaceRepository;
+
+  constructor(dataDir?: string) {
+    const registryFilePath = dataDir
+      ? path.join(dataDir, 'storage', 'disk', WORKSPACE_REGISTRY_FILENAME)
+      : undefined;
+    this.#workspaces = new DiskWorkspaceRepository(registryFilePath);
+  }
 
   async init(): Promise<void> {
     // The workspace directory is prepared by `workspace-prepare.ts`; Space

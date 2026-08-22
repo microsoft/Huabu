@@ -5,16 +5,19 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { DiskStructuredStore } from './structured-store.js';
 import {
   DiskWorkspaceRepository,
   WORKSPACE_MANIFEST_DIR,
   WORKSPACE_MANIFEST_FILENAME,
+  WORKSPACE_REGISTRY_FILENAME,
 } from './workspace-repository.js';
 
 describe('DiskWorkspaceRepository', () => {
@@ -28,6 +31,10 @@ describe('DiskWorkspaceRepository', () => {
 
   function manifestPath(root: string): string {
     return path.join(root, WORKSPACE_MANIFEST_DIR, WORKSPACE_MANIFEST_FILENAME);
+  }
+
+  function registryPath(dataDir: string): string {
+    return path.join(dataDir, 'storage', 'disk', WORKSPACE_REGISTRY_FILENAME);
   }
 
   afterAll(() => {
@@ -72,10 +79,77 @@ describe('DiskWorkspaceRepository', () => {
     expect(repository.list()).toEqual([first, second]);
   });
 
+  it('persists only the stable id-to-path index and rehydrates metadata after restart', () => {
+    const dataDir = tempDir('huabu-workspace-data-');
+    const root = tempDir('huabu-workspace-persisted-');
+    const filePath = registryPath(dataDir);
+    const repository = new DiskWorkspaceRepository(filePath);
+    const workspace = repository.open(root);
+    const renamed = repository.rename(workspace.workspaceId, 'Research');
+
+    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual({
+      schemaVersion: 1,
+      workspaces: [
+        {
+          workspaceId: workspace.workspaceId,
+          workspacePath: path.resolve(root),
+        },
+      ],
+    });
+    expect(new DiskWorkspaceRepository(filePath).list()).toEqual([renamed]);
+  });
+
+  it('stores the production registry under the Disk backend data directory', () => {
+    const dataDir = tempDir('huabu-workspace-store-data-');
+    const root = tempDir('huabu-workspace-store-root-');
+    const workspace = new DiskStructuredStore(dataDir).workspaces().open(root);
+
+    expect(JSON.parse(readFileSync(registryPath(dataDir), 'utf8'))).toEqual({
+      schemaVersion: 1,
+      workspaces: [
+        {
+          workspaceId: workspace.workspaceId,
+          workspacePath: path.resolve(root),
+        },
+      ],
+    });
+  });
+
+  it('recognizes an externally moved Workspace by id and replaces its registered path', () => {
+    const dataDir = tempDir('huabu-workspace-move-data-');
+    const parent = tempDir('huabu-workspace-move-root-');
+    const originalPath = path.join(parent, 'original');
+    const movedPath = path.join(parent, 'moved');
+    mkdirSync(originalPath);
+    const filePath = registryPath(dataDir);
+    const original = new DiskWorkspaceRepository(filePath).open(originalPath);
+
+    renameSync(originalPath, movedPath);
+    const reopened = new DiskWorkspaceRepository(filePath);
+    const moved = reopened.open(movedPath);
+
+    expect(moved).toEqual({
+      ...original,
+      workspacePath: path.resolve(movedPath),
+    });
+    expect(reopened.getByPath(originalPath)).toBeNull();
+    expect(reopened.get(original.workspaceId)).toEqual(moved);
+    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual({
+      schemaVersion: 1,
+      workspaces: [
+        {
+          workspaceId: original.workspaceId,
+          workspacePath: path.resolve(movedPath),
+        },
+      ],
+    });
+  });
+
   it('rejects two different paths that claim the same Workspace identity', () => {
     const firstRoot = tempDir('huabu-workspace-original-');
     const secondRoot = tempDir('huabu-workspace-copy-');
-    const repository = new DiskWorkspaceRepository();
+    const filePath = registryPath(tempDir('huabu-workspace-copy-data-'));
+    const repository = new DiskWorkspaceRepository(filePath);
     const first = repository.open(firstRoot);
 
     mkdirSync(path.dirname(manifestPath(secondRoot)), { recursive: true });
@@ -89,9 +163,9 @@ describe('DiskWorkspaceRepository', () => {
       'utf8',
     );
 
-    expect(() => repository.open(secondRoot)).toThrow(
-      /same Workspace identity.*different paths/i,
-    );
+    expect(() =>
+      new DiskWorkspaceRepository(filePath).open(secondRoot),
+    ).toThrow(/present at both.*copied Workspaces/i);
   });
 
   it('rejects a malformed existing manifest instead of replacing it', () => {
@@ -122,7 +196,8 @@ describe('DiskWorkspaceRepository', () => {
 
   it('unregisters a Workspace without deleting its manifest', () => {
     const root = tempDir('huabu-workspace-remove-');
-    const repository = new DiskWorkspaceRepository();
+    const filePath = registryPath(tempDir('huabu-workspace-remove-data-'));
+    const repository = new DiskWorkspaceRepository(filePath);
     const workspace = repository.open(root);
 
     expect(repository.remove(workspace.workspaceId)).toBe(true);
@@ -130,6 +205,24 @@ describe('DiskWorkspaceRepository', () => {
     expect(repository.getByPath(root)).toBeNull();
     expect(readFileSync(manifestPath(root), 'utf8')).toContain(
       workspace.workspaceId,
+    );
+    expect(new DiskWorkspaceRepository(filePath).list()).toEqual([]);
+  });
+
+  it('rejects a malformed durable registry instead of discarding it', () => {
+    const filePath = registryPath(tempDir('huabu-workspace-corrupt-data-'));
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        schemaVersion: 1,
+        workspaces: [{ workspacePath: '/missing-id', name: 'Not indexed' }],
+      }),
+      'utf8',
+    );
+
+    expect(() => new DiskWorkspaceRepository(filePath).list()).toThrow(
+      /workspace registry.*invalid/i,
     );
   });
 });
