@@ -2,8 +2,8 @@
 // Licensed under the MIT license.
 
 import { spawn } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, renameSync } from 'node:fs';
-import { mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
+import { mkdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -47,20 +47,15 @@ import {
   WorldReferenceResolutionError,
 } from './world-reference-resolver.js';
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
-import { toSafeFilename } from '../../utils/naming.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
-import {
-  isWorldCanvasId,
-  refreshCanvasDirIndex,
-  registerCanvasDir,
-  suggestCanvasDir,
-} from '../storage/canvas-dirs.js';
+import { isWorldCanvasId } from '../storage/canvas-dirs.js';
 import {
   space,
   createSpace,
   deleteSpace,
+  stageSpaceImport,
   getStructuredStore,
   type CanvasFile,
   type NodeContent,
@@ -68,8 +63,6 @@ import {
   type UpdateNodeOutcome,
   updateNode,
 } from '../storage/index.js';
-import { nodesDir, SPACE_JSON_FILENAME } from '../storage/paths.js';
-import { getWorkspacePath } from '../workspace.js';
 
 import type { CanvasNodeType } from '@huabu/shared';
 import type {
@@ -1581,8 +1574,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     if (!(await space(canvasId).read())) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
-    const dir = nodesDir(canvasId);
-    if (!existsSync(dir)) {
+    // Disk-only, declared as `reveal-space-folder`: the feature *is* "show me
+    // this in Finder", so a backend without a folder has nothing to show.
+    const dir = space(canvasId).diskTree?.nodesDirectory();
+    if (dir === undefined || !existsSync(dir)) {
       return reply.code(404).send({ message: 'Nodes folder not found' });
     }
     // Fire-and-forget: `openInFileManager` is best-effort and never
@@ -1681,13 +1676,20 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       // Stream the upload to a temp zip file
       const tmpZip = path.join(tmpdir(), `${createId('import')}.zip`);
       const targetCanvasId = createId('canvas');
-      // Extract into a hidden staging dir so `scanWorkspace()` ignores it
-      // (it skips dot-prefixed entries) and the as-yet-unrenamed dir cannot
-      // be picked up by `read()`'s self-heal as a canvas titled `<canvasId>`.
-      const stagingDir = path.join(
-        getWorkspacePath(),
-        `.import-${targetCanvasId}`,
-      );
+      // Where an imported Space lands is the backend's business — the
+      // staging location, the title-derived directory, the record filename,
+      // and the index entry are all layout. This route owns the `.huabu.zip`
+      // format and nothing else (proposal §12.6.2).
+      const staged = stageSpaceImport(targetCanvasId);
+      if (!staged) {
+        // Phrased here only until the capability matrix owns the wording
+        // (§12.8), so a Disk-only refusal reads the same everywhere.
+        return reply.code(400).send({
+          message:
+            'Space bundle import is not available on this storage backend.',
+        });
+      }
+      const stagingDir = staged.stagingDirectory;
       let stagingCleanedUp = false;
       try {
         await new Promise<void>((resolve, reject) => {
@@ -1753,64 +1755,33 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           await writeFile(dest, new Uint8Array(buf));
         });
 
-        // Rewrite the topology file so canvasId matches the new directory.
-        // New bundles carry `space.json`; still accept legacy `canvas.json`
-        // exports and normalise them to the new name on the way in.
-        const stagedJsonPath = path.join(stagingDir, SPACE_JSON_FILENAME);
-        const legacyJsonPath = path.join(stagingDir, 'canvas.json');
-        const sourceJsonPath = existsSync(stagedJsonPath)
-          ? stagedJsonPath
-          : existsSync(legacyJsonPath)
-            ? legacyJsonPath
-            : null;
-        if (!sourceJsonPath) {
-          await rm(stagingDir, { recursive: true, force: true });
+        const parsed = await staged.readRecord();
+        if (!parsed) {
+          await staged.discard();
           stagingCleanedUp = true;
           return reply.code(400).send({
-            message: 'Invalid bundle: missing space.json',
+            message: 'Invalid bundle: missing Space record',
           });
         }
-        const raw = await readFile(sourceJsonPath, 'utf-8');
-        const parsed = JSON.parse(raw) as CanvasFile;
         const sourceCanvasId = parsed.canvasId;
         const importedManifest = manifest as ImportManifest | null;
         const targetTitle =
           importedManifest?.title ?? parsed.title ?? 'Imported canvas';
-        const finalDirName = suggestCanvasDir(targetTitle, targetCanvasId);
-        const safeFromTitle = toSafeFilename(targetTitle, targetCanvasId);
-        const dedupeSuffix =
-          finalDirName === safeFromTitle
-            ? ''
-            : finalDirName.slice(safeFromTitle.length);
-        const resolvedTitle =
-          dedupeSuffix === '' ? targetTitle : targetTitle + dedupeSuffix;
 
-        const remapped: CanvasFile = {
+        // Artifact URLs are the bundle's own vocabulary, so they are rewritten
+        // here; where the result is filed is not, so `publish` decides that —
+        // including the de-duplication suffix it may have to add to the title.
+        await staged.publish({
           ...parsed,
           canvasId: targetCanvasId,
-          title: resolvedTitle,
+          title: targetTitle,
           state: rewriteCanvasArtifactUrls(
             parsed.state,
             sourceCanvasId,
             targetCanvasId,
           ),
-        };
-        // Always persist under the new name so the storage layer (which
-        // addresses `space.json`) can find it; drop a legacy source file.
-        await writeFile(stagedJsonPath, JSON.stringify(remapped));
-        if (sourceJsonPath !== stagedJsonPath) {
-          await rm(sourceJsonPath, { force: true });
-        }
-
-        // Move the staged dir into its final, title-derived location so
-        // the on-disk basename matches the title and `read()` will not
-        // self-heal-overwrite the title with the staging dir basename on
-        // the next access.
-        const finalDir = path.join(getWorkspacePath(), finalDirName);
-        renameSync(stagingDir, finalDir);
+        });
         stagingCleanedUp = true;
-        registerCanvasDir(targetCanvasId, finalDirName, resolvedTitle);
-        refreshCanvasDirIndex();
 
         const response: ImportCanvasResponse = {
           canvasId: targetCanvasId,

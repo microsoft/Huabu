@@ -84,12 +84,14 @@ export {
   initStorage,
   setStorageForTesting,
   space,
+  stageSpaceImport,
   storageHealth,
   workspaceAtDirectory,
   workspaceDirectory,
 } from './storage.js';
 export type { Space, SpaceDeleteOutcome, Storage } from './storage.js';
 export type { DiskSpaceTree } from './backends/disk/space-tree.js';
+export type { DiskSpaceImport } from './backends/disk/space-import.js';
 export {
   parseStorageProfile,
   StorageProfileError,

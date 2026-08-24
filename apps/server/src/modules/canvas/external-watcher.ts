@@ -35,7 +35,6 @@ import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
 import { listAllCanvasDirEntries } from '../storage/canvas-dirs.js';
 import { space } from '../storage/index.js';
 import { registerSpaceDirHandleOwner } from '../storage/index.js';
-import { SPACE_JSON_FILENAME } from '../storage/paths.js';
 import { getWorkspacePath, isWorkspaceConfigured } from '../workspace.js';
 
 import type { CanvasFile } from '../storage/index.js';
@@ -134,15 +133,20 @@ async function canvasNoteIds(canvasId: string): Promise<Set<string>> {
   return noteIdsFromCanvas(await space(canvasId).read());
 }
 
+/**
+ * The scan's view of which notes the Space already knows.
+ *
+ * Read through the port rather than off the record file beside `nodes/`. The
+ * path read was equivalent only because Disk keeps the two together, and this
+ * question — what does the Space contain — is one every backend answers.
+ * Failure degrades to "knows nothing", as before: a scan that cannot read
+ * topology surfaces every file rather than silently hiding some.
+ */
 async function readInitialCanvasNoteIds(
-  nodesPath: string,
+  canvasId: string,
 ): Promise<Set<string>> {
   try {
-    const raw = await readFile(
-      path.join(path.dirname(nodesPath), SPACE_JSON_FILENAME),
-      'utf8',
-    );
-    return noteIdsFromCanvas(JSON.parse(raw) as CanvasFile);
+    return await canvasNoteIds(canvasId);
   } catch {
     return new Set();
   }
@@ -682,7 +686,7 @@ async function runInitialScan(session: ActiveSpaceWatch): Promise<void> {
 
     let topology: Promise<Set<string>> | null = null;
     const knownNoteIds = (): Promise<Set<string>> =>
-      (topology ??= readInitialCanvasNoteIds(session.nodesPath));
+      (topology ??= readInitialCanvasNoteIds(session.canvasId));
 
     let nextIndex = 0;
     const worker = async (): Promise<void> => {

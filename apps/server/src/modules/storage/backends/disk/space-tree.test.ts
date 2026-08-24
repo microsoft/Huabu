@@ -55,6 +55,10 @@ describe('diskSpaceTree', () => {
     expect(() => retained.nodeIdForPath('nodes/Note.md')).toThrow(
       /inactive workspace/,
     );
+    expect(() => retained.nodesDirectory()).toThrow(/inactive workspace/);
+    expect(() => retained.duplicateSidecars('node-a')).toThrow(
+      /inactive workspace/,
+    );
     expect(diskSpaceTree('space-a').directory()).toBe(
       path.join(second, 'space-a'),
     );

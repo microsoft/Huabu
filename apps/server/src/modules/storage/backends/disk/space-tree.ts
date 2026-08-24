@@ -21,7 +21,7 @@
 
 import path from 'node:path';
 
-import { canvasRoot } from './layout.js';
+import { canvasRoot, nodesDir } from './layout.js';
 import { getCanvasStore } from './legacy/canvas-store-cache.js';
 import { getWorkspacePath } from '../../../workspace.js';
 
@@ -69,6 +69,16 @@ export interface DiskSpaceTree {
    */
   nodeIdForPath(relativePath: string): string | null;
   /**
+   * Where this Space's node sidecars are, for a feature that shows a user
+   * their own files.
+   *
+   * `directory()` plus a segment the caller would otherwise have to know. The
+   * point of the capability is that the layout has one owner, so a consumer
+   * asking "which folder holds the notes" gets an answer rather than assembles
+   * one.
+   */
+  nodesDirectory(): string;
+  /**
    * Every sidecar filename currently claiming `nodeId`; empty when there is
    * no conflict.
    *
@@ -100,6 +110,10 @@ export function diskSpaceTree(canvasId: string): DiskSpaceTree {
       assertActiveWorkspace();
       return canvasRoot(canvasId);
     },
+    nodesDirectory: () => {
+      assertActiveWorkspace();
+      return nodesDir(canvasId);
+    },
     nodeIdForPath: (relativePath: string) => {
       assertActiveWorkspace();
       const filename = NODE_SIDECAR_RE.exec(relativePath)?.[1];
@@ -107,6 +121,7 @@ export function diskSpaceTree(canvasId: string): DiskSpaceTree {
       return getCanvasStore(canvasId).nodeIdForFilename(filename);
     },
     duplicateSidecars: (nodeId: string) => {
+      assertActiveWorkspace();
       const store = getCanvasStore(canvasId);
       return store.isDuplicateNode(nodeId)
         ? store.duplicateNodeFiles(nodeId)
