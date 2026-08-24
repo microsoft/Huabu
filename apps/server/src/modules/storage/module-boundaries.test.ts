@@ -429,6 +429,47 @@ describe('no production module outside storage names a Disk layout', () => {
     // importers left and was deleted; this keeps the path closed.
     expect(violations).toEqual([]);
   });
+
+  /**
+   * The path check above only sees a direct import. The barrel still
+   * re-exports the legacy store for the compatibility layer and the Disk
+   * suites, so a production file can reach the same object by name without
+   * ever naming its file — which is how one reader survived the migration.
+   */
+  it('rejects a production import of a legacy CanvasStore symbol', () => {
+    // Readers only. `resetStorageCache` is on the barrel too and the
+    // Workspace routes still call it, but it reads nothing — it is the
+    // activation lifecycle dropping an adapter's caches, which is a
+    // composition concern with its own home to find (§12.8), not a
+    // production module learning how a Space is stored.
+    const LEGACY_STORE_SYMBOLS = [
+      'CanvasStore',
+      'getCanvasStore',
+      'forgetCanvasStore',
+    ];
+    const violations: string[] = [];
+    for (const file of sourceFiles) {
+      if (file.startsWith('modules/storage/')) continue;
+      if (file.endsWith('.test.ts')) continue;
+
+      const source = read(file);
+      for (const match of source.matchAll(
+        /import\s*(?:type\s*)?\{([^}]*)\}\s*from/g,
+      )) {
+        for (const raw of match[1].split(',')) {
+          const name = raw
+            .trim()
+            .replace(/^type\s+/, '')
+            .split(/\s+as\s+/)[0]
+            .trim();
+          if (LEGACY_STORE_SYMBOLS.includes(name)) {
+            violations.push(`${file} → ${name}`);
+          }
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
 });
 
 describe('structured write authority', () => {
