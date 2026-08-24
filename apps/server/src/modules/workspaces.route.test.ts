@@ -26,7 +26,9 @@ function handleOf({ workspaceId, name }: TestMember): TestHandle {
 const testState = vi.hoisted(() => ({
   managed: false,
   active: null as TestHandle | null,
+  activePath: null as string | null,
   members: [] as TestMember[],
+  diskIdentities: [] as TestMember[],
 }));
 
 const storageMocks = vi.hoisted(() => ({
@@ -43,10 +45,10 @@ const preprocessingMocks = vi.hoisted(() => ({
 }));
 
 const repository = vi.hoisted(() => ({
-  list: vi.fn(() =>
+  list: vi.fn(async () =>
     testState.members.map(({ workspaceId, name }) => ({ workspaceId, name })),
   ),
-  get: vi.fn((workspaceId: string) => {
+  get: vi.fn(async (workspaceId: string) => {
     const member = testState.members.find(
       (candidate) => candidate.workspaceId === workspaceId,
     );
@@ -54,7 +56,7 @@ const repository = vi.hoisted(() => ({
       ? { workspaceId: member.workspaceId, name: member.name }
       : null;
   }),
-  rename: vi.fn((workspaceId: string, name: string) => {
+  rename: vi.fn(async (workspaceId: string, name: string) => {
     const index = testState.members.findIndex(
       (candidate) => candidate.workspaceId === workspaceId,
     );
@@ -63,7 +65,7 @@ const repository = vi.hoisted(() => ({
     testState.members[index] = member;
     return { workspaceId: member.workspaceId, name: member.name };
   }),
-  remove: vi.fn((workspaceId: string) => {
+  remove: vi.fn(async (workspaceId: string) => {
     const index = testState.members.findIndex(
       (candidate) => candidate.workspaceId === workspaceId,
     );
@@ -89,12 +91,32 @@ const locatorMocks = vi.hoisted(() => ({
       ? { workspaceId: member.workspaceId, name: member.name }
       : null;
   }),
+  ensureWorkspaceManifestOnDisk: vi.fn((workspacePath: string) => {
+    let member = testState.diskIdentities.find(
+      (candidate) => candidate.workspacePath === workspacePath,
+    );
+    if (!member) {
+      member = {
+        workspaceId: NEW_ID,
+        workspacePath,
+        name: workspacePath.split('/').filter(Boolean).at(-1) ?? 'Workspace',
+      };
+      testState.diskIdentities.push(member);
+    }
+    return { schemaVersion: 1, ...handleOf(member) };
+  }),
   adoptWorkspaceDirectory: vi.fn((workspacePath: string) => {
+    const identity = locatorMocks.ensureWorkspaceManifestOnDisk(workspacePath);
     const member: TestMember = {
-      workspaceId: '00000000-0000-4000-8000-000000000003',
+      workspaceId: identity.workspaceId,
+      name: identity.name,
       workspacePath,
-      name: workspacePath.split('/').filter(Boolean).at(-1) ?? 'Workspace',
     };
+    testState.members = testState.members.filter(
+      (candidate) =>
+        candidate.workspaceId !== member.workspaceId &&
+        candidate.workspacePath !== workspacePath,
+    );
     testState.members.push(member);
     return { workspaceId: member.workspaceId, name: member.name };
   }),
@@ -104,12 +126,21 @@ vi.mock('./storage/index.js', () => ({
   getWorkspaceRepository: () => repository,
   resetStorageCache: storageMocks.resetStorageCache,
   adoptWorkspaceDirectory: locatorMocks.adoptWorkspaceDirectory,
+  ensureWorkspaceManifestOnDisk: locatorMocks.ensureWorkspaceManifestOnDisk,
   workspaceAtDirectory: locatorMocks.workspaceAtDirectory,
   workspaceDirectory: locatorMocks.workspaceDirectory,
 }));
 
 vi.mock('./workspace.js', () => ({
+  commitWorkspacePath: (workspacePath: string) => {
+    testState.active = locatorMocks.adoptWorkspaceDirectory(workspacePath);
+    testState.activePath = workspacePath;
+  },
   getWorkspaceHandle: () => testState.active,
+  getWorkspacePath: () => {
+    if (!testState.activePath) throw new Error('No active Workspace path');
+    return testState.activePath;
+  },
   isManagedMode: () => testState.managed,
   resolveWorkspacePath: (workspacePath: string) => workspacePath,
   updateActiveWorkspaceHandle: (workspace: TestHandle) => {
@@ -157,12 +188,15 @@ beforeEach(() => {
       name: 'Second',
     },
   ];
+  testState.diskIdentities = testState.members.map((member) => ({ ...member }));
   const first = testState.members[0];
   testState.active = first ? handleOf(first) : null;
+  testState.activePath = first?.workspacePath ?? null;
   vi.clearAllMocks();
   activationMocks.prepareWorkspacePath.mockImplementation(async (path) => path);
   activationMocks.activateWorkspacePath.mockImplementation(async (path) => {
     testState.active = locatorMocks.workspaceAtDirectory(path);
+    testState.activePath = path;
   });
 });
 
@@ -212,6 +246,45 @@ describe('plural Workspace management routes', () => {
         '/tmp/new',
       );
       expect(testState.active?.workspaceId).toBe(FIRST_ID);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('follows an externally moved active Workspace without splitting its path', async () => {
+    testState.diskIdentities = [
+      {
+        workspaceId: FIRST_ID,
+        workspacePath: '/tmp/moved-first',
+        name: 'First',
+      },
+      testState.diskIdentities[1] as TestMember,
+    ];
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/workspaces',
+        payload: { path: '/tmp/moved-first' },
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(response.json()).toEqual({
+        workspaceId: FIRST_ID,
+        name: 'First',
+        path: '/tmp/moved-first',
+        active: true,
+      });
+      expect(testState.activePath).toBe('/tmp/moved-first');
+      expect(
+        testState.members.filter((member) => member.workspaceId === FIRST_ID),
+      ).toEqual([
+        {
+          workspaceId: FIRST_ID,
+          workspacePath: '/tmp/moved-first',
+          name: 'First',
+        },
+      ]);
     } finally {
       await app.close();
     }
@@ -277,7 +350,7 @@ describe('plural Workspace management routes', () => {
         url: `/workspaces/${SECOND_ID}`,
       });
       expect(inactiveResponse.statusCode).toBe(204);
-      expect(repository.get(SECOND_ID)).toBeNull();
+      await expect(repository.get(SECOND_ID)).resolves.toBeNull();
     } finally {
       await app.close();
     }

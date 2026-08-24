@@ -19,6 +19,11 @@
  *
  * This file may not import a backend implementation or application workspace
  * lifecycle policy.
+ *
+ * Every operation is async so a connection-backed adapter can serve all
+ * Workspace namespaces through one already-open connection or pool. Selecting
+ * the active Workspace is lifecycle policy above this port, not a reason to
+ * reconnect the repository.
  */
 
 export interface WorkspaceHandle {
@@ -27,9 +32,9 @@ export interface WorkspaceHandle {
 }
 
 export interface WorkspaceRepository {
-  get(workspaceId: string): WorkspaceHandle | null;
-  list(): readonly WorkspaceHandle[];
-  rename(workspaceId: string, name: string): WorkspaceHandle | null;
+  get(workspaceId: string): Promise<WorkspaceHandle | null>;
+  list(): Promise<readonly WorkspaceHandle[]>;
+  rename(workspaceId: string, name: string): Promise<WorkspaceHandle | null>;
   /** Forget one member without deleting any Workspace-owned data. */
-  remove(workspaceId: string): boolean;
+  remove(workspaceId: string): Promise<boolean>;
 }

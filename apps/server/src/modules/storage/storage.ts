@@ -8,10 +8,12 @@
  * validated {@link StorageProfile} and holds them for the process. This is
  * the only place that maps a backend kind to an adapter.
  *
- * The module-level holder mirrors `workspace.ts`, which keeps the active
- * workspace path in module state set once at boot. Call {@link initStorage}
- * from the server entry point so a bad profile fails at startup with an
- * actionable message.
+ * The module-level holder is process-wide, while `workspace.ts` selects the
+ * active namespace used through it. Workspace activation never reconstructs
+ * these backend connections: a SQL adapter serves every Workspace through one
+ * live connection or pool and scopes repository/handle operations by id. Call
+ * {@link initStorage} from the server entry point so a bad profile fails at
+ * startup with an actionable message.
  *
  * Anything that reaches for storage without that — tests, scripts — builds
  * the adapters on demand. That path is synchronous, so it cannot `await
@@ -159,11 +161,11 @@ let spaceCreateTail: Promise<void> = Promise.resolve();
  * connections to hold.
  *
  * So the composition root owns this axis separately. It still maps a backend
- * kind to exactly one adapter, and it holds one instance for the process. A
- * future structured backend whose Workspace membership lives in a connection
- * has to answer the boot-order question here — by making Workspace adoption
- * part of the awaited startup sequence — rather than by widening the
- * on-demand path.
+ * kind to exactly one adapter, and it holds one instance for the process.
+ * Connection-backed adapters expose Workspace membership through that same
+ * process-wide connection or pool; switching the active Workspace selects a
+ * namespace and never drops or reconnects the backend. Their repository is
+ * wired during awaited startup rather than through the on-demand path.
  */
 export function getWorkspaceRepository(): WorkspaceRepository {
   return materializedWorkspaces();

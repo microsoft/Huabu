@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import path from 'node:path';
+
 import { z } from 'zod';
 
 import { workspaceCreateSchema, workspaceRenameSchema } from '@huabu/shared';
@@ -8,6 +10,7 @@ import { workspaceCreateSchema, workspaceRenameSchema } from '@huabu/shared';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import {
   adoptWorkspaceDirectory,
+  ensureWorkspaceManifestOnDisk,
   getWorkspaceRepository,
   resetStorageCache,
   workspaceAtDirectory,
@@ -20,7 +23,9 @@ import {
   WorkspaceActivationTimeoutError,
 } from './workspace-activation.js';
 import {
+  commitWorkspacePath,
   getWorkspaceHandle,
+  getWorkspacePath,
   isManagedMode,
   resolveWorkspacePath,
   updateActiveWorkspaceHandle,
@@ -74,15 +79,35 @@ function rejectReadOnlyMutation(
 }
 
 function descriptor(workspace: WorkspaceHandle): WorkspaceDescriptor {
-  const active = getWorkspaceHandle()?.workspaceId === workspace.workspaceId;
+  const workspacePath = workspaceDirectory(workspace.workspaceId);
+  const activeHandle = getWorkspaceHandle();
+  const active =
+    activeHandle?.workspaceId === workspace.workspaceId &&
+    workspacePath !== null &&
+    path.resolve(getWorkspacePath()) === path.resolve(workspacePath);
   return {
     workspaceId: workspace.workspaceId,
     name: workspace.name,
     // A Workspace's directory is a materialization fact the handle does not
     // carry, so it is resolved separately — and never sent in managed mode.
-    path: isManagedMode() ? null : workspaceDirectory(workspace.workspaceId),
+    path: isManagedMode() ? null : workspacePath,
     active,
   };
+}
+
+/** Follow an externally moved active Disk Workspace before publishing it. */
+function reconcileActiveWorkspaceLocation(
+  workspace: WorkspaceHandle,
+  workspacePath: string,
+): WorkspaceHandle {
+  if (getWorkspaceHandle()?.workspaceId !== workspace.workspaceId) {
+    return workspace;
+  }
+  if (path.resolve(getWorkspacePath()) === path.resolve(workspacePath)) {
+    return workspace;
+  }
+  commitWorkspacePath(workspacePath);
+  return getWorkspaceHandle() ?? workspace;
 }
 
 /**
@@ -95,14 +120,16 @@ function descriptor(workspace: WorkspaceHandle): WorkspaceDescriptor {
  * deployment cannot reach, which is the very thing path redaction exists to
  * prevent. Managed mode therefore sees exactly one Workspace: the active one.
  */
-function visibleWorkspaces(): readonly WorkspaceHandle[] {
-  if (!isManagedMode()) return getWorkspaceRepository().list();
+async function visibleWorkspaces(): Promise<readonly WorkspaceHandle[]> {
+  if (!isManagedMode()) return await getWorkspaceRepository().list();
   const active = getWorkspaceHandle();
   return active ? [active] : [];
 }
 
-function findVisible(workspaceId: string): WorkspaceHandle | null {
-  if (!isManagedMode()) return getWorkspaceRepository().get(workspaceId);
+async function findVisible(
+  workspaceId: string,
+): Promise<WorkspaceHandle | null> {
+  if (!isManagedMode()) return await getWorkspaceRepository().get(workspaceId);
   const active = getWorkspaceHandle();
   return active?.workspaceId === workspaceId ? active : null;
 }
@@ -147,7 +174,7 @@ interface WorkspaceParams {
 }
 
 const workspacesRoutes: FastifyPluginAsync = async (app) => {
-  app.get('/', async () => visibleWorkspaces().map(descriptor));
+  app.get('/', async () => (await visibleWorkspaces()).map(descriptor));
 
   app.post<{ Body: WorkspaceCreateRequest }>('/', async (request, reply) => {
     const rejected = rejectReadOnlyMutation(request, reply);
@@ -167,19 +194,39 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
       const repository = getWorkspaceRepository();
       const existing = workspaceAtDirectory(workspacePath);
       if (existing) {
-        if (!parsed.data.name) return reply.send(descriptor(existing));
+        const current = reconcileActiveWorkspaceLocation(
+          existing,
+          workspacePath,
+        );
+        if (!parsed.data.name) return reply.send(descriptor(current));
         const renamed =
-          repository.rename(existing.workspaceId, parsed.data.name) ?? existing;
+          (await repository.rename(existing.workspaceId, parsed.data.name)) ??
+          current;
         updateActiveWorkspaceHandle(renamed);
         return reply.send(descriptor(renamed));
       }
 
       await prepareWorkspacePath(workspacePath);
-      let workspace = adoptWorkspaceDirectory(workspacePath);
+      const preparedManifest = ensureWorkspaceManifestOnDisk(workspacePath);
+      const preparedWorkspace = {
+        workspaceId: preparedManifest.workspaceId,
+        name: preparedManifest.name,
+      };
+      let workspace: WorkspaceHandle;
+      if (getWorkspaceHandle()?.workspaceId === preparedWorkspace.workspaceId) {
+        // `existing` was null, so even a same-path active Workspace needs its
+        // missing membership repaired. Committing adopts it and keeps active
+        // identity and materialization on one location.
+        commitWorkspacePath(workspacePath);
+        workspace = getWorkspaceHandle() ?? preparedWorkspace;
+      } else {
+        workspace = adoptWorkspaceDirectory(workspacePath);
+      }
       if (parsed.data.name) {
         workspace =
-          repository.rename(workspace.workspaceId, parsed.data.name) ??
+          (await repository.rename(workspace.workspaceId, parsed.data.name)) ??
           workspace;
+        updateActiveWorkspaceHandle(workspace);
       }
       return reply.status(201).send(descriptor(workspace));
     } catch (error) {
@@ -192,7 +239,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const parsedId = parseWorkspaceId(request.params.workspaceId, reply);
       if (typeof parsedId !== 'string') return parsedId;
-      const workspace = findVisible(parsedId);
+      const workspace = await findVisible(parsedId);
       if (!workspace) return sendError(reply, 404, 'Workspace not found');
       return reply.send(descriptor(workspace));
     },
@@ -206,7 +253,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
       const parsedId = parseWorkspaceId(request.params.workspaceId, reply);
       if (typeof parsedId !== 'string') return parsedId;
 
-      const workspace = getWorkspaceRepository().get(parsedId);
+      const workspace = await getWorkspaceRepository().get(parsedId);
       const workspacePath = workspaceDirectory(parsedId);
       if (!workspace || !workspacePath) {
         return sendError(reply, 404, 'Workspace not found');
@@ -239,7 +286,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
       }
 
       try {
-        const workspace = getWorkspaceRepository().rename(
+        const workspace = await getWorkspaceRepository().rename(
           parsedId,
           parsed.data.name,
         );
@@ -265,7 +312,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
       // Deliberately not gated on the Workspace being readable: unregistering
       // a folder that has since been deleted or unmounted is exactly when
       // this is needed, and it only ever removes the index entry.
-      if (!getWorkspaceRepository().remove(parsedId)) {
+      if (!(await getWorkspaceRepository().remove(parsedId))) {
         return sendError(reply, 404, 'Workspace not found');
       }
       return reply.status(204).send();

@@ -16,9 +16,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  commitWorkspacePath,
+  beginWorkspaceActivation,
   isManagedMode,
   resolveWorkspacePath,
+  WorkspaceActivationInProgressError,
 } from './workspace.js';
 import { getLogger } from '../utils/logger.js';
 
@@ -55,12 +56,7 @@ export class WorkspaceActivationTimeoutError extends Error {
   }
 }
 
-export class WorkspaceActivationInProgressError extends Error {
-  constructor() {
-    super('Another workspace activation is already in progress');
-    this.name = 'WorkspaceActivationInProgressError';
-  }
-}
+export { WorkspaceActivationInProgressError };
 
 interface PreparationOptions {
   timeoutMs?: number;
@@ -205,5 +201,11 @@ export async function activateWorkspacePath(
   newPath: string,
   options: PreparationOptions = {},
 ): Promise<void> {
-  commitWorkspacePath(await prepareWorkspacePath(newPath, options));
+  const reservation = beginWorkspaceActivation(newPath);
+  try {
+    await prepareWorkspacePath(reservation.workspacePath, options);
+    reservation.commit();
+  } finally {
+    reservation.release();
+  }
 }

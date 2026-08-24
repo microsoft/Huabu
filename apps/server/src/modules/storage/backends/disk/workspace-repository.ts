@@ -27,6 +27,7 @@ import { randomUUID } from 'node:crypto';
 import {
   mkdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
   type WriteFileOptions,
 } from 'node:fs';
@@ -213,6 +214,17 @@ function sameEntries(
   );
 }
 
+/** Compare two existing directory spellings without conflating real copies. */
+function samePhysicalDirectory(left: string, right: string): boolean {
+  if (path.resolve(left) === path.resolve(right)) return true;
+  try {
+    return realpathSync.native(left) === realpathSync.native(right);
+  } catch (error) {
+    if (isUnreachable(error)) return false;
+    throw error;
+  }
+}
+
 function toHandle(manifest: WorkspaceManifest): WorkspaceHandle {
   return Object.freeze({
     workspaceId: manifest.workspaceId,
@@ -323,12 +335,12 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
 
   // ─── Portable membership (WorkspaceRepository) ──────────────────────────
 
-  get(workspaceId: string): WorkspaceHandle | null {
+  async get(workspaceId: string): Promise<WorkspaceHandle | null> {
     const entry = this.#entryFor(workspaceId);
     return entry ? this.#hydrate(entry) : null;
   }
 
-  list(): readonly WorkspaceHandle[] {
+  async list(): Promise<readonly WorkspaceHandle[]> {
     const handles: WorkspaceHandle[] = [];
     for (const entry of this.#read()) {
       const handle = this.#hydrate(entry);
@@ -337,7 +349,10 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
     return handles;
   }
 
-  rename(workspaceId: string, name: string): WorkspaceHandle | null {
+  async rename(
+    workspaceId: string,
+    name: string,
+  ): Promise<WorkspaceHandle | null> {
     const entry = this.#entryFor(workspaceId);
     if (!entry || !this.#hydrate(entry)) return null;
 
@@ -354,7 +369,7 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
     return toHandle(writeManifest(filePath, { ...manifest, name }));
   }
 
-  remove(workspaceId: string): boolean {
+  async remove(workspaceId: string): Promise<boolean> {
     const entries = this.#read();
     const next = entries.filter((entry) => entry.workspaceId !== workspaceId);
     if (next.length === entries.length) return false;
@@ -406,7 +421,10 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
         manifestPath(elsewhere.workspacePath),
         true,
       );
-      if (previous?.workspaceId === manifest.workspaceId) {
+      if (
+        previous?.workspaceId === manifest.workspaceId &&
+        !samePhysicalDirectory(elsewhere.workspacePath, workspacePath)
+      ) {
         throw new Error(
           `Workspace identity ${manifest.workspaceId} is present at both ${elsewhere.workspacePath} and ${workspacePath}; copied Workspaces must receive distinct identities`,
         );
