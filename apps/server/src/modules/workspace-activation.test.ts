@@ -86,7 +86,7 @@ describe('workspace activation isolation', () => {
 
     await activateWorkspacePath(target, { workerPath, timeoutMs: 1_000 });
 
-    expect(existsSync(path.join(target, 'workspace.json'))).toBe(true);
+    expect(existsSync(path.join(target, '.workspace.json'))).toBe(true);
     expect(getWorkspacePath()).toBe(path.resolve(target));
   });
 

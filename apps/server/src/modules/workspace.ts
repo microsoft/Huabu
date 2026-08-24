@@ -28,7 +28,7 @@
  * Directory layout inside the active workspace (canvas-centric):
  *
  *   <workspace>/
- *     workspace.json
+ *     .workspace.json
  *     <canvasId>/
  *       space.json
  *       nodes/<nodeId>.md

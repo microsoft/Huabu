@@ -92,7 +92,7 @@ describe('workspace operation leases', () => {
       expect(() => commitWorkspacePath(refused)).toThrow(
         WorkspaceOperationInProgressError,
       );
-      expect(existsSync(path.join(refused, 'workspace.json'))).toBe(false);
+      expect(existsSync(path.join(refused, '.workspace.json'))).toBe(false);
       expect(workspaceAtDirectory(refused)).toBeNull();
       const registry = path.join(
         process.env.HUABU_DATA_DIR as string,
@@ -133,7 +133,7 @@ describe('workspace preparation', () => {
     // manifest belongs there — it is part of the blocking filesystem work
     // being contained — but membership stays a Server-process decision so the
     // durable registry keeps exactly one writer and no stale cache to lose.
-    expect(existsSync(path.join(root, 'workspace.json'))).toBe(true);
+    expect(existsSync(path.join(root, '.workspace.json'))).toBe(true);
     expect(workspaceAtDirectory(root)).toBeNull();
   });
 });

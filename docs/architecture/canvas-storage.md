@@ -16,7 +16,7 @@ Runtime Home-folder activation prepares and migrates the selected directory in a
     workspaces.json               # durable workspaceId -> absolute path index
 
 <workspace>/
-  workspace.json                  # stable Workspace identity + display name
+  .workspace.json                 # stable Workspace identity + display name
   .world/                         # hidden workspace-owned World Canvas
     space.json                    # stable generated canvasId; normal Canvas topology
   setting/                        # user-owned, cross-canvas
@@ -45,7 +45,7 @@ Runtime Home-folder activation prepares and migrates the selected directory in a
 
 Key points:
 
-- `storage/disk/workspaces.json` is the Disk backend's discovery index and stores only `schemaVersion` plus `{ workspaceId, workspacePath }` entries. It is the single in-process representation of membership: it is re-read from disk on every access and each member's display metadata is read back from its own `workspace.json` on demand, so nothing here can go stale against the files it describes. The Server process is its only writer — the isolated preparation child adopts the manifest but never registers membership.
+- `storage/disk/workspaces.json` is the Disk backend's discovery index and stores only `schemaVersion` plus `{ workspaceId, workspacePath }` entries. It is the single in-process representation of membership: it is re-read from disk on every access and each member's display metadata is read back from its own `.workspace.json` on demand, so nothing here can go stale against the files it describes. The Server process is its only writer — the isolated preparation child adopts the manifest but never registers membership.
 - Opening an externally moved Workspace reads that manifest and replaces the indexed path for the same id. Two live paths carrying the same id are rejected as a copied-identity conflict; a path whose folder was deleted and recreated is re-adopted under the identity now on disk, which is what keeps the legacy Home-folder selection flow working after the user rearranges folders outside Huabu.
 - A registered Workspace that cannot answer for itself — folder deleted, volume unmounted, path taken over by another Workspace — reads as "not a member right now" rather than an error, so one unreachable entry cannot take down the whole collection, and it returns when its volume does. A _malformed_ manifest or registry still throws: that is damage the operator has to see. Unregistering removes only the index entry, works while the Workspace is unreachable, and never deletes the Workspace directory or manifest.
 - Workspace identity is a precondition of storage rather than a product of it, so the composition root resolves the Workspace repository (`getWorkspaceRepository()`) on its own axis, separate from `StructuredStore`. Managed mode adopts its Workspace while `app.ts` is still evaluating, before the boot sequence can await `initStorage()`; a future backend whose Workspace membership lives in a connection has to make adoption part of that awaited startup rather than widen the on-demand path.

@@ -5,9 +5,10 @@
  * Disk implementation of the Workspace storage port.
  *
  * A Workspace owns one stable id and display name in
- * `<workspace>/workspace.json`, alongside the `space.json` each Space keeps.
- * Existing Home folders predate that manifest, so adopting one creates the
- * file once.
+ * `<workspace>/.workspace.json`. It sits at the Home folder root — hidden, the
+ * way the Workspace's other Huabu-owned state such as `.world/` is, so the
+ * user's own Spaces and `setting/` stay the visible contents. Existing Home
+ * folders predate the manifest, so adopting one creates the file once.
  *
  * The Server data directory holds a separate discovery index containing only
  * `workspaceId -> workspacePath`. That deliberate duplication is the minimum
@@ -41,7 +42,7 @@ import type {
   WorkspaceRepository,
 } from '../../ports/workspace.js';
 
-export const WORKSPACE_MANIFEST_FILENAME = 'workspace.json';
+export const WORKSPACE_MANIFEST_FILENAME = '.workspace.json';
 export const WORKSPACE_REGISTRY_FILENAME = 'workspaces.json';
 const WORKSPACE_MANIFEST_SCHEMA_VERSION = 1;
 const WORKSPACE_REGISTRY_SCHEMA_VERSION = 1;
