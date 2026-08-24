@@ -50,6 +50,7 @@ import interactiveViewRoutes from './modules/interactive-view/interactive-view.r
 import { isPublicRfsSkillBootstrapRequest } from './modules/remote_fs/public-skill.js';
 import rfsRoutes from './modules/remote_fs/rfs.route.js';
 import deploymentRoutes from './modules/security/deployment.route.js';
+import { closeStorage } from './modules/storage/index.js';
 import {
   hostGuardPlugin,
   markBasicAuthenticated,
@@ -366,6 +367,11 @@ if (bundledAgentTeamsPath) {
 // after the process is gone. Closing them here lets `app.close()` (driven
 // by the SIGTERM/SIGINT handlers in server.ts) tear them down gracefully.
 app.addHook('onClose', async () => resetExternalNoteSessions());
+// Close the storage connections on graceful shutdown. Disk holds nothing a
+// process exit would not release, so this earns its place by being the seat
+// a connection-holding backend will need — a pool nobody closes leaks on
+// every restart, and the lifecycle is where that is visible.
+app.addHook('onClose', async () => closeStorage());
 // Capture the bound TCP port for L1-owned reachback (RFS): the
 // canvas-scoped `HUABU_RFS_URL` base is built from this. RFS is
 // canvas-coupled and therefore a pure L1 concern, so the port lives in

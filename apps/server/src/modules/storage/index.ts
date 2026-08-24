@@ -72,6 +72,7 @@ export type {
 
 export {
   adoptWorkspaceDirectory,
+  closeStorage,
   composeStorage,
   createSpace,
   createStorage,

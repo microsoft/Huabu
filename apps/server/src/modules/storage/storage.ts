@@ -396,6 +396,26 @@ export function getStorage(): Storage {
   return ensure();
 }
 
+/**
+ * Close the process's storage connections and forget them.
+ *
+ * Registered on graceful Server shutdown. Disk holds nothing a process exit
+ * would not release, so today this is close to a no-op — which is exactly why
+ * it has to exist before a connection-holding backend does: a pool that is
+ * never closed leaks on every restart, and the place to notice that is the
+ * lifecycle, not the adapter.
+ *
+ * Idempotent and safe before {@link initStorage}: shutdown must not depend on
+ * whether anything ever reached for storage.
+ */
+export async function closeStorage(): Promise<void> {
+  const storage = current;
+  current = null;
+  workspaces = null;
+  if (!storage) return;
+  await Promise.all([storage.structured.close(), storage.blobs.close()]);
+}
+
 export function getBlobStore(): BlobStore {
   return ensure().blobs;
 }
