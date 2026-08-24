@@ -68,7 +68,7 @@ import {
 import { getSketchRenderedSize } from '@huabu/shared/canvas-engine';
 
 import { RASTERIZABLE_IMAGE_EXT_MIME } from '../../utils/mime.js';
-import { canvasBlobs, getCanvasStore } from '../storage/index.js';
+import { space, getCanvasStore } from '../storage/index.js';
 
 import type {
   SketchNodeData,
@@ -450,7 +450,7 @@ async function loadContextImage(
   if (!mimeType) return null;
   const { width, height } = nodeBoxSize(node);
   if (width <= 0 || height <= 0) return null;
-  const bytes = await canvasBlobs(store.canvasId).read(src);
+  const bytes = await space(store.canvasId).blobs.read(src);
   if (!bytes) return null;
   return { node, resolvedSrc: src, bytes, mimeType, width, height };
 }
@@ -799,7 +799,7 @@ async function maybeResizeImageArtifact(
   src: string,
   maxEdge: number,
 ): Promise<{ src: string; width: number; height: number } | null> {
-  const blobs = canvasBlobs(store.canvasId);
+  const blobs = space(store.canvasId).blobs;
   const ext = path.extname(src).toLowerCase();
   const mimeType = IMAGE_EXT_MIME[ext];
   if (!mimeType) return null;
@@ -1060,10 +1060,10 @@ export async function snapshotNodesToArtifacts(
         ? `sketch-raster-${fingerprint}`
         : `sketch-raster-${fingerprint}-${maxEdge}`;
     const filename = `${id}.png`;
-    const existing = await canvasBlobs(store.canvasId).head(filename);
+    const existing = await space(store.canvasId).blobs.head(filename);
     if (!existing) {
       const png = await renderClusterPng(built.svg, built.width);
-      await canvasBlobs(store.canvasId).put(filename, png);
+      await space(store.canvasId).blobs.put(filename, png);
     }
     results.push({
       src: filename,

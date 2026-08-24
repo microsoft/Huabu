@@ -13,8 +13,9 @@
  * keeps Workspaces in a database has no directory to name. Rather than force
  * such an adapter to manufacture a path it cannot honor, locating a Workspace
  * is a capability the composition root exposes separately, for the profiles
- * that have one — the Workspace-level counterpart to `spaceDirectory()`
- * (docs/proposals/multi-backend-storage.md §12.5.4). Adopting a directory as
+ * that have one — the Workspace-level counterpart to the Space handle's
+ * `diskTree` member (docs/proposals/multi-backend-storage.md §6.4.1).
+ * Adopting a directory as
  * a Workspace lives there for the same reason.
  *
  * This file may not import a backend implementation or application workspace

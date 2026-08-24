@@ -52,7 +52,7 @@ import {
 } from '@huabu/shared';
 
 import { getLogger } from '../../../../utils/logger.js';
-import { canvasBlobs } from '../../../storage/index.js';
+import { space } from '../../../storage/index.js';
 import { getAzureImageConfig } from '../../llm.js';
 
 import type { generateImageParamsSchema } from '../definitions.js';
@@ -131,7 +131,7 @@ export async function handleGenerateImage(
   // ── Load reference artifacts upfront ──────────────────────────────────
   // Any missing/invalid ref is an early hard error — better than sending
   // a partial set to Azure and getting cryptic results.
-  const blobs = canvasBlobs(args.canvasId);
+  const blobs = space(args.canvasId).blobs;
   const refImages: Array<{ key: string; bytes: Buffer }> = [];
   for (const key of refs) {
     if (typeof key !== 'string' || !key.trim()) {

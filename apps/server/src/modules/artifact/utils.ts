@@ -7,7 +7,7 @@ import { ARTIFACT_URL_REGEX } from '@huabu/shared';
 
 import { getLogger } from '../../utils/logger.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
-import { canvasBlobs } from '../storage/index.js';
+import { space } from '../storage/index.js';
 
 const log = getLogger('artifact');
 
@@ -56,7 +56,7 @@ export async function resolveArtifactImageUrl(
   if (!canvasId || !filename) return url;
 
   try {
-    const buffer = await canvasBlobs(canvasId).read(filename);
+    const buffer = await space(canvasId).blobs.read(filename);
     if (!buffer) return url;
     const ext = path.extname(filename).toLowerCase();
     // Never guess `image/png` for an unknown extension: callers forward this

@@ -32,11 +32,7 @@ import {
   executeOnServer,
   type InteractiveViewConflict,
 } from '../canvas/canvas-executor.js';
-import {
-  canvasBlobs,
-  getCanvasStore,
-  getStructuredStore,
-} from '../storage/index.js';
+import { space, getCanvasStore, getStructuredStore } from '../storage/index.js';
 
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -346,7 +342,7 @@ export class InteractiveViewService {
       : null;
     const rendererExists = request.rendererArtifact.startsWith('upload/')
       ? stagedPath !== null && existsSync(stagedPath)
-      : Boolean(await canvasBlobs(canvasId).head(request.rendererArtifact));
+      : Boolean(await space(canvasId).blobs.head(request.rendererArtifact));
     if (!rendererExists) {
       throw new InteractiveViewServiceError(
         'renderer_not_found',

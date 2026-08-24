@@ -15,14 +15,22 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { importForeignNodeSources } from './import-node-src.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
-import {
-  canvasBlobs,
-  getCanvasStore,
-  spaceDirectory,
-} from '../storage/index.js';
+import { space, getCanvasStore } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { CanvasCommand } from '@huabu/shared';
+
+/**
+ * The Space's Disk directory, or a test failure.
+ *
+ * These cases are Disk-specific by construction; the assertion states that
+ * rather than letting an optional-chained `undefined` quietly pass.
+ */
+function diskDirOf(canvasId: string): string {
+  const tree = space(canvasId).diskTree;
+  if (!tree) throw new Error('Expected the Disk backend in this test');
+  return tree.directory();
+}
 
 let tmp: string;
 
@@ -49,7 +57,7 @@ afterEach(() => {
 
 /** Stage a file under the canvas's hidden `.upload/` scratch dir. */
 function stageUpload(canvasId: string, name: string, body: string): string {
-  const uploadDir = path.join(spaceDirectory(canvasId), '.upload');
+  const uploadDir = path.join(diskDirOf(canvasId), '.upload');
   mkdirSync(uploadDir, { recursive: true });
   const abs = path.join(uploadDir, name);
   writeFileSync(abs, body);
@@ -125,7 +133,7 @@ describe('importForeignNodeSources — web nodes', () => {
     // …whose file exists in the artifact store…
     expect(src).toBeDefined();
     if (src === undefined) throw new Error('Expected a rewritten web src');
-    expect(await canvasBlobs(canvasId).head(src)).not.toBeNull();
+    expect(await space(canvasId).blobs.head(src)).not.toBeNull();
     // …and the staging upload was reclaimed (move semantics).
     expect(existsSync(uploadAbs)).toBe(false);
   });
@@ -221,7 +229,7 @@ describe('importForeignNodeSources — web nodes', () => {
     expect(src).toMatch(/^artifact-[^/]+\.html$/);
     expect(src).toBeDefined();
     if (src === undefined) throw new Error('Expected a rewritten web src');
-    expect(await canvasBlobs(canvasId).head(src)).not.toBeNull();
+    expect(await space(canvasId).blobs.head(src)).not.toBeNull();
     expect(existsSync(uploadAbs)).toBe(false);
   });
 
@@ -268,13 +276,13 @@ describe('importForeignNodeSources — media nodes (regression)', () => {
     expect(src).toMatch(/^artifact-[^/]+\.png$/);
     expect(src).toBeDefined();
     if (src === undefined) throw new Error('Expected a rewritten image src');
-    expect(await canvasBlobs(canvasId).head(src)).not.toBeNull();
+    expect(await space(canvasId).blobs.head(src)).not.toBeNull();
   });
 
   it('canonicalizes an artifact path that leaves and re-enters the Space', async () => {
     const canvasId = 'c-image-reentered';
     const store = getCanvasStore(canvasId);
-    const spaceDir = spaceDirectory(canvasId);
+    const spaceDir = diskDirOf(canvasId);
     const artifactsDir = path.join(spaceDir, '.artifacts');
     mkdirSync(artifactsDir, { recursive: true });
     writeFileSync(path.join(artifactsDir, 'pic.png'), 'existing artifact');

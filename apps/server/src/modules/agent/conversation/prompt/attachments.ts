@@ -37,7 +37,7 @@ import { resolveImageUrl, MAX_INLINE_IMAGE_BYTES } from './image-inlining.js';
 import { escapeXmlAttr, escapeXmlText } from './node-element.js';
 import { isRasterizableImageMime } from '../../../../utils/mime.js';
 import { ARTIFACT_URL_REGEX } from '../../../artifact/utils.js';
-import { canvasBlobs } from '../../../storage/index.js';
+import { space } from '../../../storage/index.js';
 
 import type { AgentInputPart } from '@agenetes/protocol';
 import type { ChatAttachment } from '@huabu/shared';
@@ -227,7 +227,7 @@ export async function buildAttachmentParts(
           if (resolvedCanvasId && resolvedFilename) {
             try {
               const bytes =
-                await canvasBlobs(resolvedCanvasId).read(resolvedFilename);
+                await space(resolvedCanvasId).blobs.read(resolvedFilename);
               // Attachments are inlined as text; binary bytes simply
               // decode to mojibake and the URL-only branch is used instead.
               if (bytes) fileContent = bytes.toString('utf-8');

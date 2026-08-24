@@ -1288,7 +1288,7 @@ export class CanvasStore {
   // ── Artifacts ────────────────────────────────────────────────────────────
   //
   // Artifact bytes are NOT owned here. They live behind the `BlobStore`
-  // port — `canvasBlobs(canvasId)` in `storage.js` — so this store holds
+  // port — `space(canvasId).blobs` in `storage.js` — so this store holds
   // structured records only and a non-filesystem blob backend can be
   // configured independently. See docs/proposals/multi-backend-storage.md.
 
