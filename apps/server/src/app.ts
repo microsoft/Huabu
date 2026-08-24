@@ -50,13 +50,13 @@ import interactiveViewRoutes from './modules/interactive-view/interactive-view.r
 import { isPublicRfsSkillBootstrapRequest } from './modules/remote_fs/public-skill.js';
 import rfsRoutes from './modules/remote_fs/rfs.route.js';
 import deploymentRoutes from './modules/security/deployment.route.js';
-import { closeStorage } from './modules/storage/index.js';
 import {
   hostGuardPlugin,
   markBasicAuthenticated,
   originGuardPlugin,
   resolveAllowedHostnames,
 } from './modules/security/index.js';
+import { closeStorage } from './modules/storage/index.js';
 import webRoutes from './modules/web/web.route.js';
 import {
   initWorkspaceFromEnv,

@@ -34,11 +34,11 @@ import { DiskBlobStore } from './backends/disk/blob-store.js';
 import { stageDiskSpaceImport } from './backends/disk/space-import.js';
 import { diskSpaceTree } from './backends/disk/space-tree.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
-import { spaceBlobAreas } from './ports/blob.js';
 import {
   DiskWorkspaceRepository,
   workspaceRegistryPath,
 } from './backends/disk/workspace-repository.js';
+import { spaceBlobAreas } from './ports/blob.js';
 import {
   parseStorageProfile,
   requiresExplicitInit,

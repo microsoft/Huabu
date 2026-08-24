@@ -176,7 +176,10 @@ async function runPipelineStages(
       ) {
         try {
           const artifactName = `${createId('artifact')}.pdf`;
-          const info = await deps.artifacts.put(artifactName, ctx.extracted.rawPdf);
+          const info = await deps.artifacts.put(
+            artifactName,
+            ctx.extracted.rawPdf,
+          );
           ctx.resolved.artifactUri = info.name;
           ctx.resolved.artifactName = info.name;
         } catch (snapshotError) {

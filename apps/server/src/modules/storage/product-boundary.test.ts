@@ -36,7 +36,6 @@ import {
   type MountedTestStorage,
 } from './testing.js';
 
-
 import type { StorageProfile } from './profile.js';
 import type { CanvasFile } from '../canvas/persistence-types.js';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
