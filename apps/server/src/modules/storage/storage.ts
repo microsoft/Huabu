@@ -32,6 +32,10 @@ import { DiskBlobStore } from './backends/disk/blob-store.js';
 import { canvasRoot } from './backends/disk/layout.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import {
+  DiskWorkspaceRepository,
+  workspaceRegistryPath,
+} from './backends/disk/workspace-repository.js';
+import {
   parseStorageProfile,
   requiresExplicitInit,
   StorageProfileError,
@@ -54,6 +58,7 @@ import type {
   SpaceDeleteFinishResult,
   StructuredStore,
 } from './ports/structured.js';
+import type { WorkspaceRepository } from './ports/workspace.js';
 import type { Readable } from 'node:stream';
 
 /**
@@ -115,7 +120,7 @@ function buildBlobStore(profile: StorageProfile): BlobStore {
 function buildStructuredStore(profile: StorageProfile): StructuredStore {
   switch (profile.structured.kind) {
     case 'disk':
-      return new DiskStructuredStore(getDataDir());
+      return new DiskStructuredStore();
     default:
       throw new Error(
         `Unsupported structured backend: ${profile.structured.kind}`,
@@ -136,7 +141,43 @@ export function createStorage(profile: StorageProfile): Storage {
 // ─── Process-wide holder ────────────────────────────────────────────────────
 
 let current: Storage | null = null;
+let workspaces: WorkspaceRepository | null = null;
 let spaceCreateTail: Promise<void> = Promise.resolve();
+
+/**
+ * The Workspace repository for the configured structured backend.
+ *
+ * Workspace identity is a *precondition* of storage rather than a product of
+ * it: every Disk adapter resolves its paths against the active Workspace, and
+ * managed mode has to adopt its Workspace while `app.ts` is still evaluating —
+ * before the boot sequence can await {@link initStorage}. Routing it through
+ * {@link getStructuredStore} would therefore drag the whole composition open
+ * on the on-demand path, which that path explicitly refuses for a backend with
+ * connections to hold.
+ *
+ * So the composition root owns this axis separately. It still maps a backend
+ * kind to exactly one adapter, and it holds one instance for the process. A
+ * future structured backend whose Workspace membership lives in a connection
+ * has to answer the boot-order question here — by making Workspace adoption
+ * part of the awaited startup sequence — rather than by widening the
+ * on-demand path.
+ */
+export function getWorkspaceRepository(): WorkspaceRepository {
+  if (workspaces) return workspaces;
+
+  const profile = parseStorageProfile();
+  switch (profile.structured.kind) {
+    case 'disk':
+      workspaces = new DiskWorkspaceRepository(
+        workspaceRegistryPath(getDataDir()),
+      );
+      return workspaces;
+    default:
+      throw new StorageProfileError(
+        `Workspace membership is not implemented for the "${profile.structured.kind}" structured backend.`,
+      );
+  }
+}
 
 function defaultSpaceTitle(
   existing: readonly { readonly title: string | null }[],
@@ -187,15 +228,7 @@ function ensure(): Storage {
 export async function initStorage(
   profile: StorageProfile = parseStorageProfile(),
 ): Promise<Storage> {
-  const storage = current ?? createStorage(profile);
-  if (
-    storage.profile.structured.kind !== profile.structured.kind ||
-    storage.profile.blobs.kind !== profile.blobs.kind
-  ) {
-    throw new StorageProfileError(
-      'Storage was initialized with a different profile than the adapters already in use.',
-    );
-  }
+  const storage = createStorage(profile);
   await Promise.all([storage.structured.init(), storage.blobs.init()]);
   current = storage;
   return storage;

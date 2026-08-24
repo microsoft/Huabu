@@ -37,7 +37,6 @@
  */
 
 import type { StorageHealth } from './common.js';
-import type { WorkspaceRepository } from './workspace.js';
 import type {
   CanvasEvent,
   CanvasFile,
@@ -70,8 +69,6 @@ export interface StructuredStore {
   init(): Promise<void>;
   health(): Promise<StorageHealth>;
   close(): Promise<void>;
-  /** Return the repository for Workspace membership and identity. */
-  workspaces(): WorkspaceRepository;
   /**
    * Return a repository for the currently-bound Space collection.
    *

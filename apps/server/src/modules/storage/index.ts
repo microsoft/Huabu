@@ -46,6 +46,13 @@ export {
 } from './backends/disk/space-dir-handles.js';
 export type { SpaceDirHandleOwner } from './backends/disk/space-dir-handles.js';
 export { ensureWorldCanvasOnDisk } from './backends/disk/world-canvas.js';
+/**
+ * Workspace adoption, split out from the repository on purpose: the isolated
+ * preparation child creates the manifest as part of the blocking filesystem
+ * work it exists to contain, while registry membership stays a Server-process
+ * decision with exactly one writer.
+ */
+export { ensureWorkspaceManifestOnDisk } from './backends/disk/workspace-repository.js';
 export { withCanvasMutex, updateNode } from '../canvas/write-coordinator.js';
 export type {
   UpdateNodeOptions,
@@ -68,6 +75,7 @@ export {
   getBlobStore,
   getStorage,
   getStructuredStore,
+  getWorkspaceRepository,
   initStorage,
   setStorageForTesting,
   spaceDirectory,

@@ -11,7 +11,14 @@
  * The Server data directory holds a separate discovery index containing only
  * `workspaceId -> workspacePath`. That deliberate duplication is the minimum
  * needed to recognize an externally moved Workspace after restart; all other
- * metadata remains authoritative in the Workspace-owned manifest.
+ * metadata remains authoritative in the Workspace-owned manifest and is read
+ * back from it on demand rather than cached here.
+ *
+ * The index is therefore the single in-process representation of membership,
+ * and it is re-read from disk on every access. Reads cost a few small JSON
+ * files for a collection that holds a handful of entries, and in exchange a
+ * registry edited by another process — or by hand — can never be silently
+ * truncated by a stale in-memory copy.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -26,6 +33,7 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { atomicWriteJson } from '../../../../utils/fs.js';
+import { getLogger } from '../../../../utils/logger.js';
 
 import type {
   WorkspaceHandle,
@@ -37,6 +45,8 @@ export const WORKSPACE_MANIFEST_FILENAME = 'workspace.json';
 export const WORKSPACE_REGISTRY_FILENAME = 'workspaces.json';
 const WORKSPACE_MANIFEST_SCHEMA_VERSION = 1;
 const WORKSPACE_REGISTRY_SCHEMA_VERSION = 1;
+
+const log = getLogger('workspace-repository');
 
 const workspaceManifestSchema = z.object({
   schemaVersion: z.literal(WORKSPACE_MANIFEST_SCHEMA_VERSION),
@@ -68,6 +78,11 @@ type WorkspaceRegistryEntry = z.infer<
   typeof workspaceRegistrySchema
 >['workspaces'][number];
 
+/** Where the Disk backend keeps its discovery index inside the data dir. */
+export function workspaceRegistryPath(dataDir: string): string {
+  return path.join(dataDir, 'storage', 'disk', WORKSPACE_REGISTRY_FILENAME);
+}
+
 function manifestPath(workspacePath: string): string {
   return path.join(
     workspacePath,
@@ -80,19 +95,28 @@ function defaultWorkspaceName(workspacePath: string): string {
   return path.basename(workspacePath) || 'Workspace';
 }
 
-function isMissing(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
+/**
+ * Whether an error means "this path does not resolve right now".
+ *
+ * A deleted folder and an unmounted volume both land here, and both describe
+ * a Workspace that is temporarily unreachable rather than a corrupt one. A
+ * malformed manifest is deliberately *not* in this set: that is damage the
+ * operator has to see, so it keeps throwing.
+ */
+function isUnreachable(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
 function readManifestFile(
   filePath: string,
-  allowMissing: boolean,
+  allowUnreachable: boolean,
 ): WorkspaceManifest | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
   } catch (error) {
-    if (allowMissing && isMissing(error)) return null;
+    if (allowUnreachable && isUnreachable(error)) return null;
     throw new Error(
       `Workspace manifest at ${filePath} could not be read: ${(error as Error).message}`,
     );
@@ -116,7 +140,7 @@ function readWorkspaceRegistry(filePath: string): WorkspaceRegistryEntry[] {
   try {
     parsed = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
   } catch (error) {
-    if (isMissing(error)) return [];
+    if (isUnreachable(error)) return [];
     throw new Error(
       `Workspace registry at ${filePath} could not be read: ${(error as Error).message}`,
     );
@@ -156,10 +180,40 @@ function isAlreadyExists(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | null)?.code === 'EEXIST';
 }
 
+function sameEntries(
+  left: readonly WorkspaceRegistryEntry[],
+  right: readonly WorkspaceRegistryEntry[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (entry, index) =>
+        entry.workspaceId === right[index]?.workspaceId &&
+        entry.workspacePath === right[index]?.workspacePath,
+    )
+  );
+}
+
+function toHandle(
+  manifest: WorkspaceManifest,
+  workspacePath: string,
+): WorkspaceHandle {
+  return Object.freeze({
+    workspaceId: manifest.workspaceId,
+    workspacePath,
+    name: manifest.name,
+  });
+}
+
 /**
  * Return the persisted Workspace identity, adopting a legacy folder when the
  * manifest is absent. `wx` keeps concurrent adopters from overwriting the
  * winner; every contender then reads the same durable identity.
+ *
+ * Deliberately separate from the repository: workspace preparation runs this
+ * inside the isolated child process, where creating the manifest is part of
+ * the blocking filesystem work being contained, while registry membership
+ * stays a Server-process decision with exactly one writer.
  */
 export function ensureWorkspaceManifestOnDisk(
   rawWorkspacePath: string,
@@ -185,12 +239,13 @@ export function ensureWorkspaceManifestOnDisk(
 }
 
 export class DiskWorkspaceRepository implements WorkspaceRepository {
-  readonly #byId = new Map<string, WorkspaceHandle>();
-  readonly #byPath = new Map<string, WorkspaceHandle>();
   readonly #registryFilePath: string | null;
-  readonly #registeredPathById = new Map<string, string>();
-  readonly #registeredIdByPath = new Map<string, string>();
-  #registryLoaded = false;
+  /**
+   * Membership for a repository with no durable file behind it — the shape
+   * tests and scripts build. When a registry path is configured this stays
+   * unused and the file is the only copy.
+   */
+  #memory: WorkspaceRegistryEntry[] = [];
 
   constructor(registryFilePath?: string) {
     this.#registryFilePath = registryFilePath
@@ -198,171 +253,138 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
       : null;
   }
 
-  #ensureRegistryLoaded(): void {
-    if (this.#registryLoaded) return;
-    const entries = this.#registryFilePath
+  #read(): WorkspaceRegistryEntry[] {
+    return this.#registryFilePath
       ? readWorkspaceRegistry(this.#registryFilePath)
-      : [];
-    this.#replaceRegistrationMaps(entries);
-    this.#registryLoaded = true;
+      : [...this.#memory];
   }
 
-  #replaceRegistrationMaps(entries: readonly WorkspaceRegistryEntry[]): void {
-    this.#registeredPathById.clear();
-    this.#registeredIdByPath.clear();
-    for (const entry of entries) {
-      this.#registeredPathById.set(entry.workspaceId, entry.workspacePath);
-      this.#registeredIdByPath.set(entry.workspacePath, entry.workspaceId);
-    }
-  }
-
-  #registrationEntries(): WorkspaceRegistryEntry[] {
-    return [...this.#registeredPathById].map(
-      ([workspaceId, workspacePath]) => ({ workspaceId, workspacePath }),
-    );
-  }
-
-  #commitRegistrations(entries: readonly WorkspaceRegistryEntry[]): void {
+  #write(entries: readonly WorkspaceRegistryEntry[]): void {
     if (this.#registryFilePath) {
       atomicWriteJson(this.#registryFilePath, {
         schemaVersion: WORKSPACE_REGISTRY_SCHEMA_VERSION,
         workspaces: entries,
       });
+      return;
     }
-    this.#replaceRegistrationMaps(entries);
+    this.#memory = [...entries];
   }
 
-  #upsertRegistration(workspaceId: string, workspacePath: string): void {
-    let replaced = false;
-    const entries = this.#registrationEntries().map((entry) => {
-      if (entry.workspaceId !== workspaceId) return entry;
-      replaced = true;
-      return { workspaceId, workspacePath };
-    });
-    if (!replaced) entries.push({ workspaceId, workspacePath });
-    this.#commitRegistrations(entries);
-  }
-
-  #hydrateRegistered(
-    workspaceId: string,
-    workspacePath: string,
-  ): WorkspaceHandle {
-    const existing = this.#byId.get(workspaceId);
-    if (existing) return existing;
-
-    const manifest = readManifest(manifestPath(workspacePath));
-    if (manifest.workspaceId !== workspaceId) {
-      throw new Error(
-        `Workspace registry maps ${workspaceId} to ${workspacePath}, but that path claims ${manifest.workspaceId}`,
+  /**
+   * Read one member's live metadata, or null when it cannot answer for
+   * itself.
+   *
+   * Two registrations are stale rather than fatal: a Workspace whose folder
+   * is gone or unmounted, and a path that some other Workspace has since
+   * taken over. Both resolve to "not a member right now" so one unplugged
+   * drive cannot take down the whole collection; `open()` repairs the index
+   * when the path is opened again.
+   */
+  #hydrate(entry: WorkspaceRegistryEntry): WorkspaceHandle | null {
+    const manifest = readManifestFile(manifestPath(entry.workspacePath), true);
+    if (!manifest) {
+      log.warn(
+        { workspaceId: entry.workspaceId, workspacePath: entry.workspacePath },
+        'Registered Workspace is not reachable; skipping',
       );
+      return null;
     }
-    const existingAtPath = this.#byPath.get(workspacePath);
-    if (existingAtPath && existingAtPath.workspaceId !== workspaceId) {
-      throw new Error(
-        `Workspace path ${workspacePath} is already open as ${existingAtPath.workspaceId}`,
+    if (manifest.workspaceId !== entry.workspaceId) {
+      log.warn(
+        {
+          workspaceId: entry.workspaceId,
+          workspacePath: entry.workspacePath,
+          claimedBy: manifest.workspaceId,
+        },
+        'Registered Workspace path now belongs to a different Workspace; skipping',
       );
+      return null;
     }
-
-    const handle: WorkspaceHandle = Object.freeze({
-      workspaceId,
-      workspacePath,
-      name: manifest.name,
-    });
-    this.#byId.set(workspaceId, handle);
-    this.#byPath.set(workspacePath, handle);
-    return handle;
+    return toHandle(manifest, entry.workspacePath);
   }
 
   open(rawWorkspacePath: string): WorkspaceHandle {
-    this.#ensureRegistryLoaded();
     const workspacePath = path.resolve(rawWorkspacePath);
     const manifest = ensureWorkspaceManifestOnDisk(workspacePath);
-    const existingAtPath = this.#byPath.get(workspacePath);
-    if (existingAtPath) {
-      if (existingAtPath.workspaceId !== manifest.workspaceId) {
-        throw new Error(
-          `Workspace identity at ${workspacePath} changed from ${existingAtPath.workspaceId} to ${manifest.workspaceId}`,
-        );
-      }
-      return existingAtPath;
-    }
+    const entries = this.#read();
 
-    const registeredIdAtPath = this.#registeredIdByPath.get(workspacePath);
-    if (registeredIdAtPath && registeredIdAtPath !== manifest.workspaceId) {
-      throw new Error(
-        `Workspace registry maps ${workspacePath} to ${registeredIdAtPath}, but that path claims ${manifest.workspaceId}`,
-      );
-    }
-
-    const existingWithId = this.#byId.get(manifest.workspaceId);
-    const previousPath =
-      this.#registeredPathById.get(manifest.workspaceId) ??
-      existingWithId?.workspacePath;
-    if (previousPath && previousPath !== workspacePath) {
-      const previousManifest = readManifestFile(
-        manifestPath(previousPath),
+    // The same identity registered at another path is either a Workspace that
+    // moved — the old path no longer answers to it — or a copy, which must be
+    // refused so two live directories cannot share one identity.
+    const elsewhere = entries.find(
+      (entry) =>
+        entry.workspaceId === manifest.workspaceId &&
+        entry.workspacePath !== workspacePath,
+    );
+    if (elsewhere) {
+      const previous = readManifestFile(
+        manifestPath(elsewhere.workspacePath),
         true,
       );
-      if (previousManifest?.workspaceId === manifest.workspaceId) {
+      if (previous?.workspaceId === manifest.workspaceId) {
         throw new Error(
-          `Workspace identity ${manifest.workspaceId} is present at both ${previousPath} and ${workspacePath}; copied Workspaces must receive distinct identities`,
-        );
-      }
-      if (previousManifest) {
-        throw new Error(
-          `Workspace registry maps ${manifest.workspaceId} to ${previousPath}, but that path now claims ${previousManifest.workspaceId}`,
+          `Workspace identity ${manifest.workspaceId} is present at both ${elsewhere.workspacePath} and ${workspacePath}; copied Workspaces must receive distinct identities`,
         );
       }
     }
 
-    const handle: WorkspaceHandle = Object.freeze({
+    // Drop any registration that named this path for a different Workspace:
+    // the directory was replaced, so the manifest now on disk is the truth.
+    const surviving = entries.filter(
+      (entry) =>
+        entry.workspaceId === manifest.workspaceId ||
+        entry.workspacePath !== workspacePath,
+    );
+    const replacement: WorkspaceRegistryEntry = {
       workspaceId: manifest.workspaceId,
       workspacePath,
-      name: manifest.name,
+    };
+    let replaced = false;
+    const next = surviving.map((entry) => {
+      if (entry.workspaceId !== manifest.workspaceId) return entry;
+      replaced = true;
+      return replacement;
     });
-    this.#upsertRegistration(handle.workspaceId, handle.workspacePath);
-    if (previousPath && previousPath !== workspacePath) {
-      this.#byPath.delete(previousPath);
-    }
-    this.#byId.set(handle.workspaceId, handle);
-    this.#byPath.set(handle.workspacePath, handle);
-    return handle;
+    if (!replaced) next.push(replacement);
+
+    if (!sameEntries(entries, next)) this.#write(next);
+    return toHandle(manifest, workspacePath);
   }
 
   get(workspaceId: string): WorkspaceHandle | null {
-    this.#ensureRegistryLoaded();
-    const existing = this.#byId.get(workspaceId);
-    if (existing) return existing;
-    const workspacePath = this.#registeredPathById.get(workspaceId);
-    return workspacePath
-      ? this.#hydrateRegistered(workspaceId, workspacePath)
-      : null;
+    const entry = this.#read().find(
+      (candidate) => candidate.workspaceId === workspaceId,
+    );
+    return entry ? this.#hydrate(entry) : null;
   }
 
   getByPath(rawWorkspacePath: string): WorkspaceHandle | null {
-    this.#ensureRegistryLoaded();
     const workspacePath = path.resolve(rawWorkspacePath);
-    const existing = this.#byPath.get(workspacePath);
-    if (existing) return existing;
-    const workspaceId = this.#registeredIdByPath.get(workspacePath);
-    return workspaceId
-      ? this.#hydrateRegistered(workspaceId, workspacePath)
-      : null;
+    const entry = this.#read().find(
+      (candidate) => candidate.workspacePath === workspacePath,
+    );
+    return entry ? this.#hydrate(entry) : null;
   }
 
   list(): readonly WorkspaceHandle[] {
-    this.#ensureRegistryLoaded();
-    return this.#registrationEntries().map((entry) =>
-      this.#hydrateRegistered(entry.workspaceId, entry.workspacePath),
-    );
+    const handles: WorkspaceHandle[] = [];
+    for (const entry of this.#read()) {
+      const handle = this.#hydrate(entry);
+      if (handle) handles.push(handle);
+    }
+    return handles;
   }
 
   rename(workspaceId: string, rawName: string): WorkspaceHandle | null {
     const current = this.get(workspaceId);
     if (!current) return null;
 
+    // Guards the manifest's own schema, not the route body: a repository
+    // caller that trims to nothing would otherwise write a file that fails
+    // validation on the next read.
     const name = rawName.trim();
     if (!name) throw new Error('Workspace name is required');
+
     const filePath = manifestPath(current.workspacePath);
     const manifest = readManifest(filePath);
     if (manifest.workspaceId !== workspaceId) {
@@ -371,23 +393,14 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
       );
     }
     atomicWriteJson(filePath, { ...manifest, name });
-
-    const updated: WorkspaceHandle = Object.freeze({ ...current, name });
-    this.#byId.set(workspaceId, updated);
-    this.#byPath.set(current.workspacePath, updated);
-    return updated;
+    return toHandle({ ...manifest, name }, current.workspacePath);
   }
 
   remove(workspaceId: string): boolean {
-    this.#ensureRegistryLoaded();
-    const workspacePath = this.#registeredPathById.get(workspaceId);
-    if (!workspacePath) return false;
-    const entries = this.#registrationEntries().filter(
-      (entry) => entry.workspaceId !== workspaceId,
-    );
-    this.#commitRegistrations(entries);
-    this.#byId.delete(workspaceId);
-    this.#byPath.delete(workspacePath);
+    const entries = this.#read();
+    const next = entries.filter((entry) => entry.workspaceId !== workspaceId);
+    if (next.length === entries.length) return false;
+    this.#write(next);
     return true;
   }
 }

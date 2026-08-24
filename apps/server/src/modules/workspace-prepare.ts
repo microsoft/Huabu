@@ -12,8 +12,8 @@
 import { mkdirSync } from 'node:fs';
 
 import {
+  ensureWorkspaceManifestOnDisk,
   ensureWorldCanvasOnDisk,
-  getStructuredStore,
 } from './storage/index.js';
 import { migrateLegacyAcpSessions } from './workspace/migrations/migrate-acp-sessions.js';
 import {
@@ -36,7 +36,10 @@ export function prepareWorkspaceOnDisk(workspacePath: string): void {
   mkdirSync(workspacePath, { recursive: true });
   // Adopt Home folders created by older Huabu versions before any other
   // migration runs. Managed and free mode therefore share one identity path.
-  getStructuredStore().workspaces().open(workspacePath);
+  // Only the manifest is written here: this runs inside the isolated
+  // preparation child, and registry membership is the Server process's call
+  // so the durable index keeps exactly one writer.
+  ensureWorkspaceManifestOnDisk(workspacePath);
   // Demo-stage rename: canvas.json -> space.json, .memory/canvas.md ->
   // .memory/space.md, setting/.huabu.md -> setting/user.md. Runs first so
   // later readers / migrations see the new names. DELETE-ME later.

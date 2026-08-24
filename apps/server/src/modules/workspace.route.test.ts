@@ -24,8 +24,6 @@ vi.mock('./workspace.js', async (importOriginal) => {
             name: workspaceState.name,
           }
         : null,
-    getWorkspaceName: () =>
-      workspaceState.configured ? workspaceState.name : null,
     getWorkspacePath: () => workspaceState.path,
     isManagedMode: () => workspaceState.managed,
     isWorkspaceConfigured: () => workspaceState.configured,

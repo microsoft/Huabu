@@ -21,10 +21,6 @@ export const routes = {
   workspace: '/workspace',
   workspacePickFolder: '/workspace/pick-folder',
   workspaceValidatePath: '/workspace/validate-path',
-  workspaces: '/workspaces',
-  workspaceById: (workspaceId: string) => `/workspaces/${enc(workspaceId)}`,
-  workspaceActivate: (workspaceId: string) =>
-    `/workspaces/${enc(workspaceId)}/activate`,
 
   // ── LLM ───────────────────────────────────────────────────────────
   llmConfig: '/llm/config',

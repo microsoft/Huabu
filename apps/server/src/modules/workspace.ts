@@ -41,7 +41,7 @@ import path from 'node:path';
 
 import { resetExternalNoteSessions } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
-import { getStructuredStore } from './storage/index.js';
+import { getWorkspaceRepository } from './storage/index.js';
 import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import { invalidateUserSkill } from '../prompt/index.js';
 
@@ -51,7 +51,6 @@ const ENV_KEY = 'HUABU_WORKSPACE';
 
 let _workspaceHandle: WorkspaceHandle | null = null;
 let _managed = false;
-let _leasedWorkspaceId: string | null = null;
 let _leasedWorkspacePath: string | null = null;
 let _workspaceOperationLeaseCount = 0;
 
@@ -63,7 +62,6 @@ let _workspaceOperationLeaseCount = 0;
  * original result.
  */
 export interface WorkspaceOperationLease {
-  readonly workspaceId: string;
   readonly workspacePath: string;
   release(): void;
 }
@@ -149,53 +147,30 @@ export function getWorkspaceHandle(): WorkspaceHandle | null {
  * same path remains allowed.
  */
 export function acquireWorkspaceOperationLease(): WorkspaceOperationLease {
-  const workspace = getWorkspaceHandle();
-  if (!workspace) {
-    throw new Error(
-      'Workspace path has not been configured. ' +
-        'Activate a workspace first (PUT /api/workspace) or set ' +
-        `${ENV_KEY} in the environment.`,
-    );
-  }
+  const workspacePath = getWorkspacePath();
 
   if (
     _workspaceOperationLeaseCount > 0 &&
-    (_leasedWorkspaceId !== workspace.workspaceId ||
-      _leasedWorkspacePath !== workspace.workspacePath)
+    _leasedWorkspacePath !== workspacePath
   ) {
     throw new Error('Workspace operation lease invariant violated');
   }
 
-  _leasedWorkspaceId = workspace.workspaceId;
-  _leasedWorkspacePath = workspace.workspacePath;
+  _leasedWorkspacePath = workspacePath;
   _workspaceOperationLeaseCount += 1;
 
   let released = false;
   return Object.freeze({
-    workspaceId: workspace.workspaceId,
-    workspacePath: workspace.workspacePath,
+    workspacePath,
     release(): void {
       if (released) return;
       released = true;
       _workspaceOperationLeaseCount -= 1;
       if (_workspaceOperationLeaseCount === 0) {
-        _leasedWorkspaceId = null;
         _leasedWorkspacePath = null;
       }
     },
   });
-}
-
-/**
- * Display label for the currently-active workspace. In managed mode this
- * is the basename of the locked path; in free mode it's also the basename
- * of the user-picked path. Returns `null` if nothing is active yet.
- *
- * Never reveals the full host path — safe to send to the client even when
- * the deployment treats the host filesystem as private.
- */
-export function getWorkspaceName(): string | null {
-  return _workspaceHandle?.name ?? null;
 }
 
 /**
@@ -231,14 +206,18 @@ export function resolveWorkspacePath(newPath: string): string {
  * has completed successfully. Opening the handle reads the prepared manifest;
  * the compatibility fallback creates it when an older caller committed a
  * legacy path without going through preparation first.
+ *
+ * The lease guard runs *before* that, so a switch this process must refuse
+ * cannot leave the target adopted or registered on its way out.
  */
-export function commitWorkspacePath(resolvedPath: string): void {
-  commitWorkspaceHandle(getStructuredStore().workspaces().open(resolvedPath));
+export function commitWorkspacePath(rawPath: string): void {
+  const resolvedPath = path.resolve(rawPath);
+  assertWorkspacePathChangeAllowed(resolvedPath);
+  commitWorkspaceHandle(getWorkspaceRepository().open(resolvedPath));
 }
 
 /** Commit an already-prepared Workspace handle to process-local state. */
-export function commitWorkspaceHandle(workspace: WorkspaceHandle): void {
-  assertWorkspacePathChangeAllowed(workspace.workspacePath);
+function commitWorkspaceHandle(workspace: WorkspaceHandle): void {
   _workspaceHandle = workspace;
   // Drop the cached canvas-dir index so subsequent lookups (used by
   // migrations and route handlers) reflect the new workspace.

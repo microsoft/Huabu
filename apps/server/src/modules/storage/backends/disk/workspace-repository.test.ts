@@ -12,13 +12,13 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { DiskStructuredStore } from './structured-store.js';
 import {
   DiskWorkspaceRepository,
   WORKSPACE_MANIFEST_DIR,
   WORKSPACE_MANIFEST_FILENAME,
   WORKSPACE_REGISTRY_FILENAME,
 } from './workspace-repository.js';
+import { getWorkspaceRepository } from '../../storage.js';
 
 describe('DiskWorkspaceRepository', () => {
   const roots: string[] = [];
@@ -100,9 +100,10 @@ describe('DiskWorkspaceRepository', () => {
   });
 
   it('stores the production registry under the Disk backend data directory', () => {
-    const dataDir = tempDir('huabu-workspace-store-data-');
+    // vitest.setup.ts points HUABU_DATA_DIR at a per-file temp directory.
+    const dataDir = process.env.HUABU_DATA_DIR as string;
     const root = tempDir('huabu-workspace-store-root-');
-    const workspace = new DiskStructuredStore(dataDir).workspaces().open(root);
+    const workspace = getWorkspaceRepository().open(root);
 
     expect(JSON.parse(readFileSync(registryPath(dataDir), 'utf8'))).toEqual({
       schemaVersion: 1,
@@ -207,6 +208,97 @@ describe('DiskWorkspaceRepository', () => {
       workspace.workspaceId,
     );
     expect(new DiskWorkspaceRepository(filePath).list()).toEqual([]);
+  });
+
+  it('keeps the collection readable when one registered folder is gone', () => {
+    const dataDir = tempDir('huabu-workspace-gone-data-');
+    const kept = tempDir('huabu-workspace-gone-kept-');
+    const gone = tempDir('huabu-workspace-gone-missing-');
+    const filePath = registryPath(dataDir);
+    const repository = new DiskWorkspaceRepository(filePath);
+    const survivor = repository.open(kept);
+    const missing = repository.open(gone);
+
+    // An unplugged volume or a folder deleted in Finder looks exactly like
+    // this, and it must not take down the whole listing.
+    rmSync(gone, { recursive: true, force: true });
+
+    const reopened = new DiskWorkspaceRepository(filePath);
+    expect(reopened.list()).toEqual([survivor]);
+    expect(reopened.get(missing.workspaceId)).toBeNull();
+    expect(reopened.getByPath(gone)).toBeNull();
+    // The registration survives, so the Workspace returns when its volume does.
+    expect(
+      (
+        JSON.parse(readFileSync(filePath, 'utf8')) as {
+          workspaces: unknown[];
+        }
+      ).workspaces,
+    ).toHaveLength(2);
+    // ... and it can still be unregistered while unreachable.
+    expect(reopened.remove(missing.workspaceId)).toBe(true);
+    expect(reopened.list()).toEqual([survivor]);
+  });
+
+  it('still reports a malformed manifest rather than hiding it as unreachable', () => {
+    const filePath = registryPath(tempDir('huabu-workspace-damaged-data-'));
+    const root = tempDir('huabu-workspace-damaged-');
+    const repository = new DiskWorkspaceRepository(filePath);
+    repository.open(root);
+    writeFileSync(manifestPath(root), '{ definitely not json', 'utf8');
+
+    expect(() => new DiskWorkspaceRepository(filePath).list()).toThrow(
+      /workspace manifest/i,
+    );
+  });
+
+  it('re-adopts a registered path whose folder was replaced', () => {
+    const dataDir = tempDir('huabu-workspace-replaced-data-');
+    const parent = tempDir('huabu-workspace-replaced-root-');
+    const root = path.join(parent, 'home');
+    mkdirSync(root);
+    const filePath = registryPath(dataDir);
+    const repository = new DiskWorkspaceRepository(filePath);
+    const original = repository.open(root);
+
+    // Deleted outside Huabu and recreated by hand: the folder at this path is
+    // a different Workspace now, and pointing Huabu at it must keep working.
+    rmSync(root, { recursive: true, force: true });
+    mkdirSync(root);
+
+    const sameProcess = repository.open(root);
+    expect(sameProcess.workspaceId).not.toBe(original.workspaceId);
+    expect(sameProcess.workspacePath).toBe(path.resolve(root));
+    expect(repository.get(original.workspaceId)).toBeNull();
+    expect(repository.list()).toEqual([sameProcess]);
+
+    // And the same holds for a Server that only sees it after a restart.
+    rmSync(root, { recursive: true, force: true });
+    mkdirSync(root);
+    const afterRestart = new DiskWorkspaceRepository(filePath);
+    const readopted = afterRestart.open(root);
+    expect(readopted.workspaceId).not.toBe(sameProcess.workspaceId);
+    expect(afterRestart.list()).toEqual([readopted]);
+  });
+
+  it('frees a moved Workspace to keep its identity when its old path is reused', () => {
+    const dataDir = tempDir('huabu-workspace-swap-data-');
+    const parent = tempDir('huabu-workspace-swap-root-');
+    const original = path.join(parent, 'original');
+    const moved = path.join(parent, 'moved');
+    mkdirSync(original);
+    const filePath = registryPath(dataDir);
+    const repository = new DiskWorkspaceRepository(filePath);
+    const first = repository.open(original);
+
+    renameSync(original, moved);
+    mkdirSync(original);
+    const replacement = repository.open(original);
+    const relocated = repository.open(moved);
+
+    expect(relocated.workspaceId).toBe(first.workspaceId);
+    expect(relocated.workspacePath).toBe(path.resolve(moved));
+    expect(repository.list()).toEqual([replacement, relocated]);
   });
 
   it('rejects a malformed durable registry instead of discarding it', () => {

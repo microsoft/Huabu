@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { workspaceCreateSchema, workspaceRenameSchema } from '@huabu/shared';
 
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
-import { getStructuredStore, resetStorageCache } from './storage/index.js';
+import { getWorkspaceRepository, resetStorageCache } from './storage/index.js';
 import {
   activateWorkspacePath,
   prepareWorkspacePath,
@@ -21,7 +21,12 @@ import {
 } from './workspace.js';
 
 import type { WorkspaceHandle } from './storage/index.js';
-import type { ApiErrorBody, WorkspaceDescriptor } from '@huabu/shared';
+import type {
+  ApiErrorBody,
+  WorkspaceCreateRequest,
+  WorkspaceDescriptor,
+  WorkspaceRenameRequest,
+} from '@huabu/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
 const workspaceIdSchema = z.string().uuid();
@@ -72,6 +77,28 @@ function descriptor(workspace: WorkspaceHandle): WorkspaceDescriptor {
   };
 }
 
+/**
+ * The Workspaces this deployment may talk about.
+ *
+ * Managed mode locks its Workspace at boot, so every other registration in the
+ * data directory — a free-mode session that used the same one, say — is
+ * unaddressable here: activation is refused and paths are redacted. Listing
+ * those would leak nothing but the host folder names of Workspaces this
+ * deployment cannot reach, which is the very thing path redaction exists to
+ * prevent. Managed mode therefore sees exactly one Workspace: the active one.
+ */
+function visibleWorkspaces(): readonly WorkspaceHandle[] {
+  if (!isManagedMode()) return getWorkspaceRepository().list();
+  const active = getWorkspaceHandle();
+  return active ? [active] : [];
+}
+
+function findVisible(workspaceId: string): WorkspaceHandle | null {
+  if (!isManagedMode()) return getWorkspaceRepository().get(workspaceId);
+  const active = getWorkspaceHandle();
+  return active?.workspaceId === workspaceId ? active : null;
+}
+
 function parseWorkspaceId(
   rawWorkspaceId: string,
   reply: FastifyReply,
@@ -112,11 +139,9 @@ interface WorkspaceParams {
 }
 
 const workspacesRoutes: FastifyPluginAsync = async (app) => {
-  app.get('/', async () =>
-    getStructuredStore().workspaces().list().map(descriptor),
-  );
+  app.get('/', async () => visibleWorkspaces().map(descriptor));
 
-  app.post('/', async (request, reply) => {
+  app.post<{ Body: WorkspaceCreateRequest }>('/', async (request, reply) => {
     const rejected = rejectReadOnlyMutation(request, reply);
     if (rejected) return rejected;
 
@@ -131,15 +156,14 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
 
     try {
       const workspacePath = resolveWorkspacePath(parsed.data.path);
-      const repository = getStructuredStore().workspaces();
+      const repository = getWorkspaceRepository();
       const existing = repository.getByPath(workspacePath);
       if (existing) {
-        const workspace = parsed.data.name
-          ? (repository.rename(existing.workspaceId, parsed.data.name) ??
-            existing)
-          : existing;
-        updateActiveWorkspaceHandle(workspace);
-        return reply.send(descriptor(workspace));
+        if (!parsed.data.name) return reply.send(descriptor(existing));
+        const renamed =
+          repository.rename(existing.workspaceId, parsed.data.name) ?? existing;
+        updateActiveWorkspaceHandle(renamed);
+        return reply.send(descriptor(renamed));
       }
 
       await prepareWorkspacePath(workspacePath);
@@ -160,7 +184,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
     async (request, reply) => {
       const parsedId = parseWorkspaceId(request.params.workspaceId, reply);
       if (typeof parsedId !== 'string') return parsedId;
-      const workspace = getStructuredStore().workspaces().get(parsedId);
+      const workspace = findVisible(parsedId);
       if (!workspace) return sendError(reply, 404, 'Workspace not found');
       return reply.send(descriptor(workspace));
     },
@@ -174,7 +198,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
       const parsedId = parseWorkspaceId(request.params.workspaceId, reply);
       if (typeof parsedId !== 'string') return parsedId;
 
-      const workspace = getStructuredStore().workspaces().get(parsedId);
+      const workspace = getWorkspaceRepository().get(parsedId);
       if (!workspace) return sendError(reply, 404, 'Workspace not found');
       try {
         await activateWorkspacePath(workspace.workspacePath);
@@ -187,7 +211,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
     },
   );
 
-  app.patch<{ Params: WorkspaceParams }>(
+  app.patch<{ Params: WorkspaceParams; Body: WorkspaceRenameRequest }>(
     '/:workspaceId',
     async (request, reply) => {
       const rejected = rejectReadOnlyMutation(request, reply);
@@ -204,9 +228,10 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
       }
 
       try {
-        const workspace = getStructuredStore()
-          .workspaces()
-          .rename(parsedId, parsed.data.name);
+        const workspace = getWorkspaceRepository().rename(
+          parsedId,
+          parsed.data.name,
+        );
         if (!workspace) return sendError(reply, 404, 'Workspace not found');
         updateActiveWorkspaceHandle(workspace);
         return reply.send(descriptor(workspace));
@@ -226,7 +251,10 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
       if (getWorkspaceHandle()?.workspaceId === parsedId) {
         return sendError(reply, 409, 'Cannot unregister the active Workspace');
       }
-      if (!getStructuredStore().workspaces().remove(parsedId)) {
+      // Deliberately not gated on the Workspace being readable: unregistering
+      // a folder that has since been deleted or unmounted is exactly when
+      // this is needed, and it only ever removes the index entry.
+      if (!getWorkspaceRepository().remove(parsedId)) {
         return sendError(reply, 404, 'Workspace not found');
       }
       return reply.status(204).send();

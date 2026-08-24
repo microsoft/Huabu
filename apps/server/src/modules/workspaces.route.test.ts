@@ -76,7 +76,7 @@ const repository = vi.hoisted(() => ({
 }));
 
 vi.mock('./storage/index.js', () => ({
-  getStructuredStore: () => ({ workspaces: () => repository }),
+  getWorkspaceRepository: () => repository,
   resetStorageCache: storageMocks.resetStorageCache,
 }));
 
@@ -254,10 +254,13 @@ describe('plural Workspace management routes', () => {
     }
   });
 
-  it('keeps managed collections readable but hides paths and rejects mutations', async () => {
+  it('narrows a managed deployment to its own Workspace and rejects mutations', async () => {
     testState.managed = true;
     const app = await buildApp();
     try {
+      // Registrations left in the data directory by a free-mode session are
+      // unaddressable here, so listing them would leak host folder names
+      // through the very API that redacts host paths.
       const list = await app.inject({ method: 'GET', url: '/workspaces' });
       expect(list.statusCode).toBe(200);
       expect(list.json()).toEqual([
@@ -267,13 +270,13 @@ describe('plural Workspace management routes', () => {
           path: null,
           active: true,
         },
-        {
-          workspaceId: SECOND_ID,
-          name: 'Second',
-          path: null,
-          active: false,
-        },
       ]);
+
+      const other = await app.inject({
+        method: 'GET',
+        url: `/workspaces/${SECOND_ID}`,
+      });
+      expect(other.statusCode).toBe(404);
 
       const create = await app.inject({
         method: 'POST',
