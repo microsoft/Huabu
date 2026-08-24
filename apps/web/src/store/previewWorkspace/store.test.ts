@@ -58,6 +58,8 @@ beforeEach(() => {
     workspace: createEmptyWorkspace(),
     nodeFocusRequest: null,
     nodeFocusRequestSeq: 0,
+    chatOpenRequest: null,
+    chatOpenRequestSeq: 0,
   });
 });
 
@@ -169,9 +171,11 @@ describe('actions delegate to the model', () => {
 
   it('closes a tab', () => {
     const tabId = store().openPreviewTarget(node('a'));
+    const beforeTabRemoved = vi.fn();
 
-    store().closeTab(tabId);
+    store().closeTab(tabId, beforeTabRemoved);
 
+    expect(beforeTabRemoved).toHaveBeenCalledWith(tabId);
     expect(store().workspace.tabs[tabId]).toBeUndefined();
   });
 
@@ -203,6 +207,28 @@ describe('actions delegate to the model', () => {
     expect(selectGroupOfTab(store(), tabId)).toBe(sideGroupId);
   });
 
+  it('settles and clears runtime requests for a transient removed by a move', () => {
+    const moved = store().openPreviewTarget(node('a'), { transient: true });
+    const removed = store().openPreviewTarget(node('b'), {
+      transient: true,
+      openToSide: true,
+    });
+    const sideGroupId = store().workspace.groups[1].id;
+    store().requestNodeFocus(removed);
+    store().requestChatOpen(removed, 'bottom');
+    const beforeTabRemoved = vi.fn((tabId: string) => {
+      expect(store().workspace.tabs[tabId]).toBeDefined();
+    });
+
+    store().moveTab(moved, { groupId: sideGroupId }, beforeTabRemoved);
+
+    expect(beforeTabRemoved).toHaveBeenCalledOnce();
+    expect(beforeTabRemoved).toHaveBeenCalledWith(removed);
+    expect(store().workspace.tabs[removed]).toBeUndefined();
+    expect(store().nodeFocusRequest).toBeNull();
+    expect(store().chatOpenRequest).toBeNull();
+  });
+
   it('replaces a tab target in place', () => {
     const tabId = store().openPreviewTarget(chat('thread-1'));
 
@@ -220,6 +246,25 @@ describe('actions delegate to the model', () => {
 
     expect(store().workspace.groups).toHaveLength(1);
     expect(store().workspace.groups[0].tabIds).toHaveLength(2);
+  });
+
+  it('settles and clears runtime requests for a transient removed by merge', () => {
+    const removed = store().openPreviewTarget(node('a'), { transient: true });
+    const kept = store().openPreviewTarget(node('b'), {
+      transient: true,
+      openToSide: true,
+    });
+    store().requestNodeFocus(removed);
+    store().requestChatOpen(removed, 'last-user');
+    const beforeTabRemoved = vi.fn();
+
+    store().mergeGroups(beforeTabRemoved);
+
+    expect(beforeTabRemoved).toHaveBeenCalledWith(removed);
+    expect(store().workspace.tabs[removed]).toBeUndefined();
+    expect(store().workspace.tabs[kept]).toBeDefined();
+    expect(store().nodeFocusRequest).toBeNull();
+    expect(store().chatOpenRequest).toBeNull();
   });
 
   it('sets the active group', () => {
@@ -245,6 +290,17 @@ describe('actions delegate to the model', () => {
     store().validate(new Set(['b']));
 
     expect(Object.keys(store().workspace.tabs)).toEqual([kept]);
+  });
+
+  it('clears runtime requests for tabs removed by validation', () => {
+    const removed = store().openPreviewTarget(node('a'));
+    store().requestNodeFocus(removed);
+    store().requestChatOpen(removed, 'last-user');
+
+    store().validate(new Set());
+
+    expect(store().nodeFocusRequest).toBeNull();
+    expect(store().chatOpenRequest).toBeNull();
   });
 
   it('validates nothing before a Canvas is loaded', () => {

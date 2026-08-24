@@ -184,6 +184,39 @@ describe('defensive parsing', () => {
     expect(restored?.splitRatio).toBe(0.5);
   });
 
+  it('drops older duplicate transient tabs within one group', () => {
+    testStorage.storage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        workspace: {
+          tabs: {
+            t1: {
+              id: 't1',
+              target: node('a'),
+              transient: true,
+              lastActiveSeq: 1,
+            },
+            t2: {
+              id: 't2',
+              target: node('b'),
+              transient: true,
+              lastActiveSeq: 2,
+            },
+          },
+          groups: [{ id: 'g1', tabIds: ['t1', 't2'], activeTabId: 't2' }],
+          activeGroupId: 'g1',
+          activationSeq: 2,
+        },
+      }),
+    );
+
+    const restored = readWorkspace(CANVAS);
+    expect(restored?.tabs.t1).toBeUndefined();
+    expect(restored?.tabs.t2.transient).toBe(true);
+    expect(restored?.groups[0].tabIds).toEqual(['t2']);
+  });
+
   it('drops a tab claimed by two groups and discards orphans', () => {
     testStorage.storage.setItem(
       KEY,

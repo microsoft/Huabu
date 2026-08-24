@@ -68,7 +68,7 @@ Titles are derived at render time. Node tabs use the current node label; Chat ta
 
 Open to Side moves the existing semantic target into the other group instead of duplicating it and preserves whether the tab is transient or permanent. Saving an unbound Chat as a Question replaces that tab's target in place, preserving tab identity, position, messages, and draft continuity.
 
-Canvas node double-clicks, search results, and connected-node navigation open transiently. Question compose or replay and new Chat opens are permanent.
+Canvas node double-clicks, Question toolbar compose or replay actions, search results, and connected-node navigation open transiently. New Chat opens are permanent.
 
 ## 4. Rendering and Chat sessions
 
@@ -100,7 +100,7 @@ Pointer dragging keeps a faded source placeholder in the tab strip, portals a la
 
 Closing an active tab selects the nearest remaining tab in the same group. Moving or closing the final tab in a secondary group removes that group. The workspace keeps one empty primary group as its valid empty state.
 
-A transient tab is one reusable inspection slot per group. Opening another transient target replaces that slot; using its Pin action, double-clicking the tab, or committing a persistent mutation through its renderer promotes it in place. Moving a transient tab into a side group does not promote it.
+A transient tab is one reusable inspection slot per group. Opening another transient target replaces that slot; using its Pin action, double-clicking the tab, or committing a persistent mutation through its renderer promotes it in place. Moving a transient tab into a side group does not promote the moved tab; if that group already has a transient slot, the moved tab replaces the existing disposable slot. Merging groups keeps the most recently active transient slot and drops any older transient slot. Runtime topology changes report every implicitly removed tab before committing the new workspace so mounted authored editors can settle through the same lifecycle boundary as an explicit close; the store then clears tab-addressed focus and opening requests atomically with the topology update. Persistence repair has no mounted editor and only repairs the stored topology.
 
 Permanent tabs are never closed automatically. A group may retain any number of permanent tabs; users close them explicitly, while transient browsing continues to reuse the group's inspection slot.
 
@@ -124,7 +124,7 @@ The current Canvas layout is written synchronously before switching Canvas and b
 
 A capped MRU index retains workspace records for at most 50 Canvases. Evicting an old layout is non-destructive because the record contains presentation topology only.
 
-Persisted input is parsed defensively. Invalid targets, dangling tab IDs, duplicate group references, invalid active IDs, excess groups, and malformed split values are dropped or repaired without preventing the remaining layout from loading.
+Persisted input is parsed defensively. Invalid targets, dangling tab IDs, duplicate group references, invalid active IDs, excess groups, duplicate transient slots within one group, and malformed split values are dropped or repaired without preventing the remaining layout from loading. Duplicate transient slots keep the most recently active slot and drop the older disposable slots.
 
 After a command deletes nodes, the web post-effect validates the workspace against the committed live node IDs. Tabs targeting deleted nodes are removed and active IDs or empty groups are repaired by `validateWorkspace`.
 
