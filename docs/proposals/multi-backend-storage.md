@@ -55,8 +55,9 @@ Last updated: 2026-08-24
 > PR #93. What remains between the portable contracts and a second structured
 > adapter is specified in §6.4 and built by three change sets rather than one
 > phase: §12.6 (one Space handle and the portable read surface,
-> **implemented**), §12.7 (backend-agnostic application reads), and §12.8 (the
-> dispositions and the product-level harness). §12 is the authoritative plan;
+> **implemented**), §12.7 (backend-agnostic application reads,
+> **implemented**), and §12.8 (the dispositions and the product-level
+> harness). §12 is the authoritative plan;
 > the decision table in §2 marks what each step has actually settled.
 
 ---
@@ -2302,24 +2303,90 @@ Out, and owned by the two change sets that follow: retiring production
 symmetry, the extension substrate, the Disk-only capability matrix, and the
 product-level backend harness (§12.8).
 
-### 12.7 Backend-agnostic application reads — **planned**
+### 12.7 Backend-agnostic application reads — **implemented**
 
-Production reads still reach the legacy Disk store directly. This change set
-moves Canvas, agent, web, RFS, interactive-view, and Task reads onto
-`SpaceHandle.read()` and the §12.6.1 node shapes, leaves `CanvasStore` inside
-the Disk adapter and compatibility tests, and widens the module-boundary guard
-to reject production `CanvasStore` imports and Disk-layout imports from every
-production module outside `storage/` — not merely the workspace module.
+The second change set. Every production structured read now uses
+`StructuredStore`: Space topology through `SpaceHandle.read()`, single node
+content through `SpaceNodes.read()`, a named subset through
+`SpaceNodes.readMany()`, and whole-Space or incremental scans through
+`SpaceNodes.list()` / `SpaceNodes.stream()`. Search keeps its progressive
+metadata delivery without naming a filesystem scan.
 
-Pure Canvas context builders take already-read `CanvasFile` / node-record
-values instead of reaching into storage themselves; their async adapters own
-repository access once per request. Search keeps its progressive metadata
-delivery without naming a filesystem scan.
+`CanvasStore` remains inside the Disk adapter and the compatibility tests. It
+is not an application service: `storage/canvas-store.ts` had no importers left
+and is deleted — the first of the three Phase-4.5 forwarding shims to go.
 
-One behavioural hardening rides along: two Space directories carrying the same
-`canvasId` resolve last-wins today, and will raise from the directory scan.
-That makes a Finder-side duplication a loud failure of every catalogue read
-rather than a Space that silently resolves to an arbitrary copy.
+Two findings, each surfaced by building rather than by reading.
+
+**`node-prompt` could not stay store-aware.** It is a pure merge that took a
+`CanvasStore` solely to lazily read a record its caller had not supplied,
+which made a pure function into a synchronous Disk dependency no async port
+can satisfy. The record became an argument, and each caller now reads in the
+shape its request has — which is what made `readMany` earn its place rather
+than merely have one.
+
+**The barrel was a way around the import guard.** The Space preview
+projection reached the legacy store by name through `storage/index.js`, which
+the path-level check resolved to the barrel and let through. The guard now
+checks the imported symbol as well as the path. `resetStorageCache` is
+deliberately not on that symbol list: it is on the barrel too and the
+Workspace routes still call it, but it reads nothing — it is activation
+dropping an adapter's caches, a composition concern with its own home to find
+(§12.8).
+
+#### 12.7.1 The last Disk-layout imports
+
+The neutrality half of the exit criterion says no production module outside
+`storage/` may name how a backend stores a Space. Three still did, and each
+was a different kind of leak.
+
+The external-note watcher read the Space record off the file beside `nodes/`.
+That path read was equivalent only because Disk keeps the two together, and
+"what does this Space contain" is a question every backend answers — so it
+goes through the port. Reveal-nodes assembled the sidecar directory itself;
+the Disk capability now answers "which folder holds the notes", which is what
+having one owner for the layout is for.
+
+Bundle import was the real one. It owned the staging location, the
+title-derived directory name, the record filename, and the directory index
+entry — all four are placement, and none of them are the `.huabu.zip` format
+the route legitimately interprets. `stageSpaceImport` takes them, and the
+route keeps unzipping, the manifest, and artifact-URL remapping.
+
+Splitting it surfaced something worth naming: the bundle's record filename and
+Disk's record filename are the same string for a historical reason, not a
+shared one. One is a wire format frozen by every bundle already exported; the
+other is how a backend files a record today. They are separate constants now,
+because they drift the moment a backend that is not Disk exports a bundle.
+
+With those gone, `storage/paths.js` has one production importer left and it is
+a migration — exempt by construction, since rewriting a frozen historical
+shape is the one legitimate reason to know a layout that is no longer current.
+The guard is import-level, repo-wide, migrations and tests exempt: a local
+variable that happens to be called `artifactPath` is not a violation while
+importing `canvasRoot` is.
+
+#### 12.7.2 Two behaviours that moved, deliberately
+
+Neither is implied by the read migration, and both are hardenings rather than
+side effects.
+
+**Duplicate `canvasId` directories raise.** Two Space directories carrying the
+same id resolved last-wins; the directory scan now rejects. That makes a
+Finder-side duplication a loud failure of every catalogue read rather than a
+Space that silently resolves to an arbitrary copy.
+
+**The Space preview reads node records leniently.** The route read sidecars
+strictly and answered 422 when one failed to parse. The port defines a single
+lenient read for the collection — a record it cannot produce is omitted, a
+record broken by hand recovers — and the projection already fell back to
+topology data for an absent record, so a damaged sidecar now renders the way
+it does when its own Space is opened instead of failing the whole preview. The
+422 stays for a malformed Space _record_, and now covers a record the port
+refuses to produce as well as topology that is not the expected shape. The
+alternative was a `strict` flag on `list()`, which the port had just finished
+arguing against: one caller's all-or-nothing preference is not a second read
+semantics every backend has to carry.
 
 ### 12.8 The dispositions, and a harness that proves them — **planned**
 
