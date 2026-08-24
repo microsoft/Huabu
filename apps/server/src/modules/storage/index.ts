@@ -117,6 +117,7 @@ export type {
   NodePutInput,
   NodePutResult,
   NodeSnapshot,
+  NodeStreamOptions,
   SpaceBeginDeleteResult,
   SpaceChanges,
   SpaceCreateInput,

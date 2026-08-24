@@ -15,6 +15,7 @@ import type {
   NodePutInput,
   NodePutResult,
   NodeSnapshot,
+  NodeStreamOptions,
   SpaceNodes,
 } from '../../ports/structured.js';
 
@@ -28,6 +29,14 @@ function snapshotOf(record: NodeContent): NodeSnapshot {
   const revision = revisionOf(record);
   if (revision === null) throw new Error('A persisted node must have a token');
   return { record, revision };
+}
+
+function snapshotsOf(
+  contents: ReadonlyMap<string, NodeContent>,
+): Map<string, NodeSnapshot> {
+  const out = new Map<string, NodeSnapshot>();
+  for (const [nodeId, record] of contents) out.set(nodeId, snapshotOf(record));
+  return out;
 }
 
 export class DiskSpaceNodes implements SpaceNodes {
@@ -46,6 +55,45 @@ export class DiskSpaceNodes implements SpaceNodes {
     this.#assertActiveWorkspace();
     const record = this.#store.readNodeStrict(nodeId);
     return record === null ? null : snapshotOf(record);
+  }
+
+  /**
+   * Named nodes only.
+   *
+   * Resolved one id at a time through the same strict read {@link read} uses,
+   * so a selection sees exactly what reading each id would — including the
+   * index rebuild that resolves an externally renamed sidecar. Disk pays one
+   * directory scan to warm the id index and then one file read per requested
+   * id, which is the cost this member exists to keep proportional. Duplicate
+   * ids in the request collapse, as they do in the returned map.
+   */
+  async readMany(
+    nodeIds: readonly string[],
+  ): Promise<Map<string, NodeSnapshot>> {
+    this.#assertActiveWorkspace();
+    const out = new Map<string, NodeSnapshot>();
+    for (const nodeId of new Set(nodeIds)) {
+      const record = this.#store.readNodeStrict(nodeId);
+      if (record !== null) out.set(nodeId, snapshotOf(record));
+    }
+    return out;
+  }
+
+  async list(): Promise<Map<string, NodeSnapshot>> {
+    this.#assertActiveWorkspace();
+    return snapshotsOf(await this.#store.readAllNodes());
+  }
+
+  async stream(
+    onNode: (snapshot: NodeSnapshot) => void,
+    options?: NodeStreamOptions,
+  ): Promise<Map<string, NodeSnapshot>> {
+    this.#assertActiveWorkspace();
+    const contents = await this.#store.streamAllNodes(
+      (_id, content) => onNode(snapshotOf(content)),
+      options?.signal,
+    );
+    return snapshotsOf(contents);
   }
 
   async put(input: NodePutInput): Promise<NodePutResult> {
