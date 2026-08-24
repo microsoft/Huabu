@@ -20,7 +20,6 @@ vi.mock('./workspace.js', async (importOriginal) => {
       workspaceState.configured
         ? {
             workspaceId: workspaceState.workspaceId,
-            workspacePath: workspaceState.path,
             name: workspaceState.name,
           }
         : null,

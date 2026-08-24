@@ -58,7 +58,10 @@ import type {
   SpaceDeleteFinishResult,
   StructuredStore,
 } from './ports/structured.js';
-import type { WorkspaceRepository } from './ports/workspace.js';
+import type {
+  WorkspaceHandle,
+  WorkspaceRepository,
+} from './ports/workspace.js';
 import type { Readable } from 'node:stream';
 
 /**
@@ -141,7 +144,7 @@ export function createStorage(profile: StorageProfile): Storage {
 // ─── Process-wide holder ────────────────────────────────────────────────────
 
 let current: Storage | null = null;
-let workspaces: WorkspaceRepository | null = null;
+let workspaces: DiskWorkspaceRepository | null = null;
 let spaceCreateTail: Promise<void> = Promise.resolve();
 
 /**
@@ -163,20 +166,55 @@ let spaceCreateTail: Promise<void> = Promise.resolve();
  * on-demand path.
  */
 export function getWorkspaceRepository(): WorkspaceRepository {
+  return materializedWorkspaces();
+}
+
+/**
+ * The Workspace repository, narrowed to a backend that materializes
+ * Workspaces as real directories.
+ *
+ * This is the Workspace-level twin of {@link spaceDirectory}: the port
+ * deliberately says nothing about where a Workspace is, because a backend
+ * that keeps Workspaces in a database has no directory to name and must not
+ * be made to invent one. Only this module may ask a named backend where
+ * anything is, so the locator resolves here — and a non-materializing profile
+ * refuses outright rather than handing back a path that does not exist.
+ */
+function materializedWorkspaces(): DiskWorkspaceRepository {
   if (workspaces) return workspaces;
 
   const profile = parseStorageProfile();
-  switch (profile.structured.kind) {
-    case 'disk':
-      workspaces = new DiskWorkspaceRepository(
-        workspaceRegistryPath(getDataDir()),
-      );
-      return workspaces;
-    default:
-      throw new StorageProfileError(
-        `Workspace membership is not implemented for the "${profile.structured.kind}" structured backend.`,
-      );
+  if (profile.structured.kind !== 'disk') {
+    throw new StorageProfileError(
+      `The "${profile.structured.kind}" structured backend does not materialize ` +
+        `Workspaces as directories. Implement a locator for it before using ` +
+        `directory-shaped Workspace activation.`,
+    );
   }
+  workspaces = new DiskWorkspaceRepository(workspaceRegistryPath(getDataDir()));
+  return workspaces;
+}
+
+/**
+ * Adopt a real directory as a Workspace, creating its manifest if the folder
+ * predates one, and record its membership.
+ */
+export function adoptWorkspaceDirectory(
+  workspacePath: string,
+): WorkspaceHandle {
+  return materializedWorkspaces().adopt(workspacePath);
+}
+
+/** The registered Workspace materialized at a directory, if there is one. */
+export function workspaceAtDirectory(
+  workspacePath: string,
+): WorkspaceHandle | null {
+  return materializedWorkspaces().at(workspacePath);
+}
+
+/** The directory backing a registered Workspace, or null if it is not one. */
+export function workspaceDirectory(workspaceId: string): string | null {
+  return materializedWorkspaces().directoryOf(workspaceId);
 }
 
 function defaultSpaceTitle(

@@ -8,16 +8,25 @@ const FIRST_ID = '00000000-0000-4000-8000-000000000001';
 const SECOND_ID = '00000000-0000-4000-8000-000000000002';
 const NEW_ID = '00000000-0000-4000-8000-000000000003';
 
+/** Portable identity, as the port defines it — no path. */
 interface TestHandle {
   workspaceId: string;
-  workspacePath: string;
   name: string;
+}
+
+/** One registered member: identity plus the directory backing it. */
+interface TestMember extends TestHandle {
+  workspacePath: string;
+}
+
+function handleOf({ workspaceId, name }: TestMember): TestHandle {
+  return { workspaceId, name };
 }
 
 const testState = vi.hoisted(() => ({
   managed: false,
   active: null as TestHandle | null,
-  handles: [] as TestHandle[],
+  members: [] as TestMember[],
 }));
 
 const storageMocks = vi.hoisted(() => ({
@@ -34,50 +43,69 @@ const preprocessingMocks = vi.hoisted(() => ({
 }));
 
 const repository = vi.hoisted(() => ({
-  list: vi.fn(() => testState.handles),
-  get: vi.fn(
+  list: vi.fn(() =>
+    testState.members.map(({ workspaceId, name }) => ({ workspaceId, name })),
+  ),
+  get: vi.fn((workspaceId: string) => {
+    const member = testState.members.find(
+      (candidate) => candidate.workspaceId === workspaceId,
+    );
+    return member
+      ? { workspaceId: member.workspaceId, name: member.name }
+      : null;
+  }),
+  rename: vi.fn((workspaceId: string, name: string) => {
+    const index = testState.members.findIndex(
+      (candidate) => candidate.workspaceId === workspaceId,
+    );
+    if (index < 0) return null;
+    const member = { ...testState.members[index], name } as TestMember;
+    testState.members[index] = member;
+    return { workspaceId: member.workspaceId, name: member.name };
+  }),
+  remove: vi.fn((workspaceId: string) => {
+    const index = testState.members.findIndex(
+      (candidate) => candidate.workspaceId === workspaceId,
+    );
+    if (index < 0) return false;
+    testState.members.splice(index, 1);
+    return true;
+  }),
+}));
+
+/** The materialization tier the composition root exposes beside the port. */
+const locatorMocks = vi.hoisted(() => ({
+  workspaceDirectory: vi.fn(
     (workspaceId: string) =>
-      testState.handles.find(
-        (workspace) => workspace.workspaceId === workspaceId,
-      ) ?? null,
+      testState.members.find(
+        (candidate) => candidate.workspaceId === workspaceId,
+      )?.workspacePath ?? null,
   ),
-  getByPath: vi.fn(
-    (workspacePath: string) =>
-      testState.handles.find(
-        (workspace) => workspace.workspacePath === workspacePath,
-      ) ?? null,
-  ),
-  open: vi.fn((workspacePath: string) => {
-    const workspace = {
+  workspaceAtDirectory: vi.fn((workspacePath: string) => {
+    const member = testState.members.find(
+      (candidate) => candidate.workspacePath === workspacePath,
+    );
+    return member
+      ? { workspaceId: member.workspaceId, name: member.name }
+      : null;
+  }),
+  adoptWorkspaceDirectory: vi.fn((workspacePath: string) => {
+    const member: TestMember = {
       workspaceId: '00000000-0000-4000-8000-000000000003',
       workspacePath,
       name: workspacePath.split('/').filter(Boolean).at(-1) ?? 'Workspace',
     };
-    testState.handles.push(workspace);
-    return workspace;
-  }),
-  rename: vi.fn((workspaceId: string, name: string) => {
-    const index = testState.handles.findIndex(
-      (workspace) => workspace.workspaceId === workspaceId,
-    );
-    if (index < 0) return null;
-    const workspace = { ...testState.handles[index], name } as TestHandle;
-    testState.handles[index] = workspace;
-    return workspace;
-  }),
-  remove: vi.fn((workspaceId: string) => {
-    const index = testState.handles.findIndex(
-      (workspace) => workspace.workspaceId === workspaceId,
-    );
-    if (index < 0) return false;
-    testState.handles.splice(index, 1);
-    return true;
+    testState.members.push(member);
+    return { workspaceId: member.workspaceId, name: member.name };
   }),
 }));
 
 vi.mock('./storage/index.js', () => ({
   getWorkspaceRepository: () => repository,
   resetStorageCache: storageMocks.resetStorageCache,
+  adoptWorkspaceDirectory: locatorMocks.adoptWorkspaceDirectory,
+  workspaceAtDirectory: locatorMocks.workspaceAtDirectory,
+  workspaceDirectory: locatorMocks.workspaceDirectory,
 }));
 
 vi.mock('./workspace.js', () => ({
@@ -117,7 +145,7 @@ async function buildApp() {
 
 beforeEach(() => {
   testState.managed = false;
-  testState.handles = [
+  testState.members = [
     {
       workspaceId: FIRST_ID,
       workspacePath: '/tmp/first',
@@ -129,11 +157,12 @@ beforeEach(() => {
       name: 'Second',
     },
   ];
-  testState.active = testState.handles[0] ?? null;
+  const first = testState.members[0];
+  testState.active = first ? handleOf(first) : null;
   vi.clearAllMocks();
   activationMocks.prepareWorkspacePath.mockImplementation(async (path) => path);
   activationMocks.activateWorkspacePath.mockImplementation(async (path) => {
-    testState.active = repository.getByPath(path);
+    testState.active = locatorMocks.workspaceAtDirectory(path);
   });
 });
 

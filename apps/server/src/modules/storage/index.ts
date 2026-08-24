@@ -68,6 +68,7 @@ export type {
 // ─── Storage ports and composition ─────────────────────────────────────────
 
 export {
+  adoptWorkspaceDirectory,
   canvasBlobs,
   createSpace,
   createStorage,
@@ -80,6 +81,8 @@ export {
   setStorageForTesting,
   spaceDirectory,
   storageHealth,
+  workspaceAtDirectory,
+  workspaceDirectory,
 } from './storage.js';
 export type { SpaceDeleteOutcome, Storage } from './storage.js';
 export {

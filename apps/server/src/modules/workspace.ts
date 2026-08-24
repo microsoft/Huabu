@@ -28,7 +28,7 @@
  * Directory layout inside the active workspace (canvas-centric):
  *
  *   <workspace>/
- *     .huabu/workspace.json
+ *     workspace.json
  *     <canvasId>/
  *       space.json
  *       nodes/<nodeId>.md
@@ -41,7 +41,7 @@ import path from 'node:path';
 
 import { resetExternalNoteSessions } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
-import { getWorkspaceRepository } from './storage/index.js';
+import { adoptWorkspaceDirectory } from './storage/index.js';
 import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import { invalidateUserSkill } from '../prompt/index.js';
 
@@ -49,7 +49,12 @@ import type { WorkspaceHandle } from './storage/index.js';
 
 const ENV_KEY = 'HUABU_WORKSPACE';
 
+// Identity and location are separate facts: the handle is the portable
+// Workspace identity, while the path is the Disk materialization the rest of
+// the Server resolves every file against. A backend that does not materialize
+// Workspaces would keep the former and have no latter.
 let _workspaceHandle: WorkspaceHandle | null = null;
+let _workspacePath: string | null = null;
 let _managed = false;
 let _leasedWorkspacePath: string | null = null;
 let _workspaceOperationLeaseCount = 0;
@@ -124,14 +129,14 @@ export function initWorkspaceFromEnv(): void {
  * Throws if no workspace has been activated yet.
  */
 export function getWorkspacePath(): string {
-  if (!_workspaceHandle) {
+  if (!_workspacePath) {
     throw new Error(
       'Workspace path has not been configured. ' +
         'Activate a workspace first (PUT /api/workspace) or set ' +
         `${ENV_KEY} in the environment.`,
     );
   }
-  return _workspaceHandle.workspacePath;
+  return _workspacePath;
 }
 
 /** The active immutable Workspace identity, or null before configuration. */
@@ -213,12 +218,8 @@ export function resolveWorkspacePath(newPath: string): string {
 export function commitWorkspacePath(rawPath: string): void {
   const resolvedPath = path.resolve(rawPath);
   assertWorkspacePathChangeAllowed(resolvedPath);
-  commitWorkspaceHandle(getWorkspaceRepository().open(resolvedPath));
-}
-
-/** Commit an already-prepared Workspace handle to process-local state. */
-function commitWorkspaceHandle(workspace: WorkspaceHandle): void {
-  _workspaceHandle = workspace;
+  _workspaceHandle = adoptWorkspaceDirectory(resolvedPath);
+  _workspacePath = resolvedPath;
   // Drop the cached canvas-dir index so subsequent lookups (used by
   // migrations and route handlers) reflect the new workspace.
   refreshCanvasDirIndex();
@@ -239,11 +240,6 @@ export function updateActiveWorkspaceHandle(
   workspace: WorkspaceHandle,
 ): boolean {
   if (_workspaceHandle?.workspaceId !== workspace.workspaceId) return false;
-  if (_workspaceHandle.workspacePath !== workspace.workspacePath) {
-    throw new Error(
-      'Cannot change the active Workspace path during metadata update',
-    );
-  }
   _workspaceHandle = workspace;
   return true;
 }

@@ -5,8 +5,9 @@
  * Disk implementation of the Workspace storage port.
  *
  * A Workspace owns one stable id and display name in
- * `<workspace>/.huabu/workspace.json`. Existing Home folders predate that
- * manifest, so opening one adopts it by creating the file once.
+ * `<workspace>/workspace.json`, alongside the `space.json` each Space keeps.
+ * Existing Home folders predate that manifest, so adopting one creates the
+ * file once.
  *
  * The Server data directory holds a separate discovery index containing only
  * `workspaceId -> workspacePath`. That deliberate duplication is the minimum
@@ -40,7 +41,6 @@ import type {
   WorkspaceRepository,
 } from '../../ports/workspace.js';
 
-export const WORKSPACE_MANIFEST_DIR = '.huabu';
 export const WORKSPACE_MANIFEST_FILENAME = 'workspace.json';
 export const WORKSPACE_REGISTRY_FILENAME = 'workspaces.json';
 const WORKSPACE_MANIFEST_SCHEMA_VERSION = 1;
@@ -84,11 +84,7 @@ export function workspaceRegistryPath(dataDir: string): string {
 }
 
 function manifestPath(workspacePath: string): string {
-  return path.join(
-    workspacePath,
-    WORKSPACE_MANIFEST_DIR,
-    WORKSPACE_MANIFEST_FILENAME,
-  );
+  return path.join(workspacePath, WORKSPACE_MANIFEST_FILENAME);
 }
 
 function defaultWorkspaceName(workspacePath: string): string {
@@ -133,6 +129,28 @@ function readManifestFile(
 
 function readManifest(filePath: string): WorkspaceManifest {
   return readManifestFile(filePath, false) as WorkspaceManifest;
+}
+
+/**
+ * Write a manifest through the same schema that reads it.
+ *
+ * The schema is the only definition of what a valid manifest is — `name` is
+ * trimmed and must be non-empty — so validating on the way out means a caller
+ * cannot leave behind a file that fails validation on the way back in, and
+ * there is no second copy of the rule to drift.
+ */
+function writeManifest(
+  filePath: string,
+  manifest: WorkspaceManifest,
+): WorkspaceManifest {
+  const result = workspaceManifestSchema.safeParse(manifest);
+  if (!result.success) {
+    throw new Error(
+      `Workspace manifest for ${filePath} is invalid: ${result.error.issues[0]?.message ?? 'invalid manifest'}`,
+    );
+  }
+  atomicWriteJson(filePath, result.data);
+  return result.data;
 }
 
 function readWorkspaceRegistry(filePath: string): WorkspaceRegistryEntry[] {
@@ -194,13 +212,9 @@ function sameEntries(
   );
 }
 
-function toHandle(
-  manifest: WorkspaceManifest,
-  workspacePath: string,
-): WorkspaceHandle {
+function toHandle(manifest: WorkspaceManifest): WorkspaceHandle {
   return Object.freeze({
     workspaceId: manifest.workspaceId,
-    workspacePath,
     name: manifest.name,
   });
 }
@@ -219,9 +233,8 @@ export function ensureWorkspaceManifestOnDisk(
   rawWorkspacePath: string,
 ): WorkspaceManifest {
   const workspacePath = path.resolve(rawWorkspacePath);
-  const metadataDir = path.join(workspacePath, WORKSPACE_MANIFEST_DIR);
   const filePath = manifestPath(workspacePath);
-  mkdirSync(metadataDir, { recursive: true });
+  mkdirSync(workspacePath, { recursive: true });
 
   const manifest: WorkspaceManifest = {
     schemaVersion: WORKSPACE_MANIFEST_SCHEMA_VERSION,
@@ -277,7 +290,7 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
    * Two registrations are stale rather than fatal: a Workspace whose folder
    * is gone or unmounted, and a path that some other Workspace has since
    * taken over. Both resolve to "not a member right now" so one unplugged
-   * drive cannot take down the whole collection; `open()` repairs the index
+   * drive cannot take down the whole collection; `adopt()` repairs the index
    * when the path is opened again.
    */
   #hydrate(entry: WorkspaceRegistryEntry): WorkspaceHandle | null {
@@ -300,10 +313,81 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
       );
       return null;
     }
-    return toHandle(manifest, entry.workspacePath);
+    return toHandle(manifest);
   }
 
-  open(rawWorkspacePath: string): WorkspaceHandle {
+  #entryFor(workspaceId: string): WorkspaceRegistryEntry | undefined {
+    return this.#read().find((entry) => entry.workspaceId === workspaceId);
+  }
+
+  // ─── Portable membership (WorkspaceRepository) ──────────────────────────
+
+  get(workspaceId: string): WorkspaceHandle | null {
+    const entry = this.#entryFor(workspaceId);
+    return entry ? this.#hydrate(entry) : null;
+  }
+
+  list(): readonly WorkspaceHandle[] {
+    const handles: WorkspaceHandle[] = [];
+    for (const entry of this.#read()) {
+      const handle = this.#hydrate(entry);
+      if (handle) handles.push(handle);
+    }
+    return handles;
+  }
+
+  rename(workspaceId: string, name: string): WorkspaceHandle | null {
+    const entry = this.#entryFor(workspaceId);
+    if (!entry || !this.#hydrate(entry)) return null;
+
+    const filePath = manifestPath(entry.workspacePath);
+    const manifest = readManifest(filePath);
+    if (manifest.workspaceId !== workspaceId) {
+      throw new Error(
+        `Workspace identity at ${entry.workspacePath} changed from ${workspaceId} to ${manifest.workspaceId}`,
+      );
+    }
+    // The schema owns what a valid name is, on write as well as on read, so
+    // an unusable one is refused here rather than persisted and rejected on
+    // the next read.
+    return toHandle(writeManifest(filePath, { ...manifest, name }));
+  }
+
+  remove(workspaceId: string): boolean {
+    const entries = this.#read();
+    const next = entries.filter((entry) => entry.workspaceId !== workspaceId);
+    if (next.length === entries.length) return false;
+    this.#write(next);
+    return true;
+  }
+
+  // ─── Disk locator surface ───────────────────────────────────────────────
+  //
+  // Not part of the port: these answer *where* a Workspace is and how a real
+  // directory becomes one. Composition re-exposes them as the Workspace-level
+  // materialization capability, so application code never names this backend.
+
+  /** The directory backing a registered Workspace, or null if it is not one. */
+  directoryOf(workspaceId: string): string | null {
+    return this.#entryFor(workspaceId)?.workspacePath ?? null;
+  }
+
+  /** The registered Workspace materialized at a directory, if there is one. */
+  at(rawWorkspacePath: string): WorkspaceHandle | null {
+    const workspacePath = path.resolve(rawWorkspacePath);
+    const entry = this.#read().find(
+      (candidate) => candidate.workspacePath === workspacePath,
+    );
+    return entry ? this.#hydrate(entry) : null;
+  }
+
+  /**
+   * Adopt a directory as a Workspace and record its membership.
+   *
+   * This is the one place the index is repaired against what is actually on
+   * disk, because it is the one place a caller names a directory.
+   */
+  adopt(rawWorkspacePath: string): WorkspaceHandle {
     const workspacePath = path.resolve(rawWorkspacePath);
     const manifest = ensureWorkspaceManifestOnDisk(workspacePath);
     const entries = this.#read();
@@ -348,59 +432,6 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
     if (!replaced) next.push(replacement);
 
     if (!sameEntries(entries, next)) this.#write(next);
-    return toHandle(manifest, workspacePath);
-  }
-
-  get(workspaceId: string): WorkspaceHandle | null {
-    const entry = this.#read().find(
-      (candidate) => candidate.workspaceId === workspaceId,
-    );
-    return entry ? this.#hydrate(entry) : null;
-  }
-
-  getByPath(rawWorkspacePath: string): WorkspaceHandle | null {
-    const workspacePath = path.resolve(rawWorkspacePath);
-    const entry = this.#read().find(
-      (candidate) => candidate.workspacePath === workspacePath,
-    );
-    return entry ? this.#hydrate(entry) : null;
-  }
-
-  list(): readonly WorkspaceHandle[] {
-    const handles: WorkspaceHandle[] = [];
-    for (const entry of this.#read()) {
-      const handle = this.#hydrate(entry);
-      if (handle) handles.push(handle);
-    }
-    return handles;
-  }
-
-  rename(workspaceId: string, rawName: string): WorkspaceHandle | null {
-    const current = this.get(workspaceId);
-    if (!current) return null;
-
-    // Guards the manifest's own schema, not the route body: a repository
-    // caller that trims to nothing would otherwise write a file that fails
-    // validation on the next read.
-    const name = rawName.trim();
-    if (!name) throw new Error('Workspace name is required');
-
-    const filePath = manifestPath(current.workspacePath);
-    const manifest = readManifest(filePath);
-    if (manifest.workspaceId !== workspaceId) {
-      throw new Error(
-        `Workspace identity at ${current.workspacePath} changed from ${workspaceId} to ${manifest.workspaceId}`,
-      );
-    }
-    atomicWriteJson(filePath, { ...manifest, name });
-    return toHandle({ ...manifest, name }, current.workspacePath);
-  }
-
-  remove(workspaceId: string): boolean {
-    const entries = this.#read();
-    const next = entries.filter((entry) => entry.workspaceId !== workspaceId);
-    if (next.length === entries.length) return false;
-    this.#write(next);
-    return true;
+    return toHandle(manifest);
   }
 }

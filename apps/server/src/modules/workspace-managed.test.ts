@@ -28,8 +28,8 @@ it('adopts a legacy managed Workspace without exposing its host path', async () 
 
   expect(workspace.isManagedMode()).toBe(true);
   expect(workspace.getWorkspaceHandle()).toMatchObject({
-    workspacePath: path.resolve(root),
     name: path.basename(root),
   });
-  expect(existsSync(path.join(root, '.huabu', 'workspace.json'))).toBe(true);
+  expect(workspace.getWorkspacePath()).toBe(path.resolve(root));
+  expect(existsSync(path.join(root, 'workspace.json'))).toBe(true);
 });

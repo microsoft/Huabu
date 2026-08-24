@@ -6,7 +6,13 @@ import { z } from 'zod';
 import { workspaceCreateSchema, workspaceRenameSchema } from '@huabu/shared';
 
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
-import { getWorkspaceRepository, resetStorageCache } from './storage/index.js';
+import {
+  adoptWorkspaceDirectory,
+  getWorkspaceRepository,
+  resetStorageCache,
+  workspaceAtDirectory,
+  workspaceDirectory,
+} from './storage/index.js';
 import {
   activateWorkspacePath,
   prepareWorkspacePath,
@@ -72,7 +78,9 @@ function descriptor(workspace: WorkspaceHandle): WorkspaceDescriptor {
   return {
     workspaceId: workspace.workspaceId,
     name: workspace.name,
-    path: isManagedMode() ? null : workspace.workspacePath,
+    // A Workspace's directory is a materialization fact the handle does not
+    // carry, so it is resolved separately — and never sent in managed mode.
+    path: isManagedMode() ? null : workspaceDirectory(workspace.workspaceId),
     active,
   };
 }
@@ -157,7 +165,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
     try {
       const workspacePath = resolveWorkspacePath(parsed.data.path);
       const repository = getWorkspaceRepository();
-      const existing = repository.getByPath(workspacePath);
+      const existing = workspaceAtDirectory(workspacePath);
       if (existing) {
         if (!parsed.data.name) return reply.send(descriptor(existing));
         const renamed =
@@ -167,7 +175,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
       }
 
       await prepareWorkspacePath(workspacePath);
-      let workspace = repository.open(workspacePath);
+      let workspace = adoptWorkspaceDirectory(workspacePath);
       if (parsed.data.name) {
         workspace =
           repository.rename(workspace.workspaceId, parsed.data.name) ??
@@ -199,9 +207,12 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
       if (typeof parsedId !== 'string') return parsedId;
 
       const workspace = getWorkspaceRepository().get(parsedId);
-      if (!workspace) return sendError(reply, 404, 'Workspace not found');
+      const workspacePath = workspaceDirectory(parsedId);
+      if (!workspace || !workspacePath) {
+        return sendError(reply, 404, 'Workspace not found');
+      }
       try {
-        await activateWorkspacePath(workspace.workspacePath);
+        await activateWorkspacePath(workspacePath);
         resetStorageCache();
         resetPreprocessDispatcher();
         return reply.send(descriptor(getWorkspaceHandle() ?? workspace));
