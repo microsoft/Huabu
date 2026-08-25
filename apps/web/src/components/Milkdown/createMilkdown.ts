@@ -1600,13 +1600,13 @@ function runBlockTypeCommand(ctx: Ctx, key: MilkdownBlockType): void {
 }
 
 /**
- * Follow the link under the cursor on a modifier-click, and block clicks on
- * links the app would never create itself.
+ * Follow the link under the cursor, and block clicks on links the app would
+ * never create itself.
  *
- * A plain click has to keep placing the caret so link text stays editable, so
- * navigation is bound to the platform's "follow" modifier instead — `Cmd` on
- * macOS, where `Ctrl`-click is the secondary-click gesture, and `Ctrl`
- * elsewhere.
+ * Editable surfaces reserve a plain click for placing the caret, so navigation
+ * there uses the platform's "follow" modifier — `Cmd` on macOS, where
+ * `Ctrl`-click is the secondary-click gesture, and `Ctrl` elsewhere. Read-only
+ * surfaces have no caret-editing conflict and follow a plain primary click.
  *
  * The href is validated here rather than trusted from the mark: only `setLink`
  * screens what the user types, while markdown parsed from an agent reply, a
@@ -1615,24 +1615,27 @@ function runBlockTypeCommand(ctx: Ctx, key: MilkdownBlockType): void {
  * activated (a click), so an unsafe href has its default suppressed while the
  * event keeps flowing to ProseMirror's own selection handling.
  */
-function handleLinkClick(view: EditorView, event: Event): boolean {
-  const mouseEvent = event as MouseEvent;
-  const target = mouseEvent.target;
-  if (!(target instanceof Element)) return false;
-  const anchor = target.closest('a[href]');
-  if (!anchor || !view.dom.contains(anchor)) return false;
+function createLinkClickHandler(allowPlainClick: boolean) {
+  return (view: EditorView, event: Event): boolean => {
+    const mouseEvent = event as MouseEvent;
+    const target = mouseEvent.target;
+    if (!(target instanceof Element)) return false;
+    const anchor = target.closest('a[href]');
+    if (!anchor || !view.dom.contains(anchor)) return false;
 
-  const href = normalizeSafeLinkHref(anchor.getAttribute('href'));
-  if (!href) {
+    const href = normalizeSafeLinkHref(anchor.getAttribute('href'));
+    if (!href) {
+      mouseEvent.preventDefault();
+      return false;
+    }
+
+    if (mouseEvent.button !== 0) return false;
+    const hasFollowModifier = isMac ? mouseEvent.metaKey : mouseEvent.ctrlKey;
+    if (!allowPlainClick && !hasFollowModifier) return false;
     mouseEvent.preventDefault();
-    return false;
-  }
-
-  if (mouseEvent.button !== 0) return false;
-  if (!(isMac ? mouseEvent.metaKey : mouseEvent.ctrlKey)) return false;
-  mouseEvent.preventDefault();
-  window.open(href, '_blank', 'noopener,noreferrer');
-  return true;
+    window.open(href, '_blank', 'noopener,noreferrer');
+    return true;
+  };
 }
 
 type TabContext = 'list' | 'text' | 'other';
@@ -1764,6 +1767,7 @@ export async function createMilkdown(
   } = options;
   const resolveImageSrc = options.resolveImageSrc ?? ((src: string) => src);
   const useReactToolbar = !previewMode && toolbarMode === 'huabu';
+  const handleLinkClick = createLinkClickHandler(previewMode || !editable);
   let ariaLabel = initialAriaLabel;
 
   // Normalize LaTeX-style math delimiters (`\[…\]`, `\(…\)`)

@@ -43,11 +43,11 @@ Both surfaces are built by the same [`createMilkdown`](../../apps/web/src/compon
 
 Everything from here on is what happens **inside** the document. Pointer routing up to that point — which gesture the canvas claims before the event ever reaches a note — belongs to [canvas-input-interactions.md](./canvas-input-interactions.md).
 
-| Surface                                                                         | Mount                                  | Notes                                                                                                                                                                  |
-| ------------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`MilkdownEditor`](../../apps/web/src/components/Milkdown/MilkdownEditor.tsx)   | `editable: true`                       | Full editing. React owns the chrome, so Crepe's own Toolbar / LinkTooltip are off.                                                                                     |
-| [`MilkdownPreview`](../../apps/web/src/components/Milkdown/MilkdownPreview.tsx) | `editable: false`                      | Pure display. `contenteditable=false` communicates read-only on its own.                                                                                               |
-| `MilkdownPreview` with `enableBlockDrag`                                        | `editable: true` + `previewMode: true` | ProseMirror must stay editable for the block-drag handle to be hit-testable, so every input verb is swallowed at the capture phase and `aria-readonly` is set instead. |
+| Surface                                                                         | Mount                                  | Notes                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`MilkdownEditor`](../../apps/web/src/components/Milkdown/MilkdownEditor.tsx)   | `editable: true`                       | Full editing. React owns the chrome, so Crepe's own Toolbar / LinkTooltip are off; links require Ctrl/Cmd-click so a plain click can place the caret.                                                |
+| [`MilkdownPreview`](../../apps/web/src/components/Milkdown/MilkdownPreview.tsx) | `editable: false`                      | Pure display. `contenteditable=false` communicates read-only on its own, and a plain primary click opens a link.                                                                                     |
+| `MilkdownPreview` with `enableBlockDrag`                                        | `editable: true` + `previewMode: true` | ProseMirror must stay editable for the block-drag handle to be hit-testable, so every input verb is swallowed at the capture phase, `aria-readonly` is set, and links open on a plain primary click. |
 
 ---
 
@@ -84,12 +84,10 @@ In `MilkdownPreview`, `Tab` is deliberately _not_ in the swallowed-key set: its 
 
 ## 6. Link activation
 
-`Ctrl`-click (`Cmd` on macOS, where `Ctrl`-click is the secondary-click gesture) opens the link under the pointer. A plain click is reserved for placing the caret, which is what keeps link text editable — the same convention as VS Code, Word and Obsidian. Only the primary button counts.
-
-Because the handler lives in the shared factory, this works in the read-only preview too.
+In an editable note, `Ctrl`-click (`Cmd` on macOS, where `Ctrl`-click is the secondary-click gesture) opens the link under the pointer. A plain click is reserved for placing the caret, which keeps link text editable, following the same convention as VS Code, Word and Obsidian. In either read-only preview mode, a plain primary click opens the link because there is no caret-editing conflict; only the primary button counts.
 
 ```
-Ctrl/Cmd + primary click on <a href>
+read-only primary click OR editable Ctrl/Cmd + primary click on <a href>
   → handleLinkClick  (ProseMirror handleDOMEvents: click / auxclick)
   → normalizeSafeLinkHref  ── unsafe ─→ preventDefault, no navigation
   → window.open(href, '_blank', 'noopener,noreferrer')
