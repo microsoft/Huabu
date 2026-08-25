@@ -103,6 +103,14 @@ interface ChatInputProps {
   connectedTop?: boolean;
 }
 
+const AttachmentTextPreview = ({ text }: { text: string }) => (
+  <div className="bg-surface flex h-12 w-12 items-center justify-center rounded-md px-1">
+    <span className="text-fg-subtle line-clamp-3 w-full text-center text-[8px] leading-tight">
+      {text}
+    </span>
+  </div>
+);
+
 export const ChatInput = ({
   value,
   onChange,
@@ -421,11 +429,11 @@ export const ChatInput = ({
                     !attachment.url,
                 ) && (
                   <Tooltip content={t('chat.addAdjacentNodeSource')}>
-                    <Button
-                      type="button"
-                      variant="ghost"
+                    <div
+                      role="button"
+                      tabIndex={0}
                       aria-label={t('chat.addAdjacentNodeSource')}
-                      className="border-edge-default bg-surface hover:bg-hover text-fg-muted h-12 max-w-40 truncate rounded-md border border-dashed px-2 text-xs"
+                      className="group border-edge-default relative flex cursor-pointer items-center justify-center rounded-md border border-dashed"
                       onClick={() => {
                         const label =
                           typeof adjacentNode.data.label === 'string'
@@ -439,11 +447,20 @@ export const ChatInput = ({
                         });
                         onCommit?.();
                       }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        event.preventDefault();
+                        event.currentTarget.click();
+                      }}
                     >
-                      {typeof adjacentNode.data.label === 'string'
-                        ? adjacentNode.data.label
-                        : t('chat.attachmentFallbackText')}
-                    </Button>
+                      <AttachmentTextPreview
+                        text={
+                          typeof adjacentNode.data.label === 'string'
+                            ? adjacentNode.data.label
+                            : t('chat.attachmentFallbackText')
+                        }
+                      />
+                    </div>
                   </Tooltip>
                 )}
               {/* Selection attachment (from text highlight in expanded panel) */}
@@ -509,11 +526,7 @@ export const ChatInput = ({
                         lockSelectionAttachment();
                       }}
                     >
-                      <div className="bg-surface flex h-12 w-12 items-center justify-center rounded-md px-1">
-                        <span className="text-fg-subtle line-clamp-3 w-full text-center text-[8px] leading-tight">
-                          {previewText}
-                        </span>
-                      </div>
+                      <AttachmentTextPreview text={previewText} />
                       <Button
                         variant="ghost"
                         shape="pill"
@@ -609,11 +622,7 @@ export const ChatInput = ({
                         className="h-12 w-12 rounded-md object-contain"
                       />
                     ) : (
-                      <div className="bg-surface flex h-12 w-12 items-center justify-center rounded-md px-1">
-                        <span className="text-fg-subtle line-clamp-3 w-full text-center text-[8px] leading-tight">
-                          {previewText}
-                        </span>
-                      </div>
+                      <AttachmentTextPreview text={previewText} />
                     )}
                     <Button
                       variant="ghost"

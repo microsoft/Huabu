@@ -9,8 +9,10 @@ import { ChatSessionProvider } from '@/hooks/useChatSession';
 
 import { ChatInput } from './ChatInput';
 
+import type { ChatAttachment } from '@huabu/shared';
+
 const chatState = {
-  pendingAttachments: [],
+  pendingAttachments: [] as ChatAttachment[],
   selectionAttachment: null,
   addPendingAttachment: vi.fn(),
   removePendingAttachment: vi.fn(),
@@ -217,10 +219,17 @@ describe('ChatInput', () => {
       ),
     );
 
-    const candidate = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="chat.addAdjacentNodeSource"]',
+    const candidate = container.querySelector<HTMLElement>(
+      '[role="button"][aria-label="chat.addAdjacentNodeSource"]',
     );
     expect(candidate?.textContent).toContain('Adjacent note');
+    expect(candidate?.classList.contains('border-dashed')).toBe(true);
+    const candidatePreview = candidate?.firstElementChild;
+    expect(candidatePreview?.classList.contains('h-12')).toBe(true);
+    expect(candidatePreview?.classList.contains('w-12')).toBe(true);
+    expect(candidatePreview?.querySelector('span')?.classList).toContain(
+      'line-clamp-3',
+    );
 
     act(() => candidate?.click());
 
@@ -231,5 +240,56 @@ describe('ChatInput', () => {
       label: 'Adjacent note',
     });
     expect(onCommit).toHaveBeenCalledOnce();
+
+    chatState.pendingAttachments = [
+      {
+        type: 'text',
+        source: 'selection',
+        originNodeId: 'node-adjacent',
+        label: 'Adjacent note',
+      },
+    ];
+    act(() =>
+      root?.render(
+        <ChatSessionProvider
+          value={{
+            threadId: 'thread-test',
+            canvasId: 'canvas-test',
+            ownerCanvasId: 'canvas-test',
+            conversationView: null,
+          }}
+        >
+          <ChatInput
+            value=""
+            onChange={vi.fn()}
+            onSubmit={vi.fn()}
+            onCommit={onCommit}
+            onStop={vi.fn()}
+            mode="ask"
+            adjacentNodeSourceId="node-adjacent"
+          />
+        </ChatSessionProvider>,
+      ),
+    );
+
+    expect(
+      container.querySelector(
+        '[role="button"][aria-label="chat.addAdjacentNodeSource"]',
+      ),
+    ).toBeNull();
+    const confirmedTile = container.querySelector(
+      '.group.border-edge-default:not(.border-dashed)',
+    );
+    expect(confirmedTile?.firstElementChild?.classList.contains('h-12')).toBe(
+      true,
+    );
+    expect(confirmedTile?.firstElementChild?.classList.contains('w-12')).toBe(
+      true,
+    );
+    expect(
+      confirmedTile?.querySelector(
+        'button[aria-label="chat.removeAttachment"]',
+      ),
+    ).not.toBeNull();
   });
 });
