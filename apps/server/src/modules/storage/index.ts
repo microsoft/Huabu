@@ -77,6 +77,7 @@ export {
   getStorage,
   getStructuredStore,
   getWorkspaceRepository,
+  hasWorkspaceRegistry,
   initStorage,
   setStorageForTesting,
   spaceDirectory,

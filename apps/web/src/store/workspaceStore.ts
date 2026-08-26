@@ -7,129 +7,22 @@ import { create } from 'zustand';
 import { ApiError } from '../api/_client';
 import { listCanvases } from '../api/canvas';
 import {
+  activateWorkspace,
   getWorkspaceInfo,
+  listWorkspaces,
   putWorkspacePath,
+  removeWorkspace,
   type WorkspaceCapabilities,
+  type WorkspaceDescriptor,
   type WorkspaceInfo,
   type WorkspaceMode,
 } from '../api/workspace';
 import { getElectronBridge } from '../hooks/useElectron';
 import { i18n } from '../i18n';
 
-const FREE_PATH_KEY = 'huabu:workspace-path';
-const RECENT_PATHS_KEY = 'huabu:recent-workspaces';
-const MAX_RECENT = 5;
 const WORLD_ENABLED_KEY = 'huabu:world-enabled';
 
-/**
- * Storage backend abstraction. In Electron we delegate to the main
- * process (file under `userData/workspace.json`) so the saved
- * workspace survives the renderer's per-origin localStorage being
- * wiped whenever the shell picks a different server port. In the
- * browser / Vite dev server we fall back to `localStorage`.
- *
- * Implementations mirror each other shape-wise so the caller doesn't
- * have to branch on the environment.
- */
-interface WorkspacePersistence {
-  load: () => Promise<{ path: string | null; recent: string[] }>;
-  save: (path: string) => Promise<string[]>;
-  remove: (path: string) => Promise<string[]>;
-}
-
-function loadLocalStorageRecents(): string[] {
-  try {
-    const raw = localStorage.getItem(RECENT_PATHS_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (Array.isArray(parsed))
-      return parsed.filter((p): p is string => typeof p === 'string');
-  } catch {
-    // ignore corrupt JSON
-  }
-  return [];
-}
-
-function pushLocalStorageRecent(path: string): string[] {
-  const list = loadLocalStorageRecents().filter((p) => p !== path);
-  list.unshift(path);
-  const trimmed = list.slice(0, MAX_RECENT);
-  localStorage.setItem(RECENT_PATHS_KEY, JSON.stringify(trimmed));
-  return trimmed;
-}
-
-const localStoragePersistence: WorkspacePersistence = {
-  load: async () => ({
-    path: localStorage.getItem(FREE_PATH_KEY),
-    recent: loadLocalStorageRecents(),
-  }),
-  save: async (path: string) => {
-    localStorage.setItem(FREE_PATH_KEY, path);
-    return pushLocalStorageRecent(path);
-  },
-  remove: async (path: string) => {
-    const list = loadLocalStorageRecents().filter((p) => p !== path);
-    localStorage.setItem(RECENT_PATHS_KEY, JSON.stringify(list));
-    if (localStorage.getItem(FREE_PATH_KEY) === path) {
-      localStorage.removeItem(FREE_PATH_KEY);
-    }
-    return list;
-  },
-};
-
-/**
- * Build the Electron-backed persistence, migrating any pre-existing
- * `localStorage` values into the main-process store on first read so
- * users upgrading from a previous build don't lose their selection.
- */
-interface ElectronWorkspaceLike {
-  get: () => Promise<{ path: string | null; recent: string[] }>;
-  set: (path: string) => Promise<{ path: string | null; recent: string[] }>;
-  removeRecent: (
-    path: string,
-  ) => Promise<{ path: string | null; recent: string[] }>;
-}
-
-function makeElectronPersistence(
-  api: ElectronWorkspaceLike,
-): WorkspacePersistence {
-  return {
-    load: async () => {
-      const snap = await api.get();
-      // One-shot migration: if the main-process file is empty but the
-      // renderer still has a localStorage value (from an older build
-      // that only used localStorage), promote it so the user keeps
-      // their workspace across this upgrade. We only migrate the
-      // active path — stale recents from a different port partition
-      // aren't worth preserving.
-      if (!snap.path) {
-        const legacyPath = localStorage.getItem(FREE_PATH_KEY);
-        if (legacyPath) {
-          return await api.set(legacyPath);
-        }
-      }
-      return snap;
-    },
-    save: async (path: string) => {
-      const snap = await api.set(path);
-      return snap.recent;
-    },
-    remove: async (path: string) => {
-      const snap = await api.removeRecent(path);
-      return snap.recent;
-    },
-  };
-}
-
-function getPersistence(): WorkspacePersistence {
-  const bridge = getElectronBridge();
-  if (bridge?.workspace) {
-    return makeElectronPersistence(bridge.workspace);
-  }
-  return localStoragePersistence;
-}
-
-const persistence = getPersistence();
+let workspaceInitInFlight: Promise<boolean> | null = null;
 
 interface WorkspaceState {
   /** Server operating mode. `null` until the first `init()` call. */
@@ -150,8 +43,8 @@ interface WorkspaceState {
   /** Derived ordinary Space titles used by World Portal rendering. */
   spaceTitles: Record<string, string | null>;
   spaceTitlesLoaded: boolean;
-  /** Recently used free-mode paths (most recent first). */
-  recentWorkspaces: string[];
+  /** Registered free-mode Workspaces (most recently used first). */
+  recentWorkspaces: WorkspaceDescriptor[];
 
   /** Whether a workspace is ready for the app to use. */
   isReady: boolean;
@@ -181,8 +74,11 @@ interface WorkspaceState {
   /** (Free mode) Activate an absolute path. */
   selectWorkspace: (path: string) => Promise<void>;
 
-  /** (Free mode) Remove a path from the recent list. */
-  removeRecentWorkspace: (path: string) => void;
+  /** (Free mode) Activate a registered Workspace by stable identity. */
+  activateRecentWorkspace: (workspaceId: string) => Promise<void>;
+
+  /** (Free mode) Unregister an inactive Workspace. */
+  removeRecentWorkspace: (workspaceId: string) => void;
 
   /**
    * Publish a freshly-counted canvas total. Pass `null` to clear the
@@ -212,7 +108,7 @@ function fromInfo(info: WorkspaceInfo): Partial<WorkspaceState> {
 /**
  * Notify the rest of the app that a workspace is now active. Dispatched
  * on every transition from "no workspace" / "different workspace" to
- * "ready", including auto-activation from a saved path on boot. Stores
+ * "ready", including auto-activation from the Workspace registry on boot. Stores
  * gated by the server-side workspace guard (e.g. `acpProfilesStore`,
  * `useDetectedClis`) listen for this to silently re-fetch and drop the
  * cached "Workspace has not been configured" 503 they may have hit
@@ -245,14 +141,7 @@ function workspaceActivationError(error: unknown, path: string): string {
 export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   mode: null,
   capabilities: null,
-  // Synchronous bootstrap value so first paint doesn't flicker the
-  // setup page when localStorage already holds something. The async
-  // `init()` call refreshes both fields from the authoritative
-  // persistence (Electron file or localStorage) immediately after.
-  workspacePath:
-    typeof localStorage !== 'undefined'
-      ? localStorage.getItem(FREE_PATH_KEY)
-      : null,
+  workspacePath: null,
   workspaceId: null,
   workspaceName: null,
   worldCanvasId: null,
@@ -262,8 +151,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       : localStorage.getItem(WORLD_ENABLED_KEY) === 'true',
   spaceTitles: {},
   spaceTitlesLoaded: false,
-  recentWorkspaces:
-    typeof localStorage !== 'undefined' ? loadLocalStorageRecents() : [],
+  recentWorkspaces: [],
   isReady: false,
   isSyncing: false,
   error: null,
@@ -285,89 +173,83 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     });
   },
 
-  init: async () => {
-    set({ isSyncing: true, error: null });
+  init: () => {
+    workspaceInitInFlight ??= (async () => {
+      set({ isSyncing: true, error: null });
 
-    // Pull the persisted snapshot up-front so we have an authoritative
-    // value regardless of whether we're using the Electron-backed
-    // store or plain localStorage. Doing this BEFORE the server call
-    // also lets us refresh the synchronous bootstrap value if the
-    // Electron file disagrees with localStorage.
-    const persisted = await persistence.load().catch(() => ({
-      path: null as string | null,
-      recent: [] as string[],
-    }));
-    set({
-      workspacePath: persisted.path,
-      recentWorkspaces: persisted.recent,
-    });
-
-    let info: WorkspaceInfo;
-    try {
-      info = await getWorkspaceInfo();
-    } catch (err) {
-      set({
-        error: err instanceof Error ? err.message : 'Server unreachable',
-        isSyncing: false,
-      });
-      return false;
-    }
-
-    set(fromInfo(info));
-
-    // ── Managed mode: server has already activated; nothing to do. ──
-    if (info.mode === 'managed') {
-      // Free-mode leftovers are meaningless here.
+      let info: WorkspaceInfo;
       try {
-        await persistence.remove(persisted.path ?? '');
-      } catch {
-        // best-effort cleanup
-      }
-      localStorage.removeItem(FREE_PATH_KEY);
-      set({ isSyncing: false });
-      if (info.configured) emitWorkspaceChanged();
-      return info.configured;
-    }
-
-    // ── Free mode ──
-    // Server already activated (e.g. another tab beat us to it).
-    if (info.configured && info.path) {
-      const recent = await persistence.save(info.path);
-      set({ recentWorkspaces: recent, isSyncing: false });
-      emitWorkspaceChanged();
-      return true;
-    }
-
-    // Try to auto-activate using the remembered absolute path.
-    const savedPath = persisted.path;
-    if (savedPath) {
-      try {
-        const next = await putWorkspacePath(savedPath);
-        const recent = await persistence.save(savedPath);
+        info = await getWorkspaceInfo();
+      } catch (err) {
         set({
-          ...fromInfo(next),
-          recentWorkspaces: recent,
+          error: err instanceof Error ? err.message : 'Server unreachable',
           isSyncing: false,
         });
+        return false;
+      }
+
+      set(fromInfo(info));
+
+      // ── Managed mode: server has already activated; nothing to do. ──
+      if (info.mode === 'managed') {
+        set({ recentWorkspaces: [], isSyncing: false });
+        if (info.configured) emitWorkspaceChanged();
+        return info.configured;
+      }
+
+      // ── Free mode ──
+      let registered: WorkspaceDescriptor[];
+      try {
+        registered = await listWorkspaces();
+        set({ recentWorkspaces: registered });
+      } catch (err) {
+        set({
+          error:
+            err instanceof Error ? err.message : 'Failed to list Workspaces',
+          isSyncing: false,
+        });
+        return false;
+      }
+
+      // Server already activated (e.g. another tab beat us to it).
+      if (info.configured && info.path) {
+        set({ isSyncing: false });
         emitWorkspaceChanged();
         return true;
-      } catch (err) {
-        // Stored path is invalid (e.g. cross-platform leftover). Drop it
-        // and fall through to setup so the user picks a fresh one.
-        try {
-          await persistence.remove(savedPath);
-        } catch {
-          // best-effort cleanup
-        }
-        set({
-          workspacePath: null,
-          error: workspaceActivationError(err, savedPath),
-        });
       }
-    }
 
-    set({ isSyncing: false });
-    return false;
+      // Restore the most recently used registered Workspace. The registry is
+      // authoritative and activation promotes the selected entry to its front.
+      const saved = registered[0];
+      if (saved) {
+        try {
+          await activateWorkspace(saved.workspaceId);
+          const [next, recent] = await Promise.all([
+            getWorkspaceInfo(),
+            listWorkspaces(),
+          ]);
+          set({
+            ...fromInfo(next),
+            recentWorkspaces: recent,
+            isSyncing: false,
+          });
+          emitWorkspaceChanged();
+          return true;
+        } catch (err) {
+          set({
+            workspacePath: null,
+            error: workspaceActivationError(err, saved.path ?? saved.name),
+          });
+        }
+      }
+
+      set({ isSyncing: false });
+      return false;
+    })().finally(() => {
+      workspaceInitInFlight = null;
+    });
+
+    return workspaceInitInFlight;
   },
 
   selectWorkspace: async (path: string) => {
@@ -377,7 +259,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set({ isSyncing: true, error: null, canvasCount: null });
     try {
       const info = await putWorkspacePath(path);
-      const recent = await persistence.save(path);
+      const recent = await listWorkspaces();
       set({ ...fromInfo(info), recentWorkspaces: recent, isSyncing: false });
       emitWorkspaceChanged();
     } catch (err) {
@@ -387,12 +269,43 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     }
   },
 
-  removeRecentWorkspace: (path: string) => {
-    void persistence
-      .remove(path)
-      .then((list) => set({ recentWorkspaces: list }))
+  activateRecentWorkspace: async (workspaceId: string) => {
+    if (get().mode === 'managed') {
+      throw new Error('Workspace is locked by the server (managed mode)');
+    }
+    const selected = get().recentWorkspaces.find(
+      (workspace) => workspace.workspaceId === workspaceId,
+    );
+    set({ isSyncing: true, error: null, canvasCount: null });
+    try {
+      await activateWorkspace(workspaceId);
+      const [info, recent] = await Promise.all([
+        getWorkspaceInfo(),
+        listWorkspaces(),
+      ]);
+      set({ ...fromInfo(info), recentWorkspaces: recent, isSyncing: false });
+      emitWorkspaceChanged();
+    } catch (err) {
+      const message = workspaceActivationError(
+        err,
+        selected?.path ?? selected?.name ?? workspaceId,
+      );
+      set({ error: message, isSyncing: false });
+      throw err;
+    }
+  },
+
+  removeRecentWorkspace: (workspaceId: string) => {
+    void removeWorkspace(workspaceId)
+      .then(() =>
+        set((state) => ({
+          recentWorkspaces: state.recentWorkspaces.filter(
+            (workspace) => workspace.workspaceId !== workspaceId,
+          ),
+        })),
+      )
       .catch(() => {
-        // Surface nothing — the recents list is best-effort UX.
+        // Surface nothing — removing an inactive registration is best-effort.
       });
   },
 

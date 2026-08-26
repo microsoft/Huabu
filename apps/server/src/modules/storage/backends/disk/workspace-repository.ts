@@ -10,11 +10,14 @@
  * user's own Spaces and `setting/` stay the visible contents. Existing Home
  * folders predate the manifest, so adopting one creates the file once.
  *
- * The Server data directory holds a separate discovery index containing only
- * `workspaceId -> workspacePath`. That deliberate duplication is the minimum
- * needed to recognize an externally moved Workspace after restart; all other
- * metadata remains authoritative in the Workspace-owned manifest and is read
- * back from it on demand rather than cached here.
+ * The Server data directory holds a separate discovery index containing
+ * `workspaceId -> workspacePath` plus the last time that Workspace was opened.
+ * Array order has no meaning: listings sort by the explicit timestamp, and
+ * adopting/activating a Workspace updates its timestamp in place. That
+ * deliberate duplication is the minimum needed to recognize an externally
+ * moved Workspace after restart and preserve recency; all other metadata
+ * remains authoritative in the Workspace-owned manifest and is read back from
+ * it on demand rather than cached here.
  *
  * The index is therefore the single in-process representation of membership,
  * and it is re-read from disk on every access. Reads cost a few small JSON
@@ -25,6 +28,7 @@
 
 import { randomUUID } from 'node:crypto';
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   realpathSync,
@@ -69,6 +73,7 @@ const workspaceRegistrySchema = z
             .refine((value) => path.isAbsolute(value), {
               message: 'Workspace registry paths must be absolute',
             }),
+          lastOpenedAt: z.iso.datetime(),
         })
         .strict(),
     ),
@@ -176,6 +181,7 @@ function readWorkspaceRegistry(filePath: string): WorkspaceRegistryEntry[] {
   const entries = result.data.workspaces.map((entry) => ({
     workspaceId: entry.workspaceId,
     workspacePath: path.resolve(entry.workspacePath),
+    lastOpenedAt: entry.lastOpenedAt,
   }));
   const ids = new Set<string>();
   const paths = new Set<string>();
@@ -200,17 +206,23 @@ function isAlreadyExists(error: unknown): boolean {
   return (error as NodeJS.ErrnoException | null)?.code === 'EEXIST';
 }
 
-function sameEntries(
-  left: readonly WorkspaceRegistryEntry[],
-  right: readonly WorkspaceRegistryEntry[],
-): boolean {
+/** Produce a strictly newer timestamp even for opens in the same millisecond. */
+function nextLastOpenedAt(entries: readonly WorkspaceRegistryEntry[]): string {
+  const latest = entries.reduce(
+    (maximum, entry) => Math.max(maximum, Date.parse(entry.lastOpenedAt)),
+    Number.NEGATIVE_INFINITY,
+  );
+  return new Date(Math.max(Date.now(), latest + 1)).toISOString();
+}
+
+function compareMostRecentlyOpened(
+  left: WorkspaceRegistryEntry,
+  right: WorkspaceRegistryEntry,
+): number {
+  const timestampDifference =
+    Date.parse(right.lastOpenedAt) - Date.parse(left.lastOpenedAt);
   return (
-    left.length === right.length &&
-    left.every(
-      (entry, index) =>
-        entry.workspaceId === right[index]?.workspaceId &&
-        entry.workspacePath === right[index]?.workspacePath,
-    )
+    timestampDifference || left.workspaceId.localeCompare(right.workspaceId)
   );
 }
 
@@ -279,6 +291,13 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
       : null;
   }
 
+  /** Whether this durable repository has been initialized on disk. */
+  hasDurableRegistry(): boolean {
+    return (
+      this.#registryFilePath === null || existsSync(this.#registryFilePath)
+    );
+  }
+
   #read(): WorkspaceRegistryEntry[] {
     return this.#registryFilePath
       ? readWorkspaceRegistry(this.#registryFilePath)
@@ -342,7 +361,7 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
 
   async list(): Promise<readonly WorkspaceHandle[]> {
     const handles: WorkspaceHandle[] = [];
-    for (const entry of this.#read()) {
+    for (const entry of this.#read().sort(compareMostRecentlyOpened)) {
       const handle = this.#hydrate(entry);
       if (handle) handles.push(handle);
     }
@@ -441,16 +460,18 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
     const replacement: WorkspaceRegistryEntry = {
       workspaceId: manifest.workspaceId,
       workspacePath,
+      lastOpenedAt: nextLastOpenedAt(entries),
     };
-    let replaced = false;
-    const next = surviving.map((entry) => {
-      if (entry.workspaceId !== manifest.workspaceId) return entry;
-      replaced = true;
-      return replacement;
-    });
-    if (!replaced) next.push(replacement);
+    // Array order is deliberately stable and carries no recency semantics.
+    // Existing members update in place; newly discovered members append.
+    const existingIndex = surviving.findIndex(
+      (entry) => entry.workspaceId === manifest.workspaceId,
+    );
+    const next = [...surviving];
+    if (existingIndex === -1) next.push(replacement);
+    else next[existingIndex] = replacement;
 
-    if (!sameEntries(entries, next)) this.#write(next);
+    this.#write(next);
     return toHandle(manifest);
   }
 }

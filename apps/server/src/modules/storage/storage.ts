@@ -171,6 +171,11 @@ export function getWorkspaceRepository(): WorkspaceRepository {
   return materializedWorkspaces();
 }
 
+/** Whether the Disk Workspace membership registry already exists on disk. */
+export function hasWorkspaceRegistry(): boolean {
+  return materializedWorkspaces().hasDurableRegistry();
+}
+
 /**
  * The Workspace repository, narrowed to a backend that materializes
  * Workspaces as real directories.

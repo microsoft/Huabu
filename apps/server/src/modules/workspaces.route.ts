@@ -7,11 +7,13 @@ import { z } from 'zod';
 
 import { workspaceCreateSchema, workspaceRenameSchema } from '@huabu/shared';
 
+import { migrateLegacyDesktopWorkspaceStore } from './legacy-desktop-workspace-store.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
 import {
   adoptWorkspaceDirectory,
   ensureWorkspaceManifestOnDisk,
   getWorkspaceRepository,
+  hasWorkspaceRegistry,
   resetStorageCache,
   workspaceAtDirectory,
   workspaceDirectory,
@@ -174,6 +176,22 @@ interface WorkspaceParams {
 }
 
 const workspacesRoutes: FastifyPluginAsync = async (app) => {
+  let legacyMigration: Promise<unknown> | null = null;
+
+  async function ensureLegacyDesktopStoreMigrated(): Promise<void> {
+    if (isManagedMode() || hasWorkspaceRegistry()) return;
+    const filePath = process.env.HUABU_LEGACY_WORKSPACE_STORE?.trim();
+    if (!filePath) return;
+    legacyMigration ??= migrateLegacyDesktopWorkspaceStore(filePath, {
+      hasWorkspaceRegistry,
+      prepareWorkspacePath,
+      adoptWorkspaceDirectory,
+    });
+    await legacyMigration;
+  }
+
+  app.addHook('preHandler', ensureLegacyDesktopStoreMigrated);
+
   app.get('/', async () => (await visibleWorkspaces()).map(descriptor));
 
   app.post<{ Body: WorkspaceCreateRequest }>('/', async (request, reply) => {

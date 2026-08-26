@@ -44,6 +44,8 @@ describe('DiskWorkspaceRepository', () => {
     }
   });
 
+  afterEach(() => vi.restoreAllMocks());
+
   describeWorkspaceRepositoryContract('Disk', async () => {
     const repository = new DiskWorkspaceRepository();
     return {
@@ -98,10 +100,65 @@ describe('DiskWorkspaceRepository', () => {
     expect(repository.directoryOf(first.workspaceId)).toBe(
       path.resolve(firstRoot),
     );
-    await expect(repository.list()).resolves.toEqual([first, second]);
+    await expect(repository.list()).resolves.toEqual([second, first]);
   });
 
-  it('persists only the stable id-to-path index and rehydrates metadata after restart', async () => {
+  it('persists recency as timestamps instead of array order', async () => {
+    const firstOpenedAt = Date.parse('2026-08-26T01:00:00.000Z');
+    const secondOpenedAt = Date.parse('2026-08-26T02:00:00.000Z');
+    const reopenedAt = Date.parse('2026-08-26T03:00:00.000Z');
+    vi.spyOn(Date, 'now')
+      .mockReturnValueOnce(firstOpenedAt)
+      .mockReturnValueOnce(secondOpenedAt)
+      .mockReturnValue(reopenedAt);
+    const filePath = registryPath(tempDir('huabu-workspace-timestamp-data-'));
+    const repository = new DiskWorkspaceRepository(filePath);
+    const firstRoot = tempDir('huabu-workspace-timestamp-first-');
+    const secondRoot = tempDir('huabu-workspace-timestamp-second-');
+
+    const first = repository.adopt(firstRoot);
+    const second = repository.adopt(secondRoot);
+
+    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual({
+      schemaVersion: 1,
+      workspaces: [
+        {
+          workspaceId: first.workspaceId,
+          workspacePath: path.resolve(firstRoot),
+          lastOpenedAt: new Date(firstOpenedAt).toISOString(),
+        },
+        {
+          workspaceId: second.workspaceId,
+          workspacePath: path.resolve(secondRoot),
+          lastOpenedAt: new Date(secondOpenedAt).toISOString(),
+        },
+      ],
+    });
+    await expect(repository.list()).resolves.toEqual([second, first]);
+
+    repository.adopt(firstRoot);
+
+    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual({
+      schemaVersion: 1,
+      workspaces: [
+        {
+          workspaceId: first.workspaceId,
+          workspacePath: path.resolve(firstRoot),
+          lastOpenedAt: new Date(reopenedAt).toISOString(),
+        },
+        {
+          workspaceId: second.workspaceId,
+          workspacePath: path.resolve(secondRoot),
+          lastOpenedAt: new Date(secondOpenedAt).toISOString(),
+        },
+      ],
+    });
+    await expect(new DiskWorkspaceRepository(filePath).list()).resolves.toEqual(
+      [first, second],
+    );
+  });
+
+  it('persists the locator and recency timestamp and rehydrates metadata after restart', async () => {
     const dataDir = tempDir('huabu-workspace-data-');
     const root = tempDir('huabu-workspace-persisted-');
     const filePath = registryPath(dataDir);
@@ -115,6 +172,7 @@ describe('DiskWorkspaceRepository', () => {
         {
           workspaceId: workspace.workspaceId,
           workspacePath: path.resolve(root),
+          lastOpenedAt: expect.any(String),
         },
       ],
     });
@@ -135,6 +193,7 @@ describe('DiskWorkspaceRepository', () => {
         {
           workspaceId: workspace.workspaceId,
           workspacePath: path.resolve(root),
+          lastOpenedAt: expect.any(String),
         },
       ],
     });
@@ -165,6 +224,7 @@ describe('DiskWorkspaceRepository', () => {
         {
           workspaceId: original.workspaceId,
           workspacePath: path.resolve(movedPath),
+          lastOpenedAt: expect.any(String),
         },
       ],
     });
@@ -371,7 +431,7 @@ describe('DiskWorkspaceRepository', () => {
     expect(repository.directoryOf(relocated.workspaceId)).toBe(
       path.resolve(moved),
     );
-    await expect(repository.list()).resolves.toEqual([replacement, relocated]);
+    await expect(repository.list()).resolves.toEqual([relocated, replacement]);
   });
 
   it('rejects a malformed durable registry instead of discarding it', async () => {

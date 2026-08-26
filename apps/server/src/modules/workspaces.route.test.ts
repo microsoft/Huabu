@@ -1,6 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
 import fastify from 'fastify';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -29,6 +33,7 @@ const testState = vi.hoisted(() => ({
   activePath: null as string | null,
   members: [] as TestMember[],
   diskIdentities: [] as TestMember[],
+  registryInitialized: true,
 }));
 
 const storageMocks = vi.hoisted(() => ({
@@ -117,13 +122,15 @@ const locatorMocks = vi.hoisted(() => ({
         candidate.workspaceId !== member.workspaceId &&
         candidate.workspacePath !== workspacePath,
     );
-    testState.members.push(member);
+    testState.members.unshift(member);
+    testState.registryInitialized = true;
     return { workspaceId: member.workspaceId, name: member.name };
   }),
 }));
 
 vi.mock('./storage/index.js', () => ({
   getWorkspaceRepository: () => repository,
+  hasWorkspaceRegistry: () => testState.registryInitialized,
   resetStorageCache: storageMocks.resetStorageCache,
   adoptWorkspaceDirectory: locatorMocks.adoptWorkspaceDirectory,
   ensureWorkspaceManifestOnDisk: locatorMocks.ensureWorkspaceManifestOnDisk,
@@ -176,6 +183,7 @@ async function buildApp() {
 
 beforeEach(() => {
   testState.managed = false;
+  testState.registryInitialized = true;
   testState.members = [
     {
       workspaceId: FIRST_ID,
@@ -223,6 +231,40 @@ describe('plural Workspace management routes', () => {
       ]);
     } finally {
       await app.close();
+    }
+  });
+
+  it('imports the deprecated desktop store before the first list', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'huabu-route-legacy-store-'));
+    const legacyFile = path.join(root, 'workspace.json');
+    writeFileSync(
+      legacyFile,
+      JSON.stringify({
+        path: '/tmp/second',
+        recent: ['/tmp/second', '/tmp/first'],
+      }),
+      'utf8',
+    );
+    testState.members = [];
+    testState.registryInitialized = false;
+    process.env.HUABU_LEGACY_WORKSPACE_STORE = legacyFile;
+    const app = await buildApp();
+    try {
+      const response = await app.inject({ method: 'GET', url: '/workspaces' });
+
+      expect(response.statusCode).toBe(200);
+      expect(
+        response.json().map((workspace: TestMember) => workspace.workspaceId),
+      ).toEqual([SECOND_ID, FIRST_ID]);
+      expect(activationMocks.prepareWorkspacePath.mock.calls).toEqual([
+        ['/tmp/first'],
+        ['/tmp/second'],
+      ]);
+      expect(testState.registryInitialized).toBe(true);
+    } finally {
+      await app.close();
+      delete process.env.HUABU_LEGACY_WORKSPACE_STORE;
+      rmSync(root, { recursive: true, force: true });
     }
   });
 
