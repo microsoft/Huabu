@@ -30,11 +30,13 @@ import type { TabDropIndicator } from './tabDnd';
 import type {
   CanvasPreviewWorkspace,
   PreviewGroup as PreviewGroupModel,
+  PreviewTarget,
 } from '@/store/previewWorkspace/model';
 
 type PreviewGroupProps = {
   group: PreviewGroupModel;
   workspace: CanvasPreviewWorkspace;
+  adjacentNodeTarget?: Extract<PreviewTarget, { kind: 'node' }>;
   isFocused: boolean;
   onFocus: () => void;
   onActivate: (tabId: string) => void;
@@ -60,6 +62,7 @@ type PreviewGroupProps = {
 export function PreviewGroup({
   group,
   workspace,
+  adjacentNodeTarget,
   isFocused,
   onFocus,
   onActivate,
@@ -148,6 +151,9 @@ export function PreviewGroup({
                   <PreviewRenderer
                     tabId={tab.id}
                     target={tab.target}
+                    adjacentNodeTarget={
+                      isActive ? adjacentNodeTarget : undefined
+                    }
                     onClose={() => onClose(tab.id)}
                     onCommit={() => onPromote(tab.id)}
                     nodeFocusRequestNonce={

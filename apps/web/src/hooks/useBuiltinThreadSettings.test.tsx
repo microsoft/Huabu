@@ -30,7 +30,11 @@ let settingsSeenAfterSelection:
   | { modelId: string | null; reasoningEffort: string | null }
   | undefined;
 
-function Harness() {
+function Harness({
+  threadHasMessages = false,
+}: {
+  threadHasMessages?: boolean;
+}) {
   const { settings, selectModel, selectReasoningEffort } =
     useBuiltinThreadSettings({
       threadId: THREAD_ID,
@@ -38,7 +42,7 @@ function Harness() {
       provider: 'test-provider',
       defaultModelId: 'default-model',
       enabled: true,
-      threadHasMessages: false,
+      threadHasMessages,
     });
   return (
     <>
@@ -161,5 +165,58 @@ describe('useBuiltinThreadSettings', () => {
       modelId: 'model-2',
       reasoningEffort: 'medium',
     });
+  });
+
+  it('does not reload settings when the first message is sent', async () => {
+    apiMocks.getSettings.mockResolvedValue({
+      modelId: null,
+      reasoningEffort: null,
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<Harness />);
+    });
+    await act(async () => {
+      container?.querySelector('button')?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      root?.render(<Harness threadHasMessages />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.getSettings).not.toHaveBeenCalled();
+    expect(
+      container.querySelector('[data-testid="settings"]')?.textContent,
+    ).toBe('model-1:medium');
+    expect(selectThreadSettings(useChatStore.getState(), THREAD_ID)).toEqual({
+      modelId: 'model-1',
+      reasoningEffort: 'medium',
+    });
+  });
+
+  it('loads server settings when an established conversation is mounted', async () => {
+    apiMocks.getSettings.mockResolvedValue({
+      modelId: 'server-model',
+      reasoningEffort: 'low',
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<Harness threadHasMessages />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.getSettings).toHaveBeenCalledOnce();
+    expect(
+      container.querySelector('[data-testid="settings"]')?.textContent,
+    ).toBe('server-model:low');
   });
 });

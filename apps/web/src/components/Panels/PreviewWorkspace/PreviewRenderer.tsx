@@ -51,6 +51,7 @@ function questionSession(
 export function PreviewRenderer({
   tabId,
   target,
+  adjacentNodeTarget,
   onClose,
   onCommit,
   nodeFocusRequestNonce,
@@ -61,6 +62,8 @@ export function PreviewRenderer({
 }: {
   tabId: string;
   target: PreviewTarget;
+  /** Active node shown in the other split group, offered as a source. */
+  adjacentNodeTarget?: Extract<PreviewTarget, { kind: 'node' }>;
   /** Closes the tab rendering this target. */
   onClose: () => void;
   /** Promotes this tab after its target receives a persistent mutation. */
@@ -85,6 +88,25 @@ export function PreviewRenderer({
   const reference = useCanvasStore((s) =>
     target.kind === 'node' ? s.worldReferences[target.nodeId] : undefined,
   );
+  const adjacentNode = useCanvasStore((s) =>
+    adjacentNodeTarget
+      ? s.nodes.find((candidate) => candidate.id === adjacentNodeTarget.nodeId)
+      : undefined,
+  );
+  const adjacentReference = useCanvasStore((s) =>
+    adjacentNodeTarget
+      ? s.worldReferences[adjacentNodeTarget.nodeId]
+      : undefined,
+  );
+  const adjacentNodeSourceId =
+    adjacentNode &&
+    !conversationViewForNode(
+      adjacentNode,
+      adjacentNodeTarget?.canvasId ?? '',
+      adjacentReference,
+    )
+      ? adjacentNode.id
+      : undefined;
 
   const session = useMemo<ChatSession | null>(() => {
     if (target.kind === 'chat') {
@@ -103,6 +125,7 @@ export function PreviewRenderer({
       <ChatPanel
         session={session}
         previewTabId={tabId}
+        adjacentNodeSourceId={adjacentNodeSourceId}
         onCommit={onCommit}
         openPositionRequest={chatOpenRequest}
         onOpenPositionHandled={onChatOpenRequestHandled}

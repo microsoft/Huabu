@@ -76,6 +76,8 @@ interface ChatPanelProps {
   session: ChatSession;
   /** Workspace tab to convert in place when an unbound Chat is saved. */
   previewTabId: string;
+  /** Active node in the other Preview split group, if one is visible. */
+  adjacentNodeSourceId?: string;
   /** Reports a persistent thread mutation to the owning preview surface. */
   onCommit?: () => void;
   /** One-shot initial scroll request from Preview Workspace. */
@@ -91,6 +93,7 @@ export const ChatPanel = ({
   onToggle,
   session,
   previewTabId,
+  adjacentNodeSourceId,
   onCommit,
   openPositionRequest,
   onOpenPositionHandled,
@@ -893,6 +896,7 @@ export const ChatPanel = ({
               onSubmit={handleSubmit}
               onCommit={onCommit}
               onStop={stopStream}
+              adjacentNodeSourceId={adjacentNodeSourceId}
               isStreaming={isLoading}
               mode={mode}
               connectedTop={hasThreadChanges}

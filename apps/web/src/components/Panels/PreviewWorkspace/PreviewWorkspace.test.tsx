@@ -19,6 +19,7 @@ import {
   restoreMessageListScrollPosition,
 } from '@/components/Messages/messageListScroll';
 import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { messageListViewKey } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
@@ -66,11 +67,17 @@ vi.mock('../ChatPanel', () => ({
   ChatPanel: ({
     session,
     onCommit,
+    adjacentNodeSourceId,
   }: {
     session?: { threadId: string };
     onCommit?: () => void;
+    adjacentNodeSourceId?: string;
   }) => (
-    <div data-testid="chat-panel" data-thread-id={session?.threadId}>
+    <div
+      data-testid="chat-panel"
+      data-thread-id={session?.threadId}
+      data-adjacent-node-source-id={adjacentNodeSourceId}
+    >
       <button type="button" data-testid="commit-chat" onClick={onCommit} />
     </div>
   ),
@@ -803,6 +810,23 @@ describe('split', () => {
       container?.querySelectorAll('[data-preview-node-id]') ?? [],
     ).map((el) => el.getAttribute('data-preview-node-id'));
     expect(mounted).toEqual(['a', 'b']);
+  });
+
+  it('offers an ordinary node beside a chat as a source candidate', () => {
+    openNode('a');
+    const threadId = useChatStore.getState().createThread();
+    store().openPreviewTarget({ kind: 'chat', canvasId: CANVAS_ID, threadId });
+    store().openPreviewTarget(
+      { kind: 'chat', canvasId: CANVAS_ID, threadId },
+      { openToSide: true },
+    );
+    render([canvasNode('a', 'Alpha')]);
+
+    expect(
+      container
+        ?.querySelector('[data-testid="chat-panel"]')
+        ?.getAttribute('data-adjacent-node-source-id'),
+    ).toBe('a');
   });
 
   it('bounds warm retention independently in each group', async () => {

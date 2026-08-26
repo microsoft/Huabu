@@ -86,6 +86,8 @@ Dragging a Chat or Note block into an editable Note uses Milkdown's geometric dr
 
 PDF area capture routes directly to a Chat or Question conversation that is active in the group beside the PDF. When no conversation is visible beside it, the Canvas's canonical unbound Chat opens to the side and the capture is staged immediately as that thread's pending attachment. The explicit Send to Chat action always produces a thread-owned attachment; the shared dashed selection attachment remains reserved for passive browser text selection.
 
+When a conversation is visible beside an ordinary node, its composer offers that active node as a dashed source candidate. Confirming the candidate stages a thread-owned source attachment that the prompt renderer emits as a structured node reference; switching the node in the adjacent group updates the unconfirmed candidate, while an already confirmed source remains attached to the thread.
+
 For a World `nodeRef` that presents a source Question, the target remains the World presentation node while `AgentConversationView` carries the source Canvas, node, and thread as conversation owner. History, reconnect, agent turns, tools, lifecycle writes, binding, mode, and change records use that owner scope.
 
 An authored Question node remains authoritative for persisted agent mode and fixed binding. A new selectable Question thread inherits the Canvas's current binding unless the node supplies an explicit binding.

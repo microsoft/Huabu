@@ -2,11 +2,19 @@
 // Licensed under the MIT license.
 
 import clsx from 'clsx';
-import { ChevronDown, ChevronRight, Lock, Plus, Unlock } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  FileWarning,
+  Lock,
+  Plus,
+  Unlock,
+} from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '../../Common/Button';
+import { Tooltip } from '../../Common/Tooltip';
 
 import type { DraggableSyntheticListeners } from '@dnd-kit/core';
 import type { ReactNode } from 'react';
@@ -20,6 +28,7 @@ export interface TreeRowItemProps extends React.HTMLAttributes<HTMLDivElement> {
   isSelected?: boolean;
   isHighlighted?: boolean;
   isDragging?: boolean;
+  missingFileLabel?: string;
 
   // Frame/Group specific
   isCollapsible?: boolean;
@@ -102,6 +111,7 @@ export const TreeRowItem = React.memo(
     isSelected,
     isHighlighted,
     isDragging,
+    missingFileLabel,
     isCollapsible = false,
     isCollapsed = false,
     onToggleCollapse,
@@ -327,6 +337,17 @@ export const TreeRowItem = React.memo(
 
           {/* Action buttons on the right */}
           <div className="ml-auto flex shrink-0 items-center gap-1">
+            {missingFileLabel && (
+              <Tooltip content={missingFileLabel}>
+                <span
+                  role="img"
+                  aria-label={missingFileLabel}
+                  className="text-warning inline-flex"
+                >
+                  <FileWarning className="h-3.5 w-3.5" />
+                </span>
+              </Tooltip>
+            )}
             {isExternal && onImport && (
               <Button
                 variant="ghost"

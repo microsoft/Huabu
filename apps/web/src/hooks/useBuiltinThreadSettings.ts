@@ -88,6 +88,10 @@ export function useBuiltinThreadSettings({
   // Bumped on every local user mutation. A settings fetch that started
   // before a mutation must not clobber the newer local value (P1-2).
   const mutationGenRef = useRef(0);
+  const threadMessageStateRef = useRef({
+    threadId: threadId ?? null,
+    hasMessages: threadHasMessages,
+  });
 
   // Fetch the active provider's model catalogue (capability + labels).
   useEffect(() => {
@@ -110,11 +114,29 @@ export function useBuiltinThreadSettings({
 
   // Fetch this thread's persisted selection.
   useEffect(() => {
+    const previousMessageState = threadMessageStateRef.current;
+    const isFirstMessageTransition =
+      previousMessageState.threadId === threadId &&
+      !previousMessageState.hasMessages &&
+      threadHasMessages;
+    threadMessageStateRef.current = {
+      threadId: threadId ?? null,
+      hasMessages: threadHasMessages,
+    };
+
     if (!enabled || !threadId) {
       replaceSettingsState({
         threadId: threadId ?? null,
         settings: EMPTY_SETTINGS,
       });
+      setLoading(false);
+      return;
+    }
+    // Sending the first message updates local history before the server has
+    // necessarily persisted the deployment. The current thread already owns
+    // the user's latest selection, so this lifecycle transition must not
+    // trigger a stale settings reload.
+    if (isFirstMessageTransition) {
       setLoading(false);
       return;
     }
