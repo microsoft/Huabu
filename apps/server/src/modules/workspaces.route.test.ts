@@ -1,7 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -110,6 +116,12 @@ const locatorMocks = vi.hoisted(() => ({
     }
     return { schemaVersion: 1, ...handleOf(member) };
   }),
+  workspaceIdentityOnDisk: vi.fn((workspacePath: string) => {
+    const member = testState.diskIdentities.find(
+      (candidate) => candidate.workspacePath === workspacePath,
+    );
+    return member ? handleOf(member) : null;
+  }),
   adoptWorkspaceDirectory: vi.fn((workspacePath: string) => {
     const identity = locatorMocks.ensureWorkspaceManifestOnDisk(workspacePath);
     const member: TestMember = {
@@ -136,6 +148,7 @@ vi.mock('./storage/index.js', () => ({
   ensureWorkspaceManifestOnDisk: locatorMocks.ensureWorkspaceManifestOnDisk,
   workspaceAtDirectory: locatorMocks.workspaceAtDirectory,
   workspaceDirectory: locatorMocks.workspaceDirectory,
+  workspaceIdentityOnDisk: locatorMocks.workspaceIdentityOnDisk,
 }));
 
 vi.mock('./workspace.js', () => ({
@@ -236,16 +249,22 @@ describe('plural Workspace management routes', () => {
 
   it('imports the deprecated desktop store before the first list', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'huabu-route-legacy-store-'));
+    const first = path.join(root, 'first');
+    const second = path.join(root, 'second');
+    const deleted = path.join(root, 'deleted');
+    mkdirSync(first);
+    mkdirSync(second);
     const legacyFile = path.join(root, 'workspace.json');
     writeFileSync(
       legacyFile,
-      JSON.stringify({
-        path: '/tmp/second',
-        recent: ['/tmp/second', '/tmp/first'],
-      }),
+      JSON.stringify({ path: second, recent: [second, first, deleted] }),
       'utf8',
     );
     testState.members = [];
+    testState.diskIdentities = [
+      { workspaceId: FIRST_ID, workspacePath: first, name: 'First' },
+      { workspaceId: SECOND_ID, workspacePath: second, name: 'Second' },
+    ];
     testState.registryInitialized = false;
     process.env.HUABU_LEGACY_WORKSPACE_STORE = legacyFile;
     const app = await buildApp();
@@ -256,11 +275,82 @@ describe('plural Workspace management routes', () => {
       expect(
         response.json().map((workspace: TestMember) => workspace.workspaceId),
       ).toEqual([SECOND_ID, FIRST_ID]);
-      expect(activationMocks.prepareWorkspacePath.mock.calls).toEqual([
-        ['/tmp/first'],
-        ['/tmp/second'],
-      ]);
+      expect(
+        locatorMocks.adoptWorkspaceDirectory.mock.calls.map(
+          ([workspacePath]) => workspacePath,
+        ),
+      ).toEqual([first, second]);
+      // Registration never prepares: the collection must not be held behind a
+      // preparation fork per remembered folder, and a deleted folder must not
+      // be recreated by remembering it.
+      expect(activationMocks.prepareWorkspacePath).not.toHaveBeenCalled();
+      expect(existsSync(deleted)).toBe(false);
       expect(testState.registryInitialized).toBe(true);
+    } finally {
+      await app.close();
+      delete process.env.HUABU_LEGACY_WORKSPACE_STORE;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('attempts the deprecated desktop store once even when it registers nothing', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'huabu-route-legacy-once-'));
+    const home = path.join(root, 'home');
+    mkdirSync(home);
+    const legacyFile = path.join(root, 'workspace.json');
+    writeFileSync(legacyFile, JSON.stringify({ path: home }), 'utf8');
+    testState.members = [];
+    testState.registryInitialized = false;
+    // Nothing gets registered, so `hasWorkspaceRegistry()` stays false and only
+    // the once-only flag can stop the import repeating on every later request.
+    const adoptImplementation =
+      locatorMocks.adoptWorkspaceDirectory.getMockImplementation();
+    locatorMocks.adoptWorkspaceDirectory.mockImplementation(() => {
+      throw new Error('copied Workspace identity');
+    });
+    process.env.HUABU_LEGACY_WORKSPACE_STORE = legacyFile;
+    const app = await buildApp();
+    try {
+      await app.inject({ method: 'GET', url: '/workspaces' });
+      await app.inject({ method: 'GET', url: '/workspaces' });
+      const last = await app.inject({ method: 'GET', url: '/workspaces' });
+
+      expect(last.statusCode).toBe(200);
+      expect(last.json()).toEqual([]);
+      expect(locatorMocks.adoptWorkspaceDirectory).toHaveBeenCalledTimes(1);
+      expect(testState.registryInitialized).toBe(false);
+    } finally {
+      await app.close();
+      if (adoptImplementation) {
+        locatorMocks.adoptWorkspaceDirectory.mockImplementation(
+          adoptImplementation,
+        );
+      }
+      delete process.env.HUABU_LEGACY_WORKSPACE_STORE;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('never imports the deprecated desktop store in managed mode', async () => {
+    const root = mkdtempSync(
+      path.join(tmpdir(), 'huabu-route-legacy-managed-'),
+    );
+    const home = path.join(root, 'home');
+    mkdirSync(home);
+    const legacyFile = path.join(root, 'workspace.json');
+    writeFileSync(legacyFile, JSON.stringify({ path: home }), 'utf8');
+    testState.managed = true;
+    testState.registryInitialized = false;
+    process.env.HUABU_LEGACY_WORKSPACE_STORE = legacyFile;
+    const app = await buildApp();
+    try {
+      const response = await app.inject({ method: 'GET', url: '/workspaces' });
+
+      expect(response.statusCode).toBe(200);
+      // Managed mode locks its Workspace at boot; a free-mode history file has
+      // nothing to say about it.
+      expect(locatorMocks.adoptWorkspaceDirectory).not.toHaveBeenCalled();
+      expect(existsSync(path.join(home, '.workspace.json'))).toBe(false);
     } finally {
       await app.close();
       delete process.env.HUABU_LEGACY_WORKSPACE_STORE;

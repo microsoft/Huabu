@@ -52,7 +52,10 @@ export { ensureWorldCanvasOnDisk } from './backends/disk/world-canvas.js';
  * work it exists to contain, while registry membership stays a Server-process
  * decision with exactly one writer.
  */
-export { ensureWorkspaceManifestOnDisk } from './backends/disk/workspace-repository.js';
+export {
+  ensureWorkspaceManifestOnDisk,
+  workspaceIdentityOnDisk,
+} from './backends/disk/workspace-repository.js';
 export { withCanvasMutex, updateNode } from '../canvas/write-coordinator.js';
 export type {
   UpdateNodeOptions,

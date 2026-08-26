@@ -198,21 +198,28 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       }
 
       // ── Free mode ──
-      let registered: WorkspaceDescriptor[];
+      // Server already activated (e.g. another tab beat us to it).
+      const activated = info.configured && Boolean(info.path);
+
+      let registered: WorkspaceDescriptor[] = [];
       try {
         registered = await listWorkspaces();
         set({ recentWorkspaces: registered });
       } catch (err) {
-        set({
-          error:
-            err instanceof Error ? err.message : 'Failed to list Workspaces',
-          isSyncing: false,
-        });
-        return false;
+        // A registry we cannot read is only fatal when it is the sole route
+        // back to a Workspace. An already-activated Server stays usable; the
+        // welcome list is the one thing that degrades.
+        if (!activated) {
+          set({
+            error:
+              err instanceof Error ? err.message : 'Failed to list Workspaces',
+            isSyncing: false,
+          });
+          return false;
+        }
       }
 
-      // Server already activated (e.g. another tab beat us to it).
-      if (info.configured && info.path) {
+      if (activated) {
         set({ isSyncing: false });
         emitWorkspaceChanged();
         return true;

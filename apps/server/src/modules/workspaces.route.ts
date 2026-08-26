@@ -17,6 +17,7 @@ import {
   resetStorageCache,
   workspaceAtDirectory,
   workspaceDirectory,
+  workspaceIdentityOnDisk,
 } from './storage/index.js';
 import {
   activateWorkspacePath,
@@ -176,21 +177,32 @@ interface WorkspaceParams {
 }
 
 const workspacesRoutes: FastifyPluginAsync = async (app) => {
-  let legacyMigration: Promise<unknown> | null = null;
+  let legacyDesktopStoreImported = false;
 
-  async function ensureLegacyDesktopStoreMigrated(): Promise<void> {
-    if (isManagedMode() || hasWorkspaceRegistry()) return;
+  /**
+   * Import the deprecated desktop store once, before the first plural request
+   * is answered. Registration-only and synchronous, so it costs the triggering
+   * request a stat per remembered folder rather than holding the collection
+   * behind a preparation fork each.
+   */
+  function importLegacyDesktopStore(): void {
+    if (legacyDesktopStoreImported || isManagedMode() || hasWorkspaceRegistry())
+      return;
     const filePath = process.env.HUABU_LEGACY_WORKSPACE_STORE?.trim();
     if (!filePath) return;
-    legacyMigration ??= migrateLegacyDesktopWorkspaceStore(filePath, {
+    // Mark before running: an import that throws is an import that happened,
+    // and retrying it on every later request would only repeat the failure.
+    legacyDesktopStoreImported = true;
+    migrateLegacyDesktopWorkspaceStore(filePath, {
       hasWorkspaceRegistry,
-      prepareWorkspacePath,
       adoptWorkspaceDirectory,
+      workspaceIdentityOnDisk,
     });
-    await legacyMigration;
   }
 
-  app.addHook('preHandler', ensureLegacyDesktopStoreMigrated);
+  app.addHook('preHandler', async () => {
+    importLegacyDesktopStore();
+  });
 
   app.get('/', async () => (await visibleWorkspaces()).map(descriptor));
 

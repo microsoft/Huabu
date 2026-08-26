@@ -123,6 +123,29 @@ describe('workspaceStore registry persistence', () => {
     ).toEqual([SECOND_ID, FIRST_ID]);
   });
 
+  it('keeps an already-activated Workspace when the registry cannot be listed', async () => {
+    apiState.info = {
+      ...unconfiguredInfo(),
+      configured: true,
+      workspaceId: FIRST_ID,
+      path: '/tmp/first',
+      name: 'First',
+    };
+    apiMocks.listWorkspaces.mockRejectedValueOnce(new Error('registry broken'));
+
+    await expect(useWorkspaceStore.getState().init()).resolves.toBe(true);
+
+    // Only the welcome list degrades — the Server is activated and usable.
+    expect(apiMocks.activateWorkspace).not.toHaveBeenCalled();
+    expect(useWorkspaceStore.getState()).toMatchObject({
+      workspaceId: FIRST_ID,
+      isReady: true,
+      isSyncing: false,
+      error: null,
+      recentWorkspaces: [],
+    });
+  });
+
   it('shares concurrent initialization so the MRU Workspace activates once', async () => {
     const first = useWorkspaceStore.getState().init();
     const second = useWorkspaceStore.getState().init();

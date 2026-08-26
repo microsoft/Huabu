@@ -276,6 +276,27 @@ export function ensureWorkspaceManifestOnDisk(
   return readManifest(filePath);
 }
 
+/**
+ * The identity a directory already claims, without adopting or writing it.
+ *
+ * Adoption assigns an identity when a folder has none, which makes it the
+ * wrong question to ask when a caller has to *choose between* directories —
+ * two remembered paths that turn out to be one copied Workspace, say, where
+ * registering the second is refused and the choice has to be made first.
+ * Unreachable and manifest-less directories both read as "claims nothing",
+ * because both are cases where adoption would mint a fresh identity. A
+ * malformed manifest still throws, as everywhere else.
+ */
+export function workspaceIdentityOnDisk(
+  rawWorkspacePath: string,
+): WorkspaceHandle | null {
+  const manifest = readManifestFile(
+    manifestPath(path.resolve(rawWorkspacePath)),
+    true,
+  );
+  return manifest ? toHandle(manifest) : null;
+}
+
 export class DiskWorkspaceRepository implements WorkspaceRepository {
   readonly #registryFilePath: string | null;
   /**
