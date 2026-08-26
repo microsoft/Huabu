@@ -11,8 +11,8 @@ export interface MissingFileData {
 export function getMissingFileKind(
   data: Record<string, unknown> | MissingFileData,
 ): MissingFileKind | null {
-  if (data.contentMissing) return 'sidecar';
-  if (data.artifactMissing) return 'artifact';
+  if (data.contentMissing === true) return 'sidecar';
+  if (data.artifactMissing === true) return 'artifact';
   return null;
 }
 
