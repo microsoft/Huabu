@@ -2,14 +2,18 @@
 // Licensed under the MIT license.
 
 /**
- * One preview group: a tab strip over a single rendered panel.
+ * One preview group: a tab strip over a bounded set of rendered panels.
  *
- * Only the active tab is mounted. Inactive tabs keep their model and store
- * state but not their component tree, so a group with many tabs costs one
- * renderer (§9).
+ * The active tab and one recent eligible tab retain their component state.
+ * Older and resource-heavy tabs are unmounted (§4).
  */
 
+import { Activity } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
+
+import useCanvasStore from '@/store/canvasStore';
+import { previewTargetKey } from '@/store/previewWorkspace/scrollMemory';
 
 import { PreviewRenderer } from './PreviewRenderer';
 import {
@@ -17,16 +21,22 @@ import {
   PreviewTabStrip,
   tabElementId,
 } from './PreviewTabStrip';
+import {
+  canRetainPreviewNode,
+  selectRetainedPreviewTabs,
+} from './retainedPreviewTabs';
 
 import type { TabDropIndicator } from './tabDnd';
 import type {
   CanvasPreviewWorkspace,
   PreviewGroup as PreviewGroupModel,
+  PreviewTarget,
 } from '@/store/previewWorkspace/model';
 
 type PreviewGroupProps = {
   group: PreviewGroupModel;
   workspace: CanvasPreviewWorkspace;
+  adjacentNodeTarget?: Extract<PreviewTarget, { kind: 'node' }>;
   isFocused: boolean;
   onFocus: () => void;
   onActivate: (tabId: string) => void;
@@ -52,6 +62,7 @@ type PreviewGroupProps = {
 export function PreviewGroup({
   group,
   workspace,
+  adjacentNodeTarget,
   isFocused,
   onFocus,
   onActivate,
@@ -75,6 +86,26 @@ export function PreviewGroup({
   const activeTab = group.activeTabId
     ? workspace.tabs[group.activeTabId]
     : undefined;
+  const retainableTabIds = useCanvasStore(
+    useShallow((state) =>
+      group.tabIds.flatMap((tabId) => {
+        const tab = workspace.tabs[tabId];
+        if (!tab) return [];
+        if (tab.target.kind === 'chat') return [tabId];
+        const nodeId = tab.target.nodeId;
+        const node = state.nodes.find((candidate) => candidate.id === nodeId);
+        return node &&
+          canRetainPreviewNode(node, state.worldReferences[node.id])
+          ? [tabId]
+          : [];
+      }),
+    ),
+  );
+  const retainedTabs = selectRetainedPreviewTabs(
+    group,
+    workspace,
+    new Set(retainableTabIds),
+  );
 
   return (
     <section
@@ -109,29 +140,44 @@ export function PreviewGroup({
         className="min-h-0 flex-1 overflow-auto"
       >
         {activeTab ? (
-          <PreviewRenderer
-            tabId={activeTab.id}
-            target={activeTab.target}
-            onClose={() => onClose(activeTab.id)}
-            onCommit={() => onPromote(activeTab.id)}
-            nodeFocusRequestNonce={
-              nodeFocusRequest?.tabId === activeTab.id
-                ? nodeFocusRequest.nonce
-                : undefined
-            }
-            onNodeFocusRequestHandled={(nonce) =>
-              onNodeFocusRequestHandled(activeTab.id, nonce)
-            }
-            chatOpenRequest={
-              chatOpenRequest?.tabId === activeTab.id
-                ? chatOpenRequest
-                : undefined
-            }
-            onChatOpenRequestHandled={(nonce) =>
-              onChatOpenRequestHandled(activeTab.id, nonce)
-            }
-            hasFocusPriority={isFocused}
-          />
+          retainedTabs.map((tab) => {
+            const isActive = tab.id === activeTab.id;
+            return (
+              <Activity
+                key={`${tab.id}:${previewTargetKey(tab.target)}`}
+                mode={isActive ? 'visible' : 'hidden'}
+              >
+                <div className="contents" data-preview-active={isActive}>
+                  <PreviewRenderer
+                    tabId={tab.id}
+                    target={tab.target}
+                    adjacentNodeTarget={
+                      isActive ? adjacentNodeTarget : undefined
+                    }
+                    onClose={() => onClose(tab.id)}
+                    onCommit={() => onPromote(tab.id)}
+                    nodeFocusRequestNonce={
+                      isActive && nodeFocusRequest?.tabId === tab.id
+                        ? nodeFocusRequest.nonce
+                        : undefined
+                    }
+                    onNodeFocusRequestHandled={(nonce) =>
+                      onNodeFocusRequestHandled(tab.id, nonce)
+                    }
+                    chatOpenRequest={
+                      isActive && chatOpenRequest?.tabId === tab.id
+                        ? chatOpenRequest
+                        : undefined
+                    }
+                    onChatOpenRequestHandled={(nonce) =>
+                      onChatOpenRequestHandled(tab.id, nonce)
+                    }
+                    hasFocusPriority={isActive && isFocused}
+                  />
+                </div>
+              </Activity>
+            );
+          })
         ) : (
           <div className="text-fg-subtle flex h-full items-center justify-center text-sm">
             {t('preview.emptyGroup')}

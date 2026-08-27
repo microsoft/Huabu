@@ -23,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import artifactRoute from './artifact.route.js';
 import { createCanvas, deleteCanvas } from '../storage/compatibility/canvas.js';
 import {
-  canvasBlobs,
+  space,
   getStorage,
   resetStorageCache,
   setStorageForTesting,
@@ -194,7 +194,7 @@ describe('artifact route', () => {
     });
 
     expect(upload.statusCode).toBe(500);
-    expect(await canvasBlobs('missing').list()).toEqual([]);
+    expect(await space('missing').blobs.list()).toEqual([]);
     await app.close();
   });
 
@@ -234,7 +234,7 @@ describe('artifact route', () => {
       const upload = await uploading;
       expect(upload.statusCode).toBe(500);
       expect(blocker.putCalls()).toBe(0);
-      expect(await canvasBlobs('c1').list()).toEqual([]);
+      expect(await space('c1').blobs.list()).toEqual([]);
     } finally {
       blocker.releaseDelete();
       blocker.restore();
@@ -244,7 +244,7 @@ describe('artifact route', () => {
 
   it('serves a byte range so media nodes can seek', async () => {
     const app = await buildApp();
-    await canvasBlobs('c1').put('a.png', png);
+    await space('c1').blobs.put('a.png', png);
 
     const res = await app.inject({
       method: 'GET',
@@ -260,7 +260,7 @@ describe('artifact route', () => {
 
   it('answers 304 for an unchanged artifact', async () => {
     const app = await buildApp();
-    await canvasBlobs('c1').put('a.png', png);
+    await space('c1').blobs.put('a.png', png);
 
     const first = await app.inject({
       method: 'GET',
@@ -332,7 +332,7 @@ describe('artifact route', () => {
 
   it('clones an artifact into another canvas under a fresh key', async () => {
     const app = await buildApp();
-    await canvasBlobs('src-canvas').put('a.png', png);
+    await space('src-canvas').blobs.put('a.png', png);
 
     const res = await app.inject({
       method: 'POST',
@@ -346,8 +346,8 @@ describe('artifact route', () => {
     expect(uri).toMatch(/\.png$/);
 
     // Destination owns its own copy; the source is untouched.
-    expect(await canvasBlobs('dst-canvas').read(uri)).toEqual(png);
-    expect(await canvasBlobs('src-canvas').read('a.png')).toEqual(png);
+    expect(await space('dst-canvas').blobs.read(uri)).toEqual(png);
+    expect(await space('src-canvas').blobs.read('a.png')).toEqual(png);
 
     await app.close();
   });

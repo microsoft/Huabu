@@ -196,6 +196,7 @@ export {
   computeFrameFit,
   fitFrameToChildren,
   fitFrames,
+  projectAffectedFrameGeometry,
   getFrameSizing,
   moveNodeOutOfFrame,
 } from './frame/index.js';
@@ -225,6 +226,7 @@ export {
   fingerprintMarkdownBlocks,
   fingerprintMarkdownKeys,
   fingerprintMdastBlock,
+  topLevelListItemMarkdown,
   type FingerprintedBlock,
 } from './provenance/blockFingerprint.js';
 export {

@@ -21,6 +21,10 @@ export const routes = {
   workspace: '/workspace',
   workspacePickFolder: '/workspace/pick-folder',
   workspaceValidatePath: '/workspace/validate-path',
+  workspaces: '/workspaces',
+  workspaceById: (workspaceId: string) => `/workspaces/${enc(workspaceId)}`,
+  workspaceActivate: (workspaceId: string) =>
+    `/workspaces/${enc(workspaceId)}/activate`,
 
   // ── LLM ───────────────────────────────────────────────────────────
   llmConfig: '/llm/config',
@@ -51,6 +55,8 @@ export const routes = {
   canvas: (canvasId: string) => `/canvas/${enc(canvasId)}`,
   canvasExecute: (canvasId: string) => `/canvas/${enc(canvasId)}/execute`,
   canvasReferences: (canvasId: string) => `/canvas/${enc(canvasId)}/references`,
+  canvasPreviewScene: (canvasId: string) =>
+    `/canvas/${enc(canvasId)}/preview-scene`,
   canvasExport: (canvasId: string) => `/canvas/${enc(canvasId)}/export`,
   canvasNode: (canvasId: string, nodeId: string) =>
     `/canvas/${enc(canvasId)}/nodes/${enc(nodeId)}`,

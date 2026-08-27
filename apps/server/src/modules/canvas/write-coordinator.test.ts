@@ -33,6 +33,26 @@ function fakeRepository(canvasId = 'c1') {
       if (revision === null) throw new Error('test storage token is missing');
       return { record, revision };
     },
+    // This fake holds one node, so the collection reads are the same record
+    // under its own id. `updateNode` never calls them; they exist because the
+    // port has them.
+    async readMany(nodeIds): Promise<Map<string, NodeSnapshot>> {
+      const snapshot = await nodes.read('');
+      return snapshot !== null && nodeIds.includes(snapshot.record.nodeId)
+        ? new Map([[snapshot.record.nodeId, snapshot]])
+        : new Map();
+    },
+    async list(): Promise<Map<string, NodeSnapshot>> {
+      const snapshot = await nodes.read('');
+      return snapshot === null
+        ? new Map()
+        : new Map([[snapshot.record.nodeId, snapshot]]);
+    },
+    async stream(onNode): Promise<Map<string, NodeSnapshot>> {
+      const all = await nodes.list();
+      for (const snapshot of all.values()) onNode(snapshot);
+      return all;
+    },
     async put(input) {
       if (suppressed) return { ok: false, reason: 'write-suppressed' };
       const currentRevision = storageRevisionOf(record);

@@ -46,6 +46,16 @@ export {
 } from './backends/disk/space-dir-handles.js';
 export type { SpaceDirHandleOwner } from './backends/disk/space-dir-handles.js';
 export { ensureWorldCanvasOnDisk } from './backends/disk/world-canvas.js';
+/**
+ * Workspace adoption, split out from the repository on purpose: the isolated
+ * preparation child creates the manifest as part of the blocking filesystem
+ * work it exists to contain, while registry membership stays a Server-process
+ * decision with exactly one writer.
+ */
+export {
+  ensureWorkspaceManifestOnDisk,
+  workspaceIdentityOnDisk,
+} from './backends/disk/workspace-repository.js';
 export { withCanvasMutex, updateNode } from '../canvas/write-coordinator.js';
 export type {
   UpdateNodeOptions,
@@ -61,19 +71,25 @@ export type {
 // ─── Storage ports and composition ─────────────────────────────────────────
 
 export {
-  canvasBlobs,
+  adoptWorkspaceDirectory,
+  composeStorage,
   createSpace,
   createStorage,
   deleteSpace,
   getBlobStore,
   getStorage,
   getStructuredStore,
+  getWorkspaceRepository,
+  hasWorkspaceRegistry,
   initStorage,
   setStorageForTesting,
-  spaceDirectory,
+  space,
   storageHealth,
+  workspaceAtDirectory,
+  workspaceDirectory,
 } from './storage.js';
-export type { SpaceDeleteOutcome, Storage } from './storage.js';
+export type { Space, SpaceDeleteOutcome, Storage } from './storage.js';
+export type { DiskSpaceTree } from './backends/disk/space-tree.js';
 export {
   parseStorageProfile,
   StorageProfileError,
@@ -93,11 +109,16 @@ export type {
 } from './ports/blob.js';
 export type { StorageHealth } from './ports/common.js';
 export type {
+  WorkspaceHandle,
+  WorkspaceRepository,
+} from './ports/workspace.js';
+export type {
   NewCanvasEvent,
   NodeDeleteResult,
   NodePutInput,
   NodePutResult,
   NodeSnapshot,
+  NodeStreamOptions,
   SpaceBeginDeleteResult,
   SpaceChanges,
   SpaceCreateInput,

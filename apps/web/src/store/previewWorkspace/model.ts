@@ -27,7 +27,8 @@ export type PreviewTab = {
   /**
    * A transient tab is the group's reusable inspection slot: the next
    * transient open replaces its target instead of appending a tab. Promoted
-   * to permanent by an explicit gesture (edit, double-click, Open to Side).
+   * to permanent by an explicit gesture (edit, double-click, or Pin). Moving
+   * it with Open to Side preserves its transient state.
    */
   transient: boolean;
   /** Monotonic activation stamp used to restore recent-target ordering. */
@@ -200,6 +201,50 @@ export function promoteTab(
   };
 }
 
+/** Repairs the one-transient-tab-per-group invariant by dropping older slots. */
+export function repairTransientTabs(
+  workspace: CanvasPreviewWorkspace,
+  preferredTabId?: string,
+): CanvasPreviewWorkspace {
+  let tabs = workspace.tabs;
+  let groups = workspace.groups;
+
+  for (const group of groups) {
+    const transientIds = group.tabIds.filter((tabId) => tabs[tabId]?.transient);
+    if (transientIds.length <= 1) continue;
+
+    const keeper =
+      preferredTabId && transientIds.includes(preferredTabId)
+        ? preferredTabId
+        : transientIds.reduce((latestId, tabId) =>
+            tabs[tabId].lastActiveSeq > tabs[latestId].lastActiveSeq
+              ? tabId
+              : latestId,
+          );
+
+    const removedIds = new Set(
+      transientIds.filter((tabId) => tabId !== keeper),
+    );
+    if (tabs === workspace.tabs) tabs = { ...workspace.tabs };
+    for (const tabId of removedIds) delete tabs[tabId];
+
+    groups = groups.map((candidate) =>
+      candidate.id === group.id
+        ? {
+            ...candidate,
+            tabIds: candidate.tabIds.filter((tabId) => !removedIds.has(tabId)),
+            activeTabId:
+              candidate.activeTabId && removedIds.has(candidate.activeTabId)
+                ? keeper
+                : candidate.activeTabId,
+          }
+        : candidate,
+    );
+  }
+
+  return tabs === workspace.tabs ? workspace : { ...workspace, tabs, groups };
+}
+
 function ensureSideGroup(
   workspace: CanvasPreviewWorkspace,
   fromGroupId: string,
@@ -240,7 +285,7 @@ export function openTarget(
     ? requestedGroupId
     : workspace.activeGroupId;
 
-  let next = workspace;
+  let next = repairTransientTabs(workspace);
   let destinationGroupId = baseGroupId;
 
   if (options.openToSide) {
@@ -262,8 +307,9 @@ export function openTarget(
         next = moveTab(next, existing.id, { groupId: destinationGroupId });
       }
     }
-    // Revealing a target is an explicit visit, so it stops being disposable.
-    next = promoteTab(next, existing.id);
+    // A permanent open promotes an existing inspection slot. Repeated
+    // transient opens only reveal it; keeping it requires an explicit Pin.
+    if (!options.transient) next = promoteTab(next, existing.id);
     return { workspace: activateTab(next, existing.id), tabId: existing.id };
   }
 
@@ -421,7 +467,10 @@ export function moveTab(
     return g;
   });
 
-  return withoutEmptyGroups({ ...workspace, groups });
+  return repairTransientTabs(
+    withoutEmptyGroups({ ...workspace, groups }),
+    tabId,
+  );
 }
 
 /** Folds every tab back into the first group. */
@@ -438,12 +487,12 @@ export function mergeGroups(
       first.activeTabId ?? rest.find((g) => g.activeTabId)?.activeTabId ?? null,
   };
 
-  return {
+  return repairTransientTabs({
     ...workspace,
     groups: [merged],
     activeGroupId: merged.id,
     splitRatio: DEFAULT_SPLIT_RATIO,
-  };
+  });
 }
 
 export function setActiveGroup(
@@ -503,5 +552,5 @@ export function validateWorkspace(
       : groups[0].id,
   });
 
-  return next;
+  return repairTransientTabs(next);
 }

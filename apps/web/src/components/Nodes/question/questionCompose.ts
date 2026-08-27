@@ -47,9 +47,13 @@ export function enterQuestionConversation(
   binding: AgentBinding | undefined,
   canvasId: string | null,
   openPosition: 'last-user' | 'bottom',
+  options?: { transient?: boolean },
 ): void {
+  useChatStore
+    .getState()
+    .makeThreadMetadataEphemeral(view.conversationOwner.threadId);
   initializeQuestionBinding(view, binding, canvasId, false);
-  const tabId = openPreviewNode(view.presentationAnchor.nodeId);
+  const tabId = openPreviewNode(view.presentationAnchor.nodeId, options);
   if (tabId) {
     usePreviewWorkspaceStore.getState().requestChatOpen(tabId, openPosition);
   }
@@ -63,9 +67,10 @@ export function enterQuestionCompose(
   view: AgentConversationView,
   canvasId: string | null,
   binding?: AgentBinding,
+  options?: { transient?: boolean },
 ): void {
   initializeQuestionBinding(view, binding, canvasId, true);
-  openPreviewNode(view.presentationAnchor.nodeId);
+  openPreviewNode(view.presentationAnchor.nodeId, options);
   usePanelStore
     .getState()
     .requestFocusChatInput(view.conversationOwner.threadId);

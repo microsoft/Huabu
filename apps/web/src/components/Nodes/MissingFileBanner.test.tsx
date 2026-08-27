@@ -47,6 +47,11 @@ describe('getMissingFileKind', () => {
     expect(getMissingFileKind({})).toBeNull();
   });
 
+  it('ignores non-boolean truthy flag values', () => {
+    expect(getMissingFileKind({ contentMissing: 'true' })).toBeNull();
+    expect(getMissingFileKind({ artifactMissing: 1 })).toBeNull();
+  });
+
   it('distinguishes artifact loss from sidecar loss', () => {
     expect(getMissingFileKind({ artifactMissing: true })).toBe('artifact');
     expect(getMissingFileKind({ contentMissing: true })).toBe('sidecar');

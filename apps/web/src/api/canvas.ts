@@ -11,6 +11,7 @@ import type {
   DeleteCanvasResponse,
   GetCanvasResponse,
   GetWorldReferencesResponse,
+  GetSpacePreviewSceneResponse,
   GetNodeContentResponse,
   PutCanvasRequest,
   PutCanvasResponse,
@@ -139,6 +140,17 @@ export async function getWorldReferences(
     routes.canvasReferences(canvasId),
     {
       fallbackMessage: 'Failed to resolve World references',
+    },
+  );
+}
+
+export async function getSpacePreviewScene(
+  canvasId: string,
+): Promise<GetSpacePreviewSceneResponse> {
+  return apiFetch<GetSpacePreviewSceneResponse>(
+    routes.canvasPreviewScene(canvasId),
+    {
+      fallbackMessage: 'Failed to load Space preview',
     },
   );
 }

@@ -21,7 +21,7 @@ import {
   setChatThreadModel,
   setChatThreadReasoningEffort,
 } from '@/api/llm';
-import { useChatStore } from '@/store/chatStore';
+import { selectThreadSettings, useChatStore } from '@/store/chatStore';
 
 import type { ChatThreadSettings, LLMModelInfo } from '@huabu/shared';
 
@@ -57,11 +57,41 @@ export function useBuiltinThreadSettings({
   threadHasMessages,
 }: UseBuiltinThreadSettingsArgs) {
   const [models, setModels] = useState<LLMModelInfo[]>([]);
-  const [settings, setSettings] = useState<ChatThreadSettings>(EMPTY_SETTINGS);
+  const [settingsState, setSettingsState] = useState<{
+    threadId: string | null;
+    settings: ChatThreadSettings;
+  }>(() => ({
+    threadId: threadId ?? null,
+    settings:
+      enabled && threadId
+        ? selectThreadSettings(useChatStore.getState(), threadId)
+        : EMPTY_SETTINGS,
+  }));
+  const settingsStateRef = useRef(settingsState);
+  const replaceSettingsState = useCallback(
+    (next: { threadId: string | null; settings: ChatThreadSettings }) => {
+      settingsStateRef.current = next;
+      setSettingsState(next);
+    },
+    [],
+  );
+  const cachedSettings = useChatStore((state) =>
+    threadId ? selectThreadSettings(state, threadId) : EMPTY_SETTINGS,
+  );
+  const settings =
+    enabled && settingsState.threadId === threadId
+      ? settingsState.settings
+      : enabled
+        ? cachedSettings
+        : EMPTY_SETTINGS;
   const [loading, setLoading] = useState(false);
   // Bumped on every local user mutation. A settings fetch that started
   // before a mutation must not clobber the newer local value (P1-2).
   const mutationGenRef = useRef(0);
+  const threadMessageStateRef = useRef({
+    threadId: threadId ?? null,
+    hasMessages: threadHasMessages,
+  });
 
   // Fetch the active provider's model catalogue (capability + labels).
   useEffect(() => {
@@ -84,13 +114,40 @@ export function useBuiltinThreadSettings({
 
   // Fetch this thread's persisted selection.
   useEffect(() => {
+    const previousMessageState = threadMessageStateRef.current;
+    const isFirstMessageTransition =
+      previousMessageState.threadId === threadId &&
+      !previousMessageState.hasMessages &&
+      threadHasMessages;
+    threadMessageStateRef.current = {
+      threadId: threadId ?? null,
+      hasMessages: threadHasMessages,
+    };
+
     if (!enabled || !threadId) {
-      setSettings(EMPTY_SETTINGS);
+      replaceSettingsState({
+        threadId: threadId ?? null,
+        settings: EMPTY_SETTINGS,
+      });
+      setLoading(false);
       return;
     }
-    // Clear the previous thread's selection immediately so the load window
-    // never carries a stale value into the newly-selected thread (P1-1).
-    setSettings(EMPTY_SETTINGS);
+    // Sending the first message updates local history before the server has
+    // necessarily persisted the deployment. The current thread already owns
+    // the user's latest selection, so this lifecycle transition must not
+    // trigger a stale settings reload.
+    if (isFirstMessageTransition) {
+      setLoading(false);
+      return;
+    }
+    const restored = selectThreadSettings(useChatStore.getState(), threadId);
+    replaceSettingsState({ threadId, settings: restored });
+    // Before first send there is no durable server record. The local thread
+    // cache is authoritative and is carried on the first message.
+    if (!threadHasMessages) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     const genAtStart = mutationGenRef.current;
     setLoading(true);
@@ -99,10 +156,10 @@ export function useBuiltinThreadSettings({
         // Skip if the thread/enable changed, or the user picked a value
         // after this fetch started — the local choice wins (P1-2).
         if (cancelled || mutationGenRef.current !== genAtStart) return;
-        setSettings(next);
+        replaceSettingsState({ threadId, settings: next });
       })
       .catch(() => {
-        // Keep EMPTY (or a local pick that bumped the generation).
+        // Keep the restored cache (or a local pick that bumped the generation).
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -110,7 +167,7 @@ export function useBuiltinThreadSettings({
     return () => {
       cancelled = true;
     };
-  }, [enabled, threadId, canvasId]);
+  }, [enabled, threadId, canvasId, threadHasMessages, replaceSettingsState]);
 
   // Mirror the current selection into the owning thread so the send path can
   // carry it on the request (applies a pre-first-message pick on thread
@@ -129,6 +186,24 @@ export function useBuiltinThreadSettings({
     );
   }, [enabled, threadId, settings, setThreadSettings]);
 
+  const updateLocalSettings = useCallback(
+    (
+      update: (current: ChatThreadSettings) => ChatThreadSettings,
+    ): ChatThreadSettings | null => {
+      if (!threadId) return null;
+      const current = settingsStateRef.current;
+      const previous =
+        current.threadId === threadId
+          ? current.settings
+          : selectThreadSettings(useChatStore.getState(), threadId);
+      const nextSettings = update(previous);
+      replaceSettingsState({ threadId, settings: nextSettings });
+      setThreadSettings(threadId, nextSettings);
+      return nextSettings;
+    },
+    [threadId, replaceSettingsState, setThreadSettings],
+  );
+
   const selectModel = useCallback(
     async (modelId: string) => {
       if (!threadId) return;
@@ -138,15 +213,15 @@ export function useBuiltinThreadSettings({
       // honour (off/absent stay), so the UI never shows a stale effort.
       const nextEfforts =
         models.find((m) => m.id === modelId)?.reasoningEfforts ?? [];
-      setSettings((s) => ({
-        ...s,
+      updateLocalSettings((current) => ({
+        ...current,
         modelId,
         reasoningEffort:
-          s.reasoningEffort &&
-          s.reasoningEffort !== 'off' &&
-          !nextEfforts.includes(s.reasoningEffort)
+          current.reasoningEffort &&
+          current.reasoningEffort !== 'off' &&
+          !nextEfforts.includes(current.reasoningEffort)
             ? null
-            : s.reasoningEffort,
+            : current.reasoningEffort,
       }));
       // No persisted record yet → hold locally; the first message carries
       // it (skip the POST so nothing 404s).
@@ -159,20 +234,29 @@ export function useBuiltinThreadSettings({
         );
         // Adopt the server's canonical (clamped) values, unless the user
         // changed something while the request was in flight.
-        if (mutationGenRef.current === gen) setSettings(corrected);
+        if (mutationGenRef.current === gen) {
+          replaceSettingsState({ threadId, settings: corrected });
+        }
       } catch {
         // Keep the optimistic value; a genuinely bad value is corrected by
         // the next settings fetch.
       }
     },
-    [threadId, canvasId, threadHasMessages, models],
+    [
+      threadId,
+      canvasId,
+      threadHasMessages,
+      models,
+      updateLocalSettings,
+      replaceSettingsState,
+    ],
   );
 
   const selectReasoningEffort = useCallback(
     async (reasoningEffort: string) => {
       if (!threadId) return;
       mutationGenRef.current += 1;
-      setSettings((s) => ({ ...s, reasoningEffort })); // optimistic
+      updateLocalSettings((current) => ({ ...current, reasoningEffort }));
       if (!threadHasMessages) return;
       try {
         await setChatThreadReasoningEffort(
@@ -184,7 +268,7 @@ export function useBuiltinThreadSettings({
         // Keep the optimistic value; carried on the next send.
       }
     },
-    [threadId, canvasId, threadHasMessages],
+    [threadId, canvasId, threadHasMessages, updateLocalSettings],
   );
 
   // The effective model id: the per-thread override, else the global default.

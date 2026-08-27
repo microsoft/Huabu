@@ -12,6 +12,11 @@ import {
   seedWorkspaceFromLegacyChat,
   writeWorkspace,
 } from './persistence';
+import {
+  messageListViewKey,
+  rememberMessageListScrollPosition,
+  restoreMessageListScrollPosition,
+} from './scrollMemory';
 
 const testStorage = vi.hoisted(() => {
   const values = new Map<string, string>();
@@ -119,6 +124,46 @@ describe('defensive parsing', () => {
     expect(restored?.groups[0].activeTabId).toBe('good');
   });
 
+  it('drops chat targets from another Canvas and empty thread ids', () => {
+    testStorage.storage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        workspace: {
+          tabs: {
+            good: {
+              id: 'good',
+              target: { kind: 'chat', canvasId: CANVAS, threadId: 'thread-1' },
+            },
+            wrongCanvas: {
+              id: 'wrongCanvas',
+              target: {
+                kind: 'chat',
+                canvasId: 'canvas-2',
+                threadId: 'thread-2',
+              },
+            },
+            empty: {
+              id: 'empty',
+              target: { kind: 'chat', canvasId: CANVAS, threadId: '' },
+            },
+          },
+          groups: [{ id: 'g1', tabIds: ['good', 'wrongCanvas', 'empty'] }],
+          activeGroupId: 'g1',
+        },
+      }),
+    );
+
+    const restored = readWorkspace(CANVAS);
+    expect(Object.keys(restored?.tabs ?? {})).toEqual(['good']);
+    expect(restored?.groups[0].tabIds).toEqual(['good']);
+    expect(restored?.tabs.good.target).toEqual({
+      kind: 'chat',
+      canvasId: CANVAS,
+      threadId: 'thread-1',
+    });
+  });
+
   it('repairs a dangling active tab and a bad split ratio', () => {
     testStorage.storage.setItem(
       KEY,
@@ -137,6 +182,39 @@ describe('defensive parsing', () => {
     expect(restored?.groups[0].activeTabId).toBe('t1');
     expect(restored?.activeGroupId).toBe('g1');
     expect(restored?.splitRatio).toBe(0.5);
+  });
+
+  it('drops older duplicate transient tabs within one group', () => {
+    testStorage.storage.setItem(
+      KEY,
+      JSON.stringify({
+        version: 1,
+        workspace: {
+          tabs: {
+            t1: {
+              id: 't1',
+              target: node('a'),
+              transient: true,
+              lastActiveSeq: 1,
+            },
+            t2: {
+              id: 't2',
+              target: node('b'),
+              transient: true,
+              lastActiveSeq: 2,
+            },
+          },
+          groups: [{ id: 'g1', tabIds: ['t1', 't2'], activeTabId: 't2' }],
+          activeGroupId: 'g1',
+          activationSeq: 2,
+        },
+      }),
+    );
+
+    const restored = readWorkspace(CANVAS);
+    expect(restored?.tabs.t1).toBeUndefined();
+    expect(restored?.tabs.t2.transient).toBe(true);
+    expect(restored?.groups[0].tabIds).toEqual(['t2']);
   });
 
   it('drops a tab claimed by two groups and discards orphans', () => {
@@ -208,6 +286,8 @@ describe('canvas index', () => {
   });
 
   it('deletes the layout of canvases pushed past the cap', () => {
+    const viewKey = messageListViewKey('c0', 'thread-0');
+    rememberMessageListScrollPosition(viewKey, 100);
     for (let i = 0; i <= MAX_PERSISTED_CANVASES; i += 1) {
       writeWorkspace(`c${i}`, sampleWorkspace());
     }
@@ -217,16 +297,24 @@ describe('canvas index', () => {
     expect(index).not.toContain('c0');
     expect(readWorkspace('c0')).toBeNull();
     expect(readWorkspace('c1')).not.toBeNull();
+    expect(
+      restoreMessageListScrollPosition(document.createElement('div'), viewKey),
+    ).toBe(false);
   });
 
   it('removes the record and the index entry on canvas delete', () => {
     writeWorkspace('c1', sampleWorkspace());
     writeWorkspace('c2', sampleWorkspace());
+    const viewKey = messageListViewKey('c1', 'thread-1');
+    rememberMessageListScrollPosition(viewKey, 100);
 
     deleteWorkspace('c1');
 
     expect(readWorkspace('c1')).toBeNull();
     expect(readPersistedCanvasIndex()).toEqual(['c2']);
+    expect(
+      restoreMessageListScrollPosition(document.createElement('div'), viewKey),
+    ).toBe(false);
   });
 
   it('survives a corrupt index', () => {

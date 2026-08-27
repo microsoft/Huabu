@@ -22,14 +22,29 @@ import {
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
+  type PointerSensorProps,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
 
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import { conversationViewForNode } from '@/store/conversationOwner';
+import {
+  messageListViewKey,
+  nodePreviewViewKey,
+  reconcilePreviewScrollTargets,
+} from '@/store/previewWorkspace/scrollMemory';
 import {
   usePreviewWorkspaceStore,
   type PreviewWorkspaceState,
@@ -39,13 +54,64 @@ import { PreviewGroup } from './PreviewGroup';
 import { PreviewTabDragOverlay } from './PreviewTab';
 import { resolveTabDropDestination, resolveTabDropIndicator } from './tabDnd';
 
-import type { CanvasPreviewWorkspace } from '@/store/previewWorkspace/model';
+import type {
+  CanvasPreviewWorkspace,
+  PreviewTarget,
+} from '@/store/previewWorkspace/model';
 import type { Node } from '@xyflow/react';
 
 /** Keyboard nudge per Arrow press on the separator. */
 const RATIO_STEP = 0.05;
 
 const selectWorkspace = (s: PreviewWorkspaceState) => s.workspace;
+
+export function subscribeToTabDragInterruption(
+  cancel: () => void,
+  ownerDocument: Document = document,
+  ownerWindow: Window = window,
+): () => void {
+  const cancelOnHidden = () => {
+    if (ownerDocument.visibilityState === 'hidden') cancel();
+  };
+  ownerWindow.addEventListener('blur', cancel);
+  ownerDocument.addEventListener('visibilitychange', cancelOnHidden);
+  return () => {
+    ownerWindow.removeEventListener('blur', cancel);
+    ownerDocument.removeEventListener('visibilitychange', cancelOnHidden);
+  };
+}
+
+class PreviewTabPointerSensor extends PointerSensor {
+  constructor(props: PointerSensorProps) {
+    let unsubscribe = () => {};
+    const onCancel = () => {
+      unsubscribe();
+      props.onCancel();
+    };
+    const onEnd = () => {
+      unsubscribe();
+      props.onEnd();
+    };
+    const onAbort = (id: Parameters<PointerSensorProps['onAbort']>[0]) => {
+      unsubscribe();
+      props.onAbort(id);
+    };
+
+    super({ ...props, onAbort, onCancel, onEnd });
+
+    const ownerDocument =
+      (
+        props.event.target as
+          | (EventTarget & { ownerDocument?: Document })
+          | null
+      )?.ownerDocument ?? document;
+    unsubscribe = subscribeToTabDragInterruption(
+      onCancel,
+      ownerDocument,
+      ownerDocument.defaultView ?? window,
+    );
+  }
+}
 
 export function PreviewTabDragOverlayPortal({
   tab,
@@ -125,6 +191,51 @@ export function PreviewWorkspace({
   const setActiveGroup = usePreviewWorkspaceStore((s) => s.setActiveGroup);
   const setSplitRatio = usePreviewWorkspaceStore((s) => s.setSplitRatio);
 
+  const scrollTargets = useMemo(
+    () => Object.values(workspace.tabs).map(({ target }) => target),
+    [workspace.tabs],
+  );
+  const scrollViewKeys = useCanvasStore(
+    useShallow((state) =>
+      scrollTargets.map((target) => {
+        if (target.kind === 'chat') {
+          return messageListViewKey(target.canvasId, target.threadId);
+        }
+
+        const node = state.nodes.find(
+          (candidate) => candidate.id === target.nodeId,
+        );
+        if (!node) return undefined;
+        const view = conversationViewForNode(
+          node,
+          target.canvasId,
+          state.worldReferences[target.nodeId],
+        );
+        return view
+          ? messageListViewKey(
+              view.conversationOwner.canvasId,
+              view.conversationOwner.threadId,
+            )
+          : nodePreviewViewKey(target.canvasId, target.nodeId);
+      }),
+    ),
+  );
+  const scrollRegistrations = useMemo(() => {
+    const registrations: Array<{
+      target: PreviewTarget;
+      viewKey: string;
+    }> = [];
+    for (const [index, target] of scrollTargets.entries()) {
+      const viewKey = scrollViewKeys[index];
+      if (viewKey) registrations.push({ target, viewKey });
+    }
+    return registrations;
+  }, [scrollTargets, scrollViewKeys]);
+
+  useEffect(() => {
+    reconcilePreviewScrollTargets(canvasId, scrollRegistrations);
+  }, [canvasId, scrollRegistrations]);
+
   const settleTab = useCallback((tabId: string) => {
     settleActivePreviewTab(
       usePreviewWorkspaceStore.getState().workspace,
@@ -148,11 +259,9 @@ export function PreviewWorkspace({
   );
 
   const closeWorkspaceTab = (tabId: string) => {
-    const isFinalTab =
-      Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs).length ===
-      1;
-    settleTab(tabId);
-    closeTab(tabId);
+    const currentWorkspace = usePreviewWorkspaceStore.getState().workspace;
+    const isFinalTab = Object.keys(currentWorkspace.tabs).length === 1;
+    closeTab(tabId, settleTab);
     if (isFinalTab) onCollapse?.();
   };
   const openPreviewTarget = usePreviewWorkspaceStore(
@@ -166,7 +275,14 @@ export function PreviewWorkspace({
       // target, so it goes through the same open path (§8).
       if (tab) {
         settleTab(tabId);
-        openPreviewTarget(tab.target, { openToSide: true });
+        openPreviewTarget(
+          tab.target,
+          {
+            openToSide: true,
+            transient: tab.transient,
+          },
+          settleTab,
+        );
       }
     },
     [openPreviewTarget, settleTab],
@@ -191,7 +307,9 @@ export function PreviewWorkspace({
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const isSplit = workspace.groups.length > 1;
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(PreviewTabPointerSensor, {
+      activationConstraint: { distance: 5 },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     }),
@@ -222,7 +340,7 @@ export function PreviewWorkspace({
       );
       if (!destination) return;
       settleTab(tabId);
-      moveTab(tabId, destination);
+      moveTab(tabId, destination, settleTab);
       activateTab(tabId);
     },
     [activateTab, clearTabDrag, moveTab, settleTab],
@@ -349,6 +467,19 @@ export function PreviewWorkspace({
               <PreviewGroup
                 group={group}
                 workspace={workspace}
+                adjacentNodeTarget={
+                  isSplit
+                    ? (() => {
+                        const otherGroup = workspace.groups[1 - index];
+                        const otherTarget = otherGroup?.activeTabId
+                          ? workspace.tabs[otherGroup.activeTabId]?.target
+                          : undefined;
+                        return otherTarget?.kind === 'node'
+                          ? otherTarget
+                          : undefined;
+                      })()
+                    : undefined
+                }
                 isFocused={group.id === workspace.activeGroupId}
                 onFocus={() => setActiveGroup(group.id)}
                 onActivate={activateWorkspaceTab}

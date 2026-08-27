@@ -274,6 +274,36 @@ function addSidecarToIndex(
 }
 
 /**
+ * How a directory scan of `nodes/*.md` treats a file it cannot use.
+ *
+ * The two axes are separate because reachability and content are separate
+ * failures, and the readers that want one do not all want the other. A scan
+ * that conflated them would force the portable repository to choose between
+ * hiding an I/O error and rejecting a sidecar its own single read repairs.
+ */
+export interface NodeScanOptions {
+  /**
+   * Reject an unreadable sidecar (EACCES, EIO, a directory in the way)
+   * instead of dropping it from the scan. Absence — ENOENT — is still
+   * absence. Matches {@link CanvasStore.readNodeStrict}, so a scan and a
+   * single read agree about which nodes exist.
+   */
+  strict?: boolean;
+  /**
+   * Reject a sidecar whose frontmatter does not parse. Defaults to
+   * {@link strict}.
+   *
+   * The portable node repository sets it `false`: `readNodeStrict` recovers a
+   * hand-broken sidecar on purpose — the body survives, the unparseable
+   * frontmatter is dropped — so a scan that rejected what a read repairs
+   * would make the two shapes disagree about the same node. Readers that
+   * treat malformed content as an integrity failure (the World reference
+   * resolver, the Space preview) leave it defaulted.
+   */
+  strictRecords?: boolean;
+}
+
+/**
  * Read one node sidecar under either compatibility or repository semantics.
  * Compatibility readers preserve the legacy "missing or unreadable" `null`
  * while retaining whether that answer proves absence. Strict repository reads
@@ -874,16 +904,22 @@ export class CanvasStore {
    * Only used on the batch hydrate path — single-node lookups should
    * continue to call `readNode(nodeId)`.
    *
+   * Defaults to the legacy compatibility semantics: a sidecar that cannot be
+   * read is dropped and the index it primes is marked inconclusive. See
+   * {@link NodeScanOptions} for the strict variants the portable repository
+   * and the integrity-sensitive readers ask for.
+   *
    * Reads run concurrently (bounded by {@link NODE_READ_CONCURRENCY})
    * via async, non-blocking `readFile` calls so the event loop stays
    * free and large canvases hydrate with overlapped I/O. The id index
    * is still built in stable `readdirSync` order so the derived keys
    * match the previous synchronous implementation exactly.
    */
-  async readAllNodes(options?: {
-    strict?: boolean;
-  }): Promise<Map<string, NodeContent>> {
+  async readAllNodes(
+    options?: NodeScanOptions,
+  ): Promise<Map<string, NodeContent>> {
     this.assertActiveWorkspace();
+    const strictRecords = options?.strictRecords ?? options?.strict ?? false;
     const generation = this.nodeIndexGeneration;
     const contents = new Map<string, NodeContent>();
     const idx = new NameIndex<NodeFileEntry>();
@@ -918,7 +954,7 @@ export class CanvasStore {
             ? rawId
             : file.replace(/\.md$/, '');
         addSidecarToIndex(idx, duplicates, this.canvasId, id, file);
-        contents.set(id, markdownToNodeContent(id, raw, options?.strict));
+        contents.set(id, markdownToNodeContent(id, raw, strictRecords));
       }
     }
     if (this.nodeIndexGeneration === generation) {
@@ -948,26 +984,54 @@ export class CanvasStore {
    *
    * Concurrency bound is the same {@link NODE_READ_CONCURRENCY} the
    * non-streaming path uses, so memory / FD pressure is identical.
+   *
+   * Takes the same {@link NodeScanOptions} as {@link readAllNodes}, and with
+   * the same defaults. A strict scan rejects rather than returning a silently
+   * short collection: the first unreadable sidecar stops the remaining
+   * workers from starting, and the failure is raised once every in-flight
+   * read has settled. `onNode` may already have fired for the files that
+   * landed before the failure — a partial delivery is unavoidable — but never
+   * after the caller has been told the scan failed, which is the part a
+   * caller cannot defend against itself.
    */
   async streamAllNodes(
     onNode: (id: string, content: NodeContent) => void,
     signal?: { readonly aborted: boolean },
+    options?: NodeScanOptions,
   ): Promise<Map<string, NodeContent>> {
     this.assertActiveWorkspace();
+    const strictRecords = options?.strictRecords ?? options?.strict ?? false;
     const generation = this.nodeIndexGeneration;
     const contents = new Map<string, NodeContent>();
     const idx = new NameIndex<NodeFileEntry>();
     const duplicates = new Set<string>();
     let indexIsConclusive = true;
+    // The first strict failure, raised after the fan-out settles. Throwing
+    // from inside a worker would reject while its siblings were still
+    // delivering, so a caller could receive nodes after it had already been
+    // handed the error. Only a strict scan ever sets it; `onNode` is left
+    // outside the guard so a caller's own throw propagates as it always has.
+    const scan: { failure: { readonly error: unknown } | null } = {
+      failure: null,
+    };
     const dir = nodesDir(this.canvasId);
     if (existsSync(dir)) {
       const files = readdirSync(dir).filter((file) => file.endsWith('.md'));
       await mapWithConcurrency(files, NODE_READ_CONCURRENCY, async (file) => {
-        if (signal?.aborted) {
+        if (signal?.aborted || scan.failure !== null) {
           indexIsConclusive = false;
           return;
         }
-        const raw = await readTextAsync(path.join(dir, file));
+        let raw: string | null;
+        try {
+          raw = options?.strict
+            ? await readFile(path.join(dir, file), 'utf8')
+            : await readTextAsync(path.join(dir, file));
+        } catch (error) {
+          scan.failure ??= { error };
+          indexIsConclusive = false;
+          return;
+        }
         if (raw === null) {
           indexIsConclusive = false;
           return;
@@ -980,13 +1044,21 @@ export class CanvasStore {
             ? rawId
             : file.replace(/\.md$/, '');
         addSidecarToIndex(idx, duplicates, this.canvasId, id, file);
-        const content = markdownToNodeContent(id, raw);
+        let content: NodeContent;
+        try {
+          content = markdownToNodeContent(id, raw, strictRecords);
+        } catch (error) {
+          scan.failure ??= { error };
+          indexIsConclusive = false;
+          return;
+        }
         contents.set(id, content);
         // JS is single-threaded between awaits, so even though
         // multiple workers may be in-flight, exactly one onNode call
         // runs at a time. Callers can mutate shared counters safely.
         onNode(id, content);
       });
+      if (scan.failure !== null) throw scan.failure.error;
     }
     if (this.nodeIndexGeneration === generation) {
       this.nodes = idx;
@@ -1288,7 +1360,7 @@ export class CanvasStore {
   // ── Artifacts ────────────────────────────────────────────────────────────
   //
   // Artifact bytes are NOT owned here. They live behind the `BlobStore`
-  // port — `canvasBlobs(canvasId)` in `storage.js` — so this store holds
+  // port — `space(canvasId).blobs` in `storage.js` — so this store holds
   // structured records only and a non-filesystem blob backend can be
   // configured independently. See docs/proposals/multi-backend-storage.md.
 

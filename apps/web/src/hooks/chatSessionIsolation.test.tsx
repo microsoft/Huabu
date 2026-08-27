@@ -186,6 +186,8 @@ beforeEach(async () => {
   useAcpThreadChangesStore.setState({ load: async () => {} });
   useChatStore.setState({
     threadsById: {},
+    bindingByThread: {},
+    settingsByThread: {},
     // Deliberately points at neither renderer: nothing on screen may resolve
     // its conversation through this field.
     threadMap: {},
@@ -332,9 +334,11 @@ describe('two mounted ChatPanels', () => {
   });
 
   it('renders each thread with its own compose mode', async () => {
-    await commit(() =>
-      useChatStore.getState().setThreadLastAction(THREAD_A, 'operate'),
-    );
+    await commit(() => {
+      const store = useChatStore.getState();
+      store.setThreadLastAction(THREAD_A, 'operate');
+      store.setThreadLastAction(THREAD_B, 'ask');
+    });
 
     await commit(() => {
       root?.render(

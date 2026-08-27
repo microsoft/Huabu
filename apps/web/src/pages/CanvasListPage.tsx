@@ -17,6 +17,7 @@ import { Header } from '../components/Panels/Header/Header';
 import { APP_NAME } from '../config/app';
 import { useCanvasActions } from '../hooks/useCanvasActions';
 import { isElectron } from '../hooks/useElectron';
+import { deleteWorkspace } from '../store/previewWorkspace/persistence';
 import { useWorkspaceLabel, useWorkspaceStore } from '../store/workspaceStore';
 
 import type { CanvasSummary } from '@huabu/shared';
@@ -113,6 +114,7 @@ export default function CanvasListPage() {
     try {
       setIsDeleting(true);
       await deleteCanvasById(pendingDelete.canvasId);
+      deleteWorkspace(pendingDelete.canvasId);
       setCanvases((prev) => {
         const next = prev.filter((c) => c.canvasId !== pendingDelete.canvasId);
         setCanvasCount(next.length);

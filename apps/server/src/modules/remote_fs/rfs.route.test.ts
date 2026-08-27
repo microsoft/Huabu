@@ -56,11 +56,7 @@ import {
   agentThreadService,
 } from '../agent/agent-thread.service.js';
 import * as selectableProfiles from '../agent/selectable-agent-profile.js';
-import {
-  getCanvasStore,
-  resetStorageCache,
-  spaceDirectory,
-} from '../storage/index.js';
+import { getCanvasStore, resetStorageCache, space } from '../storage/index.js';
 import {
   RunCompletionError,
   runCompletionService,
@@ -71,6 +67,18 @@ import { setWorkspacePath } from '../workspace.js';
 
 import type { FixedAgentNodeTarget } from '../agent/agent-thread-resolver.js';
 import type { CanvasNodeId } from '@huabu/shared';
+
+/**
+ * The Space's Disk directory, or a test failure.
+ *
+ * These cases are Disk-specific by construction; the assertion states that
+ * rather than letting an optional-chained `undefined` quietly pass.
+ */
+function diskDirOf(canvasId: string): string {
+  const tree = space(canvasId).diskTree;
+  if (!tree) throw new Error('Expected the Disk backend in this test');
+  return tree.directory();
+}
 
 let tmp: string;
 
@@ -159,7 +167,7 @@ describe('GET /api/rfs/:canvasId/skill', () => {
   it('returns only the bundled root guide without authorization', async () => {
     seedNote('c1', 'node-1', 'Anchor', 'content');
     writeFileSync(
-      join(spaceDirectory('c1'), 'skill.md'),
+      join(diskDirOf('c1'), 'skill.md'),
       '# Private Space Override',
       'utf8',
     );
@@ -765,12 +773,7 @@ describe('POST /api/rfs/:canvasId/execute', () => {
     ],
   });
 
-  // A live Space whose Portal does not exist yet used to be answered with
-  // 409 "refresh the World". Since `ensureCanonicalPortals`, the router
-  // reconciles the missing Portal first and the pin succeeds, so the route
-  // has no reason to fail. Router-level coverage of the reconciliation
-  // itself lives in canvas-command-router.test.ts.
-  it('reconciles a missing Portal instead of failing the request', async () => {
+  it('does not recreate legacy Portals for a retired Pin command', async () => {
     writeWorldFixture('.world', 'canvas-world', []);
     writeWorldFixture('Project', 'canvas-source', [
       {
@@ -791,7 +794,7 @@ describe('POST /api/rfs/:canvasId/execute', () => {
         payload: pinPayload('canvas-source', 'node-source'),
       });
 
-      expect(response.statusCode).toBe(200);
+      expect(response.statusCode).toBe(409);
 
       const worldNodes = getCanvasStore('canvas-world').read()?.state.nodes as
         | { type?: string; data?: { targetCanvasId?: string } }[]
@@ -799,7 +802,7 @@ describe('POST /api/rfs/:canvasId/execute', () => {
       expect(
         worldNodes?.some(
           (node) =>
-            node.type === 'canvasRef' &&
+            node.type === 'spacePreview' &&
             node.data?.targetCanvasId === 'canvas-source',
         ),
       ).toBe(true);

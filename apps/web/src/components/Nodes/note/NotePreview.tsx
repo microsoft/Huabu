@@ -39,6 +39,7 @@ import { Button } from '@/components/Common/Button';
 import { MilkdownEditor } from '@/components/Milkdown';
 import { MilkdownFloatingToolbar } from '@/components/Milkdown/MilkdownFloatingToolbar';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
+import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import useCanvasStore from '@/store/canvasStore';
 import {
   coerceProvenance,
@@ -79,6 +80,8 @@ const RawMarkdownEditor = lazy(
 export interface PreviewComponentProps {
   /** Canvas node id, when this preview is bound to a real node. */
   id?: string;
+  /** Runtime identity used to restore this Preview target's scroll offset. */
+  scrollViewKey?: string;
   data: Record<string, unknown>;
   readOnly?: boolean;
   /** One-shot focus request owned by the containing preview tab. */
@@ -96,6 +99,7 @@ export interface PreviewComponentProps {
 
 export const NotePreview = ({
   id,
+  scrollViewKey,
   data,
   readOnly,
   focusRequestNonce,
@@ -126,6 +130,7 @@ export const NotePreview = ({
 
   const [editor, setEditor] = useState<MilkdownInstance | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  usePreviewScrollMemory(containerRef, scrollViewKey);
 
   // Edit-mode toggle: rich-text WYSIWYG (Milkdown) vs raw markdown
   // (textarea). Provenance overlays and the batch accept/reject chip

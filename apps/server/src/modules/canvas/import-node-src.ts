@@ -39,9 +39,10 @@ import { getLogger } from '../../utils/logger.js';
 import {
   safeResolve,
   isArtifactsRel,
+  sandboxRoot,
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
-import { canvasBlobs, spaceDirectory } from '../storage/index.js';
+import { space } from '../storage/index.js';
 
 import type { CanvasStore } from '../storage/index.js';
 
@@ -272,7 +273,7 @@ async function resolveImportedSrc(
   // is judged by where it actually lands, while the helper still owns the
   // virtual/physical `.artifacts` vocabulary. A nested path is not a blob key,
   // so it falls through and is copied into the artifact root below.
-  const resolvedPhysicalRel = path.relative(spaceDirectory(canvasId), absPath);
+  const resolvedPhysicalRel = path.relative(sandboxRoot(canvasId), absPath);
   if (isArtifactsRel(resolvedPhysicalRel)) {
     const key = path.basename(absPath);
     const canonicalPath = safeResolve(
@@ -309,7 +310,7 @@ async function copyToArtifact(
     const id = createId('artifact');
     const key = `${id}${ext}`;
     const buffer = await readFile(absPath);
-    await canvasBlobs(store.canvasId).put(key, buffer);
+    await space(store.canvasId).blobs.put(key, buffer);
 
     // Move semantics: reclaim RFS scratch uploads once they are safely
     // stored. Never delete user node files or other canvas content —
@@ -365,7 +366,7 @@ async function downloadToArtifact(
     }
     const ext = pickDownloadExt(pathname, contentType);
     const key = `${createId('artifact')}${ext}`;
-    await canvasBlobs(store.canvasId).put(key, buffer);
+    await space(store.canvasId).blobs.put(key, buffer);
     return key;
   } catch (err) {
     log.warn({ err, url }, 'Failed to download online node src into artifacts');

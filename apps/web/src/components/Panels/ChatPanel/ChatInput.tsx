@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl, uploadImage, uploadPdf } from '@/api/artifact';
 import { useChatSession } from '@/hooks/useChatSession';
+import useCanvasStore from '@/store/canvasStore';
 import {
   selectThreadMessages,
   selectThreadPendingAttachments,
@@ -90,6 +91,8 @@ interface ChatInputProps {
    * semantics of this prop.
    */
   contextUsageOverride?: ContextUsageOverride | undefined;
+  /** Active node shown in the other Preview split group. */
+  adjacentNodeSourceId?: string;
   disabled?: boolean;
   placeholder?: string;
   /**
@@ -99,6 +102,14 @@ interface ChatInputProps {
    */
   connectedTop?: boolean;
 }
+
+const AttachmentTextPreview = ({ text }: { text: string }) => (
+  <div className="bg-surface flex h-12 w-12 items-center justify-center rounded-md px-1">
+    <span className="text-fg-subtle line-clamp-3 w-full text-center text-[8px] leading-tight">
+      {text}
+    </span>
+  </div>
+);
 
 export const ChatInput = ({
   value,
@@ -114,6 +125,7 @@ export const ChatInput = ({
   acpSelectorsSlot,
   agentSelectorSlot,
   contextUsageOverride,
+  adjacentNodeSourceId,
   disabled = false,
   placeholder,
   connectedTop = false,
@@ -130,6 +142,11 @@ export const ChatInput = ({
     selectThreadPendingAttachments(s, threadId),
   );
   const selectionAttachment = useChatStore((s) => s.selectionAttachment);
+  const adjacentNode = useCanvasStore((s) =>
+    adjacentNodeSourceId
+      ? s.nodes.find((node) => node.id === adjacentNodeSourceId)
+      : undefined,
+  );
   const addPendingAttachment = useChatStore((s) => s.addPendingAttachment);
   const removePendingAttachment = useChatStore(
     (s) => s.removePendingAttachment,
@@ -400,8 +417,52 @@ export const ChatInput = ({
           className={`border p-3 transition-colors ${connectedTop ? 'rounded-t-none rounded-b-2xl' : 'rounded-2xl'} ${isDragOver ? 'border-edge-default bg-info-bg' : 'border-edge-default bg-surface'}`}
         >
           {/* ── Pending attachment thumbnails ── */}
-          {(pendingAttachments.length > 0 || selectionAttachment) && (
+          {(pendingAttachments.length > 0 ||
+            selectionAttachment ||
+            adjacentNode) && (
             <div className="mb-2 flex flex-wrap gap-2">
+              {adjacentNode &&
+                !pendingAttachments.some(
+                  (attachment) =>
+                    attachment.originNodeId === adjacentNode.id &&
+                    !attachment.content &&
+                    !attachment.url,
+                ) && (
+                  <Tooltip content={t('chat.addAdjacentNodeSource')}>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-label={t('chat.addAdjacentNodeSource')}
+                      className="group border-edge-default relative flex cursor-pointer items-center justify-center rounded-md border border-dashed"
+                      onClick={() => {
+                        const label =
+                          typeof adjacentNode.data.label === 'string'
+                            ? adjacentNode.data.label
+                            : t('chat.attachmentFallbackText');
+                        addPendingAttachment(threadId, {
+                          type: 'text',
+                          source: 'selection',
+                          originNodeId: adjacentNode.id,
+                          label,
+                        });
+                        onCommit?.();
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        event.preventDefault();
+                        event.currentTarget.click();
+                      }}
+                    >
+                      <AttachmentTextPreview
+                        text={
+                          typeof adjacentNode.data.label === 'string'
+                            ? adjacentNode.data.label
+                            : t('chat.attachmentFallbackText')
+                        }
+                      />
+                    </div>
+                  </Tooltip>
+                )}
               {/* Selection attachment (from text highlight in expanded panel) */}
               {selectionAttachment &&
                 (() => {
@@ -465,11 +526,7 @@ export const ChatInput = ({
                         lockSelectionAttachment();
                       }}
                     >
-                      <div className="bg-surface flex h-12 w-12 items-center justify-center rounded-md px-1">
-                        <span className="text-fg-subtle line-clamp-3 w-full text-center text-[8px] leading-tight">
-                          {previewText}
-                        </span>
-                      </div>
+                      <AttachmentTextPreview text={previewText} />
                       <Button
                         variant="ghost"
                         shape="pill"
@@ -565,11 +622,7 @@ export const ChatInput = ({
                         className="h-12 w-12 rounded-md object-contain"
                       />
                     ) : (
-                      <div className="bg-surface flex h-12 w-12 items-center justify-center rounded-md px-1">
-                        <span className="text-fg-subtle line-clamp-3 w-full text-center text-[8px] leading-tight">
-                          {previewText}
-                        </span>
-                      </div>
+                      <AttachmentTextPreview text={previewText} />
                     )}
                     <Button
                       variant="ghost"

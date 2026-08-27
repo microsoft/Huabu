@@ -14,15 +14,17 @@ import { LayerFilterBar } from './LayerFilterBar';
 import {
   buildAvailableFilterKeys,
   isOfficeFilterKey,
-  nodeMatchesFilterKey,
   type LayerFilterKey,
 } from './layerFilterKey';
+import { nodeMatchesLayerFilters } from './missingNodeFilter';
+import { MissingNodesSummary } from './MissingNodesSummary';
 import { QuestionStatusDot } from './QuestionStatusDot';
 import { getNodeIcon } from '../../../config/nodeIcons';
 import useCanvasStore from '../../../store/canvasStore';
 import { useExternalImportsStore } from '../../../store/externalImportsStore';
 import { usePanelStore } from '../../../store/panelStore';
 import { useSearchStore } from '../../../store/searchStore';
+import { hasMissingFile } from '../../Nodes/missingFile';
 import { SketchIcon } from '../../Nodes/sketch/SketchIcon';
 import { SidebarPanel } from '../SidebarPanel';
 
@@ -156,6 +158,8 @@ const isSameTreeItem = (
   if (an.parentId !== bn.parentId) return false;
   if (an.data.label !== bn.data.label) return false;
   if (an.data.locked !== bn.data.locked) return false;
+  if (an.data.contentMissing !== bn.data.contentMissing) return false;
+  if (an.data.artifactMissing !== bn.data.artifactMissing) return false;
   // SketchIcon depends on these references; reuse cached item when they
   // are reference-equal (the sketch store updates immutably).
   if (an.data.strokes !== bn.data.strokes) return false;
@@ -225,6 +229,7 @@ export const CanvasLayerPanel = ({
   const [selectedKeys, setSelectedKeys] = useState<Set<LayerFilterKey>>(
     () => new Set(),
   );
+  const [showMissingOnly, setShowMissingOnly] = useState(false);
 
   // Canvas-wide search query (lives in searchStore so the input
   // and the result list can both read / write it). When non-empty
@@ -310,7 +315,19 @@ export const CanvasLayerPanel = ({
   // the canvas-wide search (see `CanvasSearchInput`), so the
   // tree itself now only filters by the chip whitelist —
   // matching the historical "chips alone are active" code path.
-  const isFilterActive = selectedKeys.size > 0;
+  const missingNodeCount = useMemo(
+    () =>
+      nodes.reduce(
+        (count, node) => count + Number(hasMissingFile(node.data)),
+        0,
+      ),
+    [nodes],
+  );
+  const isFilterActive = selectedKeys.size > 0 || showMissingOnly;
+
+  useEffect(() => {
+    if (missingNodeCount === 0 && showMissingOnly) setShowMissingOnly(false);
+  }, [missingNodeCount, showMissingOnly]);
 
   // Canvas layer tree: use original node order (hierarchy-based).
   // We cache per-id item refs by content so that selection-only changes
@@ -348,23 +365,9 @@ export const CanvasLayerPanel = ({
     const next = new Map<string, DataSourceTreeItem>();
     const out: DataSourceTreeItem[] = [];
     for (const item of layerItems) {
-      const t = item.node.type as CanvasNodeType | undefined;
-      // Chip row is a whitelist: node must match at least one
-      // selected key (per-format for office, plain type otherwise).
-      let matched = false;
-      for (const key of selectedKeys) {
-        if (
-          nodeMatchesFilterKey(
-            t,
-            item.node.data as Record<string, unknown> | undefined,
-            key,
-          )
-        ) {
-          matched = true;
-          break;
-        }
+      if (!nodeMatchesLayerFilters(item.node, selectedKeys, showMissingOnly)) {
+        continue;
       }
-      if (!matched) continue;
       const cached = prev.get(item.id);
       const flat =
         cached && cached.node === item.node && cached.depth === 0
@@ -375,10 +378,14 @@ export const CanvasLayerPanel = ({
     }
     flatItemCacheRef.current = next;
     return out;
-  }, [layerItems, isFilterActive, selectedKeys]);
+  }, [layerItems, isFilterActive, selectedKeys, showMissingOnly]);
 
   const itemsToRender = isFilterActive ? (filteredFlatItems ?? []) : layerItems;
-  const emptyText = isFilterActive ? t('layers.noMatches') : t('layers.empty');
+  const emptyText = showMissingOnly
+    ? t('layers.noMissingMatches')
+    : isFilterActive
+      ? t('layers.noMatches')
+      : t('layers.empty');
 
   // Build external (not-yet-imported) note rows. Filter out any whose
   // frontmatter id already lives in the canvas state — handles the race
@@ -390,13 +397,14 @@ export const CanvasLayerPanel = ({
     const hasTypeFilter = selectedKeys.size > 0;
     const out: DataSourceTreeItem[] = [];
     for (const item of externalPending) {
+      if (showMissingOnly) continue;
       if (item.noteId && knownIds.has(item.noteId)) continue;
       const label = item.fileName.replace(/\.md$/i, '');
       if (hasTypeFilter && !selectedKeys.has('note')) continue;
       out.push(buildExternalTreeItem(item, label));
     }
     return out;
-  }, [externalPending, rawNodes, selectedKeys]);
+  }, [externalPending, rawNodes, selectedKeys, showMissingOnly]);
 
   // Drive the collapse-all toolbar toggle: we need to know whether any
   // frame/group exists at all (to decide if the button renders) and
@@ -472,6 +480,15 @@ export const CanvasLayerPanel = ({
           isSearchOpen={isSearchOpen}
           onToggleSearch={toggleSearchOpen}
         />
+        {missingNodeCount > 0 && (
+          <MissingNodesSummary
+            count={missingNodeCount}
+            isActive={showMissingOnly}
+            isDisabled={isSearchActive}
+            onToggle={() => setShowMissingOnly((active) => !active)}
+            onClear={() => setShowMissingOnly(false)}
+          />
+        )}
         <div className="min-h-0 flex-1 overflow-y-auto">
           {isSearchActive ? (
             <CanvasSearchResults />

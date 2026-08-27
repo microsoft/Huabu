@@ -36,6 +36,7 @@ import { Spline, ChevronDown, ChevronRight, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
+import { shouldCanvasSearchOwnKeyboard } from './canvasSearchKeyboard';
 import { focusNodesOnCanvas } from './focusNodesOnCanvas';
 import { getNodeIcon } from '../../../config/nodeIcons';
 import { scheduleScrollToMatch } from '../../../hooks/searchDom';
@@ -337,14 +338,12 @@ export const CanvasSearchResults = (): React.JSX.Element => {
   // bar and any canvas-level Arrow / Enter handlers while a query
   // is active.
   //
-  // LOAD-BEARING — capture phase + stopPropagation here suppresses
-  // *all* canvas-level Enter / Arrow handlers while the result list
-  // is mounted. That is intentional (we own the keyboard while
-  // searching); Escape is handled by `CanvasSearchInput` (which
-  // clears the query and closes the scope — that unmounts this
-  // component and the keydown listener cleans up).
+  // Search keeps ownership while focus is in its input/results or React Flow
+  // has moved focus onto a plain Canvas node wrapper. Editors and controls in
+  // Chat, Preview, and Canvas keep their own Enter / Arrow behavior.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (!shouldCanvasSearchOwnKeyboard(e.target)) return;
       if (e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
@@ -428,7 +427,7 @@ export const CanvasSearchResults = (): React.JSX.Element => {
     !isStreaming && query.trim().length > 0 && results.length === 0 && !error;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col" data-canvas-search-results="">
       {/* Truncation banner. VS Code-style: lives at the TOP so the
           user spots the warning before scrolling and knows the list
           is incomplete. */}

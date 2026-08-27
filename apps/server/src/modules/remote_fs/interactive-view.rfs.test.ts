@@ -17,11 +17,7 @@ import {
   type AcpWorkloadSpec,
 } from '../agent/agenetes/drivers.js';
 import interactiveViewRoutes from '../interactive-view/interactive-view.route.js';
-import {
-  canvasBlobs,
-  getCanvasStore,
-  resetStorageCache,
-} from '../storage/index.js';
+import { space, getCanvasStore, resetStorageCache } from '../storage/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
@@ -220,7 +216,7 @@ describe('Interactive View RFS resources', () => {
         code: 'renderer_not_found',
       });
 
-      await canvasBlobs('c1').put('view.html', Buffer.from('<p>view</p>'));
+      await space('c1').blobs.put('view.html', Buffer.from('<p>view</p>'));
       const invalidState = await app.inject({
         method: 'POST',
         url: '/rfs/c1/interactive-views',

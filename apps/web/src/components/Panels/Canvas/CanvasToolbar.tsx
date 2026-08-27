@@ -11,6 +11,7 @@ import {
   ChevronDown,
   Undo2,
   Redo2,
+  PanelsTopLeft,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -22,10 +23,12 @@ import {
   uploadPdf,
   uploadVideo,
 } from '@/api/artifact';
+import { listCanvases } from '@/api/canvas';
 import { matchesShortcut } from '@/config/shortcuts';
 import { isEditableTarget } from '@/hooks/shortcuts';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useToolStore } from '@/store/toolStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import {
   getAvailableCanvasTools,
@@ -45,6 +48,7 @@ import { SketchModeSwitcher } from '../../Nodes/sketch/SketchModeSwitcher.tsx';
 import { SketchSettingsPanel } from '../../Nodes/sketch/SketchSettingsPanel.tsx';
 
 import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
+import type { CanvasSummary } from '@huabu/shared';
 
 interface NodeToolbarProps {
   activeTool: 'select' | 'pan' | 'lasso';
@@ -65,6 +69,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const canUndo = useCanvasStore((s) => s.canUndo);
   const canRedo = useCanvasStore((s) => s.canRedo);
   const canvasId = useCanvasStore((s) => s.canvasId);
+  const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
   const toolTitle = (label: string, shortcut: string) =>
     isNotMouse ? label : `${label} (${shortcut})`;
 
@@ -73,13 +78,16 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const intentButtonRef = useRef<HTMLDivElement>(null);
 
   // State
-  const [activeModal, setActiveModal] = useState<'upload' | 'link' | null>(
-    null,
-  );
+  const [activeModal, setActiveModal] = useState<
+    'upload' | 'link' | 'spacePreview' | null
+  >(null);
   const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
   const resourceMenuRef = useRef<HTMLDivElement>(null);
   const resourceJustDismissedRef = useRef(false);
   const [linkText, setLinkText] = useState('');
+  const [previewTargets, setPreviewTargets] = useState<CanvasSummary[]>([]);
+  const [previewTargetsLoading, setPreviewTargetsLoading] = useState(false);
+  const [previewTargetsError, setPreviewTargetsError] = useState(false);
 
   // Select / Pan / Lasso live on a single SplitSelect: the primary button
   // mirrors the currently active tool and the popover lists every option
@@ -199,7 +207,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
   const resourceOptions = useMemo<
     {
-      value: 'upload' | 'link';
+      value: 'upload' | 'link' | 'spacePreview';
       label: string;
       icon: React.ReactNode;
     }[]
@@ -215,9 +223,35 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         label: t('toolbar.resources.addLinks'),
         icon: <LinkIcon />,
       },
+      ...(canvasId !== worldCanvasId
+        ? [
+            {
+              value: 'spacePreview' as const,
+              label: t('spacePreview.add'),
+              icon: <PanelsTopLeft />,
+            },
+          ]
+        : []),
     ],
-    [t],
+    [canvasId, t, worldCanvasId],
   );
+
+  const openSpacePreviewModal = () => {
+    setActiveModal('spacePreview');
+    setPreviewTargetsLoading(true);
+    setPreviewTargetsError(false);
+    void listCanvases()
+      .then(({ canvases }) =>
+        setPreviewTargets(
+          canvases.filter((canvas) => canvas.canvasId !== canvasId),
+        ),
+      )
+      .catch(() => {
+        setPreviewTargets([]);
+        setPreviewTargetsError(true);
+      })
+      .finally(() => setPreviewTargetsLoading(false));
+  };
 
   const getResourceMenuPosition = () => {
     if (!resourceMenuRef.current) return { x: 0, y: 0 };
@@ -544,7 +578,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             variant="ghost"
             size="sm"
             iconOnly
-            title={t('toolbar.resources.uploadOrLink')}
+            title={t('toolbar.resources.addContent')}
             className={clsx(resourceMenuOpen && 'bg-bg-default')}
             onClick={() => {
               if (resourceJustDismissedRef.current) return;
@@ -583,7 +617,11 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                   className="w-full justify-start rounded-none px-3 py-1.5 text-left"
                   onClick={() => {
                     setResourceMenuOpen(false);
-                    setActiveModal(opt.value);
+                    if (opt.value === 'spacePreview') {
+                      openSpacePreviewModal();
+                    } else {
+                      setActiveModal(opt.value);
+                    }
                   }}
                 >
                   <span className="shrink-0">{opt.icon}</span>
@@ -674,6 +712,55 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             accept="image/*,application/pdf,video/mp4,.md,.markdown,text/markdown,.docx,.xlsx,.pptx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,.html,.htm,text/html"
             onChange={handleFileChange}
           />
+        </div>
+      </Modal>
+
+      <Modal
+        title={t('spacePreview.chooseTarget')}
+        description={t('spacePreview.chooseTargetDescription')}
+        isOpen={activeModal === 'spacePreview'}
+        onClose={() => setActiveModal(null)}
+      >
+        <div className="flex max-h-80 flex-col overflow-y-auto">
+          {previewTargetsLoading ? (
+            <div className="text-fg-muted p-4 text-center text-sm">
+              {t('spacePreview.loadingTargets')}
+            </div>
+          ) : previewTargetsError ? (
+            <div className="text-danger p-4 text-center text-sm">
+              {t('spacePreview.targetsUnavailable')}
+            </div>
+          ) : previewTargets.length === 0 ? (
+            <div className="text-fg-muted p-4 text-center text-sm">
+              {t('spacePreview.noTargets')}
+            </div>
+          ) : (
+            previewTargets.map((target) => (
+              <Button
+                key={target.canvasId}
+                variant="ghost"
+                size="md"
+                className="w-full justify-start rounded-none"
+                onClick={() => {
+                  addNodes([
+                    {
+                      nodeType: 'spacePreview',
+                      data: {
+                        targetCanvasId: target.canvasId,
+                        origin: { type: 'user-created' },
+                      },
+                    },
+                  ]);
+                  setActiveModal(null);
+                }}
+              >
+                <PanelsTopLeft />
+                <span className="min-w-0 truncate">
+                  {target.title || t('spacePreview.untitledSpace')}
+                </span>
+              </Button>
+            ))
+          )}
         </div>
       </Modal>
 

@@ -10,16 +10,8 @@ import useCanvasStore from '@/store/canvasStore';
 
 import './MissingFileBanner.css';
 
-export type MissingFileKind = 'sidecar' | 'artifact';
-
-export function getMissingFileKind(data: {
-  contentMissing?: boolean;
-  artifactMissing?: boolean;
-}): MissingFileKind | null {
-  if (data.contentMissing) return 'sidecar';
-  if (data.artifactMissing) return 'artifact';
-  return null;
-}
+export { getMissingFileKind } from './missingFile';
+export type { MissingFileKind } from './missingFile';
 
 export interface MissingFileBannerProps {
   /** Node ID — used by the Remove button to delete this node from the canvas. */

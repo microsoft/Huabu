@@ -65,6 +65,7 @@ docs/
 | [node-preprocessing.md](./architecture/node-preprocessing.md)                   | Unified 6-stage preprocessing pipeline; per-node profiles decide extract / enrich / persist.             |     | [node-auto-height.md](./architecture/node-auto-height.md) | Who owns a node's height, how content height is measured, and how a derived height reaches geometry. |     | [sketch-node.md](./architecture/sketch-node.md) | Sketch nodes: data model, lifecycle, stroke-level editing, and how AI reads them as content. |
 | [note-node.md](./architecture/note-node.md)                                     | Note node: Markdown data model, save path, and in-document input (Tab indentation, link activation).     |
 | [preview-workspace.md](./architecture/preview-workspace.md)                     | Right-side node and Chat tabs, groups, session isolation, focus requests, persistence, and validation.   |
+| [space-preview.md](./architecture/space-preview.md)                             | View-only Space scene projection, isolated preview interaction, and preview-based World reconciliation.  |
 | [web-architecture.md](./architecture/web-architecture.md)                       | Frontend (`apps/web/src/`) layout, dependency rules, and conventions.                                    |
 
 ---
@@ -76,26 +77,27 @@ docs/
 
 ### Active
 
-| Doc                                                                                                | Status         | Summary                                                                    |
-| -------------------------------------------------------------------------------------------------- | -------------- | -------------------------------------------------------------------------- |
-| [active-space-external-note-watcher.md](./proposals/active-space-external-note-watcher.md)         | Proposed       | Scope external-note watchers to Spaces with active SSE subscribers.        |
-| [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md)                   | In-Progress    | Read/write revision freshness across agent and web paths.                  |
-| [agent-resource-registry.md](./proposals/agent-resource-registry.md)                               | Draft          | Machine-aware resource discovery, placement, and on-demand Agent access.   |
-| [agent-turn-realtime-sync.md](./proposals/agent-turn-realtime-sync.md)                             | Proposed       | Live attachment and durable event replay for UI, RFS, and Headless turns.  |
-| [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                 | Proposed       | Canvas checkpoint and restoration design.                                  |
-| [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                           | In-Progress    | Roadmap from multi-agent sync to multi-user co-editing.                    |
-| [content-before-ai-design.md](./proposals/content-before-ai-design.md)                             | Needs review   | Block-level and inline authorship provenance.                              |
-| [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md) | Draft          | Follow-up credential storage hardening.                                    |
-| [direct-space-operations.md](./proposals/direct-space-operations.md)                               | In-Progress    | #348 deterministic RFS query and mutation operations for external agents.  |
-| [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                 | Partly shipped | Server-side headless canvas executor and structure/content sync.           |
-| [interactive-agent-views.md](./proposals/interactive-agent-views.md)                               | In-Progress    | Capability-bound HTML views for persistent external-Agent interaction.     |
-| [long-horizon-tasks.md](./proposals/long-horizon-tasks.md)                                         | Partly shipped | Canvas-scoped recursive Agent creation, invocation, and handoff pipeline.  |
-| [managed-acp-harness.md](./proposals/managed-acp-harness.md)                                       | Draft          | Resource-first Agent Team Profile compilation.                             |
-| [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.          |
-| [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Huabu-owned Milkdown toolbar and semantic editor commands.                 |
-| [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                           |
-| [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                   | Partly shipped | Phases 1–3: Blob, structured repositories, catalogue, and bounded reads.   |
-| [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)             | Proposed       | Revision-aware offscreen Note measurement and stable auto-height geometry. |
+| Doc                                                                                                | Status         | Summary                                                                                |
+| -------------------------------------------------------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------- |
+| [active-space-external-note-watcher.md](./proposals/active-space-external-note-watcher.md)         | Proposed       | Scope external-note watchers to Spaces with active SSE subscribers.                    |
+| [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md)                   | In-Progress    | Read/write revision freshness across agent and web paths.                              |
+| [agent-resource-registry.md](./proposals/agent-resource-registry.md)                               | Draft          | Machine-aware resource discovery, placement, and on-demand Agent access.               |
+| [agent-turn-realtime-sync.md](./proposals/agent-turn-realtime-sync.md)                             | Proposed       | Live attachment and durable event replay for UI, RFS, and Headless turns.              |
+| [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                 | Proposed       | Canvas checkpoint and restoration design.                                              |
+| [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                           | In-Progress    | Roadmap from multi-agent sync to multi-user co-editing.                                |
+| [content-before-ai-design.md](./proposals/content-before-ai-design.md)                             | Needs review   | Block-level and inline authorship provenance.                                          |
+| [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md) | Draft          | Follow-up credential storage hardening.                                                |
+| [direct-space-operations.md](./proposals/direct-space-operations.md)                               | In-Progress    | #348 deterministic RFS query and mutation operations for external agents.              |
+| [headless-executor-plan.md](./proposals/headless-executor-plan.md)                                 | Partly shipped | Server-side headless canvas executor and structure/content sync.                       |
+| [interactive-agent-views.md](./proposals/interactive-agent-views.md)                               | In-Progress    | Capability-bound HTML views for persistent external-Agent interaction.                 |
+| [long-horizon-tasks.md](./proposals/long-horizon-tasks.md)                                         | Partly shipped | Canvas-scoped recursive Agent creation, invocation, and handoff pipeline.              |
+| [managed-acp-harness.md](./proposals/managed-acp-harness.md)                                       | Draft          | Resource-first Agent Team Profile compilation.                                         |
+| [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.                      |
+| [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Huabu-owned Milkdown toolbar and semantic editor commands.                             |
+| [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                                       |
+| [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                   | Partly shipped | Phases 1–3: Blob, structured repositories, catalogue, and bounded reads.               |
+| [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)             | Proposed       | Revision-aware offscreen Note measurement and stable auto-height geometry.             |
+| [space-preview-and-world-redesign.md](./proposals/space-preview-and-world-redesign.md)             | In-Progress    | View-only Space previews, a preview-based World, and deferred zoom-through navigation. |
 
 ### Shipped
 

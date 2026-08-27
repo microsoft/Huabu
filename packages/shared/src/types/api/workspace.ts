@@ -32,15 +32,40 @@ export type WorkspaceCapabilities = z.infer<typeof workspaceCapabilitiesSchema>;
 export const workspaceInfoSchema = z.object({
   mode: workspaceModeSchema,
   configured: z.boolean(),
+  /** Stable Workspace identity, or null before configuration. */
+  workspaceId: z.string().uuid().nullable(),
   /** Free-mode active absolute path. Always null in managed mode. */
   path: z.string().nullable(),
-  /** Display label (basename of the active path), or null. */
+  /** Persisted display label (defaults to the active path basename), or null. */
   name: z.string().nullable(),
   /** Stable hidden World canvas identity, or null before configuration. */
   worldCanvasId: z.string().min(1).nullable(),
   capabilities: workspaceCapabilitiesSchema,
 });
 export type WorkspaceInfo = z.infer<typeof workspaceInfoSchema>;
+
+/** One Workspace exposed by the plural management API. */
+export const workspaceDescriptorSchema = z.object({
+  workspaceId: z.string().uuid(),
+  name: z.string().min(1),
+  /** Disk path in free mode; hidden for managed deployments. */
+  path: z.string().nullable(),
+  active: z.boolean(),
+});
+export type WorkspaceDescriptor = z.infer<typeof workspaceDescriptorSchema>;
+
+/** Body for `POST /api/workspaces`. */
+export const workspaceCreateSchema = z.object({
+  path: z.string().min(1, 'Workspace path is required'),
+  name: z.string().trim().min(1, 'Workspace name is required').optional(),
+});
+export type WorkspaceCreateRequest = z.infer<typeof workspaceCreateSchema>;
+
+/** Body for `PATCH /api/workspaces/:workspaceId`. */
+export const workspaceRenameSchema = z.object({
+  name: z.string().trim().min(1, 'Workspace name is required'),
+});
+export type WorkspaceRenameRequest = z.infer<typeof workspaceRenameSchema>;
 
 /**
  * Result of `POST /api/workspace/pick-folder`.

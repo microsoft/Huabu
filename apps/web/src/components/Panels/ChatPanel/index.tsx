@@ -46,6 +46,7 @@ import {
   resolveConversationOwnerSource,
 } from '@/store/conversationOwner';
 import { useLLMStore } from '@/store/llmStore';
+import { messageListViewKey } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { snapshotAgentIcon } from '@/utils/agentIcon';
 
@@ -75,6 +76,8 @@ interface ChatPanelProps {
   session: ChatSession;
   /** Workspace tab to convert in place when an unbound Chat is saved. */
   previewTabId: string;
+  /** Active node in the other Preview split group, if one is visible. */
+  adjacentNodeSourceId?: string;
   /** Reports a persistent thread mutation to the owning preview surface. */
   onCommit?: () => void;
   /** One-shot initial scroll request from Preview Workspace. */
@@ -90,6 +93,7 @@ export const ChatPanel = ({
   onToggle,
   session,
   previewTabId,
+  adjacentNodeSourceId,
   onCommit,
   openPositionRequest,
   onOpenPositionHandled,
@@ -839,7 +843,7 @@ export const ChatPanel = ({
             messages={messages}
             isLoading={isLoading}
             isHistoryLoading={!isHistoryLoaded}
-            viewKey={threadId}
+            viewKey={messageListViewKey(ownerCanvasId, threadId)}
             isActive={!isCollapsed}
             openPosition={
               pendingPermission
@@ -892,6 +896,7 @@ export const ChatPanel = ({
               onSubmit={handleSubmit}
               onCommit={onCommit}
               onStop={stopStream}
+              adjacentNodeSourceId={adjacentNodeSourceId}
               isStreaming={isLoading}
               mode={mode}
               connectedTop={hasThreadChanges}

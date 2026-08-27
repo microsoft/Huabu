@@ -174,60 +174,68 @@ export const QuestionNode = memo(
     // ------------------------------------------------------------------
     // Open an already-run question's conversation (live or replay).
     // ------------------------------------------------------------------
-    const openInChat = useCallback(() => {
-      if (!data.threadId) return;
-      enterQuestionConversation(
-        {
-          presentationAnchor: { canvasId, nodeId: id },
-          conversationOwner: {
-            canvasId,
-            nodeId: id,
-            threadId: data.threadId,
+    const openInChat = useCallback(
+      (transient = false) => {
+        if (!data.threadId) return;
+        enterQuestionConversation(
+          {
+            presentationAnchor: { canvasId, nodeId: id },
+            conversationOwner: {
+              canvasId,
+              nodeId: id,
+              threadId: data.threadId,
+            },
           },
-        },
+          data.agentBinding,
+          canvasId,
+          needsApproval
+            ? 'bottom'
+            : hasRun && !data.viewed
+              ? 'last-user'
+              : 'bottom',
+          { transient },
+        );
+        // Mark as viewed only once the run has finished.
+        if (hasRun && !data.viewed) {
+          patchNodeSilent(id, { viewed: true });
+        }
+      },
+      [
+        id,
+        data.threadId,
         data.agentBinding,
+        data.viewed,
+        needsApproval,
+        hasRun,
         canvasId,
-        needsApproval
-          ? 'bottom'
-          : hasRun && !data.viewed
-            ? 'last-user'
-            : 'bottom',
-      );
-      // Mark as viewed only once the run has finished.
-      if (hasRun && !data.viewed) {
-        patchNodeSilent(id, { viewed: true });
-      }
-    }, [
-      id,
-      data.threadId,
-      data.agentBinding,
-      data.viewed,
-      needsApproval,
-      hasRun,
-      canvasId,
-      patchNodeSilent,
-    ]);
+        patchNodeSilent,
+      ],
+    );
 
     // ------------------------------------------------------------------
     // Open this node for composition: switch the chat panel to the
     // node's (empty) thread, expand it, and focus the input. Mints a
     // thread id on first use so the node + its conversation are bound.
     // ------------------------------------------------------------------
-    const openInCompose = useCallback(() => {
-      let threadId = data.threadId;
-      if (!threadId) {
-        threadId = createId('thread');
-        patchNodeSilent(id, { threadId });
-      }
-      enterQuestionCompose(
-        {
-          presentationAnchor: { canvasId, nodeId: id },
-          conversationOwner: { canvasId, nodeId: id, threadId },
-        },
-        canvasId,
-        data.agentBinding,
-      );
-    }, [id, data.threadId, data.agentBinding, canvasId, patchNodeSilent]);
+    const openInCompose = useCallback(
+      (transient = false) => {
+        let threadId = data.threadId;
+        if (!threadId) {
+          threadId = createId('thread');
+          patchNodeSilent(id, { threadId });
+        }
+        enterQuestionCompose(
+          {
+            presentationAnchor: { canvasId, nodeId: id },
+            conversationOwner: { canvasId, nodeId: id, threadId },
+          },
+          canvasId,
+          data.agentBinding,
+          { transient },
+        );
+      },
+      [id, data.threadId, data.agentBinding, canvasId, patchNodeSilent],
+    );
 
     // ------------------------------------------------------------------
     // Double-click:
@@ -240,9 +248,9 @@ export const QuestionNode = memo(
         e.stopPropagation();
         if (isForkPending) return;
         if (canOpenInChat) {
-          openInChat();
+          openInChat(true);
         } else {
-          openInCompose();
+          openInCompose(true);
         }
       },
       [isForkPending, canOpenInChat, openInChat, openInCompose],
@@ -262,14 +270,14 @@ export const QuestionNode = memo(
                 ? t('node.watchLiveConversation')
                 : t('node.viewConversation')
             }
-            onClick={openInChat}
+            onClick={() => openInChat(true)}
           >
             <MessageSquare size={14} />
           </FloatingToolbar.ActionButton>
         ) : (
           <FloatingToolbar.ActionButton
             title={t('node.ask')}
-            onClick={openInCompose}
+            onClick={() => openInCompose(true)}
           >
             <MessageSquare size={14} />
           </FloatingToolbar.ActionButton>
