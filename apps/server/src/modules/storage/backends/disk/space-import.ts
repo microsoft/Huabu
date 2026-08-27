@@ -33,15 +33,24 @@ import { getWorkspacePath } from '../../../workspace.js';
 import type { CanvasFile } from '../../../canvas/persistence-types.js';
 
 /**
- * The filename a bundle carries its record under, before this backend
+ * The filenames a bundle may carry its record under, before this backend
  * existed to disagree.
  *
  * Historically the same name Disk uses, and deliberately *not* the same
  * constant: one is a wire format frozen by every bundle already exported, the
  * other is how a backend files a record today. They drift the moment a backend
  * that is not Disk exports one.
+ *
+ * Assembled per call rather than captured at module scope. `layout.ts` and
+ * this file sit in one import cycle — layout imports `getWorkspacePath`,
+ * `workspace.ts` imports the storage barrel, and the composition root imports
+ * this module — so a graph entered through a Disk module evaluates this file
+ * while `layout.ts` is still initializing. A module-level array would freeze
+ * `undefined` in place of the record filename for the life of the process.
  */
-const BUNDLE_RECORD_FILENAMES = [SPACE_JSON_FILENAME, 'canvas.json'] as const;
+function bundleRecordFilenames(): readonly string[] {
+  return [SPACE_JSON_FILENAME, 'canvas.json'];
+}
 
 export interface DiskSpaceImport {
   /** Where the bundle's entries should be written. */
@@ -72,7 +81,7 @@ export function stageDiskSpaceImport(canvasId: string): DiskSpaceImport {
     stagingDirectory,
 
     async readRecord(): Promise<CanvasFile | null> {
-      for (const name of BUNDLE_RECORD_FILENAMES) {
+      for (const name of bundleRecordFilenames()) {
         const candidate = path.join(stagingDirectory, name);
         if (!existsSync(candidate)) continue;
         return JSON.parse(await readFile(candidate, 'utf8')) as CanvasFile;
@@ -102,7 +111,7 @@ export function stageDiskSpaceImport(canvasId: string): DiskSpaceImport {
         path.join(stagingDirectory, SPACE_JSON_FILENAME),
         JSON.stringify({ ...record, canvasId, title }),
       );
-      for (const name of BUNDLE_RECORD_FILENAMES) {
+      for (const name of bundleRecordFilenames()) {
         if (name === SPACE_JSON_FILENAME) continue;
         await rm(path.join(stagingDirectory, name), { force: true });
       }
