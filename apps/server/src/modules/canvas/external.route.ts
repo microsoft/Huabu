@@ -17,7 +17,7 @@ import {
   takeExternalNote,
 } from './external-watcher.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
-import { spaceDirectory } from '../storage/index.js';
+import { space } from '../storage/index.js';
 
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -95,7 +95,14 @@ const externalRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       return reply.code(404).send({ message: 'External note not found' });
     }
 
-    const abs = path.join(spaceDirectory(canvasId), item.relativePath);
+    // External-note claim is Disk-only (proposal §6.4.3, disposition A): it
+    // exists to adopt documents that arrived without going through the
+    // application, and no database backend has such an arrival path.
+    const tree = space(canvasId).diskTree;
+    if (!tree) {
+      return reply.code(404).send({ message: 'External note not found' });
+    }
+    const abs = path.join(tree.directory(), item.relativePath);
     let raw: string;
     try {
       raw = await readFile(abs, 'utf8');

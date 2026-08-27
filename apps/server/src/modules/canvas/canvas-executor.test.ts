@@ -30,7 +30,7 @@ import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
 import {
-  canvasBlobs,
+  space,
   getCanvasStore,
   getStructuredStore,
   updateNode,
@@ -273,7 +273,7 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
       src: 'old.svg',
       content: '',
     });
-    await canvasBlobs('c1').put(
+    await space('c1').blobs.put(
       'new.svg',
       Buffer.from(
         '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>',
@@ -329,7 +329,7 @@ describe('executeOnServer — MERGE_NODE_DATA CAS', () => {
       src: 'pic.svg',
       content: '',
     });
-    await canvasBlobs('c1').put(
+    await space('c1').blobs.put(
       'pic.svg',
       Buffer.from(
         '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"></svg>',

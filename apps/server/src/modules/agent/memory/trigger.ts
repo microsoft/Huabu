@@ -26,7 +26,7 @@ import { existsSync } from 'node:fs';
 
 import { atomicWriteJson, mkdirp, readJson } from '../../../utils/fs.js';
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
-import { spaceDirectory } from '../../storage/index.js';
+import { space } from '../../storage/index.js';
 import { memoryStatePath, canvasMemoryDir } from '../../workspace/paths.js';
 
 /** Op-count threshold that triggers a memory analysis pass. */
@@ -83,7 +83,12 @@ export function writeMemoryState(canvasId: string, state: MemoryState): void {
   // file. Same hazard for any in-flight memory worker that calls
   // `markAnalyzed` post-delete. Skip the write when the canvas root
   // is gone; losing one bookkeeping write is harmless.
-  if (!existsSync(spaceDirectory(canvasId))) return;
+  // Disk-only by construction: the hazard is an ad-hoc file write
+  // recreating a directory the delete removed, and a backend with no
+  // directory has no such hazard. Phase 4.6 retires the guard entirely when
+  // this state moves onto the extension substrate (proposal §12.6.3).
+  const tree = space(canvasId).diskTree;
+  if (tree && !existsSync(tree.directory())) return;
   mkdirp(canvasMemoryDir(canvasId));
   atomicWriteJson(memoryStatePath(canvasId), state);
 }

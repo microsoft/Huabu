@@ -36,6 +36,7 @@ import {
   titleForAllocatedDirectory,
   titleVisibleAtDirectory,
 } from './space-title.js';
+import { ensureWorldCanvasOnDisk } from './world-canvas.js';
 import { atomicWriteJson, mkdirp, sanitizeId } from '../../../../utils/fs.js';
 import { normalizeForCompare } from '../../../../utils/naming.js';
 import { getWorkspacePath } from '../../../workspace.js';
@@ -89,6 +90,27 @@ export class DiskSpaceRepository implements SpaceRepository {
   async worldId(): Promise<string> {
     this.#assertActiveWorkspace();
     return this.#requireWorld();
+  }
+
+  /**
+   * Bootstrap the World, delegating to the same idempotent Disk primitive
+   * Workspace preparation calls.
+   *
+   * One writer for one file: the preparation path may still run before the
+   * store is mounted (legacy migrations remain filesystem-based), so a second
+   * implementation here would be a second authority over `.world/space.json`
+   * that could disagree about what counts as established. The primitive
+   * already reads an existing `.world` as established storage and raises on a
+   * malformed one, which is exactly what the port promises.
+   *
+   * The directory index is refreshed afterwards because a freshly created
+   * World is a new member of the collection every later read resolves through.
+   */
+  async ensureWorld(): Promise<string> {
+    this.#assertActiveWorkspace();
+    const canvasId = ensureWorldCanvasOnDisk(this.#workspacePath);
+    refreshCanvasDirIndex();
+    return canvasId;
   }
 
   async create(input: SpaceCreateInput): Promise<SpaceCreateResult> {

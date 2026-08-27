@@ -36,8 +36,8 @@ import { getWorkspacePath } from '../../../workspace.js';
  *
  * Resolved through {@link canvasDirName} rather than the canvasId, because
  * Disk files a Space under its title and that name moves on rename. This is
- * also the materialization anchor the rest of the app reaches by way of
- * `storage`'s `spaceDirectory()`.
+ * also the materialization anchor the rest of the app reaches by way of the
+ * Space handle's `diskTree` member.
  */
 export function canvasRoot(canvasId: string): string {
   const safeId = sanitizeId(canvasId, 'canvasId');

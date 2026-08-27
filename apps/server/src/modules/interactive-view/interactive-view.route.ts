@@ -20,7 +20,7 @@ import {
   interactiveViewService,
 } from './interactive-view.service.js';
 import { sendBlob } from '../artifact/send-blob.js';
-import { canvasBlobs } from '../storage/index.js';
+import { space } from '../storage/index.js';
 
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -84,7 +84,7 @@ const interactiveViewRoutes: FastifyPluginAsync = async (app) => {
       const sent = await sendBlob(
         request,
         reply,
-        canvasBlobs(params.data.canvasId),
+        space(params.data.canvasId).blobs,
         resource.rendererArtifact,
       );
       if (!sent) {

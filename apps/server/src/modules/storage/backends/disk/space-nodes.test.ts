@@ -30,6 +30,7 @@ import { setWorkspacePath } from '../../../workspace.js';
 import { describeSpaceNodesContract } from '../../ports/contracts/space-nodes.contract.js';
 
 import type { NodeContent } from '../../../canvas/persistence-types.js';
+import type { NodeSnapshot } from '../../ports/structured.js';
 
 function freshWorkspace(prefix: string): string {
   const root = mkdtempSync(path.join(tmpdir(), prefix));
@@ -240,6 +241,20 @@ describe('DiskSpaceNodes', () => {
     await expect(repository.read('broken')).resolves.toMatchObject({
       record: { nodeId: 'broken', content: 'body' },
     });
+
+    // The collection shapes recover it the same way. They are strict about
+    // reaching a sidecar, not about what a user typed inside one, so a scan
+    // never refuses a node the per-id read repairs.
+    const recovered = await repository.read('broken');
+    await expect(repository.list()).resolves.toEqual(
+      new Map([['broken', recovered]]),
+    );
+    const delivered: NodeSnapshot[] = [];
+    await expect(
+      repository.stream((snapshot) => delivered.push(snapshot)),
+    ).resolves.toEqual(new Map([['broken', recovered]]));
+    expect(delivered).toEqual([recovered]);
+
     await expect(
       repository.put({
         nodeId: 'broken',
@@ -267,6 +282,48 @@ describe('DiskSpaceNodes', () => {
     await expect(repository.read('node-a')).rejects.toMatchObject({
       code: 'EISDIR',
     });
+
+    // The collection shapes have to agree. A scan that swallowed the failure
+    // would report an empty Space to an executor prestate hydration or a
+    // bundle export while the per-id read still refused — the same node,
+    // absent through one shape and an I/O error through another.
+    await expect(repository.list()).rejects.toMatchObject({ code: 'EISDIR' });
+    await expect(
+      repository.stream(() => {
+        throw new Error('no node should be delivered from an unreadable scan');
+      }),
+    ).rejects.toMatchObject({ code: 'EISDIR' });
+  });
+
+  it('stops a strict scan at the first unreadable sidecar', async () => {
+    const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
+    for (const nodeId of ['node-a', 'node-b', 'node-c']) {
+      const stored = await repository.put({
+        nodeId,
+        record: note(nodeId, `Node ${nodeId}`, 'body'),
+      });
+      if (!stored.ok) throw new Error('node seed failed');
+    }
+    const sidecar = path.join(
+      nodesDir('canvas-a'),
+      readdirSync(nodesDir('canvas-a'))[0],
+    );
+    unlinkSync(sidecar);
+    mkdirSync(sidecar);
+
+    const delivered: NodeSnapshot[] = [];
+    await expect(
+      repository.stream((snapshot) => delivered.push(snapshot)),
+    ).rejects.toMatchObject({ code: 'EISDIR' });
+
+    // Delivering some of the readable siblings first is unavoidable: they are
+    // in flight concurrently. Delivering *after* the caller has been handed
+    // the error is not, and it is the half a caller cannot defend against —
+    // it has already unwound whatever it was collecting into.
+    const atRejection = delivered.length;
+    expect(atRejection).toBeLessThan(3);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(delivered).toHaveLength(atRejection);
   });
 
   it.runIf(process.platform !== 'win32')(

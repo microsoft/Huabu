@@ -58,12 +58,11 @@ import {
   suggestCanvasDir,
 } from '../storage/canvas-dirs.js';
 import {
-  canvasBlobs,
+  space,
   createSpace,
   deleteSpace,
   getCanvasStore,
   getStructuredStore,
-  spaceDirectory,
   type CanvasFile,
   type UpdateNodeOutcome,
   updateNode,
@@ -342,7 +341,7 @@ async function singleArtifactProbe(
 ): Promise<(key: string) => boolean> {
   const key = extractArtifactKey(src);
   if (!key) return () => false;
-  const exists = (await canvasBlobs(canvasId).hasMany([key])).has(key);
+  const exists = (await space(canvasId).blobs.hasMany([key])).has(key);
   return (candidate) => candidate === key && exists;
 }
 
@@ -532,7 +531,7 @@ async function hydrateNodeContent(
   const present =
     referenced.size === 0
       ? new Set<string>()
-      : await canvasBlobs(store.canvasId).hasMany([...referenced]);
+      : await space(store.canvasId).blobs.hasMany([...referenced]);
   const artifactExists = (key: string): boolean => present.has(key);
 
   return nodes.map((node) => {
@@ -1629,8 +1628,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
-    const canvasDir = spaceDirectory(canvasId);
-    if (!existsSync(canvasDir)) {
+    // The Space bundle is a Disk projection (proposal §6.4.3, disposition
+    // A); a portable export generated from records plus reachable blob
+    // references is a separate later design.
+    const tree = space(canvasId).diskTree;
+    const canvasDir = tree?.directory();
+    if (canvasDir === undefined || !existsSync(canvasDir)) {
       return reply.code(404).send({ message: 'Canvas directory not found' });
     }
 

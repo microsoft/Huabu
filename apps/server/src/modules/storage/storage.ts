@@ -31,7 +31,7 @@ import {
   getWorkspacePath,
 } from '../workspace.js';
 import { DiskBlobStore } from './backends/disk/blob-store.js';
-import { canvasRoot } from './backends/disk/layout.js';
+import { diskSpaceTree } from './backends/disk/space-tree.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import {
   DiskWorkspaceRepository,
@@ -46,6 +46,7 @@ import {
 } from './profile.js';
 import { withSpacePutAdmission } from './space-lifecycle-admission.js';
 
+import type { DiskSpaceTree } from './backends/disk/space-tree.js';
 import type {
   BlobInfo,
   BlobLease,
@@ -58,6 +59,7 @@ import type { StorageHealth } from './ports/common.js';
 import type {
   SpaceCreateResult,
   SpaceDeleteFinishResult,
+  SpaceHandle,
   StructuredStore,
 } from './ports/structured.js';
 import type {
@@ -110,6 +112,70 @@ export interface Storage {
   readonly profile: StorageProfile;
   readonly structured: StructuredStore;
   readonly blobs: BlobStore;
+  /**
+   * Every storage capability for one Space, from one call.
+   *
+   * A Space's durable state spans both ports — its record and nodes are
+   * structured, its files are bytes — so the application reaches all of it
+   * through one object rather than remembering which axis holds what
+   * (§6.4.1).
+   */
+  space(canvasId: string): Space;
+}
+
+/**
+ * One Space across every axis that holds part of it.
+ *
+ * A **composition-layer facade, not a port type**. `StructuredStore.space()`
+ * keeps returning the structured-only {@link SpaceHandle}, `BlobStore.scope()`
+ * keeps returning a {@link BlobScope}, and neither port imports the other.
+ * They are joined here because this is the only object in the process that
+ * holds both, and because this layer already owns every cross-store rule: the
+ * blob-put precondition and the blob-first delete saga.
+ *
+ * The join cannot move down into a port. The two axes are configured
+ * independently, so a `SpaceHandle` that vended blobs would oblige the Disk
+ * structured adapter to construct an Azure blob scope; deletion ordering
+ * deliberately keeps remote blob I/O outside any database transaction; and
+ * `BlobScopeRef` covers scopes that have no Space at all, which a blob store
+ * reachable only through a Space handle could not serve.
+ */
+export interface Space extends SpaceHandle {
+  /**
+   * This Space's blobs, with the cross-store precondition applied.
+   *
+   * Bytes may only be added to a Space whose record exists. Reads and
+   * `deleteAll()` stay available for cleanup when a record has already gone.
+   */
+  readonly blobs: BlobScope;
+  /**
+   * Disk's directory for this Space. `null` on every other backend.
+   *
+   * A capability only some backends implement, named for the backend that has
+   * it and typed by its absence — not hidden behind a parallel free function,
+   * and not a stub that throws. A caller branching on `null` is told the truth
+   * once; a caller that must remember a second import is being asked to know
+   * this module's internal topology.
+   */
+  readonly diskTree: DiskSpaceTree | null;
+}
+
+function composeSpace(storage: Storage, canvasId: string): Space {
+  const handle = storage.structured.space(canvasId);
+  return {
+    canvasId: handle.canvasId,
+    read: () => handle.read(),
+    write: (input) => handle.write(input),
+    nodes: handle.nodes,
+    changes: handle.changes,
+    tasks: handle.tasks,
+    events: handle.events,
+    blobs: guardedBlobScope(storage, canvasId),
+    diskTree:
+      storage.profile.structured.kind === 'disk'
+        ? diskSpaceTree(canvasId)
+        : null,
+  };
 }
 
 function buildBlobStore(profile: StorageProfile): BlobStore {
@@ -133,14 +199,42 @@ function buildStructuredStore(profile: StorageProfile): StructuredStore {
   }
 }
 
+/**
+ * Assemble a {@link Storage} from connections the caller already holds.
+ *
+ * Does not validate the profile and opens nothing — it only wires the Space
+ * facade over two given stores. Exists so anything holding its own
+ * connections composes the same facade the process does, rather than a
+ * partial object literal that would go stale the next time {@link Storage}
+ * gains a member.
+ */
+export function composeStorage(
+  profile: StorageProfile,
+  structured: StructuredStore,
+  blobs: BlobStore,
+): Storage {
+  return {
+    profile,
+    structured,
+    blobs,
+    // Composes from the receiver, not from a captured local. Substituting one
+    // axis by spreading — `{...storage, blobs: fake}` — is the obvious way to
+    // stub a backend, and a closure over the original object would hand that
+    // copy Spaces built on the stores it just replaced, silently.
+    space(this: Storage, canvasId: string): Space {
+      return composeSpace(this, canvasId);
+    },
+  };
+}
+
 /** Validate a profile and construct both connections. Does not `init()`. */
 export function createStorage(profile: StorageProfile): Storage {
   validateStorageProfile(profile);
-  return {
+  return composeStorage(
     profile,
-    structured: buildStructuredStore(profile),
-    blobs: buildBlobStore(profile),
-  };
+    buildStructuredStore(profile),
+    buildBlobStore(profile),
+  );
 }
 
 // ─── Process-wide holder ────────────────────────────────────────────────────
@@ -180,7 +274,7 @@ export function hasWorkspaceRegistry(): boolean {
  * The Workspace repository, narrowed to a backend that materializes
  * Workspaces as real directories.
  *
- * This is the Workspace-level twin of {@link spaceDirectory}: the port
+ * This is the Workspace-level twin of {@link Space.diskTree}: the port
  * deliberately says nothing about where a Workspace is, because a backend
  * that keeps Workspaces in a database has no directory to name and must not
  * be made to invent one. Only this module may ask a named backend where
@@ -352,15 +446,18 @@ export async function deleteSpace(
 }
 
 /**
- * Blob scope for one Space — the only scope kind today.
+ * Blob scope for one Space, with the cross-store precondition applied.
  *
  * The raw BlobStore intentionally knows nothing about structured lifecycle,
  * so composition owns the one cross-store invariant: bytes may only be added
  * to a Space whose record exists. Reads and `deleteAll()` stay available for
  * cleanup/recovery when a record has already gone missing.
+ *
+ * Takes its {@link Storage} rather than resolving the process-wide holder, so
+ * one Space facade is composed entirely from the connections it was built
+ * against — a scope that re-resolved the holder could outlive them.
  */
-export function canvasBlobs(canvasId: string): BlobScope {
-  const storage = ensure();
+function guardedBlobScope(storage: Storage, canvasId: string): BlobScope {
   const workspacePath = activeWorkspacePath();
   const delegate = storage.blobs.scope({ kind: 'canvas', canvasId });
 
@@ -419,22 +516,15 @@ export async function storageHealth(): Promise<StorageHealth[]> {
 }
 
 /**
- * The real directory backing a Space — the materialization capability.
+ * Every storage capability for one Space — the shorthand call sites use.
  *
- * Some consumers genuinely need a filesystem path rather than a record: an
- * ACP agent needs a working directory, the external watcher needs something
- * to watch, RFS exposes a tree. That is a product requirement, not a leak
- * (proposal §12.5.4), and it is the Space-level counterpart to
- * `BlobScope.materialize()`.
- *
- * It lives in the composition root because only this module may ask a named
- * backend where anything is. Every profile selectable today materializes, so
- * this resolves unconditionally; a backend that stores Spaces without a
- * directory would refuse here rather than hand back a path that does not
- * exist.
+ * Exactly `getStorage().space(canvasId)`, and an ergonomic spelling of the
+ * same method rather than a second design. One function answers every storage
+ * question about a Space: its record, its nodes, its logs, its Tasks, its
+ * bytes, and — where the backend has one — its directory.
  */
-export function spaceDirectory(canvasId: string): string {
-  return canvasRoot(canvasId);
+export function space(canvasId: string): Space {
+  return ensure().space(canvasId);
 }
 
 /**

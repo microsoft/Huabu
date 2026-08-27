@@ -56,11 +56,7 @@ import {
   agentThreadService,
 } from '../agent/agent-thread.service.js';
 import * as selectableProfiles from '../agent/selectable-agent-profile.js';
-import {
-  getCanvasStore,
-  resetStorageCache,
-  spaceDirectory,
-} from '../storage/index.js';
+import { getCanvasStore, resetStorageCache, space } from '../storage/index.js';
 import {
   RunCompletionError,
   runCompletionService,
@@ -71,6 +67,18 @@ import { setWorkspacePath } from '../workspace.js';
 
 import type { FixedAgentNodeTarget } from '../agent/agent-thread-resolver.js';
 import type { CanvasNodeId } from '@huabu/shared';
+
+/**
+ * The Space's Disk directory, or a test failure.
+ *
+ * These cases are Disk-specific by construction; the assertion states that
+ * rather than letting an optional-chained `undefined` quietly pass.
+ */
+function diskDirOf(canvasId: string): string {
+  const tree = space(canvasId).diskTree;
+  if (!tree) throw new Error('Expected the Disk backend in this test');
+  return tree.directory();
+}
 
 let tmp: string;
 
@@ -159,7 +167,7 @@ describe('GET /api/rfs/:canvasId/skill', () => {
   it('returns only the bundled root guide without authorization', async () => {
     seedNote('c1', 'node-1', 'Anchor', 'content');
     writeFileSync(
-      join(spaceDirectory('c1'), 'skill.md'),
+      join(diskDirOf('c1'), 'skill.md'),
       '# Private Space Override',
       'utf8',
     );
