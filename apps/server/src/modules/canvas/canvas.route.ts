@@ -1571,12 +1571,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Reply: ApiResult<RevealNodesFolderResponse>;
   }>('/:canvasId/reveal-nodes', async function (request, reply) {
     const { canvasId } = request.params;
-    if (!(await space(canvasId).read())) {
+    const handle = space(canvasId);
+    if (!(await handle.read())) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
     // Disk-only, declared as `reveal-space-folder`: the feature *is* "show me
     // this in Finder", so a backend without a folder has nothing to show.
-    const dir = space(canvasId).diskTree?.nodesDirectory();
+    const dir = handle.diskTree?.nodesDirectory();
     if (dir === undefined || !existsSync(dir)) {
       return reply.code(404).send({ message: 'Nodes folder not found' });
     }
@@ -1606,7 +1607,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
     const includeHistory = parsedQuery.data.includeHistory !== 'false';
 
-    const canvas = await space(canvasId).read();
+    const handle = space(canvasId);
+    const canvas = await handle.read();
     if (!canvas) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
@@ -1614,7 +1616,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // The Space bundle is a Disk projection (proposal §6.4.3, disposition
     // A); a portable export generated from records plus reachable blob
     // references is a separate later design.
-    const tree = space(canvasId).diskTree;
+    const tree = handle.diskTree;
     const canvasDir = tree?.directory();
     if (canvasDir === undefined || !existsSync(canvasDir)) {
       return reply.code(404).send({ message: 'Canvas directory not found' });

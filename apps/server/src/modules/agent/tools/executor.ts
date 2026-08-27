@@ -65,6 +65,7 @@ import {
 } from './handlers/task.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 import { resolveWorldReadCanvasId } from '../../canvas/world-target-access.js';
+import { acquireWorkspaceOperationLease } from '../../workspace.js';
 
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { NodeOrigin } from '@huabu/shared';
@@ -134,42 +135,72 @@ export async function executeTool(
       canvasId: await resolveWorldReadCanvasId(ownerCanvasId, requested),
     } as unknown as T;
   };
+  const withStableWorkspace = async <T>(
+    operation: () => T | Promise<T>,
+  ): Promise<T> => {
+    // Cross-Space read authorization and the handler that consumes it are one
+    // operation. The resolver cannot release the Workspace before the handler
+    // runs without reopening a switch window between the check and the read.
+    const lease = acquireWorkspaceOperationLease();
+    try {
+      return await operation();
+    } finally {
+      lease.release();
+    }
+  };
 
   switch (name) {
     case 'web_search':
       return handleWebSearch(args as WebSearchArgs);
 
     case 'get_space_outline':
-      return handleGetCanvasOutline(
-        await withReadCanvasId<GetCanvasOutlineArgs>(args, 'get_space_outline'),
+      return withStableWorkspace(async () =>
+        handleGetCanvasOutline(
+          await withReadCanvasId<GetCanvasOutlineArgs>(
+            args,
+            'get_space_outline',
+          ),
+        ),
       );
 
     case 'inspect_nodes':
-      return handleInspectNodes(
-        await withReadCanvasId<InspectNodesArgs>(args, 'inspect_nodes'),
+      return withStableWorkspace(async () =>
+        handleInspectNodes(
+          await withReadCanvasId<InspectNodesArgs>(args, 'inspect_nodes'),
+        ),
       );
 
     case 'inspect_edges':
-      return handleInspectEdges(
-        await withReadCanvasId<InspectEdgesArgs>(args, 'inspect_edges'),
+      return withStableWorkspace(async () =>
+        handleInspectEdges(
+          await withReadCanvasId<InspectEdgesArgs>(args, 'inspect_edges'),
+        ),
       );
 
     case 'grep':
-      return handleGrep(await withReadCanvasId<GrepArgs>(args, 'grep'));
+      return withStableWorkspace(async () =>
+        handleGrep(await withReadCanvasId<GrepArgs>(args, 'grep')),
+      );
 
     case 'find':
-      return handleFind(await withReadCanvasId<FindArgs>(args, 'find'));
+      return withStableWorkspace(async () =>
+        handleFind(await withReadCanvasId<FindArgs>(args, 'find')),
+      );
 
     case 'ls':
-      return handleLs(await withReadCanvasId<LsArgs>(args, 'ls'));
+      return withStableWorkspace(async () =>
+        handleLs(await withReadCanvasId<LsArgs>(args, 'ls')),
+      );
 
     case 'read': {
       const ownerCanvasId = requireCanvasId('read');
-      const readArgs = await withReadCanvasId<ReadArgs>(args, 'read');
-      return handleRead(
-        readArgs,
-        readArgs.canvasId === ownerCanvasId ? context?.readSet : undefined,
-      );
+      return withStableWorkspace(async () => {
+        const readArgs = await withReadCanvasId<ReadArgs>(args, 'read');
+        return handleRead(
+          readArgs,
+          readArgs.canvasId === ownerCanvasId ? context?.readSet : undefined,
+        );
+      });
     }
 
     case 'space_commands':

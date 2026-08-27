@@ -43,6 +43,7 @@ beforeEach(() => {
     'c-web-remote',
     'c-web-data',
     'c-web-merge-local',
+    'c-web-merge-multiple',
     'c-web-merge-remote',
     'c-image-local',
     'c-image-reentered',
@@ -82,19 +83,25 @@ function firstPatchedSrc(commands: CanvasCommand[]): string | undefined {
 
 /** Seed a Space with one existing web node for merge-path tests. */
 function seedWebNode(canvasId: string, nodeId: string, src: string): void {
+  seedWebNodes(canvasId, [{ nodeId, src }]);
+}
+
+/** Seed a Space with existing web nodes for merge-path tests. */
+function seedWebNodes(
+  canvasId: string,
+  nodes: readonly { nodeId: string; src: string }[],
+): void {
   getCanvasStore(canvasId).write({
     canvasId,
     title: null,
     version: 1,
     state: {
-      nodes: [
-        {
-          id: nodeId,
-          type: 'web',
-          position: { x: 0, y: 0 },
-          data: { label: 'Existing page', src },
-        },
-      ],
+      nodes: nodes.map(({ nodeId, src }) => ({
+        id: nodeId,
+        type: 'web',
+        position: { x: 0, y: 0 },
+        data: { label: 'Existing page', src },
+      })),
       edges: [],
     },
     createdAt: Date.now(),
@@ -243,6 +250,39 @@ describe('importForeignNodeSources — web nodes', () => {
     const out = await importForeignNodeSources(canvasId, commands);
 
     expect(firstPatchedSrc(out)).toBe(remote);
+  });
+
+  it('normalizes every entry in a multi-node MERGE_NODE_DATA command', async () => {
+    const canvasId = 'c-web-merge-multiple';
+    const firstNodeId = 'node-web-merge-first';
+    const secondNodeId = 'node-web-merge-second';
+    seedWebNodes(canvasId, [
+      { nodeId: firstNodeId, src: 'https://example.com/first' },
+      { nodeId: secondNodeId, src: 'https://example.com/second' },
+    ]);
+    const firstUpload = stageUpload(canvasId, 'first.html', '<p>first</p>');
+    const secondUpload = stageUpload(canvasId, 'second.html', '<p>second</p>');
+
+    const out = await importForeignNodeSources(canvasId, [
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          { nodeId: firstNodeId, patch: { src: 'upload/first.html' } },
+          { nodeId: secondNodeId, patch: { src: 'upload/second.html' } },
+        ],
+      },
+    ]);
+    const command = out[0];
+    if (command?.type !== 'MERGE_NODE_DATA') {
+      throw new Error('Expected MERGE_NODE_DATA output');
+    }
+
+    expect(command.patches.map((entry) => entry.patch.src)).toEqual([
+      expect.stringMatching(/^artifact-[^/]+\.html$/),
+      expect.stringMatching(/^artifact-[^/]+\.html$/),
+    ]);
+    expect(existsSync(firstUpload)).toBe(false);
+    expect(existsSync(secondUpload)).toBe(false);
   });
 });
 

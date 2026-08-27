@@ -7,21 +7,35 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const workspaceState = vi.hoisted(() => ({ path: '' }));
+const workspaceState = vi.hoisted(() => ({ path: '', leases: 0 }));
 
 vi.mock('../../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
+  acquireWorkspaceOperationLease: () => {
+    const workspacePath = workspaceState.path;
+    workspaceState.leases += 1;
+    let released = false;
+    return {
+      workspacePath,
+      release: () => {
+        if (released) return;
+        released = true;
+        workspaceState.leases -= 1;
+      },
+    };
+  },
 }));
 
 import { executeTool } from './executor.js';
 import { refreshCanvasDirIndex } from '../../storage/canvas-dirs.js';
 
-function writeCanvas(
+function writeCanvasAt(
+  workspacePath: string,
   directory: string,
   canvasId: string,
   nodes: unknown[],
 ): void {
-  const root = path.join(workspaceState.path, directory);
+  const root = path.join(workspacePath, directory);
   mkdirSync(root, { recursive: true });
   writeFileSync(
     path.join(root, 'space.json'),
@@ -37,10 +51,27 @@ function writeCanvas(
   );
 }
 
+function writeCanvas(
+  directory: string,
+  canvasId: string,
+  nodes: unknown[],
+): void {
+  writeCanvasAt(workspaceState.path, directory, canvasId, nodes);
+}
+
+function switchWorkspace(nextPath: string): void {
+  if (workspaceState.leases > 0) {
+    throw new Error('Workspace operation in progress');
+  }
+  workspaceState.path = nextPath;
+  refreshCanvasDirIndex();
+}
+
 beforeEach(() => {
   workspaceState.path = mkdtempSync(
     path.join(tmpdir(), 'huabu-world-target-read-'),
   );
+  workspaceState.leases = 0;
   writeCanvas('.world', 'canvas-world', [
     {
       id: 'node-portal',
@@ -125,5 +156,54 @@ describe('World target reads', () => {
         { canvasId: 'canvas-world' },
       ),
     ).rejects.toThrow();
+  });
+
+  it('keeps portal authorization and the target read in one Workspace', async () => {
+    const originalWorkspace = workspaceState.path;
+    const otherWorkspace = mkdtempSync(
+      path.join(tmpdir(), 'huabu-world-target-read-other-'),
+    );
+    writeCanvasAt(otherWorkspace, '.world', 'canvas-world', [
+      {
+        id: 'node-portal',
+        type: 'canvasRef',
+        position: { x: 0, y: 0 },
+        data: { targetCanvasId: 'canvas-a' },
+      },
+    ]);
+    writeCanvasAt(otherWorkspace, 'Other Project', 'canvas-a', [
+      {
+        id: 'node-other',
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: {},
+      },
+    ]);
+
+    let switchError: unknown;
+    queueMicrotask(() => {
+      try {
+        switchWorkspace(otherWorkspace);
+      } catch (error) {
+        switchError = error;
+      }
+    });
+
+    try {
+      const result = JSON.parse(
+        (await executeTool(
+          'get_space_outline',
+          { targetCanvasId: 'canvas-a' },
+          { canvasId: 'canvas-world' },
+        )) as string,
+      ) as { nodes: Array<{ id: string }> };
+
+      expect(switchError).toBeInstanceOf(Error);
+      expect(workspaceState.path).toBe(originalWorkspace);
+      expect(result.nodes.map((node) => node.id)).toEqual(['node-source']);
+    } finally {
+      workspaceState.path = originalWorkspace;
+      rmSync(otherWorkspace, { recursive: true, force: true });
+    }
   });
 });

@@ -217,7 +217,7 @@ async function collectSelectedNodeRefs(
   if (canvasId) {
     try {
       records = await space(canvasId).nodes.readMany(
-        collectSelectedNodeIds(nodes),
+        collectSelectionNodeIds(nodes),
       );
     } catch {
       /* Space unreadable — refs stay bare. */
@@ -247,6 +247,19 @@ async function collectSelectedNodeRefs(
   };
   walk(nodes);
   return refs;
+}
+
+/** Collect every node represented by the recursive selection wire. */
+function collectSelectionNodeIds(nodes: WireSelectionNode[]): string[] {
+  const seen = new Set<string>();
+  const walk = (list: WireSelectionNode[]) => {
+    for (const node of list) {
+      seen.add(node.id);
+      if (node.children) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return [...seen];
 }
 
 /**

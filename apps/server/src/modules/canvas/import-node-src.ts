@@ -141,19 +141,22 @@ export async function importForeignNodeSources(
   // Lazily built nodeId → nodeType map, needed only to gate MERGE_NODE_DATA
   // patches (CREATE_NODES carries `nodeType` inline). Node type is immutable,
   // so reading the pre-batch snapshot here is race-free.
-  let typeById: Map<string, string> | null = null;
+  let typeByIdPromise: Promise<Map<string, string>> | null = null;
   const nodeType = async (nodeId: string): Promise<string> => {
-    if (!typeById) {
-      typeById = new Map();
-      const canvas = await space(canvasId).read();
-      for (const raw of canvas?.state.nodes ?? []) {
-        const n = raw as { id?: unknown; type?: unknown };
-        if (typeof n.id === 'string' && typeof n.type === 'string') {
-          typeById.set(n.id, n.type);
+    if (!typeByIdPromise) {
+      typeByIdPromise = (async () => {
+        const byId = new Map<string, string>();
+        const canvas = await space(canvasId).read();
+        for (const raw of canvas?.state.nodes ?? []) {
+          const n = raw as { id?: unknown; type?: unknown };
+          if (typeof n.id === 'string' && typeof n.type === 'string') {
+            byId.set(n.id, n.type);
+          }
         }
-      }
+        return byId;
+      })();
     }
-    return typeById.get(nodeId) ?? '';
+    return (await typeByIdPromise).get(nodeId) ?? '';
   };
 
   const out: CanvasCommand[] = [];
