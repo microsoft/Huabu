@@ -312,10 +312,14 @@ describe('Disk Space tree capability', () => {
   ].sort();
 
   it('keeps the exact production consumer census', () => {
+    // Matched as a bare word, not as `.diskTree`: destructuring the member
+    // off a handle (`const { diskTree } = space(id)`) or reaching it by
+    // subscript reads it just as effectively, and a census a consumer can
+    // leave by changing its spelling is not a census.
     const consumers = sourceFiles
       .filter((file) => !file.startsWith('modules/storage/'))
       .filter((file) => !file.endsWith('.test.ts'))
-      .filter((file) => /\.diskTree\b/.test(read(file)));
+      .filter((file) => /\bdiskTree\b/.test(read(file)));
 
     expect(consumers.sort()).toEqual(EXPECTED_CONSUMERS);
   });

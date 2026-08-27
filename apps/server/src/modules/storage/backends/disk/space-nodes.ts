@@ -79,11 +79,24 @@ export class DiskSpaceNodes implements SpaceNodes {
     return out;
   }
 
+  /**
+   * Every node, under the same reachability rule {@link read} applies.
+   *
+   * The scan is strict about reachability and lenient about content, so it
+   * answers about exactly the nodes a per-id read would: an unreadable
+   * sidecar rejects here instead of being dropped from the collection, while
+   * a sidecar whose frontmatter a user broke by hand is recovered rather than
+   * refused. A lenient scan would leave the port claiming that environmental
+   * failures reject while its two collection shapes reported absence.
+   */
   async list(): Promise<Map<string, NodeSnapshot>> {
     this.#assertActiveWorkspace();
-    return snapshotsOf(await this.#store.readAllNodes());
+    return snapshotsOf(
+      await this.#store.readAllNodes({ strict: true, strictRecords: false }),
+    );
   }
 
+  /** {@link list}, delivered as each sidecar lands, with the same strictness. */
   async stream(
     onNode: (snapshot: NodeSnapshot) => void,
     options?: NodeStreamOptions,
@@ -92,6 +105,7 @@ export class DiskSpaceNodes implements SpaceNodes {
     const contents = await this.#store.streamAllNodes(
       (_id, content) => onNode(snapshotOf(content)),
       options?.signal,
+      { strict: true, strictRecords: false },
     );
     return snapshotsOf(contents);
   }

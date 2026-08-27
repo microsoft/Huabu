@@ -2253,8 +2253,11 @@ backend-specific members; the barrel exports a free `space(canvasId)`
 shorthand for `getStorage().space(canvasId)`, matching how `canvasBlobs()` was
 already called. `StructuredStore` and `BlobStore` keep their independence —
 neither imports the other — so the facade is the only new type. The
-`getStructuredStore().space(id)` and `canvasBlobs(id)` call sites migrate to
-it, and `canvasBlobs()` and `spaceDirectory()` are gone.
+`canvasBlobs(id)` and `spaceDirectory(id)` call sites migrate to it, and both
+free functions are gone. The `getStructuredStore().space(id)` call sites stay:
+they already reach the structured handle they need, and §12.7 moves that whole
+population — the application's reads with it — in one pass, rather than
+rewriting every site twice.
 
 The facade composes from the receiver rather than a captured local, so
 `{...storage, blobs: fake}` — the obvious way to stub one axis, and what the
@@ -2272,7 +2275,11 @@ directory would mean fabricating one, which moves the failure somewhere less
 obvious than the refusal.
 
 The capability owns a Workspace-bound Space directory, bundle publication, the
-sidecar-to-record mapping, and directory-handle coordination.
+sidecar-to-record mapping, and directory-handle coordination. Workspace-bound
+is literal: the tree binds to the Workspace that was active when the handle was
+resolved, so a retained tree rejects after an activation rather than resolving
+into the newly active Workspace — the same refusal the handle's portable
+members make, on the one member that hands out real paths.
 `module-boundaries.test.ts` holds the member name and the exact consumer list,
 so the surface can only shrink, and asserts the barrel exposes nothing that
 reads as a portable path API. Every entry in that census is a family §6.4.3

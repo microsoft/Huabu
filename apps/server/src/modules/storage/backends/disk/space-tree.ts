@@ -19,26 +19,48 @@
  * the accessor.
  */
 
+import path from 'node:path';
+
 import { canvasRoot } from './layout.js';
+import { getWorkspacePath } from '../../../workspace.js';
 
 export interface DiskSpaceTree {
   readonly canvasId: string;
   /**
-   * Absolute path to this Space's directory in the active Workspace.
+   * Absolute path to this Space's directory in the Workspace this tree was
+   * resolved in.
    *
    * A method rather than a property because it is not a constant: the
    * directory name is derived from the Space's title, so a Finder-side rename
-   * moves it, and a Workspace switch invalidates it entirely. Resolving per
-   * call keeps a retained tree from handing back a path that was true when the
-   * handle was made. It raises rather than improvising when the id is
-   * malformed or the resolved path escapes the Workspace.
+   * moves it. Resolving per call keeps a retained tree from handing back a
+   * path that was true when the handle was made. It raises rather than
+   * improvising when the id is malformed or the resolved path escapes the
+   * Workspace.
+   *
+   * A Workspace switch does not move a retained tree, it invalidates it: the
+   * whole Space handle is scoped to the Workspace that was active when it was
+   * resolved (`StructuredStore.space`), and a directory that followed
+   * activation would answer a question about one Workspace with another
+   * Workspace's files while its sibling members rejected. Resolve a fresh
+   * handle instead.
    */
   directory(): string;
 }
 
 export function diskSpaceTree(canvasId: string): DiskSpaceTree {
+  // Bound at resolution, exactly as `DiskSpaceNodes` binds its own: one Space
+  // handle answers about one Workspace, on every member.
+  const workspacePath = path.resolve(getWorkspacePath());
   return {
     canvasId,
-    directory: () => canvasRoot(canvasId),
+    directory: () => {
+      if (path.resolve(getWorkspacePath()) !== workspacePath) {
+        throw new Error(
+          `DiskSpaceTree(${canvasId}) belongs to an inactive workspace. ` +
+            'Resolve a fresh Space handle after workspace activation.',
+        );
+      }
+      return canvasRoot(canvasId);
+    },
   };
 }
