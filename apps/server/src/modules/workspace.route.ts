@@ -16,10 +16,9 @@ import {
   WorkspaceActivationTimeoutError,
 } from './workspace-activation.js';
 import {
-  getWorkspaceName,
+  getWorkspaceHandle,
   getWorkspacePath,
   isManagedMode,
-  isWorkspaceConfigured,
 } from './workspace.js';
 
 import type {
@@ -155,14 +154,16 @@ function sendError(
 /** Build the canonical success payload describing the current workspace. */
 async function buildWorkspaceState(): Promise<WorkspaceInfo> {
   const managed = isManagedMode();
-  const configured = isWorkspaceConfigured();
+  const workspace = getWorkspaceHandle();
+  const configured = workspace !== null;
   return {
     mode: managed ? 'managed' : 'free',
     configured,
+    workspaceId: workspace?.workspaceId ?? null,
     // Free-mode active absolute path. Never exposed in managed mode.
-    path: configured && !managed ? getWorkspacePath() : null,
-    // Display label (basename). Safe to send in either mode.
-    name: configured ? getWorkspaceName() : null,
+    path: workspace && !managed ? getWorkspacePath() : null,
+    // Persisted display label. Safe to send in either mode.
+    name: workspace?.name ?? null,
     worldCanvasId: configured
       ? await getStructuredStore().spaces().worldId()
       : null,

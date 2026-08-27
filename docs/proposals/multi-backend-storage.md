@@ -90,7 +90,7 @@ built above these ports, but its form is intentionally unresolved here.
 | Node Markdown ownership                                | **Accepted** (P4)         | Authored node content remains with structured node records because it participates in revision CAS, search, and node mutation. Opaque and large bytes remain in BlobStore.                                                                                                                                                                                                                 |
 | Blob key, staging, deletion, and GC semantics          | Proposed / open           | Names are the existing `<artifactId><ext>` keys; `deleteAll()` covers Space destruction. Staging, reference counting, and GC remain undesigned. Per-key deletion stays out of the public port, but the absence of any cleanup path is what makes atomic replace mandatory (§6.2).                                                                                                          |
 | Space-handle identity and caching                      | **Corrected** (P1)        | `space(id)` returning a stable handle is bounded by the LRU behind it, not guaranteed. In-memory tombstones and the filename index are therefore adapter-local caches, never durable state (§12.1.1, §12.2.4).                                                                                                                                                                             |
-| Backend selection scope                                | Open                      | Process-global today because the profile is read from env. Per-Workspace or per-Space selection has not been fixed.                                                                                                                                                                                                                                                                        |
+| Backend selection scope                                | **Accepted**              | Backend selection and its connection/pool are process-global. Workspaces are namespaces inside the configured backend; activating another Workspace re-scopes repository/handle operations without dropping or reconnecting the backend. A SQL profile serves every Workspace through one live connection/pool.                                                                            |
 | Logical filesystem view                                | Open                      | A possible `SpaceFileView` above both stores; name and contract are not accepted yet.                                                                                                                                                                                                                                                                                                      |
 | Real agent workspace                                   | Open                      | Materialized directory, OS mount, protocol-only access, or a combination remain under evaluation.                                                                                                                                                                                                                                                                                          |
 | Agent-authored filesystem write-back                   | Open                      | Read-only projection, explicit checkout/commit, and live bidirectional sync are alternatives, not decisions.                                                                                                                                                                                                                                                                               |
@@ -303,9 +303,13 @@ interface StorageProfile {
 ```
 
 Parsed from `HUABU_STRUCTURED_BACKEND` and `HUABU_BLOB_BACKEND`, both
-defaulting to `disk`. Credential references, selection scope, config storage,
-restart behavior, and runtime switching remain open — a Postgres DSN or Azure
-container reference will extend these members.
+defaulting to `disk`. Backend selection is process-global and initialization
+opens one connection or pool for each configured axis. Workspace activation
+selects a namespace inside those existing connections; it does not rebuild
+them, and a SQL structured adapter serves every Workspace through the same
+connection/pool. Credential references, config storage, and deployment-level
+backend migration remain open — a Postgres DSN or Azure container reference
+will extend these members.
 
 Some combinations require capability validation. For example, Postgres plus a
 node-local DiskBlob implementation is unsafe in a multi-replica deployment
@@ -1999,9 +2003,6 @@ resume point such a digest would need.
 
 ### Structured storage
 
-- Is backend selection global, per Workspace, or per Space? (Process-global
-  today only because the profile is read from env — that is an implementation
-  default, not a decision.)
 - Which Canvas-owned records belong in each L1 repository while preserving
   Agenetes ownership of Thread/Event/Turn semantics and ports?
 - Does `StructuredStore` remain only a name for the configured backend family,
@@ -2045,12 +2046,11 @@ resume point such a digest would need.
 ### Composition and migration
 
 - Which backend combinations are supported product configurations?
-- What happens to open connections on a free-mode Workspace switch? Today the
-  switch resets the Space-instance cache but never rebuilds the storage
-  holder, which is invisible only because both Disk adapters are stateless and
-  resolve the workspace path per call.
-- Can a Workspace change either backend after creation, and is migration
-  online or offline?
+- Which Workspace-scoped handles and caches must be invalidated on activation?
+  The process-wide backend connections remain open; SQL Workspaces share one
+  connection/pool and activation only changes the selected namespace.
+- Can a deployment change either configured backend, and is migration online
+  or offline?
 - How are backups and restores made consistent across structured and blob
   stores?
 - How are health, readiness, degraded operation, and observability reported?

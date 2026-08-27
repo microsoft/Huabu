@@ -8,10 +8,12 @@
  * validated {@link StorageProfile} and holds them for the process. This is
  * the only place that maps a backend kind to an adapter.
  *
- * The module-level holder mirrors `workspace.ts`, which keeps the active
- * workspace path in module state set once at boot. Call {@link initStorage}
- * from the server entry point so a bad profile fails at startup with an
- * actionable message.
+ * The module-level holder is process-wide, while `workspace.ts` selects the
+ * active namespace used through it. Workspace activation never reconstructs
+ * these backend connections: a SQL adapter serves every Workspace through one
+ * live connection or pool and scopes repository/handle operations by id. Call
+ * {@link initStorage} from the server entry point so a bad profile fails at
+ * startup with an actionable message.
  *
  * Anything that reaches for storage without that — tests, scripts — builds
  * the adapters on demand. That path is synchronous, so it cannot `await
@@ -23,6 +25,7 @@
 
 import path from 'node:path';
 
+import { getDataDir } from '../../data-dir.js';
 import {
   acquireWorkspaceOperationLease,
   getWorkspacePath,
@@ -30,6 +33,10 @@ import {
 import { DiskBlobStore } from './backends/disk/blob-store.js';
 import { canvasRoot } from './backends/disk/layout.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
+import {
+  DiskWorkspaceRepository,
+  workspaceRegistryPath,
+} from './backends/disk/workspace-repository.js';
 import {
   parseStorageProfile,
   requiresExplicitInit,
@@ -53,6 +60,10 @@ import type {
   SpaceDeleteFinishResult,
   StructuredStore,
 } from './ports/structured.js';
+import type {
+  WorkspaceHandle,
+  WorkspaceRepository,
+} from './ports/workspace.js';
 import type { Readable } from 'node:stream';
 
 /**
@@ -135,7 +146,83 @@ export function createStorage(profile: StorageProfile): Storage {
 // ─── Process-wide holder ────────────────────────────────────────────────────
 
 let current: Storage | null = null;
+let workspaces: DiskWorkspaceRepository | null = null;
 let spaceCreateTail: Promise<void> = Promise.resolve();
+
+/**
+ * The Workspace repository for the configured structured backend.
+ *
+ * Workspace identity is a *precondition* of storage rather than a product of
+ * it: every Disk adapter resolves its paths against the active Workspace, and
+ * managed mode has to adopt its Workspace while `app.ts` is still evaluating —
+ * before the boot sequence can await {@link initStorage}. Routing it through
+ * {@link getStructuredStore} would therefore drag the whole composition open
+ * on the on-demand path, which that path explicitly refuses for a backend with
+ * connections to hold.
+ *
+ * So the composition root owns this axis separately. It still maps a backend
+ * kind to exactly one adapter, and it holds one instance for the process.
+ * Connection-backed adapters expose Workspace membership through that same
+ * process-wide connection or pool; switching the active Workspace selects a
+ * namespace and never drops or reconnects the backend. Their repository is
+ * wired during awaited startup rather than through the on-demand path.
+ */
+export function getWorkspaceRepository(): WorkspaceRepository {
+  return materializedWorkspaces();
+}
+
+/** Whether the Disk Workspace membership registry already exists on disk. */
+export function hasWorkspaceRegistry(): boolean {
+  return materializedWorkspaces().hasDurableRegistry();
+}
+
+/**
+ * The Workspace repository, narrowed to a backend that materializes
+ * Workspaces as real directories.
+ *
+ * This is the Workspace-level twin of {@link spaceDirectory}: the port
+ * deliberately says nothing about where a Workspace is, because a backend
+ * that keeps Workspaces in a database has no directory to name and must not
+ * be made to invent one. Only this module may ask a named backend where
+ * anything is, so the locator resolves here — and a non-materializing profile
+ * refuses outright rather than handing back a path that does not exist.
+ */
+function materializedWorkspaces(): DiskWorkspaceRepository {
+  if (workspaces) return workspaces;
+
+  const profile = parseStorageProfile();
+  if (profile.structured.kind !== 'disk') {
+    throw new StorageProfileError(
+      `The "${profile.structured.kind}" structured backend does not materialize ` +
+        `Workspaces as directories. Implement a locator for it before using ` +
+        `directory-shaped Workspace activation.`,
+    );
+  }
+  workspaces = new DiskWorkspaceRepository(workspaceRegistryPath(getDataDir()));
+  return workspaces;
+}
+
+/**
+ * Adopt a real directory as a Workspace, creating its manifest if the folder
+ * predates one, and record its membership.
+ */
+export function adoptWorkspaceDirectory(
+  workspacePath: string,
+): WorkspaceHandle {
+  return materializedWorkspaces().adopt(workspacePath);
+}
+
+/** The registered Workspace materialized at a directory, if there is one. */
+export function workspaceAtDirectory(
+  workspacePath: string,
+): WorkspaceHandle | null {
+  return materializedWorkspaces().at(workspacePath);
+}
+
+/** The directory backing a registered Workspace, or null if it is not one. */
+export function workspaceDirectory(workspaceId: string): string | null {
+  return materializedWorkspaces().directoryOf(workspaceId);
+}
 
 function defaultSpaceTitle(
   existing: readonly { readonly title: string | null }[],
