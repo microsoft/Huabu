@@ -468,4 +468,3 @@ Issue #110 introduces `web_search` and `generate_image` as the first `hosted-too
 | [`external/agenetes/packages/agentlet-gateway/`](../../external/agenetes/packages/agentlet-gateway/) | Authenticated routing to Agentlet machines and possible future typed probes. |
 | [`external/agentlet/spec/agent-reachback.md`](../../external/agentlet/spec/agent-reachback.md) | Host-agnostic reachback transport and environment boundary. |
 | [`packages/shared/src/types/api/`](../../packages/shared/src/types/api/) | Future canonical versioned RFS Registry wire contracts. |
-
