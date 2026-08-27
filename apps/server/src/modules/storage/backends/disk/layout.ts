@@ -56,6 +56,7 @@ export function canvasRoot(canvasId: string): string {
  */
 export const SPACE_JSON_FILENAME = 'space.json';
 export const WORLD_CANVAS_DIR_NAME = '.world';
+export const WORKSPACE_SETTING_DIR_NAME = 'setting';
 
 export function canvasJsonPath(canvasId: string): string {
   return path.join(canvasRoot(canvasId), SPACE_JSON_FILENAME);

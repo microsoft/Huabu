@@ -10,7 +10,11 @@
 import { existsSync, readdirSync, renameSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-import { SPACE_JSON_FILENAME, WORLD_CANVAS_DIR_NAME } from './layout.js';
+import {
+  SPACE_JSON_FILENAME,
+  WORLD_CANVAS_DIR_NAME,
+  WORKSPACE_SETTING_DIR_NAME,
+} from './layout.js';
 import { NameIndex, type NameIndexResult } from './name-index.js';
 import { readJsonStrict, sanitizeId } from '../../../../utils/fs.js';
 import {
@@ -147,6 +151,43 @@ export function canvasDirName(canvasId: string): string {
   ensureScanned();
   if (worldEntry?.id === canvasId) return WORLD_CANVAS_DIR_NAME;
   return index.get(canvasId)?.filename ?? canvasId;
+}
+
+/**
+ * Resolve a directory for destructive blob cleanup.
+ *
+ * Missing stable ids may still own blobs in the legacy id-named directory,
+ * but that fallback must never alias another Space or a Workspace-owned
+ * directory. Destructive callers get a fresh scan so a stale name index
+ * cannot authorize the wrong target.
+ */
+export type DestructiveCanvasDirTarget =
+  | { readonly kind: 'owned'; readonly filename: string }
+  | { readonly kind: 'orphan'; readonly filename: string };
+
+export function destructiveCanvasDirName(
+  canvasId: string,
+): DestructiveCanvasDirTarget | null {
+  const safeId = sanitizeId(canvasId, 'canvasId');
+  scanWorkspace();
+  if (worldEntry?.id === safeId) {
+    return { kind: 'owned', filename: WORLD_CANVAS_DIR_NAME };
+  }
+
+  const owned = index.get(safeId);
+  if (owned) return { kind: 'owned', filename: owned.filename };
+  // NameIndex's secondary key is the normalized on-disk filename, not the
+  // display title. A hit here means the fallback belongs to another Space.
+  if (index.findByName(safeId)) return null;
+
+  const normalized = normalizeForCompare(safeId);
+  if (
+    normalized === normalizeForCompare(WORLD_CANVAS_DIR_NAME) ||
+    normalized === normalizeForCompare(WORKSPACE_SETTING_DIR_NAME)
+  ) {
+    return null;
+  }
+  return { kind: 'orphan', filename: safeId };
 }
 
 /** Ordinary user-visible Spaces only. */
