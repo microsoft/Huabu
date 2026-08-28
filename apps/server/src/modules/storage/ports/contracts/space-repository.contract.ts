@@ -23,7 +23,25 @@ export interface SpaceRepositoryContractHarness {
   readonly worldCanvasId: string;
   /** One representative portable mutation for deletion-fence checks. */
   readonly attemptMutation: (canvasId: string) => Promise<unknown>;
+  /**
+   * Bind to a namespace that has never been mounted — no World, no Spaces.
+   *
+   * This is the state every backend meets first, and the only place the
+   * creating branch of {@link SpaceRepository.ensureWorld} can be observed;
+   * the main harness namespace always has a World already. Invalidating the
+   * other harness members is allowed: a case that opens this uses nothing
+   * else afterwards.
+   */
+  readonly openEmptyNamespace: () =>
+    | Promise<EmptyNamespaceHarness>
+    | EmptyNamespaceHarness;
   readonly cleanup?: () => Promise<void> | void;
+}
+
+/** A backend namespace with nothing in it yet. */
+export interface EmptyNamespaceHarness {
+  readonly repository: SpaceRepository;
+  readonly read: (canvasId: string) => Promise<CanvasFile | null>;
 }
 
 export function describeSpaceRepositoryContract(
@@ -92,6 +110,45 @@ export function describeSpaceRepositoryContract(
       expect(
         (await repository.list()).map((row) => row.canvasId),
       ).not.toContain(worldCanvasId);
+    });
+
+    it('returns the established World from ensureWorld without replacing it', async () => {
+      const { repository, worldCanvasId, read } = await open();
+      const before = await read(worldCanvasId);
+
+      await expect(repository.ensureWorld()).resolves.toBe(worldCanvasId);
+      await expect(repository.ensureWorld()).resolves.toBe(worldCanvasId);
+
+      // Identity is what Portals reference, so a bootstrap that ran against an
+      // established World must be indistinguishable from not having run.
+      await expect(read(worldCanvasId)).resolves.toEqual(before);
+      expect(
+        (await repository.list()).map((row) => row.canvasId),
+      ).not.toContain(worldCanvasId);
+    });
+
+    it('bootstraps exactly one version-0 World in an empty namespace', async () => {
+      const { openEmptyNamespace } = await open();
+      const { repository, read } = await openEmptyNamespace();
+
+      const worldCanvasId = await repository.ensureWorld();
+      expect(worldCanvasId).toEqual(expect.any(String));
+      expect(worldCanvasId).not.toHaveLength(0);
+
+      const created = await read(worldCanvasId);
+      expect(created).toMatchObject({
+        canvasId: worldCanvasId,
+        version: 0,
+        state: { nodes: [], edges: [] },
+      });
+
+      // Idempotent, and the World it minted is the one `worldId()` resolves —
+      // a second bootstrap that minted a second identity would orphan every
+      // Portal written against the first.
+      await expect(repository.ensureWorld()).resolves.toBe(worldCanvasId);
+      await expect(repository.worldId()).resolves.toBe(worldCanvasId);
+      await expect(read(worldCanvasId)).resolves.toEqual(created);
+      await expect(repository.list()).resolves.toEqual([]);
     });
 
     it('creates and returns the authoritative empty version-0 record', async () => {

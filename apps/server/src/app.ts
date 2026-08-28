@@ -62,6 +62,7 @@ import {
   isWorkspaceConfigured,
 } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
+import workspacesRoutes from './modules/workspaces.route.js';
 import { preloadSkills } from './prompt/index.js';
 import { getPersistedSecret, setSecrets } from './security/secret-store.js';
 import { MAX_UPLOAD_BYTES } from './upload-limits.js';
@@ -275,6 +276,7 @@ app.register(deploymentRoutes, { prefix: '/api/deployment' });
 app.register(interactiveViewRoutes, { prefix: '/api/interactive-views' });
 app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
+app.register(workspacesRoutes, { prefix: '/api/workspaces' });
 app.register(rfsRoutes, { prefix: '/api/rfs' });
 app.register(agentTeamRoutes, { prefix: '/api/agent-team' });
 

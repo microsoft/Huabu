@@ -66,25 +66,29 @@ Titles are derived at render time. Node tabs use the current node label; Chat ta
 
 `openPreviewNode` is the user-facing node adapter. It settles the previously active editable Note or Text when necessary, expands the right panel, opens the node target, and requests editor focus for an explicitly opened Note.
 
-`openChat` activates the most recently used unbound Chat target or creates a new thread and tab when none exists. New conversation always creates an independent `threadId`.
+`openChat` activates the most recently used unbound Chat target or creates a new thread and tab when none exists. New conversation always creates an independent `threadId`. A thread with no persisted selection defaults to the built-in Huabu Agent in `operate` mode; persisted per-thread and per-Canvas selections still take precedence.
 
-Open to Side moves the existing semantic target into the other group instead of duplicating it. Saving an unbound Chat as a Question replaces that tab's target in place, preserving tab identity, position, messages, and draft continuity.
+Open to Side moves the existing semantic target into the other group instead of duplicating it and preserves whether the tab is transient or permanent. Saving an unbound Chat as a Question replaces that tab's target in place, preserving tab identity, position, messages, and draft continuity.
 
-Canvas search results and connected-node navigation open transiently. Explicit node opens, Question compose or replay, and new Chat opens are permanent.
+Canvas node double-clicks, Question toolbar compose or replay actions, search results, and connected-node navigation open transiently. New Chat opens are permanent.
 
 ## 4. Rendering and Chat sessions
 
 Each group mounts its active tab plus at most one warm inactive tab selected by the greatest `lastActiveSeq`. The warm slot is a bounded runtime optimization rather than persisted topology: React 19 `Activity` keeps that tab's DOM and component state with `mode="hidden"`, cleans up its Effects while hidden, and restarts those Effects when the tab becomes visible again. Activity cleanup and closing a tab do not mark the page as unloading or terminate a thread-owned stream; only the browser page lifecycle suppresses unload-time transport errors.
 
+PDF tabs retain view state in the warm slot, but discard the loaded pdf.js document proxy during Activity cleanup because `react-pdf` destroys that proxy's worker transport while hidden. Page rendering and text indexing remain suspended until the visible tab loads a fresh proxy.
+
 Chat, Question, Note, Text, PDF, and Office tabs are eligible for the warm slot. Eligibility follows the resolved renderer, so a valid World `nodeRef` that presents a source Question is treated as a Question rather than as a generic reference. Web, Audio, Video, and other node types are not retained because hidden native media or iframe work can outlive React Effect cleanup. Closing or replacing a warm tab, deleting its node, or advancing the slot to a more recently active eligible tab unmounts the old tree. The shared runtime scroll cache remains the cold-restore fallback after a real unmount.
 
-`PreviewRenderer` resolves node targets against the current Canvas nodes and World references. Ordinary nodes render through `ExpandedNodePanel`; Question nodes and unbound Chat targets render through `ChatPanel`.
+`PreviewRenderer` resolves node targets against the current Canvas nodes and World references. Ordinary nodes render through `ExpandedNodePanel`; Question nodes and unbound Chat targets render through `ChatPanel`. An ordinary node's AI summary can be dismissed for the lifetime of the mounted preview without mutating node data.
 
 Every mounted `ChatPanel` receives an explicit `ChatSession` and owning preview tab ID. There is no globally current Chat thread or Question replay pointer, so two groups can render independent conversations without sharing messages, drafts, bindings, attachments, settings, loading state, or stream control.
 
 Dragging a Chat or Note block into an editable Note uses Milkdown's geometric drop position, while its fixed-position indicator is portalled to `document.body` so the Preview panel's compositor transform cannot rebase viewport coordinates in either split group.
 
 PDF area capture routes directly to a Chat or Question conversation that is active in the group beside the PDF. When no conversation is visible beside it, the Canvas's canonical unbound Chat opens to the side and the capture is staged immediately as that thread's pending attachment. The explicit Send to Chat action always produces a thread-owned attachment; the shared dashed selection attachment remains reserved for passive browser text selection.
+
+When a conversation is visible beside an ordinary node, its composer offers that active node as a dashed source candidate. Confirming the candidate stages a thread-owned source attachment that the prompt renderer emits as a structured node reference; switching the node in the adjacent group updates the unconfirmed candidate, while an already confirmed source remains attached to the thread.
 
 For a World `nodeRef` that presents a source Question, the target remains the World presentation node while `AgentConversationView` carries the source Canvas, node, and thread as conversation owner. History, reconnect, agent turns, tools, lifecycle writes, binding, mode, and change records use that owner scope.
 
@@ -100,7 +104,7 @@ Pointer dragging keeps a faded source placeholder in the tab strip, portals a la
 
 Closing an active tab selects the nearest remaining tab in the same group. Moving or closing the final tab in a secondary group removes that group. The workspace keeps one empty primary group as its valid empty state.
 
-A transient tab is one reusable inspection slot per group. Opening another transient target replaces that slot; double-clicking the tab or committing a persistent mutation through its renderer promotes it in place.
+A transient tab is one reusable inspection slot per group. Opening another transient target replaces that slot; using its Pin action, double-clicking the tab, or committing a persistent mutation through its renderer promotes it in place. Moving a transient tab into a side group does not promote the moved tab; if that group already has a transient slot, the moved tab replaces the existing disposable slot. Merging groups keeps the most recently active transient slot and drops any older transient slot. Runtime topology changes report every implicitly removed tab before committing the new workspace so mounted authored editors can settle through the same lifecycle boundary as an explicit close; the store then clears tab-addressed focus and opening requests atomically with the topology update. Persistence repair has no mounted editor and only repairs the stored topology.
 
 Permanent tabs are never closed automatically. A group may retain any number of permanent tabs; users close them explicitly, while transient browsing continues to reuse the group's inspection slot.
 
@@ -124,7 +128,7 @@ The current Canvas layout is written synchronously before switching Canvas and b
 
 A capped MRU index retains workspace records for at most 50 Canvases. Evicting an old layout is non-destructive because the record contains presentation topology only.
 
-Persisted input is parsed defensively. Invalid targets, dangling tab IDs, duplicate group references, invalid active IDs, excess groups, and malformed split values are dropped or repaired without preventing the remaining layout from loading.
+Persisted input is parsed defensively. Invalid targets, dangling tab IDs, duplicate group references, invalid active IDs, excess groups, duplicate transient slots within one group, and malformed split values are dropped or repaired without preventing the remaining layout from loading. Duplicate transient slots keep the most recently active slot and drop the older disposable slots.
 
 After a command deletes nodes, the web post-effect validates the workspace against the committed live node IDs. Tabs targeting deleted nodes are removed and active IDs or empty groups are repaired by `validateWorkspace`.
 

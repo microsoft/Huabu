@@ -15,6 +15,7 @@ import type {
   NodePutInput,
   NodePutResult,
   NodeSnapshot,
+  NodeStreamOptions,
   SpaceNodes,
 } from '../../ports/structured.js';
 
@@ -28,6 +29,14 @@ function snapshotOf(record: NodeContent): NodeSnapshot {
   const revision = revisionOf(record);
   if (revision === null) throw new Error('A persisted node must have a token');
   return { record, revision };
+}
+
+function snapshotsOf(
+  contents: ReadonlyMap<string, NodeContent>,
+): Map<string, NodeSnapshot> {
+  const out = new Map<string, NodeSnapshot>();
+  for (const [nodeId, record] of contents) out.set(nodeId, snapshotOf(record));
+  return out;
 }
 
 export class DiskSpaceNodes implements SpaceNodes {
@@ -46,6 +55,59 @@ export class DiskSpaceNodes implements SpaceNodes {
     this.#assertActiveWorkspace();
     const record = this.#store.readNodeStrict(nodeId);
     return record === null ? null : snapshotOf(record);
+  }
+
+  /**
+   * Named nodes only.
+   *
+   * Resolved one id at a time through the same strict read {@link read} uses,
+   * so a selection sees exactly what reading each id would — including the
+   * index rebuild that resolves an externally renamed sidecar. Disk pays one
+   * directory scan to warm the id index and then one file read per requested
+   * id, which is the cost this member exists to keep proportional. Duplicate
+   * ids in the request collapse, as they do in the returned map.
+   */
+  async readMany(
+    nodeIds: readonly string[],
+  ): Promise<Map<string, NodeSnapshot>> {
+    this.#assertActiveWorkspace();
+    const out = new Map<string, NodeSnapshot>();
+    for (const nodeId of new Set(nodeIds)) {
+      const record = this.#store.readNodeStrict(nodeId);
+      if (record !== null) out.set(nodeId, snapshotOf(record));
+    }
+    return out;
+  }
+
+  /**
+   * Every node, under the same reachability rule {@link read} applies.
+   *
+   * The scan is strict about reachability and lenient about content, so it
+   * answers about exactly the nodes a per-id read would: an unreadable
+   * sidecar rejects here instead of being dropped from the collection, while
+   * a sidecar whose frontmatter a user broke by hand is recovered rather than
+   * refused. A lenient scan would leave the port claiming that environmental
+   * failures reject while its two collection shapes reported absence.
+   */
+  async list(): Promise<Map<string, NodeSnapshot>> {
+    this.#assertActiveWorkspace();
+    return snapshotsOf(
+      await this.#store.readAllNodes({ strict: true, strictRecords: false }),
+    );
+  }
+
+  /** {@link list}, delivered as each sidecar lands, with the same strictness. */
+  async stream(
+    onNode: (snapshot: NodeSnapshot) => void,
+    options?: NodeStreamOptions,
+  ): Promise<Map<string, NodeSnapshot>> {
+    this.#assertActiveWorkspace();
+    const contents = await this.#store.streamAllNodes(
+      (_id, content) => onNode(snapshotOf(content)),
+      options?.signal,
+      { strict: true, strictRecords: false },
+    );
+    return snapshotsOf(contents);
   }
 
   async put(input: NodePutInput): Promise<NodePutResult> {

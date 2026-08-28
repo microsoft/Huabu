@@ -282,6 +282,68 @@ describe('workspace module names no backend', () => {
   });
 });
 
+/**
+ * The Disk Space directory, fenced by name and by census (proposal §12.6.2).
+ *
+ * `diskTree` is not a port and is not portable: a backend that keeps Spaces in
+ * tables has no directory, and the member is typed by that absence. What keeps
+ * an unportable capability from reading as a portable one is not where it
+ * hangs — it is on the Space handle, beside everything else about a Space —
+ * but its name and the fact that every consumer is written down here.
+ *
+ * This list may shrink and must not grow. Each entry is a family §6.4.3
+ * assigns a disposition: the **A** families stay and become capability-matrix
+ * rows, and the rest leave as they move onto a port.
+ */
+describe('Disk Space tree capability', () => {
+  const EXPECTED_CONSUMERS = [
+    // A — the built-in file tools' sandbox root.
+    'modules/agent/tools/handlers/fs-sandbox.ts',
+    // A — bundle export.
+    'modules/canvas/canvas.route.ts',
+    // A — external-note claim.
+    'modules/canvas/external.route.ts',
+    // C — the resurrection guard, which disappears with the substrate.
+    'modules/agent/memory/trigger.ts',
+    // D — the per-Space RFS access guide, headed for a blob.
+    'modules/remote_fs/skill.ts',
+    // C and D — memory files, the debug prompt log, ACP session state.
+    'modules/workspace/paths.ts',
+  ].sort();
+
+  it('keeps the exact production consumer census', () => {
+    // Matched as a bare word, not as `.diskTree`: destructuring the member
+    // off a handle (`const { diskTree } = space(id)`) or reaching it by
+    // subscript reads it just as effectively, and a census a consumer can
+    // leave by changing its spelling is not a census.
+    const consumers = sourceFiles
+      .filter((file) => !file.startsWith('modules/storage/'))
+      .filter((file) => !file.endsWith('.test.ts'))
+      .filter((file) => /\bdiskTree\b/.test(read(file)));
+
+    expect(consumers.sort()).toEqual(EXPECTED_CONSUMERS);
+  });
+
+  it('exposes no portable path accessor from the barrel', () => {
+    const barrel = read('modules/storage/index.ts');
+
+    // A Space's directory is reachable only through the Disk-named member on
+    // the Space handle. A free `spaceDirectory()`-shaped export would read as
+    // something every backend answers, which is the claim being prevented.
+    expect(barrel).not.toMatch(/\bspaceDirectory\b/);
+    expect(barrel).toMatch(/\bDiskSpaceTree\b/);
+  });
+
+  it('names Disk at the type, so a consumer cannot mistake it for a port', () => {
+    const tree = read('modules/storage/backends/disk/space-tree.ts');
+
+    expect(tree).toMatch(/export interface DiskSpaceTree/);
+    // Living under `backends/disk/` is what the `ports/` census already
+    // guarantees; this states the intent the file exists to carry.
+    expect(tree).toMatch(/not a port/i);
+  });
+});
+
 describe('structured write authority', () => {
   it('does not expose compatibility create/delete writers from the public barrel', () => {
     expect(read('modules/storage/index.ts')).not.toMatch(

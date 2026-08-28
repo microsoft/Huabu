@@ -12,6 +12,8 @@ import { PathInput } from '../components/Common/PathInput';
 import { APP_NAME } from '../config/app';
 import { useWorkspaceStore } from '../store/workspaceStore';
 
+import type { WorkspaceDescriptor } from '../api/workspace';
+
 /**
  * First-launch / "switch workspace" page.
  *
@@ -32,6 +34,9 @@ export default function WorkspaceSetupPage() {
   const recentWorkspaces = useWorkspaceStore((s) => s.recentWorkspaces);
   const removeRecentWorkspace = useWorkspaceStore(
     (s) => s.removeRecentWorkspace,
+  );
+  const activateRecentWorkspace = useWorkspaceStore(
+    (s) => s.activateRecentWorkspace,
   );
   const selectWorkspace = useWorkspaceStore((s) => s.selectWorkspace);
   const storeError = useWorkspaceStore((s) => s.error);
@@ -65,6 +70,7 @@ export default function WorkspaceSetupPage() {
           isSyncing={isSyncing}
           storeError={storeError}
           recentWorkspaces={recentWorkspaces}
+          activateRecentWorkspace={activateRecentWorkspace}
           removeRecentWorkspace={removeRecentWorkspace}
           selectWorkspace={selectWorkspace}
           onActivated={() => navigate('/', { replace: true })}
@@ -81,8 +87,9 @@ export default function WorkspaceSetupPage() {
 interface FreeSetupProps {
   isSyncing: boolean;
   storeError: string | null;
-  recentWorkspaces: string[];
-  removeRecentWorkspace: (path: string) => void;
+  recentWorkspaces: WorkspaceDescriptor[];
+  activateRecentWorkspace: (workspaceId: string) => Promise<void>;
+  removeRecentWorkspace: (workspaceId: string) => void;
   selectWorkspace: (path: string) => Promise<void>;
   onActivated: () => void;
 }
@@ -91,6 +98,7 @@ function FreeSetup({
   isSyncing,
   storeError,
   recentWorkspaces,
+  activateRecentWorkspace,
   removeRecentWorkspace,
   selectWorkspace,
   onActivated,
@@ -118,8 +126,14 @@ function FreeSetup({
     void activate(pathInput);
   };
 
-  const handleSelectRecent = (path: string) => {
-    void activate(path);
+  const handleSelectRecent = async (workspaceId: string) => {
+    setError(null);
+    try {
+      await activateRecentWorkspace(workspaceId);
+      onActivated();
+    } catch {
+      // The workspace store localizes and exposes activation failures.
+    }
   };
 
   return (
@@ -148,29 +162,36 @@ function FreeSetup({
             <span>{t('workspace.recent')}</span>
           </div>
           <ul className="space-y-1">
-            {recentWorkspaces.map((path) => (
-              <li key={path} className="group flex items-center gap-1">
+            {recentWorkspaces.map((workspace) => (
+              <li
+                key={workspace.workspaceId}
+                className="group flex items-center gap-1"
+              >
                 <Button
                   variant="ghost"
                   tone="neutral"
                   size="sm"
-                  onClick={() => void handleSelectRecent(path)}
+                  onClick={() => void handleSelectRecent(workspace.workspaceId)}
                   disabled={isLoading}
                   className="min-w-0 flex-1 justify-start rounded-lg text-left"
                 >
                   <FolderOpen size={14} className="text-fg-subtle shrink-0" />
-                  <span className="text-fg-muted truncate text-sm">{path}</span>
+                  <span className="text-fg-muted truncate text-sm">
+                    {workspace.path ?? workspace.name}
+                  </span>
                 </Button>
-                <Button
-                  variant="ghost"
-                  iconOnly
-                  size="sm"
-                  onClick={() => removeRecentWorkspace(path)}
-                  className="opacity-0 transition-all group-hover:opacity-100"
-                  title={t('workspace.removeRecent')}
-                >
-                  <X size={14} />
-                </Button>
+                {!workspace.active && (
+                  <Button
+                    variant="ghost"
+                    iconOnly
+                    size="sm"
+                    onClick={() => removeRecentWorkspace(workspace.workspaceId)}
+                    className="opacity-0 transition-all group-hover:opacity-100"
+                    title={t('workspace.removeRecent')}
+                  >
+                    <X size={14} />
+                  </Button>
+                )}
               </li>
             ))}
           </ul>

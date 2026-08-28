@@ -8,7 +8,7 @@ import { type FastifyPluginAsync } from 'fastify';
 import { cloneArtifactBodySchema, createId } from '@huabu/shared';
 
 import { sendBlob } from './send-blob.js';
-import { canvasBlobs } from '../storage/index.js';
+import { space } from '../storage/index.js';
 import { extractHtmlFromMhtml, injectBaseHref } from '../web/mhtml.js';
 
 import type {
@@ -61,7 +61,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
     const name = `${id}${ext}`;
 
     try {
-      await canvasBlobs(canvasId).put(name, data.file);
+      await space(canvasId).blobs.put(name, data.file);
     } catch (error) {
       request.log.error({ err: error }, 'Failed to stream artifact to storage');
       return reply.code(500).send({ message: 'Failed to save file' });
@@ -82,7 +82,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
     '/:canvasId/artifact/:filename',
     async (request, reply) => {
       const { canvasId, filename } = request.params;
-      const blobs = canvasBlobs(canvasId);
+      const blobs = space(canvasId).blobs;
       const safeName = path.basename(filename);
 
       // `.mhtml` snapshots are stored as proper multipart/related MHTML
@@ -151,7 +151,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
 
     let buffer: Buffer | null;
     try {
-      buffer = await canvasBlobs(srcCanvasId).read(srcKey);
+      buffer = await space(srcCanvasId).blobs.read(srcKey);
     } catch (err) {
       request.log.error({ err }, 'Failed to read source artifact for clone');
       return reply
@@ -167,7 +167,7 @@ const artifactRoute: FastifyPluginAsync = async (fastify) => {
     const name = `${id}${ext}`;
 
     try {
-      await canvasBlobs(dstCanvasId).put(name, buffer);
+      await space(dstCanvasId).blobs.put(name, buffer);
     } catch (err) {
       request.log.error({ err }, 'Failed to clone artifact');
       return reply

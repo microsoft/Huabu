@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { renderPromptFile } from '../../prompt/agents/loader.js';
-import { spaceDirectory } from '../storage/index.js';
+import { space } from '../storage/index.js';
 
 /** PROMPT-ROOT-relative path of the bundled access guide. */
 const ACCESS_GUIDE_TEMPLATE = 'external-agent/access-huabu.md';
@@ -40,9 +40,16 @@ export function resolveBundledRootSkill(): string {
  * markdown text (served with `Content-Type: text/markdown`).
  */
 export function resolveCanvasSkill(canvasId: string): string {
-  const override = path.join(spaceDirectory(canvasId), 'skill.md');
-  if (existsSync(override)) {
-    return readFileSync(override, 'utf8');
+  // A user-authored override read from the Space root. Disposition D
+  // (proposal §6.4.3): it becomes a blob under its own scope kind, at which
+  // point this reads through the port and the branch goes away. Until then a
+  // backend without a directory simply has no override to find.
+  const tree = space(canvasId).diskTree;
+  if (tree) {
+    const override = path.join(tree.directory(), 'skill.md');
+    if (existsSync(override)) {
+      return readFileSync(override, 'utf8');
+    }
   }
   return resolveBundledRootSkill();
 }

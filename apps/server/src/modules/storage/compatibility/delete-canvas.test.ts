@@ -21,10 +21,10 @@ import { resetStorageCache } from '../backends/disk/legacy/canvas-store-cache.js
 import { DiskStructuredStore } from '../backends/disk/structured-store.js';
 import { getCanvasStore } from '../index.js';
 import {
-  canvasBlobs,
+  composeStorage,
+  space,
   deleteSpace,
   setStorageForTesting,
-  type Storage,
 } from '../storage.js';
 
 import type {
@@ -195,11 +195,13 @@ let restoreStorage: () => void;
 
 function installBlobStore(next: BlobStore): void {
   restoreStorage();
-  restoreStorage = setStorageForTesting({
-    profile: { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
-    structured: new DiskStructuredStore(),
-    blobs: next,
-  } satisfies Storage);
+  restoreStorage = setStorageForTesting(
+    composeStorage(
+      { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
+      new DiskStructuredStore(),
+      next,
+    ),
+  );
 }
 
 beforeEach(() => {
@@ -211,11 +213,13 @@ beforeEach(() => {
   resetStorageCache();
 
   blobs = new OrderRecordingBlobStore();
-  restoreStorage = setStorageForTesting({
-    profile: { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
-    structured: new DiskStructuredStore(),
-    blobs,
-  } satisfies Storage);
+  restoreStorage = setStorageForTesting(
+    composeStorage(
+      { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
+      new DiskStructuredStore(),
+      blobs,
+    ),
+  );
 });
 
 afterEach(() => {
@@ -309,7 +313,7 @@ describe('deleteSpace composition', () => {
     controlled.blockPuts = true;
     installBlobStore(controlled);
 
-    const putting = canvasBlobs('canvas-a').put(
+    const putting = space('canvas-a').blobs.put(
       'in-flight.bin',
       Buffer.from('bytes'),
     );
@@ -349,7 +353,7 @@ describe('deleteSpace composition', () => {
     const deleting = deleteSpace('canvas-a');
     await controlled.deleteStarted.promise;
     expect(workspaceState.leaseCount).toBe(1);
-    const putting = canvasBlobs('canvas-a').put(
+    const putting = space('canvas-a').blobs.put(
       'too-late.bin',
       Buffer.from('orphan'),
     );
@@ -462,8 +466,8 @@ describe('deleteSpace composition', () => {
     controlled.blockPuts = true;
     installBlobStore(controlled);
 
-    const first = canvasBlobs('canvas-a').put('first.bin', Buffer.from('1'));
-    const second = canvasBlobs('canvas-a').put('second.bin', Buffer.from('2'));
+    const first = space('canvas-a').blobs.put('first.bin', Buffer.from('1'));
+    const second = space('canvas-a').blobs.put('second.bin', Buffer.from('2'));
 
     await vi.waitFor(() => expect(controlled.putCalls).toBe(2));
     controlled.releasePuts();
@@ -484,7 +488,7 @@ describe('deleteSpace composition', () => {
     await controlled.deleteStarted.promise;
 
     await expect(
-      canvasBlobs('canvas-b').put('independent.bin', Buffer.from('free')),
+      space('canvas-b').blobs.put('independent.bin', Buffer.from('free')),
     ).resolves.toMatchObject({ name: 'independent.bin' });
     expect(existsSync(artifactPath('canvas-b', 'independent.bin'))).toBe(true);
 

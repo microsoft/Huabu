@@ -221,6 +221,33 @@ describe('transient tabs', () => {
     expect(revisited.tabs['t1'].transient).toBe(false);
   });
 
+  it('keeps the slot transient when its target is browsed again', () => {
+    const first = open(emptyWorkspace(), node('a'), 't1', {
+      transient: true,
+    }).workspace;
+    const revisited = open(first, node('a'), 'unused', {
+      transient: true,
+    }).workspace;
+
+    expect(revisited.tabs['t1'].transient).toBe(true);
+  });
+
+  it('keeps a transient tab transient when moving it to the side', () => {
+    const first = open(emptyWorkspace(), node('a'), 't1', {
+      transient: true,
+    }).workspace;
+    const second = open(first, node('b'), 't2').workspace;
+    const sided = open(second, node('a'), 'unused', {
+      transient: true,
+      openToSide: true,
+    }).workspace;
+
+    expect(sided.tabs['t1'].transient).toBe(true);
+    expect(sided.groups).toHaveLength(2);
+    expect(tabIdsOf(sided, 0)).toEqual(['t2']);
+    expect(tabIdsOf(sided, 1)).toEqual(['t1']);
+  });
+
   it('keeps each group inspection slot separate', () => {
     const a = open(emptyWorkspace(), node('a'), 't1', {
       transient: true,
@@ -326,6 +353,24 @@ describe('moveTab', () => {
     expect(moved.groups[0].activeTabId).toBe('t1');
   });
 
+  it('replaces the destination transient tab with the moved one', () => {
+    const first = open(emptyWorkspace(), node('a'), 't1', {
+      transient: true,
+    }).workspace;
+    const split = open(first, node('b'), 't2', {
+      transient: true,
+      openToSide: true,
+    }).workspace;
+    const sideGroupId = split.groups[1].id;
+
+    const moved = moveTab(split, 't1', { groupId: sideGroupId });
+
+    expect(moved.groups).toHaveLength(1);
+    expect(moved.tabs['t1'].transient).toBe(true);
+    expect(moved.tabs['t2']).toBeUndefined();
+    expect(moved.groups[0].tabIds).toEqual(['t1']);
+  });
+
   it('collapses the source group when its last tab leaves', () => {
     const a = open(emptyWorkspace(), node('a'), 't1').workspace;
     const b = open(a, node('b'), 't2', { openToSide: true }).workspace;
@@ -351,6 +396,22 @@ describe('mergeGroups', () => {
     expect(merged.groups).toHaveLength(1);
     expect(merged.groups[0].tabIds).toEqual(['t1', 't2']);
     expect(merged.activeGroupId).toBe('g1');
+  });
+
+  it('drops older transient tabs when merging groups', () => {
+    const first = open(emptyWorkspace(), node('a'), 't1', {
+      transient: true,
+    }).workspace;
+    const split = open(first, node('b'), 't2', {
+      transient: true,
+      openToSide: true,
+    }).workspace;
+
+    const merged = mergeGroups(split);
+
+    expect(merged.tabs['t1']).toBeUndefined();
+    expect(merged.tabs['t2'].transient).toBe(true);
+    expect(merged.groups[0].tabIds).toEqual(['t2']);
   });
 
   it('is a no-op with a single group', () => {

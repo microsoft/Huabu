@@ -207,7 +207,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
 
   const resourceOptions = useMemo<
     {
-      value: 'upload' | 'link';
+      value: 'upload' | 'link' | 'spacePreview';
       label: string;
       icon: React.ReactNode;
     }[]
@@ -223,9 +223,35 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         label: t('toolbar.resources.addLinks'),
         icon: <LinkIcon />,
       },
+      ...(canvasId !== worldCanvasId
+        ? [
+            {
+              value: 'spacePreview' as const,
+              label: t('spacePreview.add'),
+              icon: <PanelsTopLeft />,
+            },
+          ]
+        : []),
     ],
-    [t],
+    [canvasId, t, worldCanvasId],
   );
+
+  const openSpacePreviewModal = () => {
+    setActiveModal('spacePreview');
+    setPreviewTargetsLoading(true);
+    setPreviewTargetsError(false);
+    void listCanvases()
+      .then(({ canvases }) =>
+        setPreviewTargets(
+          canvases.filter((canvas) => canvas.canvasId !== canvasId),
+        ),
+      )
+      .catch(() => {
+        setPreviewTargets([]);
+        setPreviewTargetsError(true);
+      })
+      .finally(() => setPreviewTargetsLoading(false));
+  };
 
   const getResourceMenuPosition = () => {
     if (!resourceMenuRef.current) return { x: 0, y: 0 };
@@ -489,31 +515,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
           >
             <NODE_ICON.frame />
           </Button>
-          {canvasId !== worldCanvasId && (
-            <Button
-              variant="ghost"
-              iconOnly
-              title={t('spacePreview.add')}
-              onClick={() => {
-                setActiveModal('spacePreview');
-                setPreviewTargetsLoading(true);
-                setPreviewTargetsError(false);
-                void listCanvases()
-                  .then(({ canvases }) =>
-                    setPreviewTargets(
-                      canvases.filter((canvas) => canvas.canvasId !== canvasId),
-                    ),
-                  )
-                  .catch(() => {
-                    setPreviewTargets([]);
-                    setPreviewTargetsError(true);
-                  })
-                  .finally(() => setPreviewTargetsLoading(false));
-              }}
-            >
-              <PanelsTopLeft />
-            </Button>
-          )}
           <div className="relative flex items-center">
             {pendingNodeType === 'sketch' && (
               <SketchSettingsPanel
@@ -577,7 +578,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             variant="ghost"
             size="sm"
             iconOnly
-            title={t('toolbar.resources.uploadOrLink')}
+            title={t('toolbar.resources.addContent')}
             className={clsx(resourceMenuOpen && 'bg-bg-default')}
             onClick={() => {
               if (resourceJustDismissedRef.current) return;
@@ -616,7 +617,11 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                   className="w-full justify-start rounded-none px-3 py-1.5 text-left"
                   onClick={() => {
                     setResourceMenuOpen(false);
-                    setActiveModal(opt.value);
+                    if (opt.value === 'spacePreview') {
+                      openSpacePreviewModal();
+                    } else {
+                      setActiveModal(opt.value);
+                    }
                   }}
                 >
                   <span className="shrink-0">{opt.icon}</span>

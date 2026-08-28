@@ -7,6 +7,7 @@ import { getElectronBridge } from '../hooks/useElectron';
 
 import type {
   PickFolderResult,
+  WorkspaceDescriptor,
   WorkspaceInfo,
   WorkspacePathRequest,
 } from '@huabu/shared';
@@ -15,6 +16,7 @@ import type {
 export type {
   PickFolderResult,
   WorkspaceCapabilities,
+  WorkspaceDescriptor,
   WorkspaceInfo,
   WorkspaceMode,
 } from '@huabu/shared';
@@ -48,6 +50,31 @@ export async function putWorkspacePath(
     method: 'PUT',
     json: body,
     fallbackMessage: 'Failed to update Home path',
+  });
+}
+
+/** List registered Workspaces in durable most-recently-used order. */
+export async function listWorkspaces(): Promise<WorkspaceDescriptor[]> {
+  return apiFetch<WorkspaceDescriptor[]>(routes.workspaces, {
+    fallbackMessage: 'Failed to list Home folders',
+  });
+}
+
+/** Activate a registered Workspace by stable identity. */
+export async function activateWorkspace(
+  workspaceId: string,
+): Promise<WorkspaceDescriptor> {
+  return apiFetch<WorkspaceDescriptor>(routes.workspaceActivate(workspaceId), {
+    method: 'POST',
+    fallbackMessage: 'Failed to activate Home folder',
+  });
+}
+
+/** Unregister a Workspace without deleting its directory or contents. */
+export async function removeWorkspace(workspaceId: string): Promise<void> {
+  await apiFetch<void>(routes.workspaceById(workspaceId), {
+    method: 'DELETE',
+    fallbackMessage: 'Failed to remove Home folder',
   });
 }
 

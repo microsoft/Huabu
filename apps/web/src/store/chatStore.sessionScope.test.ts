@@ -96,7 +96,17 @@ describe('chatStore thread-scoped state', () => {
     expect(selectThreadBinding(state, 'thread-a')).toEqual(EXTERNAL);
     expect(selectThreadBinding(state, 'thread-b')).toEqual(INTERNAL);
     expect(selectThreadLastAction(state, 'thread-a')).toBe('operate');
-    expect(selectThreadLastAction(state, 'thread-b')).toBe('ask');
+    expect(selectThreadLastAction(state, 'thread-b')).toBe('operate');
+  });
+
+  it('defaults an uncached external thread to ask', () => {
+    useChatStore.setState({
+      bindingByThread: { 'thread-external': EXTERNAL },
+    });
+
+    expect(
+      selectThreadLastAction(useChatStore.getState(), 'thread-external'),
+    ).toBe('ask');
   });
 
   it('returns stable defaults for an uncached thread', () => {
@@ -121,6 +131,37 @@ describe('chatStore thread creation', () => {
       'canvas-1': first,
       'canvas-2': second,
     });
+    expect(selectThreadBinding(useChatStore.getState(), first)).toEqual(
+      INTERNAL,
+    );
+    expect(selectThreadLastAction(useChatStore.getState(), first)).toBe(
+      'operate',
+    );
+  });
+
+  it('defaults a new independent thread to the built-in Huabu Agent', () => {
+    const created = useChatStore.getState().createThread();
+    const state = useChatStore.getState();
+
+    expect(selectThreadBinding(state, created)).toEqual(INTERNAL);
+    expect(selectThreadLastAction(state, created)).toBe('operate');
+  });
+
+  it('defaults external Canvas and independent threads to ask', () => {
+    useChatStore.setState({
+      bindingMap: { 'canvas-external': EXTERNAL },
+    });
+
+    const canvasThread = useChatStore
+      .getState()
+      .ensureCanvasThread('canvas-external');
+    const independentThread = useChatStore
+      .getState()
+      .createThread({ binding: EXTERNAL });
+
+    const state = useChatStore.getState();
+    expect(selectThreadLastAction(state, canvasThread)).toBe('ask');
+    expect(selectThreadLastAction(state, independentThread)).toBe('ask');
   });
 
   it('creates a loaded thread without moving another renderer', () => {

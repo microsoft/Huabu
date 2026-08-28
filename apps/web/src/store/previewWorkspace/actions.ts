@@ -62,8 +62,8 @@ export function openChat(): string {
 }
 
 export function closeActivePreviewNode(): void {
-  const workspace = usePreviewWorkspaceStore.getState();
-  const activeTab = selectActiveTab(workspace);
+  const preview = usePreviewWorkspaceStore.getState();
+  const activeTab = selectActiveTab(preview);
   if (!activeTab) return;
   const target = activeTab?.target;
   if (target?.kind !== 'node') return;
@@ -71,8 +71,9 @@ export function closeActivePreviewNode(): void {
   const node = useCanvasStore
     .getState()
     .nodes.find((candidate) => candidate.id === target.nodeId);
-  if (node?.type === 'note' || node?.type === 'text') {
-    settleNodePreprocess(node.id);
-  }
-  workspace.closeTab(activeTab.id);
+  preview.closeTab(activeTab.id, () => {
+    if (node?.type === 'note' || node?.type === 'text') {
+      settleNodePreprocess(node.id);
+    }
+  });
 }

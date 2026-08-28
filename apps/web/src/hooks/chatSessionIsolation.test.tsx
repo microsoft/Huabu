@@ -334,9 +334,11 @@ describe('two mounted ChatPanels', () => {
   });
 
   it('renders each thread with its own compose mode', async () => {
-    await commit(() =>
-      useChatStore.getState().setThreadLastAction(THREAD_A, 'operate'),
-    );
+    await commit(() => {
+      const store = useChatStore.getState();
+      store.setThreadLastAction(THREAD_A, 'operate');
+      store.setThreadLastAction(THREAD_B, 'ask');
+    });
 
     await commit(() => {
       root?.render(

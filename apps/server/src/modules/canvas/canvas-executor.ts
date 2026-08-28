@@ -64,7 +64,7 @@ import {
 } from './world-portal-policy.js';
 import { getLogger } from '../../utils/logger.js';
 import {
-  canvasBlobs,
+  space,
   getCanvasStore,
   getStructuredStore,
   withCanvasMutex,
@@ -375,7 +375,7 @@ async function aspectHeightForWidth(
   width: number,
 ): Promise<number | null> {
   try {
-    const dim = await readImageDimensions(canvasBlobs(canvasId), src);
+    const dim = await readImageDimensions(space(canvasId).blobs, src);
     if (!dim?.width || !dim?.height || dim.width <= 0 || dim.height <= 0) {
       return null;
     }

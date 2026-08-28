@@ -19,6 +19,11 @@ import type {
  * External bindings only appear when the user explicitly selects an agent.
  */
 const DEFAULT_BINDING: AgentBinding = { kind: 'internal' };
+const DEFAULT_ACTION: AgentMode = 'operate';
+
+function defaultActionForBinding(binding: AgentBinding): AgentMode {
+  return binding.kind === 'external' ? 'ask' : DEFAULT_ACTION;
+}
 
 /**
  * Everything cached for one conversation thread.
@@ -219,18 +224,20 @@ const EMPTY_THREAD: ChatThreadState = {
   draft: '',
   historyLoaded: false,
   isStreaming: false,
-  lastAction: 'ask',
+  lastAction: DEFAULT_ACTION,
   binding: DEFAULT_BINDING,
   settings: { modelId: null, reasoningEffort: null },
   pendingAttachments: [],
 };
 
 function threadOf(state: ChatState, threadId: string): ChatThreadState {
+  const binding = state.bindingByThread[threadId] ?? DEFAULT_BINDING;
   return (
     state.threadsById[threadId] ?? {
       ...EMPTY_THREAD,
-      lastAction: state.lastActionByThread[threadId] ?? 'ask',
-      binding: state.bindingByThread[threadId] ?? DEFAULT_BINDING,
+      lastAction:
+        state.lastActionByThread[threadId] ?? defaultActionForBinding(binding),
+      binding,
       settings: state.settingsByThread[threadId] ?? EMPTY_THREAD.settings,
     }
   );
@@ -359,7 +366,8 @@ export const useChatStore = create<ChatState>()(
       createThread: (options) => {
         const threadId = createId('thread');
         const binding = options?.binding ?? DEFAULT_BINDING;
-        const lastAction = options?.lastAction ?? 'ask';
+        const lastAction =
+          options?.lastAction ?? defaultActionForBinding(binding);
         set((state) => ({
           ...patchThread(state, threadId, {
             messages: [],
@@ -385,7 +393,10 @@ export const useChatStore = create<ChatState>()(
         const threadId = createId('thread');
         const binding = state.bindingMap[canvasId] ?? DEFAULT_BINDING;
         set({
-          ...patchThread(state, threadId, { binding }),
+          ...patchThread(state, threadId, {
+            binding,
+            lastAction: defaultActionForBinding(binding),
+          }),
           threadMap: { ...state.threadMap, [canvasId]: threadId },
           bindingMap: { ...state.bindingMap, [canvasId]: binding },
           bindingByThread: rememberThreadValue(

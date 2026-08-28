@@ -16,6 +16,7 @@ import {
   MAX_PREVIEW_GROUPS,
   createEmptyWorkspace,
   findTabByTarget,
+  repairTransientTabs,
   type CanvasPreviewWorkspace,
   type PreviewGroup,
   type PreviewTab,
@@ -198,7 +199,13 @@ function parseWorkspace(
         ? source.activationSeq
         : Math.max(0, ...Object.values(tabs).map((t) => t.lastActiveSeq));
 
-    return { tabs, groups, activeGroupId, splitRatio, activationSeq };
+    return repairTransientTabs({
+      tabs,
+      groups,
+      activeGroupId,
+      splitRatio,
+      activationSeq,
+    });
   } catch {
     // Corrupt entries are treated as missing layout.
     return null;

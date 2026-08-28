@@ -19,6 +19,7 @@ import {
   restoreMessageListScrollPosition,
 } from '@/components/Messages/messageListScroll';
 import useCanvasStore from '@/store/canvasStore';
+import { useChatStore } from '@/store/chatStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { messageListViewKey } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
@@ -66,11 +67,17 @@ vi.mock('../ChatPanel', () => ({
   ChatPanel: ({
     session,
     onCommit,
+    adjacentNodeSourceId,
   }: {
     session?: { threadId: string };
     onCommit?: () => void;
+    adjacentNodeSourceId?: string;
   }) => (
-    <div data-testid="chat-panel" data-thread-id={session?.threadId}>
+    <div
+      data-testid="chat-panel"
+      data-thread-id={session?.threadId}
+      data-adjacent-node-source-id={adjacentNodeSourceId}
+    >
       <button type="button" data-testid="commit-chat" onClick={onCommit} />
     </div>
   ),
@@ -585,6 +592,66 @@ describe('activation', () => {
     expect(store().workspace.tabs[tabId].transient).toBe(false);
   });
 
+  it('promotes a transient tab with its Pin action', () => {
+    const tabId = openNode('a', true);
+    render([canvasNode('a', 'Alpha')]);
+
+    const keepButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Keep Alpha open"]',
+    );
+    expect(keepButton).not.toBeNull();
+    const closeButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Close Alpha"]',
+    );
+    const actionRail = container?.querySelector<HTMLElement>(
+      '[data-testid="preview-tab-actions"]',
+    );
+    const title = tabs()[0].querySelector<HTMLElement>(
+      '[data-testid="preview-tab-title"]',
+    );
+    const icon = tabs()[0].querySelector<HTMLElement>(
+      '[data-testid="preview-tab-icon"]',
+    );
+    expect(title?.classList.contains('group-hover:text-fg-subtle')).toBe(true);
+    expect(title?.classList.contains('transition-colors')).toBe(true);
+    expect(icon?.classList.contains('group-hover:text-fg-subtle')).toBe(true);
+    expect(icon?.classList.contains('transition-colors')).toBe(true);
+    expect(actionRail?.classList.contains('absolute')).toBe(true);
+    expect(actionRail?.classList.contains('opacity-0')).toBe(true);
+    expect(actionRail?.classList.contains('group-hover:opacity-100')).toBe(
+      true,
+    );
+    expect(actionRail?.classList.contains('focus-within:opacity-100')).toBe(
+      true,
+    );
+    expect(actionRail?.contains(keepButton ?? null)).toBe(true);
+    expect(actionRail?.contains(closeButton ?? null)).toBe(true);
+    expect(keepButton?.classList.contains('shadow-sm')).toBe(false);
+    expect(closeButton?.classList.contains('shadow-sm')).toBe(false);
+    act(() => keepButton?.click());
+
+    expect(store().workspace.tabs[tabId].transient).toBe(false);
+    expect(
+      container?.querySelector('[aria-label="Keep Alpha open"]'),
+    ).toBeNull();
+  });
+
+  it('keeps a transient tab transient when opening it to the side', () => {
+    const transientTabId = openNode('a', true);
+    openNode('b');
+    store().activateTab(transientTabId);
+    render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
+
+    const openToSideButton = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="Open to the side"]',
+    );
+    expect(openToSideButton).not.toBeNull();
+    act(() => openToSideButton?.click());
+
+    expect(store().workspace.groups).toHaveLength(2);
+    expect(store().workspace.tabs[transientTabId].transient).toBe(true);
+  });
+
   it('promotes a transient tab when its renderer commits a mutation', () => {
     const tabId = store().openPreviewTarget(
       { kind: 'chat', canvasId: CANVAS_ID, threadId: 'thread-1' },
@@ -743,6 +810,23 @@ describe('split', () => {
       container?.querySelectorAll('[data-preview-node-id]') ?? [],
     ).map((el) => el.getAttribute('data-preview-node-id'));
     expect(mounted).toEqual(['a', 'b']);
+  });
+
+  it('offers an ordinary node beside a chat as a source candidate', () => {
+    openNode('a');
+    const threadId = useChatStore.getState().createThread();
+    store().openPreviewTarget({ kind: 'chat', canvasId: CANVAS_ID, threadId });
+    store().openPreviewTarget(
+      { kind: 'chat', canvasId: CANVAS_ID, threadId },
+      { openToSide: true },
+    );
+    render([canvasNode('a', 'Alpha')]);
+
+    expect(
+      container
+        ?.querySelector('[data-testid="chat-panel"]')
+        ?.getAttribute('data-adjacent-node-source-id'),
+    ).toBe('a');
   });
 
   it('bounds warm retention independently in each group', async () => {

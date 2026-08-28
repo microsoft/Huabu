@@ -32,8 +32,6 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
-  readFileSync,
-  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -83,7 +81,7 @@ const IS_DEV_ORCHESTRATOR = Boolean(process.env.EXTERNAL_SERVER_URL?.trim());
  *
  * - Packaged install / `start:desktop` → always `Huabu`. A single global
  *   instance is intentional: these share one `<userData>/data` tree, so
- *   two of them at once fight over port 3001 and the same `workspace.json`
+ *   two of them at once fight over port 3001 and the same Workspace registry
  *   (the exact failure the single-instance lock guards against).
  *
  * - `dev:desktop` (HMR orchestrator) → `Huabu Dev`, OPTIONALLY suffixed
@@ -112,8 +110,8 @@ function resolveAppName(): string {
  *
  * Only the HMR dev orchestrator (`pnpm dev:desktop`) gets a different name.
  * Its tsx-watch server and Vite HMR are actively-changing code, so we keep
- * its `workspace.json`, Chromium storage, and Electron logs / crash dumps
- * isolated from a real install. (Its LLM/integration secrets are a separate
+ * its Chromium storage and Electron logs / crash dumps isolated from a real
+ * install. (Its LLM/integration secrets are a separate
  * concern that's ALSO isolated, but not by this name split: with
  * `EXTERNAL_SERVER_URL` set we skip the `safeStorage`-backed
  * `DesktopSecureSecretStore` below entirely, and the tsx-watch server
@@ -123,7 +121,7 @@ function resolveAppName(): string {
  * `pnpm start:desktop`, by contrast, runs the exact same bundled server /
  * web build a packaged install would run — it's typically used as a final
  * smoke test before shipping, so it intentionally shares `Huabu`'s on-disk
- * state with the installed app: same workspace, and the same
+ * state with the installed app: same Workspace registry, and the same
  * `safeStorage`-encrypted `<userData>/data/secure-secrets.json` (so secrets
  * already configured in the installed app are reused) rather than starting
  * from an empty slate.
@@ -152,7 +150,7 @@ app.setName(resolveAppName());
  * a second time, or running `start:desktop` while the installed app is
  * open) forks a SECOND Fastify server. The two servers then fight over
  * the preferred port (3001) and, worse, share the same
- * `<userData>/data` tree — same `workspace.json`, same canvas DB. When
+ * `<userData>/data` tree — same Workspace registry, same canvas DB. When
  * one instance later shuts its server down, any window still pointed at
  * `127.0.0.1:3001` starts getting `503 (server closing)` and then
  * `ERR_CONNECTION_REFUSED`.
@@ -457,8 +455,8 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
   // Ensure the data directory exists so the server doesn't have to
   // race-condition on first-use creation. The workspace directory is
   // intentionally NOT pre-created: in free mode the user picks it via
-  // the in-app UI (folder picker / path input), and the web client
-  // persists the selection across launches via localStorage.
+  // the in-app UI (folder picker / path input), and the Server records the
+  // selection in its Workspace registry after successful activation.
   mkdirSync(dataDir, { recursive: true });
 
   if (IS_DEV && webDistPath && !existsSync(webDistPath)) {
@@ -485,6 +483,9 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
     SERVER_PORT: String(port),
     HUABU_BIND_HOST: '127.0.0.1',
     HUABU_DATA_DIR: dataDir,
+    // Read-only upgrade source. The Server imports this deprecated file only
+    // when its authoritative storage/disk/workspaces.json does not exist.
+    HUABU_LEGACY_WORKSPACE_STORE: join(userData, 'workspace.json'),
     HUABU_SECRET_BRIDGE: '1',
     ...(webDistPath ? { WEB_DIST_PATH: webDistPath } : {}),
     NODE_ENV: IS_DEV ? 'development' : 'production',
@@ -688,115 +689,6 @@ function waitForPort(
       });
     }
     attempt();
-  });
-}
-
-// ── Workspace persistence ────────────────────────────────────────────
-
-/**
- * Persist the user-selected free-mode workspace path (and recent list)
- * in a JSON file under `app.getPath('userData')` so it survives across
- * launches independently of the renderer's `localStorage`.
- *
- * Why not just rely on `localStorage`? Chromium partitions storage by
- * origin (scheme + host + port). The Electron shell forks the server on
- * a fresh port whenever the preferred port (3001) is busy — e.g. a
- * leftover server process, another local service, or simply a second
- * launch racing with the first. A different port means a different
- * origin, which means a separate, empty `localStorage` bucket and the
- * user is dumped back on the workspace picker even though they picked
- * a folder yesterday.
- *
- * Storing the path in the main process (one location per user,
- * port-agnostic) and exposing it over IPC sidesteps the partition
- * entirely. The renderer still keeps `localStorage` writes for
- * browser/dev mode compatibility, but the Electron bridge takes
- * precedence when present.
- */
-
-const WORKSPACE_STORE_FILE = 'workspace.json';
-const MAX_RECENT_WORKSPACES = 5;
-
-interface WorkspaceStore {
-  path: string | null;
-  recent: string[];
-}
-
-function workspaceStorePath(): string {
-  return join(app.getPath('userData'), WORKSPACE_STORE_FILE);
-}
-
-function readWorkspaceStore(): WorkspaceStore {
-  const file = workspaceStorePath();
-  if (!existsSync(file)) return { path: null, recent: [] };
-  try {
-    const raw = readFileSync(file, 'utf8');
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-      return { path: null, recent: [] };
-    }
-    const obj = parsed as Record<string, unknown>;
-    const path =
-      typeof obj.path === 'string' && obj.path.length > 0 ? obj.path : null;
-    const recent = Array.isArray(obj.recent)
-      ? obj.recent.filter((p): p is string => typeof p === 'string')
-      : [];
-    return { path, recent };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[desktop] workspace store unreadable: ${message}`);
-    return { path: null, recent: [] };
-  }
-}
-
-function writeWorkspaceStore(store: WorkspaceStore): void {
-  const file = workspaceStorePath();
-  // Atomic-ish write via tmp + rename so a crash mid-write doesn't
-  // leave a half-truncated JSON the next launch refuses to parse.
-  const tmp = `${file}.tmp`;
-  mkdirSync(app.getPath('userData'), { recursive: true });
-  writeFileSync(tmp, JSON.stringify(store, null, 2), 'utf8');
-  renameSync(tmp, file);
-}
-
-function pushRecentWorkspace(store: WorkspaceStore, path: string): string[] {
-  const next = [path, ...store.recent.filter((p) => p !== path)].slice(
-    0,
-    MAX_RECENT_WORKSPACES,
-  );
-  return next;
-}
-
-function registerWorkspaceIpc(): void {
-  ipcMain.handle('workspace:get', () => readWorkspaceStore());
-
-  ipcMain.handle('workspace:set', (_event, rawPath: unknown) => {
-    if (typeof rawPath !== 'string' || rawPath.length === 0) {
-      throw new Error('workspace:set requires a non-empty string path');
-    }
-    if (!isAbsolute(rawPath)) {
-      throw new Error('workspace:set requires an absolute path');
-    }
-    const current = readWorkspaceStore();
-    const next: WorkspaceStore = {
-      path: rawPath,
-      recent: pushRecentWorkspace(current, rawPath),
-    };
-    writeWorkspaceStore(next);
-    return next;
-  });
-
-  ipcMain.handle('workspace:remove-recent', (_event, rawPath: unknown) => {
-    if (typeof rawPath !== 'string') {
-      throw new Error('workspace:remove-recent requires a string path');
-    }
-    const current = readWorkspaceStore();
-    const next: WorkspaceStore = {
-      path: current.path === rawPath ? null : current.path,
-      recent: current.recent.filter((p) => p !== rawPath),
-    };
-    writeWorkspaceStore(next);
-    return next;
   });
 }
 
@@ -1241,10 +1133,8 @@ app.whenReady().then(async () => {
   // inside `createWindow`.
   applyApplicationMenu(() => mainWindow);
 
-  // Register IPC handlers BEFORE any window is created so the preload
-  // script's `ipcRenderer.invoke('workspace:get', …)` calls always have
-  // a handler to talk to, even on the very first render.
-  registerWorkspaceIpc();
+  // Register IPC handlers before any window is created so every preload
+  // bridge is ready on the first render.
   registerWindowIpc();
   registerDiagnosticsIpc();
   registerDialogIpc();

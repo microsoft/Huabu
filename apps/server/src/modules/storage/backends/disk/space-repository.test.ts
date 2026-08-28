@@ -115,6 +115,17 @@ describeSpaceRepositoryContract('Disk', () => {
         },
       }),
     worldCanvasId: WORLD_ID,
+    // A Disk namespace is a Workspace directory, so an unmounted one is a
+    // fresh temp root with no `.world`. Activating it invalidates the store
+    // above, which is exactly the licence the harness member documents.
+    openEmptyNamespace: () => {
+      makeWorkspace('huabu-space-repository-contract-empty-');
+      const empty = new DiskStructuredStore();
+      return {
+        repository: empty.spaces(),
+        read: (canvasId: string) => empty.space(canvasId).read(),
+      };
+    },
   };
 });
 

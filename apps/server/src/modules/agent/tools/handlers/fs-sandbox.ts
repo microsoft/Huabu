@@ -30,7 +30,7 @@ import { readFileSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 
 import { parseFrontmatter } from '../../../../utils/markdown-frontmatter.js';
-import { getCanvasStore, spaceDirectory } from '../../../storage/index.js';
+import { getCanvasStore, space } from '../../../storage/index.js';
 
 // ─── Always-skipped directory names ─────────────────────────────────────────
 
@@ -143,7 +143,18 @@ export function safeResolve(canvasId: string, rel: string): string {
   ) {
     throw new Error(`Invalid canvasId: ${canvasId}`);
   }
-  const root = spaceDirectory(canvasId);
+  // The built-in file tools are Disk-only and stated as such (proposal
+  // §6.4.3, disposition A): off Disk the first-party agent reaches a Space
+  // over RFS/HTTP, which is what external agents already use. Refusing here
+  // is the backstop behind the capability matrix, not the primary check.
+  const tree = space(canvasId).diskTree;
+  if (!tree) {
+    throw new Error(
+      'Built-in file tools need a Space directory, which the active ' +
+        'structured backend does not provide.',
+    );
+  }
+  const root = tree.directory();
   // Accept the clean virtual prefixes (`upload/`, `artifacts/`) as aliases
   // for their hidden on-disk dirs so agents can reference either form.
   const target = path.resolve(root, toPhysicalRel(rel));
@@ -153,6 +164,19 @@ export function safeResolve(canvasId: string, rel: string): string {
     );
   }
   return target;
+}
+
+/**
+ * The sandbox root for one Space.
+ *
+ * Exported because classifying a resolved path as "inside this Space" is a
+ * question about the sandbox, not about storage: the caller that asks is
+ * already working in sandbox coordinates, and routing it through storage
+ * would make it a consumer of a backend capability it has no stake in
+ * (proposal §6.4.3).
+ */
+export function sandboxRoot(canvasId: string): string {
+  return safeResolve(canvasId, '');
 }
 
 /** Normalise a relative path to forward slashes. */

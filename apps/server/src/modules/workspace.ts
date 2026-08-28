@@ -28,6 +28,7 @@
  * Directory layout inside the active workspace (canvas-centric):
  *
  *   <workspace>/
+ *     .workspace.json
  *     <canvasId>/
  *       space.json
  *       nodes/<nodeId>.md
@@ -40,15 +41,24 @@ import path from 'node:path';
 
 import { resetExternalNoteSessions } from './canvas/external-watcher.js';
 import { refreshCanvasDirIndex } from './storage/canvas-dirs.js';
+import { adoptWorkspaceDirectory } from './storage/index.js';
 import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import { invalidateUserSkill } from '../prompt/index.js';
 
+import type { WorkspaceHandle } from './storage/index.js';
+
 const ENV_KEY = 'HUABU_WORKSPACE';
 
+// Identity and location are separate facts: the handle is the portable
+// Workspace identity, while the path is the Disk materialization the rest of
+// the Server resolves every file against. A backend that does not materialize
+// Workspaces would keep the former and have no latter.
+let _workspaceHandle: WorkspaceHandle | null = null;
 let _workspacePath: string | null = null;
 let _managed = false;
 let _leasedWorkspacePath: string | null = null;
 let _workspaceOperationLeaseCount = 0;
+let _activatingWorkspacePath: string | null = null;
 
 /**
  * A short-lived claim that keeps an async operation on one workspace.
@@ -62,6 +72,13 @@ export interface WorkspaceOperationLease {
   release(): void;
 }
 
+/** A process-local reservation for one pending active-Workspace switch. */
+export interface WorkspaceActivationReservation {
+  readonly workspacePath: string;
+  commit(): void;
+  release(): void;
+}
+
 /** Raised when a workspace switch would strand an in-flight operation. */
 export class WorkspaceOperationInProgressError extends Error {
   constructor() {
@@ -69,6 +86,14 @@ export class WorkspaceOperationInProgressError extends Error {
       'Cannot change workspace while an operation is still using the active workspace',
     );
     this.name = 'WorkspaceOperationInProgressError';
+  }
+}
+
+/** Raised when another switch already owns the active-Workspace reservation. */
+export class WorkspaceActivationInProgressError extends Error {
+  constructor() {
+    super('Another workspace activation is already in progress');
+    this.name = 'WorkspaceActivationInProgressError';
   }
 }
 
@@ -85,7 +110,7 @@ export function isManagedMode(): boolean {
 }
 
 export function isWorkspaceConfigured(): boolean {
-  return _workspacePath !== null;
+  return _workspaceHandle !== null;
 }
 
 /**
@@ -130,6 +155,11 @@ export function getWorkspacePath(): string {
   return _workspacePath;
 }
 
+/** The active immutable Workspace identity, or null before configuration. */
+export function getWorkspaceHandle(): WorkspaceHandle | null {
+  return _workspaceHandle;
+}
+
 /**
  * Keep the currently-active workspace stable for an async operation.
  *
@@ -139,6 +169,13 @@ export function getWorkspacePath(): string {
  */
 export function acquireWorkspaceOperationLease(): WorkspaceOperationLease {
   const workspacePath = getWorkspacePath();
+
+  if (
+    _activatingWorkspacePath !== null &&
+    _activatingWorkspacePath !== workspacePath
+  ) {
+    throw new WorkspaceActivationInProgressError();
+  }
 
   if (
     _workspaceOperationLeaseCount > 0 &&
@@ -165,16 +202,41 @@ export function acquireWorkspaceOperationLease(): WorkspaceOperationLease {
 }
 
 /**
- * Display label for the currently-active workspace. In managed mode this
- * is the basename of the locked path; in free mode it's also the basename
- * of the user-picked path. Returns `null` if nothing is active yet.
+ * Reserve a namespace switch before asynchronous preparation can touch it.
  *
- * Never reveals the full host path — safe to send to the client even when
- * the deployment treats the host filesystem as private.
+ * The reservation closes both sides of the race: an existing operation makes
+ * activation fail before the target is prepared, while new operations cannot
+ * start and strand themselves in the old Workspace during preparation.
  */
-export function getWorkspaceName(): string | null {
-  if (!_workspacePath) return null;
-  return path.basename(_workspacePath);
+export function beginWorkspaceActivation(
+  newPath: string,
+): WorkspaceActivationReservation {
+  const workspacePath = resolveWorkspacePath(newPath);
+  if (_activatingWorkspacePath !== null) {
+    throw new WorkspaceActivationInProgressError();
+  }
+  assertWorkspacePathChangeAllowed(workspacePath);
+  _activatingWorkspacePath = workspacePath;
+
+  let released = false;
+  let committed = false;
+  return Object.freeze({
+    workspacePath,
+    commit(): void {
+      if (released || committed || _activatingWorkspacePath !== workspacePath) {
+        throw new WorkspaceActivationInProgressError();
+      }
+      commitResolvedWorkspacePath(workspacePath);
+      committed = true;
+    },
+    release(): void {
+      if (released) return;
+      released = true;
+      if (_activatingWorkspacePath === workspacePath) {
+        _activatingWorkspacePath = null;
+      }
+    },
+  });
 }
 
 /**
@@ -192,6 +254,7 @@ export function setWorkspacePath(newPath: string): void {
     );
   }
   const resolvedPath = resolveWorkspacePath(newPath);
+  assertNoWorkspaceActivationInProgress();
   assertWorkspacePathChangeAllowed(resolvedPath);
   prepareWorkspaceOnDisk(resolvedPath);
   commitWorkspacePath(resolvedPath);
@@ -206,11 +269,23 @@ export function resolveWorkspacePath(newPath: string): string {
 /**
  * Commit an already-prepared workspace to process-local state.
  *
- * This function intentionally performs no disk I/O. Runtime activation calls
- * it only after the isolated preparation process has completed successfully.
+ * Runtime activation calls this only after the isolated preparation process
+ * has completed successfully. Opening the handle reads the prepared manifest;
+ * the compatibility fallback creates it when an older caller committed a
+ * legacy path without going through preparation first.
+ *
+ * The lease guard runs *before* that, so a switch this process must refuse
+ * cannot leave the target adopted or registered on its way out.
  */
-export function commitWorkspacePath(resolvedPath: string): void {
+export function commitWorkspacePath(rawPath: string): void {
+  const resolvedPath = path.resolve(rawPath);
+  assertNoWorkspaceActivationInProgress();
+  commitResolvedWorkspacePath(resolvedPath);
+}
+
+function commitResolvedWorkspacePath(resolvedPath: string): void {
   assertWorkspacePathChangeAllowed(resolvedPath);
+  _workspaceHandle = adoptWorkspaceDirectory(resolvedPath);
   _workspacePath = resolvedPath;
   // Drop the cached canvas-dir index so subsequent lookups (used by
   // migrations and route handlers) reflect the new workspace.
@@ -225,6 +300,15 @@ export function commitWorkspacePath(resolvedPath: string): void {
   // function bodies, after both modules have finished evaluating.
   invalidateUserSkill();
   resetExternalNoteSessions();
+}
+
+/** Refresh metadata for the active Workspace without switching namespaces. */
+export function updateActiveWorkspaceHandle(
+  workspace: WorkspaceHandle,
+): boolean {
+  if (_workspaceHandle?.workspaceId !== workspace.workspaceId) return false;
+  _workspaceHandle = workspace;
+  return true;
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -254,5 +338,11 @@ function assertWorkspacePathChangeAllowed(resolvedPath: string): void {
     _leasedWorkspacePath !== resolvedPath
   ) {
     throw new WorkspaceOperationInProgressError();
+  }
+}
+
+function assertNoWorkspaceActivationInProgress(): void {
+  if (_activatingWorkspacePath !== null) {
+    throw new WorkspaceActivationInProgressError();
   }
 }

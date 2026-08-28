@@ -16,9 +16,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  commitWorkspacePath,
+  beginWorkspaceActivation,
   isManagedMode,
   resolveWorkspacePath,
+  WorkspaceActivationInProgressError,
 } from './workspace.js';
 import { getLogger } from '../utils/logger.js';
 
@@ -55,12 +56,7 @@ export class WorkspaceActivationTimeoutError extends Error {
   }
 }
 
-export class WorkspaceActivationInProgressError extends Error {
-  constructor() {
-    super('Another workspace activation is already in progress');
-    this.name = 'WorkspaceActivationInProgressError';
-  }
-}
+export { WorkspaceActivationInProgressError };
 
 interface PreparationOptions {
   timeoutMs?: number;
@@ -176,11 +172,11 @@ export function runWorkspacePreparation(
   });
 }
 
-/** Prepare a free-mode workspace and commit it only after full success. */
-export async function activateWorkspacePath(
+/** Prepare a free-mode Workspace without changing the active Workspace. */
+export async function prepareWorkspacePath(
   newPath: string,
   options: PreparationOptions = {},
-): Promise<void> {
+): Promise<string> {
   if (isManagedMode()) {
     throw new Error(
       'Server is in managed mode; the workspace is fixed at startup',
@@ -194,8 +190,22 @@ export async function activateWorkspacePath(
   activationInProgress = true;
   try {
     await runWorkspacePreparation(resolvedPath, options);
-    commitWorkspacePath(resolvedPath);
+    return resolvedPath;
   } finally {
     activationInProgress = false;
+  }
+}
+
+/** Prepare a free-mode workspace and commit it only after full success. */
+export async function activateWorkspacePath(
+  newPath: string,
+  options: PreparationOptions = {},
+): Promise<void> {
+  const reservation = beginWorkspaceActivation(newPath);
+  try {
+    await prepareWorkspacePath(reservation.workspacePath, options);
+    reservation.commit();
+  } finally {
+    reservation.release();
   }
 }

@@ -21,7 +21,9 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { useTranslation } from 'react-i18next';
 
+import { getMissingFileKind } from '@/components/Nodes/missingFile';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { useExternalImportsStore } from '@/store/externalImportsStore';
 import { usePanelStore } from '@/store/panelStore';
@@ -124,9 +126,17 @@ const SortableRow = React.memo(
     onToggleCollapse,
     onToggleLock,
   }: SortableRowProps) => {
+    const { t } = useTranslation();
     const { listeners, setNodeRef, isDragging } = useSortable({
       id: item.id,
     });
+    const missingFileKind = getMissingFileKind(item.node.data);
+    const missingFileLabel =
+      missingFileKind === 'sidecar'
+        ? t('layers.nodeContentFileMissing')
+        : missingFileKind === 'artifact'
+          ? t('layers.nodeSourceFileMissing')
+          : undefined;
 
     // Intentionally drop BOTH the active row's drag transform AND the
     // sibling rows' strategy transform: the dragged row stays in its
@@ -148,6 +158,7 @@ const SortableRow = React.memo(
         isSelected={isDirectlySelected}
         isHighlighted={isHighlighted}
         isDragging={isDragging}
+        missingFileLabel={missingFileLabel}
         isCollapsible={isCollapsible}
         isCollapsed={isCollapsed}
         isLocked={isLocked}

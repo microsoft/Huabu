@@ -45,7 +45,8 @@ import {
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
 import { findPdfTextMatches } from './pdfTextIndex';
 import { PDF_DOCUMENT_OPTIONS } from './pdfWorker';
-import { usePdfTextIndex, type PdfIndexDocument } from './usePdfTextIndex';
+import { usePdfDocumentLifecycle } from './usePdfDocumentLifecycle';
+import { usePdfTextIndex } from './usePdfTextIndex';
 import { Button } from '../../Common/Button';
 import { Loading } from '../../Common/Loading';
 
@@ -87,9 +88,12 @@ export const PDFPreview = ({
   const previewSearchNodeId = usePreviewSearchStore((s) => s.nodeId);
   const searchQuery = usePreviewSearchStore((s) => s.query);
   const isPreviewSearchOpen = usePreviewSearchStore((s) => s.isOpen);
-  const [numPages, setNumPages] = useState<number | null>(null);
-  const [pdfDocument, setPdfDocument] = useState<PdfIndexDocument | null>(null);
-  const [docLoaded, setDocLoaded] = useState(false);
+  const {
+    document: pdfDocument,
+    numPages,
+    isLoaded: docLoaded,
+    handleLoadSuccess: onDocumentLoadSuccess,
+  } = usePdfDocumentLifecycle(src);
   const [forcedPageIndex, setForcedPageIndex] = useState<number | null>(null);
   const searchNavigationCancelRef = useRef<(() => void) | null>(null);
   const [visiblePageIndexes, setVisiblePageIndexes] = useState<
@@ -103,9 +107,6 @@ export const PDFPreview = ({
   >(() => new Map());
   // Reset loading state when the PDF source changes.
   useEffect(() => {
-    setDocLoaded(false);
-    setNumPages(null);
-    setPdfDocument(null);
     setForcedPageIndex(null);
     setVisiblePageIndexes(new Set([0]));
     setRetainedPageIndexes(new Set([0]));
@@ -360,12 +361,6 @@ export const PDFPreview = ({
     renderedWidth > 0 && containerWidth > 0
       ? containerWidth / renderedWidth
       : 1;
-
-  const onDocumentLoadSuccess = useCallback((document: PdfIndexDocument) => {
-    setPdfDocument(document);
-    setNumPages(document.numPages);
-    setDocLoaded(true);
-  }, []);
 
   const handlePageAspectRatioResolved = useCallback(
     (pageIndex: number, aspectRatio: number) => {

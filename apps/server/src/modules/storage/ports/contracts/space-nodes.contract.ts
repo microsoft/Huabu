@@ -66,6 +66,104 @@ export function describeSpaceNodesContract(
       await expect(repository.read('contract-missing')).resolves.toBeNull();
     });
 
+    /**
+     * The four read shapes are one view of one collection.
+     *
+     * Each is free to reach the backend differently — a lookup by id, a
+     * selection, a scan, a scan that yields — so what has to be asserted is
+     * that they never disagree about a node. An adapter whose scan parsed
+     * records more leniently than its single read, or minted a different
+     * revision, would pass every test written against one shape alone.
+     */
+    it('agrees across read, readMany, list, and stream', async () => {
+      const { repository } = await open();
+      const ids = ['contract-agree-a', 'contract-agree-b', 'contract-agree-c'];
+      for (const nodeId of ids) {
+        await putSuccessfully(repository, {
+          nodeId,
+          record: note(nodeId, `Contract ${nodeId}`, `body of ${nodeId}`),
+        });
+      }
+
+      const listed = await repository.list();
+      for (const nodeId of ids) {
+        expect(listed.get(nodeId)).toEqual(await repository.read(nodeId));
+      }
+
+      const selection = ids.slice(0, 2);
+      const many = await repository.readMany(selection);
+      expect([...many.keys()].sort()).toEqual(selection);
+      for (const nodeId of selection) {
+        expect(many.get(nodeId)).toEqual(listed.get(nodeId));
+      }
+
+      const delivered: NodeSnapshot[] = [];
+      const streamed = await repository.stream((snapshot) => {
+        delivered.push(snapshot);
+      });
+      expect(streamed).toEqual(listed);
+      // Delivery order is unspecified, so compare as a set keyed by id.
+      expect(
+        new Map(
+          delivered.map((snapshot) => [snapshot.record.nodeId, snapshot]),
+        ),
+      ).toEqual(listed);
+      expect(delivered).toHaveLength(listed.size);
+    });
+
+    it('omits absent ids from readMany rather than failing', async () => {
+      const { repository } = await open();
+      const present = 'contract-partial-present';
+      await putSuccessfully(repository, {
+        nodeId: present,
+        record: note(present, 'Contract partial', 'here'),
+      });
+
+      const many = await repository.readMany([
+        present,
+        'contract-partial-absent',
+        // A repeated id is one node, not two reads with two answers.
+        present,
+      ]);
+
+      expect([...many.keys()]).toEqual([present]);
+      await expect(repository.readMany([])).resolves.toEqual(new Map());
+    });
+
+    it('reads an absent Space as an empty collection', async () => {
+      const { missingRepository } = await open();
+
+      await expect(missingRepository.list()).resolves.toEqual(new Map());
+      await expect(
+        missingRepository.readMany(['contract-missing-space-node']),
+      ).resolves.toEqual(new Map());
+
+      const delivered: NodeSnapshot[] = [];
+      await expect(
+        missingRepository.stream((snapshot) => delivered.push(snapshot)),
+      ).resolves.toEqual(new Map());
+      expect(delivered).toEqual([]);
+    });
+
+    it('stops delivering to an aborted stream', async () => {
+      const { repository } = await open();
+      const nodeId = 'contract-stream-abort';
+      await putSuccessfully(repository, {
+        nodeId,
+        record: note(nodeId, 'Contract abort', 'body'),
+      });
+
+      const delivered: NodeSnapshot[] = [];
+      // Already aborted, so no adapter has an excuse to deliver: this pins
+      // that the promise still settles rather than that a mid-scan abort is
+      // observed at any particular node.
+      await repository.stream((snapshot) => delivered.push(snapshot), {
+        signal: { aborted: true },
+      });
+
+      expect(delivered).toEqual([]);
+    });
+
     it('returns the exact persisted record and its matching revision from put', async () => {
       const { repository } = await open();
       const input: NodePutInput = {

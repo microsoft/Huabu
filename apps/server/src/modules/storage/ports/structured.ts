@@ -180,6 +180,21 @@ export interface SpaceRepository {
    * A missing or malformed World is an integrity failure and rejects.
    */
   worldId(): Promise<string>;
+  /**
+   * Return the stable World, creating it once if this namespace is new.
+   *
+   * The backend-neutral bootstrap hook. Every backend meets an empty
+   * namespace the first time it is mounted, and a Workspace without a World
+   * has no Portal target and no home view — so ensuring one cannot stay a
+   * Disk-shaped step run before the store exists.
+   *
+   * Idempotent, and deliberately narrower than "create if absent": it mints a
+   * version-0 World only when the namespace holds no World at all. An
+   * *established* World that is missing or malformed stays the integrity
+   * error {@link worldId} reports, because regenerating identity there would
+   * silently orphan every Portal that referenced it.
+   */
+  ensureWorld(): Promise<string>;
   create(input: SpaceCreateInput): Promise<SpaceCreateResult>;
   /**
    * Fence mutations before cross-store cleanup begins.
@@ -471,6 +486,54 @@ export interface SpaceNodes {
    */
   readonly canvasId: string;
   read(nodeId: string): Promise<NodeSnapshot | null>;
+  /**
+   * The named nodes that exist, keyed by stable id.
+   *
+   * An absent id is a missing key, not an error: a caller asking for a
+   * selection is describing what it wants, not asserting that all of it is
+   * there. Reading the same id through {@link read} yields the same record and
+   * the same revision.
+   *
+   * This is the shape most readers want — a selection to describe, a
+   * neighbourhood to render, one View to serve — and it exists so their cost
+   * stays proportional to the request. Expressed as {@link list} the same read
+   * makes an unrelated node somewhere else part of the bill, and no backend
+   * serves that better than it serves a lookup by id.
+   */
+  readMany(nodeIds: readonly string[]): Promise<Map<string, NodeSnapshot>>;
+  /**
+   * Every node in this Space, keyed by stable id.
+   *
+   * For work that genuinely spans the Space — executor prestate hydration,
+   * the Space GET, the canvas outline, cross-node inspection. Iteration order
+   * is unspecified; a caller that needs an order imposes it.
+   */
+  list(): Promise<Map<string, NodeSnapshot>>;
+  /**
+   * {@link list}, delivering each record as it lands.
+   *
+   * `onNode` is invoked once per node, never concurrently with itself, before
+   * the returned map settles; the map is the same collection {@link list}
+   * would return. Delivery order is arrival order, and is deliberately not a
+   * query order — a backend may serve in whatever order is cheapest, and none
+   * of them promises a resumable cursor. This is a latency shape for a reader
+   * that can show partial results, not a pagination contract.
+   */
+  stream(
+    onNode: (snapshot: NodeSnapshot) => void,
+    options?: NodeStreamOptions,
+  ): Promise<Map<string, NodeSnapshot>>;
   put(input: NodePutInput): Promise<NodePutResult>;
   delete(nodeId: string): Promise<NodeDeleteResult>;
+}
+
+export interface NodeStreamOptions {
+  /**
+   * Polled as the scan proceeds; an aborted scan stops delivering early.
+   *
+   * The returned promise still settles, so an adapter never leaks a pending
+   * scan, but its map is then partial by definition. A caller that aborts
+   * must check its own signal rather than reading the result.
+   */
+  readonly signal?: { readonly aborted: boolean };
 }
