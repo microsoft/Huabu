@@ -59,7 +59,10 @@ import {
   type CanvasUiIntent,
   type UiResolverState,
 } from '@/handler/canvasCommand/uiIntent';
-import { mergeLiveDragGeometry } from '@/handler/liveDragGeometry';
+import {
+  compensateDetachedDragPosition,
+  mergeLiveDragGeometry,
+} from '@/handler/liveDragGeometry';
 import { projectStructuredTargetGeometry } from '@/handler/projectStructuredTargetGeometry';
 import {
   applySnap,
@@ -2628,18 +2631,24 @@ const useCanvasStore = create<RFState>()(
         ).nodes;
         const liveById = new Map(liveNodes.map((node) => [node.id, node]));
         const publishGeometryProjection = (projection: NestableNode[]) => {
-          const geometryPreviews = projection.filter((node) => {
-            if (draggedIds.has(node.id)) return false;
+          const geometryPreviews = projection.flatMap((node) => {
             const current = liveById.get(node.id);
-            if (!current) return false;
+            if (!current) return [];
+            if (draggedIds.has(node.id)) {
+              const position = compensateDetachedDragPosition(
+                current,
+                projection,
+              );
+              return position ? [{ ...node, position }] : [];
+            }
             const currentSize = getNodeSize(current);
             const nextSize = getNodeSize(node);
-            return (
+            const changed =
               current.position.x !== node.position.x ||
               current.position.y !== node.position.y ||
               currentSize.width !== nextSize.width ||
-              currentSize.height !== nextSize.height
-            );
+              currentSize.height !== nextSize.height;
+            return changed ? [node] : [];
           });
           useGesturePreviewStore
             .getState()
