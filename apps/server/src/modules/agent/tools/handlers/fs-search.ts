@@ -168,7 +168,7 @@ export async function handleGrep(args: GrepArgs): Promise<string> {
   const globRe = effectiveGlob ? globToRegExp(effectiveGlob) : null;
   const effectiveLimit = Math.max(1, limit ?? DEFAULT_GREP_LIMIT);
   const ctxN = Math.max(0, ctxLines ?? 0);
-  const lookup = makeNodeLookup(args.canvasId);
+  const lookup = await makeNodeLookup(args.canvasId);
   const deadline = Date.now() + GREP_DEADLINE_MS;
 
   // Enumerate candidate files, recording each as a canvas-relative
@@ -289,7 +289,7 @@ export async function handleFind(args: FindArgs): Promise<string> {
   }
 
   const effectiveLimit = Math.max(1, limit ?? DEFAULT_FIND_LIMIT);
-  const lookup = makeNodeLookup(args.canvasId);
+  const lookup = await makeNodeLookup(args.canvasId);
 
   const results: Array<Record<string, unknown>> = [];
   let truncated = false;

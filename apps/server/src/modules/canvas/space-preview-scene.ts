@@ -18,7 +18,7 @@ import {
   stripMarkdown,
 } from '@huabu/shared/canvas-engine';
 
-import { getCanvasStore, getStructuredStore } from '../storage/index.js';
+import { getStructuredStore, space } from '../storage/index.js';
 
 type StoredNode = NestableNode & {
   type?: string;
@@ -146,18 +146,28 @@ export async function getSpacePreviewScene(
     throw new SpacePreviewSceneError(404, 'Target Space was not found');
   }
 
-  const store = getCanvasStore(canvasId);
-  const canvas = store.read();
+  const target = space(canvasId);
+  let canvas;
+  try {
+    canvas = await target.read();
+  } catch {
+    // A record the port refuses to produce is a malformed target, which is
+    // the same 422 the shape checks below raise. Reading it as a file used to
+    // put that judgement here; the port makes it once for every reader, and
+    // this route still owns what the caller is told.
+    throw new SpacePreviewSceneError(422, 'Target Space is malformed');
+  }
   if (!canvas) {
     throw new SpacePreviewSceneError(404, 'Target Space was not found');
   }
 
-  let contentByNodeId;
-  try {
-    contentByNodeId = await store.readAllNodes({ strict: true });
-  } catch {
-    throw new SpacePreviewSceneError(422, 'Target Space content is malformed');
-  }
+  // Node records are read the one lenient way the port defines, which is also
+  // how the Space's own view renders it: a record that cannot be produced is
+  // omitted and the projection falls back to topology data below, and a
+  // record a user broke by hand recovers the same way it does when its Space
+  // is opened. The 422 stays for a malformed *Space record*, which is the
+  // damage that makes the whole projection meaningless.
+  const contentByNodeId = await target.nodes.list();
 
   if (
     !Array.isArray(canvas.state?.nodes) ||
@@ -175,7 +185,7 @@ export async function getSpacePreviewScene(
     const position = absolutePosition(node.id);
     if (!position || !node.type) continue;
     const defaults = getNodeDefaultSize(node.type);
-    const content = contentByNodeId.get(node.id);
+    const content = contentByNodeId.get(node.id)?.record;
     const previewText =
       node.type === 'note' || node.type === 'text'
         ? boundedPreviewText(content?.content ?? node.data?.content)

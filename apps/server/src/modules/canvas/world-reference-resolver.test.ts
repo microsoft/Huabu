@@ -7,10 +7,23 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const workspaceState = vi.hoisted(() => ({ path: '' }));
+const workspaceState = vi.hoisted(() => ({ path: '', leases: 0 }));
 
 vi.mock('../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
+  acquireWorkspaceOperationLease: () => {
+    const workspacePath = workspaceState.path;
+    workspaceState.leases += 1;
+    let released = false;
+    return {
+      workspacePath,
+      release: () => {
+        if (released) return;
+        released = true;
+        workspaceState.leases -= 1;
+      },
+    };
+  },
 }));
 
 import {
@@ -19,12 +32,13 @@ import {
 } from './world-reference-resolver.js';
 import { refreshCanvasDirIndex } from '../storage/canvas-dirs.js';
 
-function writeCanvas(
+function writeCanvasAt(
+  workspacePath: string,
   directory: string,
   canvasId: string,
   nodes: unknown[],
 ): string {
-  const root = path.join(workspaceState.path, directory);
+  const root = path.join(workspacePath, directory);
   mkdirSync(root, { recursive: true });
   writeFileSync(
     path.join(root, 'space.json'),
@@ -41,10 +55,27 @@ function writeCanvas(
   return root;
 }
 
+function writeCanvas(
+  directory: string,
+  canvasId: string,
+  nodes: unknown[],
+): string {
+  return writeCanvasAt(workspaceState.path, directory, canvasId, nodes);
+}
+
+function switchWorkspace(nextPath: string): void {
+  if (workspaceState.leases > 0) {
+    throw new Error('Workspace operation in progress');
+  }
+  workspaceState.path = nextPath;
+  refreshCanvasDirIndex();
+}
+
 beforeEach(() => {
   workspaceState.path = mkdtempSync(
     path.join(tmpdir(), 'huabu-world-references-'),
   );
+  workspaceState.leases = 0;
   writeCanvas('.world', 'canvas-world', [
     {
       id: 'node-portal-a',
@@ -219,14 +250,17 @@ describe('World reference resolution', () => {
     ).toBeUndefined();
   });
 
-  it('surfaces malformed source topology and sidecar data', async () => {
+  it('surfaces a malformed source Space record', async () => {
     writeFileSync(
       path.join(workspaceState.path, 'Project A', 'space.json'),
       '{',
       'utf8',
     );
-    await expect(resolveWorldReferences('canvas-world')).rejects.toThrow();
 
+    await expect(resolveWorldReferences('canvas-world')).rejects.toThrow();
+  });
+
+  it('still resolves a reference whose node record is hand-broken', async () => {
     const sourceRoot = writeCanvas('Project A', 'canvas-a', [
       {
         id: 'node-source',
@@ -240,6 +274,89 @@ describe('World reference resolution', () => {
       '---\ninvalid: "\n---\nbody',
       'utf8',
     );
-    await expect(resolveWorldReferences('canvas-world')).rejects.toThrow();
+
+    // Broken frontmatter is not a read failure — the storage port keeps such
+    // a node readable so it stays repairable through the content PUT. This
+    // resolver used to read source nodes strictly and 500 the whole World
+    // view for one hand-edited file; now the reference resolves with whatever
+    // survived the parse.
+    const { references } = await resolveWorldReferences('canvas-world');
+    const resolved = references.find(
+      (reference) => reference.referenceNodeId === 'node-ref-ok',
+    );
+    expect(resolved?.status).toBe('ok');
+  });
+
+  it('keeps World authorization and referenced records in one Workspace', async () => {
+    const originalWorkspace = workspaceState.path;
+    const otherWorkspace = mkdtempSync(
+      path.join(tmpdir(), 'huabu-world-references-other-'),
+    );
+    writeCanvasAt(otherWorkspace, '.world', 'canvas-world', [
+      {
+        id: 'node-portal-a',
+        type: 'canvasRef',
+        position: { x: 0, y: 0 },
+        data: { targetCanvasId: 'canvas-a' },
+      },
+      {
+        id: 'node-ref-ok',
+        type: 'nodeRef',
+        position: { x: 0, y: 0 },
+        data: { target: { canvasId: 'canvas-a', nodeId: 'node-source' } },
+      },
+    ]);
+    const otherSource = writeCanvasAt(
+      otherWorkspace,
+      'Other Project',
+      'canvas-a',
+      [
+        {
+          id: 'node-source',
+          type: 'note',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+      ],
+    );
+    mkdirSync(path.join(otherSource, 'nodes'));
+    writeFileSync(
+      path.join(otherSource, 'nodes', 'Other note.md'),
+      [
+        '---',
+        'id: node-source',
+        'type: note',
+        'label: Other note',
+        '---',
+        'Other body',
+      ].join('\n'),
+      'utf8',
+    );
+
+    let switchError: unknown;
+    queueMicrotask(() => {
+      try {
+        switchWorkspace(otherWorkspace);
+      } catch (error) {
+        switchError = error;
+      }
+    });
+
+    try {
+      const response = await resolveWorldReferences('canvas-world');
+      const resolved = response.references.find(
+        (reference) => reference.referenceNodeId === 'node-ref-ok',
+      );
+
+      expect(switchError).toBeInstanceOf(Error);
+      expect(workspaceState.path).toBe(originalWorkspace);
+      expect(resolved).toMatchObject({
+        status: 'ok',
+        source: { label: 'Source note', preview: 'Source body' },
+      });
+    } finally {
+      workspaceState.path = originalWorkspace;
+      rmSync(otherWorkspace, { recursive: true, force: true });
+    }
   });
 });

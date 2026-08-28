@@ -461,7 +461,17 @@ export type NodeDeleteResult = 'deleted' | 'absent';
  * content revision. Label allocation is a domain behavior: a non-strict put
  * may return a de-duplicated persisted label, while a strict put reports a
  * `label-conflict`. The contract intentionally says nothing about filenames
- * or physical layout. Environmental and malformed-record failures reject.
+ * or physical layout.
+ *
+ * Every read is **strict about retrievability and lenient about content**. A
+ * record that exists but cannot be produced is an environmental failure and
+ * rejects — never absence, and never a silently shorter collection. A record
+ * whose stored content is malformed is recovered rather than refused, because
+ * on a backend that keeps records in files a user can damage one by hand, and
+ * a record no read will produce cannot be repaired through the routes that
+ * exist to repair it. The two rules hold identically on {@link SpaceNodes.read},
+ * {@link SpaceNodes.readMany}, {@link SpaceNodes.list}, and
+ * {@link SpaceNodes.stream}.
  *
  * Two mutation outcomes are **adapter-shaped** and optional:
  *
@@ -507,6 +517,15 @@ export interface SpaceNodes {
    * For work that genuinely spans the Space — executor prestate hydration,
    * the Space GET, the canvas outline, cross-node inspection. Iteration order
    * is unspecified; a caller that needs an order imposes it.
+   *
+   * Answers about exactly the nodes {@link read} would, under the same two
+   * rules the interface states: a record that cannot be retrieved rejects the
+   * scan, and a record whose content is malformed is recovered. Dropping the
+   * unretrievable member instead — serving the rest of the collection — was
+   * considered and rejected: it would leave this port promising that
+   * environmental failures reject while its two collection shapes reported
+   * absence, and no caller could then tell a Space that lost a node from one
+   * it merely cannot read right now.
    */
   list(): Promise<Map<string, NodeSnapshot>>;
   /**

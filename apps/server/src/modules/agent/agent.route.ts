@@ -546,7 +546,7 @@ const agentRoutes: FastifyPluginAsync = async (
     } = parsed.data;
 
     const resolvedThreadId = getOrCreateThreadId(threadId);
-    const fixedTarget = agentThreadService.resolveFixedTarget(
+    const fixedTarget = await agentThreadService.resolveFixedTarget(
       canvasId,
       resolvedThreadId,
     );

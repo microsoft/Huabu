@@ -53,10 +53,10 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { describeNode, nodeLabel, type NodeInput } from './node-prompt.js';
-import { getCanvasStore } from '../storage/index.js';
+import { space } from '../storage/index.js';
 
 import type { AgentNodeOutline } from '../agent/node-ref.js';
-import type { CanvasFile } from '../storage/canvas-store.js';
+import type { CanvasFile } from '../storage/index.js';
 import type {
   CanvasNodeType,
   CardinalDirection,
@@ -282,13 +282,19 @@ export interface CanvasOutlineOpts {
  * Build the one-shot "map" of a canvas: every node's geometry + edges +
  * spatial clusters. Returns `null` when the canvas does not exist.
  */
-export function buildCanvasOutline(
+export async function buildCanvasOutline(
   canvasId: string,
   opts: CanvasOutlineOpts = {},
-): CanvasOutline | null {
-  const store = getCanvasStore(canvasId);
-  const canvas = store.read();
+): Promise<CanvasOutline | null> {
+  const handle = space(canvasId);
+  const canvas = await handle.read();
   if (!canvas) return null;
+
+  // Whole-Space work: the outline describes every node, so one scan is the
+  // shape (§12.6.1). It also replaces the lazy per-node reads the memo below
+  // used to guard, which no async port could serve from inside a synchronous
+  // map.
+  const records = await handle.nodes.list();
 
   const bundle = buildSpatialBundle(canvas);
   const summary = buildSpatialSummary(bundle.spatialNodes, bundle.edges);
@@ -311,25 +317,20 @@ export function buildCanvasOutline(
 
   // Resolve display labels from the sidecar (topology never carries
   // them), memoized so a frame referenced as many nodes' parent is read once.
-  const labelMemo = new Map<string, string | undefined>();
-  const memoLabel = (id: string): string | undefined => {
-    if (labelMemo.has(id)) return labelMemo.get(id);
-    const l = nodeLabel(store, id);
-    labelMemo.set(id, l);
-    return l;
-  };
+  const labelOf = (id: string): string | undefined =>
+    nodeLabel(records.get(id)?.record ?? null);
 
   const nodes: CanvasOutlineNode[] = bundle.spatialNodes.map((s) => {
     const raw = bundle.rawById.get(s.id);
-    const parentLabel = s.parentId ? memoLabel(s.parentId) : undefined;
+    const parentLabel = s.parentId ? labelOf(s.parentId) : undefined;
     const style = opts.includeStyle ? readVisualStyle(raw) : undefined;
     const out: CanvasOutlineNode = describeNode(
-      store,
       {
         ...spatialNodeInput(s, raw, parentLabel),
         ...(style ? { style } : {}),
       },
       'outline',
+      records.get(s.id)?.record ?? null,
     );
     // The shared builder attaches `summary` (authored abstract) and
     // `preview` (raw body excerpt) from the sidecar; both are text scan
@@ -449,25 +450,23 @@ const DEFAULT_INSPECT_LIMIT = 50;
  * direction, edgeIds, hops, clusterId) are computed during filtering
  * and merged into the final result row.
  */
-export function inspectNodes(
+export async function inspectNodes(
   canvasId: string,
   args: InspectNodesArgs,
-): InspectNodesResult | InspectNodesError {
-  const store = getCanvasStore(canvasId);
-  const canvas = store.read();
+): Promise<InspectNodesResult | InspectNodesError> {
+  const handle = space(canvasId);
+  const canvas = await handle.read();
   if (!canvas) return { error: `Canvas ${canvasId} not found` };
 
   const bundle = buildSpatialBundle(canvas);
+  // An unfiltered inspect returns every node, and `labelPattern` has to test
+  // every candidate, so the candidate set is the Space (§12.6.1).
+  const records = await handle.nodes.list();
 
   // Display labels come from the sidecar (topology never carries them);
   // memoize so the `labelPattern` filter and the result map read each once.
-  const labelMemo = new Map<string, string | undefined>();
-  const memoLabel = (id: string): string | undefined => {
-    if (labelMemo.has(id)) return labelMemo.get(id);
-    const l = nodeLabel(store, id);
-    labelMemo.set(id, l);
-    return l;
-  };
+  const memoLabel = (id: string): string | undefined =>
+    nodeLabel(records.get(id)?.record ?? null);
 
   // Per-node derived fields accumulated during filter passes.
   const derived = new Map<string, Partial<InspectNodeResult>>();
@@ -713,9 +712,9 @@ export function inspectNodes(
     const raw = bundle.rawById.get(s.id);
     const parentLabel = s.parentId ? memoLabel(s.parentId) : undefined;
     const base = describeNode(
-      store,
       spatialNodeInput(s, raw, parentLabel),
       'outline',
+      records.get(s.id)?.record ?? null,
     );
     // Inspect deliberately omits text hints (`summary` / `preview`); agents
     // that need text use `get_canvas_outline({ includePreviews: true })` or
@@ -815,12 +814,11 @@ export type InspectEdgesError = { error: string };
  * `inspect_nodes({ connectedTo }).edgeIds` or directly from a styling
  * task, so even the unfiltered case is bounded in practice.
  */
-export function inspectEdges(
+export async function inspectEdges(
   canvasId: string,
   args: InspectEdgesArgs,
-): InspectEdgesResult | InspectEdgesError {
-  const store = getCanvasStore(canvasId);
-  const canvas = store.read();
+): Promise<InspectEdgesResult | InspectEdgesError> {
+  const canvas = await space(canvasId).read();
   if (!canvas) return { error: `Canvas ${canvasId} not found` };
 
   const bundle = buildSpatialBundle(canvas);

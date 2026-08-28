@@ -30,7 +30,7 @@ import { readFileSync, readdirSync, statSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 
 import { parseFrontmatter } from '../../../../utils/markdown-frontmatter.js';
-import { getCanvasStore, space } from '../../../storage/index.js';
+import { space } from '../../../storage/index.js';
 
 // ─── Always-skipped directory names ─────────────────────────────────────────
 
@@ -320,22 +320,27 @@ export interface NodeMeta {
  * frontmatter `id:` plus `space.json` metadata.
  * Returns `null` otherwise.
  */
-export function makeNodeLookup(
+export async function makeNodeLookup(
   canvasId: string,
-): (canvasRelPath: string) => NodeMeta | null {
+): Promise<(canvasRelPath: string) => NodeMeta | null> {
+  // The Space record is read up front rather than inside the lazy build: the
+  // returned lookup is called synchronously from the search passes, and only
+  // this half of the work crosses the storage port. The directory scan below
+  // stays where it is — the built-in file tools are Disk-only (§6.4.3,
+  // disposition A) and this maps real filenames to records.
+  let file;
+  try {
+    file = await space(canvasId).read();
+  } catch {
+    file = null;
+  }
+
   let cache: Map<string, NodeMeta> | null = null;
   const ensure = (): Map<string, NodeMeta> => {
     if (cache) return cache;
 
     const byId = new Map<string, NodeMeta>();
     const byPath = new Map<string, NodeMeta>();
-
-    let file;
-    try {
-      file = getCanvasStore(canvasId).read();
-    } catch {
-      file = null;
-    }
     if (file) {
       const nodes = (file.state.nodes ?? []) as Array<Record<string, unknown>>;
       for (const n of nodes) {

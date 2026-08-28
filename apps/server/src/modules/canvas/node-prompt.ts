@@ -2,11 +2,11 @@
 // Licensed under the MIT license.
 
 /**
- * Store-aware "node → context" assembly.
+ * "node → context" assembly, over records the caller has already read.
  *
  * ONE rule: a node is carried into the prompt with whatever authored info
  * the caller already has; anything missing (label / body / summary / src)
- * is filled from the node's on-disk `.md` sidecar — the CANONICAL source.
+ * is filled from the node's stored record — the CANONICAL source.
  * Topology never persists `data.label` or note bodies, so a
  * caller that only has the raw canvas node hands in almost nothing and the
  * sidecar supplies the rest. This is the single place assembly lives, so
@@ -22,7 +22,14 @@
  *
  * The pure ladder (`buildAgentNodePreview` / `buildAgentNodeOutline`) stays
  * in `agent/node-ref.ts` and owns the filename rule / preview ladder / rev
- * hash; this module only adds the store lookup that feeds it.
+ * hash; this module only adds the merge that feeds it.
+ *
+ * Nothing here reaches storage. These builders used to take a `CanvasStore`
+ * and read a node lazily when the caller supplied no record, which made a
+ * pure merge into a synchronous Disk dependency that no async port could
+ * satisfy. The record is now an argument: each caller reads what it needs
+ * once, in whatever shape suits its request, and hands the result down
+ * (proposal §12.6.1).
  */
 
 import {
@@ -31,7 +38,7 @@ import {
 } from '../agent/node-ref.js';
 
 import type { AgentNodeOutline, AgentNodePreview } from '../agent/node-ref.js';
-import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
+import type { NodeContent } from '../storage/index.js';
 import type { CanvasNodeType } from '@huabu/shared';
 
 export { renderNodes } from '../agent/conversation/prompt/node-element.js';
@@ -69,16 +76,13 @@ function pick(own: unknown, fromStore: unknown): string | undefined {
 }
 
 /**
- * Merge the caller's authored fields with the sidecar's (own wins). Pass a
- * pre-read `meta` (e.g. from a batch {@link CanvasStore.readAllNodes}) to
- * skip the per-node disk read; pass `null` to force "no sidecar".
+ * Merge the caller's authored fields with the stored record's (own wins).
+ * `null` means the caller looked and there is no record.
  */
 function authoredFields(
-  store: CanvasStore | null,
   input: NodeInput,
-  meta?: NodeContent | null,
+  m: NodeContent | null,
 ): { label?: string; summary?: string; content?: string; src?: string } {
-  const m = meta !== undefined ? meta : store ? store.readNode(input.id) : null;
   const out: {
     label?: string;
     summary?: string;
@@ -101,33 +105,30 @@ function authoredFields(
 
 /**
  * Node → LLM-facing data object at the requested `level`. Carries the
- * caller's authored fields and fills any gaps from the sidecar; always
- * emits `rev` for content-bearing nodes (the freshness / CAS token).
- * `store` may be `null` (e.g. the store is unavailable) — then only the
- * caller's own fields are used.
+ * caller's authored fields and fills any gaps from `record`; always emits
+ * `rev` for content-bearing nodes (the freshness / CAS token). Pass `null`
+ * when the node has no stored record — then only the caller's own fields
+ * are used.
  */
 export function describeNode(
-  store: CanvasStore | null,
   input: NodeInput,
   level: 'preview',
-  meta?: NodeContent | null,
+  record: NodeContent | null,
 ): AgentNodePreview;
 export function describeNode(
-  store: CanvasStore | null,
   input: NodeInput,
   level: 'outline',
-  meta?: NodeContent | null,
+  record: NodeContent | null,
 ): AgentNodeOutline;
 export function describeNode(
-  store: CanvasStore | null,
   input: NodeInput,
   level: NodeLevel,
-  meta?: NodeContent | null,
+  record: NodeContent | null,
 ): AgentNodePreview | AgentNodeOutline {
   const common = {
     id: input.id,
     type: (input.type ?? 'note') as CanvasNodeType,
-    ...authoredFields(store, input, meta),
+    ...authoredFields(input, record),
   };
   if (level === 'outline') {
     return buildAgentNodeOutline({
@@ -147,15 +148,12 @@ export function describeNode(
 }
 
 /**
- * Resolve just a node's display label from the sidecar. Used for the
+ * Resolve just a node's display label from its stored record. Used for the
  * parent-frame `label=` hint — a plain string, not an agent-facing node,
  * so it needs no rev.
  */
-export function nodeLabel(
-  store: CanvasStore,
-  nodeId: string,
-  meta?: NodeContent | null,
-): string | undefined {
-  const m = meta !== undefined ? meta : store.readNode(nodeId);
-  return typeof m?.label === 'string' && m.label ? m.label : undefined;
+export function nodeLabel(record: NodeContent | null): string | undefined {
+  return typeof record?.label === 'string' && record.label
+    ? record.label
+    : undefined;
 }

@@ -46,7 +46,7 @@ import { agenetes } from '../agent/agenetes/drivers.js';
 import { chatEnvelopeFromSubmission } from '../agent/agenetes/handle.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
-import type { CanvasStore, NodeContent } from '../storage/canvas-store.js';
+import type { NodeContent, Space } from '../storage/index.js';
 import type { AgentTurn } from '@agenetes/protocol';
 
 /** Window of characters shown around each match in `snippet`. */
@@ -531,20 +531,20 @@ export function extractSearchableEdges(state: unknown): SearchableEdge[] {
 }
 
 /**
- * Drive a search directly off a {@link CanvasStore}.
+ * Drive a search off one Space.
  *
- * Streams meta-tier matches as each sidecar lands (no `await`-all
+ * Streams meta-tier matches as each record lands (no `await`-all
  * barrier in front of the first emit). Content tier runs after the
  * stream settles, scanning the in-memory cache that was built as a
- * side effect of the meta walk — zero extra disk reads.
+ * side effect of the meta walk — zero extra reads.
  */
 export async function searchCanvas(
-  store: CanvasStore,
+  handle: Space,
   request: CanvasSearchRequest,
   emit: (event: CanvasSearchEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const file = store.read();
+  const file = await handle.read();
   if (!file) {
     emit({ type: 'error', message: 'Canvas not found' });
     return;
@@ -583,22 +583,31 @@ export async function searchCanvas(
   // invokes the callback synchronously as each file resolves, so a
   // match against the very first parsed file ships before any of the
   // remaining files are even opened.
-  const contentByNodeId = await store.streamAllNodes((id, content) => {
-    if (signal?.aborted) return;
-    if (!wantsMeta) return;
-    if (totalEmitted >= limit) {
-      truncated = true;
-      return;
-    }
-    const node = candidateById.get(id);
-    // Skip sidecars that belong to nodes filtered out by
-    // `nodeId` / `nodeTypes` — we still read them (the directory
-    // walk is unfiltered) but they contribute nothing here.
-    if (!node) return;
-    scanNodeMeta(node, content, fields, needleLower, needleLen, (m) =>
-      tryEmitMatch('meta', m),
-    );
-  }, signal);
+  const streamed = await handle.nodes.stream(
+    (snapshot) => {
+      const id = snapshot.record.nodeId;
+      const content = snapshot.record;
+      if (signal?.aborted) return;
+      if (!wantsMeta) return;
+      if (totalEmitted >= limit) {
+        truncated = true;
+        return;
+      }
+      const node = candidateById.get(id);
+      // Skip sidecars that belong to nodes filtered out by
+      // `nodeId` / `nodeTypes` — we still read them (the directory
+      // walk is unfiltered) but they contribute nothing here.
+      if (!node) return;
+      scanNodeMeta(node, content, fields, needleLower, needleLen, (m) =>
+        tryEmitMatch('meta', m),
+      );
+    },
+    signal ? { signal } : undefined,
+  );
+  const contentByNodeId = new Map<string, NodeContent>();
+  for (const [id, snapshot] of streamed) {
+    contentByNodeId.set(id, snapshot.record);
+  }
 
   if (signal?.aborted) return;
 
@@ -677,7 +686,7 @@ export async function searchCanvas(
       const label = content?.label ?? null;
       scanNodeConversation(
         node,
-        store.canvasId,
+        handle.canvasId,
         label,
         needleLower,
         needleLen,
