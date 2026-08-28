@@ -258,10 +258,17 @@ test.describe('note auto height', () => {
       parseFloat((element as HTMLElement).style.height),
     );
 
+    // The preview workspace no longer opens itself when a note is
+    // created, so drive the shipped path: select the note, then hit
+    // Expand on its floating toolbar.
+    await note.click({ force: true });
+    await page.getByRole('button', { name: 'Expand', exact: true }).click();
+    await expect(page.locator('[data-search-scope="node"]')).toHaveCount(1);
+
     const editor = page.locator(
       '[data-search-scope="node"] .ProseMirror[contenteditable="true"]',
     );
-    await expect(editor).toHaveCount(1);
+    await expect(editor).toHaveCount(1, { timeout: 15_000 });
 
     const longContent = Array.from(
       { length: 12 },
@@ -269,7 +276,11 @@ test.describe('note auto height', () => {
         `Section ${index + 1}. This manually edited paragraph is long enough to wrap and must expand the mounted note.`,
     ).join('\n\n');
     await editor.fill(longContent);
-    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    // Leave the preview the way a user does. The close control is only
+    // rendered when the panel is not embedded, so drive the keyboard
+    // path, which works in both presentations.
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-search-scope="node"]')).toHaveCount(0);
 
     await expect
       .poll(() =>
