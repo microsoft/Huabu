@@ -144,13 +144,13 @@ All questions run through `/api/agent` ([agent.ts](../../apps/web/src/api/agent.
 
 ### 5.3 Spatial context (server-side)
 
-Resolved entirely on the server — no spatial geometry crosses the wire. `renderNodeNeighbourhoodMarkdown(canvasId, anchorNodeId)` ([node-neighbourhood.ts](../../apps/server/src/modules/canvas/node-neighbourhood.ts)) walks inside-out (frame → grandframe → canvas) and serialises a priority-tiered neighbourhood into the agent's preamble:
+Resolved entirely on the server — no spatial geometry crosses the wire. `renderNodeNeighbourhoodMarkdown(canvasId, anchorNodeId)` ([node-neighbourhood.ts](../../apps/server/src/modules/canvas/node-neighbourhood.ts)) serialises a bounded, priority-tiered neighbourhood into the agent's preamble:
 
-| Priority | Source                       | Detail          | Why                   |
-| -------- | ---------------------------- | --------------- | --------------------- |
-| P0       | edges touching the node      | full snippet    | explicit user intent  |
-| P1       | same-frame siblings          | summary + label | topically related     |
-| P2       | distance-sorted nearby nodes | label + snippet | proximity ≈ relevance |
+| Priority | Source                                              | Inclusion rule                              | Why                                  |
+| -------- | --------------------------------------------------- | ------------------------------------------- | ------------------------------------ |
+| P0       | nodes connected directly to the anchor              | always, regardless of distance              | explicit user intent                 |
+| P1       | the direct containing Frame and its direct siblings | always, regardless of distance              | preserves the anchor's local context |
+| P2       | other distance-sorted spatial neighbours            | at most 600 px edge-to-edge from the anchor | bounds prompt token consumption      |
 
 The LLM gets natural-language topology; for exact coordinates it calls
 `get_space_outline` / `inspect_nodes` on demand.
