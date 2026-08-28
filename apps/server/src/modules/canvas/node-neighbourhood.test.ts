@@ -37,7 +37,7 @@ function includedIds(
 describe('buildNodeNeighbourhoodContext', () => {
   it('uses a narrow default radius for ordinary spatial neighbours', () => {
     const ids = includedIds(
-      [node('anchor', 0), node('nearby', 500), node('distant', 800)],
+      [node('anchor', 0), node('nearby', 500), node('distant', -501)],
       [],
     );
 

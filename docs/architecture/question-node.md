@@ -150,7 +150,7 @@ Resolved entirely on the server — no spatial geometry crosses the wire. `rende
 | -------- | --------------------------------------------------- | ------------------------------------------- | ------------------------------------ |
 | P0       | nodes connected directly to the anchor              | always, regardless of distance              | explicit user intent                 |
 | P1       | the direct containing Frame and its direct siblings | always, regardless of distance              | preserves the anchor's local context |
-| P2       | other distance-sorted spatial neighbours            | at most 600 px edge-to-edge from the anchor | bounds prompt token consumption      |
+| P2       | other distance-sorted spatial neighbours            | at most 400 px edge-to-edge from the anchor | bounds prompt token consumption      |
 
 The LLM gets natural-language topology; for exact coordinates it calls
 `get_space_outline` / `inspect_nodes` on demand.

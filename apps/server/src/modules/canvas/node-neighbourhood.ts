@@ -51,7 +51,7 @@ import { getCanvasStore } from '../storage/index.js';
 import type { AgentNodePreview } from '../agent/node-ref.js';
 import type { CanvasNodeType, SpatialNode } from '@huabu/shared';
 
-const DEFAULT_NEIGHBOURHOOD_RADIUS = 600;
+const DEFAULT_NEIGHBOURHOOD_RADIUS = 400;
 
 // ─── Public entry point ─────────────────────────────────────────────────────
 
