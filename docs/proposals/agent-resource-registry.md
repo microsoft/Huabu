@@ -1,470 +1,444 @@
-# Machine-Aware Agent Resource Registry
+# Agent Resource Registry and External Agent Capabilities
 
-Status: Draft
+Status: Proposed
 
-Last updated: 2026-08-27
+Last updated: 2026-08-28
 
-Tracking issue: [#120](https://github.com/microsoft/Huabu/issues/120)
+Tracking issues: [#120](https://github.com/microsoft/Huabu/issues/120), [#110](https://github.com/microsoft/Huabu/issues/110)
 
-Initial child implementation: [#110](https://github.com/microsoft/Huabu/issues/110)
+Supersedes: the earlier machine-aware registry draft previously stored at this path
 
-## 1. Context
+## 1. Decision
 
-Huabu exposes agent-facing resources through several independent mechanisms: RFS Skills and direct Space operations, built-in agent tools, Agenetes Agent Profiles, Agent Team Config, Agentlet-provided process environments, distributed scripts, Canvas artifacts, and user-authored instructions.
+Huabu will expose one compact Agent Resource Registry to external agents and will use that registry as the composition boundary for External Agent Profiles.
 
-External agents currently have no single catalogue that answers which resources exist, which apply to their current machine and conversation, how to access them, and which prerequisites are missing. Adding one bespoke integration per capability would duplicate discovery, authorization, secret handling, and versioning.
+Delivery is split into three phases:
 
-The Agent Resource Registry provides one machine-aware catalogue over those existing sources. An agent receives a compact projection first and loads or invokes an individual resource only when needed.
+1. Phase 1 establishes the registry, local resource management, and Profile resource composition, using existing Agent Teams such as HackMD and slide makers as acceptance fixtures.
+2. Phase 2 registers Huabu-hosted capabilities such as web search and image generation, with credentials and policy enforcement remaining inside Huabu.
+3. Phase 3 converts bundled Agent Team presets into ordinary External Agent Profiles composed from registry resources and eventually replaces the current Agent Team Setup flow with agent-assisted local resource installation.
 
-The registry is conceptually similar to an installed-program or device registry: it records stable logical resources and their applicable access locations, but it does not become the storage location for every resource body or secret.
+Phase 1 and Phase 2 are planned for one implementation pull request. Phase 3 remains a separate migration because it removes an existing preparation and security boundary.
 
-## 2. Goals
+## 2. Problem
 
-1. Give built-in and external agents one normalized catalogue of Skills, hosted tools, Agent Profiles, scripts, artifacts, executables, environment declarations, instructions, and composite Connectors.
-2. Project only resources applicable to the current Machine, Profile, Canvas, thread, and authorization context.
-3. Separate stable logical resource identity from machine-specific paths, caches, versions, and availability.
-4. Let agents discover compact summaries and fetch detailed instructions or schemas on demand.
-5. Preserve existing sources of truth rather than copying Profile, Skill, secret, or artifact state into another authoritative database.
-6. Keep secrets server-side and expose only bounded readiness and injection semantics.
-7. Support rapid schema evolution through explicit versions on every durable or wire-level contract.
-8. Let the first version accept user-declared machine placements without requiring a new Agentlet resource-probe protocol.
+Huabu currently exposes resources through unrelated mechanisms:
 
-## 3. Non-goals
+- the Huabu Access Skill and focused RFS guides;
+- direct RFS Space query and command capabilities;
+- built-in Huabu agent tools;
+- command-backed External Agent Profiles;
+- Agent Team manifests, Configs, setup state, and prepared workspaces;
+- Agentlet-managed shared npm tools and distributed files;
+- machine-local Skills, scripts, connectors, and executables.
 
-- Automatically maintaining desired software state on every machine.
-- Continuously reinstalling a resource after a user removes it.
-- Adding a generic remote-command or arbitrary probe API to Agentlet.
-- Treating an agent's claim that installation succeeded as trusted machine state.
-- Replacing RFS, MCP, Agenetes Profiles, Agent Team manifests, package managers, or the SecretStore.
-- Exposing secret values, provider credentials, privileged host configuration, or unrestricted environment inheritance.
-- Standardizing the final field-level schemas before the HackMD proof of concept validates the model.
+An external agent has no single answer to four basic questions:
 
-## 4. Ownership
+1. Which resources are available to this Profile?
+2. Which resources exist on the machine where this agent is running?
+3. How should the agent read or invoke each resource?
+4. Which resources are unavailable because configuration, authorization, or installation is missing?
 
-Huabu Server owns the registry's product semantics, aggregation, authorization filtering, user annotations, and final projection.
+The current Agent Team model packages these concerns together. This works for fixed presets but makes capabilities difficult to compose across ordinary External Agent Profiles and encourages a new bespoke integration for every hosted tool.
 
-RFS is the primary discovery and access adapter for external agents. Built-in agents consume the same registry service directly instead of making an HTTP request back into Huabu.
+## 3. Goals
 
-Agenetes remains authoritative for Agent Profiles, Deployments, threads, driver state, and Agentlet placement identity. It provides runtime context and registered resources but does not own Huabu's resource catalogue.
+1. Define one small, versioned resource contract for Huabu-hosted and machine-local agent resources.
+2. Make resource discovery compact and detail loading on demand.
+3. Let an External Agent Profile select a set of resources.
+4. Attach Huabu Access and Local Resource Management to External Agent Profiles by default.
+5. Project machine-local resources only to agents running on the applicable Agentlet machine.
+6. Keep provider credentials and managed Config values outside registry records, prompts, durable WorkloadSpecs, generated files, and client-visible state.
+7. Reuse existing authoritative sources instead of copying their complete state into a second database.
+8. Preserve existing Agent Team Setup during Phases 1 and 2.
+9. Give hosted capabilities one shared implementation used by built-in and external agents.
+10. Make the Phase 3 removal of Agent Team Setup conditional on replacing all of its preparation and validation guarantees.
 
-Agentlet remains the process and machine execution layer. The MVP does not add resource discovery to Agentlet. A future typed probe protocol may report machine-observed placements, but Agentlet does not own the registry or interpret Huabu resource semantics.
+## 4. Non-goals
 
-Every contributing subsystem remains authoritative for its own facts:
+- Building a general package marketplace.
+- Automatically installing arbitrary resources without user approval.
+- Treating agent-authored claims as proof that a resource is installed or safe.
+- Continuously reconciling desired software state on every machine.
+- Copying secret values or complete Agent Team manifests into the registry.
+- Removing Agent Team Setup in Phase 1 or Phase 2.
+- Giving external agents arbitrary provider, credential, endpoint, model, Canvas, Profile, machine, or thread selection.
+- Replacing RFS Space query and command contracts.
+- Requiring MCP as the initial transport.
+
+## 5. Ownership
+
+Huabu Server owns resource definitions for Huabu Skills and hosted capabilities, Profile resource selection, authorization projection, and the external RFS adapter.
+
+Agentlet owns the physical machine resource root, installation receipts, machine-local paths, executable resolution, and the process environment supplied to agents on that machine.
+
+Agenetes owns Agent Profiles, WorkloadSpecs, thread lifecycle, placement identity, durable workload snapshots, and driver routing.
+
+Existing subsystems remain authoritative for their own facts:
 
 | Source | Authoritative facts |
 | --- | --- |
-| Huabu Skill loader | System Skills, Canvas overrides, and effective Skill content |
-| RFS capability registry | Direct Space query and command contracts |
-| Huabu hosted capability providers | Hosted-tool availability and invocation |
-| SecretStore | Whether a logical secret is configured and injectable |
-| Agenetes | Profiles, threads, placement identity, and runtime readiness |
-| Canvas BlobStore | Artifact identity and availability |
-| User registry configuration | Connector definitions, annotations, and declared machine placements |
-| Future Agentlet probe | Machine-observed executable, cache, file, and version facts |
+| Huabu external-agent Skill loader | Huabu Access and focused guide content |
+| Huabu hosted capability service | Hosted capability schema, readiness, policy, and invocation |
+| Huabu SecretStore | Credential availability and secret values |
+| Agenetes Agent Profile registry | Profile identity, placement, and launch configuration |
+| Agentlet resource manager | Local installation paths, receipts, versions, and validation |
+| Existing Agent Team registry | Member Config, preparation, and prepared runtime state during migration |
+| Profile resource binding | User-selected logical resource IDs |
 
-## 5. Design principles
+## 6. Resource model
 
-### 5.1 Registry as projection, not duplicated storage
+The registry uses one versioned discriminated `AgentResource` union rather than separate Definition, Placement, Annotation, Connector, Secret Requirement, Access, Requirements, and Observation models.
 
-The registry federates existing sources and computes an effective view. It may cache projections and user-authored declarations, but it does not copy authoritative Skill bodies, Profile launch records, secret values, or artifact bytes.
+The common shape is:
+
+```ts
+interface AgentResourceBase {
+  schemaVersion: 1;
+  id: string;
+  kind: 'skill' | 'hosted-tool' | 'local-resource';
+  contractVersion: number;
+  name: string;
+  summary: string;
+  provider: ResourceProvider;
+  availability: ResourceAvailability;
+  access: ResourceAccess;
+}
+```
+
+`provider` identifies the authority that can establish availability:
+
+```ts
+type ResourceProvider =
+  | { kind: 'huabu' }
+  | { kind: 'agentlet-machine'; agentletId: string };
+```
+
+`availability` is intentionally small:
+
+```ts
+type ResourceAvailability =
+  | { status: 'available' }
+  | { status: 'unavailable'; reason: string }
+  | { status: 'forbidden' };
+```
+
+An unavailable reason is a stable, safe code such as `not_installed`, `not_configured`, `machine_offline`, `profile_not_bound`, or `provider_unavailable`. It never includes a secret, command output, provider response body, or privileged path that the caller is not already authorized to read.
+
+`access` determines how the resource is consumed:
+
+```ts
+type ResourceAccess =
+  | { kind: 'rfs-skill'; path: string }
+  | { kind: 'hosted-invocation'; resourceId: string }
+  | { kind: 'local-path'; path: string; entrypoint?: string };
+```
+
+The access union is closed and versioned by the resource schema. Callers do not infer behavior from arbitrary URLs, commands, or prose.
+
+## 7. Initial registry
+
+The initial registry contains:
+
+| Resource ID | Kind | Provider | Purpose |
+| --- | --- | --- | --- |
+| `huabu.skill.access` | `skill` | Huabu | Discover and operate the current Huabu Space through RFS |
+| `huabu.skill.local-resource-management` | `skill` | Huabu | Install and manage authorized machine-local Skills and CLI tools |
+| `huabu.tool.web-search` | `hosted-tool` | Huabu | Search the web through the user's configured Huabu integration |
+| `huabu.tool.generate-image` | `hosted-tool` | Huabu | Generate an image through the user's configured Huabu image provider |
+| `machine:<agentletId>:connector:<name>` | `local-resource` | Agentlet machine | Use a machine-local connector package |
+| `machine:<agentletId>:skill:<name>` | `local-resource` | Agentlet machine | Load an installed third-party Skill |
+| `machine:<agentletId>:tool:<name>` | `local-resource` | Agentlet machine | Invoke an installed CLI tool |
+
+Resource IDs are logical identifiers. Absolute machine paths remain in the applicable local resource entry and never become the identity.
+
+## 8. Local resource management
+
+Agentlet provides `AGENT_RESOURCE_DIR` to every spawned external agent. The default is an absolute machine-local directory under `~/.agentlet/resources`.
 
 ```text
-Skills / RFS capabilities / hosted tools / SecretStore
-Agenetes Profiles and placement / artifacts / user declarations
-                              |
-                              v
-                  Huabu registry projection
-           filtered by machine/profile/canvas/thread
-                              |
-                  +-----------+-----------+
-                  |                       |
-                  v                       v
-          RFS external adapter      built-in adapter
+~/.agentlet/resources/
+  skills/       # cloned or installed Agent Skills
+  tools/        # managed CLI packages and launch shims
+  connectors/   # resource bundles such as HackMD publishing
+  receipts/     # machine-owned installation and validation records
 ```
 
-### 5.2 Strict contract, agent-friendly view
+The physical root belongs to Agentlet because Agentlet knows the execution machine and launches the process that consumes these files. Huabu receives a bounded projection of validated resource metadata; it does not scan arbitrary machine paths itself.
 
-Runtime-validatable JSON schemas are authoritative for identity, authorization, access methods, status, and invocation. Markdown catalogues and meta prompts are generated views optimized for agent reading; they are never the source of truth.
+The Local Resource Management Skill explains how an external agent:
 
-The compact view contains only resource identity, kind, summary, readiness, and a link for loading details. Detailed schemas, instructions, or content are fetched on demand.
+1. inspects the current resource catalogue;
+2. identifies a missing Skill, connector, or CLI;
+3. presents the exact source, version or commit, destination, and commands to the user;
+4. obtains user approval before installation or mutation;
+5. installs only under `AGENT_RESOURCE_DIR` unless the user explicitly authorizes another location;
+6. validates the expected entrypoint and records a receipt;
+7. requests a registry refresh;
+8. updates or removes a resource without editing the user's project directory.
 
-### 5.3 Definition is not placement
+The Skill is procedural guidance, not an authorization mechanism. Installation remains subject to the external harness permission flow and host policy.
 
-A Resource Definition describes a stable logical resource. A Placement describes how that resource applies at a particular host or machine. Paths and URLs are access locations, not resource identities.
+An agent cannot mark a resource available by editing registry state. Availability comes from Agentlet validation of the installed path and receipt.
+
+## 9. Profile resource composition
+
+Every ordinary External Agent Profile has a set of logical resource IDs.
+
+`huabu.skill.access` and `huabu.skill.local-resource-management` are default resources. Other resources are optional and selected by the user.
+
+Profile selection is constrained by placement:
+
+- Huabu-hosted resources are eligible for any local External Agent Profile when host policy allows them.
+- A machine-local resource is eligible only when its `agentletId` matches the Profile placement.
+- Missing, stale, or unavailable resources remain visible in Profile editing with a safe reason but do not become usable at runtime.
+
+When a thread first realizes a Profile, the effective resource selection and contract versions are snapshotted into the durable workload configuration. Later Profile edits do not silently change an existing thread.
+
+Secrets are resolved at invocation or process-spawn time through runtime ports. Secret values never enter the Profile record or durable resource snapshot.
+
+## 10. Discovery
+
+RFS exposes a bounded list/detail surface:
 
 ```text
-Resource Definition x applicable Placement = effective Resource projection
+GET $HUABU_RFS_URL/resources
+GET $HUABU_RFS_URL/resources/:resourceId
 ```
 
-### 5.4 Requirements, not desired installation
+The list response contains only identity, kind, summary, availability, and a detail link. The detail response contains the complete authorized resource record and any input/output schema needed to use it.
 
-The MVP Connector model declares what is required to perform a capability. It does not declare that Huabu must continuously keep a package installed on a machine.
+The external-agent bootstrap contains only the two default Skill references and the resource discovery entrypoint. It does not inline the complete registry or every Skill body.
 
-If a user removes a declared executable, Huabu does not automatically reinstall it. The next attempted use fails explicitly, and an agent may propose or perform another user-authorized installation.
+Discovery is not authorization. Every read or invocation re-evaluates the active runtime grant.
 
-### 5.5 Agent-driven, host-verified evolution
+## 11. Hosted capability invocation
 
-An agent may discover a missing prerequisite, explain an installation recipe, request approval, perform an authorized installation, and request a registry refresh. It may not directly promote a placement to a trusted observed state.
-
-The MVP has no generic machine verifier, so user-provided placements remain `declared`. A future trusted machine probe may add `observed` or `verified` evidence without changing the logical Resource Definition.
-
-## 6. Conceptual model
-
-The examples in this section are illustrative. Exact Zod schemas and field naming remain subject to the HackMD proof of concept, but every independently evolving contract carries an explicit schema version from its first release.
-
-### 6.1 Resource Definition
-
-A Resource Definition gives one logical resource a stable identity, kind, human-readable metadata, contract version, and kind-specific specification.
-
-```yaml
-schemaVersion: 1
-id: executable.hackmd-cli
-kind: executable
-contractVersion: 1
-name: HackMD CLI
-summary: Command-line client used to publish and manage HackMD notes.
-spec:
-  command: hackmd
-  versionConstraint: ">=1 <2"
-annotations:
-  whenToUse: Use through the HackMD Connector rather than invoking it without the Huabu publishing instructions.
-```
-
-`schemaVersion` versions the Resource Definition envelope. `contractVersion` versions the behavior or content contract of this particular resource.
-
-### 6.2 Placement
-
-A Placement relates a logical resource to a host or machine and describes its declared or authoritative access method.
-
-```yaml
-schemaVersion: 1
-resourceId: executable.hackmd-cli
-scope:
-  kind: machine
-  machineId: machine-a
-source: user
-status: declared
-access:
-  schemaVersion: 1
-  kind: executable-path
-  path: /usr/local/bin/hackmd
-declaredVersion: 1.2.0
-updatedAt: 2026-08-27T10:00:00Z
-```
-
-The MVP accepts user-authored placements with `source: user` and `status: declared`. A declaration means that the user intends the path or access method to be usable; it is not a trusted observation.
-
-Huabu-hosted resources may use `source: host` and an authoritative `available` or `unavailable` status because Huabu can directly evaluate those facts. Future machine probes may use `source: machine-probe` with explicit observation and expiry fields.
-
-### 6.3 Annotation
-
-Annotations enrich resource discovery without altering trusted execution fields.
-
-```yaml
-schemaVersion: 1
-resourceId: connector.hackmd
-source: user
-content:
-  whenToUse: Publish a connected group of Space notes as one HackMD document.
-  guidance: Inspect nodes connected to the selected note before publishing.
-```
-
-User annotations cannot override resource IDs, access methods, schemas, authorization, secret policies, limits, or provider-controlled readiness.
-
-### 6.4 Connector Bundle
-
-A Connector is a composite Resource Definition that declares requirements and instruction overlays. It is a capability recipe rather than a package archive or installed process.
-
-```yaml
-schemaVersion: 1
-id: connector.hackmd
-kind: connector
-contractVersion: 1
-name: HackMD Connector
-summary: Publish Huabu Space content to HackMD.
-spec:
-  requirementsSchemaVersion: 1
-  requirements:
-    - resourceId: skill.hackmd.official
-      relationship: required
-    - resourceId: executable.hackmd-cli
-      relationship: required
-      versionConstraint: ">=1 <2"
-    - resourceId: secret.hackmd-token
-      relationship: required
-    - resourceId: instructions.huabu-hackmd-publishing
-      relationship: required
-```
-
-The initial dependency vocabulary is `required` only. `optional`, `one-of`, conflicts, and conditional dependencies require explicit schema evolution rather than being encoded in annotation prose.
-
-### 6.5 Secret Requirement
-
-A Secret Requirement identifies a logical prerequisite and its injection boundary without exposing the value.
-
-```yaml
-schemaVersion: 1
-id: secret.hackmd-token
-kind: secret-requirement
-contractVersion: 1
-name: HackMD API token
-spec:
-  secretId: integration:hackmd:token
-  delivery: process-environment
-  environmentVariable: HACKMD_TOKEN
-  exposure: invocation-only
-```
-
-Registry projections may expose only `configured`, `injectable`, `missing`, or `forbidden`. They never include the value, ciphertext, provider endpoint, or a caller-selectable secret ID.
-
-### 6.6 Access Method
-
-Access is a versioned discriminated union. Initial conceptual variants include:
-
-- `rfs-document` for Skills and generated guides.
-- `rfs-download` for artifacts.
-- `hosted-invocation` for Huabu tools such as web search and image generation.
-- `agent-profile` for Agenetes-backed Agent creation.
-- `executable-path` for a user-declared machine-local executable.
-- `local-path` for a user-declared folder, Skill cache, or script.
-
-Every access value carries its own `schemaVersion`. Callers must never infer access behavior from a path or URL string alone.
-
-## 7. HackMD proof of concept
-
-The HackMD Connector is the design proof of concept because it combines every important resource class:
-
-1. The official HackMD Skill begins as a GitHub source and may have a different local cache on each machine.
-2. `hackmd-cli` is installed independently on each machine, for example with `npm install -g`.
-3. A HackMD token is stored in Huabu's SecretStore and injected only at an authorized execution boundary.
-4. Huabu-specific instructions require the agent to inspect connected Space nodes before publishing.
-
-### 7.1 Logical resources
+Phase 2 adds:
 
 ```text
-connector.hackmd
-  requires skill.hackmd.official
-  requires executable.hackmd-cli
-  requires secret.hackmd-token
-  requires instructions.huabu-hackmd-publishing
-```
-
-The official Skill and Huabu instruction overlay remain separate resources. Updating or replacing the upstream Skill cannot erase Huabu's publishing policy, and user annotation cannot mutate either trusted contract.
-
-### 7.2 User-declared Machine A placements
-
-```yaml
-schemaVersion: 1
-machineId: machine-a
-placements:
-  - schemaVersion: 1
-    resourceId: skill.hackmd.official
-    source: user
-    status: declared
-    access:
-      schemaVersion: 1
-      kind: local-path
-      path: /home/user/.cache/huabu/skills/hackmd
-  - schemaVersion: 1
-    resourceId: executable.hackmd-cli
-    source: user
-    status: declared
-    access:
-      schemaVersion: 1
-      kind: executable-path
-      path: /usr/local/bin/hackmd
-```
-
-The token readiness comes from Huabu's SecretStore rather than the machine declaration. The Huabu instruction overlay comes from the Huabu registry provider. The effective Connector view combines all four sources.
-
-### 7.3 Effective projection
-
-```yaml
-schemaVersion: 1
-registryProtocolVersion: 1
-resourceId: connector.hackmd
-contractVersion: 1
-scope:
-  machineId: machine-a
-  canvasId: canvas-123
-  threadId: thread-456
-readiness: declared
-requirements:
-  - resourceId: skill.hackmd.official
-    status: declared
-  - resourceId: executable.hackmd-cli
-    status: declared
-  - resourceId: secret.hackmd-token
-    status: injectable
-  - resourceId: instructions.huabu-hackmd-publishing
-    status: available
-```
-
-Because the machine-local dependencies are user-declared, the aggregate readiness is `declared`, not `verified`. A failed invocation returns an explicit unavailable-resource result and does not silently downgrade or rewrite the user's declaration.
-
-### 7.4 Agent-driven installation
-
-The MVP does not reproduce the current Agent Team Setup state machine.
-
-```text
-Agent reads connector.hackmd
-  -> sees executable.hackmd-cli missing or undeclared
-  -> reads a trusted or user-authored installation recipe
-  -> requests user approval when policy requires it
-  -> runs npm install -g hackmd-cli on its current machine
-  -> asks the user or registry API to add/update the declared Placement
-  -> retries use under the normal resource error contract
-```
-
-An installation recipe is guidance and proposed action, not proof of installed state. The MVP records the resulting Placement as user-declared. A future machine probe can independently resolve the executable, read its version, and publish a time-bounded observation.
-
-## 8. Projection and discovery
-
-The registry computes an effective view from the authenticated runtime context:
-
-```text
-machine + agentlet placement + profile + canvas + thread + authorization
-                                  |
-                                  v
-                      bounded Resource catalogue
-```
-
-Machine-scoped placements are included only for the current machine. Resources with a valid remote or Huabu-hosted access method may remain visible across machines when authorization permits.
-
-The agent-facing surface follows an MCP-inspired list/detail/access split without requiring MCP as the initial transport:
-
-```text
-GET  $HUABU_RFS_URL/resources
-GET  $HUABU_RFS_URL/resources/:resourceId
 POST $HUABU_RFS_URL/resources/:resourceId/invoke
-POST $HUABU_RFS_URL/resources/refresh
 ```
 
-These paths are provisional. The shared wire contracts, not this path sketch, are authoritative once implementation begins.
+The request contains:
 
-The list response is bounded and paginated. Details include kind-specific schemas, requirements, annotations, limits, and access methods. Invocation exists only for invocable kinds; documents and artifacts use their advertised read or download access.
+- the resource contract major version;
+- capability-specific input validated against the canonical schema;
+- an optional caller correlation ID.
 
-The RFS Skill bootstrap may render a compact Markdown table generated from the same projection:
+The request does not accept Canvas ID, Profile ID, thread ID, machine ID, provider, credential ID, API key, or unrestricted model and endpoint overrides.
 
-| Resource | Kind | Summary | Readiness | Load |
-| --- | --- | --- | --- | --- |
-| `huabu.skill.layout` | Skill | Arrange Space content | Available | Resource detail |
-| `connector.hackmd` | Connector | Publish Space content to HackMD | Declared | Resource detail |
-| `huabu.tool.web-search` | Hosted tool | Search the current web | Available | Invocation detail |
+The server derives scope and allowed resource IDs from a runtime capability grant associated with the external Agent session.
 
-## 9. Versioning
+The current process-global Agentlet token is not sufficient for this authorization because it does not prove Profile or thread identity. Phase 2 therefore introduces a short-lived, opaque, session-scoped grant. The grant is delivered at runtime and is not stored in the durable WorkloadSpec.
 
-Versioning is mandatory from the first persisted or networked representation.
+Hosted invocation uses one shared capability service:
+
+```text
+Built-in tool adapter ─┐
+                       ├─ hosted capability service ─ provider
+External RFS adapter ─┘
+```
+
+The current built-in `web_search` and `generate_image` handlers become adapters over this service. Native and external invocation therefore share validation, provider configuration, timeout, cancellation, quota, result shaping, and errors.
+
+## 12. Credential and environment boundary
+
+Provider secrets stay in Huabu's SecretStore and are resolved only inside the hosted capability service.
+
+Registry and discovery responses may expose only safe readiness such as `available` or `not_configured`. They never expose:
+
+- raw secret values or ciphertext;
+- SecretStore identifiers;
+- provider credential environment-variable names;
+- privileged provider configuration;
+- arbitrary caller-selectable endpoints, credentials, providers, or models.
+
+Huabu must also prevent environment-backed provider credentials from reaching external agents.
+
+Agentlet currently spawns agents with its inherited process environment, while Huabu strips only the `HUABU_` namespace before starting the daemon. Environment fallbacks such as `TAVILY_API_KEY`, `RAPIDAPI_KEY`, `AZURE_OPENAI_API_KEY`, and provider-specific API-key variables must be removed from the daemon and spawned-agent environment unless an explicit resource contract authorizes delivery.
+
+The daemon-owned `AGENTLET_TOKEN`, the RFS base, the thread identity, the session-scoped resource grant, and `AGENT_RESOURCE_DIR` are explicit runtime injections. Ambient host environment inheritance is not a resource-delivery mechanism.
+
+## 13. Authorization, limits, and audit
+
+The effective hosted capability grant binds:
+
+- Agentlet placement;
+- Profile ID;
+- Canvas ID;
+- thread ID;
+- allowed resource IDs;
+- expiry;
+- policy version.
+
+Caller-supplied headers may provide correlation hints but cannot establish any of these identities.
+
+Each hosted capability publishes bounded policy metadata:
+
+- request size;
+- result size;
+- timeout;
+- maximum concurrency;
+- request or cost quota where applicable;
+- retry safety;
+- side-effect classification.
+
+Web search retains a bounded result count and a provider deadline. Image generation remains sequential per authorized scope, has a longer provider deadline, and writes artifacts only into the grant's Canvas BlobStore.
+
+Every invocation produces a sanitized audit record containing the resource ID, trusted scope identifiers, correlation ID, start/end time, outcome code, latency, and policy version. Audit records exclude secrets, authorization headers, full provider payloads, generated image bytes, and sensitive command environments.
+
+## 14. Error contract
+
+Hosted resource invocation returns either a typed success or one stable error:
+
+- `unsupported_version`
+- `resource_not_found`
+- `forbidden`
+- `unavailable`
+- `invalid_input`
+- `cancelled`
+- `timeout`
+- `quota_exceeded`
+- `provider_failure`
+- `internal_error`
+
+Errors never use a success-shaped result. Provider errors are mapped to the stable taxonomy and sanitized before leaving the server.
+
+Retry guidance is explicit. Read-only web search may be retryable after transient provider failure. Image generation is not blindly retryable after an unknown transport outcome because the provider may have completed a billed operation.
+
+## 15. Versioning
+
+The registry protocol and each resource contract evolve independently:
 
 | Version | Scope |
 | --- | --- |
-| `registryProtocolVersion` | Catalogue projection, pagination, common discovery, and invocation envelope |
-| Resource `schemaVersion` | Resource Definition envelope and common fields |
-| Resource `contractVersion` | One logical resource's content, inputs, outputs, and behavioral semantics |
-| Placement `schemaVersion` | Placement scope, provenance, status, and access binding |
-| Access `schemaVersion` | Access-method discriminated union |
-| Annotation `schemaVersion` | Annotation envelope and trusted/untrusted separation |
-| Requirements `requirementsSchemaVersion` | Connector dependency expression |
-| Observation `schemaVersion` | Future machine-probe evidence and expiry contract |
+| Registry protocol version | List/detail envelopes, pagination, and common fields |
+| Resource schema version | `AgentResource` union and access variants |
+| Resource contract version | One Skill or hosted capability's behavior and input/output schema |
+| Grant policy version | Authorization and limit interpretation |
+| Receipt schema version | Agentlet local installation and validation evidence |
 
-Adding a new optional field or resource kind may remain backward-compatible when old consumers can ignore it safely. Removing a field, changing required semantics, changing authorization meaning, or reinterpreting an existing enum requires a version change.
+Adding an optional field is compatible only when older callers can safely ignore it. Removing fields, changing authorization meaning, changing required input, or reinterpreting an enum requires a major version change.
 
-Unknown major schema versions fail explicitly. They must not be accepted with best-effort defaults. Migrations preserve provenance and never promote a user declaration to a host or machine observation.
+An unsupported major version fails explicitly; it is never accepted through best-effort coercion.
 
-## 10. Trust, authorization, and secrets
+## 16. Phase 1 acceptance
 
-Registry visibility does not itself authorize access. Every read, download, invocation, Profile launch, and future refresh operation performs authorization at execution time.
+Phase 1 uses existing Agent Teams as representative acceptance fixtures while preserving their current Setup path.
 
-The current process-global RFS bearer token is insufficient to prove Machine, Profile, or thread identity. The implementation must eventually bind a resource grant to the effective Agenetes placement, Profile, thread, Canvas, expiry, and capability allowlist. The exact grant contract is deferred, but no caller-supplied Machine or thread identifier becomes trusted merely because it appears in a request.
+| Fixture | Coverage |
+| --- | --- |
+| `hackmd-publisher` | GitHub Skill, npm CLI, secret Config, prompt, machine-local installation, and connector composition |
+| `deepv-slides-maker` | endpoint Config, secret API key, local scripts or tools, and external service dependency |
+| `html-slides-maker` | no-secret Skill and local content-generation resources |
 
-Trusted system fields and user-controlled prose remain structurally separate. User definitions and annotations are untrusted input and cannot select arbitrary provider credentials, widen Canvas scope, overwrite hosted access methods, or bypass confirmation policy.
+Phase 1 is accepted when:
 
-Secrets remain in the SecretStore. Environment resource entries expose variable names, readiness, and injection policy only. Raw values never enter Registry storage, responses, prompts, generated Markdown, generated HTML, logs, or audit records.
+1. Huabu projects the two default Huabu Skills and applicable machine-local resources through one registry.
+2. An ordinary External Agent Profile can select HackMD or slide-making resources in addition to the defaults.
+3. A Profile cannot select a local resource from another Agentlet machine.
+4. A new thread snapshots the effective resource IDs and versions.
+5. The external agent can discover the selected resources and load the advertised Skill or local path.
+6. Existing Agent Team Setup outputs can be represented and consumed without reinstalling them.
+7. Missing or invalid local resources return an explicit unavailable status.
+8. Secret Config values remain redacted from registry, Profile, WorkloadSpec, prompts, logs, and client-visible responses.
+9. Existing command-backed and manifest-backed Profile behavior remains compatible.
+10. Agent Team Setup remains the preparation authority during this phase.
 
-## 11. Status and error semantics
+## 17. Phase 2 acceptance
 
-The MVP distinguishes:
+Phase 2 is accepted when:
 
-- `available`: the authoritative provider can currently confirm availability.
-- `unavailable`: the authoritative provider can currently confirm absence or disabled state.
-- `declared`: a user claims the placement is usable, but Huabu has not independently verified it.
-- `forbidden`: the resource exists but is outside the caller's authorization.
+1. `web-search` and `generate-image` appear as hosted resources only when allowed by the effective Profile and host policy.
+2. Availability reflects server-side configuration without exposing secrets.
+3. An authorized external agent can invoke each resource through RFS.
+4. Built-in and external adapters use the same capability service.
+5. The caller cannot select arbitrary credentials, endpoints, providers, models, Canvas IDs, Profile IDs, machines, or threads.
+6. Invalid, forbidden, unavailable, cancelled, timed-out, quota-exceeded, and provider-failure requests return stable errors.
+7. Image artifacts are written only to the authorized Canvas.
+8. Environment-backed provider credentials are absent from external agent processes.
+9. Sanitized invocation audit records are produced.
+10. Existing native Huabu tool behavior remains compatible.
 
-Future machine observation may add `observed`, `verified`, `stale`, or `unknown` only through an explicit Placement/Observation schema version.
+## 18. Phase 3 migration
 
-Failures are explicit and stable: unsupported schema version, resource not found, forbidden, unavailable, invalid input, missing secret, timeout, quota exceeded, provider failure, and non-retryable side effect. An error never takes the shape of a successful result.
+Phase 3 converts bundled presets from manifest-backed Agent Team Profiles into ordinary External Agent Profiles with selected resources.
 
-## 12. Relationship to existing surfaces
+This phase may remove Agent Team Setup only after the replacement provides:
 
-`GET /agent/profiles` is an early specialized registry projection: Agenetes owns Profile facts, Huabu filters and redacts them, and RFS publishes stable IDs and aliases. The general registry should eventually represent Profiles as `agent-profile` resources without immediately removing the compatibility endpoint.
+- trusted source and version selection;
+- user approval before installation;
+- deterministic installation destinations;
+- installation receipts;
+- executable and Skill validation;
+- shared-resource concurrency control;
+- update and removal behavior;
+- secret injection at runtime;
+- machine-offline and stale-resource handling;
+- preparation diagnostics;
+- no writes into the user's project directory unless explicitly authorized.
 
-RFS Skills such as `layout`, `tasks`, `agents`, and `interactive-views` become `skill` resources whose access method points to the existing authenticated guide. Their content and override rules remain owned by the Skill loader.
+Migration must preserve existing Profile and thread behavior. Existing durable threads continue from their snapshotted workload even if their source preset is later converted or removed.
 
-RFS direct Space queries and commands remain their own canonical protocol. The registry links to those capabilities rather than duplicating their schemas.
+## 19. Implementation outline
 
-Issue #110 introduces `web_search` and `generate_image` as the first `hosted-tool` resources. Their provider credentials stay server-side, and native and external invocation must share one handler and contract.
+### Phase 1: issue #120
 
-## 13. Delivery plan
+1. Add shared Zod contracts for registry list/detail records and Profile resource IDs.
+2. Add the Huabu registry service and providers for Huabu Skills and existing Agent Team resources.
+3. Add Agentlet `AGENT_RESOURCE_DIR`, receipt storage, and bounded local resource projection.
+4. Add the Local Resource Management Skill.
+5. Add RFS list/detail routes.
+6. Add Profile resource selection and thread-time snapshotting.
+7. Exercise HackMD and slide-making fixtures without changing their existing Setup implementation.
 
-### Phase 1: HackMD definition POC
+### Phase 2: issue #110
 
-- Define versioned Resource, Placement, Annotation, Connector requirement, Secret Requirement, and Access Method schemas.
-- Persist user-authored Connector definitions, annotations, and declared placements in Huabu-owned storage.
-- Project one HackMD Connector for the current machine.
-- Generate a compact Markdown catalogue from the strict projection.
-- Document explicit manual or agent-assisted placement updates after installation.
+1. Extract web search and image generation into shared hosted capability services.
+2. Register both services as hosted resources.
+3. Add runtime session-scoped grants and the invocation route.
+4. Add shared cancellation, timeout, quota, error, and audit handling.
+5. Remove provider secret variables from inherited external-agent environments.
+6. Add native/external parity and authorization regression coverage.
 
-### Phase 2: Existing Huabu resources
+### Phase 3: separate migration issue
 
-- Project existing RFS Skills and direct-operation capabilities.
-- Project Agenetes Agent Profiles through the registry while preserving `/agent/profiles`.
-- Project hosted-resource and SecretStore readiness without exposing secret values.
+1. Represent bundled preset requirements as registry resource selections.
+2. Create ordinary External Agent Profiles from those selections.
+3. Add agent-assisted installation backed by receipts and validation.
+4. Migrate existing preset Profiles.
+5. Remove Agent Team Setup only after all migration invariants pass.
 
-### Phase 3: Issue #110 hosted capabilities
+## 20. Documentation changes
 
-- Register web search and image generation as versioned hosted tools.
-- Share native and RFS invocation handlers, validation, timeout, quota, error, and audit semantics.
-- Add scoped resource grants for external invocations.
+Phase 1 updates:
 
-### Phase 4: Optional machine observation
+- `docs/architecture/agent-reachback.md`
+- `docs/architecture/agent-teams-as-extensions.md`
+- `docs/architecture/agent-architecture.md`
+- `external/agentlet/spec/agent-reachback.md`
+- a new architecture document for Agent Resource Registry and local resource management
 
-- Evaluate a narrow typed Agentlet probe protocol.
-- Verify executable paths, versions, Skill cache digests, and artifact metadata without arbitrary command execution.
-- Add observation expiry, offline-machine behavior, and declared-versus-observed conflict presentation.
+Phase 2 additionally updates:
 
-## 14. Open questions
+- `docs/architecture/credential-storage.md`
+- `docs/architecture/deployment-security.md`
+- the external-agent Huabu Access Skill
 
-1. Which Huabu-owned file or structured store persists user Resource Definitions and Placements?
-2. How is the current Machine identity derived and displayed when a local command Profile and an Agent Team Profile target the same Agentlet?
-3. Are installation recipes standalone resources or versioned fields on executable definitions?
-4. Which installation actions require per-use confirmation, and can a user grant a durable policy for one package and machine?
-5. Should a failed resource use affect only the current invocation, or also attach non-authoritative failure evidence to its declared Placement?
-6. What are the minimum dependency relations after `required`: `optional`, `one-of`, or conditional requirements?
-7. How are upstream Skill commits pinned, cached, updated, and attributed?
-8. Which compatibility endpoints remain indefinitely after equivalent Registry resources ship?
+After each phase ships, implemented behavior moves into architecture documentation while this Proposal remains the historical decision record.
 
-## 15. Acceptance criteria
-
-- Huabu owns one versioned Resource Registry projection service usable by built-in and external agents.
-- Every durable or wire-level Resource, Placement, Access, Annotation, Requirements, and future Observation contract carries an explicit schema version.
-- A HackMD Connector combines an official Skill, user-declared machine-local CLI placement, Secret Requirement, and Huabu instruction overlay.
-- Machine-local declarations are labeled `declared` and never represented as trusted observations.
-- An agent can discover the compact Connector summary, load its details, identify missing requirements, and follow an installation recipe without a new Agentlet probe protocol.
-- Secret values never enter Registry state or agent-visible output.
-- Existing subsystem records remain authoritative and are not duplicated into Registry storage.
-- The MVP does not implement desired-installation reconciliation or automatic reinstallation.
-- Issue #110 can add web search and image generation as hosted resources without inventing a separate discovery model.
-
-## 16. Code entry points
+## 21. Code entry points
 
 | File/dir | Responsibility |
 | --- | --- |
-| [`apps/server/src/modules/remote_fs/`](../../apps/server/src/modules/remote_fs/) | RFS discovery and external-agent adapter surface. |
-| [`apps/server/src/modules/agent/tools/`](../../apps/server/src/modules/agent/tools/) | Existing built-in tool definitions and handlers to project or share. |
-| [`apps/server/src/prompt/skills/`](../../apps/server/src/prompt/skills/) | Existing Huabu Skill definitions and loader inputs. |
-| [`apps/server/src/security/secret-store.ts`](../../apps/server/src/security/secret-store.ts) | Secret readiness and server-side value boundary. |
-| [`apps/server/src/modules/agent/acp/`](../../apps/server/src/modules/agent/acp/) | External-agent context and reachback environment assembly. |
-| [`external/agenetes/packages/agent-team/`](../../external/agenetes/packages/agent-team/) | Existing Agent Profile, Config, and placement resource source. |
-| [`external/agenetes/packages/agentlet-gateway/`](../../external/agenetes/packages/agentlet-gateway/) | Authenticated routing to Agentlet machines and possible future typed probes. |
-| [`external/agentlet/spec/agent-reachback.md`](../../external/agentlet/spec/agent-reachback.md) | Host-agnostic reachback transport and environment boundary. |
-| [`packages/shared/src/types/api/`](../../packages/shared/src/types/api/) | Future canonical versioned RFS Registry wire contracts. |
+| [`apps/server/src/modules/remote_fs/`](../../apps/server/src/modules/remote_fs/) | External discovery and invocation adapter |
+| [`apps/server/src/prompt/external-agent/`](../../apps/server/src/prompt/external-agent/) | Huabu Access and Local Resource Management Skills |
+| [`apps/server/src/modules/agent/tools/`](../../apps/server/src/modules/agent/tools/) | Existing built-in adapters for hosted capabilities |
+| [`apps/server/src/security/secret-store.ts`](../../apps/server/src/security/secret-store.ts) | Server-side credential boundary |
+| [`apps/server/src/modules/agent/acp/`](../../apps/server/src/modules/agent/acp/) | Profile workload assembly and runtime injection |
+| [`external/agenetes/packages/agent-team/`](../../external/agenetes/packages/agent-team/) | Current unified Profile registry and migration source |
+| [`external/agentlet/packages/local/`](../../external/agentlet/packages/local/) | Machine resource root, environment, receipts, and agent process spawn |
+| [`external/agentlet/packages/agent-team/`](../../external/agentlet/packages/agent-team/) | Existing setup materializer reused during Phases 1 and 2 |
+| [`packages/shared/src/types/api/`](../../packages/shared/src/types/api/) | Canonical registry and hosted invocation wire contracts |
+| [`agent-teams/`](../../agent-teams/) | Phase 1 acceptance fixtures and Phase 3 migration inputs |
