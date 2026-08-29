@@ -21,6 +21,8 @@ The governing rule is that **rendering never causes a geometry change**. Zoom, p
 
 Intrinsic → layout is one pure function, [`intrinsicToLayoutHeight`](../../packages/shared/src/canvas-engine/height/compute.ts): clamp to the type's minimum, scale by the node's width, add the node shell's chrome, quantize to a 4 px step. The order mirrors the DOM — the minimum applies unscaled, the chrome is outside the scaled container and so is added after.
 
+`note`'s minimum is a **reading** floor, not an anti-collapse guard. It is 244 intrinsic, which renders as 248 px at the reference width — deliberately generous. The previous value of 50 produced a 56 px card: one line of text and a sliver of the next, which is the box a brand-new note appears in and the box a collapsed note falls back to, and it is unreadable for anything already written. This is also the single knob for "notes are too short"; nothing in `nodeSizes.ts` reaches the rendered height, because `getNodeCreationStyle` drops the nominal height for auto-by-default types.
+
 The scale divides the node's **content** width, its box minus the shell border, so the logical layout width lands on `refWidth` exactly at every node size. That is the premise the whole hint cache rests on: content measured at one node width wraps identically at any other. A legibility floor on the scale would break it — once engaged, the content stops shrinking and starts laying out _narrower_ than the reference, so `note` deliberately has none. Semantic zoom already replaces a tiny note's body with a placeholder long before its text would become unreadable. `HeightPolicy.minContentScale` carries the floor for the `manual` types, whose box is the user's and whose scale is therefore purely a rendering decision.
 
 ## 3. Ownership
@@ -39,7 +41,9 @@ The scale divides the node's **content** width, its box minus the shell border, 
 
 A resize gesture on an auto note pins it to `fixed`. That flip is implicit, so the toolbar's auto indicator reflects it at gesture end.
 
-The `fixed → auto` flip is reachable **only** from the node toolbar (and the multi-select toolbar). A truncated note draws a fade + chevron along its bottom edge, but that is a hint, not a control: as a click target it spanned the card's full width right where selection and resize gestures land, so it fired by accident far more often than on purpose.
+The `fixed ↔ auto` flip is reachable from the node toolbar (and the multi-select toolbar) and from the chevron a note draws along its bottom edge. That chevron was previously inert, and for a reason worth preserving: as a click target it spanned the card's full width right where selection and resize gestures land, so it fired by accident far more often than on purpose. It is now a control again, but a narrow one — the full-width container stays `pointer-events-none` and only a 24×24 button opts back in, carrying `nodrag nopan` so React Flow cannot read the press as the start of a drag or pan. Without a reachable expand affordance the collapse-on-create rule in §8 would be a trap rather than a default.
+
+The chevron renders when the note is truncated (pointing down: expand) and also on a selected, already-expanded note whose content is past the collapse threshold (pointing up: collapse). The second case exists because an expanded note hides nothing, so truncation alone would leave no way back.
 
 ## 4. Freshness
 
@@ -100,6 +104,8 @@ measure ────────▶ propose → gate → APPLY_MEASURED_HEIGHT �
 ```
 
 **Creation** records `heightMode` and materializes immediately, so the same batch's `fitFrames` and grid solver see a real footprint rather than zero.
+
+A note created with content past [`NOTE_COLLAPSE_CONTENT_THRESHOLD`](../../packages/shared/src/canvas-engine/height/policy.ts) is born **collapsed**: pinned to `collapsedLayoutHeight`, which is the same number a short note settles at, so a collapsed long note and a one-line note are one size rather than two competing definitions of "small". Auto height is right for a note you can take in at a glance; past roughly a screenful the node grows to thousands of pixels and buries its neighbours at the moment it holds the most information. The rule is consulted only when the caller expressed no height preference at all — a numeric height pins as always, and an explicit `'auto'` is the author saying "expand this one", which outranks the heuristic. It lives in `policy.ts`, not in a creation helper, so the headless engine and the web client cannot disagree and produce a geometry write on every load.
 
 **Load** runs [`normalizeNodeHeights`](../../apps/web/src/store/canvasStore/load/normalizeNodeHeights.ts) — write the inferred owner explicitly, then materialize — and then [`warmupNodeHeights`](../../apps/web/src/store/canvasStore/load/warmupNodeHeights.ts), which measures never-measured notes _before_ the canvas is shown, nearest to the restored viewport first, under a wall-clock budget. Warmup applies the completed measurements to the fetched snapshot through the pure canvas executor, so `APPLY_MEASURED_HEIGHT` performs the same freshness checks and parent Frame/Portal relayout as an interactive measurement without dispatching through the web store or creating load-time history. Normalization never writes a hint; a canvas saved before this model existed would otherwise paint a wall of collapsed cards and expand them one by one.
 

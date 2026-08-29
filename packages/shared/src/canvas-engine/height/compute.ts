@@ -106,3 +106,18 @@ export function intrinsicToLayoutHeight(
   const scaled = clamped * contentScaleFor(policy, width);
   return quantizeHeight(scaled + (policy.insetY ?? 0));
 }
+
+/**
+ * Layout height a *collapsed* node occupies: the type's minimum content
+ * height, converted for the node's own width.
+ *
+ * This is deliberately the same number a short note settles at, so a
+ * collapsed long note and a one-line note are the same size rather than
+ * two competing definitions of "small".
+ */
+export function collapsedLayoutHeight(
+  nodeType: string | undefined,
+  width: number | undefined,
+): number {
+  return intrinsicToLayoutHeight(0, nodeType, width);
+}

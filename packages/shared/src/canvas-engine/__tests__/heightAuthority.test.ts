@@ -98,7 +98,7 @@ describe("SET_NODE_GEOMETRY height: 'auto'", () => {
         type: 'note',
         content: CONTENT,
         heightMode: 'auto',
-        autoHeight: { intrinsicHeight: 200, measuredFor: KEY },
+        autoHeight: { intrinsicHeight: 400, measuredFor: KEY },
       },
     } as Partial<CanvasNode>);
 
@@ -114,7 +114,7 @@ describe("SET_NODE_GEOMETRY height: 'auto'", () => {
 
     expect(styleOf(writeResult.nodes, 'n1')).toEqual({
       width: 800,
-      height: 404,
+      height: 800,
     });
   });
 

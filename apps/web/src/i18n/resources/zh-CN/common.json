@@ -419,6 +419,8 @@
   },
   "node": {
     "untitled": "未命名",
+    "showFullNote": "展开完整笔记",
+    "collapseNote": "折叠这条笔记",
     "rename": "重命名节点",
     "preview": "预览",
     "navigateUpstream": "导航到来源节点（{{shortcut}}）",

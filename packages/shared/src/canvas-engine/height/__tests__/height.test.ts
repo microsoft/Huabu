@@ -11,7 +11,9 @@ import {
 import {
   HEIGHT_LAYOUT_VERSION,
   HEIGHT_QUANTIZATION_STEP,
+  NOTE_COLLAPSE_CONTENT_THRESHOLD,
   autoHeightKey,
+  collapsedLayoutHeight,
   contentScaleFor,
   getHeightPolicy,
   getHeightRefWidth,
@@ -23,6 +25,7 @@ import {
   quantizeHeight,
   readAutoHeightHint,
   resolveHeightMode,
+  shouldCollapseNoteOnCreate,
 } from '../index.js';
 
 import type { Node } from '@xyflow/react';
@@ -210,15 +213,16 @@ describe('intrinsicToLayoutHeight', () => {
     // The shell border lives outside the scaled container, so doubling
     // the width doubles the content but not the 6px chrome. The same
     // 6px also narrows the content box, which is why the scale at the
-    // reference width is 394/400 rather than 1.
-    expect(intrinsicToLayoutHeight(200, 'note', 400)).toBe(204);
-    expect(intrinsicToLayoutHeight(200, 'note', 800)).toBe(404);
+    // reference width is 394/400 rather than 1. The intrinsic value is
+    // above the note minimum so this measures the scaling, not the clamp.
+    expect(intrinsicToLayoutHeight(400, 'note', 400)).toBe(400);
+    expect(intrinsicToLayoutHeight(400, 'note', 800)).toBe(800);
   });
 
   it('applies the minimum before scaling', () => {
-    // Note minimum is 50 unscaled; at half width the scale clamp is 0.5.
-    expect(intrinsicToLayoutHeight(10, 'note', 400)).toBe(56);
-    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(32);
+    // Note minimum is 244 unscaled; at half width the scale halves too.
+    expect(intrinsicToLayoutHeight(10, 'note', 400)).toBe(248);
+    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(128);
   });
 
   it('does not scale types without a reference width', () => {
@@ -233,7 +237,7 @@ describe('intrinsicToLayoutHeight', () => {
     // would render short. Semantic zoom, not this, is what keeps a tiny
     // note readable — it swaps the body for a placeholder.
     expect(contentScaleFor(getHeightPolicy('note'), 100)).toBeCloseTo(0.235);
-    expect(intrinsicToLayoutHeight(200, 'note', 100)).toBe(56);
+    expect(intrinsicToLayoutHeight(800, 'note', 100)).toBe(196);
   });
 
   it('floors the scale for manual types, whose box the user owns', () => {
@@ -458,5 +462,36 @@ describe('materializeAutoHeight', () => {
       materializeAutoHeight(node({ id: 'b', type: 'note' })),
     ];
     expect(materializeAutoHeights(nodes)).toBe(nodes);
+  });
+});
+
+describe('collapse on create', () => {
+  it('collapses only a toggleable type whose content exceeds the threshold', () => {
+    const long = 'x'.repeat(NOTE_COLLAPSE_CONTENT_THRESHOLD + 1);
+    const short = 'x'.repeat(NOTE_COLLAPSE_CONTENT_THRESHOLD);
+
+    expect(shouldCollapseNoteOnCreate('note', long)).toBe(true);
+    expect(shouldCollapseNoteOnCreate('note', short)).toBe(false);
+
+    // `text` and `question` size themselves through a different
+    // mechanism, and a manual type owns its box outright.
+    expect(shouldCollapseNoteOnCreate('text', long)).toBe(false);
+    expect(shouldCollapseNoteOnCreate('image', long)).toBe(false);
+  });
+
+  it('ignores content that is not a string', () => {
+    expect(shouldCollapseNoteOnCreate('note', undefined)).toBe(false);
+    expect(shouldCollapseNoteOnCreate('note', { text: 'x' })).toBe(false);
+  });
+
+  it('collapses to exactly the height a short note settles at', () => {
+    // One definition of "small", not two: whatever the policy minimum
+    // renders as is what a collapsed note gets, at any width.
+    for (const width of [200, 400, 800]) {
+      expect(collapsedLayoutHeight('note', width)).toBe(
+        intrinsicToLayoutHeight(0, 'note', width),
+      );
+    }
+    expect(collapsedLayoutHeight('note', 400)).toBe(248);
   });
 });

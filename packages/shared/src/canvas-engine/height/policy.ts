@@ -105,6 +105,44 @@ const MANUAL_POLICY: HeightPolicy = { kind: 'manual' };
 export const NODE_SHELL_INSET = 6;
 
 /**
+ * Authored content length (characters) past which a newly created note
+ * is born **collapsed** — pinned to the policy minimum with the expand
+ * affordance showing — instead of auto-sized to its full content.
+ *
+ * Auto height is the right default for a note you can take in at a
+ * glance. Past roughly a screenful it stops being a note and becomes a
+ * document: the node grows to thousands of pixels, buries its
+ * neighbours, and makes the canvas unusable at the very moment it holds
+ * the most information. Collapsing at birth keeps the canvas scannable
+ * and costs one click to undo.
+ *
+ * Only consulted at creation, and only when the caller expressed no
+ * height preference at all. An explicit numeric height pins as always,
+ * and an explicit `'auto'` means "expand this one fully" — the author
+ * has spoken either way, so neither is second-guessed.
+ */
+export const NOTE_COLLAPSE_CONTENT_THRESHOLD = 800;
+
+/**
+ * Whether a note created with this content should start collapsed.
+ *
+ * Lives beside the policy rather than in a creation helper because the
+ * headless engine and the web client must agree on it exactly: a note
+ * that the server collapses and the client expands would produce a
+ * geometry write on every load.
+ */
+export function shouldCollapseNoteOnCreate(
+  nodeType: string | undefined,
+  content: unknown,
+): boolean {
+  if (getHeightPolicy(nodeType).kind !== 'toggleable') return false;
+  return (
+    typeof content === 'string' &&
+    content.length > NOTE_COLLAPSE_CONTENT_THRESHOLD
+  );
+}
+
+/**
  * Height policy per node type. Types absent from this table are `manual`.
  *
  * `refWidth` values match the creation defaults in
@@ -114,12 +152,22 @@ export const NODE_SHELL_INSET = 6;
 const HEIGHT_POLICIES: Readonly<Record<string, HeightPolicy>> = {
   // The note body measures `.ProseMirror` plus the host's own vertical
   // padding, so the only thing left to add is the node shell itself.
+  //
+  // `minIntrinsicHeight` is a *reading* floor, not an anti-collapse
+  // guard. At the old value of 50 a note settled at 56px — one line and
+  // a sliver of the next — which is unreadable for anything already
+  // written and is the box a brand-new note starts in. 244 renders as
+  // 248px at the reference width (quantized to the 4px step), which is
+  // also the height a long note collapses to, so a short note and a
+  // collapsed long one agree instead of forming two different "small
+  // note" sizes.
+  //
   // No `minContentScale`: its height is derived from the scale, and a
   // floor would make the content lay out narrower than `refWidth`.
   note: {
     kind: 'toggleable',
     refWidth: 400,
-    minIntrinsicHeight: 50,
+    minIntrinsicHeight: 244,
     insetY: NODE_SHELL_INSET,
   },
   text: { kind: 'content' },

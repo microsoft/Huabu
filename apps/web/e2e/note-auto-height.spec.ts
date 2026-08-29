@@ -294,6 +294,69 @@ test.describe('note auto height', () => {
     expect(overflow).toBeLessThanOrEqual(1);
   });
 
+  test('a long agent note is born collapsed and expands from its chevron', async ({
+    page,
+  }) => {
+    // The two halves of the same promise: a document-length note must
+    // not bury the canvas it lands on, and the way back out must be one
+    // click away. Only meaningful together — collapsing without a
+    // reachable expand affordance is a trap.
+    await openNewCanvas(page);
+    const markdown = Array.from(
+      { length: 20 },
+      (_, index) =>
+        `## Section ${index + 1}\n\nThis paragraph is long enough to wrap at the note width and would make an auto-height note thousands of pixels tall.`,
+    ).join('\n\n');
+
+    // No `size` at all: the collapse heuristic only applies when the
+    // caller expressed no height preference, so the shared
+    // `createAgentNote` helper (which passes `height: 'auto'`) would
+    // deliberately opt out.
+    await executeAgentCommands(page, [
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            nodeType: 'note',
+            data: { label: 'Agent document', content: markdown },
+            position: { x: 100, y: 100 },
+          },
+        ],
+      },
+    ]);
+
+    const note = page.locator('.react-flow__node-note');
+    await expect(note.locator('.ProseMirror')).toHaveCount(1);
+
+    // This project emulates a touch device, where the pen tool is armed
+    // by default and its overlay owns every canvas pointer event. Leave
+    // that mode the way a user does, so the click below reaches the node
+    // rather than the sketch surface.
+    await page.keyboard.press('Escape');
+
+    const heightOf = () =>
+      note.evaluate((element) =>
+        parseFloat((element as HTMLElement).style.height),
+      );
+
+    // Give any stray measurement a chance to land before asserting the
+    // height stayed put — a collapsed note is pinned, so nothing should.
+    await page.waitForTimeout(1500);
+    const collapsedHeight = await heightOf();
+    expect(collapsedHeight).toBeLessThan(400);
+    expect(collapsedHeight).toBeGreaterThan(200);
+
+    await note.click({ force: true });
+    await page
+      .getByRole('button', { name: 'Show the whole note', exact: true })
+      .click();
+
+    await expect.poll(heightOf).toBeGreaterThan(collapsedHeight + 500);
+
+    const [overflow] = await measureOverflows(page);
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
   test('every auto note fits the content it was measured from', async ({
     page,
   }) => {

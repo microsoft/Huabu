@@ -3,11 +3,14 @@
 
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import clsx from 'clsx';
-import { ChevronsDown, Fullscreen } from 'lucide-react';
+import { ChevronsDown, ChevronsUp, Fullscreen } from 'lucide-react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { autoHeightKey } from '@huabu/shared/canvas-engine';
+import {
+  autoHeightKey,
+  NOTE_COLLAPSE_CONTENT_THRESHOLD,
+} from '@huabu/shared/canvas-engine';
 
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Loading } from '@/components/Common/Loading';
@@ -69,6 +72,7 @@ export const NoteNode = memo(
   ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     const { t } = useTranslation();
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+    const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
     const moveNoteBlockIntoNote = useCanvasStore(
       (s) => s.moveNoteBlockIntoNote,
     );
@@ -221,6 +225,23 @@ export const NoteNode = memo(
     // less than it holds right now.
     const isTruncated =
       contentHeight > 0 && hostHeight > 0 && contentHeight - hostHeight > 1;
+
+    // An expanded note has nothing hidden, so `isTruncated` is false and
+    // the fade never appears — but the user still needs a way back. Show
+    // the collapse control on an expanded note whose content is long
+    // enough that it would have been collapsed at birth, and only while
+    // it is selected, so an unselected canvas stays free of chrome.
+    const showCollapseControl =
+      !isFixedHeight &&
+      selected &&
+      markdown.length > NOTE_COLLAPSE_CONTENT_THRESHOLD;
+
+    // A name of its own rather than the toolbar's "Switch to fixed
+    // height": both controls can be on screen at once, and two buttons
+    // sharing an accessible name is ambiguous to a screen reader.
+    const heightToggleLabel = isFixedHeight
+      ? t('node.showFullNote')
+      : t('node.collapseNote');
 
     // Report the measured intrinsic height as a *proposal*. The queue
     // decides whether it is worth committing and when; the engine owns
@@ -487,24 +508,53 @@ export const NoteNode = memo(
                   )}
                 </div>
               </div>
-              {isTruncated && (
+              {(isTruncated || showCollapseControl) && (
                 <div
-                  aria-hidden
+                  // The container spans the card so the fade reads as an
+                  // edge treatment, but it must never take a click: the
+                  // previous full-width hit target sat exactly where
+                  // selection and resize gestures land and fired by
+                  // accident far more often than on purpose. Only the
+                  // small button below opts back into pointer events.
                   className="pointer-events-none absolute right-0 bottom-0 left-0 flex h-10 items-end justify-center pb-1"
                 >
-                  {/* Fade gradient */}
+                  {isTruncated && (
+                    <div
+                      aria-hidden
+                      className="from-fg-subtle/30 absolute inset-0 bg-linear-to-t to-transparent"
+                    />
+                  )}
                   <div
-                    aria-hidden
-                    className="from-fg-subtle/30 absolute inset-0 bg-linear-to-t to-transparent"
-                  />
-                  <div
-                    className="text-fg-subtle relative z-10"
+                    className="relative z-10"
                     style={{
                       transform: `scale(${counterZoomScale})`,
                       transformOrigin: 'bottom center',
                     }}
                   >
-                    <ChevronsDown size={14} />
+                    <button
+                      type="button"
+                      // `nodrag` / `nopan` stop React Flow from reading
+                      // the press as the start of a node drag or a
+                      // canvas pan before the click ever lands.
+                      className="nodrag nopan text-fg-subtle hover:text-fg-default hover:bg-hover pointer-events-auto flex size-6 cursor-pointer items-center justify-center rounded"
+                      title={heightToggleLabel}
+                      aria-label={heightToggleLabel}
+                      aria-expanded={!isFixedHeight}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setNoteHeightMode(
+                          [id],
+                          isFixedHeight ? 'auto' : 'fixed',
+                        );
+                      }}
+                    >
+                      {isFixedHeight ? (
+                        <ChevronsDown size={14} />
+                      ) : (
+                        <ChevronsUp size={14} />
+                      )}
+                    </button>
                   </div>
                 </div>
               )}
