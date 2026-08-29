@@ -51,7 +51,7 @@ describe('CREATE_NODES selection', () => {
       // Materialized from the note policy's minimum, not pinned: a
       // created note must have a real footprint for the same-batch frame
       // fit and grid solver, and its ownership is recorded explicitly.
-      height: 248,
+      height: 96,
     });
     expect(
       (

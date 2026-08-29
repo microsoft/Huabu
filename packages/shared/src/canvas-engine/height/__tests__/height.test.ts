@@ -220,9 +220,9 @@ describe('intrinsicToLayoutHeight', () => {
   });
 
   it('applies the minimum before scaling', () => {
-    // Note minimum is 244 unscaled; at half width the scale halves too.
-    expect(intrinsicToLayoutHeight(10, 'note', 400)).toBe(248);
-    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(128);
+    // Note minimum is 91 unscaled; at half width the scale halves too.
+    expect(intrinsicToLayoutHeight(10, 'note', 400)).toBe(96);
+    expect(intrinsicToLayoutHeight(10, 'note', 200)).toBe(52);
   });
 
   it('does not scale types without a reference width', () => {
@@ -484,14 +484,22 @@ describe('collapse on create', () => {
     expect(shouldCollapseNoteOnCreate('note', { text: 'x' })).toBe(false);
   });
 
-  it('collapses to exactly the height a short note settles at', () => {
-    // One definition of "small", not two: whatever the policy minimum
-    // renders as is what a collapsed note gets, at any width.
-    for (const width of [200, 400, 800]) {
-      expect(collapsedLayoutHeight('note', width)).toBe(
-        intrinsicToLayoutHeight(0, 'note', width),
-      );
-    }
+  it('collapses to a readable preview, not to the short-note floor', () => {
+    // The two constants exist precisely so these differ. Collapsing to
+    // the minimum would turn every long note into a stub, and raising
+    // the minimum to the collapsed height would render every note of
+    // nine lines or fewer at the same size.
     expect(collapsedLayoutHeight('note', 400)).toBe(248);
+    expect(intrinsicToLayoutHeight(0, 'note', 400)).toBe(96);
+
+    // Scales with the node's own width, exactly like a measured height.
+    expect(collapsedLayoutHeight('note', 800)).toBe(
+      intrinsicToLayoutHeight(244, 'note', 800),
+    );
+
+    // A type with no collapsed height still cannot fall below its floor.
+    expect(collapsedLayoutHeight('image', 400)).toBe(
+      intrinsicToLayoutHeight(0, 'image', 400),
+    );
   });
 });

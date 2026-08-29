@@ -108,16 +108,23 @@ export function intrinsicToLayoutHeight(
 }
 
 /**
- * Layout height a *collapsed* node occupies: the type's minimum content
- * height, converted for the node's own width.
+ * Layout height a *collapsed* node occupies: the type's collapsed
+ * preview height, converted for the node's own width.
  *
- * This is deliberately the same number a short note settles at, so a
- * collapsed long note and a one-line note are the same size rather than
- * two competing definitions of "small".
+ * Runs through {@link intrinsicToLayoutHeight} rather than returning a
+ * literal so it scales with the node's width exactly like a measured
+ * height does. Types without a collapsed height fall through to their
+ * minimum, which is also what the clamp inside that function guarantees:
+ * a collapsed node can never end up shorter than a short one.
  */
 export function collapsedLayoutHeight(
   nodeType: string | undefined,
   width: number | undefined,
 ): number {
-  return intrinsicToLayoutHeight(0, nodeType, width);
+  const policy = getHeightPolicy(nodeType);
+  return intrinsicToLayoutHeight(
+    policy.collapsedIntrinsicHeight ?? 0,
+    nodeType,
+    width,
+  );
 }

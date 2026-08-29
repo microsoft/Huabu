@@ -50,6 +50,18 @@ export interface HeightPolicy {
    */
   minIntrinsicHeight?: number;
   /**
+   * Intrinsic content height (px, unscaled) a *collapsed* node of this
+   * type is pinned to. Deliberately separate from
+   * {@link minIntrinsicHeight}: the two look alike but do opposite jobs.
+   *
+   * The minimum is a floor on a note that is genuinely short, so it must
+   * stay small or it erases the difference between a two-line note and a
+   * nine-line one. The collapsed height is a *preview window* onto a note
+   * that is far too long to show, so it must be generous enough to read.
+   * Collapsing to the minimum would make every long note a stub.
+   */
+  collapsedIntrinsicHeight?: number;
+  /**
    * Chrome (px) that lives outside the measured element but inside the
    * node box — added after scaling. `0` where the measurement already
    * accounts for the node's own padding.
@@ -153,21 +165,29 @@ const HEIGHT_POLICIES: Readonly<Record<string, HeightPolicy>> = {
   // The note body measures `.ProseMirror` plus the host's own vertical
   // padding, so the only thing left to add is the node shell itself.
   //
-  // `minIntrinsicHeight` is a *reading* floor, not an anti-collapse
-  // guard. At the old value of 50 a note settled at 56px — one line and
-  // a sliver of the next — which is unreadable for anything already
-  // written and is the box a brand-new note starts in. 244 renders as
-  // 248px at the reference width (quantized to the 4px step), which is
-  // also the height a long note collapses to, so a short note and a
-  // collapsed long one agree instead of forming two different "small
-  // note" sizes.
+  // Two different jobs, two different numbers — see the field docs.
+  //
+  // `minIntrinsicHeight` is a floor for a genuinely short note. Measured
+  // in a real browser at refWidth: one paragraph line is 41px intrinsic
+  // and each additional line adds 25, so 91 is three lines and renders
+  // as a 96px card. The old value of 50 rendered as 56 — one line and a
+  // sliver of the next. It stays deliberately small because a note under
+  // the collapse threshold is supposed to size itself to its content;
+  // every pixel of floor above the real content erases the difference
+  // between a short note and a slightly longer one. (A floor of 244
+  // would render every note of nine lines or fewer at the same 248px.)
+  //
+  // `collapsedIntrinsicHeight` is the preview window for a note too long
+  // to show at all, so it is generous: 244 renders as 248px, roughly a
+  // nine-line excerpt, with the fade and the expand chevron over it.
   //
   // No `minContentScale`: its height is derived from the scale, and a
   // floor would make the content lay out narrower than `refWidth`.
   note: {
     kind: 'toggleable',
     refWidth: 400,
-    minIntrinsicHeight: 244,
+    minIntrinsicHeight: 91,
+    collapsedIntrinsicHeight: 244,
     insetY: NODE_SHELL_INSET,
   },
   text: { kind: 'content' },

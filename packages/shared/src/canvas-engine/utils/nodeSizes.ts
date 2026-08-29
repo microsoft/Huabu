@@ -33,9 +33,9 @@ const DEFAULT_SIZES: Record<string, NodeSize> = {
   // never written to `style.height` — it exists for layout calculations
   // (viewport centring, placement) that need a footprint before the node
   // has been measured. It mirrors the rendered minimum, which the note
-  // policy's `minIntrinsicHeight` (244) converts to 248px at the
-  // reference width. Change that constant, not this one.
-  note: { width: 400, height: 248 },
+  // policy's `minIntrinsicHeight` (91) converts to 96px at the reference
+  // width. Change that constant, not this one.
+  note: { width: 400, height: 96 },
   web: { width: 400, height: 400 },
   pdf: { width: 400, height: 400 },
   office: { width: 400, height: 400 },
