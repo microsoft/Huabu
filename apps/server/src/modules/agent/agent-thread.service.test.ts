@@ -76,6 +76,7 @@ function createHarness(options?: {
   target?: FixedAgentNodeTarget | null;
   busy?: boolean;
   externalEvents?: AgentStreamEvent[];
+  externalError?: Error;
   startError?: Error;
   finishError?: Error;
   persistedBinding?: Extract<AgentBinding, { kind: 'external' }> | null;
@@ -90,6 +91,12 @@ function createHarness(options?: {
   const failLifecycle = vi.fn().mockResolvedValue(undefined);
   const runExternal = vi.fn((runOptions: { onTurnStarted?: () => void }) => {
     runOptions.onTurnStarted?.();
+    if (options?.externalError) {
+      const externalError = options.externalError;
+      return (async function* () {
+        throw externalError;
+      })();
+    }
     return events(
       options?.externalEvents ?? [
         { type: 'text_delta', data: { content: 'Result' } },
@@ -243,6 +250,43 @@ describe('AgentThreadService', () => {
   it('writes an error terminal for a failed fixed-node stream', async () => {
     const harness = createHarness({
       externalEvents: [{ type: 'error', data: { error: 'Agent unavailable' } }],
+    });
+    const invocation = await harness.service.invoke(invocationOptions());
+
+    for await (const _event of invocation.events) {
+      // Drain the canonical invocation stream.
+    }
+
+    expect(harness.failLifecycle).toHaveBeenCalledWith(
+      TARGET,
+      'Agent unavailable',
+    );
+    expect(harness.finishLifecycle).not.toHaveBeenCalled();
+    expect(harness.release).toHaveBeenCalledOnce();
+  });
+
+  it('writes an error terminal when ACP session bootstrap throws', async () => {
+    const message = "Target agentlet '192.168.0.105' is not connected.";
+    const harness = createHarness({ externalError: new Error(message) });
+    const invocation = await harness.service.invoke(invocationOptions());
+
+    await expect(async () => {
+      for await (const _event of invocation.events) {
+        // Drain the canonical invocation stream.
+      }
+    }).rejects.toThrow(message);
+
+    expect(harness.failLifecycle).toHaveBeenCalledWith(TARGET, message);
+    expect(harness.finishLifecycle).not.toHaveBeenCalled();
+    expect(harness.release).toHaveBeenCalledOnce();
+  });
+
+  it('keeps an observed stream error terminal even if done follows it', async () => {
+    const harness = createHarness({
+      externalEvents: [
+        { type: 'error', data: { error: 'Agent unavailable' } },
+        { type: 'done', data: { message: 'Unexpected late completion' } },
+      ],
     });
     const invocation = await harness.service.invoke(invocationOptions());
 

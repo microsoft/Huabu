@@ -69,6 +69,7 @@ Created like any node via `CREATE_NODES` ([resolveAddNodes.ts](../../apps/web/sr
 - An idle node with `agentBindingPolicy: fixed` opens compose with its persisted binding and a read-only Agent selector; ordinary nodes with an absent or `selectable` policy retain the existing pre-send picker.
 - After sending: **running → done / error**.
 - For fixed Agent Nodes, `AgentThreadService` resolves the persisted binding, writes first content and `status` / `errorMessage` through the server Canvas executor, and applies launch overrides before the first ACP realization. The Web client writes only `viewed`; selectable Question Nodes retain the existing client-authored lifecycle.
+- Fixed Agent Node settlement is error-dominant: a thrown dispatch failure or an emitted `error` event always persists `status: error`, even if teardown concurrently aborts the signal or a malformed stream also emits `done`. Only a stream with no observed error may persist `status: done`.
 - Running uses the bound Agent identity with a flowing information ring; an external Agent avatar body rotates while the built-in Huabu logo remains still.
 - A live unresolved ACP permission request temporarily overrides every other badge state, stops working motion, and shows a static warning ring with a shield satellite; resolving or cancelling the request restores the underlying run state.
 - Done, error, and conflict attention styling appears only while `viewed === false`; opening the finished thread marks it viewed and returns the avatar to a quiet neutral ring.
