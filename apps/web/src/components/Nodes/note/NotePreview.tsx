@@ -606,17 +606,19 @@ export const NotePreview = ({
                 surfaceRef={containerRef}
               />
             ) : null}
-            <MilkdownEditor
-              markdown={markdown}
-              editable={!readOnly}
-              canvasId={canvasId ?? undefined}
-              onChange={handleEditorChange}
-              onExternalUpdate={handleExternalUpdate}
-              onReady={setEditor}
-              onBlockDragStart={readOnly ? undefined : handleBlockDragStart}
-              decorations={decorations}
-              className="milkdown-note-preview"
-            />
+            <div className="contents" data-preview-search-content>
+              <MilkdownEditor
+                markdown={markdown}
+                editable={!readOnly}
+                canvasId={canvasId ?? undefined}
+                onChange={handleEditorChange}
+                onExternalUpdate={handleExternalUpdate}
+                onReady={setEditor}
+                onBlockDragStart={readOnly ? undefined : handleBlockDragStart}
+                decorations={decorations}
+                className="milkdown-note-preview"
+              />
+            </div>
             {PROVENANCE_ENABLED && !readOnly ? (
               <ProvenanceOverlay
                 blocks={provenance.blocks}
@@ -632,21 +634,23 @@ export const NotePreview = ({
             ) : null}
           </>
         ) : (
-          <Suspense
-            fallback={
-              <div className="text-fg-subtle px-2 py-1 text-xs">
-                {t('node.loadingSourceEditor')}
-              </div>
-            }
-          >
-            <RawMarkdownEditor
-              value={markdown}
-              readOnly={readOnly}
-              onChange={handleRawChange}
-              ariaLabel={t('node.rawMarkdownSource')}
-              className="huabu-raw-markdown"
-            />
-          </Suspense>
+          <div className="contents" data-preview-search-content>
+            <Suspense
+              fallback={
+                <div className="text-fg-subtle px-2 py-1 text-xs">
+                  {t('node.loadingSourceEditor')}
+                </div>
+              }
+            >
+              <RawMarkdownEditor
+                value={markdown}
+                readOnly={readOnly}
+                onChange={handleRawChange}
+                ariaLabel={t('node.rawMarkdownSource')}
+                className="huabu-raw-markdown"
+              />
+            </Suspense>
+          </div>
         )}
       </div>
       {showProvenanceChip ? (

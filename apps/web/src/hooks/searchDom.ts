@@ -19,8 +19,10 @@
  * inside `root`'s text nodes and return it as a `Range`, or `null`
  * if there aren't that many matches.
  *
- * Walks in document order, skipping `<script>` / `<style>` /
- * `<noscript>` so we don't return ranges pointing at code blocks.
+ * Walks in document order. When the preview declares one or more
+ * `[data-preview-search-content]` roots, only those document surfaces are
+ * searched; otherwise the whole root is used as a compatibility fallback.
+ * Hidden content and explicitly excluded chrome are always skipped.
  */
 export function findNthRange(
   root: HTMLElement,
@@ -29,37 +31,91 @@ export function findNthRange(
 ): Range | null {
   const needle = query.toLowerCase();
   if (!needle) return null;
-  let remaining = nth;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) => {
-      const parent = node.parentElement;
-      if (!parent) return NodeFilter.FILTER_REJECT;
-      const tag = parent.tagName;
-      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') {
-        return NodeFilter.FILTER_REJECT;
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
-  let current = walker.nextNode();
-  while (current) {
-    const text = (current.textContent ?? '').toLowerCase();
-    let from = 0;
-    while (true) {
-      const idx = text.indexOf(needle, from);
-      if (idx === -1) break;
-      if (remaining === 0) {
+  const ranges = findRanges(root, query, nth + 1);
+  return ranges[nth] ?? null;
+}
+
+/**
+ * Find case-insensitive occurrences of `query` in user-facing preview text.
+ * Exported so counting, highlighting, and match navigation share exactly the
+ * same search boundary and visibility rules.
+ */
+export function findRanges(
+  root: HTMLElement,
+  query: string,
+  maxRanges = Number.POSITIVE_INFINITY,
+): Range[] {
+  const needle = query.toLowerCase();
+  if (!needle || maxRanges <= 0) return [];
+
+  const ranges: Range[] = [];
+  for (const searchRoot of getSearchRoots(root)) {
+    const walker = document.createTreeWalker(
+      searchRoot,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: (node) =>
+          isSearchableTextNode(node, searchRoot)
+            ? NodeFilter.FILTER_ACCEPT
+            : NodeFilter.FILTER_REJECT,
+      },
+    );
+    let current = walker.nextNode();
+    while (current && ranges.length < maxRanges) {
+      const text = (current.textContent ?? '').toLowerCase();
+      let from = 0;
+      while (ranges.length < maxRanges) {
+        const idx = text.indexOf(needle, from);
+        if (idx === -1) break;
         const range = document.createRange();
         range.setStart(current, idx);
         range.setEnd(current, idx + needle.length);
-        return range;
+        ranges.push(range);
+        from = idx + Math.max(1, needle.length);
       }
-      remaining -= 1;
-      from = idx + Math.max(1, needle.length);
+      current = walker.nextNode();
     }
-    current = walker.nextNode();
+    if (ranges.length >= maxRanges) break;
   }
-  return null;
+  return ranges;
+}
+
+function getSearchRoots(root: HTMLElement): HTMLElement[] {
+  if (root.matches('[data-preview-search-content]')) return [root];
+  const candidates = Array.from(
+    root.querySelectorAll<HTMLElement>('[data-preview-search-content]'),
+  );
+  const topLevelCandidates = candidates.filter(
+    (candidate) =>
+      !candidate.parentElement?.closest('[data-preview-search-content]'),
+  );
+  return topLevelCandidates.length > 0 ? topLevelCandidates : [root];
+}
+
+function isSearchableTextNode(node: Node, boundary: HTMLElement): boolean {
+  let element = node.parentElement;
+  while (element) {
+    const tag = element.tagName;
+    if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return false;
+    if (
+      element.hidden ||
+      element.getAttribute('aria-hidden') === 'true' ||
+      element.hasAttribute('data-search-exclude')
+    ) {
+      return false;
+    }
+    if (
+      element.style.display === 'none' ||
+      element.style.visibility === 'hidden' ||
+      element.classList.contains('hidden') ||
+      element.classList.contains('invisible')
+    ) {
+      return false;
+    }
+    if (element === boundary) break;
+    element = element.parentElement;
+  }
+  return true;
 }
 
 /**

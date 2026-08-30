@@ -31,6 +31,8 @@ Inline text and background colors persist as HTML spans with `data-huabu-text-co
 
 **Rendering** — the canvas card mounts the read-only `MilkdownPreview`; the expanded panel mounts the editable `MilkdownEditor`, which also offers a raw-Markdown source mode alongside WYSIWYG. See §4.
 
+**Searching** — expanded-preview find marks the WYSIWYG document or raw-Markdown editor as its searchable content root. Editor chrome, including Crepe's mounted-but-hidden slash menu and Huabu's floating toolbar and provenance controls, is outside that boundary and does not contribute matches. The shared DOM walker also rejects hidden and explicitly excluded text so counting, highlighting, and next/previous navigation agree.
+
 **Saving** — an edit calls `updateNodeData(id, { content })`, which dispatches `UPDATE_NODE_DATA` → `MERGE_NODE_DATA`. There is **no debounce**: every editor `onChange` writes through. Concurrency is handled at the server by rev-CAS, which rejects a stale write with `409 NODE_CONTENT_CONFLICT` rather than merging it.
 
 **Height** — a note's height is `auto` or `fixed` (`setNoteHeightMode`); measurement, freshness keys and the layout conversion are owned by [node-auto-height.md](./node-auto-height.md).
