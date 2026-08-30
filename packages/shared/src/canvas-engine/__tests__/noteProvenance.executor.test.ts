@@ -115,4 +115,29 @@ describe('executeCanvasCommands: AI note provenance', () => {
       fingerprintMarkdownKeys(inline),
     );
   });
+
+  it('canonicalizes LaTeX-style inline math before stamping provenance', () => {
+    const latexDelimiters = String.raw`The result is \(x + y\).`;
+    const milkdownDelimiters = 'The result is $x + y$.';
+
+    expect(fingerprintMarkdownKeys(latexDelimiters)).toEqual(
+      fingerprintMarkdownKeys(milkdownDelimiters),
+    );
+
+    const start = note('n1', { content: 'The old result.' });
+    const { provenance } = runContentEdit('agent', start, latexDelimiters);
+    expect(provenance?.blocks).toHaveLength(1);
+    expect(provenance?.blocks[0]?.key).toBe(
+      fingerprintMarkdownKeys(milkdownDelimiters)[0],
+    );
+  });
+
+  it('canonicalizes LaTeX-style display math to Milkdown block math', () => {
+    const latexDelimiters = String.raw`\[x^2 + y^2 = z^2\]`;
+    const milkdownDelimiters = '$$\nx^2 + y^2 = z^2\n$$';
+
+    expect(fingerprintMarkdownKeys(latexDelimiters)).toEqual(
+      fingerprintMarkdownKeys(milkdownDelimiters),
+    );
+  });
 });

@@ -37,6 +37,8 @@ import { mathFromMarkdown } from 'mdast-util-math';
 import { gfm } from 'micromark-extension-gfm';
 import { math } from 'micromark-extension-math';
 
+import { normalizeMathDelimiters } from './normalizeMathDelimiters.js';
+
 /** Loose mdast node shape — we only ever read a handful of fields. */
 interface MdastNode {
   type: string;
@@ -210,7 +212,8 @@ export function fingerprintMdastBlock(node: MdastNode): string {
 export function fingerprintMarkdownBlocks(
   markdown: string,
 ): FingerprintedBlock[] {
-  const parsed = parseTopLevel(markdown);
+  const canonicalMarkdown = normalizeMathDelimiters(markdown);
+  const parsed = parseTopLevel(canonicalMarkdown);
   const definitions = new Map<string, MdastNode>();
   for (const node of parsed) {
     if (node.type === 'definition' && typeof node.identifier === 'string') {
@@ -230,7 +233,7 @@ export function fingerprintMarkdownBlocks(
       | undefined;
     const start = pos?.start?.offset ?? 0;
     const end = pos?.end?.offset ?? 0;
-    const md = end > start ? markdown.slice(start, end).trim() : '';
+    const md = end > start ? canonicalMarkdown.slice(start, end).trim() : '';
     return { key, markdown: md };
   });
 }

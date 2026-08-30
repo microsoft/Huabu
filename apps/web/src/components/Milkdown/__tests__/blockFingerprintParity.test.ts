@@ -30,6 +30,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { fingerprintMarkdownKeys } from '@huabu/shared/canvas-engine';
 
+import { normalizeMathDelimiters } from '../markdownUtils';
+
 import type { Node as PMNode } from '@milkdown/prose/model';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -60,7 +62,7 @@ async function createHarness(): Promise<Harness> {
       return crepe.editor.action((ctx) => {
         const parser = ctx.get(parserCtx);
         const serializer = ctx.get(serializerCtx);
-        const doc = parser(markdown) as PMNode | null;
+        const doc = parser(normalizeMathDelimiters(markdown)) as PMNode | null;
         if (!doc) return { serialized: '', pmBlockCount: 0 };
         return { serialized: serializer(doc), pmBlockCount: doc.childCount };
       });
@@ -91,6 +93,8 @@ const AGENT_MARKDOWN_CASES: Array<[string, string]> = [
   ],
   ['autolink', 'Contact <person@example.com> or visit <https://example.com>.'],
   ['escaped-punctuation', String.raw`Literal \*stars\* and \[brackets\].`],
+  ['latex-inline-math', String.raw`The result is \(x + y\).`],
+  ['latex-display-math', String.raw`\[x^2 + y^2 = z^2\]`],
   ['html-block', '<div data-kind="callout">\nImportant content\n</div>'],
   ['details-block', '<details>\n<summary>Details</summary>\nBody\n</details>'],
   ['definition', 'Term\n: Definition emitted by an agent'],
