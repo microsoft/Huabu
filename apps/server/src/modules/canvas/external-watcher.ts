@@ -33,9 +33,8 @@ import path from 'node:path';
 import { getLogger } from '../../utils/logger.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
 import { listAllCanvasDirEntries } from '../storage/canvas-dirs.js';
-import { getCanvasStore } from '../storage/index.js';
+import { space } from '../storage/index.js';
 import { registerSpaceDirHandleOwner } from '../storage/index.js';
-import { SPACE_JSON_FILENAME } from '../storage/paths.js';
 import { getWorkspacePath, isWorkspaceConfigured } from '../workspace.js';
 
 import type { CanvasFile } from '../storage/index.js';
@@ -130,19 +129,24 @@ function noteIdsFromCanvas(canvas: CanvasFile | null): Set<string> {
   return ids;
 }
 
-function canvasNoteIds(canvasId: string): Set<string> {
-  return noteIdsFromCanvas(getCanvasStore(canvasId).read());
+async function canvasNoteIds(canvasId: string): Promise<Set<string>> {
+  return noteIdsFromCanvas(await space(canvasId).read());
 }
 
+/**
+ * The scan's view of which notes the Space already knows.
+ *
+ * Read through the port rather than off the record file beside `nodes/`. The
+ * path read was equivalent only because Disk keeps the two together, and this
+ * question — what does the Space contain — is one every backend answers.
+ * Failure degrades to "knows nothing", as before: a scan that cannot read
+ * topology surfaces every file rather than silently hiding some.
+ */
 async function readInitialCanvasNoteIds(
-  nodesPath: string,
+  canvasId: string,
 ): Promise<Set<string>> {
   try {
-    const raw = await readFile(
-      path.join(path.dirname(nodesPath), SPACE_JSON_FILENAME),
-      'utf8',
-    );
-    return noteIdsFromCanvas(JSON.parse(raw) as CanvasFile);
+    return await canvasNoteIds(canvasId);
   } catch {
     return new Set();
   }
@@ -195,8 +199,16 @@ function forgetItem(session: ActiveSpaceWatch, relativePath: string): void {
   emit(session, { type: 'removed', data: { relativePath } });
 }
 
-function snapshotOf(session: ActiveSpaceWatch): ExternalNoteItem[] {
-  const known = canvasNoteIds(session.canvasId);
+/**
+ * `known` is passed in rather than read here because this must stay
+ * synchronous: it both reads and prunes `pendingItems`, and the caller relies
+ * on registering its listener and taking the snapshot without an await
+ * between them, so no event can slip through.
+ */
+function snapshotOf(
+  session: ActiveSpaceWatch,
+  known: ReadonlySet<string>,
+): ExternalNoteItem[] {
   const out: ExternalNoteItem[] = [];
   for (const [rel, item] of session.pendingItems) {
     if (item.noteId && known.has(item.noteId)) {
@@ -228,7 +240,7 @@ function scheduleNodeEvent(session: ActiveSpaceWatch, basename: string): void {
         .then(async (fileStat) => {
           if (!fileStat.isFile()) return;
           const item = await buildItem(absPath, relativePath, () =>
-            Promise.resolve(canvasNoteIds(session.canvasId)),
+            canvasNoteIds(session.canvasId),
           );
           if (!item || !isSessionCurrent(session, stamp)) return;
           recordItem(session, item);
@@ -674,7 +686,7 @@ async function runInitialScan(session: ActiveSpaceWatch): Promise<void> {
 
     let topology: Promise<Set<string>> | null = null;
     const knownNoteIds = (): Promise<Set<string>> =>
-      (topology ??= readInitialCanvasNoteIds(session.nodesPath));
+      (topology ??= readInitialCanvasNoteIds(session.canvasId));
 
     let nextIndex = 0;
     const worker = async (): Promise<void> => {
@@ -787,11 +799,13 @@ export async function openExternalNoteSession(
     await ensureInitialScan(active);
   }
 
+  const known = await canvasNoteIds(active.canvasId);
+
   // Registering the listener and reading the snapshot must stay in one
   // synchronous block so no event can slip between them.
   if (released || !isSessionCurrent(active)) return { snapshot: [], close };
   active.listeners.add(listener);
-  return { snapshot: snapshotOf(active), close };
+  return { snapshot: snapshotOf(active, known), close };
 }
 
 /** Remove and return a pending item — used by the import endpoint. */

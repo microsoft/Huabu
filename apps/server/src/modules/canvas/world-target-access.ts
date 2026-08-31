@@ -1,18 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import path from 'node:path';
+import { getStructuredStore, space } from '../storage/index.js';
 
-import {
-  isWorldCanvasId,
-  refreshCanvasDirIndex,
-} from '../storage/canvas-dirs.js';
-import { getCanvasStore } from '../storage/index.js';
-import { SPACE_JSON_FILENAME } from '../storage/paths.js';
-import { getWorkspacePath } from '../workspace.js';
-
-import type { CanvasFile } from '../storage/canvas-store.js';
+import type { CanvasFile } from '../storage/index.js';
 
 interface StoredNode {
   type?: string;
@@ -26,38 +17,39 @@ export class WorldTargetAccessError extends Error {
   }
 }
 
-export function readWorldTargetCanvasesStrict(
+/**
+ * Read the Space records a World reference addresses, strictly.
+ *
+ * "Strictly" means an unreadable or malformed record raises rather than
+ * resolving to a broken reference: a World Portal that silently rendered as
+ * "missing" because a record could not be parsed would hide an integrity
+ * problem behind an ordinary-looking empty state.
+ *
+ * Every requested id appears in the result; one that has no Space maps to
+ * `null`. This used to walk the Workspace directory reading `space.json`
+ * files itself, which made a reference resolver a consumer of the Disk record
+ * layout, and made the read cost the whole Workspace rather than the ids
+ * asked for.
+ */
+export async function readWorldTargetCanvasesStrict(
   canvasIds: ReadonlySet<string>,
-): Map<string, CanvasFile | null> {
-  const matches = new Map<string, CanvasFile | null>(
-    [...canvasIds].map((canvasId) => [canvasId, null] as const),
+): Promise<Map<string, CanvasFile | null>> {
+  const entries = await Promise.all(
+    [...canvasIds].map(async (canvasId) => {
+      const record = await space(canvasId).read();
+      if (
+        record &&
+        (!Array.isArray(record.state?.nodes) ||
+          !Array.isArray(record.state.edges))
+      ) {
+        throw new WorldTargetAccessError(
+          `Canvas ${canvasId} has malformed topology`,
+        );
+      }
+      return [canvasId, record] as const;
+    }),
   );
-  const workspace = getWorkspacePath();
-  for (const entry of readdirSync(workspace)) {
-    if (entry.startsWith('.')) continue;
-    const root = path.join(workspace, entry);
-    if (!statSync(root).isDirectory()) continue;
-    const topologyPath = path.join(root, SPACE_JSON_FILENAME);
-    if (!existsSync(topologyPath)) continue;
-    const raw = readFileSync(topologyPath, 'utf8');
-    const canvas = JSON.parse(raw) as CanvasFile;
-    if (!canvasIds.has(canvas.canvasId)) continue;
-    if (matches.get(canvas.canvasId)) {
-      throw new WorldTargetAccessError(
-        `Canvas ${canvas.canvasId} has duplicate topology`,
-      );
-    }
-    if (
-      !Array.isArray(canvas.state?.nodes) ||
-      !Array.isArray(canvas.state.edges)
-    ) {
-      throw new WorldTargetAccessError(
-        `Canvas ${canvas.canvasId} has malformed topology`,
-      );
-    }
-    matches.set(canvas.canvasId, canvas);
-  }
-  return matches;
+  return new Map(entries);
 }
 
 /**
@@ -65,18 +57,20 @@ export function readWorldTargetCanvasesStrict(
  * Explicit cross-Canvas reads are available only from World and only through
  * one canonical Portal in the current World topology.
  */
-export function resolveWorldReadCanvasId(
+export async function resolveWorldReadCanvasId(
   ownerCanvasId: string,
   targetCanvasId: string | undefined,
-): string {
+): Promise<string> {
   if (!targetCanvasId) return ownerCanvasId;
-  if (!isWorldCanvasId(ownerCanvasId)) {
+
+  const spaces = getStructuredStore().spaces();
+  if (ownerCanvasId !== (await spaces.worldId())) {
     throw new WorldTargetAccessError(
       'targetCanvasId is available only in a World conversation',
     );
   }
 
-  const world = getCanvasStore(ownerCanvasId).read();
+  const world = await space(ownerCanvasId).read();
   if (!world) {
     throw new WorldTargetAccessError('World Canvas is not readable');
   }
@@ -90,7 +84,8 @@ export function resolveWorldReadCanvasId(
       `Canvas ${targetCanvasId} is not addressed by one canonical World Portal`,
     );
   }
-  readWorldTargetCanvasesStrict(new Set([targetCanvasId]));
-  refreshCanvasDirIndex();
+  // The Portal names it; confirm the Space itself is readable before handing
+  // the id to a tool that will read from it.
+  await readWorldTargetCanvasesStrict(new Set([targetCanvasId]));
   return targetCanvasId;
 }

@@ -21,8 +21,12 @@
 
 import path from 'node:path';
 
-import { canvasRoot } from './layout.js';
+import { canvasRoot, nodesDir } from './layout.js';
+import { getCanvasStore } from './legacy/canvas-store-cache.js';
 import { getWorkspacePath } from '../../../workspace.js';
+
+/** A node sidecar, as RFS and the file tools address one. */
+const NODE_SIDECAR_RE = /^nodes\/([^/]+\.md)$/;
 
 export interface DiskSpaceTree {
   readonly canvasId: string;
@@ -45,22 +49,83 @@ export interface DiskSpaceTree {
    * handle instead.
    */
   directory(): string;
+  /**
+   * Which node record the materialized file at `relativePath` carries.
+   *
+   * `relativePath` is Space-relative (`nodes/My note.md`); anything that is
+   * not a node sidecar, and any name no node currently claims, returns `null`.
+   *
+   * This is the **sidecar-to-record mapping**, and it belongs to the tree
+   * rather than to a port for the reason §6.4.3 gives under disposition B:
+   * every backend could mint `nodes/<label>.md` names from records, but Disk
+   * inverts the *real* filename, because the file is really there and a user
+   * may have renamed it. The two are only the same answer when nothing has
+   * touched the directory from outside — which is exactly the case Disk
+   * cannot assume. Until a second backend exists, RFS's file plane is Disk's.
+   *
+   * Resolved through the frontmatter-`id` index rather than by re-deriving
+   * `toSafeFilename(label)`: topology never carries a label, so a derived path
+   * would collapse to `nodes/<id>.md` and never match a label-named file.
+   */
+  nodeIdForPath(relativePath: string): string | null;
+  /**
+   * Where this Space's node sidecars are, for a feature that shows a user
+   * their own files.
+   *
+   * `directory()` plus a segment the caller would otherwise have to know. The
+   * point of the capability is that the layout has one owner, so a consumer
+   * asking "which folder holds the notes" gets an answer rather than assembles
+   * one.
+   */
+  nodesDirectory(): string;
+  /**
+   * Every sidecar filename currently claiming `nodeId`; empty when there is
+   * no conflict.
+   *
+   * Only a filesystem can produce this: two files can both say they are one
+   * node, and a table with a primary key cannot. The read path surfaces it as
+   * a non-blocking hint — the index keeps the last-scanned file, so the node
+   * still renders — while a write hard-fails with `duplicate-node`. That
+   * asymmetry is deliberate: a user who broke it by hand needs to see the node
+   * to fix it.
+   */
+  duplicateSidecars(nodeId: string): readonly string[];
 }
 
 export function diskSpaceTree(canvasId: string): DiskSpaceTree {
   // Bound at resolution, exactly as `DiskSpaceNodes` binds its own: one Space
   // handle answers about one Workspace, on every member.
   const workspacePath = path.resolve(getWorkspacePath());
+  const assertActiveWorkspace = (): void => {
+    if (path.resolve(getWorkspacePath()) !== workspacePath) {
+      throw new Error(
+        `DiskSpaceTree(${canvasId}) belongs to an inactive workspace. ` +
+          'Resolve a fresh Space handle after workspace activation.',
+      );
+    }
+  };
   return {
     canvasId,
     directory: () => {
-      if (path.resolve(getWorkspacePath()) !== workspacePath) {
-        throw new Error(
-          `DiskSpaceTree(${canvasId}) belongs to an inactive workspace. ` +
-            'Resolve a fresh Space handle after workspace activation.',
-        );
-      }
+      assertActiveWorkspace();
       return canvasRoot(canvasId);
+    },
+    nodesDirectory: () => {
+      assertActiveWorkspace();
+      return nodesDir(canvasId);
+    },
+    nodeIdForPath: (relativePath: string) => {
+      assertActiveWorkspace();
+      const filename = NODE_SIDECAR_RE.exec(relativePath)?.[1];
+      if (filename === undefined) return null;
+      return getCanvasStore(canvasId).nodeIdForFilename(filename);
+    },
+    duplicateSidecars: (nodeId: string) => {
+      assertActiveWorkspace();
+      const store = getCanvasStore(canvasId);
+      return store.isDuplicateNode(nodeId)
+        ? store.duplicateNodeFiles(nodeId)
+        : [];
     },
   };
 }

@@ -23,11 +23,7 @@ import {
 } from './canvas-executor.js';
 import { reconcileWorldPortals } from './world-portals.js';
 import { createKeyedMutex } from '../../utils/keyed-mutex.js';
-import {
-  listCanvasDirEntries,
-  requireWorldCanvasId,
-} from '../storage/canvas-dirs.js';
-import { getCanvasStore } from '../storage/index.js';
+import { getStructuredStore, space } from '../storage/index.js';
 
 type PortalCommand = Extract<CanvasCommand, { type: 'SET_PORTAL_NODE_PINS' }>;
 const withPortalRoutingMutex = createKeyedMutex<string>();
@@ -210,7 +206,7 @@ async function ensureCanonicalPortals(
   worldCanvasId: string,
   commands: readonly PortalCommand[],
 ): Promise<void> {
-  const world = getCanvasStore(worldCanvasId).read() as StoredCanvas | null;
+  const world = (await space(worldCanvasId).read()) as StoredCanvas | null;
   const targets = new Set<string>();
   for (const node of (world?.state.nodes ?? []) as NestableNode[]) {
     const target = portalTarget(node);
@@ -249,14 +245,15 @@ async function executeCanvasCommandsOnHostInternal(
 
   assertConsistentDesiredStates(portalCommands);
 
-  const worldCanvasId = requireWorldCanvasId();
+  const spaces = getStructuredStore().spaces();
+  const worldCanvasId = await spaces.worldId();
   if (!routingLockHeld) {
     return withPortalRoutingMutex(worldCanvasId, () =>
       executeCanvasCommandsOnHostInternal(input, true),
     );
   }
   await ensureCanonicalPortals(worldCanvasId, portalCommands);
-  const world = getCanvasStore(worldCanvasId).read() as StoredCanvas | null;
+  const world = (await space(worldCanvasId).read()) as StoredCanvas | null;
   if (!world || !Array.isArray(world.state.nodes)) {
     throw new CanvasCommandRoutingError('World Canvas is unavailable');
   }
@@ -335,18 +332,39 @@ async function executeCanvasCommandsOnHostInternal(
   }
 
   const liveCanvasIds = new Set(
-    listCanvasDirEntries().map((entry) => entry.id),
+    (await spaces.list()).map((summary) => summary.canvasId),
   );
-  const sourceStates = new Map<string, SourceState | null>();
-  const readSource = (canvasId: string): SourceState | null => {
-    if (!sourceStates.has(canvasId)) {
-      sourceStates.set(
-        canvasId,
-        sourceStateOf(getCanvasStore(canvasId).read() as StoredCanvas | null),
-      );
+
+  // Every source Space the passes below can ask about, read once up front.
+  // The set is knowable without running them: a source is either named by a
+  // Portal-Pin update or referenced by a World node, and both are already in
+  // hand. That keeps the reads to what this command touches while letting the
+  // passes themselves stay synchronous.
+  const referencedCanvasIds = new Set<string>();
+  for (const command of portalCommands) {
+    for (const update of command.updates) {
+      referencedCanvasIds.add(update.sourceCanvasId);
     }
-    return sourceStates.get(canvasId) ?? null;
-  };
+  }
+  for (const node of worldNodes) {
+    const target = referenceTarget(node);
+    if (target) referencedCanvasIds.add(target.canvasId);
+  }
+  const sourceStates = new Map<string, SourceState | null>(
+    await Promise.all(
+      [...referencedCanvasIds].map(
+        async (canvasId) =>
+          [
+            canvasId,
+            sourceStateOf(
+              (await space(canvasId).read()) as StoredCanvas | null,
+            ),
+          ] as const,
+      ),
+    ),
+  );
+  const readSource = (canvasId: string): SourceState | null =>
+    sourceStates.get(canvasId) ?? null;
 
   const requested = new Map<string, boolean>();
   for (const command of portalCommands) {

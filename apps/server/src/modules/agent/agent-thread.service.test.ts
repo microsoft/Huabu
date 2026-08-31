@@ -106,7 +106,7 @@ function createHarness(options?: {
     return emptyInternalStream();
   });
   const service = new AgentThreadService({
-    resolveFixedAgentNode: () =>
+    resolveFixedAgentNode: async () =>
       options && 'target' in options ? (options.target ?? null) : TARGET,
     resolvePersistedExternalBinding: () =>
       options && 'persistedBinding' in options
@@ -164,7 +164,7 @@ describe('AgentThreadService', () => {
     expect(externalBindingFromWorkloadSpec({ binding: {} })).toBeNull();
   });
 
-  it('resolves a persisted external Thread without a fixed Agent Node', () => {
+  it('resolves a persisted external Thread without a fixed Agent Node', async () => {
     const binding = {
       kind: 'external' as const,
       profileId: 'profile-selectable',
@@ -172,12 +172,12 @@ describe('AgentThreadService', () => {
     };
     const harness = createHarness({ target: null, persistedBinding: binding });
 
-    expect(
+    await expect(
       harness.service.resolveExternalTarget('canvas-a', 'thread-a'),
-    ).toEqual({ binding, fixedTarget: null });
+    ).resolves.toEqual({ binding, fixedTarget: null });
   });
 
-  it('prefers the fixed Agent Node binding when one exists', () => {
+  it('prefers the fixed Agent Node binding when one exists', async () => {
     const harness = createHarness({
       persistedBinding: {
         kind: 'external',
@@ -186,9 +186,9 @@ describe('AgentThreadService', () => {
       },
     });
 
-    expect(
+    await expect(
       harness.service.resolveExternalTarget('canvas-a', 'thread-a'),
-    ).toEqual({ binding: TARGET.agentBinding, fixedTarget: TARGET });
+    ).resolves.toEqual({ binding: TARGET.agentBinding, fixedTarget: TARGET });
   });
 
   it('uses persisted fixed binding and overrides under one leased lifecycle', async () => {
@@ -356,7 +356,7 @@ describe('AgentThreadService', () => {
       return events([{ type: 'done', data: { message: 'Done' } }]);
     });
     const service = new AgentThreadService({
-      resolveFixedAgentNode: () => TARGET,
+      resolveFixedAgentNode: async () => TARGET,
       resolvePersistedExternalBinding: () => null,
       waitForTurnRelease: vi.fn().mockResolvedValue(undefined),
       acquireTurn: vi.fn(() => vi.fn()),

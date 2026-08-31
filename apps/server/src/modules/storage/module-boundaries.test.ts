@@ -10,7 +10,7 @@
  * one import".
  *
  * What this is **not**: evidence that every read capability is portable. The
- * compatibility facade and three root forwarding shims still serve explicit
+ * compatibility facade and two root forwarding shims still serve explicit
  * Disk-only/read paths. This asserts that the portable write boundary and
  * dependency direction stay intact while that remaining list only shrinks.
  */
@@ -78,14 +78,13 @@ function inLayer(relative: string, layer: string): boolean {
 }
 
 describe('storage module tree', () => {
-  it('keeps only the barrel, composition, and the three shims at the root', () => {
+  it('keeps only the barrel, composition, and the two shims at the root', () => {
     const rootFiles = storageFiles
       .filter((f) => path.dirname(f) === 'modules/storage')
       .map((f) => path.basename(f));
 
     expect(rootFiles.sort()).toEqual([
       'canvas-dirs.ts',
-      'canvas-store.ts',
       'index.ts',
       'module-boundaries.test.ts',
       'paths.ts',
@@ -305,6 +304,9 @@ describe('Disk Space tree capability', () => {
     'modules/canvas/external.route.ts',
     // C — the resurrection guard, which disappears with the substrate.
     'modules/agent/memory/trigger.ts',
+    // B, deferred — RFS's sidecar-to-record mapping. Portable in principle,
+    // Disk's in practice until a second backend has a file plane at all.
+    'modules/remote_fs/node-meta.ts',
     // D — the per-Space RFS access guide, headed for a blob.
     'modules/remote_fs/skill.ts',
     // C and D — memory files, the debug prompt log, ACP session state.
@@ -341,6 +343,132 @@ describe('Disk Space tree capability', () => {
     // Living under `backends/disk/` is what the `ports/` census already
     // guarantees; this states the intent the file exists to carry.
     expect(tree).toMatch(/not a port/i);
+  });
+});
+
+/**
+ * The neutrality half of the exit criterion, at the import level (proposal
+ * §12.7, §12.8).
+ *
+ * The `workspace module names no backend` group above pinned Phase 4.5's
+ * correction for one module. The criterion is wider: **no** production module
+ * outside `storage/` may name how a backend stores a Space, because that is
+ * exactly the knowledge a second adapter would have to re-satisfy.
+ *
+ * Migrations are exempt — they rewrite frozen historical on-disk shapes, which
+ * is the one legitimate reason to know a layout that is no longer current.
+ * Tests are exempt for the same reason they may name an adapter: a test that
+ * names one is choosing its subject.
+ */
+describe('no production module outside storage names a Disk layout', () => {
+  /** Members of `backends/disk/layout.ts` and the Disk directory index. */
+  const DISK_LAYOUT = [
+    'SPACE_JSON_FILENAME',
+    'WORLD_CANVAS_DIR_NAME',
+    'canvasJsonPath',
+    'nodesDir',
+    'nodeFilePath',
+    'ARTIFACTS_DIR_NAME',
+    'artifactsDir',
+    'artifactPath',
+    'HISTORY_DIR_NAME',
+    'historyDir',
+    'chatDir',
+    'tasksPath',
+    'eventsPath',
+    'deltaLogPath',
+    'changesPath',
+    'canvasRoot',
+    'suggestCanvasDir',
+    'registerCanvasDir',
+    'renameCanvasDirOnDisk',
+  ];
+
+  it('imports no Disk layout symbol', () => {
+    const violations: string[] = [];
+    for (const file of sourceFiles) {
+      if (file.startsWith('modules/storage/')) continue;
+      if (file.endsWith('.test.ts')) continue;
+      if (file.startsWith('modules/workspace/migrations/')) continue;
+
+      // Import-level, deliberately: a local variable that happens to be
+      // called `artifactPath` is not a violation, while importing the symbol
+      // is. The check is about where knowledge comes from, not vocabulary.
+      const source = read(file);
+      const imported = new Set<string>();
+      for (const match of source.matchAll(
+        /import\s*(?:type\s*)?\{([^}]*)\}\s*from/g,
+      )) {
+        for (const raw of match[1].split(',')) {
+          const name = raw
+            .trim()
+            .replace(/^type\s+/, '')
+            .split(/\s+as\s+/)[0];
+          if (name) imported.add(name.trim());
+        }
+      }
+      for (const symbol of DISK_LAYOUT) {
+        if (imported.has(symbol)) violations.push(`${file} → ${symbol}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('rejects a production import of the legacy CanvasStore', () => {
+    const violations = sourceFiles
+      .filter((file) => !file.startsWith('modules/storage/'))
+      .filter((file) => !file.endsWith('.test.ts'))
+      .filter((file) =>
+        specifiersOf(file).some((spec) => {
+          const target = resolveSpecifier(file, spec);
+          return target?.includes('legacy/canvas-store') === true;
+        }),
+      );
+
+    // The root forwarding shim that used to make this reachable had no
+    // importers left and was deleted; this keeps the path closed.
+    expect(violations).toEqual([]);
+  });
+
+  /**
+   * The path check above only sees a direct import. The barrel still
+   * re-exports the legacy store for the compatibility layer and the Disk
+   * suites, so a production file can reach the same object by name without
+   * ever naming its file — which is how one reader survived the migration.
+   */
+  it('rejects a production import of a legacy CanvasStore symbol', () => {
+    // Readers only. `resetStorageCache` is on the barrel too and the
+    // Workspace routes still call it, but it reads nothing — it is the
+    // activation lifecycle dropping an adapter's caches, which is a
+    // composition concern with its own home to find (§12.8), not a
+    // production module learning how a Space is stored.
+    const LEGACY_STORE_SYMBOLS = [
+      'CanvasStore',
+      'getCanvasStore',
+      'forgetCanvasStore',
+    ];
+    const violations: string[] = [];
+    for (const file of sourceFiles) {
+      if (file.startsWith('modules/storage/')) continue;
+      if (file.endsWith('.test.ts')) continue;
+
+      const source = read(file);
+      for (const match of source.matchAll(
+        /import\s*(?:type\s*)?\{([^}]*)\}\s*from/g,
+      )) {
+        for (const raw of match[1].split(',')) {
+          const name = raw
+            .trim()
+            .replace(/^type\s+/, '')
+            .split(/\s+as\s+/)[0]
+            .trim();
+          if (LEGACY_STORE_SYMBOLS.includes(name)) {
+            violations.push(`${file} → ${name}`);
+          }
+        }
+      }
+    }
+    expect(violations).toEqual([]);
   });
 });
 
@@ -398,11 +526,7 @@ describe('structured write authority', () => {
 });
 
 describe('root forwarding shims', () => {
-  const SHIMS = [
-    'modules/storage/canvas-store.ts',
-    'modules/storage/canvas-dirs.ts',
-    'modules/storage/paths.ts',
-  ];
+  const SHIMS = ['modules/storage/canvas-dirs.ts', 'modules/storage/paths.ts'];
 
   it.each(SHIMS)('%s contains no logic', (shim) => {
     const body = read(shim)
@@ -420,37 +544,22 @@ describe('root forwarding shims', () => {
 
   /** Exact snapshot of the remaining deprecated-path importers. */
   const EXPECTED_IMPORTERS: Record<string, readonly string[]> = {
-    'storage/canvas-store.js': [
-      'modules/canvas/canvas-search.test.ts',
-      'modules/canvas/canvas-search.ts',
-      'modules/canvas/canvas-spatial.ts',
-      'modules/canvas/canvas.route.ts',
-      'modules/canvas/node-prompt.test.ts',
-      'modules/canvas/node-prompt.ts',
-      'modules/canvas/world-reference-resolver.ts',
-      'modules/canvas/world-target-access.ts',
-    ],
     'storage/canvas-dirs.js': [
       'modules/agent/tools/world-target-read.test.ts',
       'modules/canvas/canvas-command-router.test.ts',
-      'modules/canvas/canvas-command-router.ts',
       'modules/canvas/canvas.route.ts',
       'modules/canvas/external-watcher.test.ts',
       'modules/canvas/external-watcher.ts',
       'modules/canvas/world-portal-policy.ts',
       'modules/canvas/world-portals.test.ts',
-      'modules/canvas/world-portals.ts',
       'modules/canvas/world-reference-resolver.test.ts',
-      'modules/canvas/world-reference-resolver.ts',
-      'modules/canvas/world-target-access.ts',
       'modules/workspace.ts',
     ],
     'storage/paths.js': [
       'modules/canvas/canvas-content-cas.test.ts',
       'modules/canvas/canvas.route.test.ts',
-      'modules/canvas/canvas.route.ts',
-      'modules/canvas/external-watcher.ts',
-      'modules/canvas/world-target-access.ts',
+      // The one production importer left is a migration, which rewrites a
+      // frozen historical on-disk shape and is exempt by construction.
       'modules/workspace/migrations/migrate-acp-sessions.ts',
     ],
   };

@@ -65,14 +65,12 @@ import {
 import { getLogger } from '../../utils/logger.js';
 import {
   space,
-  getCanvasStore,
-  getStructuredStore,
   withCanvasMutex,
   type BlobScope,
   type CanvasFile,
-  type CanvasStore,
   type DeltaLogEntry,
   type NodeContent,
+  type NodeSnapshot,
   type SpaceNodeMutation,
 } from '../storage/index.js';
 
@@ -140,7 +138,7 @@ function stripNodesForCanvas(nodes: readonly CanvasNode[]): CanvasNode[] {
 }
 
 function hydrateNodes(
-  store: CanvasStore,
+  records: ReadonlyMap<string, NodeSnapshot>,
   nodes: readonly CanvasNode[],
 ): CanvasNode[] {
   return nodes.map((node) => {
@@ -149,12 +147,7 @@ function hydrateNodes(
     const nodeType = typeof node.type === 'string' ? node.type : '';
     if (!MD_BACKED_NODE_TYPES.has(nodeType)) return { ...node };
 
-    let content: NodeContent | null = null;
-    try {
-      content = store.readNode(nodeId);
-    } catch {
-      content = null;
-    }
+    const content = records.get(nodeId)?.record ?? null;
     if (!content) return { ...node };
 
     const data: Record<string, unknown> = { ...(node.data ?? {}) };
@@ -692,11 +685,7 @@ export async function executeOnServer(
   // writes to the same canvas. Idempotent for values that are already artifact
   // keys / `/api/` URLs / `data:` URIs.
   if (originator.source === 'agent') {
-    commands = await importForeignNodeSources(
-      getCanvasStore(canvasId),
-      canvasId,
-      commands,
-    );
+    commands = await importForeignNodeSources(canvasId, commands);
 
     // For image nodes with only width specified, calculate height from actual
     // image aspect ratio. This ensures correct proportions for all image sources.
@@ -704,10 +693,13 @@ export async function executeOnServer(
   }
 
   return await withCanvasMutex(canvasId, async () => {
-    const store = getCanvasStore(canvasId);
-    const handle = getStructuredStore().space(canvasId);
-    const canvas = store.read();
+    const handle = space(canvasId);
+    const canvas = await handle.read();
     if (!canvas) throw new CanvasNotFoundError(canvasId);
+
+    // Executor prestate is whole-Space work: every md-backed node in the
+    // topology needs its stored content before the engine sees it.
+    const records = await handle.nodes.list();
 
     const fromVersion = canvas.version;
 
@@ -715,7 +707,7 @@ export async function executeOnServer(
     // the prestate — handlers like MERGE_NODE_DATA need the current
     // `data.content` to merge against, but topology never carries it.
     const prestateNodes = hydrateNodes(
-      store,
+      records,
       canvas.state.nodes as CanvasNode[],
     );
     const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];
@@ -1123,14 +1115,17 @@ export async function applyDeltasOnServer(input: {
   const { canvasId, originator, runId } = input;
 
   return await withCanvasMutex(canvasId, async () => {
-    const store = getCanvasStore(canvasId);
-    const handle = getStructuredStore().space(canvasId);
-    const canvas = store.read();
+    const handle = space(canvasId);
+    const canvas = await handle.read();
     if (!canvas) throw new CanvasNotFoundError(canvasId);
+
+    // Executor prestate is whole-Space work: every md-backed node in the
+    // topology needs its stored content before the engine sees it.
+    const records = await handle.nodes.list();
 
     const fromVersion = canvas.version;
     const prestateNodes = hydrateNodes(
-      store,
+      records,
       canvas.state.nodes as CanvasNode[],
     );
     const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];

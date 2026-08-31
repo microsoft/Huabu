@@ -58,7 +58,8 @@ const interactiveViewRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     try {
-      const resource = interactiveViewService.get(
+      const blobs = space(params.data.canvasId).blobs;
+      const resource = await interactiveViewService.get(
         params.data.canvasId,
         params.data.nodeId,
       );
@@ -84,7 +85,7 @@ const interactiveViewRoutes: FastifyPluginAsync = async (app) => {
       const sent = await sendBlob(
         request,
         reply,
-        space(params.data.canvasId).blobs,
+        blobs,
         resource.rendererArtifact,
       );
       if (!sent) {
@@ -153,7 +154,10 @@ const interactiveViewRoutes: FastifyPluginAsync = async (app) => {
     }
     try {
       return reply.send(
-        interactiveViewService.get(parsed.data.canvasId, parsed.data.nodeId),
+        await interactiveViewService.get(
+          parsed.data.canvasId,
+          parsed.data.nodeId,
+        ),
       );
     } catch (error) {
       if (error instanceof InteractiveViewServiceError) {

@@ -32,8 +32,9 @@ import {
   executeOnServer,
   type InteractiveViewConflict,
 } from '../canvas/canvas-executor.js';
-import { space, getCanvasStore, getStructuredStore } from '../storage/index.js';
+import { space, getStructuredStore } from '../storage/index.js';
 
+import type { NodeContent } from '../storage/index.js';
 import type { FastifyBaseLogger } from 'fastify';
 
 interface StoredNode {
@@ -70,12 +71,12 @@ export class InteractiveViewServiceError extends Error {
   }
 }
 
-function resolveOwnerThread(
+async function resolveOwnerThread(
   canvasId: string,
   threadId: string,
-): ExternalAgentThreadTarget | null {
+): Promise<ExternalAgentThreadTarget | null> {
   try {
-    return agentThreadService.resolveExternalTarget(canvasId, threadId);
+    return await agentThreadService.resolveExternalTarget(canvasId, threadId);
   } catch (error) {
     if (error instanceof AgentThreadResolutionError) {
       throw new InteractiveViewServiceError(
@@ -156,8 +157,8 @@ function validateDefinition(definition: InteractiveViewDefinitionV1): void {
 }
 
 function resourceFromNode(
-  canvasId: string,
   node: StoredNode,
+  record: NodeContent | null,
 ): InteractiveViewResource | null {
   if (node.type !== 'web' || typeof node.id !== 'string') return null;
   const data =
@@ -168,10 +169,9 @@ function resourceFromNode(
     data.interactiveView,
   );
   if (!parsed.success) return null;
-  const sidecar = getCanvasStore(canvasId).readNode(node.id);
   const rendererArtifact =
-    typeof sidecar?.src === 'string'
-      ? sidecar.src
+    typeof record?.src === 'string'
+      ? record.src
       : typeof data.src === 'string'
         ? data.src
         : null;
@@ -186,16 +186,28 @@ function resourceFromNode(
 }
 
 export class InteractiveViewService {
-  list(canvasId: string, viewKey?: string): InteractiveViewResource[] {
-    const canvas = getCanvasStore(canvasId).read();
+  async list(
+    canvasId: string,
+    viewKey?: string,
+  ): Promise<InteractiveViewResource[]> {
+    const handle = space(canvasId);
+    const canvas = await handle.read();
     if (!canvas) {
       throw new InteractiveViewServiceError(
         'canvas_not_found',
         `Canvas ${canvasId} does not exist`,
       );
     }
+    // Every `web` node is a candidate View and each needs its record's `src`,
+    // so the candidate set is the Space.
+    const records = await handle.nodes.list();
     return (canvas.state.nodes as StoredNode[]).flatMap((node) => {
-      const resource = resourceFromNode(canvasId, node);
+      const resource = resourceFromNode(
+        node,
+        typeof node.id === 'string'
+          ? (records.get(node.id)?.record ?? null)
+          : null,
+      );
       if (
         !resource ||
         (viewKey !== undefined && resource.viewKey !== viewKey)
@@ -206,8 +218,12 @@ export class InteractiveViewService {
     });
   }
 
-  get(canvasId: string, nodeId: string): InteractiveViewResource {
-    const canvas = getCanvasStore(canvasId).read();
+  async get(
+    canvasId: string,
+    nodeId: string,
+  ): Promise<InteractiveViewResource> {
+    const handle = space(canvasId);
+    const canvas = await handle.read();
     if (!canvas) {
       throw new InteractiveViewServiceError(
         'canvas_not_found',
@@ -217,7 +233,12 @@ export class InteractiveViewService {
     const node = (canvas.state.nodes as StoredNode[]).find(
       (candidate) => candidate.id === nodeId,
     );
-    const resource = node ? resourceFromNode(canvasId, node) : null;
+    const resource = node
+      ? resourceFromNode(
+          node,
+          (await handle.nodes.read(nodeId))?.record ?? null,
+        )
+      : null;
     if (!resource) {
       throw new InteractiveViewServiceError(
         'view_not_found',
@@ -231,7 +252,7 @@ export class InteractiveViewService {
     canvasId: string,
     nodeId: string,
   ): Promise<InteractiveViewRuntimeSnapshot> {
-    const resource = this.get(canvasId, nodeId);
+    const resource = await this.get(canvasId, nodeId);
     const data: InteractiveViewRuntimeSnapshot['data'] = {};
     for (const binding of resource.definition.bindings) {
       let value: InteractiveViewJsonValue;
@@ -273,7 +294,7 @@ export class InteractiveViewService {
           if (run.rootThreadId) threadIds.add(run.rootThreadId);
         }
       } else {
-        const canvas = getCanvasStore(canvasId).read();
+        const canvas = await space(canvasId).read();
         if (!canvas) {
           throw new InteractiveViewServiceError(
             'canvas_not_found',
@@ -324,14 +345,14 @@ export class InteractiveViewService {
     canvasId: string,
     request: CreateInteractiveViewRequest,
   ): Promise<InteractiveViewResource> {
-    const canvas = getCanvasStore(canvasId).read();
+    const canvas = await space(canvasId).read();
     if (!canvas) {
       throw new InteractiveViewServiceError(
         'canvas_not_found',
         `Canvas ${canvasId} does not exist`,
       );
     }
-    if (!resolveOwnerThread(canvasId, request.ownerThreadId)) {
+    if (!(await resolveOwnerThread(canvasId, request.ownerThreadId))) {
       throw new InteractiveViewServiceError(
         'invalid_owner_thread',
         `Owner thread ${request.ownerThreadId} is not an external Agent thread in this Canvas`,
@@ -404,7 +425,7 @@ export class InteractiveViewService {
     value: InteractiveViewJsonValue,
     actor: 'host-bridge' | 'trusted-agent',
   ): Promise<InteractiveViewResource> {
-    const current = this.get(canvasId, nodeId);
+    const current = await this.get(canvasId, nodeId);
     if (
       actor === 'host-bridge' &&
       !current.definition.actions.some(
@@ -477,7 +498,7 @@ export class InteractiveViewService {
     if (inputIssue) {
       throw new InteractiveViewServiceError('invalid_definition', inputIssue);
     }
-    const resource = this.get(canvasId, nodeId);
+    const resource = await this.get(canvasId, nodeId);
     const grant = resource.definition.actions.find(
       (candidate) => candidate.actionId === actionId,
     );
@@ -501,7 +522,7 @@ export class InteractiveViewService {
       ...(input !== undefined ? { input } : {}),
       viewRevision: resource.revision,
     };
-    const ownerTarget = resolveOwnerThread(
+    const ownerTarget = await resolveOwnerThread(
       canvasId,
       resource.definition.ownerThreadId,
     );

@@ -34,7 +34,7 @@ interface AgentThreadServiceDependencies {
   resolveFixedAgentNode: (
     canvasId: string,
     threadId: string,
-  ) => FixedAgentNodeTarget | null;
+  ) => Promise<FixedAgentNodeTarget | null>;
   resolvePersistedExternalBinding: (
     canvasId: string,
     threadId: string,
@@ -160,20 +160,20 @@ export class AgentThreadService {
     private readonly dependencies: AgentThreadServiceDependencies = DEFAULT_DEPENDENCIES,
   ) {}
 
-  resolveFixedTarget(
+  async resolveFixedTarget(
     canvasId: string | undefined,
     threadId: string,
-  ): FixedAgentNodeTarget | null {
+  ): Promise<FixedAgentNodeTarget | null> {
     return canvasId
       ? this.dependencies.resolveFixedAgentNode(canvasId, threadId)
       : null;
   }
 
-  resolveExternalTarget(
+  async resolveExternalTarget(
     canvasId: string,
     threadId: string,
-  ): ExternalAgentThreadTarget | null {
-    const fixedTarget = this.resolveFixedTarget(canvasId, threadId);
+  ): Promise<ExternalAgentThreadTarget | null> {
+    const fixedTarget = await this.resolveFixedTarget(canvasId, threadId);
     if (fixedTarget) {
       return fixedTarget.agentBinding.kind === 'external'
         ? { binding: fixedTarget.agentBinding, fixedTarget }
@@ -197,7 +197,7 @@ export class AgentThreadService {
   ): Promise<AgentThreadInvocation> {
     const fixedTarget =
       options.fixedTarget === undefined
-        ? this.resolveFixedTarget(options.canvasId, options.threadId)
+        ? await this.resolveFixedTarget(options.canvasId, options.threadId)
         : options.fixedTarget;
     const binding: AgentBinding = fixedTarget?.agentBinding ??
       options.requestBinding ?? { kind: 'internal' };
