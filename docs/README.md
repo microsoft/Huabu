@@ -94,6 +94,7 @@ docs/
 | [managed-agent-teams.md](./proposals/managed-agent-teams.md)                                       | In-Progress    | Huabu-managed discovery, configuration, preparation, and runtime.                      |
 | [milkdown-custom-toolbar-plan.md](./proposals/milkdown-custom-toolbar-plan.md)                     | In-Progress    | Huabu-owned Milkdown toolbar and semantic editor commands.                             |
 | [model-role-routing.md](./proposals/model-role-routing.md)                                         | Proposed       | Model selection by runtime role.                                                       |
+| [move-selected-nodes-between-spaces.md](./proposals/move-selected-nodes-between-spaces.md)         | Proposed       | #142 selected-node and Frame-subtree moves between Spaces with bounded compensation.   |
 | [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                   | Partly shipped | Phases 1–3: Blob, structured repositories, catalogue, and bounded reads.               |
 | [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)             | Proposed       | Revision-aware offscreen Note measurement and stable auto-height geometry.             |
 | [space-preview-and-world-redesign.md](./proposals/space-preview-and-world-redesign.md)             | In-Progress    | View-only Space previews, a preview-based World, and deferred zoom-through navigation. |
