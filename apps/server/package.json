@@ -29,6 +29,7 @@
     "@agenetes/runtime": "workspace:*",
     "@agentclientprotocol/sdk": "^0.22.1",
     "@agentlet/protocol": "workspace:*",
+    "@agentlet/resources": "workspace:*",
     "@earendil-works/pi-agent-core": "^0.81.1",
     "@earendil-works/pi-ai": "^0.81.1",
     "@fastify/compress": "^8.3.1",

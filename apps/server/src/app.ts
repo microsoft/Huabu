@@ -5,6 +5,10 @@ import { unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import {
+  enumerateLocalResources,
+  resolveResourceRoot,
+} from '@agentlet/resources';
 import compress from '@fastify/compress';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
@@ -31,6 +35,10 @@ import {
   listProfiles as listLegacyAcpProfiles,
   removeProfiles as removeLegacyAcpProfiles,
 } from './modules/agent/acp/profile-store.js';
+import {
+  HUABU_RESOURCES,
+  huabuResourceValidationPort,
+} from './modules/agent/acp/resources.js';
 import agentRoutes from './modules/agent/agent.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
 import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js';
@@ -309,6 +317,20 @@ try {
     app.log.warn({ err }, '[acp] could not remove legacy acp-config.json');
   }
 }
+const localResources = enumerateLocalResources(
+  resolveResourceRoot(),
+  getSupervisedAgentletId(),
+);
+for (const diagnostic of localResources.diagnostics) {
+  app.log.warn(
+    {
+      receiptPath: diagnostic.receiptPath,
+      code: diagnostic.code,
+    },
+    `[agent-resources] ${diagnostic.message}`,
+  );
+}
+
 const agentletGateway = mountAgenetes(app, {
   connectionToken: getConnectionToken(),
   dataDir: getDataDir(),
@@ -323,6 +345,18 @@ const agentletGateway = mountAgenetes(app, {
   // docs/architecture/agent-reachback.md ("Environment injection and isolation").
   hostEnvPrefix: 'HUABU_',
   hostEnvAllowlist: [],
+  hostEnvDenylist: [
+    'TAVILY_API_KEY',
+    'RAPIDAPI_KEY',
+    'AZURE_OPENAI_API_KEY',
+    'AZURE_OPENAI_API_ENDPOINT',
+    'AZURE_OPENAI_API_DEPLOYMENT_NAME',
+  ],
+  resources: {
+    storageDir: join(getDataDir(), 'agent-resources'),
+    initialResources: [...HUABU_RESOURCES, ...localResources.records],
+    reconciledProviders: ['huabu', getSupervisedAgentletId()],
+  },
   agentTeam: {
     storageDir: join(getDataDir(), 'agent-team'),
     secretStore: {
@@ -335,6 +369,7 @@ const agentletGateway = mountAgenetes(app, {
       process.cwd(),
     ),
     onLegacyProfilesMigrated: removeLegacyAcpProfiles,
+    resourceValidationPort: huabuResourceValidationPort,
   },
 });
 // Legacy `agent-team` ACP records predate managed Agent Teams. They can't

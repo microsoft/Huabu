@@ -33,6 +33,7 @@ import type {
   AcpPermissionDecisionResponse,
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
+  AgentResourceListResponse,
   CreateAcpCommandProfileBody,
   PatchAgentProfileBody,
   AcpThreadCachedMetaResponse,
@@ -60,6 +61,7 @@ export type {
   CreateAcpCommandProfileBody,
   PatchAgentProfileBody,
   AgentProfileView,
+  AgentResourceListResponse,
   AcpSessionConfigOption,
   AcpSessionMetaSnapshot,
   AcpSessionMode,
@@ -94,6 +96,12 @@ export async function listAcpAgentClis(): Promise<AcpAgentCliListResponse> {
 export async function listAcpProfiles(): Promise<AcpProfilesListResponse> {
   return apiFetch<AcpProfilesListResponse>(routes.acpProfiles, {
     fallbackMessage: 'Failed to list agent profiles',
+  });
+}
+
+export async function listAcpResources(): Promise<AgentResourceListResponse> {
+  return apiFetch<AgentResourceListResponse>(routes.acpResources, {
+    fallbackMessage: 'Failed to list agent resources',
   });
 }
 

@@ -80,15 +80,15 @@ Agentlet owns the physical machine resource root, installation receipts, executa
 
 Existing subsystems remain authoritative for their own facts:
 
-| Source | Authoritative facts |
-| --- | --- |
-| Huabu external-agent Skill loader | Huabu Access and focused guide instructions |
-| Huabu hosted capability service | Hosted capability schema, readiness, policy, and invocation behavior |
-| Huabu SecretStore | Credential availability and secret values |
-| Agenetes Resource Registry | Resource identity, catalogue persistence, lookup, and provider registration |
-| Agenetes Agent Profile registry | Profile identity, schema version, placement, launch configuration, and selected resource IDs |
-| Agentlet resource manager | Local installation paths, receipts, versions, and validation |
-| Existing Agent Team registry | Member Config, preparation, and prepared runtime state during migration |
+| Source                            | Authoritative facts                                                                          |
+| --------------------------------- | -------------------------------------------------------------------------------------------- |
+| Huabu external-agent Skill loader | Huabu Access and focused guide instructions                                                  |
+| Huabu hosted capability service   | Hosted capability schema, readiness, policy, and invocation behavior                         |
+| Huabu SecretStore                 | Credential availability and secret values                                                    |
+| Agenetes Resource Registry        | Resource identity, catalogue persistence, lookup, and provider registration                  |
+| Agenetes Agent Profile registry   | Profile identity, schema version, placement, launch configuration, and selected resource IDs |
+| Agentlet resource manager         | Local installation paths, receipts, versions, and validation                                 |
+| Existing Agent Team registry      | Member Config, preparation, and prepared runtime state during migration                      |
 
 ## 6. Resource model
 
@@ -109,14 +109,14 @@ interface AgentResource {
 
 The fields have narrow meanings:
 
-| Field | Meaning |
-| --- | --- |
-| `schemaVersion` | Version of the `AgentResource` record format |
-| `id` | Stable, globally unique, human-readable kebab-case identifier |
-| `name` | Human-facing display name |
-| `provider` | Stable authority ID publishing the record; Phase 1 uses `huabu` or the exact Agentlet machine ID |
-| `description` | Short catalogue summary used for browsing and Profile selection |
-| `instructions` | Natural-language directions telling the agent how to access and use the resource |
+| Field           | Meaning                                                                                          |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| `schemaVersion` | Version of the `AgentResource` record format                                                     |
+| `id`            | Stable, globally unique, human-readable kebab-case identifier                                    |
+| `name`          | Human-facing display name                                                                        |
+| `provider`      | Stable authority ID publishing the record; Phase 1 uses `huabu` or the exact Agentlet machine ID |
+| `description`   | Short catalogue summary used for browsing and Profile selection                                  |
+| `instructions`  | Natural-language directions telling the agent how to access and use the resource                 |
 
 `instructions` combines the former structured access and inline content concepts. It may reference an RFS URL, an `AGENT_RESOURCE_DIR` path, an HTTP method, or an injected credential variable, but it never contains a secret value. For example, the Huabu Access record can direct the agent to fetch `$HUABU_RFS_URL/skill` with a bearer token read from the `AGENTLET_TOKEN` environment variable.
 
@@ -138,15 +138,15 @@ The first persistent store uses its own versioned `resources.json` envelope unde
 
 The initial registry contains:
 
-| Resource ID | Name | Provider | Example instruction |
-| --- | --- | --- | --- |
-| `huabu-access` | Huabu Access | `huabu` | Fetch `$HUABU_RFS_URL/skill` with the injected Agentlet token and follow the returned guide |
-| `local-resource-management` | Local Resource Management | `huabu` | Fetch the focused RFS Skill and follow it before installing or changing local resources |
-| `web-search` | Web Search | `huabu` | Invoke the documented RFS endpoint using the current session authorization |
-| `generate-image` | Generate Image | `huabu` | Invoke the documented RFS endpoint and use the returned Canvas artifact |
-| `hackmd-publisher` | HackMD Publisher | Agentlet machine ID | Read and follow the Skill under `$AGENT_RESOURCE_DIR` |
-| `deepv-slides-maker` | DeepV Slides Maker | Agentlet machine ID | Read and follow the installed local Skill |
-| `html-slides-maker` | HTML Slides Maker | Agentlet machine ID | Read and follow the installed local Skill |
+| Resource ID                 | Name                      | Provider            | Example instruction                                                                         |
+| --------------------------- | ------------------------- | ------------------- | ------------------------------------------------------------------------------------------- |
+| `huabu-access`              | Huabu Access              | `huabu`             | Fetch `$HUABU_RFS_URL/skill` with the injected Agentlet token and follow the returned guide |
+| `local-resource-management` | Local Resource Management | `huabu`             | Fetch the focused RFS Skill and follow it before installing or changing local resources     |
+| `web-search`                | Web Search                | `huabu`             | Invoke the documented RFS endpoint using the current session authorization                  |
+| `generate-image`            | Generate Image            | `huabu`             | Invoke the documented RFS endpoint and use the returned Canvas artifact                     |
+| `hackmd-publisher`          | HackMD Publisher          | Agentlet machine ID | Read and follow the Skill under `$AGENT_RESOURCE_DIR`                                       |
+| `deepv-slides-maker`        | DeepV Slides Maker        | Agentlet machine ID | Read and follow the installed local Skill                                                   |
+| `html-slides-maker`         | HTML Slides Maker         | Agentlet machine ID | Read and follow the installed local Skill                                                   |
 
 IDs do not encode resource type, provider, machine, or storage location. Provider and instructions carry those facts without making them part of stable identity. Absolute machine paths may appear in authorized instructions but never become the resource ID.
 
@@ -231,7 +231,7 @@ Create, patch, and launch override inputs use one bounded canonical resource-ID 
 
 The override is accepted everywhere the existing working-directory launch override is accepted, including fixed Agent Node creation, RFS Agent creation, and Task Run creation. It applies only before the thread's first realization; an existing durable workload remains authoritative.
 
-When a thread first realizes a Profile, the effective resource IDs are snapshotted into `AgentProfileSnapshot`. This is a backward-compatible addition to Agent Profile driver workload v1: its schema accepts an absent snapshot `resourceIds` as `[]`, while every newly created workload writes the field explicitly. The driver version therefore remains v1 and existing durable threads require no workspace migration. Later Profile edits, resource overrides, or required-default changes do not silently change an existing thread.
+When a thread first realizes a Profile, Huabu snapshots the effective resource IDs directly into its existing ACP workload v1 spec. Huabu does not mount the optional Agenetes Profile wrapper driver, so switching workload drivers solely to obtain `AgentProfileSnapshot` would add an unrelated durable-thread migration. The ACP schema instead accepts absent `resourceIds` as `[]` and an absent non-secret resource scope for legacy workloads, while every newly created workload writes both explicitly. The driver version remains v1 and existing durable threads require no workspace migration. Later Profile edits, resource overrides, or required-default changes do not silently change an existing thread.
 
 Secrets are resolved at invocation or process-spawn time through runtime ports. Secret values never enter the Profile record or durable resource snapshot.
 
@@ -297,7 +297,7 @@ Registry and discovery responses never expose runtime readiness, credential stat
 
 Huabu must also prevent environment-backed provider credentials from reaching external agents.
 
-Agentlet currently spawns agents with its inherited process environment, while Huabu strips only the `HUABU_` namespace before starting the daemon. Environment fallbacks such as `TAVILY_API_KEY`, `RAPIDAPI_KEY`, `AZURE_OPENAI_API_KEY`, and provider-specific API-key variables must be removed from the daemon and spawned-agent environment unless an explicit resource contract authorizes delivery.
+Agentlet spawns agents from its inherited process environment, while Huabu strips the `HUABU_` namespace before starting the daemon. Huabu additionally denies the exact hosted-provider variables `TAVILY_API_KEY`, `RAPIDAPI_KEY`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_ENDPOINT`, and `AZURE_OPENAI_API_DEPLOYMENT_NAME`. The denylist is intentionally exact: unrelated credentials such as `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` may be required by command-backed external ACP harnesses and are not Huabu hosted-provider configuration.
 
 The daemon-owned `AGENTLET_TOKEN`, the RFS base, the thread identity, the session-scoped resource grant, and `AGENT_RESOURCE_DIR` are explicit runtime injections. Ambient host environment inheritance is not a resource-delivery mechanism.
 
@@ -315,7 +315,7 @@ The effective hosted capability grant binds:
 
 Caller-supplied headers may provide correlation hints but cannot establish any of these identities.
 
-Each hosted capability publishes bounded policy metadata:
+Each hosted capability enforces bounded policy:
 
 - request size;
 - result size;
@@ -352,17 +352,17 @@ Retry guidance is explicit. Read-only web search may be retryable after transien
 
 The catalogue record format and related runtime contracts evolve independently:
 
-| Version | Scope |
-| --- | --- |
-| Agent Profile registry file v4 | Persisted registry envelope containing normalized Profile v2 records |
-| Agent Profile schema v2 | Adds explicit per-record version and first-class `resourceIds`; missing version is legacy v1 |
-| Agent Profile driver workload v1 | Adds optional-on-read, explicit-on-write effective resource IDs without changing the driver version |
-| Resource Registry file v1 | Independent `resources.json` persistence envelope |
-| Catalogue protocol version | List envelope, pagination, and transport behavior |
-| `AgentResource.schemaVersion` | Common catalogue record fields and their semantics |
-| Hosted capability contract version | One invocation endpoint's behavior and input/output schema |
-| Grant policy version | Authorization and limit interpretation |
-| Receipt schema version | Agentlet local installation and validation evidence |
+| Version                            | Scope                                                                                                                             |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Agent Profile registry file v4     | Persisted registry envelope containing normalized Profile v2 records                                                              |
+| Agent Profile schema v2            | Adds explicit per-record version and first-class `resourceIds`; missing version is legacy v1                                      |
+| ACP driver workload v1             | Adds optional-on-read, explicit-on-write effective resource IDs and non-secret resource scope without changing the driver version |
+| Resource Registry file v1          | Independent `resources.json` persistence envelope                                                                                 |
+| Catalogue protocol version         | List envelope, pagination, and transport behavior                                                                                 |
+| `AgentResource.schemaVersion`      | Common catalogue record fields and their semantics                                                                                |
+| Hosted capability contract version | One invocation endpoint's behavior and input/output schema                                                                        |
+| Grant policy version               | Authorization and limit interpretation                                                                                            |
+| Receipt schema version             | Agentlet local installation and validation evidence                                                                               |
 
 Adding an optional field is compatible only when older callers can safely ignore it. Removing fields, changing authorization meaning, changing required input, or reinterpreting an enum requires a major version change.
 
@@ -380,7 +380,7 @@ Phase 1 is accepted when:
 6. A launch override can completely replace the Profile's optional resource IDs, including replacing them with an empty list.
 7. Huabu-required default resources remain effective after an override without being hard-coded by Agenetes.
 8. A Profile cannot select a local resource from another Agentlet machine.
-9. A new thread writes effective resource IDs into its Agent Profile workload v1 snapshot, while an existing snapshot without the field reads as an empty list.
+9. A new thread writes effective resource IDs and non-secret scope into its ACP workload v1 snapshot, while an existing workload without the fields reads with an empty resource list and no grant scope.
 10. The external agent can identify its selected resource IDs and load the corresponding instructions.
 11. Missing or invalid local resources fail explicitly during resolution or launch without mutating the catalogue record.
 12. Secret values remain absent from Resource records, Profile records, WorkloadSpecs, prompts, logs, and client-visible responses.
@@ -474,17 +474,17 @@ After each phase ships, implemented behavior moves into architecture documentati
 
 ## 21. Code entry points
 
-| File/dir | Responsibility |
-| --- | --- |
-| [`apps/server/src/modules/remote_fs/`](../../apps/server/src/modules/remote_fs/) | External discovery and invocation adapter |
-| [`apps/server/src/prompt/external-agent/`](../../apps/server/src/prompt/external-agent/) | Huabu Access and Local Resource Management Skills |
-| [`apps/server/src/modules/agent/tools/`](../../apps/server/src/modules/agent/tools/) | Existing built-in adapters for hosted capabilities |
-| [`apps/server/src/security/secret-store.ts`](../../apps/server/src/security/secret-store.ts) | Server-side credential boundary |
-| [`apps/server/src/modules/agent/acp/`](../../apps/server/src/modules/agent/acp/) | Profile workload assembly and runtime injection |
-| [`external/agenetes/packages/agent-team/`](../../external/agenetes/packages/agent-team/) | Current unified Profile registry, Profile v2 migration, and unchanged Agent Team preparation |
-| [`external/agenetes/packages/protocol/`](../../external/agenetes/packages/protocol/) | Canonical `AgentResource` and generic Profile override schemas |
-| `external/agenetes/packages/resource-registry/` | New framework-independent registry service and persistence |
-| [`external/agentlet/packages/local/`](../../external/agentlet/packages/local/) | Machine resource root, environment, receipts, and agent process spawn |
-| [`external/agentlet/packages/agent-team/`](../../external/agentlet/packages/agent-team/) | Existing setup materializer whose behavior remains unchanged during Phases 1 and 2 |
-| [`packages/shared/src/types/api/`](../../packages/shared/src/types/api/) | Huabu HTTP envelopes that reuse Agenetes resource and override schemas |
-| [`agent-teams/`](../../agent-teams/) | Phase 3 migration inputs; not a Phase 1 resource source |
+| File/dir                                                                                     | Responsibility                                                                               |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| [`apps/server/src/modules/remote_fs/`](../../apps/server/src/modules/remote_fs/)             | External discovery and invocation adapter                                                    |
+| [`apps/server/src/prompt/external-agent/`](../../apps/server/src/prompt/external-agent/)     | Huabu Access and Local Resource Management Skills                                            |
+| [`apps/server/src/modules/agent/tools/`](../../apps/server/src/modules/agent/tools/)         | Existing built-in adapters for hosted capabilities                                           |
+| [`apps/server/src/security/secret-store.ts`](../../apps/server/src/security/secret-store.ts) | Server-side credential boundary                                                              |
+| [`apps/server/src/modules/agent/acp/`](../../apps/server/src/modules/agent/acp/)             | Profile workload assembly and runtime injection                                              |
+| [`external/agenetes/packages/agent-team/`](../../external/agenetes/packages/agent-team/)     | Current unified Profile registry, Profile v2 migration, and unchanged Agent Team preparation |
+| [`external/agenetes/packages/protocol/`](../../external/agenetes/packages/protocol/)         | Canonical `AgentResource` and generic Profile override schemas                               |
+| `external/agenetes/packages/resource-registry/`                                              | New framework-independent registry service and persistence                                   |
+| [`external/agentlet/packages/local/`](../../external/agentlet/packages/local/)               | Machine resource root, environment, receipts, and agent process spawn                        |
+| [`external/agentlet/packages/agent-team/`](../../external/agentlet/packages/agent-team/)     | Existing setup materializer whose behavior remains unchanged during Phases 1 and 2           |
+| [`packages/shared/src/types/api/`](../../packages/shared/src/types/api/)                     | Huabu HTTP envelopes that reuse Agenetes resource and override schemas                       |
+| [`agent-teams/`](../../agent-teams/)                                                         | Phase 3 migration inputs; not a Phase 1 resource source                                      |

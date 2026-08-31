@@ -48,6 +48,7 @@ docs/
 | [agent-architecture.md](./architecture/agent-architecture.md)                   | Server-side agent runtime, tools, skills, SSE protocol.                                                  |
 | [agent-context.md](./architecture/agent-context.md)                             | How canvas state gets shaped into `AgentChatContext` and reaches the model.                              |
 | [agent-reachback.md](./architecture/agent-reachback.md)                         | Huabu Reachback Tool (HRT) — how external agents read/write the Space out-of-band.                       |
+| [agent-resources.md](./architecture/agent-resources.md)                         | External Agent resource catalogue, Profile composition, local resources, and hosted capabilities.        |
 | [agent-teams-as-extensions.md](./architecture/agent-teams-as-extensions.md)     | Product/vision: managed Agent Teams as Huabu's "plugin system".                                          |
 | [api-design.md](./architecture/api-design.md)                                   | **Authoritative** rules for every HTTP / SSE endpoint, zod-first wire contracts.                         |
 | [canvas-command-architecture.md](./architecture/canvas-command-architecture.md) | `CanvasUiIntent` / `CanvasCommand` / `CanvasExecution` three-layer model.                                |

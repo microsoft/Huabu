@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { resourceIdListSchema } from '@agenetes/protocol';
 import { z } from 'zod';
 
 const trimmedString = (max: number) =>
@@ -64,10 +65,12 @@ export type AgentIcon = z.infer<typeof agentIconSchema>;
 export const AGENT_ICON_CUSTOM_DATA_KEY = 'icon';
 
 const profileBaseSchema = z.object({
+  schemaVersion: z.literal(2),
   id: trimmedString(255),
   alias: trimmedString(255),
   agentletId: trimmedString(255),
   workingDirPath: pathSchema,
+  resourceIds: resourceIdListSchema,
   customData: customDataSchema.optional(),
 });
 
@@ -176,8 +179,11 @@ export type AgentProfileView = z.infer<typeof agentProfileSchema>;
 
 export const createAgentProfileBodySchema = z.union([
   profileBaseSchema
-    .omit({ id: true })
-    .extend({ launch: manifestLaunchSchema })
+    .omit({ id: true, schemaVersion: true })
+    .extend({
+      resourceIds: resourceIdListSchema.optional().default([]),
+      launch: manifestLaunchSchema,
+    })
     .strict(),
   profileBaseSchema
     .omit({ id: true })
@@ -192,8 +198,11 @@ export type CreateAgentProfileBody = z.infer<
 >;
 
 const createAgentTeamProfileBaseSchema = profileBaseSchema
-  .omit({ id: true, workingDirPath: true })
-  .extend({ launch: manifestLaunchSchema });
+  .omit({ id: true, schemaVersion: true, workingDirPath: true })
+  .extend({
+    resourceIds: resourceIdListSchema.optional().default([]),
+    launch: manifestLaunchSchema,
+  });
 
 export const createAgentTeamProfileBodySchema = z.union([
   createAgentTeamProfileBaseSchema
@@ -217,8 +226,9 @@ export type CreateAgentTeamProfileBody = z.infer<
 >;
 
 export const createAcpCommandProfileBodySchema = profileBaseSchema
-  .omit({ id: true, agentletId: true })
+  .omit({ id: true, schemaVersion: true, agentletId: true })
   .extend({
+    resourceIds: resourceIdListSchema.optional().default([]),
     launch: commandLaunchSchema,
     metadata: commandMetadataSchema.optional(),
   })
@@ -232,6 +242,7 @@ export const patchAgentProfileBodySchema = z
     alias: trimmedString(255).optional(),
     customData: customDataSchema.nullable().optional(),
     metadata: commandMetadataSchema.nullable().optional(),
+    resourceIds: resourceIdListSchema.optional(),
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0, {

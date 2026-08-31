@@ -30,6 +30,7 @@ import { ensureProfileCacheSubscription } from './profile-cache-port.js';
 import { getProfileSessionPreferences } from './profile-session-preferences.js';
 import { getProfile as getLegacyProfile } from './profile-store.js';
 import { buildReachbackEnv } from './reachback-env.js';
+import { resolveEffectiveResourceIds } from './resources.js';
 import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import {
@@ -170,6 +171,7 @@ export function resolveProfileSnapshot(
     profileId: profile.id,
     agentletId: profile.agentletId,
     workingDirPath: profile.workingDirPath,
+    resourceIds: profile.resourceIds,
     launch: profile.launch,
   };
 }
@@ -235,6 +237,10 @@ export function buildAcpWorkloadSpec(
   const workingDirPath = opts.launchOverrides?.workingDirPath;
   cwd = workingDirPath ?? cwd;
   recipe = applyWorkingDirectoryOverride(recipe, workingDirPath);
+  const resourceIds = resolveEffectiveResourceIds(
+    opts.launchOverrides?.resourceIds ?? profile?.resourceIds ?? [],
+    agentletId,
+  );
 
   return {
     threadId,
@@ -243,13 +249,15 @@ export function buildAcpWorkloadSpec(
     namespace: canvasAcpNamespace(canvasId),
     spec: {
       initialPreamble: [
-        renderExternalAgentSystemPreamble(),
+        renderExternalAgentSystemPreamble(resourceIds),
         ...(opts.launchOverrides?.additionalInitialPreamble
           ? [opts.launchOverrides.additionalInitialPreamble]
           : []),
       ],
       initialPreferences: getProfileSessionPreferences(binding.profileId),
       binding,
+      resourceIds,
+      resourceScope: { canvasId, threadId },
       agentletId,
       ...(cwd !== undefined && { cwd }),
       recipe,

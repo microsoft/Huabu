@@ -25,3 +25,13 @@ Every operational endpoint and advanced skill requires `Authorization: Bearer $A
 ```bash
 AUTH="Authorization: Bearer $AGENTLET_TOKEN"
 ```
+
+## Configured resources
+
+This Agent was launched with these resource IDs: {{resourceIds}}.
+
+Fetch their current safe catalogue records with:
+
+```bash
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/resources"
+```

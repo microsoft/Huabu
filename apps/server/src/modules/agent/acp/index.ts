@@ -4,6 +4,7 @@
 export {
   mountAgenetes,
   getAgentTeamRegistry,
+  getResourceRegistry,
   getSupervisedAgentletId,
   ACP_UPGRADE_PATH,
 } from '@agenetes/agentlet-host';

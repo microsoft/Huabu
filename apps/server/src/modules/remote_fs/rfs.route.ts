@@ -36,6 +36,14 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { getSupervisedAgentletId } from '@agenetes/agentlet-host';
+import {
+  readReceipt,
+  removeReceipt,
+  resolveResourceRoot,
+  writeReceipt,
+} from '@agentlet/resources';
+
 import {
   AGENT_SSE_EVENTS,
   RFS_HEARTBEAT_DEFAULT_SEC,
@@ -44,18 +52,23 @@ import {
   createTaskRequestSchema,
   completeTaskRunRequestSchema,
   createInteractiveViewRequestSchema,
+  hostedCapabilityInvokeRequestSchema,
   HUABU_AGENT_PROFILE_ID,
+  imageGenerationInvocationInputSchema,
   interactiveViewLookupQuerySchema,
   interactiveViewResourceParamsSchema,
+  localResourceReceiptRequestSchema,
   rfsAgentCreateHeadersSchema,
   rfsAgentCreateRequestSchema,
   rfsAgentHeadersSchema,
   rfsAgentPromptRequestSchema,
   rfsExecuteHeadersSchema,
   rfsExecuteRequestSchema,
+  RESOURCE_GRANT_HEADER,
   replaceInteractiveViewStateRequestSchema,
   spaceQuerySchema,
   startTaskRunRequestSchema,
+  webSearchInvocationInputSchema,
   type CreateTaskResponse,
   type CompleteTaskRunResponse,
   type CreateInteractiveViewRequest,
@@ -64,6 +77,9 @@ import {
   type RfsAgentProfilesResponse,
   type RfsUploadResponse,
   type AgentStreamEvent,
+  type AgentResourceListResponse,
+  type LocalResourceReceiptResponse,
+  type LocalResourceRemovalResponse,
   type StartTaskRunResponse,
 } from '@huabu/shared';
 
@@ -85,6 +101,12 @@ import {
 } from './space-capabilities.js';
 import { executeRfsCommands } from './space-execute.js';
 import {
+  assertLocalResourceIdAvailable,
+  listResourcesForAgentlet,
+  refreshLocalAgentResources,
+  ResourceRegistryUnavailableError,
+} from '../agent/acp/resources.js';
+import {
   AgentNodeCreationError,
   agentNodeService,
   resolveAgentNodePosition,
@@ -100,6 +122,16 @@ import {
 } from '../agent/agent-thread.service.js';
 import { buildChatEnvelope } from '../agent/conversation/envelope.js';
 import { isPromptDebugEnabled } from '../agent/conversation/prompt/debug-prompt.js';
+import {
+  HostedCapabilityError,
+  toInternalError,
+} from '../agent/hosted-capabilities/errors.js';
+import { invokeImageGeneration } from '../agent/hosted-capabilities/image-generation.service.js';
+import {
+  acquireInvocation,
+  authorizeResourceGrant,
+} from '../agent/hosted-capabilities/resource-grant.js';
+import { invokeWebSearch } from '../agent/hosted-capabilities/web-search.service.js';
 import {
   listAvailableAgentProfiles,
   SelectableAgentProfileError,
@@ -155,6 +187,46 @@ function interactiveViewStatus(error: InteractiveViewServiceError): number {
       return 400;
     default:
       return 500;
+  }
+}
+
+function hostedCapabilityStatus(error: HostedCapabilityError): number {
+  switch (error.code) {
+    case 'resource_not_found':
+      return 404;
+    case 'forbidden':
+      return 403;
+    case 'unavailable':
+      return 503;
+    case 'quota_exceeded':
+      return 429;
+    case 'cancelled':
+      return 499;
+    case 'timeout':
+      return 504;
+    case 'invalid_input':
+    case 'unsupported_version':
+      return 400;
+    default:
+      return 502;
+  }
+}
+
+function publicHostedCapabilityMessage(error: HostedCapabilityError): string {
+  switch (error.code) {
+    case 'invalid_input':
+    case 'resource_not_found':
+    case 'forbidden':
+    case 'quota_exceeded':
+      return error.message;
+    case 'unavailable':
+      return 'The hosted capability is not configured or unavailable.';
+    case 'cancelled':
+      return 'The hosted capability invocation was cancelled.';
+    case 'timeout':
+      return 'The hosted capability invocation timed out.';
+    default:
+      return 'The hosted capability provider request failed.';
   }
 }
 
@@ -375,6 +447,153 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       throw error;
     }
   });
+
+  app.post<{
+    Params: { canvasId: string };
+  }>('/:canvasId/resources/local/receipts', async (request, reply) => {
+    const body = Buffer.isBuffer(request.body)
+      ? request.body.toString('utf8')
+      : '';
+    let json: unknown;
+    try {
+      json = JSON.parse(body || '{}');
+    } catch {
+      return reply
+        .code(400)
+        .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
+    }
+    const parsed = localResourceReceiptRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return reply
+        .code(400)
+        .send(
+          rfsError(
+            parsed.error.issues[0]?.message ?? 'Invalid resource receipt.',
+            'invalid_input',
+          ),
+        );
+    }
+
+    const grantHeader = request.headers[RESOURCE_GRANT_HEADER];
+    const grantToken = Array.isArray(grantHeader)
+      ? grantHeader[0]
+      : grantHeader;
+    let release: (() => void) | undefined;
+    try {
+      const grant = authorizeResourceGrant(
+        grantToken,
+        request.params.canvasId,
+        'local-resource-management',
+      );
+      if (grant.agentletId !== getSupervisedAgentletId()) {
+        throw new HostedCapabilityError(
+          'forbidden',
+          'Local resource management is available only on the supervised Agentlet.',
+        );
+      }
+      release = acquireInvocation(
+        grantToken ?? '',
+        'local-resource-management',
+      );
+      const root = resolveResourceRoot();
+      assertLocalResourceIdAvailable(parsed.data.id, grant.agentletId);
+      try {
+        writeReceipt(root, {
+          ...parsed.data,
+          provider: grant.agentletId,
+          installedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        request.log.warn(
+          { err: error, resourceId: parsed.data.id },
+          'Local resource receipt validation failed',
+        );
+        throw new HostedCapabilityError(
+          'invalid_input',
+          'The local resource receipt or entrypoint is invalid.',
+        );
+      }
+      const refreshed = refreshLocalAgentResources();
+      const resource = refreshed.records.find(
+        (record) => record.id === parsed.data.id,
+      );
+      if (!resource) {
+        throw new HostedCapabilityError(
+          'internal_error',
+          'The validated local resource was not published.',
+        );
+      }
+      const response: LocalResourceReceiptResponse = { resource };
+      return reply.send(response);
+    } catch (cause) {
+      const error =
+        cause instanceof HostedCapabilityError ? cause : toInternalError(cause);
+      request.log.warn(
+        {
+          err: cause,
+          resourceId: parsed.data.id,
+          canvasId: request.params.canvasId,
+          outcome: error.code,
+        },
+        'Local resource receipt write failed',
+      );
+      return reply
+        .code(hostedCapabilityStatus(error))
+        .send(rfsError(publicHostedCapabilityMessage(error), error.code));
+    } finally {
+      release?.();
+    }
+  });
+
+  app.delete<{
+    Params: { canvasId: string; resourceId: string };
+  }>(
+    '/:canvasId/resources/local/receipts/:resourceId',
+    async (request, reply) => {
+      const grantHeader = request.headers[RESOURCE_GRANT_HEADER];
+      const grantToken = Array.isArray(grantHeader)
+        ? grantHeader[0]
+        : grantHeader;
+      let release: (() => void) | undefined;
+      try {
+        authorizeResourceGrant(
+          grantToken,
+          request.params.canvasId,
+          'local-resource-management',
+        );
+        release = acquireInvocation(
+          grantToken ?? '',
+          'local-resource-management',
+        );
+        const root = resolveResourceRoot();
+        const removed =
+          readReceipt(root, request.params.resourceId) !== undefined;
+        removeReceipt(root, request.params.resourceId);
+        refreshLocalAgentResources();
+        const response: LocalResourceRemovalResponse = { removed };
+        return reply.send(response);
+      } catch (cause) {
+        const error =
+          cause instanceof HostedCapabilityError
+            ? cause
+            : toInternalError(cause);
+        request.log.warn(
+          {
+            err: cause,
+            resourceId: request.params.resourceId,
+            canvasId: request.params.canvasId,
+            outcome: error.code,
+          },
+          'Local resource receipt removal failed',
+        );
+        return reply
+          .code(hostedCapabilityStatus(error))
+          .send(rfsError(publicHostedCapabilityMessage(error), error.code));
+      } finally {
+        release?.();
+      }
+    },
+  );
 
   app.get<{
     Params: { canvasId: string; nodeId: string };
@@ -783,6 +1002,177 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
 
   // ── Task creation and Run launch ──
   app.get<{ Params: { canvasId: string } }>(
+    '/:canvasId/resources',
+    async (_request, reply) => {
+      try {
+        const response: AgentResourceListResponse = {
+          resources: listResourcesForAgentlet(getSupervisedAgentletId()),
+        };
+        return reply.send(response);
+      } catch (error) {
+        if (error instanceof ResourceRegistryUnavailableError) {
+          return reply
+            .code(503)
+            .send(rfsError(error.message, 'resource_registry_unavailable'));
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{
+    Params: { canvasId: string; resourceId: string };
+  }>('/:canvasId/resources/:resourceId/invoke', async (request, reply) => {
+    const { canvasId, resourceId } = request.params;
+    if (resourceId !== 'web-search' && resourceId !== 'generate-image') {
+      return reply
+        .code(404)
+        .send(
+          rfsError(
+            `Hosted resource not found: ${resourceId}`,
+            'resource_not_found',
+          ),
+        );
+    }
+
+    const body = Buffer.isBuffer(request.body)
+      ? request.body.toString('utf8')
+      : '';
+    let json: unknown;
+    try {
+      json = JSON.parse(body || '{}');
+    } catch {
+      return reply
+        .code(400)
+        .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
+    }
+    const envelope = hostedCapabilityInvokeRequestSchema.safeParse(json);
+    if (!envelope.success) {
+      return reply
+        .code(400)
+        .send(
+          rfsError(
+            envelope.error.issues[0]?.message ?? 'Invalid invocation request.',
+            'invalid_input',
+          ),
+        );
+    }
+    const webInput =
+      resourceId === 'web-search'
+        ? webSearchInvocationInputSchema.safeParse(envelope.data.input)
+        : undefined;
+    const imageInput =
+      resourceId === 'generate-image'
+        ? imageGenerationInvocationInputSchema.safeParse(envelope.data.input)
+        : undefined;
+    const invalidInput =
+      webInput?.success === false
+        ? webInput.error
+        : imageInput?.success === false
+          ? imageInput.error
+          : undefined;
+    if (invalidInput) {
+      return reply
+        .code(400)
+        .send(
+          rfsError(
+            invalidInput.issues[0]?.message ?? 'Invalid capability input.',
+            'invalid_input',
+          ),
+        );
+    }
+
+    const grantHeader = request.headers[RESOURCE_GRANT_HEADER];
+    const grantToken = Array.isArray(grantHeader)
+      ? grantHeader[0]
+      : grantHeader;
+    const startedAt = Date.now();
+    const abortController = new AbortController();
+    const abortInvocation = () => abortController.abort();
+    request.raw.once('aborted', abortInvocation);
+    let grant;
+    let release: (() => void) | undefined;
+    try {
+      grant = authorizeResourceGrant(grantToken, canvasId, resourceId);
+      release = acquireInvocation(grantToken ?? '', resourceId);
+      let result: unknown;
+      if (resourceId === 'web-search') {
+        if (!webInput?.success) {
+          throw new HostedCapabilityError(
+            'internal_error',
+            'Validated web search input is unavailable.',
+          );
+        }
+        result = await invokeWebSearch(webInput.data, {
+          signal: abortController.signal,
+        });
+      } else {
+        if (!imageInput?.success) {
+          throw new HostedCapabilityError(
+            'internal_error',
+            'Validated image input is unavailable.',
+          );
+        }
+        result = await invokeImageGeneration(
+          imageInput.data,
+          {
+            canvasId: grant.canvasId,
+          },
+          {
+            signal: abortController.signal,
+          },
+        );
+      }
+      request.log.info(
+        {
+          resourceId,
+          profileId: grant.profileId,
+          agentletId: grant.agentletId,
+          canvasId: grant.canvasId,
+          threadId: grant.threadId,
+          correlationId: envelope.data.correlationId,
+          outcome: 'success',
+          latencyMs: Date.now() - startedAt,
+          policyVersion: grant.policyVersion,
+        },
+        'Hosted capability invocation',
+      );
+      return reply.send({
+        schemaVersion: 1,
+        resourceId,
+        ...(envelope.data.correlationId
+          ? { correlationId: envelope.data.correlationId }
+          : {}),
+        result,
+      });
+    } catch (cause) {
+      const error =
+        cause instanceof HostedCapabilityError ? cause : toInternalError(cause);
+      request.log.warn(
+        {
+          err: cause,
+          resourceId,
+          profileId: grant?.profileId,
+          agentletId: grant?.agentletId,
+          canvasId: grant?.canvasId ?? canvasId,
+          threadId: grant?.threadId,
+          correlationId: envelope.data.correlationId,
+          outcome: error.code,
+          latencyMs: Date.now() - startedAt,
+          policyVersion: grant?.policyVersion,
+        },
+        'Hosted capability invocation failed',
+      );
+      return reply
+        .code(hostedCapabilityStatus(error))
+        .send(rfsError(publicHostedCapabilityMessage(error), error.code));
+    } finally {
+      request.raw.removeListener('aborted', abortInvocation);
+      release?.();
+    }
+  });
+
+  app.get<{ Params: { canvasId: string } }>(
     '/:canvasId/agent/profiles',
     async (_request, reply) => {
       try {
@@ -995,6 +1385,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         position?: { x: number; y: number };
         parentThreadId?: string;
         workingDirPath?: string;
+        resourceIds?: string[];
         additionalInitialPreamble?: string;
       };
       if (contentType.includes('application/json')) {
@@ -1112,6 +1503,9 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           launchOverrides: {
             ...(creation.workingDirPath !== undefined
               ? { workingDirPath: creation.workingDirPath }
+              : {}),
+            ...(creation.resourceIds !== undefined
+              ? { resourceIds: creation.resourceIds }
               : {}),
             ...(creation.additionalInitialPreamble !== undefined
               ? {

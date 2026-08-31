@@ -177,6 +177,7 @@ export class RunLauncher {
     try {
       launchOverrides = parseAgentLaunchOverrides({
         workingDirPath: parsed.data.workingDirPath,
+        resourceIds: parsed.data.resourceIds,
         additionalInitialPreamble: parsed.data.additionalInitialPreamble,
       });
     } catch (error) {

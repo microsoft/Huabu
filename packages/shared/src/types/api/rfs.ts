@@ -30,6 +30,7 @@
  * `import type` only (keep it zod-free).
  */
 
+import { resourceIdListSchema } from '@agenetes/protocol';
 import { z } from 'zod';
 
 import { CANVAS_NODE_TYPES } from '../canvas/node.js';
@@ -251,6 +252,7 @@ export const rfsAgentCreateRequestSchema = z.object({
     .regex(/^[a-zA-Z0-9_-]+$/)
     .optional(),
   workingDirPath: z.string().optional(),
+  resourceIds: resourceIdListSchema.optional(),
   additionalInitialPreamble: z.string().optional(),
 });
 export type RfsAgentCreateRequest = z.infer<typeof rfsAgentCreateRequestSchema>;
