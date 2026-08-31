@@ -69,6 +69,7 @@ Created like any node via `CREATE_NODES` ([resolveAddNodes.ts](../../apps/web/sr
 - An idle node with `agentBindingPolicy: fixed` opens compose with its persisted binding and a read-only Agent selector; ordinary nodes with an absent or `selectable` policy retain the existing pre-send picker.
 - After sending: **running → done / error**.
 - For fixed Agent Nodes, `AgentThreadService` resolves the persisted binding, writes first content and `status` / `errorMessage` through the server Canvas executor, and applies launch overrides before the first ACP realization. The Web client writes only `viewed`; selectable Question Nodes retain the existing client-authored lifecycle.
+- Selectable Question Node lifecycle patches are optimistically reflected in the active Canvas and persisted through the canonical Canvas executor. Loading never infers `done` merely from `threadId` plus authored content because a persisted conversation may terminate in `error`; legacy nodes with an unknown status stay neutral but remain reopenable.
 - Running uses the bound Agent identity with a flowing information ring; an external Agent avatar body rotates while the built-in Huabu logo remains still.
 - A live unresolved ACP permission request temporarily overrides every other badge state, stops working motion, and shows a static warning ring with a shield satellite; resolving or cancelling the request restores the underlying run state.
 - Done, error, and conflict attention styling appears only while `viewed === false`; opening the finished thread marks it viewed and returns the avatar to a quiet neutral ring.
@@ -144,13 +145,13 @@ All questions run through `/api/agent` ([agent.ts](../../apps/web/src/api/agent.
 
 ### 5.3 Spatial context (server-side)
 
-Resolved entirely on the server — no spatial geometry crosses the wire. `renderNodeNeighbourhoodMarkdown(canvasId, anchorNodeId)` ([node-neighbourhood.ts](../../apps/server/src/modules/canvas/node-neighbourhood.ts)) walks inside-out (frame → grandframe → canvas) and serialises a priority-tiered neighbourhood into the agent's preamble:
+Resolved entirely on the server — no spatial geometry crosses the wire. `renderNodeNeighbourhoodMarkdown(canvasId, anchorNodeId)` ([node-neighbourhood.ts](../../apps/server/src/modules/canvas/node-neighbourhood.ts)) serialises a bounded, priority-tiered neighbourhood into the agent's preamble:
 
-| Priority | Source                       | Detail          | Why                   |
-| -------- | ---------------------------- | --------------- | --------------------- |
-| P0       | edges touching the node      | full snippet    | explicit user intent  |
-| P1       | same-frame siblings          | summary + label | topically related     |
-| P2       | distance-sorted nearby nodes | label + snippet | proximity ≈ relevance |
+| Priority | Source                                              | Inclusion rule                              | Why                                  |
+| -------- | --------------------------------------------------- | ------------------------------------------- | ------------------------------------ |
+| P0       | nodes connected directly to the anchor              | always, regardless of distance              | explicit user intent                 |
+| P1       | the direct containing Frame and its direct siblings | always, regardless of distance              | preserves the anchor's local context |
+| P2       | other distance-sorted spatial neighbours            | at most 400 px edge-to-edge from the anchor | bounds prompt token consumption      |
 
 The LLM gets natural-language topology; for exact coordinates it calls
 `get_space_outline` / `inspect_nodes` on demand.

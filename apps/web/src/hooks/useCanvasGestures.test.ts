@@ -117,7 +117,8 @@ describe('touch viewport geometry', () => {
   });
 
   it('clamps touch zoom to the shared canvas range', () => {
-    expect(clampZoom(0.01)).toBe(0.1);
+    expect(clampZoom(0.01)).toBe(0.05);
+    expect(clampZoom(0.05)).toBe(0.05);
     expect(clampZoom(6)).toBe(5);
     expect(clampZoom(2)).toBe(2);
   });

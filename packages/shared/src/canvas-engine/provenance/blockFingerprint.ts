@@ -37,6 +37,8 @@ import { mathFromMarkdown } from 'mdast-util-math';
 import { gfm } from 'micromark-extension-gfm';
 import { math } from 'micromark-extension-math';
 
+import { normalizeMathDelimiters } from './normalizeMathDelimiters.js';
+
 /** Loose mdast node shape — we only ever read a handful of fields. */
 interface MdastNode {
   type: string;
@@ -136,14 +138,41 @@ function isBreakPlaceholder(node: MdastNode): boolean {
  * Recursively project an mdast node to a canonical, style-independent
  * form suitable for hashing.
  */
-function normalizeMdast(node: MdastNode): unknown {
+function normalizeMdast(
+  node: MdastNode,
+  definitions: ReadonlyMap<string, MdastNode>,
+): unknown {
+  if (node.type === 'linkReference' || node.type === 'imageReference') {
+    const identifier =
+      typeof node.identifier === 'string' ? node.identifier : undefined;
+    const definition = identifier ? definitions.get(identifier) : undefined;
+    if (definition) {
+      return normalizeMdast(
+        node.type === 'linkReference'
+          ? {
+              type: 'link',
+              title: definition.title ?? null,
+              url: definition.url,
+              children: node.children,
+            }
+          : {
+              type: 'image',
+              title: definition.title ?? null,
+              url: definition.url,
+              alt: node.alt,
+            },
+        definitions,
+      );
+    }
+  }
+
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(node)) {
     if (VOLATILE_FIELDS.has(k)) continue;
     if (k === 'children' && Array.isArray(v)) {
       const kids = (v as MdastNode[])
         .filter((child) => !isBreakPlaceholder(child))
-        .map(normalizeMdast);
+        .map((child) => normalizeMdast(child, definitions));
       // Omit empty children so a cell rendered `<br />` by one host and
       // left blank by the other collapse to the same shape.
       if (kids.length > 0) out.children = kids;
@@ -171,7 +200,7 @@ function parseTopLevel(markdown: string): MdastNode[] {
  * block. Two blocks with identical normalized content hash equal.
  */
 export function fingerprintMdastBlock(node: MdastNode): string {
-  return hash(stableStringify(normalizeMdast(node)));
+  return hash(stableStringify(normalizeMdast(node, new Map())));
 }
 
 /**
@@ -183,10 +212,18 @@ export function fingerprintMdastBlock(node: MdastNode): string {
 export function fingerprintMarkdownBlocks(
   markdown: string,
 ): FingerprintedBlock[] {
-  const blocks = parseTopLevel(markdown);
+  const canonicalMarkdown = normalizeMathDelimiters(markdown);
+  const parsed = parseTopLevel(canonicalMarkdown);
+  const definitions = new Map<string, MdastNode>();
+  for (const node of parsed) {
+    if (node.type === 'definition' && typeof node.identifier === 'string') {
+      definitions.set(node.identifier, node);
+    }
+  }
+  const blocks = parsed.filter((node) => node.type !== 'definition');
   const counts = new Map<string, number>();
   return blocks.map((node) => {
-    const base = fingerprintMdastBlock(node);
+    const base = hash(stableStringify(normalizeMdast(node, definitions)));
     const n = (counts.get(base) ?? 0) + 1;
     counts.set(base, n);
     const key = n === 1 ? base : `${base}#${n}`;
@@ -196,7 +233,7 @@ export function fingerprintMarkdownBlocks(
       | undefined;
     const start = pos?.start?.offset ?? 0;
     const end = pos?.end?.offset ?? 0;
-    const md = end > start ? markdown.slice(start, end).trim() : '';
+    const md = end > start ? canonicalMarkdown.slice(start, end).trim() : '';
     return { key, markdown: md };
   });
 }

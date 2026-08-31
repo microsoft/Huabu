@@ -23,7 +23,7 @@ export const SNAP_GRID: [number, number] = [GRID_SIZE, GRID_SIZE];
  * touch-pinch handlers. Keeping a single source of truth ensures all gesture
  * paths clamp to the same limits.
  */
-export const MIN_ZOOM = 0.1;
+export const MIN_ZOOM = 0.05;
 export const MAX_ZOOM = 5;
 
 /** Screen-space movement required before a touch gesture becomes a drag. */

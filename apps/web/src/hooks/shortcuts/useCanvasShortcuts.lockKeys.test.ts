@@ -118,6 +118,44 @@ describe('useCanvasShortcuts catalog key lock', () => {
     expect(canvasActions.sendSelectedToOrder).toHaveBeenLastCalledWith('top');
   });
 
+  it('copies selected nodes when an editor retains focus without selected text', () => {
+    const editor = document.createElement('textarea');
+    editor.value = 'Note text';
+    editor.setSelectionRange(4, 4);
+    container.appendChild(editor);
+
+    act(() => {
+      editor.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'c',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
+    expect(canvasActions.copySelectedNodes).toHaveBeenCalledOnce();
+  });
+
+  it('preserves native copy when text is selected in an editor', () => {
+    const editor = document.createElement('textarea');
+    editor.value = 'Note text';
+    editor.setSelectionRange(0, 4);
+    container.appendChild(editor);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'c',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => editor.dispatchEvent(event));
+
+    expect(canvasActions.copySelectedNodes).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   it('keeps temporary pan active until the primary pointer is released', () => {
     act(() => {
       window.dispatchEvent(
