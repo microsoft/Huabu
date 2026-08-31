@@ -31,6 +31,7 @@ import {
   validateManagedAgentTeam,
   type ManagedSetupWorkerMessage,
 } from '@agentlet/agent-team'
+import { resolveResourceRoot } from '@agentlet/resources'
 import { AgentProcess } from './agent-process.js'
 import { WsClient } from './ws-client.js'
 import { Relay } from './relay.js'
@@ -89,6 +90,34 @@ export function resolveManagedSetupWorkerPath(
 }
 
 /**
+ * Compute the envRegistry defaults injected into every spawned agent
+ * process: well-known daemon-managed dirs, keyed by well-known env var name.
+ * `process.env` overrides each default when present. Individual dirs are
+ * created lazily — by `server/sendResource` for reachback resources, or by
+ * `@agentlet/resources` when a local resource is installed.
+ */
+export function buildEnvRegistryDefaults(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  // Values are resolved to absolute paths against the daemon cwd so that
+  // spawned agents (which run in a different cwd) reference the same dir.
+  const cwdRelativeDefaults: Record<string, string> = {
+    AGENTLET_REACHBACK_DIR: join('node_modules', '.cache', 'agentlet', 'reachback'),
+  }
+  const registry: Record<string, string> = {}
+  for (const [key, fallback] of Object.entries(cwdRelativeDefaults)) {
+    registry[key] = resolve(env[key] || fallback)
+  }
+
+  // AGENT_RESOURCE_DIR is the machine-local resource root (skills, tools,
+  // connectors, receipts). Unlike the cwd-relative defaults above, it
+  // defaults to an absolute path under the user's home directory, so its
+  // resolution — including the AGENT_RESOURCE_DIR override — is owned by
+  // @agentlet/resources rather than duplicated here.
+  registry.AGENT_RESOURCE_DIR = resolveResourceRoot(env)
+
+  return registry
+}
+
+/**
  * Agentlet connects a machine-level control channel and manages agent
  * processes requested by the host.
  */
@@ -109,7 +138,8 @@ export class Agentlet {
    * Unified env registry — all daemon-managed environment variables that
    * are injected into spawned agent processes. Initialized from defaults,
    * then overridden by process.env if present. Individual dirs are created
-   * lazily when resources are received via server/sendResource.
+   * lazily when resources are received via server/sendResource or when a
+   * local resource is installed under AGENT_RESOURCE_DIR.
    */
   private readonly envRegistry: Record<string, string> = {}
 
@@ -117,16 +147,7 @@ export class Agentlet {
     this.options = options
     this.logger = logger
     this.daemonId = resolveAgentletId(options.agentletId)
-
-    // Well-known env vars with defaults — process.env overrides if set.
-    // Values are resolved to absolute paths against the daemon cwd so that
-    // spawned agents (which run in a different cwd) reference the same dir.
-    const defaults: Record<string, string> = {
-      AGENTLET_REACHBACK_DIR: join('node_modules', '.cache', 'agentlet', 'reachback'),
-    }
-    for (const [key, fallback] of Object.entries(defaults)) {
-      this.envRegistry[key] = resolve(process.env[key] || fallback)
-    }
+    Object.assign(this.envRegistry, buildEnvRegistryDefaults())
   }
 
   async start(): Promise<void> {

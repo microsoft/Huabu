@@ -25,6 +25,7 @@ Agentlet does not provide a standalone relay server, REST API, browser UI, token
 | `agentlet` | Daemon CLI, ACP process lifecycle, WebSocket client, relay, logging, and Agent Team commands. |
 | `@agentlet/protocol` | Shared daemon/Gateway JSON-RPC types and method constants. |
 | `@agentlet/agent-team` | Agent Team manifest parsing, setup, validation, and diagnostics. |
+| `@agentlet/resources` | Machine-local resource root layout, receipt persistence, and catalogue projection. |
 
 ## Build and test
 
@@ -116,8 +117,21 @@ The standard environment includes:
 | `AGENTLET_REACHBACK_DIR` | Directory containing host-provided resources. |
 | `AGENTLET_SERVER` | Gateway URL supplied to the daemon. |
 | `AGENTLET_TOKEN` | Authentication token available to host-provided reachback tools. |
+| `AGENT_RESOURCE_DIR` | Machine-local resource root (`skills/`, `tools/`, `connectors/`, `receipts/`); defaults to `~/.agentlet/resources`. |
 
 Agentlet transports opaque resources and environment values; it does not interpret the host-specific tool protocol.
+
+## Local Resources
+
+Every spawned agent also receives `AGENT_RESOURCE_DIR`, a bounded machine-local
+directory (`skills/`, `tools/`, `connectors/`, `receipts/`) used to install and
+record Skills, CLI tools, and connectors shared across agents on that machine.
+Installation records are versioned receipts persisted atomically under
+`receipts/`, and `@agentlet/resources` exposes an enumeration/projection
+service a host integration uses to surface validated local resources through
+the Agenetes Resource Registry. The full contract, including the receipt
+schema and the enumeration API's path-traversal guarantees, is documented in
+[`spec/local-resources.md`](spec/local-resources.md).
 
 ## Repository layout
 
@@ -126,8 +140,10 @@ packages/
   protocol/    # Shared daemon/Gateway wire contract
   local/       # agentlet CLI and execution daemon
   agent-team/  # Agent Team manifests and setup logic
+  resources/   # Machine-local resource layout, receipts, and catalogue projection
 spec/
   protocol.md
   agent-reachback.md
   agent-team.md
+  local-resources.md
 ```

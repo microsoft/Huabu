@@ -1,7 +1,10 @@
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import {
   buildAgentProcessEnv,
+  buildEnvRegistryDefaults,
   resolveAgentletId,
   resolveManagedSetupWorkerPath,
 } from '../src/agentlet.js'
@@ -82,5 +85,26 @@ describe('spawned agent environment', () => {
       AGENTLET_SERVER: 'ws://host.test',
       AGENTLET_TOKEN: 'daemon-token',
     })
+  })
+})
+
+describe('AGENT_RESOURCE_DIR provisioning', () => {
+  it('defaults every spawned agent to an absolute ~/.agentlet/resources root', () => {
+    const registry = buildEnvRegistryDefaults({})
+    expect(registry.AGENT_RESOURCE_DIR.endsWith(join('.agentlet', 'resources'))).toBe(true)
+    expect(registry.AGENT_RESOURCE_DIR.startsWith('/') || /^[A-Za-z]:\\/.test(registry.AGENT_RESOURCE_DIR)).toBe(true)
+  })
+
+  it('honors a host-configured explicit absolute AGENT_RESOURCE_DIR override', () => {
+    const registry = buildEnvRegistryDefaults({ AGENT_RESOURCE_DIR: '/srv/agentlet/resources' })
+    expect(registry.AGENT_RESOURCE_DIR).toBe('/srv/agentlet/resources')
+  })
+
+  it('keeps AGENT_RESOURCE_DIR independent from the cwd-relative reachback default', () => {
+    const registry = buildEnvRegistryDefaults({})
+    expect(registry.AGENTLET_REACHBACK_DIR.endsWith(join('node_modules', '.cache', 'agentlet', 'reachback'))).toBe(
+      true,
+    )
+    expect(registry.AGENT_RESOURCE_DIR).not.toContain('node_modules')
   })
 })
