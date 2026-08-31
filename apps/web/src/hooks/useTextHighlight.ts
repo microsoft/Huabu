@@ -220,4 +220,3 @@ function elementId(el: HTMLElement): string {
   }
   return String(id);
 }
-

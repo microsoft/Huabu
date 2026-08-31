@@ -116,10 +116,7 @@ export function shouldComposeConversationOwner(
   const hasAuthoredContent = headless
     ? source?.hasAuthoredContent !== false
     : typeof source?.content === 'string' && source.content.trim().length > 0;
-  return (
-    getQuestionNodeStatus(source) === 'idle' &&
-    !hasAuthoredContent
-  );
+  return getQuestionNodeStatus(source) === 'idle' && !hasAuthoredContent;
 }
 
 /** Keep client writes to fixed Agent Nodes limited to presentation state. */

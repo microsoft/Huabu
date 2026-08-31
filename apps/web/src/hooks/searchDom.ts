@@ -50,16 +50,12 @@ export function findRanges(
 
   const ranges: Range[] = [];
   for (const searchRoot of getSearchRoots(root)) {
-    const walker = document.createTreeWalker(
-      searchRoot,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode: (node) =>
-          isSearchableTextNode(node, searchRoot)
-            ? NodeFilter.FILTER_ACCEPT
-            : NodeFilter.FILTER_REJECT,
-      },
-    );
+    const walker = document.createTreeWalker(searchRoot, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) =>
+        isSearchableTextNode(node, searchRoot)
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_REJECT,
+    });
     let current = walker.nextNode();
     while (current && ranges.length < maxRanges) {
       const text = (current.textContent ?? '').toLowerCase();

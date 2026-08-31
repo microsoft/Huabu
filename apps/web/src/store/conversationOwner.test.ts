@@ -173,9 +173,7 @@ describe('conversation owner routing', () => {
       commands: [
         {
           type: 'MERGE_NODE_DATA',
-          patches: [
-            { nodeId: 'node-source', patch: { status: 'running' } },
-          ],
+          patches: [{ nodeId: 'node-source', patch: { status: 'running' } }],
         },
       ],
       originator: { source: 'ui' },

@@ -47,7 +47,10 @@ export interface UseCanvasShortcutsOptions {
 export type CanvasTool = 'select' | 'lasso' | 'pan';
 
 function hasNativeCopySelection(target: EventTarget | null): boolean {
-  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement
+  ) {
     return (
       target.selectionStart !== null &&
       target.selectionEnd !== null &&

@@ -137,8 +137,7 @@ export const QuestionNode = memo(
      * or finished (replay). A pending paste-fork blocks opening until its
      * history has finished copying.
      */
-    const canOpenInChat =
-      hasConversation && !isForkPending;
+    const canOpenInChat = hasConversation && !isForkPending;
 
     const needsApproval = useChatStore((s) => {
       if (!data.threadId) return false;
