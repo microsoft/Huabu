@@ -142,7 +142,7 @@ The separator exposes a symmetric pointer target around its visible rule, tracks
 
 Each group uses the WAI-ARIA tabs pattern with a tablist, selected tab, labelled tabpanel, and roving keyboard focus. Only the focused group responds to group-level shortcuts; editable controls, search, menus, and media viewers keep ownership of their own keys.
 
-Tab titles are visually truncated while retaining full accessible labels and tooltips. Transient tabs are visually distinct and expose their temporary status and promotion gesture accessibly.
+Tab titles are visually truncated while retaining full accessible labels and tooltips. Tabs do not shrink their action controls when the strip is crowded; the strip scrolls horizontally instead. Close remains visible on every tab, and the one-way Pin action remains visible on transient tabs, so pointer, keyboard, and touch users do not depend on hover to operate a tab. Transient tabs are visually distinct and expose their temporary status and promotion gesture accessibly.
 
 ## 9. Integration rules
 

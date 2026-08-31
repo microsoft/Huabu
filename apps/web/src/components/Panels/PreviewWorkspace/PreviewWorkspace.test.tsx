@@ -248,7 +248,7 @@ describe('tab strip', () => {
     expect(tabs()[0].classList.contains('h-9')).toBe(true);
   });
 
-  it('sizes tabs to content and shrinks them before scrolling', () => {
+  it('sizes tabs to content without shrinking their controls', () => {
     openNode('a');
     openNode('b');
     render([canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')]);
@@ -256,7 +256,20 @@ describe('tab strip', () => {
     const [inactiveTab, activeTab] = tabs();
     expect(inactiveTab.classList.contains('min-w-20')).toBe(true);
     expect(inactiveTab.classList.contains('w-fit')).toBe(true);
-    expect(inactiveTab.classList.contains('flex-[0_1_auto]')).toBe(true);
+    expect(inactiveTab.classList.contains('flex-none')).toBe(true);
+    expect(inactiveTab.classList.contains('flex-[0_1_auto]')).toBe(false);
+    for (const tab of [inactiveTab, activeTab]) {
+      const actionRail = tab.querySelector<HTMLElement>(
+        '[data-testid="preview-tab-actions"]',
+      );
+      expect(actionRail?.classList.contains('shrink-0')).toBe(true);
+      expect(actionRail?.classList.contains('absolute')).toBe(false);
+      expect(actionRail?.classList.contains('opacity-0')).toBe(false);
+      expect(actionRail?.classList.contains('pointer-events-none')).toBe(false);
+      expect(
+        actionRail?.querySelector('[aria-label^="Close "]'),
+      ).not.toBeNull();
+    }
     expect(activeTab.classList.contains('border-r')).toBe(true);
     expect(activeTab.classList.contains('last:border-r-0')).toBe(false);
     expect(activeTab.classList.contains('bg-surface')).toBe(true);
@@ -616,13 +629,12 @@ describe('activation', () => {
     expect(title?.classList.contains('transition-colors')).toBe(true);
     expect(icon?.classList.contains('group-hover:text-fg-subtle')).toBe(true);
     expect(icon?.classList.contains('transition-colors')).toBe(true);
-    expect(actionRail?.classList.contains('absolute')).toBe(true);
-    expect(actionRail?.classList.contains('opacity-0')).toBe(true);
+    expect(actionRail?.classList.contains('absolute')).toBe(false);
+    expect(actionRail?.classList.contains('shrink-0')).toBe(true);
+    expect(actionRail?.classList.contains('opacity-0')).toBe(false);
+    expect(actionRail?.classList.contains('pointer-events-none')).toBe(false);
     expect(actionRail?.classList.contains('group-hover:opacity-100')).toBe(
-      true,
-    );
-    expect(actionRail?.classList.contains('focus-within:opacity-100')).toBe(
-      true,
+      false,
     );
     expect(actionRail?.contains(keepButton ?? null)).toBe(true);
     expect(actionRail?.contains(closeButton ?? null)).toBe(true);
