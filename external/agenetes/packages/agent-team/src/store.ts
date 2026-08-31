@@ -10,6 +10,8 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 
+import { resourceIdListSchema } from '@agenetes/protocol';
+
 import { agentTeamMemberKey, agentTeamRootKey } from './identity.js';
 
 /**
@@ -71,8 +73,9 @@ import type {
 } from './types.js';
 import type { AgentTeamScanDiagnostic } from '@agentlet/protocol';
 
-const SCHEMA_VERSION = 3;
-const PROFILE_SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 4;
+const EMBEDDED_SETUP_LOG_SCHEMA_VERSION = 2;
+const PREVIOUS_SCHEMA_VERSION = 3;
 const DISCOVERY_SCHEMA_VERSION = 1;
 const REGISTRY_FILENAME = 'registry.json';
 const SETUP_LOG_LIMIT = 200;
@@ -418,6 +421,20 @@ function parseProfile(value: unknown, index: number): AgentProfile {
   }
   assertString(value.agentletId, `${label}.agentletId`);
   assertString(value.workingDirPath, `${label}.workingDirPath`);
+  const legacyProfile = value.schemaVersion === undefined;
+  if (!legacyProfile && value.schemaVersion !== 2) {
+    throw new Error(
+      `Invalid Agent Team registry: ${label}.schemaVersion is unsupported`,
+    );
+  }
+  const parsedResourceIds = resourceIdListSchema.safeParse(
+    legacyProfile ? [] : value.resourceIds,
+  );
+  if (!parsedResourceIds.success) {
+    throw new Error(
+      `Invalid Agent Team registry: ${label}.resourceIds must be a bounded list of unique resource ids`,
+    );
+  }
   if (!isObject(value.launch)) {
     throw new Error(
       `Invalid Agent Team registry: ${label}.launch must be an object`,
@@ -425,10 +442,12 @@ function parseProfile(value: unknown, index: number): AgentProfile {
   }
   const customData = parseCustomData(value.customData, `${label}.customData`);
   const base = {
+    schemaVersion: 2 as const,
     id: value.id,
     alias: value.alias,
     agentletId: value.agentletId,
     workingDirPath: value.workingDirPath,
+    resourceIds: parsedResourceIds.data,
     ...(customData === undefined ? {} : { customData }),
   };
   if (value.launch.kind === 'agent-team-manifest') {
@@ -486,10 +505,12 @@ function migrateDeployment(
   assertString(value.harness, `${label}.harness`);
   assertString(value.workingDirPath, `${label}.workingDirPath`);
   return {
+    schemaVersion: 2,
     id: value.id,
     alias: value.alias,
     agentletId: value.machine,
     workingDirPath: value.workingDirPath,
+    resourceIds: [],
     launch: {
       kind: 'agent-team-manifest',
       manifestPath: value.manifestPath,
@@ -538,7 +559,8 @@ function parseRegistryFile(value: unknown): AgentTeamRegistryState {
   const isDiscoverySchema = value.schemaVersion === DISCOVERY_SCHEMA_VERSION;
   if (
     !isDiscoverySchema &&
-    value.schemaVersion !== PROFILE_SCHEMA_VERSION &&
+    value.schemaVersion !== EMBEDDED_SETUP_LOG_SCHEMA_VERSION &&
+    value.schemaVersion !== PREVIOUS_SCHEMA_VERSION &&
     value.schemaVersion !== SCHEMA_VERSION
   ) {
     throw new Error(`Unsupported or invalid Agent Team registry schema`);

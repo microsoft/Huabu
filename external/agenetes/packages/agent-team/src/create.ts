@@ -1,12 +1,17 @@
 import { AgentTeamRegistry } from './registry.js';
 import { FileAgentTeamRegistryStore } from './store.js';
 
-import type { AgentTeamControlPort, AgentTeamSecretStore } from './types.js';
+import type {
+  AgentResourceValidationPort,
+  AgentTeamControlPort,
+  AgentTeamSecretStore,
+} from './types.js';
 
 export interface CreateAgentTeamRegistryOptions {
   storageDir: string;
   controlPort: AgentTeamControlPort;
   secretStore: AgentTeamSecretStore;
+  resourceValidationPort?: AgentResourceValidationPort;
   now?: () => number;
 }
 
@@ -21,5 +26,6 @@ export function createAgentTeamRegistry(
     undefined,
     options.secretStore,
     options.controlPort,
+    options.resourceValidationPort,
   );
 }

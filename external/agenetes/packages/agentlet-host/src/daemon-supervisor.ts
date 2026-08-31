@@ -248,6 +248,8 @@ export interface AttachOptions {
    */
   hostEnvPrefix?: string;
   hostEnvAllowlist?: readonly string[];
+  /** Exact inherited variable names removed regardless of namespace. */
+  hostEnvDenylist?: readonly string[];
 }
 
 /**
@@ -262,11 +264,14 @@ export function filterHostNamespacedEnv(
   env: NodeJS.ProcessEnv,
   prefix: string | undefined,
   allowlist: readonly string[] | undefined,
+  denylist: readonly string[] | undefined = undefined,
 ): Record<string, string> {
   const allow = new Set(allowlist ?? []);
+  const deny = new Set(denylist ?? []);
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined) continue;
+    if (deny.has(key)) continue;
     if (prefix && key.startsWith(prefix) && !allow.has(key)) continue;
     out[key] = value;
   }
@@ -301,6 +306,7 @@ class DaemonSupervisor {
   private agentletId = '';
   private hostEnvPrefix: string | undefined;
   private hostEnvAllowlist: readonly string[] | undefined;
+  private hostEnvDenylist: readonly string[] | undefined;
 
   /**
    * Install the supervisor on a Fastify app. Idempotent per-app —
@@ -314,6 +320,7 @@ class DaemonSupervisor {
     this.agentletId = opts.agentletId ?? hostname();
     this.hostEnvPrefix = opts.hostEnvPrefix;
     this.hostEnvAllowlist = opts.hostEnvAllowlist;
+    this.hostEnvDenylist = opts.hostEnvDenylist;
 
     cleanupLegacyTicketsFile(app, this.dataDir);
 
@@ -489,6 +496,7 @@ class DaemonSupervisor {
             process.env,
             this.hostEnvPrefix,
             this.hostEnvAllowlist,
+            this.hostEnvDenylist,
           ),
           AGENTLET_TOKEN: token,
         },

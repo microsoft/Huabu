@@ -4,6 +4,7 @@ import type {
   AgentTeamControlPort,
   AgentTeamRegistry,
   AgentTeamSecretStore,
+  AgentResourceValidationPort,
   CreateAcpCommandProfileInput,
 } from '@agenetes/agent-team';
 import type { FastifyInstance } from 'fastify';
@@ -13,6 +14,7 @@ export interface MountAgentTeamOptions {
   secretStore: AgentTeamSecretStore;
   legacyCommandProfiles?: CreateAcpCommandProfileInput[];
   onLegacyProfilesMigrated?: (ids: string[]) => void;
+  resourceValidationPort?: AgentResourceValidationPort;
 }
 
 let instance: AgentTeamRegistry | null = null;
@@ -32,6 +34,7 @@ export function mountAgentTeamRegistry(
       storageDir: options.storageDir,
       secretStore: options.secretStore,
       controlPort,
+      resourceValidationPort: options.resourceValidationPort,
     });
     const migrated = instance.importCommandProfiles(
       options.legacyCommandProfiles ?? [],

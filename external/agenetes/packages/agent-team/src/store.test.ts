@@ -44,10 +44,12 @@ const state: AgentTeamRegistryState = {
   ],
   profiles: [
     {
+      schemaVersion: 2,
       id: 'profile-1',
       alias: 'Reviewer',
       agentletId: 'machine-a',
       workingDirPath: '/teams/reviewer/workspaces/copilot',
+      resourceIds: [],
       launch: {
         kind: 'agent-team-manifest',
         manifestPath: '/teams/reviewer/agentlet.yaml',
@@ -81,7 +83,7 @@ describe('FileAgentTeamRegistryStore', () => {
     expect(new FileAgentTeamRegistryStore(storageDir).load()).toEqual(state);
     expect(
       JSON.parse(readFileSync(join(storageDir, 'registry.json'), 'utf8')),
-    ).toMatchObject({ schemaVersion: 3, state });
+    ).toMatchObject({ schemaVersion: 4, state });
     expect(existsSync(join(storageDir, 'registry.json.tmp'))).toBe(false);
   });
 
@@ -146,6 +148,7 @@ describe('FileAgentTeamRegistryStore', () => {
           members: state.members,
           deployments: [
             {
+              schemaVersion: 2,
               id: 'legacy-deployment',
               alias: 'Reviewer',
               revision: 3,
@@ -165,10 +168,12 @@ describe('FileAgentTeamRegistryStore', () => {
 
     expect(new FileAgentTeamRegistryStore(storageDir).load().profiles).toEqual([
       {
+        schemaVersion: 2,
         id: 'legacy-deployment',
         alias: 'Reviewer',
         agentletId: 'machine-a',
         workingDirPath: '/teams/reviewer/workspaces/copilot',
+        resourceIds: [],
         launch: {
           kind: 'agent-team-manifest',
           manifestPath: '/teams/reviewer/agentlet.yaml',
@@ -179,7 +184,7 @@ describe('FileAgentTeamRegistryStore', () => {
     ]);
     expect(
       JSON.parse(readFileSync(join(storageDir, 'registry.json'), 'utf8')),
-    ).toMatchObject({ schemaVersion: 3 });
+    ).toMatchObject({ schemaVersion: 4 });
     expect(
       readFileSync(join(storageDir, 'legacy-deployment.setup.jsonl'), 'utf8'),
     ).toBe('');
@@ -222,7 +227,38 @@ describe('FileAgentTeamRegistryStore', () => {
     ]);
     expect(
       JSON.parse(readFileSync(join(storageDir, 'registry.json'), 'utf8')),
-    ).toEqual({ schemaVersion: 3, state });
+    ).toEqual({ schemaVersion: 4, state });
+  });
+
+  it('migrates schema v3 Profiles to schema v2 records in registry v4', () => {
+    const storageDir = createStorageDir();
+    const legacyProfile = {
+      ...state.profiles[0],
+      schemaVersion: undefined,
+      resourceIds: undefined,
+    };
+    writeFileSync(
+      join(storageDir, 'registry.json'),
+      JSON.stringify({
+        schemaVersion: 3,
+        state: { ...state, profiles: [legacyProfile] },
+      }),
+    );
+
+    const loaded = new FileAgentTeamRegistryStore(storageDir).load();
+
+    expect(loaded.profiles[0]).toMatchObject({
+      schemaVersion: 2,
+      resourceIds: [],
+    });
+    expect(
+      JSON.parse(readFileSync(join(storageDir, 'registry.json'), 'utf8')),
+    ).toMatchObject({
+      schemaVersion: 4,
+      state: {
+        profiles: [{ schemaVersion: 2, resourceIds: [] }],
+      },
+    });
   });
 
   // Proving the 200-entry cap means rewriting the log 200 times, and each

@@ -160,3 +160,23 @@ export type { AgentStateSnapshot } from './agent-state.js';
 // @huabu/shared without depending on the fastify-bound host package.
 export { agentletStatusSchema } from './agentlet-status.js';
 export type { AgentletStatus } from './agentlet-status.js';
+
+// AgentResource (docs/proposals/agent-resource-registry.md §6, §9): the
+// canonical Resource Registry catalogue record, its bounded resource-ID
+// list, and the generic resourceIds launch-override envelope. Shared by the
+// Resource Registry service and by any Profile-owning package (e.g.
+// @agenetes/agent-team) that selects resources by ID.
+export {
+  AGENT_RESOURCE_SCHEMA_VERSION,
+  MAX_PROFILE_RESOURCE_IDS,
+  resourceIdSchema,
+  resourceIdListSchema,
+  agentResourceSchema,
+  resourceIdsOverrideSchema,
+} from './resource.js';
+export type {
+  AgentResourceId,
+  ResourceIdList,
+  AgentResource,
+  ResourceIdsOverride,
+} from './resource.js';

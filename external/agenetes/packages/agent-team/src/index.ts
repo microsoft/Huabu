@@ -55,4 +55,6 @@ export type {
   AgentTeamRootScan,
   AgentTeamScanPort,
   AgentTeamControlPort,
+  AgentResourceValidationContext,
+  AgentResourceValidationPort,
 } from './types.js';

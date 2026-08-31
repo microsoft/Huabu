@@ -1,4 +1,4 @@
-import { agentSpecSchema } from '@agenetes/protocol';
+import { agentSpecSchema, resourceIdListSchema } from '@agenetes/protocol';
 import { defineDriver } from '@agenetes/runtime';
 import { z } from 'zod';
 
@@ -69,6 +69,7 @@ const profileSnapshotSchema = z.object({
   profileId: z.string(),
   agentletId: z.string(),
   workingDirPath: z.string(),
+  resourceIds: resourceIdListSchema.default([]),
   launch: z.discriminatedUnion('kind', [
     z.object({
       kind: z.literal('acp-command'),
