@@ -125,8 +125,11 @@ export const QuestionNode = memo(
       data.threadId ? s.pendingForkThreadIds[data.threadId] === true : false,
     );
 
-    /** Whether this node has been executed at least once. */
+    /** Whether this node has an explicit terminal execution state. */
     const hasRun = status === 'done' || status === 'error';
+    const hasConversation =
+      !!data.threadId &&
+      (hasRun || status === 'running' || displayText.trim().length > 0);
 
     /**
      * Whether the chat panel can be opened to this question's thread —
@@ -135,7 +138,7 @@ export const QuestionNode = memo(
      * history has finished copying.
      */
     const canOpenInChat =
-      !!data.threadId && (hasRun || status === 'running') && !isForkPending;
+      hasConversation && !isForkPending;
 
     const needsApproval = useChatStore((s) => {
       if (!data.threadId) return false;

@@ -1927,13 +1927,9 @@ const useCanvasStore = create<RFState>()(
           // strips it from persisted topology for good.
           viewport?: CanvasViewport;
         };
-        // Repair question nodes whose execution status drifted to a
-        // stale non-terminal value (most often `idle`) while they
-        // actually completed a run — the `status: 'done'` autosave can
-        // be silently dropped by a 409 when the agent edits the canvas
-        // mid-conversation. Nodes that own a `threadId` always have a
-        // persisted conversation, so a stale status is demoted to
-        // `done` here, restoring the badge + reopen affordance.
+        // Remove obsolete question auto-run state without guessing a
+        // terminal outcome. A node can own a persisted conversation whose
+        // last turn failed, so thread/content presence must never imply done.
         // Normalize tree order on load: persisted topology is not
         // guaranteed to list every parent frame ahead of its children
         // (older writes, or a delta-authored save), and a child ahead of

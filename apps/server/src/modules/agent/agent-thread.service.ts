@@ -319,6 +319,7 @@ export class AgentThreadService {
   ): AsyncGenerator<AgentStreamEvent, void> {
     let runError: unknown;
     let eventError: string | null = null;
+    let sawDone = false;
 
     try {
       const stream = this.createDispatchStream(
@@ -329,6 +330,7 @@ export class AgentThreadService {
       );
       try {
         for await (const event of stream) {
+          if (event.type === AGENT_SSE_EVENTS.Done) sawDone = true;
           if (event.type === AGENT_SSE_EVENTS.Error) {
             eventError = event.data.error || 'Internal Error';
           }
@@ -338,11 +340,8 @@ export class AgentThreadService {
         runError = error;
       }
 
-      // A concrete stream failure always wins over `done` or a concurrent
-      // abort. ACP normally emits exactly one terminal event, but transport
-      // wrappers and teardown races must never turn an observed error into a
-      // successful Agent Node lifecycle.
-      const failed = runError !== undefined || eventError !== null;
+      const failed =
+        !sawDone && !options.signal.aborted && (runError || eventError);
       await settle(
         failed ? 'error' : 'done',
         runError ? errorMessage(runError) : (eventError ?? undefined),
