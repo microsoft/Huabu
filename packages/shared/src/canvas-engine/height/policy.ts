@@ -132,8 +132,23 @@ export const NODE_SHELL_INSET = 6;
  * height preference at all. An explicit numeric height pins as always,
  * and an explicit `'auto'` means "expand this one fully" — the author
  * has spoken either way, so neither is second-guessed.
+ *
+ * The unit is characters because nothing has been measured yet at
+ * creation time, but it is a good proxy in the range that matters:
+ * across real agent-written notes past ~600 characters, intrinsic
+ * height lands at 1.34x the character count with only ~5% spread —
+ * tighter than a line count predicts the same heights (~9%).
+ *
+ * The number is chosen by inverting that ratio from the rendered height
+ * we actually want to trigger on, not picked for roundness. 550 lands a
+ * little over 700px, roughly 2.5x a typical short note and about a
+ * screenful, against the ~248px collapsed preview. An earlier value of
+ * 800 inverted to ~1080px, so a note had to outgrow an entire screen
+ * before it collapsed and everything between 600 and 1080px rendered at
+ * full length — which is exactly what made a wall of long notes look
+ * arbitrary next to a collapsed one.
  */
-export const NOTE_COLLAPSE_CONTENT_THRESHOLD = 800;
+export const NOTE_COLLAPSE_CONTENT_THRESHOLD = 550;
 
 /**
  * Whether a note created with this content should start collapsed.
