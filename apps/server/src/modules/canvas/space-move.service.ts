@@ -41,7 +41,13 @@ import {
 } from '../agent/agenetes/drivers.js';
 import { agentThreadService } from '../agent/agent-thread.service.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
-import { getBlobStore, isWorldCanvasId, space } from '../storage/index.js';
+import {
+  createSpace,
+  deleteSpace,
+  getBlobStore,
+  isWorldCanvasId,
+  space,
+} from '../storage/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 import { acquireWorkspaceOperationLease } from '../workspace.js';
 
@@ -168,16 +174,17 @@ export async function moveCanvasSelection(
   sourceCanvasId: string,
   input: MoveSelectionBody,
 ): Promise<MoveSelectionResponse> {
-  if (sourceCanvasId === input.destinationCanvasId) {
+  const destinationCanvasId =
+    input.destination.kind === 'existing'
+      ? input.destination.canvasId
+      : createId('canvas');
+  if (sourceCanvasId === destinationCanvasId) {
     throw new SpaceMoveError(
       'MOVE_DESTINATION_SAME_AS_SOURCE',
       'Source and destination Spaces must be different',
     );
   }
-  if (
-    isWorldCanvasId(sourceCanvasId) ||
-    isWorldCanvasId(input.destinationCanvasId)
-  ) {
+  if (isWorldCanvasId(sourceCanvasId) || isWorldCanvasId(destinationCanvasId)) {
     throw new SpaceMoveError(
       'MOVE_WORLD_NOT_ALLOWED',
       'World cannot participate in a move',
@@ -186,12 +193,26 @@ export async function moveCanvasSelection(
   }
 
   const workspaceLease = acquireWorkspaceOperationLease();
+  let createdDestination = false;
   try {
+    if (input.destination.kind === 'new') {
+      const created = await createSpace(
+        destinationCanvasId,
+        input.destination.title,
+      );
+      if (!created.ok) {
+        throw new SpaceMoveError(
+          'MOVE_DESTINATION_CREATE_FAILED',
+          'The destination Space could not be created',
+        );
+      }
+      createdDestination = true;
+    }
     return await withCanvasMutexes(
-      [sourceCanvasId, input.destinationCanvasId],
+      [sourceCanvasId, destinationCanvasId],
       async () => {
         const sourceHandle = space(sourceCanvasId);
-        const destinationHandle = space(input.destinationCanvasId);
+        const destinationHandle = space(destinationCanvasId);
         const [source, destination, sourceRecords, destinationRecords] =
           await Promise.all([
             sourceHandle.read(),
@@ -235,6 +256,7 @@ export async function moveCanvasSelection(
             sourceEdges: (source.state.edges ?? []) as CanvasEdge[],
             destinationNodes: hydratedDestination,
             selectedNodeIds: input.selectedNodeIds,
+            destinationCanvasId,
           });
         } catch (error) {
           if (error instanceof SpaceMovePlanError) {
@@ -300,10 +322,7 @@ export async function moveCanvasSelection(
             threadMoves.push({
               threadId,
               sourceSpec: record.spec,
-              targetSpec: movedWorkloadSpec(
-                record.spec,
-                input.destinationCanvasId,
-              ),
+              targetSpec: movedWorkloadSpec(record.spec, destinationCanvasId),
             });
           }
 
@@ -312,7 +331,7 @@ export async function moveCanvasSelection(
           );
           const rewrittenNodes = await cloneArtifacts(
             sourceCanvasId,
-            input.destinationCanvasId,
+            destinationCanvasId,
             movedNodes,
           );
           const rewrittenById = new Map(
@@ -325,10 +344,11 @@ export async function moveCanvasSelection(
             sourceEdges: (source.state.edges ?? []) as CanvasEdge[],
             destinationNodes: hydratedDestination,
             selectedNodeIds: input.selectedNodeIds,
+            destinationCanvasId,
           });
 
           const destinationWrite = await executeOnServerAlreadyLocked({
-            canvasId: input.destinationCanvasId,
+            canvasId: destinationCanvasId,
             commands: plan.commands,
             originator: { source: 'system' },
             publish: false,
@@ -344,6 +364,7 @@ export async function moveCanvasSelection(
           }
 
           const completedThreads: typeof threadMoves = [];
+          let sourceWrite: ExecuteOnServerOutput | undefined;
           try {
             for (const move of threadMoves) {
               agenetes.rehome(
@@ -355,9 +376,9 @@ export async function moveCanvasSelection(
               );
               completedThreads.push(move);
             }
-            const sourceWrite = await executeOnServerAlreadyLocked({
+            sourceWrite = await executeOnServerAlreadyLocked({
               canvasId: sourceCanvasId,
-              commands: [plan.deleteCommand],
+              commands: plan.sourceCommands,
               originator: { source: 'system' },
               publish: false,
             });
@@ -375,9 +396,11 @@ export async function moveCanvasSelection(
             return {
               transferId: createId('transfer'),
               destination: {
-                canvasId: input.destinationCanvasId,
+                canvasId: destinationCanvasId,
                 title: destination.title,
+                created: createdDestination,
               },
+              sourcePreviewNodeId: plan.sourcePreviewNodeId,
               sourceVersion: sourceWrite.toVersion,
               destinationVersion: destinationWrite.toVersion,
               roots:
@@ -422,17 +445,24 @@ export async function moveCanvasSelection(
             };
           } catch (error) {
             try {
+              if (sourceWrite && sourceWrite.deltas.length > 0) {
+                await applyDeltasOnServerAlreadyLocked({
+                  canvasId: sourceCanvasId,
+                  deltas: invertDeltas(sourceWrite.deltas),
+                  originator: { source: 'system' },
+                });
+              }
               for (const move of completedThreads.reverse()) {
                 agenetes.rehome(
                   {
-                    namespace: canvasAcpNamespace(input.destinationCanvasId),
+                    namespace: canvasAcpNamespace(destinationCanvasId),
                     threadId: move.threadId,
                   },
                   move.sourceSpec,
                 );
               }
               await applyDeltasOnServerAlreadyLocked({
-                canvasId: input.destinationCanvasId,
+                canvasId: destinationCanvasId,
                 deltas: invertDeltas(destinationWrite.deltas),
                 originator: { source: 'system' },
               });
@@ -450,6 +480,27 @@ export async function moveCanvasSelection(
         }
       },
     );
+  } catch (error) {
+    if (
+      createdDestination &&
+      !(
+        error instanceof SpaceMoveError && error.code === 'MOVE_OUTCOME_UNKNOWN'
+      )
+    ) {
+      try {
+        const deleted = await deleteSpace(destinationCanvasId);
+        if (!deleted.ok && deleted.reason !== 'not-found') {
+          throw new Error(`cleanup rejected: ${deleted.reason}`);
+        }
+      } catch (cleanupError) {
+        throw new SpaceMoveError(
+          'MOVE_DESTINATION_CLEANUP_FAILED',
+          `Move failed and the new destination Space could not be removed: ${String(cleanupError)}`,
+          500,
+        );
+      }
+    }
+    throw error;
   } finally {
     workspaceLease.release();
   }

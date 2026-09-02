@@ -6,7 +6,20 @@ import { z } from 'zod';
 export const moveSelectionBodySchema = z
   .object({
     selectedNodeIds: z.array(z.string().min(1)).min(1),
-    destinationCanvasId: z.string().min(1),
+    destination: z.discriminatedUnion('kind', [
+      z
+        .object({
+          kind: z.literal('existing'),
+          canvasId: z.string().min(1),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal('new'),
+          title: z.string().trim().min(1),
+        })
+        .strict(),
+    ]),
     expectedSourceVersion: z.number().int().nonnegative(),
   })
   .strict();
@@ -18,6 +31,8 @@ export const moveSelectionErrorCodeSchema = z.enum([
   'MOVE_NODE_NOT_MOVABLE',
   'MOVE_DESTINATION_MISSING',
   'MOVE_DESTINATION_SAME_AS_SOURCE',
+  'MOVE_DESTINATION_CREATE_FAILED',
+  'MOVE_DESTINATION_CLEANUP_FAILED',
   'MOVE_WORLD_NOT_ALLOWED',
   'MOVE_AGENT_RUNNING',
   'MOVE_AGENT_TASK_OWNED',
@@ -63,8 +78,10 @@ export const moveSelectionResponseSchema = z
       .object({
         canvasId: z.string().min(1),
         title: z.string().nullable(),
+        created: z.boolean(),
       })
       .strict(),
+    sourcePreviewNodeId: z.string().min(1),
     sourceVersion: z.number().int().nonnegative(),
     destinationVersion: z.number().int().nonnegative(),
     roots: z.array(movedRootSchema),

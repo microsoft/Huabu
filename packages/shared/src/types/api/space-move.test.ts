@@ -13,12 +13,12 @@ describe('moveSelectionBodySchema', () => {
     expect(
       moveSelectionBodySchema.parse({
         selectedNodeIds: ['node-a', 'node-b'],
-        destinationCanvasId: 'canvas-b',
+        destination: { kind: 'existing', canvasId: 'canvas-b' },
         expectedSourceVersion: 7,
       }),
     ).toEqual({
       selectedNodeIds: ['node-a', 'node-b'],
-      destinationCanvasId: 'canvas-b',
+      destination: { kind: 'existing', canvasId: 'canvas-b' },
       expectedSourceVersion: 7,
     });
   });
@@ -27,16 +27,15 @@ describe('moveSelectionBodySchema', () => {
     expect(
       moveSelectionBodySchema.safeParse({
         selectedNodeIds: [],
-        destinationCanvasId: 'canvas-b',
+        destination: { kind: 'existing', canvasId: 'canvas-b' },
         expectedSourceVersion: 7,
       }).success,
     ).toBe(false);
     expect(
       moveSelectionBodySchema.safeParse({
         selectedNodeIds: ['node-a'],
-        destinationCanvasId: 'canvas-b',
+        destination: { kind: 'new', title: '  ' },
         expectedSourceVersion: 7,
-        createDestination: true,
       }).success,
     ).toBe(false);
   });
@@ -47,7 +46,12 @@ describe('moveSelectionResponseSchema', () => {
     expect(
       moveSelectionResponseSchema.safeParse({
         transferId: 'transfer-a',
-        destination: { canvasId: 'canvas-b', title: 'Destination' },
+        destination: {
+          canvasId: 'canvas-b',
+          title: 'Destination',
+          created: false,
+        },
+        sourcePreviewNodeId: 'node-preview',
         sourceVersion: 8,
         destinationVersion: 4,
         roots: [

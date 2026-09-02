@@ -9,6 +9,7 @@ import { listCanvases, moveCanvasSelection } from '@/api/canvas';
 import { Button } from '@/components/Common/Button';
 import { Modal } from '@/components/Common/Modal';
 import { Select, type SelectOption } from '@/components/Common/Select';
+import { TextInput } from '@/components/Common/TextInput';
 import { toast } from '@/components/Common/Toast';
 import useCanvasStore, { drainPendingSaves } from '@/store/canvasStore';
 
@@ -21,6 +22,10 @@ export function MoveSelectionModal() {
   const nodes = useCanvasStore((state) => state.nodes);
   const [options, setOptions] = useState<SelectOption<string>[]>([]);
   const [destinationCanvasId, setDestinationCanvasId] = useState('');
+  const [destinationKind, setDestinationKind] = useState<'existing' | 'new'>(
+    'existing',
+  );
+  const [newSpaceTitle, setNewSpaceTitle] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -67,7 +72,13 @@ export function MoveSelectionModal() {
   };
 
   const submit = async () => {
-    if (!canvasId || !destinationCanvasId || selectedNodeIds.length === 0) {
+    const title = newSpaceTitle.trim();
+    if (
+      !canvasId ||
+      selectedNodeIds.length === 0 ||
+      (destinationKind === 'existing' && !destinationCanvasId) ||
+      (destinationKind === 'new' && !title)
+    ) {
       return;
     }
     setSubmitting(true);
@@ -76,7 +87,10 @@ export function MoveSelectionModal() {
       const expectedSourceVersion = useCanvasStore.getState().version;
       const result = await moveCanvasSelection(canvasId, {
         selectedNodeIds,
-        destinationCanvasId,
+        destination:
+          destinationKind === 'existing'
+            ? { kind: 'existing', canvasId: destinationCanvasId }
+            : { kind: 'new', title },
         expectedSourceVersion,
       });
       setOpen(false);
@@ -121,10 +135,10 @@ export function MoveSelectionModal() {
           <Button
             variant="solid"
             disabled={
-              loading ||
-              loadError ||
+              (destinationKind === 'existing' && (loading || loadError)) ||
               submitting ||
-              !destinationCanvasId ||
+              (destinationKind === 'existing' && !destinationCanvasId) ||
+              (destinationKind === 'new' && !newSpaceTitle.trim()) ||
               selectedNodeIds.length === 0
             }
             onClick={() => void submit()}
@@ -137,7 +151,32 @@ export function MoveSelectionModal() {
       }
     >
       <div className="mt-4">
-        {loadError ? (
+        <Select
+          className="w-full"
+          options={[
+            {
+              value: 'existing',
+              label: t('moveSelection.existingDestination'),
+            },
+            { value: 'new', label: t('moveSelection.newDestination') },
+          ]}
+          value={destinationKind}
+          onChange={setDestinationKind}
+          disabled={submitting}
+          ariaLabel={t('moveSelection.destinationKind')}
+        />
+        {destinationKind === 'new' ? (
+          <TextInput
+            className="mt-3 w-full"
+            size="md"
+            value={newSpaceTitle}
+            onChange={(event) => setNewSpaceTitle(event.target.value)}
+            disabled={submitting}
+            placeholder={t('moveSelection.newSpaceName')}
+            aria-label={t('moveSelection.newSpaceName')}
+            autoFocus
+          />
+        ) : loadError ? (
           <p className="text-danger text-sm">
             {t('moveSelection.targetsUnavailable')}
           </p>
@@ -147,7 +186,7 @@ export function MoveSelectionModal() {
           </p>
         ) : (
           <Select
-            className="w-full"
+            className="mt-3 w-full"
             options={options}
             value={destinationCanvasId}
             onChange={setDestinationCanvasId}
@@ -158,6 +197,9 @@ export function MoveSelectionModal() {
         )}
         <p className="text-fg-subtle mt-3 text-xs">
           {t('moveSelection.boundaryNotice')}
+        </p>
+        <p className="text-fg-subtle mt-1 text-xs">
+          {t('moveSelection.previewNotice')}
         </p>
       </div>
     </Modal>

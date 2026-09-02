@@ -9,17 +9,23 @@ import useCanvasStore from '@/store/canvasStore';
 
 import { MoveSelectionModal } from './MoveSelectionModal';
 
+const { listCanvases, translate } = vi.hoisted(() => ({
+  listCanvases: vi.fn(),
+  translate: (key: string) => key,
+}));
+
 vi.mock('react-i18next', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('react-i18next')>()),
-  useTranslation: () => ({ t: (key: string) => key }),
+  ...(await importOriginal()),
+  useTranslation: () => ({ t: translate }),
 }));
 
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
 }));
 
-vi.mock('@/api/canvas', () => ({
-  listCanvases: vi.fn(),
+vi.mock('@/api/canvas', async (importOriginal) => ({
+  ...(await importOriginal()),
+  listCanvases,
   moveCanvasSelection: vi.fn(),
 }));
 
@@ -35,7 +41,9 @@ afterEach(() => {
     canvasId: '',
     nodes: [],
     moveSelectionDialogOpen: false,
+    pendingSave: false,
   });
+  listCanvases.mockReset();
 });
 
 describe('MoveSelectionModal', () => {
@@ -63,5 +71,43 @@ describe('MoveSelectionModal', () => {
 
     act(() => useCanvasStore.setState({ pendingSave: true }));
     expect(container.innerHTML).toBe('');
+  });
+
+  it('allows entering a name for a new destination Space', async () => {
+    listCanvases.mockResolvedValue({ canvases: [] });
+    useCanvasStore.setState({
+      canvasId: 'source',
+      nodes: [
+        {
+          id: 'node-selected',
+          type: 'note',
+          position: { x: 0, y: 0 },
+          data: { label: 'Selected' },
+          selected: true,
+        },
+      ],
+      moveSelectionDialogOpen: true,
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => root?.render(<MoveSelectionModal />));
+    const kindSelect = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="moveSelection.destinationKind"]',
+    );
+    act(() => kindSelect?.click());
+    const newDestination = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="option"]'),
+    ).find((button) =>
+      button.textContent?.includes('moveSelection.newDestination'),
+    );
+    act(() => newDestination?.click());
+
+    expect(
+      document.querySelector<HTMLInputElement>(
+        'input[aria-label="moveSelection.newSpaceName"]',
+      ),
+    ).not.toBeNull();
   });
 });

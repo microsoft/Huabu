@@ -11,6 +11,7 @@ import { executeOnServer } from './canvas-executor.js';
 import { moveCanvasSelection } from './space-move.service.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
 import { resetStorageCache, space } from '../storage/index.js';
+import { getStructuredStore } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { SpaceMoveError } from './space-move.service.js';
@@ -79,10 +80,17 @@ async function seedSource() {
 describe('moveCanvasSelection', () => {
   it('moves a Frame subtree and reports omitted boundary edges', async () => {
     const seeded = await seedSource();
+    const sourceBefore = await space('source').read();
+    const originalFrame = (
+      sourceBefore?.state.nodes as Array<{
+        id: string;
+        position: { x: number; y: number };
+      }>
+    ).find((node) => node.id === 'node-frame');
 
     const result = await moveCanvasSelection('source', {
       selectedNodeIds: ['node-frame'],
-      destinationCanvasId: 'destination',
+      destination: { kind: 'existing', canvasId: 'destination' },
       expectedSourceVersion: seeded.toVersion,
     });
 
@@ -91,6 +99,7 @@ describe('moveCanvasSelection', () => {
       movedFrameCount: 1,
       preservedEdgeCount: 0,
       movedConversationCount: 0,
+      destination: { created: false },
       omittedBoundaryEdges: [
         {
           edgeId: 'edge-boundary',
@@ -101,7 +110,16 @@ describe('moveCanvasSelection', () => {
     });
     const source = await space('source').read();
     const destination = await space('destination').read();
-    expect(source?.state.nodes).toHaveLength(1);
+    expect(source?.state.nodes).toHaveLength(2);
+    expect(source?.state.nodes).toContainEqual(
+      expect.objectContaining({
+        id: result.sourcePreviewNodeId,
+        type: 'spacePreview',
+        position: originalFrame?.position,
+        data: expect.objectContaining({ targetCanvasId: 'destination' }),
+        style: expect.objectContaining({ width: 480, height: 320 }),
+      }),
+    );
     expect(destination?.state.nodes).toHaveLength(2);
     const child = (
       destination?.state.nodes as Array<{ parentId?: string }>
@@ -115,7 +133,7 @@ describe('moveCanvasSelection', () => {
     await expect(
       moveCanvasSelection('source', {
         selectedNodeIds: ['node-frame'],
-        destinationCanvasId: 'destination',
+        destination: { kind: 'existing', canvasId: 'destination' },
         expectedSourceVersion: 0,
       }),
     ).rejects.toMatchObject({
@@ -150,7 +168,7 @@ describe('moveCanvasSelection', () => {
 
     await moveCanvasSelection('source', {
       selectedNodeIds: ['node-image'],
-      destinationCanvasId: 'destination',
+      destination: { kind: 'existing', canvasId: 'destination' },
       expectedSourceVersion: seeded.toVersion,
     });
 
@@ -163,5 +181,67 @@ describe('moveCanvasSelection', () => {
     expect(await space('source').blobs.read('artifact-old.png')).toEqual(
       Buffer.from('image'),
     );
+  });
+
+  it('creates a named destination Space and leaves its preview at the source', async () => {
+    createCanvas('source', 'Source');
+    const seeded = await executeOnServer({
+      canvasId: 'source',
+      originator: { source: 'ui' },
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-wide',
+              nodeType: 'note',
+              data: { label: 'Wide', content: 'body' },
+              position: { x: 100, y: 200 },
+              size: { width: 900, height: 700 },
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await moveCanvasSelection('source', {
+      selectedNodeIds: ['node-wide'],
+      destination: { kind: 'new', title: 'Moved work' },
+      expectedSourceVersion: seeded.toVersion,
+    });
+
+    expect(result.destination).toMatchObject({
+      title: 'Moved work',
+      created: true,
+    });
+    expect(
+      (await space(result.destination.canvasId).read())?.state.nodes,
+    ).toHaveLength(1);
+    expect((await space('source').read())?.state.nodes).toContainEqual(
+      expect.objectContaining({
+        id: result.sourcePreviewNodeId,
+        type: 'spacePreview',
+        position: { x: 100, y: 200 },
+        style: expect.objectContaining({ width: 900, height: 700 }),
+      }),
+    );
+  });
+
+  it('removes a newly created destination when source validation fails', async () => {
+    createCanvas('source', 'Source');
+
+    await expect(
+      moveCanvasSelection('source', {
+        selectedNodeIds: ['missing'],
+        destination: { kind: 'new', title: 'Temporary destination' },
+        expectedSourceVersion: 0,
+      }),
+    ).rejects.toMatchObject({ code: 'MOVE_SOURCE_NODE_MISSING' });
+
+    expect(
+      (await getStructuredStore().spaces().list()).some(
+        (candidate) => candidate.title === 'Temporary destination',
+      ),
+    ).toBe(false);
   });
 });

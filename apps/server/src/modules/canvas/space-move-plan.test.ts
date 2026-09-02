@@ -33,6 +33,7 @@ describe('buildSpaceMovePlan', () => {
       sourceEdges: [],
       destinationNodes: [],
       selectedNodeIds: [frame.id, child.id],
+      destinationCanvasId: 'destination',
     });
 
     expect(plan.rootIds).toEqual([frame.id]);
@@ -45,6 +46,18 @@ describe('buildSpaceMovePlan', () => {
     expect(movedFrame?.position).toEqual({ x: 0, y: 0 });
     expect(movedChild?.position).toEqual({ x: 10, y: 20 });
     expect(movedChild?.parentId).toBe(movedFrame?.id);
+    expect(plan.sourceCommands[1]).toMatchObject({
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          id: plan.sourcePreviewNodeId,
+          nodeType: 'spacePreview',
+          data: { targetCanvasId: 'destination' },
+          position: { x: 50, y: 60 },
+          size: { width: 480, height: 320 },
+        },
+      ],
+    });
   });
 
   it('preserves internal edges and reports boundary edges', () => {
@@ -69,6 +82,7 @@ describe('buildSpaceMovePlan', () => {
       sourceEdges: edges,
       destinationNodes: [],
       selectedNodeIds: [first.id, second.id],
+      destinationCanvasId: 'destination',
     });
 
     expect(plan.commands[1]).toMatchObject({
@@ -97,6 +111,7 @@ describe('buildSpaceMovePlan', () => {
       sourceEdges: [],
       destinationNodes: [],
       selectedNodeIds: [agent.id],
+      destinationCanvasId: 'destination',
     });
 
     expect(plan.movedThreadIds).toEqual(['thread-agent']);
@@ -117,7 +132,31 @@ describe('buildSpaceMovePlan', () => {
         sourceEdges: [],
         destinationNodes: [],
         selectedNodeIds: ['node-ref'],
+        destinationCanvasId: 'destination',
       }),
     ).toThrow(SpaceMovePlanError);
+  });
+
+  it('caps a breadcrumb preview created from a very large moved footprint', () => {
+    const large = node('large', 'frame', -100, -200);
+    large.style = { width: 5000, height: 4000 };
+
+    const plan = buildSpaceMovePlan({
+      sourceNodes: [large],
+      sourceEdges: [],
+      destinationNodes: [],
+      selectedNodeIds: [large.id],
+      destinationCanvasId: 'destination',
+    });
+
+    expect(plan.sourceCommands[1]).toMatchObject({
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          position: { x: -100, y: -200 },
+          size: { width: 2400, height: 1600 },
+        },
+      ],
+    });
   });
 });

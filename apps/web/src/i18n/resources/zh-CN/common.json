@@ -28,6 +28,10 @@
     "title": "移动到 Space",
     "description": "移动选中的 {{count}} 个节点，包括 Frame 中的后代节点。",
     "selectDestination": "选择目标 Space",
+    "destinationKind": "目标类型",
+    "existingDestination": "现有 Space",
+    "newDestination": "新建 Space",
+    "newSpaceName": "新 Space 名称",
     "untitledSpace": "未命名 Space",
     "confirm": "移动",
     "moving": "正在移动…",
@@ -36,7 +40,8 @@
     "failed": "无法移动所选内容。",
     "targetsUnavailable": "无法加载目标 Space。",
     "noTargets": "请先创建另一个 Space，再移动所选内容。",
-    "boundaryNotice": "与所选内容之外节点的连接将被移除。"
+    "boundaryNotice": "与所选内容之外节点的连接将被移除。",
+    "previewNotice": "原位置将保留一个指向目标 Space 的预览。"
   },
   "canvasControls": {
     "resetZoom": "重置缩放至 100%",

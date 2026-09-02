@@ -6,7 +6,7 @@ Last updated: 2026-09-01
 
 Tracking issue: [#142](https://github.com/microsoft/Huabu/issues/142)
 
-> **Scope.** This proposal adds the smallest complete user-facing operation for moving selected Canvas nodes and Frame subtrees between existing ordinary Spaces in the active Workspace. It includes moving an eligible Agent Node's existing conversation identity instead of resetting or copying it. It deliberately does not introduce a general multi-Space transaction API, filesystem WAL, crash recovery, Blob reference counting, garbage collection, or multi-backend transaction protocol.
+> **Scope.** This proposal adds the smallest complete user-facing operation for moving selected Canvas nodes and Frame subtrees between existing or newly created ordinary Spaces in the active Workspace and leaving a source `spacePreview` breadcrumb. It includes moving an eligible Agent Node's existing conversation identity instead of resetting or copying it. It deliberately does not introduce a general multi-Space transaction API, filesystem WAL, crash recovery, Blob reference counting, garbage collection, or multi-backend transaction protocol.
 
 > **Reliability boundary.** The operation provides user-visible all-or-compensated behavior while the Server process continues running and returns a determinate result. Process termination, power loss, and an unknown remote-backend outcome remain outside #142, matching the current `SpaceHandle.write()` contract.
 
@@ -22,15 +22,16 @@ The storage layer now provides the primitives needed to implement the business o
 
 ## 2. Decision
 
-Add one Server-owned `SpaceMoveService` and one HTTP execution endpoint. The web gathers the current selection, lets the user choose an existing destination, shows a compact confirmation, drains pending writes, and submits selected root IDs plus the destination Space ID.
+Add one Server-owned `SpaceMoveService` and one HTTP execution endpoint. The web gathers the current selection, lets the user choose an existing destination or name a new one, shows a compact confirmation, drains pending writes, and submits selected root IDs plus the destination choice.
 
-The Server re-reads authoritative source and destination state, expands Frame subtrees, allocates fresh destination node and edge IDs, clones required artifacts, rehomes eligible Agent conversations, executes the destination insertion and source deletion while holding both Canvas locks, and delays both Canvas Sync publications until the operation succeeds.
+The Server creates the destination when requested, re-reads authoritative source and destination state, expands Frame subtrees, allocates fresh destination node and edge IDs, clones required artifacts, rehomes eligible Agent conversations, executes the destination insertion and source replacement while holding both Canvas locks, and delays both Canvas Sync publications until the operation succeeds.
 
 If a determinate failure occurs after the destination write, the service compensates the Agent rehome and destination insertion before releasing the locks. This is application-level coordination over the current single-Space and Agenetes store guarantees, not a new portable storage transaction contract.
 
 ## 3. Goals
 
-- Move one or more selected ordinary Canvas nodes into an existing ordinary Space.
+- Move one or more selected ordinary Canvas nodes into an existing or newly created ordinary Space.
+- Leave one `spacePreview` breadcrumb at the moved set's former source bounds.
 - Treat selected Frames as subtree roots and preserve every descendant exactly once.
 - Preserve parent-child hierarchy, parent-local child geometry, root-to-root relative geometry, node style, Frame layout data, and internal edge style.
 - Omit edges that cross the transfer boundary and report them explicitly.
@@ -38,7 +39,7 @@ If a determinate failure occurs after the destination write, the service compens
 - Preserve an eligible Agent Node's `threadId`, complete workload record, driver state, folded turns, and event log while changing the owning Space.
 - Avoid overwriting destination nodes, edges, sidecars, and artifacts by allocating fresh IDs and de-duplicating labels.
 - Keep source nodes unchanged when validation or destination preparation fails.
-- Compensate a completed destination insertion when the following source deletion returns a determinate failure.
+- Compensate completed source and destination writes when a later step returns a determinate failure, and remove a request-created destination on failure.
 - Publish no intermediate Canvas Sync state.
 - Return an actionable result containing the destination, moved roots and descendants, preserved edges, omitted boundary edges, label changes, and moved Agent conversations.
 
@@ -50,7 +51,6 @@ If a determinate failure occurs after the destination write, the service compens
 - A filesystem WAL, two-phase commit protocol, transactional outbox, or idempotency ledger.
 - Per-key Blob deletion, artifact reference counting, orphan collection, or general Blob GC.
 - Moving nodes across Workspaces.
-- Creating a destination Space as part of the move flow.
 - Moving the World Canvas or managed World projection/reference nodes.
 - Moving Tasks, Runs, pending change-review records, Canvas event history, permissions, or unrelated nearby content.
 - Copying or forking Agent conversations.
@@ -63,7 +63,7 @@ Both the single-selection and multi-selection floating toolbars expose **Move to
 
 The modal reuses `Modal`, `Select`, and `Button` from `apps/web/src/components/Common`. It contains:
 
-- an existing-Space picker that excludes the current Space and World;
+- an existing-Space picker that excludes the current Space and World, plus a New Space mode with a required name;
 - the number and labels of selected roots;
 - the number of descendants included through selected Frames;
 - the number of internal edges that will be preserved;
@@ -97,11 +97,13 @@ Nodes whose parent is included retain their parent-local `position` and remap `p
 
 ## 7. Destination placement
 
-The service resolves each transferred root's absolute source position and computes the bounding box of all transferred roots and their subtrees. It preserves the relative offsets between roots and applies one translation to the complete root set.
+The service resolves each transferred node's absolute source position and computes the bounding box of the complete deduplicated transfer set. It preserves the relative offsets between roots and applies one translation to the complete root set.
 
 For an empty destination, the transferred bounds begin at a fixed root-space origin such as `{ x: 0, y: 0 }`. For a non-empty destination, the bounds are placed to the right of the destination's current absolute bounds with a fixed gap. This deterministic rule is intentionally simpler than a general collision-free packing algorithm.
 
 Only root positions receive the translation. Descendant positions remain parent-local, preserving nested Frame geometry and structured-layout assignments.
+
+The source executor batch deletes the transferred roots and creates one root-level `spacePreview` at the transfer bounds' original top-left. Its size follows the original occupied width and height, clamped to a minimum of `480 × 320` and a safety maximum of `2400 × 1600`. Existing previews pointing to the same destination are not deduplicated because this node represents the location of this specific move. Boundary edges are removed rather than redirected to the preview.
 
 ## 8. Identity and collision handling
 
@@ -169,7 +171,9 @@ Add the shared zod contract under `packages/shared/src/types/api/space-move.ts` 
 ```ts
 interface MoveSelectionRequest {
   selectedNodeIds: string[];
-  destinationCanvasId: string;
+  destination:
+    | { kind: 'existing'; canvasId: string }
+    | { kind: 'new'; title: string };
   expectedSourceVersion: number;
 }
 ```
@@ -185,7 +189,8 @@ The response contains:
 ```ts
 interface MoveSelectionResponse {
   transferId: string;
-  destination: { canvasId: string; title: string | null };
+  destination: { canvasId: string; title: string | null; created: boolean };
+  sourcePreviewNodeId: string;
   sourceVersion: number;
   destinationVersion: number;
   roots: Array<{
@@ -233,7 +238,7 @@ drain client writes
 
 The existing `withCanvasMutex()` becomes a small multi-key coordinator that acquires unique Canvas IDs in lexical order. Existing single-Canvas callers continue through the same one-key path.
 
-The Canvas executor exposes internal already-locked variants for both command execution and inverse-delta application, plus the current public lock-taking wrappers. Move calls only the already-locked variants so both locks remain held across destination insertion, source deletion, and any compensation; calling the public `applyDeltasOnServer()` while holding the destination lock would otherwise wait on itself. Normal executor callers remain unchanged.
+The Canvas executor exposes internal already-locked variants for both command execution and inverse-delta application, plus the current public lock-taking wrappers. Move calls only the already-locked variants so both locks remain held across destination insertion, source replacement, and any compensation; calling the public `applyDeltasOnServer()` while holding the destination lock would otherwise wait on itself. Normal executor callers remain unchanged.
 
 The destination and source operations reuse `CREATE_NODES`, `CONNECT_NODES`, and `DELETE_NODES`; move-specific selection expansion, ID mapping, artifact rewriting, Agent eligibility, and result reporting stay in `SpaceMoveService` rather than becoming a `CanvasCommand`.
 
@@ -241,13 +246,13 @@ Every acquired Agent turn lease is released in a `finally` path after success, c
 
 ## 14. Determinate failure and compensation
 
-Validation, source reads, artifact reads, and destination artifact writes occur before source deletion. Failure in those stages leaves the source unchanged and creates no visible destination topology.
+Validation, source reads, artifact reads, and destination artifact writes occur before source replacement. Failure in those stages leaves the source unchanged and creates no visible destination topology. A destination created for this request is deleted with its blobs before returning the failure.
 
 If destination command execution rejects, its existing `SpaceHandle.write()` rollback restores that Space's structured prestate. The source has not yet changed.
 
 If an Agent rehome rejects, the service applies the destination execution's inverse deltas while both Canvas locks remain held. The source nodes and Agent ownership remain unchanged.
 
-If source deletion rejects after Agent rehome, the service rehomes moved conversations back to their source specs, then applies the destination execution's inverse deltas. It publishes neither the insertion nor the compensation.
+If the source replacement batch rejects after Agent rehome, the service applies any source inverse deltas, rehomes moved conversations back to their source specs, then applies the destination execution's inverse deltas. It publishes neither the insertion nor the compensation.
 
 If compensation succeeds, the endpoint returns the original failure and both Spaces remain user-visible equivalents of their pre-request states, apart from possible unreachable destination Blob bytes.
 
@@ -287,7 +292,7 @@ World, the source Space itself, a missing Space, and a Space in deletion admissi
 
 ### Slice C: Product UI
 
-1. Add the existing-Space picker modal and single/multi-selection toolbar actions with localized English and Chinese strings.
+1. Add existing/new destination modes, a required new-Space name input, and single/multi-selection toolbar actions with localized English and Chinese strings.
 2. Drain pending source writes before submission, disable the action during execution, and surface eligibility errors.
 3. Add success feedback with moved counts and an **Open destination** action.
 4. Add focused service, route, resolver, and UI regression tests.
@@ -320,7 +325,7 @@ The expected implementation size is approximately 700–1,000 production lines a
 
 - Allocate fresh node, edge, Sketch stroke, and artifact IDs.
 - De-duplicate labels against destination nodes and earlier nodes in the same transfer.
-- Preserve source labels and IDs unchanged until source deletion commits.
+- Preserve source labels and IDs unchanged until the source replacement commits.
 - Move a selection previously copied to the destination without overwriting the copy.
 
 ### Artifacts
@@ -355,7 +360,9 @@ The expected implementation size is approximately 700–1,000 production lines a
 ### UI
 
 - Single and multi-selection toolbars open the same modal.
-- The existing-Space flow submits the selected destination ID.
+- Existing and new destination modes submit their strict discriminated request variants.
+- A request-created destination is removed when later validation or execution fails.
+- The source replacement leaves one correctly targeted preview at the authoritative moved bounds and clamps extreme dimensions.
 - The confirmation shows normalized roots, descendants, preserved edges, omitted edges, and moved Agent conversation count.
 - Ineligible Agent selections disable confirmation and explain the blocking reason.
 - Pending writes drain before submission.

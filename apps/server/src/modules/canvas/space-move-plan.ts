@@ -13,12 +13,17 @@ import {
 import {
   deduplicateLabel,
   getAbsolutePosition,
+  getNodeDefaultSize,
   type CanvasEdge,
   type CanvasNode,
   type NestableNode,
 } from '@huabu/shared/canvas-engine';
 
 const DESTINATION_GAP = 160;
+const PREVIEW_MIN_WIDTH = 480;
+const PREVIEW_MIN_HEIGHT = 320;
+const PREVIEW_MAX_WIDTH = 2400;
+const PREVIEW_MAX_HEIGHT = 1600;
 const MOVABLE_TYPES = new Set<CanvasNodeType>(
   CANVAS_NODE_TYPES.filter(
     (type) =>
@@ -41,7 +46,8 @@ export class SpaceMovePlanError extends Error {
 
 export interface SpaceMovePlan {
   commands: CanvasCommand[];
-  deleteCommand: Extract<CanvasCommand, { type: 'DELETE_NODES' }>;
+  sourceCommands: CanvasCommand[];
+  sourcePreviewNodeId: CanvasNodeId;
   rootIds: string[];
   movedIds: Set<string>;
   nodeIdMap: Map<string, CanvasNodeId>;
@@ -62,6 +68,18 @@ function nodeSize(node: CanvasNode): { width: number; height?: number } | null {
   return {
     width,
     ...(typeof height === 'number' ? { height } : {}),
+  };
+}
+
+function occupiedSize(node: CanvasNode): { width: number; height: number } {
+  const defaults = getNodeDefaultSize(node.type ?? 'note');
+  return {
+    width:
+      typeof node.style?.width === 'number' ? node.style.width : defaults.width,
+    height:
+      typeof node.style?.height === 'number'
+        ? node.style.height
+        : (defaults.height ?? 100),
   };
 }
 
@@ -132,8 +150,15 @@ export function buildSpaceMovePlan(input: {
   sourceEdges: readonly CanvasEdge[];
   destinationNodes: readonly CanvasNode[];
   selectedNodeIds: readonly string[];
+  destinationCanvasId: string;
 }): SpaceMovePlan {
-  const { sourceNodes, sourceEdges, destinationNodes, selectedNodeIds } = input;
+  const {
+    sourceNodes,
+    sourceEdges,
+    destinationNodes,
+    selectedNodeIds,
+    destinationCanvasId,
+  } = input;
   assertAcyclic(sourceNodes);
   const byId = new Map(sourceNodes.map((node) => [node.id, node]));
   for (const nodeId of new Set(selectedNodeIds)) {
@@ -268,12 +293,55 @@ export function buildSpaceMovePlan(input: {
   const commands: CanvasCommand[] = [{ type: 'CREATE_NODES', nodes: creates }];
   if (edges.length > 0) commands.push({ type: 'CONNECT_NODES', edges });
 
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const nodeId of movedIds) {
+    const node = byId.get(nodeId);
+    const position = getAbsolutePosition(sourceNodes as NestableNode[], nodeId);
+    if (!node || !position) {
+      throw new SpaceMovePlanError('invalid-hierarchy', nodeId);
+    }
+    const size = occupiedSize(node);
+    minX = Math.min(minX, position.x);
+    minY = Math.min(minY, position.y);
+    maxX = Math.max(maxX, position.x + size.width);
+    maxY = Math.max(maxY, position.y + size.height);
+  }
+  const sourcePreviewNodeId = createId('node');
+
   return {
     commands,
-    deleteCommand: {
-      type: 'DELETE_NODES',
-      nodeIds: rootIds.map((nodeId) => nodeId as CanvasNodeId),
-    },
+    sourceCommands: [
+      {
+        type: 'DELETE_NODES',
+        nodeIds: rootIds.map((nodeId) => nodeId as CanvasNodeId),
+      },
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            id: sourcePreviewNodeId,
+            nodeType: 'spacePreview',
+            data: { targetCanvasId: destinationCanvasId },
+            position: { x: minX, y: minY },
+            size: {
+              width: Math.min(
+                PREVIEW_MAX_WIDTH,
+                Math.max(PREVIEW_MIN_WIDTH, maxX - minX),
+              ),
+              height: Math.min(
+                PREVIEW_MAX_HEIGHT,
+                Math.max(PREVIEW_MIN_HEIGHT, maxY - minY),
+              ),
+            },
+            selectOnCreate: false,
+          },
+        ],
+      },
+    ],
+    sourcePreviewNodeId,
     rootIds,
     movedIds,
     nodeIdMap,
