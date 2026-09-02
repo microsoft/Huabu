@@ -59,6 +59,14 @@ const playgroundRoutes = import.meta.env.DEV
         }),
       },
       {
+        path: '/playground/chat-performance',
+        lazy: async () => ({
+          Component: (
+            await import('./pages/playground/ChatPerformancePlaygroundPage')
+          ).default,
+        }),
+      },
+      {
         path: '/playground/agent-nodes',
         lazy: async () => ({
           Component: (

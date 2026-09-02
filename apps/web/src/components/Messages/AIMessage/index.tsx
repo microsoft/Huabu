@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import { Copy } from 'lucide-react';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { groupByThinkingPhase, type SegmentGroup } from './groupParts';
@@ -106,12 +107,12 @@ function renderToolGroup(
   }
 }
 
-export const AIMessage = ({
+export const AIMessage = memo(function AIMessage({
   messageId,
   segments,
   isStreaming,
   hideActions,
-}: AIMessageProps) => {
+}: AIMessageProps) {
   const { t } = useTranslation();
   const addNode = useCanvasStore((state) => state.addNode);
   const { threadId } = useChatSession();
@@ -282,4 +283,4 @@ export const AIMessage = ({
       </div>
     </div>
   );
-};
+});

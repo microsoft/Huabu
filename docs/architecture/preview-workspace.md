@@ -12,6 +12,8 @@ Preview Workspace owns presentation topology: open tabs, tab order, active tabs,
 
 `chatStore` owns conversation state keyed by `threadId`: messages, drafts, history status, streaming state, binding, model settings, compose mode, and pending attachments. It persists thread identity metadata (binding, built-in settings, and compose mode) without an entry limit so every independent Chat tab rehydrates with the same agent after reload; messages, drafts, history status, streaming state, and attachments remain runtime-only. Preview Workspace stores only the target needed to select a renderer.
 
+Within a mounted Chat renderer, the thread-scoped composer owns the draft subscription. Draft updates therefore rerender the composer without invalidating `MessageList`; unchanged historical message cards are memoized, while message-array updates and streaming changes continue through the history tree normally.
+
 `panelStore` owns and persists the outer right-column collapse state, owns the transient Preview fullscreen state, and owns thread-addressed composer focus requests. Opening a Preview target expands the right column; closing a tab does not delete its underlying node or conversation history. `MainLayout` treats the persisted collapse state as authoritative whenever no panel motion is active. A settled collapsed slot is zero-width and clips overflow, while an active open/close motion temporarily releases that clipping; interrupted startup hydration therefore cannot leave translated panel content visible over the Canvas in either persisted state. Fullscreen is intentionally not persisted across reloads.
 
 ```text
