@@ -18,9 +18,7 @@ export function MoveSelectionModal() {
   const isOpen = useCanvasStore((state) => state.moveSelectionDialogOpen);
   const setOpen = useCanvasStore((state) => state.setMoveSelectionDialogOpen);
   const canvasId = useCanvasStore((state) => state.canvasId);
-  const selectedNodes = useCanvasStore((state) =>
-    state.nodes.filter((node) => node.selected),
-  );
+  const nodes = useCanvasStore((state) => state.nodes);
   const [options, setOptions] = useState<SelectOption<string>[]>([]);
   const [destinationCanvasId, setDestinationCanvasId] = useState('');
   const [loading, setLoading] = useState(false);
@@ -28,8 +26,8 @@ export function MoveSelectionModal() {
   const [loadError, setLoadError] = useState(false);
 
   const selectedNodeIds = useMemo(
-    () => selectedNodes.map((node) => node.id),
-    [selectedNodes],
+    () => nodes.filter((node) => node.selected).map((node) => node.id),
+    [nodes],
   );
 
   useEffect(() => {
