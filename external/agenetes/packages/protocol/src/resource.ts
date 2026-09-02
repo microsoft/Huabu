@@ -1,7 +1,7 @@
 // AgentResource — the canonical Agenetes catalogue record for the Resource
 // Registry (docs/proposals/agent-resource-registry.md §6). A compact,
 // agent-readable record telling an agent what a resource is, who provides
-// it, and how to access or use it through natural-language instructions. It
+// it, and what source-owned and user-owned text to follow. It
 // intentionally never models installation state, runtime availability,
 // authorization state, input/output contracts, or provider configuration —
 // those remain owned by the subsystem that resolves or invokes the
@@ -22,13 +22,13 @@ import { z } from 'zod';
  * revision, or receipt schema is independently owned and versioned outside
  * the catalogue.
  */
-export const AGENT_RESOURCE_SCHEMA_VERSION = 1;
+export const AGENT_RESOURCE_SCHEMA_VERSION = 2;
 
 const RESOURCE_ID_MAX_LENGTH = 128;
 const RESOURCE_NAME_MAX_LENGTH = 128;
 const RESOURCE_PROVIDER_MAX_LENGTH = 128;
-const RESOURCE_DESCRIPTION_MAX_LENGTH = 512;
-const RESOURCE_INSTRUCTIONS_MAX_LENGTH = 4000;
+const RESOURCE_SOURCE_CONTENT_MAX_LENGTH = 100_000;
+const RESOURCE_USER_CONTENT_MAX_LENGTH = 20_000;
 
 /**
  * Bound on how many resource IDs a single Profile, override, or patch may
@@ -40,7 +40,7 @@ export const MAX_PROFILE_RESOURCE_IDS = 64;
 /**
  * Stable, globally unique, human-readable kebab-case resource identifier
  * (§6). IDs never encode resource type, provider, machine, or storage
- * location (§7) — those facts live in `provider` and `instructions`.
+ * location (§7) — those facts live in `provider` and `sourceContent`.
  */
 export const resourceIdSchema = z
   .string()
@@ -78,21 +78,35 @@ export const agentResourceSchema = z.object({
   schemaVersion: z.literal(AGENT_RESOURCE_SCHEMA_VERSION),
   /** Stable, globally unique, human-readable kebab-case identifier. */
   id: resourceIdSchema,
-  /** Human-facing display name. */
+  /** Source-owned canonical name. */
   name: z.string().trim().min(1).max(RESOURCE_NAME_MAX_LENGTH),
+  /** Optional user-owned presentation name. */
+  displayName: z
+    .string()
+    .trim()
+    .min(1)
+    .max(RESOURCE_NAME_MAX_LENGTH)
+    .optional(),
   /**
    * Stable authority ID publishing the record. Phase 1 uses `huabu` or the
    * exact Agentlet machine ID (§6). Agenetes treats this opaquely; it never
    * hard-codes a specific provider value.
    */
   provider: z.string().trim().min(1).max(RESOURCE_PROVIDER_MAX_LENGTH),
-  /** Short catalogue summary used for browsing and Profile selection. */
-  description: z.string().trim().min(1).max(RESOURCE_DESCRIPTION_MAX_LENGTH),
   /**
-   * Natural-language directions telling the agent how to access and use the
-   * resource. Never contains a secret value (§6, §12).
+   * Source-owned agent-readable content. Refresh replaces this field without
+   * changing user customization. Never contains a secret value (§6, §12).
    */
-  instructions: z.string().trim().min(1).max(RESOURCE_INSTRUCTIONS_MAX_LENGTH),
+  sourceContent: z
+    .string()
+    .trim()
+    .min(1)
+    .max(RESOURCE_SOURCE_CONTENT_MAX_LENGTH),
+  /**
+   * User-owned global instructions supplied to every Profile selecting the
+   * Resource. An empty string means no customization.
+   */
+  userContent: z.string().trim().max(RESOURCE_USER_CONTENT_MAX_LENGTH),
 });
 export type AgentResource = z.infer<typeof agentResourceSchema>;
 

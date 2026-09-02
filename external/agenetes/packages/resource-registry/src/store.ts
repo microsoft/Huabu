@@ -48,7 +48,7 @@ function renameOverWithRetry(from: string, to: string): void {
   }
 }
 
-const RESOURCE_REGISTRY_SCHEMA_VERSION = 1;
+const RESOURCE_REGISTRY_SCHEMA_VERSION = 2;
 const RESOURCE_REGISTRY_FILENAME = 'resources.json';
 
 interface ResourceRegistryFile {
@@ -83,11 +83,46 @@ function parseResource(value: unknown, index: number): AgentResource {
   return parsed.data;
 }
 
+function migrateLegacyResource(value: unknown, index: number): AgentResource {
+  if (!isObject(value)) {
+    throw new Error(
+      `Invalid Resource Registry: resources[${index}] is not a valid AgentResource`,
+    );
+  }
+  const { id, name, provider, description, instructions } = value;
+  if (
+    value.schemaVersion !== 1 ||
+    typeof id !== 'string' ||
+    typeof name !== 'string' ||
+    typeof provider !== 'string' ||
+    typeof description !== 'string' ||
+    typeof instructions !== 'string'
+  ) {
+    throw new Error(
+      `Invalid Resource Registry: resources[${index}] is not a valid AgentResource`,
+    );
+  }
+  return parseResource(
+    {
+      schemaVersion: 2,
+      id,
+      name,
+      provider,
+      sourceContent: `${description.trim()}\n\n${instructions.trim()}`,
+      userContent: '',
+    },
+    index,
+  );
+}
+
 function parseRegistryFile(value: unknown): ResourceRegistryState {
   if (!isObject(value) || !isObject(value.state)) {
     throw new Error('Unsupported or invalid Resource Registry schema');
   }
-  if (value.schemaVersion !== RESOURCE_REGISTRY_SCHEMA_VERSION) {
+  if (
+    value.schemaVersion !== 1 &&
+    value.schemaVersion !== RESOURCE_REGISTRY_SCHEMA_VERSION
+  ) {
     throw new Error('Unsupported or invalid Resource Registry schema');
   }
   if (!Array.isArray(value.state.resources)) {
@@ -95,7 +130,10 @@ function parseRegistryFile(value: unknown): ResourceRegistryState {
       'Invalid Resource Registry state: resources must be an array',
     );
   }
-  const resources = value.state.resources.map(parseResource);
+  const resources =
+    value.schemaVersion === 1
+      ? value.state.resources.map(migrateLegacyResource)
+      : value.state.resources.map(parseResource);
   const ids = new Set(resources.map((resource) => resource.id));
   if (ids.size !== resources.length) {
     throw new Error('Invalid Resource Registry: duplicate resource id');

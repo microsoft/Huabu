@@ -26,12 +26,12 @@ function createStorageDir(): string {
 const state: ResourceRegistryState = {
   resources: [
     {
-      schemaVersion: 1,
+      schemaVersion: 2,
       id: 'huabu-access',
       name: 'Huabu Access',
       provider: 'huabu',
-      description: 'Fetch the Huabu Access Skill and follow it.',
-      instructions: 'Fetch $HUABU_RFS_URL/skill with the injected token.',
+      sourceContent: 'Fetch $HUABU_RFS_URL/skill with the injected token.',
+      userContent: '',
     },
   ],
 };
@@ -59,7 +59,7 @@ describe('FileResourceRegistryStore', () => {
     expect(new FileResourceRegistryStore(storageDir).load()).toEqual(state);
     expect(
       JSON.parse(readFileSync(join(storageDir, 'resources.json'), 'utf8')),
-    ).toEqual({ schemaVersion: 1, state });
+    ).toEqual({ schemaVersion: 2, state });
     expect(existsSync(join(storageDir, 'resources.json.tmp'))).toBe(false);
   });
 
@@ -84,7 +84,7 @@ describe('FileResourceRegistryStore', () => {
     const storageDir = createStorageDir();
     writeFileSync(
       join(storageDir, 'resources.json'),
-      JSON.stringify({ schemaVersion: 2, state }),
+      JSON.stringify({ schemaVersion: 99, state }),
     );
 
     expect(() => new FileResourceRegistryStore(storageDir).load()).toThrow(
@@ -92,12 +92,47 @@ describe('FileResourceRegistryStore', () => {
     );
   });
 
-  it('fails closed for a malformed resource record', () => {
+  it('migrates v1 records into source-owned and user-owned text', () => {
     const storageDir = createStorageDir();
     writeFileSync(
       join(storageDir, 'resources.json'),
       JSON.stringify({
         schemaVersion: 1,
+        state: {
+          resources: [
+            {
+              schemaVersion: 1,
+              id: 'huabu-access',
+              name: 'Huabu Access',
+              provider: 'huabu',
+              description: 'Access the Space.',
+              instructions: 'Fetch the Skill.',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(new FileResourceRegistryStore(storageDir).load()).toEqual({
+      resources: [
+        {
+          schemaVersion: 2,
+          id: 'huabu-access',
+          name: 'Huabu Access',
+          provider: 'huabu',
+          sourceContent: 'Access the Space.\n\nFetch the Skill.',
+          userContent: '',
+        },
+      ],
+    });
+  });
+
+  it('fails closed for a malformed resource record', () => {
+    const storageDir = createStorageDir();
+    writeFileSync(
+      join(storageDir, 'resources.json'),
+      JSON.stringify({
+        schemaVersion: 2,
         state: { resources: [{ ...state.resources[0], id: 'Not Kebab Case' }] },
       }),
     );
@@ -112,7 +147,7 @@ describe('FileResourceRegistryStore', () => {
     writeFileSync(
       join(storageDir, 'resources.json'),
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         state: { resources: [state.resources[0], state.resources[0]] },
       }),
     );

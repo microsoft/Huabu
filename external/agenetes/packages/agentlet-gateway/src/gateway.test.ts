@@ -644,6 +644,36 @@ describe('AgentletGateway', () => {
           }),
         );
       }
+      if (
+        'method' in message &&
+        message.method === ServerMethods.RESOURCE_SCAN &&
+        'id' in message
+      ) {
+        machineA.socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              rootPath: '/skills',
+              candidates: [],
+              diagnostics: [],
+            },
+          }),
+        );
+      }
+      if (
+        'method' in message &&
+        message.method === ServerMethods.RESOURCE_LIST_MANAGED &&
+        'id' in message
+      ) {
+        machineA.socket.send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: { ids: ['slides'] },
+          }),
+        );
+      }
     });
 
     await expect(
@@ -659,6 +689,18 @@ describe('AgentletGateway', () => {
       rootPath: '/teams',
       members: [],
       diagnostics: [],
+    });
+
+    await expect(
+      gateway.scanResources('machine-a', { rootPath: '/skills' }),
+    ).resolves.toEqual({
+      rootPath: '/skills',
+      candidates: [],
+      diagnostics: [],
+    });
+
+    await expect(gateway.listManagedResources('machine-a')).resolves.toEqual({
+      ids: ['slides'],
     });
 
     await expect(

@@ -8,12 +8,12 @@ import type { AgentResource } from '@agenetes/protocol';
 
 function resource(overrides: Partial<AgentResource> = {}): AgentResource {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'huabu-access',
     name: 'Huabu Access',
     provider: 'huabu',
-    description: 'Fetch the Huabu Access Skill and follow it.',
-    instructions: 'Fetch $HUABU_RFS_URL/skill with the injected token.',
+    sourceContent: 'Fetch $HUABU_RFS_URL/skill with the injected token.',
+    userContent: '',
     ...overrides,
   };
 }
@@ -77,15 +77,15 @@ describe('ResourceRegistry', () => {
 
   it('replaces an existing record owned by the same provider', () => {
     const registry = new ResourceRegistry(new InMemoryResourceRegistryStore());
-    registry.register(resource({ description: 'v1' }));
+    registry.register(resource({ sourceContent: 'v1' }));
 
     const replaced = registry.replaceOwn(
       'huabu',
-      resource({ description: 'v2' }),
+      resource({ sourceContent: 'v2' }),
     );
 
-    expect(replaced.description).toBe('v2');
-    expect(registry.get('huabu-access')?.description).toBe('v2');
+    expect(replaced.sourceContent).toBe('v2');
+    expect(registry.get('huabu-access')?.sourceContent).toBe('v2');
   });
 
   it('atomically reconciles a provider projection and withdraws stale records', () => {
@@ -99,13 +99,33 @@ describe('ResourceRegistry', () => {
     );
 
     registry.replaceProviderResources('huabu', [
-      resource({ id: 'huabu-access', description: 'Current' }),
+      resource({ id: 'huabu-access', sourceContent: 'Current' }),
     ]);
 
     expect(registry.list().map(({ id }) => id)).toEqual([
       'huabu-access',
       'machine-resource',
     ]);
+  });
+
+  it('preserves user customization during provider reconciliation', () => {
+    const registry = new ResourceRegistry(new InMemoryResourceRegistryStore());
+    registry.register(
+      resource({
+        displayName: 'My Huabu',
+        userContent: 'Use concise notes.',
+      }),
+    );
+
+    registry.replaceProviderResources('huabu', [
+      resource({ sourceContent: 'Updated source' }),
+    ]);
+
+    expect(registry.get('huabu-access')).toMatchObject({
+      sourceContent: 'Updated source',
+      displayName: 'My Huabu',
+      userContent: 'Use concise notes.',
+    });
   });
 
   it('rejects replaceOwn for an unregistered id', () => {

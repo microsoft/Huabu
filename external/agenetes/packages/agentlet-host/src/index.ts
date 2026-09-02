@@ -83,6 +83,7 @@ export type {
 } from '@agenetes/agent-team';
 export type { AgentResource } from '@agenetes/protocol';
 export type { ResourceRegistry } from '@agenetes/resource-registry';
+export { ResourceRegistryError } from '@agenetes/resource-registry';
 
 /** Host-injected configuration for {@link mountAgenetes}. */
 export interface MountAgenetesOptions {

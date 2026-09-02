@@ -113,9 +113,22 @@ export class ResourceRegistry {
     provider: string,
     resources: readonly AgentResource[],
   ): AgentResource[] {
-    const nextOwn = resources.map((resource) =>
-      this.validateResource(resource),
-    );
+    const nextOwn = resources.map((resource) => {
+      const validated = this.validateResource(resource);
+      const current = this.state.resources.find(
+        (candidate) =>
+          candidate.id === validated.id && candidate.provider === provider,
+      );
+      return current
+        ? {
+            ...validated,
+            ...(current.displayName
+              ? { displayName: current.displayName }
+              : {}),
+            userContent: current.userContent,
+          }
+        : validated;
+    });
     if (nextOwn.some((resource) => resource.provider !== provider)) {
       throw new ResourceRegistryError(
         'resource_conflict',

@@ -14,8 +14,8 @@ const validResource = {
   id: 'huabu-access',
   name: 'Huabu Access',
   provider: 'huabu',
-  description: 'Fetch the Huabu Access Skill and follow it.',
-  instructions: 'Fetch $HUABU_RFS_URL/skill with the injected Agentlet token.',
+  sourceContent: 'Fetch $HUABU_RFS_URL/skill with the injected Agentlet token.',
+  userContent: '',
 };
 
 describe('resourceIdSchema', () => {
@@ -77,24 +77,37 @@ describe('agentResourceSchema', () => {
 
   it('rejects an unsupported schemaVersion', () => {
     expect(
-      agentResourceSchema.safeParse({ ...validResource, schemaVersion: 2 })
+      agentResourceSchema.safeParse({ ...validResource, schemaVersion: 1 })
         .success,
     ).toBe(false);
   });
 
   it('rejects a missing required field', () => {
-    const { instructions: _instructions, ...withoutInstructions } =
+    const { sourceContent: _sourceContent, ...withoutSourceContent } =
       validResource;
-    expect(agentResourceSchema.safeParse(withoutInstructions).success).toBe(
+    expect(agentResourceSchema.safeParse(withoutSourceContent).success).toBe(
       false,
     );
   });
 
-  it('rejects an empty description', () => {
+  it('rejects empty source content', () => {
     expect(
-      agentResourceSchema.safeParse({ ...validResource, description: '' })
+      agentResourceSchema.safeParse({ ...validResource, sourceContent: '' })
         .success,
     ).toBe(false);
+  });
+
+  it('accepts an optional display name and global user content', () => {
+    expect(
+      agentResourceSchema.parse({
+        ...validResource,
+        displayName: 'Canvas helper',
+        userContent: 'Prefer bounded queries.',
+      }),
+    ).toMatchObject({
+      displayName: 'Canvas helper',
+      userContent: 'Prefer bounded queries.',
+    });
   });
 
   it('rejects a non-kebab-case id', () => {
