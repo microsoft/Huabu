@@ -9,8 +9,8 @@ import { parseReceipt, type ResourceReceipt } from './receipts.js';
  *
  * Field-for-field, this mirrors the canonical Agenetes `AgentResource` shape
  * described in `docs/proposals/agent-resource-registry.md`
- * (`schemaVersion: 1`, `id`, `name`, `provider`, `description`,
- * `instructions`). Agentlet has no build/workspace dependency on the
+ * (`schemaVersion: 2`, `id`, `name`, `provider`, `sourceContent`,
+ * `userContent`). Agentlet has no build/workspace dependency on the
  * Agenetes packages — they live in a separate repository and pnpm
  * workspace — so this type is a self-contained adapter shape rather than an
  * import of the Agenetes type. A host integration (Huabu's Agentlet
@@ -19,12 +19,12 @@ import { parseReceipt, type ResourceReceipt } from './receipts.js';
  * the mapping is a structural no-op.
  */
 export interface LocalResourceRecord {
-  schemaVersion: 1;
+  schemaVersion: 2;
   id: string;
   name: string;
   provider: string;
-  description: string;
-  instructions: string;
+  sourceContent: string;
+  userContent: string;
 }
 
 export interface LocalResourceDiagnostic {
@@ -41,12 +41,12 @@ export interface LocalResourceEnumeration {
 
 function projectRecord(receipt: ResourceReceipt): LocalResourceRecord {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: receipt.id,
     name: receipt.name,
     provider: receipt.provider,
-    description: receipt.description,
-    instructions: receipt.instructions,
+    sourceContent: receipt.sourceContent,
+    userContent: '',
   };
 }
 

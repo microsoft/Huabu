@@ -34,8 +34,7 @@ function sampleReceipt(root: string, overrides: Partial<ResourceReceiptInput> = 
     kind: 'skill',
     name: 'HackMD Publisher',
     provider: 'machine-a',
-    description: 'Syncs canvas nodes to HackMD',
-    instructions: `Read and follow the Skill under ${root}/skills/hackmd-publisher/SKILL.md`,
+    sourceContent: '# HackMD Publisher\n\nSyncs canvas nodes to HackMD.',
     entrypoint,
     installedAt: '2026-08-31T00:00:00.000Z',
     ...overrides,
@@ -69,20 +68,20 @@ describe('enumerateLocalResources', () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.records).toEqual([
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: 'deepv-slides-maker',
         name: 'DeepV Slides Maker',
         provider: 'machine-a',
-        description: 'Syncs canvas nodes to HackMD',
-        instructions: expect.any(String),
+        sourceContent: expect.any(String),
+        userContent: '',
       },
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: 'hackmd-publisher',
         name: 'HackMD Publisher',
         provider: 'machine-a',
-        description: 'Syncs canvas nodes to HackMD',
-        instructions: expect.any(String),
+        sourceContent: expect.any(String),
+        userContent: '',
       },
     ]);
   });

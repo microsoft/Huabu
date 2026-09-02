@@ -11,8 +11,8 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 
 import { ensureResourceLayout, resourceSubdirPath } from './resource-dir.js';
 
-/** Current `ResourceReceipt` schema version. Unknown versions fail explicitly. */
-export const RECEIPT_SCHEMA_VERSION = 1 as const;
+/** Current `ResourceReceipt` schema version. */
+export const RECEIPT_SCHEMA_VERSION = 2 as const;
 
 export type ResourceKind = 'skill' | 'tool' | 'connector';
 
@@ -31,20 +31,21 @@ const KEBAB_CASE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  * publish.
  */
 export interface ResourceReceipt {
-  schemaVersion: 1;
+  schemaVersion: 2;
   /** Stable, globally unique, kebab-case identifier shared with the catalogue projection. */
   id: string;
   kind: ResourceKind;
   name: string;
   /** Stable authority ID: `huabu` or the exact Agentlet machine ID. */
   provider: string;
-  description: string;
-  /** Natural-language directions for the agent; never contains a secret value. */
-  instructions: string;
+  /** Source-owned agent-readable text, normally the imported SKILL.md. */
+  sourceContent: string;
   /** Path to the validated entrypoint, relative to the resource root. Must resolve inside the root. */
   entrypoint: string;
   /** Optional install provenance (URL, package spec, commit) recorded for audit; never a secret. */
   source?: string;
+  /** Content revision computed by Agentlet from the imported source tree. */
+  sourceRevision?: string;
   /** ISO-8601 timestamp of the installation or last validation. */
   installedAt: string;
 }
@@ -102,22 +103,36 @@ export function parseReceipt(value: unknown, root: string): ResourceReceipt {
   if (typeof value !== 'object' || value === null) {
     throw new Error('Resource receipt must be a JSON object');
   }
-  const record = value as Partial<ResourceReceipt>;
+  const record = value as Record<string, unknown>;
 
-  if (record.schemaVersion !== RECEIPT_SCHEMA_VERSION) {
+  if (record.schemaVersion !== RECEIPT_SCHEMA_VERSION && record.schemaVersion !== 1) {
     throw new Error(`Unsupported resource receipt schemaVersion: ${JSON.stringify(record.schemaVersion)}`);
   }
   assertValidId(record.id);
-  if (!record.kind || !RESOURCE_KINDS.includes(record.kind)) {
+  if (
+    typeof record.kind !== 'string' ||
+    !RESOURCE_KINDS.includes(record.kind as ResourceKind)
+  ) {
     throw new Error(`Resource receipt kind must be one of ${RESOURCE_KINDS.join(', ')}: got ${JSON.stringify(record.kind)}`);
   }
-  for (const field of ['name', 'provider', 'description', 'instructions', 'entrypoint', 'installedAt'] as const) {
+  for (const field of ['name', 'provider', 'entrypoint', 'installedAt'] as const) {
     if (!isNonEmptyString(record[field])) {
       throw new Error(`Resource receipt field "${field}" must be a non-empty string`);
     }
   }
   if (record.source !== undefined && !isNonEmptyString(record.source)) {
     throw new Error('Resource receipt field "source" must be a non-empty string when present');
+  }
+  if (record.sourceRevision !== undefined && !isNonEmptyString(record.sourceRevision)) {
+    throw new Error('Resource receipt field "sourceRevision" must be a non-empty string when present');
+  }
+
+  const sourceContent =
+    record.schemaVersion === 1
+      ? [record.description, record.instructions].filter(isNonEmptyString).join('\n\n')
+      : record.sourceContent;
+  if (!isNonEmptyString(sourceContent)) {
+    throw new Error('Resource receipt field "sourceContent" must be a non-empty string');
   }
 
   // Reject a receipt that claims an entrypoint outside the resource root it is stored under.
@@ -126,13 +141,13 @@ export function parseReceipt(value: unknown, root: string): ResourceReceipt {
   return {
     schemaVersion: RECEIPT_SCHEMA_VERSION,
     id: record.id,
-    kind: record.kind,
+    kind: record.kind as ResourceKind,
     name: record.name as string,
     provider: record.provider as string,
-    description: record.description as string,
-    instructions: record.instructions as string,
+    sourceContent,
     entrypoint: record.entrypoint as string,
-    source: record.source,
+    source: record.source as string | undefined,
+    sourceRevision: record.sourceRevision as string | undefined,
     installedAt: record.installedAt as string,
   };
 }

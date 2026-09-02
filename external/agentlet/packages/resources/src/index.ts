@@ -33,3 +33,20 @@ export type {
   LocalResourceDiagnostic,
   LocalResourceEnumeration,
 } from './catalogue.js';
+
+// Skills — read-only discovery and confirmed import lifecycle
+export {
+  scanSkillFolder,
+  scanSkillSource,
+  importSkill,
+  refreshSkill,
+  removeImportedSkill,
+  listImportedSkillIds,
+} from './skills.js';
+export type {
+  SkillImportCandidate,
+  SkillScanDiagnostic,
+  SkillScanResult,
+  ImportSkillInput,
+  ImportSkillResult,
+} from './skills.js';

@@ -48,8 +48,7 @@ function sampleReceipt(root: string, overrides: Partial<ResourceReceiptInput> = 
     kind: 'skill',
     name: 'HackMD Publisher',
     provider: 'machine-a',
-    description: 'Syncs canvas nodes to HackMD',
-    instructions: `Read and follow the Skill under ${root}/skills/hackmd-publisher/SKILL.md`,
+    sourceContent: '# HackMD Publisher\n\nSyncs canvas nodes to HackMD.',
     entrypoint,
     installedAt: '2026-08-31T00:00:00.000Z',
     ...overrides,
@@ -106,20 +105,20 @@ describe('assertInsideResourceRoot', () => {
 describe('parseReceipt', () => {
   it('validates a well-formed receipt', () => {
     const root = createRoot();
-    const receipt = parseReceipt({ schemaVersion: 1, ...sampleReceipt(root) }, root);
-    expect(receipt).toMatchObject({ schemaVersion: 1, id: 'hackmd-publisher', kind: 'skill' });
+    const receipt = parseReceipt({ schemaVersion: 2, ...sampleReceipt(root) }, root);
+    expect(receipt).toMatchObject({ schemaVersion: 2, id: 'hackmd-publisher', kind: 'skill' });
   });
 
   it('rejects a missing or unsupported schemaVersion', () => {
     const root = createRoot();
     expect(() => parseReceipt({ ...sampleReceipt(root) }, root)).toThrow(/schemaVersion/);
-    expect(() => parseReceipt({ schemaVersion: 2, ...sampleReceipt(root) }, root)).toThrow(/schemaVersion/);
+    expect(() => parseReceipt({ schemaVersion: 99, ...sampleReceipt(root) }, root)).toThrow(/schemaVersion/);
   });
 
   it('rejects a non-kebab-case id', () => {
     const root = createRoot();
     expect(() =>
-      parseReceipt({ schemaVersion: 1, ...sampleReceipt(root, { id: 'Not Valid!' }) }, root),
+      parseReceipt({ schemaVersion: 2, ...sampleReceipt(root, { id: 'Not Valid!' }) }, root),
     ).toThrow(/kebab-case/);
   });
 
@@ -127,7 +126,7 @@ describe('parseReceipt', () => {
     const root = createRoot();
     expect(() =>
       parseReceipt(
-        { schemaVersion: 1, ...sampleReceipt(root, { entrypoint: join('..', 'outside.md') }) },
+        { schemaVersion: 2, ...sampleReceipt(root, { entrypoint: join('..', 'outside.md') }) },
         root,
       ),
     ).toThrow(/must stay within/);
@@ -136,7 +135,7 @@ describe('parseReceipt', () => {
   it('rejects an unknown kind', () => {
     const root = createRoot();
     expect(() =>
-      parseReceipt({ schemaVersion: 1, ...sampleReceipt(root, { kind: 'malicious' as never }) }, root),
+      parseReceipt({ schemaVersion: 2, ...sampleReceipt(root, { kind: 'malicious' as never }) }, root),
     ).toThrow(/kind must be one of/);
   });
 });
@@ -146,7 +145,7 @@ describe('writeReceipt / readReceipt / removeReceipt', () => {
     const root = createRoot();
     const written = writeReceipt(root, sampleReceipt(root));
 
-    expect(written.schemaVersion).toBe(1);
+    expect(written.schemaVersion).toBe(2);
 
     const path = join(resourceSubdirPath(root, 'receipts'), 'hackmd-publisher.json');
     expect(existsSync(path)).toBe(true);
@@ -157,6 +156,26 @@ describe('writeReceipt / readReceipt / removeReceipt', () => {
 
     const read = readReceipt(root, 'hackmd-publisher');
     expect(read).toEqual(written);
+  });
+
+  it('migrates a v1 receipt to source content', () => {
+    const root = createRoot();
+    const input = sampleReceipt(root);
+    const receipt = parseReceipt(
+      {
+        ...input,
+        schemaVersion: 1,
+        sourceContent: undefined,
+        description: 'Publishes notes.',
+        instructions: 'Read SKILL.md.',
+      },
+      root,
+    );
+
+    expect(receipt).toMatchObject({
+      schemaVersion: 2,
+      sourceContent: 'Publishes notes.\n\nRead SKILL.md.',
+    });
   });
 
   it('creates the bounded resource layout on first write', () => {
