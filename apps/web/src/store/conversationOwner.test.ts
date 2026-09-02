@@ -142,7 +142,7 @@ describe('conversation owner routing', () => {
     });
   });
 
-  it('keeps ordinary same-Canvas question lifecycle updates local', async () => {
+  it('persists ordinary same-Canvas question lifecycle updates', async () => {
     const view: AgentConversationView = {
       presentationAnchor: {
         canvasId: 'canvas-source',
@@ -169,7 +169,15 @@ describe('conversation owner routing', () => {
     await patchConversationOwnerNode(view, { status: 'running' });
 
     expect(useCanvasStore.getState().nodes[0]?.data.status).toBe('running');
-    expect(postCanvasExecute).not.toHaveBeenCalled();
+    expect(postCanvasExecute).toHaveBeenCalledWith('canvas-source', {
+      commands: [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [{ nodeId: 'node-source', patch: { status: 'running' } }],
+        },
+      ],
+      originator: { source: 'ui' },
+    });
   });
 
   it('rejects a resolved source question that has no thread', () => {
@@ -193,6 +201,12 @@ describe('conversation owner routing', () => {
   it('does not compose over authored source content with stale idle status', () => {
     expect(
       shouldComposeConversationOwner(
+        { status: 'idle', content: 'Existing question' },
+        false,
+      ),
+    ).toBe(false);
+    expect(
+      shouldComposeConversationOwner(
         { status: 'idle', hasAuthoredContent: true },
         true,
       ),
@@ -202,6 +216,9 @@ describe('conversation owner routing', () => {
         { status: 'idle', hasAuthoredContent: false },
         true,
       ),
+    ).toBe(true);
+    expect(
+      shouldComposeConversationOwner({ status: 'idle', content: '' }, false),
     ).toBe(true);
   });
 

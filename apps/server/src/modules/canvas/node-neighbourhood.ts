@@ -51,6 +51,8 @@ import { space } from '../storage/index.js';
 import type { AgentNodePreview } from '../agent/node-ref.js';
 import type { CanvasNodeType, SpatialNode } from '@huabu/shared';
 
+const DEFAULT_NEIGHBOURHOOD_RADIUS = 400;
+
 // ─── Public entry point ─────────────────────────────────────────────────────
 
 // ─── Adapter: canvasId + anchorNodeId → NodeNeighbourhoodContext ────────────
@@ -201,7 +203,12 @@ export function buildNodeNeighbourhoodContext(
   opts?: { maxDistance?: number },
 ): NodeNeighbourhoodContext {
   const nodeById = new Map(allNodes.map((n) => [n.id, n]));
-  const maxDistance = opts?.maxDistance ?? 2000;
+  const maxDistance = opts?.maxDistance ?? DEFAULT_NEIGHBOURHOOD_RADIUS;
+  const connectedIds = new Set<string>();
+  for (const edge of edges) {
+    if (edge.source === anchorNode.id) connectedIds.add(edge.target);
+    if (edge.target === anchorNode.id) connectedIds.add(edge.source);
+  }
 
   // All content nodes (non-frame, non-self).
   const contentNodes = allNodes.filter(
@@ -214,13 +221,15 @@ export function buildNodeNeighbourhoodContext(
   // ── Walk from inside-out, starting from the anchor node ──
   let currentRef: SpatialNode = anchorNode;
   let currentFrameId: string | null | undefined = anchorNode.parentId;
+  let isAnchorFrame = true;
 
   while (true) {
     const frame = currentFrameId ? nodeById.get(currentFrameId) : undefined;
 
     if (frame) {
       // ── Inner layer: currentRef vs siblings inside this frame ──
-      const siblings = contentNodes.filter(
+      const siblingCandidates = isAnchorFrame ? allNodes : contentNodes;
+      const siblings = siblingCandidates.filter(
         (n) => n.parentId === currentFrameId && n.id !== currentRef.id,
       );
       const siblingGroups = buildGroupsFromNodes(
@@ -228,7 +237,28 @@ export function buildNodeNeighbourhoodContext(
         siblings,
         nodeById,
         describe,
-      ).filter((g) => g._minEdgeDist <= maxDistance);
+      ).filter((g) => isAnchorFrame || g._minEdgeDist <= maxDistance);
+
+      if (isAnchorFrame) {
+        const frameCenter = rectCenter(frame.rect);
+        const refCenter = rectCenter(currentRef.rect);
+        siblingGroups.unshift({
+          dx: Math.round(frameCenter.x - refCenter.x),
+          dy: Math.round(frameCenter.y - refCenter.y),
+          _minEdgeDist: 0,
+          arrangement: 'containing frame',
+          frameId: frame.id,
+          frameLabel: frame.label,
+          nodes: [
+            describe?.(frame) ??
+              buildAgentNodePreview({
+                id: frame.id,
+                type: 'frame' as CanvasNodeType,
+                ...(frame.label ? { label: frame.label } : {}),
+              }),
+          ],
+        });
+      }
       layers.push({
         frameId: frame.id,
         frameLabel: frame.label,
@@ -239,6 +269,7 @@ export function buildNodeNeighbourhoodContext(
       // Move outward: the frame itself becomes the reference entity.
       currentRef = frame;
       currentFrameId = frame.parentId;
+      isAnchorFrame = false;
     } else {
       // ── Outermost layer: currentRef vs everything outside ──
       // Collect ancestors to exclude.
@@ -337,6 +368,29 @@ export function buildNodeNeighbourhoodContext(
 
       break; // outermost layer done
     }
+  }
+
+  // Explicit relationships outrank proximity. A connected endpoint may sit
+  // beyond the radius or inside an outer frame whose descendants are normally
+  // represented only by that frame, so append any endpoint not already shown.
+  const includedIds = new Set(
+    allGroups.flatMap((group) => group.nodes.map((node) => node.id)),
+  );
+  const missingConnectedNodes = [...connectedIds]
+    .map((id) => nodeById.get(id))
+    .filter(
+      (node): node is SpatialNode =>
+        node !== undefined && !includedIds.has(node.id),
+    );
+  if (missingConnectedNodes.length > 0) {
+    const connectedGroups = buildGroupsFromNodes(
+      anchorNode,
+      missingConnectedNodes,
+      nodeById,
+      describe,
+    );
+    layers.push({ groups: connectedGroups });
+    allGroups.push(...connectedGroups);
   }
 
   // If no layers at all, the node is isolated.

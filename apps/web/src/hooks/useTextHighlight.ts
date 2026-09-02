@@ -27,6 +27,8 @@
 
 import { useEffect, useState } from 'react';
 
+import { findRanges } from './searchDom';
+
 /** Global registered highlight name. CSS selector: `::highlight(huabu-search)`. */
 const HIGHLIGHT_NAME = 'huabu-search';
 
@@ -180,6 +182,15 @@ export function useTextHighlight({
         childList: true,
         subtree: true,
         characterData: true,
+        attributes: true,
+        attributeFilter: [
+          'aria-hidden',
+          'class',
+          'data-preview-search-content',
+          'data-search-exclude',
+          'hidden',
+          'style',
+        ],
       });
       return o;
     });
@@ -208,48 +219,4 @@ function elementId(el: HTMLElement): string {
     elementIds.set(el, id);
   }
   return String(id);
-}
-
-function findRanges(
-  root: HTMLElement,
-  query: string,
-  maxRanges: number,
-): Range[] {
-  const needle = query.toLowerCase();
-  const needleLen = needle.length;
-  if (needleLen === 0) return [];
-
-  const ranges: Range[] = [];
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    // Skip script/style nodes by checking the parent tag.
-    acceptNode: (node) => {
-      const parent = node.parentElement;
-      if (!parent) return NodeFilter.FILTER_REJECT;
-      const tag = parent.tagName;
-      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') {
-        return NodeFilter.FILTER_REJECT;
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
-
-  let current = walker.nextNode();
-  while (current && ranges.length < maxRanges) {
-    const text = current.textContent ?? '';
-    if (text.length >= needleLen) {
-      const lower = text.toLowerCase();
-      let from = 0;
-      while (ranges.length < maxRanges) {
-        const idx = lower.indexOf(needle, from);
-        if (idx === -1) break;
-        const range = document.createRange();
-        range.setStart(current, idx);
-        range.setEnd(current, idx + needleLen);
-        ranges.push(range);
-        from = idx + Math.max(1, needleLen);
-      }
-    }
-    current = walker.nextNode();
-  }
-  return ranges;
 }

@@ -46,6 +46,22 @@ export interface UseCanvasShortcutsOptions {
 
 export type CanvasTool = 'select' | 'lasso' | 'pan';
 
+function hasNativeCopySelection(target: EventTarget | null): boolean {
+  if (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement
+  ) {
+    return (
+      target.selectionStart !== null &&
+      target.selectionEnd !== null &&
+      target.selectionStart !== target.selectionEnd
+    );
+  }
+
+  const selection = window.getSelection();
+  return !!selection && !selection.isCollapsed;
+}
+
 /**
  * All keyboard / paste handling for the canvas, extracted from Canvas.tsx.
  *
@@ -379,12 +395,10 @@ export function useCanvasShortcuts(
         e.preventDefault();
         frameSelectedNodes();
       } else if (lowerKey === 'c') {
-        if (editable) return;
-        // If the user has selected text (e.g. in a panel), let the browser
-        // handle the native copy instead of overwriting the clipboard with
-        // serialized node data.
-        const selection = window.getSelection();
-        if (selection && !selection.isCollapsed) return;
+        // Editors can retain focus after their node is selected. Preserve
+        // native copy only when the user has an actual text selection;
+        // otherwise copy the selected Canvas nodes.
+        if (hasNativeCopySelection(e.target)) return;
         e.preventDefault();
         copySelectedNodes();
       } else if (lowerKey === 'v') {

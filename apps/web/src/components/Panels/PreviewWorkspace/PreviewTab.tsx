@@ -161,7 +161,7 @@ export function PreviewTab({
         zIndex: isDragging ? 1 : undefined,
       }}
       className={cn(
-        'group relative flex h-9 w-fit max-w-48 min-w-20 flex-[0_1_auto] cursor-pointer items-center gap-1.5 px-2.5 text-sm',
+        'group relative flex h-9 w-fit max-w-48 min-w-20 flex-none cursor-pointer items-center gap-1.5 px-2.5 text-sm',
         'border-edge-default border-r',
         'focus-visible:outline-info focus-visible:outline-1 focus-visible:-outline-offset-2',
         isActive
@@ -186,7 +186,7 @@ export function PreviewTab({
       <Tooltip
         content={tabDescription}
         placement="bottom"
-        wrapperClassName="inline-flex min-w-0"
+        wrapperClassName="inline-flex min-w-0 flex-1"
       >
         <span
           data-testid="preview-tab-title"
@@ -197,11 +197,7 @@ export function PreviewTab({
       </Tooltip>
       <div
         data-testid="preview-tab-actions"
-        className={cn(
-          'pointer-events-none absolute right-1 z-10 flex items-center gap-0 opacity-0 transition-opacity',
-          'group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100',
-          isActive ? 'bg-surface' : 'bg-hover',
-        )}
+        className="ml-auto flex shrink-0 items-center gap-0"
       >
         {tab.transient && (
           <Button

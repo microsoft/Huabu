@@ -23,6 +23,7 @@ export type ConversationOwnerSource = {
   agentMode?: 'ask' | 'operate';
   agentBinding?: AgentBinding;
   agentBindingPolicy?: 'selectable' | 'fixed';
+  content?: unknown;
   hasAuthoredContent?: boolean;
 };
 
@@ -112,10 +113,10 @@ export function shouldComposeConversationOwner(
   source: ConversationOwnerSource | undefined,
   headless: boolean,
 ): boolean {
-  return (
-    getQuestionNodeStatus(source) === 'idle' &&
-    (!headless || source?.hasAuthoredContent === false)
-  );
+  const hasAuthoredContent = headless
+    ? source?.hasAuthoredContent !== false
+    : typeof source?.content === 'string' && source.content.trim().length > 0;
+  return getQuestionNodeStatus(source) === 'idle' && !hasAuthoredContent;
 }
 
 /** Keep client writes to fixed Agent Nodes limited to presentation state. */
@@ -193,12 +194,14 @@ async function applyConversationOwnerPatch(
 ): Promise<void> {
   const owner = view.conversationOwner;
   const active = useCanvasStore.getState();
-  if (
+  const ownerIsActive =
     active.canvasId === owner.canvasId &&
-    active.nodes.some((node) => node.id === owner.nodeId)
-  ) {
+    active.nodes.some((node) => node.id === owner.nodeId);
+  if (ownerIsActive) {
+    // Reflect lifecycle changes immediately, but still persist them through
+    // the canonical executor below. A local-only status disappears on reload;
+    // load-time code cannot safely infer success from conversation existence.
     active.patchNodeSilent(owner.nodeId, patch);
-    return;
   }
 
   const wirePatch = Object.fromEntries(
@@ -232,6 +235,11 @@ async function applyConversationOwnerPatch(
         typeof current.applyDeltasFromAgent
       >[2],
     );
+  } else if (ownerIsActive && current.canvasId === owner.canvasId) {
+    // A Canvas-sync broadcast may have advanced the version before this
+    // response returned. The optimistic patch is already visible; the server
+    // command above is the durable source of truth.
+    current.patchNodeSilent(owner.nodeId, patch);
   }
 }
 

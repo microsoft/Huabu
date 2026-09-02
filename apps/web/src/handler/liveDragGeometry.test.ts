@@ -3,7 +3,10 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { mergeLiveDragGeometry } from './liveDragGeometry';
+import {
+  compensateDetachedDragPosition,
+  mergeLiveDragGeometry,
+} from './liveDragGeometry';
 
 import type { NestableNode } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
@@ -43,5 +46,57 @@ describe('mergeLiveDragGeometry', () => {
       width: 200,
       height: 80,
     });
+  });
+});
+
+describe('compensateDetachedDragPosition', () => {
+  it('keeps the detached world position stable when the previewed parent moves', () => {
+    const liveNode = {
+      id: 'dragged',
+      type: 'note',
+      parentId: 'frame',
+      position: { x: 400, y: 400 },
+      data: {},
+    } as NestableNode;
+    const projectedNodes = [
+      {
+        id: 'frame',
+        type: 'frame',
+        position: { x: 140, y: 140 },
+        data: {},
+      },
+      {
+        ...liveNode,
+        parentId: undefined,
+        position: { x: 500, y: 500 },
+      },
+    ] as NestableNode[];
+
+    expect(compensateDetachedDragPosition(liveNode, projectedNodes)).toEqual({
+      x: 360,
+      y: 360,
+    });
+  });
+
+  it('does not compensate a drag that remains in its parent', () => {
+    const liveNode = {
+      id: 'dragged',
+      type: 'note',
+      parentId: 'frame',
+      position: { x: 40, y: 40 },
+      data: {},
+    } as NestableNode;
+
+    expect(
+      compensateDetachedDragPosition(liveNode, [
+        {
+          id: 'frame',
+          type: 'frame',
+          position: { x: 100, y: 100 },
+          data: {},
+        } as NestableNode,
+        liveNode,
+      ]),
+    ).toBeNull();
   });
 });

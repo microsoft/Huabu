@@ -87,6 +87,8 @@ Space Preview is the intentional exception to ordinary node rendering: it consum
 
 Canvas copy carries Huabu's serialized node payload so that pasting back into Huabu preserves node identity and artifact ownership. The payload always rides in `text/html`; the other representations exist for applications outside Huabu:
 
+`Cmd/Ctrl+C` preserves the browser's native copy behavior when the user has an actual text selection in an input, editor, preview, or panel. If an editor merely retains focus with a collapsed caret, the shortcut copies the selected Canvas nodes instead; retained editor focus must not turn node copy into a silent no-op.
+
 | Selection              | `text/plain`                       | `text/html`                                                  | `image/png` |
 | ---------------------- | ---------------------------------- | ------------------------------------------------------------ | ----------- |
 | Exactly one image node | —                                  | `<img src="data:…" data-huabu-nodes="<base64 payload>">`     | the image   |

@@ -5,7 +5,7 @@
 
 ## 1. Scope and coordinate spaces
 
-The canvas supports zoom values from `0.1` through `5`, with the shared bounds in [`apps/web/src/config/canvas.ts`](../../apps/web/src/config/canvas.ts) applied to React Flow and the custom pinch handlers.
+The canvas supports zoom values from `0.05` through `5`, with the shared bounds in [`apps/web/src/config/canvas.ts`](../../apps/web/src/config/canvas.ts) applied to React Flow and the custom pinch handlers.
 
 Zoom-sensitive rendering uses two coordinate spaces deliberately. Canvas-space content participates in the viewport transform and therefore grows or shrinks with the canvas; screen-space overlays are positioned from transformed coordinates but retain stable physical size for controls or labels that must remain operable.
 

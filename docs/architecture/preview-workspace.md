@@ -12,6 +12,8 @@ Preview Workspace owns presentation topology: open tabs, tab order, active tabs,
 
 `chatStore` owns conversation state keyed by `threadId`: messages, drafts, history status, streaming state, binding, model settings, compose mode, and pending attachments. It persists thread identity metadata (binding, built-in settings, and compose mode) without an entry limit so every independent Chat tab rehydrates with the same agent after reload; messages, drafts, history status, streaming state, and attachments remain runtime-only. Preview Workspace stores only the target needed to select a renderer.
 
+Within a mounted Chat renderer, the thread-scoped composer owns the draft subscription. Draft updates therefore rerender the composer without invalidating `MessageList`; unchanged historical message cards are memoized, while message-array updates and streaming changes continue through the history tree normally.
+
 `panelStore` owns and persists the outer right-column collapse state, owns the transient Preview fullscreen state, and owns thread-addressed composer focus requests. Opening a Preview target expands the right column; closing a tab does not delete its underlying node or conversation history. `MainLayout` treats the persisted collapse state as authoritative whenever no panel motion is active. A settled collapsed slot is zero-width and clips overflow, while an active open/close motion temporarily releases that clipping; interrupted startup hydration therefore cannot leave translated panel content visible over the Canvas in either persisted state. Fullscreen is intentionally not persisted across reloads.
 
 ```text
@@ -142,7 +144,7 @@ The separator exposes a symmetric pointer target around its visible rule, tracks
 
 Each group uses the WAI-ARIA tabs pattern with a tablist, selected tab, labelled tabpanel, and roving keyboard focus. Only the focused group responds to group-level shortcuts; editable controls, search, menus, and media viewers keep ownership of their own keys.
 
-Tab titles are visually truncated while retaining full accessible labels and tooltips. Transient tabs are visually distinct and expose their temporary status and promotion gesture accessibly.
+Tab titles are visually truncated while retaining full accessible labels and tooltips. Tabs do not shrink their action controls when the strip is crowded; the strip scrolls horizontally instead. Close remains visible on every tab, and the one-way Pin action remains visible on transient tabs, so pointer, keyboard, and touch users do not depend on hover to operate a tab. Transient tabs are visually distinct and expose their temporary status and promotion gesture accessibly.
 
 ## 9. Integration rules
 
