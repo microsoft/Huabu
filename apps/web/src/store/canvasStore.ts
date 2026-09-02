@@ -59,7 +59,10 @@ import {
   type CanvasUiIntent,
   type UiResolverState,
 } from '@/handler/canvasCommand/uiIntent';
-import { mergeLiveDragGeometry } from '@/handler/liveDragGeometry';
+import {
+  compensateDetachedDragPosition,
+  mergeLiveDragGeometry,
+} from '@/handler/liveDragGeometry';
 import { projectStructuredTargetGeometry } from '@/handler/projectStructuredTargetGeometry';
 import {
   applySnap,
@@ -1924,13 +1927,9 @@ const useCanvasStore = create<RFState>()(
           // strips it from persisted topology for good.
           viewport?: CanvasViewport;
         };
-        // Repair question nodes whose execution status drifted to a
-        // stale non-terminal value (most often `idle`) while they
-        // actually completed a run — the `status: 'done'` autosave can
-        // be silently dropped by a 409 when the agent edits the canvas
-        // mid-conversation. Nodes that own a `threadId` always have a
-        // persisted conversation, so a stale status is demoted to
-        // `done` here, restoring the badge + reopen affordance.
+        // Remove obsolete question auto-run state without guessing a
+        // terminal outcome. A node can own a persisted conversation whose
+        // last turn failed, so thread/content presence must never imply done.
         // Normalize tree order on load: persisted topology is not
         // guaranteed to list every parent frame ahead of its children
         // (older writes, or a delta-authored save), and a child ahead of
@@ -2628,18 +2627,24 @@ const useCanvasStore = create<RFState>()(
         ).nodes;
         const liveById = new Map(liveNodes.map((node) => [node.id, node]));
         const publishGeometryProjection = (projection: NestableNode[]) => {
-          const geometryPreviews = projection.filter((node) => {
-            if (draggedIds.has(node.id)) return false;
+          const geometryPreviews = projection.flatMap((node) => {
             const current = liveById.get(node.id);
-            if (!current) return false;
+            if (!current) return [];
+            if (draggedIds.has(node.id)) {
+              const position = compensateDetachedDragPosition(
+                current,
+                projection,
+              );
+              return position ? [{ ...node, position }] : [];
+            }
             const currentSize = getNodeSize(current);
             const nextSize = getNodeSize(node);
-            return (
+            const changed =
               current.position.x !== node.position.x ||
               current.position.y !== node.position.y ||
               currentSize.width !== nextSize.width ||
-              currentSize.height !== nextSize.height
-            );
+              currentSize.height !== nextSize.height;
+            return changed ? [node] : [];
           });
           useGesturePreviewStore
             .getState()

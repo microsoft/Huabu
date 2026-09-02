@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { executeCanvasCommands } from '../index.js';
+import { fingerprintMarkdownKeys } from '../provenance/blockFingerprint.js';
 
 import type {
   CanvasExecutionSource,
@@ -88,5 +89,55 @@ describe('executeCanvasCommands: AI note provenance', () => {
     );
     expect(provenance?.blocks ?? []).toHaveLength(0);
     expect(provenance?.deletedBlocks ?? []).toHaveLength(0);
+  });
+
+  it('canonicalizes reference links to the same visible block as Milkdown', () => {
+    const reference =
+      'Read [the guide][guide].\n\n[guide]: https://example.com "Docs"';
+    const inline = 'Read [the guide](https://example.com "Docs").';
+
+    expect(fingerprintMarkdownKeys(reference)).toEqual(
+      fingerprintMarkdownKeys(inline),
+    );
+
+    const start = note('n1', { content: 'Read the old guide.' });
+    const { provenance } = runContentEdit('agent', start, reference);
+    expect(provenance?.blocks).toHaveLength(1);
+    expect(provenance?.blocks[0]?.key).toBe(fingerprintMarkdownKeys(inline)[0]);
+  });
+
+  it('canonicalizes reference images to the same visible block as Milkdown', () => {
+    const reference =
+      '![Diagram][diagram]\n\n[diagram]: artifacts/diagram.png "Architecture"';
+    const inline = '![Diagram](artifacts/diagram.png "Architecture")';
+
+    expect(fingerprintMarkdownKeys(reference)).toEqual(
+      fingerprintMarkdownKeys(inline),
+    );
+  });
+
+  it('canonicalizes LaTeX-style inline math before stamping provenance', () => {
+    const latexDelimiters = String.raw`The result is \(x + y\).`;
+    const milkdownDelimiters = 'The result is $x + y$.';
+
+    expect(fingerprintMarkdownKeys(latexDelimiters)).toEqual(
+      fingerprintMarkdownKeys(milkdownDelimiters),
+    );
+
+    const start = note('n1', { content: 'The old result.' });
+    const { provenance } = runContentEdit('agent', start, latexDelimiters);
+    expect(provenance?.blocks).toHaveLength(1);
+    expect(provenance?.blocks[0]?.key).toBe(
+      fingerprintMarkdownKeys(milkdownDelimiters)[0],
+    );
+  });
+
+  it('canonicalizes LaTeX-style display math to Milkdown block math', () => {
+    const latexDelimiters = String.raw`\[x^2 + y^2 = z^2\]`;
+    const milkdownDelimiters = '$$\nx^2 + y^2 = z^2\n$$';
+
+    expect(fingerprintMarkdownKeys(latexDelimiters)).toEqual(
+      fingerprintMarkdownKeys(milkdownDelimiters),
+    );
   });
 });

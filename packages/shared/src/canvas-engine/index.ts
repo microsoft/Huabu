@@ -112,6 +112,7 @@ export {
   medianOfChildExtents,
 } from './utils/constants.js';
 export { stripMarkdown } from './utils/markdown.js';
+export { normalizeMathDelimiters } from './provenance/normalizeMathDelimiters.js';
 export {
   type AutoHeightFreshness,
   type AutoHeightHintRead,
