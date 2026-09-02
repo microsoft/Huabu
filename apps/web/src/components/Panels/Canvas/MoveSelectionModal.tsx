@@ -1,0 +1,167 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
+import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
+
+import { listCanvases, moveCanvasSelection } from '@/api/canvas';
+import { Button } from '@/components/Common/Button';
+import { Modal } from '@/components/Common/Modal';
+import { Select, type SelectOption } from '@/components/Common/Select';
+import { toast } from '@/components/Common/Toast';
+import useCanvasStore, { drainPendingSaves } from '@/store/canvasStore';
+
+export function MoveSelectionModal() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const isOpen = useCanvasStore((state) => state.moveSelectionDialogOpen);
+  const setOpen = useCanvasStore((state) => state.setMoveSelectionDialogOpen);
+  const canvasId = useCanvasStore((state) => state.canvasId);
+  const selectedNodes = useCanvasStore((state) =>
+    state.nodes.filter((node) => node.selected),
+  );
+  const [options, setOptions] = useState<SelectOption<string>[]>([]);
+  const [destinationCanvasId, setDestinationCanvasId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+
+  const selectedNodeIds = useMemo(
+    () => selectedNodes.map((node) => node.id),
+    [selectedNodes],
+  );
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    setLoading(true);
+    setLoadError(false);
+    void listCanvases()
+      .then(({ canvases }) => {
+        if (!active) return;
+        const next = canvases
+          .filter((canvas) => canvas.canvasId !== canvasId)
+          .map((canvas) => ({
+            value: canvas.canvasId,
+            label: canvas.title || t('moveSelection.untitledSpace'),
+          }));
+        setOptions(next);
+        setDestinationCanvasId((current) =>
+          next.some((option) => option.value === current)
+            ? current
+            : (next[0]?.value ?? ''),
+        );
+      })
+      .catch(() => {
+        if (active) setLoadError(true);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [canvasId, isOpen, t]);
+
+  const close = () => {
+    if (!submitting) setOpen(false);
+  };
+
+  const submit = async () => {
+    if (!canvasId || !destinationCanvasId || selectedNodeIds.length === 0) {
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await drainPendingSaves();
+      const expectedSourceVersion = useCanvasStore.getState().version;
+      const result = await moveCanvasSelection(canvasId, {
+        selectedNodeIds,
+        destinationCanvasId,
+        expectedSourceVersion,
+      });
+      setOpen(false);
+      toast(
+        t('moveSelection.success', {
+          count: result.movedNodeCount,
+          conversations: result.movedConversationCount,
+        }),
+        {
+          tone: 'success',
+          action: {
+            label: t('moveSelection.openDestination'),
+            onClick: () => navigate(`/canvas/${result.destination.canvasId}`),
+          },
+        },
+      );
+    } catch (error) {
+      toast(
+        error instanceof Error ? error.message : t('moveSelection.failed'),
+        { tone: 'danger', duration: 0 },
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      title={t('moveSelection.title')}
+      description={t('moveSelection.description', {
+        count: selectedNodeIds.length,
+      })}
+      onClose={close}
+      closeOnBackdropClick={!submitting}
+      closeOnEscape={!submitting}
+      footer={
+        <>
+          <Button variant="ghost" disabled={submitting} onClick={close}>
+            {t('actions.cancel')}
+          </Button>
+          <Button
+            variant="solid"
+            disabled={
+              loading ||
+              loadError ||
+              submitting ||
+              !destinationCanvasId ||
+              selectedNodeIds.length === 0
+            }
+            onClick={() => void submit()}
+          >
+            {submitting
+              ? t('moveSelection.moving')
+              : t('moveSelection.confirm')}
+          </Button>
+        </>
+      }
+    >
+      <div className="mt-4">
+        {loadError ? (
+          <p className="text-danger text-sm">
+            {t('moveSelection.targetsUnavailable')}
+          </p>
+        ) : options.length === 0 && !loading ? (
+          <p className="text-fg-muted text-sm">
+            {t('moveSelection.noTargets')}
+          </p>
+        ) : (
+          <Select
+            className="w-full"
+            options={options}
+            value={destinationCanvasId}
+            onChange={setDestinationCanvasId}
+            disabled={loading || submitting}
+            placeholder={t('moveSelection.selectDestination')}
+            ariaLabel={t('moveSelection.selectDestination')}
+          />
+        )}
+        <p className="text-fg-subtle mt-3 text-xs">
+          {t('moveSelection.boundaryNotice')}
+        </p>
+      </div>
+    </Modal>
+  );
+}

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Trash2 } from 'lucide-react';
+import { MoveRight, Trash2 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -54,6 +54,9 @@ export const MultiSelectToolbar = () => {
   const setNoteHeightMode = useCanvasStore((s) => s.setNoteHeightMode);
   const beginGesture = useCanvasStore((s) => s.beginGesture);
   const deleteNodes = useCanvasStore((s) => s.deleteNodes);
+  const setMoveSelectionDialogOpen = useCanvasStore(
+    (s) => s.setMoveSelectionDialogOpen,
+  );
   const isNotMouse = useIsNotMouse();
 
   const selectedNodes = useMemo(
@@ -65,6 +68,11 @@ export const MultiSelectToolbar = () => {
   );
   const hasManagedSizeSelection = selectedNodes.some(
     (node) => node.type === 'canvasRef' || node.type === 'frameRef',
+  );
+  const hasNonMovableSelection = selectedNodes.some((node) =>
+    ['spacePreview', 'canvasRef', 'frameRef', 'nodeRef'].includes(
+      node.type ?? '',
+    ),
   );
 
   // Edges whose endpoints are both in the node selection participate in
@@ -323,6 +331,18 @@ export const MultiSelectToolbar = () => {
           }}
           title={t('toolbar.accentColor')}
         />
+      )}
+
+      {!hasNonMovableSelection && (
+        <>
+          <FloatingToolbar.Divider />
+          <FloatingToolbar.ActionButton
+            title={t('moveSelection.action')}
+            onClick={() => setMoveSelectionDialogOpen(true)}
+          >
+            <MoveRight />
+          </FloatingToolbar.ActionButton>
+        </>
       )}
 
       {/* Non-mouse only: mouse users have keyboard Delete / Backspace. */}

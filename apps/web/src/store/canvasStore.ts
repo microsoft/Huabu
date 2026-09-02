@@ -453,6 +453,8 @@ type RFState = {
   refreshWorldReferences: () => Promise<void>;
   isSaving: boolean;
   pendingSave: boolean;
+  moveSelectionDialogOpen: boolean;
+  setMoveSelectionDialogOpen: (open: boolean) => void;
 
   /**
    * True when the server has rejected a save with `CANVAS_VERSION_CONFLICT`
@@ -1281,6 +1283,9 @@ const useCanvasStore = create<RFState>()(
     pinnedSourceNodeIds: {},
     isSaving: false,
     pendingSave: false,
+    moveSelectionDialogOpen: false,
+    setMoveSelectionDialogOpen: (open) =>
+      set({ moveSelectionDialogOpen: open }),
     versionConflict: false,
     versionConflictServerVersion: null,
 

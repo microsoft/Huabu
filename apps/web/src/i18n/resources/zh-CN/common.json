@@ -23,6 +23,21 @@
     "lock": "锁定",
     "unlock": "解锁"
   },
+  "moveSelection": {
+    "action": "移动到 Space",
+    "title": "移动到 Space",
+    "description": "移动选中的 {{count}} 个节点，包括 Frame 中的后代节点。",
+    "selectDestination": "选择目标 Space",
+    "untitledSpace": "未命名 Space",
+    "confirm": "移动",
+    "moving": "正在移动…",
+    "success": "已移动 {{count}} 个节点和 {{conversations}} 个对话。",
+    "openDestination": "打开目标 Space",
+    "failed": "无法移动所选内容。",
+    "targetsUnavailable": "无法加载目标 Space。",
+    "noTargets": "请先创建另一个 Space，再移动所选内容。",
+    "boundaryNotice": "与所选内容之外节点的连接将被移除。"
+  },
   "canvasControls": {
     "resetZoom": "重置缩放至 100%",
     "zoomAria": "画布缩放 {{percentage}}%。重置至 100%"

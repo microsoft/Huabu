@@ -18,6 +18,7 @@ import {
   getCanvasEventsQuerySchema,
   postCanvasEventsBodySchema,
   postCanvasExecuteBodySchema,
+  moveSelectionBodySchema,
   preprocessNodeBodySchema,
   putCanvasBodySchema,
   putNodeContentBodySchema,
@@ -33,6 +34,7 @@ import {
 import { CanvasNotFoundError, applyDeltasOnServer } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { moveCanvasSelection, SpaceMoveError } from './space-move.service.js';
 import {
   getSpacePreviewScene,
   SpacePreviewSceneError,
@@ -89,6 +91,7 @@ import type {
   PostCanvasEventsResponse,
   PostCanvasExecuteRequest,
   PostCanvasExecuteResponse,
+  MoveSelectionResponse,
   PreprocessNodeBody,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
@@ -1282,6 +1285,32 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   //
   // Atomic per-canvas (the executor owns a mutex keyed by canvasId).
   // Idempotent no-op batches do not bump the version.
+
+  fastify.post<{
+    Params: { canvasId: string };
+    Body: unknown;
+    Reply: ApiResult<MoveSelectionResponse>;
+  }>('/:canvasId/move-selection', async function (request, reply) {
+    const parsed = moveSelectionBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
+      });
+    }
+    try {
+      return reply.send(
+        await moveCanvasSelection(request.params.canvasId, parsed.data),
+      );
+    } catch (error) {
+      if (error instanceof SpaceMoveError) {
+        return reply.code(error.statusCode).send({
+          code: error.code,
+          message: error.message,
+        });
+      }
+      throw error;
+    }
+  });
 
   fastify.post<{
     Params: { canvasId: string };
