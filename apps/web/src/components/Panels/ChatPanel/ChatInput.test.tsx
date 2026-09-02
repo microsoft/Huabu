@@ -357,7 +357,7 @@ describe('ChatInput', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('reuses computed resize metrics while the draft changes', () => {
+  it('does not synchronously measure layout while the draft changes', () => {
     const getComputedStyle = vi.spyOn(window, 'getComputedStyle');
 
     function Harness() {
@@ -403,6 +403,6 @@ describe('ChatInput', () => {
       textarea?.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
-    expect(getComputedStyle).toHaveBeenCalledOnce();
+    expect(getComputedStyle).not.toHaveBeenCalled();
   });
 });

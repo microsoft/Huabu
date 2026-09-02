@@ -36,6 +36,13 @@ interface AIMessageProps {
 
 const NoteIcon = NODE_ICON.note;
 
+function usePlainTextMessageRenderer(): boolean {
+  return (
+    import.meta.env.DEV &&
+    window.localStorage.getItem('huabu-debug-plain-chat-messages') === '1'
+  );
+}
+
 /**
  * Render one `tool-group` from `groupAdjacentToolParts`. Extracted
  * so both the phase body (tool calls under a thinking) and the
@@ -114,6 +121,7 @@ export const AIMessage = memo(function AIMessage({
   hideActions,
 }: AIMessageProps) {
   const { t } = useTranslation();
+  const renderPlainText = usePlainTextMessageRenderer();
   const addNode = useCanvasStore((state) => state.addNode);
   const { threadId } = useChatSession();
 
@@ -232,8 +240,12 @@ export const AIMessage = memo(function AIMessage({
               key={`l${eIdx}`}
               className="text-fg-default bg-surface ml-1 rounded-2xl border border-none px-4 text-sm"
             >
-              <div className="leading-relaxed">
-                <MilkdownMessageCard content={seg.text} threadId={threadId} />
+              <div className="leading-relaxed whitespace-pre-wrap">
+                {renderPlainText ? (
+                  seg.text
+                ) : (
+                  <MilkdownMessageCard content={seg.text} threadId={threadId} />
+                )}
               </div>
             </div>
           );

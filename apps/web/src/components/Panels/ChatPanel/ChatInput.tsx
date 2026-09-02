@@ -2,13 +2,7 @@
 // Licensed under the MIT license.
 
 import { ArrowUp, Square, X } from 'lucide-react';
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl, uploadImage, uploadPdf } from '@/api/artifact';
@@ -133,12 +127,6 @@ export const ChatInput = ({
   const { t } = useTranslation();
   const isSubmitDisabled = disabled || !value.trim();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const resizeMetricsRef = useRef<{
-    minHeight: number;
-    maxHeight: number;
-    borderY: number;
-  } | null>(null);
-  const resizeMetricsModeRef = useRef<AgentMode | null>(null);
   const historyIndexRef = useRef(-1);
   const draftRef = useRef('');
 
@@ -288,73 +276,6 @@ export const ChatInput = ({
     mode === 'operate'
       ? t('chat.operatePlaceholder')
       : (placeholder ?? t('chat.inputPlaceholder'));
-
-  // Auto-resize textarea.
-  // Runs synchronously before paint to avoid the brief flash where the
-  // textarea looks stretched by the parent flex container.
-  //
-  // Both `ask` and `operate` modes render the same `<textarea>` and
-  // both should grow as the user types — `mode` is still a dep so the
-  // effect re-runs on mode switch (e.g. to recompute against the
-  // mode-specific placeholder if it ever affects measured height).
-  useLayoutEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    let metrics =
-      resizeMetricsModeRef.current === mode ? resizeMetricsRef.current : null;
-    if (!metrics) {
-      const computed = window.getComputedStyle(textarea);
-      const lineHeightRaw = Number.parseFloat(computed.lineHeight);
-      const lineHeight =
-        Number.isFinite(lineHeightRaw) && lineHeightRaw > 0
-          ? lineHeightRaw
-          : 20;
-      const paddingY =
-        (Number.parseFloat(computed.paddingTop) || 0) +
-        (Number.parseFloat(computed.paddingBottom) || 0);
-      const borderY =
-        (Number.parseFloat(computed.borderTopWidth) || 0) +
-        (Number.parseFloat(computed.borderBottomWidth) || 0);
-      const chrome = paddingY + borderY;
-      metrics = {
-        minHeight: lineHeight * 2 + chrome,
-        maxHeight: lineHeight * 5 + chrome,
-        borderY,
-      };
-      resizeMetricsRef.current = metrics;
-      resizeMetricsModeRef.current = mode;
-    }
-
-    if (!value) {
-      // Empty content — skip scrollHeight measurement because it's unreliable
-      // on first mount (layout / fonts not yet settled) and tends to produce
-      // a value larger than the actual rows={2} default, making the textarea
-      // appear stretched until the user types.
-      const minHeight = `${metrics.minHeight}px`;
-      if (textarea.style.height !== minHeight) {
-        textarea.style.height = minHeight;
-      }
-      if (textarea.style.overflowY !== 'hidden') {
-        textarea.style.overflowY = 'hidden';
-      }
-      return;
-    }
-
-    // Reset to auto so scrollHeight reflects the intrinsic content height.
-    textarea.style.height = 'auto';
-    // scrollHeight excludes border per spec — add it back for border-box.
-    const measured = textarea.scrollHeight + metrics.borderY;
-    const nextHeight = Math.max(
-      metrics.minHeight,
-      Math.min(measured, metrics.maxHeight),
-    );
-    textarea.style.height = `${nextHeight}px`;
-    const overflowY = measured > metrics.maxHeight ? 'auto' : 'hidden';
-    if (textarea.style.overflowY !== overflowY) {
-      textarea.style.overflowY = overflowY;
-    }
-  }, [mode, value]);
 
   // Handle Enter key for submission and ArrowUp/ArrowDown for prompt history
   const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (
