@@ -24,6 +24,12 @@ import {
   type AgentTeamValidateParams,
   type JsonRpcMessage,
   type JsonRpcError,
+  type ResourceScanParams,
+  type ResourceImportParams,
+  type ResourceRefreshScanParams,
+  type ResourceRefreshParams,
+  type ResourceDeleteParams,
+  type LocalResourceRecord,
 } from '@agentlet/protocol'
 import {
   resolveAgentTeam,
@@ -31,6 +37,17 @@ import {
   validateManagedAgentTeam,
   type ManagedSetupWorkerMessage,
 } from '@agentlet/agent-team'
+import {
+  importSkill,
+  listImportedSkillIds,
+  readReceipt,
+  refreshSkill,
+  removeImportedSkill,
+  resolveResourceRoot,
+  scanSkillFolder,
+  scanSkillSource,
+  type ResourceReceipt,
+} from '@agentlet/resources'
 import { AgentProcess } from './agent-process.js'
 import { WsClient } from './ws-client.js'
 import { Relay } from './relay.js'
@@ -89,6 +106,34 @@ export function resolveManagedSetupWorkerPath(
 }
 
 /**
+ * Compute the envRegistry defaults injected into every spawned agent
+ * process: well-known daemon-managed dirs, keyed by well-known env var name.
+ * `process.env` overrides each default when present. Individual dirs are
+ * created lazily — by `server/sendResource` for reachback resources, or by
+ * `@agentlet/resources` when a local resource is installed.
+ */
+export function buildEnvRegistryDefaults(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  // Values are resolved to absolute paths against the daemon cwd so that
+  // spawned agents (which run in a different cwd) reference the same dir.
+  const cwdRelativeDefaults: Record<string, string> = {
+    AGENTLET_REACHBACK_DIR: join('node_modules', '.cache', 'agentlet', 'reachback'),
+  }
+  const registry: Record<string, string> = {}
+  for (const [key, fallback] of Object.entries(cwdRelativeDefaults)) {
+    registry[key] = resolve(env[key] || fallback)
+  }
+
+  // AGENT_RESOURCE_DIR is the machine-local resource root (skills, tools,
+  // connectors, receipts). Unlike the cwd-relative defaults above, it
+  // defaults to an absolute path under the user's home directory, so its
+  // resolution — including the AGENT_RESOURCE_DIR override — is owned by
+  // @agentlet/resources rather than duplicated here.
+  registry.AGENT_RESOURCE_DIR = resolveResourceRoot(env)
+
+  return registry
+}
+
+/**
  * Agentlet connects a machine-level control channel and manages agent
  * processes requested by the host.
  */
@@ -109,7 +154,8 @@ export class Agentlet {
    * Unified env registry — all daemon-managed environment variables that
    * are injected into spawned agent processes. Initialized from defaults,
    * then overridden by process.env if present. Individual dirs are created
-   * lazily when resources are received via server/sendResource.
+   * lazily when resources are received via server/sendResource or when a
+   * local resource is installed under AGENT_RESOURCE_DIR.
    */
   private readonly envRegistry: Record<string, string> = {}
 
@@ -117,16 +163,7 @@ export class Agentlet {
     this.options = options
     this.logger = logger
     this.daemonId = resolveAgentletId(options.agentletId)
-
-    // Well-known env vars with defaults — process.env overrides if set.
-    // Values are resolved to absolute paths against the daemon cwd so that
-    // spawned agents (which run in a different cwd) reference the same dir.
-    const defaults: Record<string, string> = {
-      AGENTLET_REACHBACK_DIR: join('node_modules', '.cache', 'agentlet', 'reachback'),
-    }
-    for (const [key, fallback] of Object.entries(defaults)) {
-      this.envRegistry[key] = resolve(process.env[key] || fallback)
-    }
+    Object.assign(this.envRegistry, buildEnvRegistryDefaults())
   }
 
   async start(): Promise<void> {
@@ -303,9 +340,165 @@ export class Agentlet {
       case ServerMethods.AGENT_TEAM_VALIDATE:
         this.handleAgentTeamValidate(msg.id, msg.params as unknown as AgentTeamValidateParams)
         break
+      case ServerMethods.RESOURCE_SCAN:
+        this.handleResourceScan(msg.id, msg.params as unknown as ResourceScanParams)
+        break
+      case ServerMethods.RESOURCE_LIST_MANAGED:
+        this.handleResourceListManaged(msg.id)
+        break
+      case ServerMethods.RESOURCE_IMPORT:
+        this.handleResourceImport(msg.id, msg.params as unknown as ResourceImportParams)
+        break
+      case ServerMethods.RESOURCE_REFRESH_SCAN:
+        this.handleResourceRefreshScan(msg.id, msg.params as unknown as ResourceRefreshScanParams)
+        break
+      case ServerMethods.RESOURCE_REFRESH:
+        this.handleResourceRefresh(msg.id, msg.params as unknown as ResourceRefreshParams)
+        break
+      case ServerMethods.RESOURCE_DELETE:
+        this.handleResourceDelete(msg.id, msg.params as unknown as ResourceDeleteParams)
+        break
       default:
         this.sendDaemonResponse(msg.id, undefined, { code: -32601, message: `Unknown method: ${msg.method}` })
     }
+  }
+
+  private projectResourceReceipt(receipt: ResourceReceipt): LocalResourceRecord {
+      return {
+        schemaVersion: 2,
+        id: receipt.id,
+        name: receipt.name,
+        provider: receipt.provider,
+        sourceContent: receipt.sourceContent,
+        userContent: '',
+      }
+    }
+
+    private handleResourceScan(requestId: string | number, params: ResourceScanParams): void {
+      if (!params || typeof params.rootPath !== 'string' || params.rootPath.trim() === '') {
+        this.sendDaemonResponse(requestId, undefined, {
+          code: -32602,
+          message: 'Missing required param: rootPath',
+        })
+        return
+      }
+      try {
+        this.sendDaemonResponse(requestId, scanSkillFolder(params.rootPath))
+      } catch (error) {
+        this.sendResourceControlError(requestId, error, 'resource_scan_failed')
+      }
+    }
+
+    private handleResourceListManaged(requestId: string | number): void {
+      try {
+        this.sendDaemonResponse(requestId, {
+          ids: listImportedSkillIds(resolveResourceRoot(), this.daemonId),
+        })
+      } catch (error) {
+        this.sendResourceControlError(requestId, error, 'resource_list_managed_failed')
+      }
+    }
+
+    private handleResourceImport(requestId: string | number, params: ResourceImportParams): void {
+      if (
+        !params ||
+        typeof params.id !== 'string' ||
+        typeof params.sourcePath !== 'string' ||
+        typeof params.expectedRevision !== 'string'
+      ) {
+        this.sendDaemonResponse(requestId, undefined, {
+          code: -32602,
+          message: 'Invalid resource import parameters',
+        })
+        return
+      }
+      try {
+        const result = importSkill(resolveResourceRoot(), this.daemonId, params)
+        this.sendDaemonResponse(requestId, {
+          resource: this.projectResourceReceipt(result.receipt),
+          created: result.created,
+        })
+      } catch (error) {
+        this.sendResourceControlError(requestId, error, 'resource_import_failed')
+      }
+    }
+
+    private handleResourceRefreshScan(
+      requestId: string | number,
+      params: ResourceRefreshScanParams,
+    ): void {
+      if (!params || typeof params.id !== 'string') {
+        this.sendDaemonResponse(requestId, undefined, {
+          code: -32602,
+          message: 'Invalid resource refresh-scan parameters',
+        })
+        return
+      }
+      try {
+        const receipt = readReceipt(resolveResourceRoot(), params.id)
+        if (!receipt?.source) throw new Error(`Imported Skill not found: ${params.id}`)
+        const candidate = scanSkillSource(receipt.source)
+        this.sendDaemonResponse(requestId, {
+          rootPath: receipt.source,
+          candidates: [candidate],
+          diagnostics: [],
+        })
+      } catch (error) {
+        this.sendResourceControlError(requestId, error, 'resource_refresh_scan_failed')
+      }
+    }
+
+    private handleResourceRefresh(requestId: string | number, params: ResourceRefreshParams): void {
+      if (
+        !params ||
+        typeof params.id !== 'string' ||
+        typeof params.expectedRevision !== 'string'
+      ) {
+        this.sendDaemonResponse(requestId, undefined, {
+          code: -32602,
+          message: 'Invalid resource refresh parameters',
+        })
+        return
+      }
+      try {
+        const receipt = refreshSkill(
+          resolveResourceRoot(),
+          this.daemonId,
+          params.id,
+          params.expectedRevision,
+        )
+        this.sendDaemonResponse(requestId, { resource: this.projectResourceReceipt(receipt) })
+      } catch (error) {
+        this.sendResourceControlError(requestId, error, 'resource_refresh_failed')
+      }
+    }
+
+    private handleResourceDelete(requestId: string | number, params: ResourceDeleteParams): void {
+      if (!params || typeof params.id !== 'string') {
+        this.sendDaemonResponse(requestId, undefined, {
+          code: -32602,
+          message: 'Invalid resource delete parameters',
+        })
+        return
+      }
+      try {
+        const removed = removeImportedSkill(resolveResourceRoot(), this.daemonId, params.id)
+        this.sendDaemonResponse(requestId, { removed })
+      } catch (error) {
+        this.sendResourceControlError(requestId, error, 'resource_delete_failed')
+      }
+    }
+
+    private sendResourceControlError(
+      requestId: string | number,
+      error: unknown,
+      code: string,
+    ): void {
+      this.sendDaemonResponse(requestId, undefined, {
+        code: -32602,
+        message: error instanceof Error ? error.message : String(error),
+        data: { code },
+      })
   }
 
   private handleAgentTeamScan(requestId: string | number, params: AgentTeamScanParams): void {

@@ -216,10 +216,13 @@ export class AgentNodeService {
     let binding: AgentBinding;
     let agentIcon;
     if (profileId === HUABU_AGENT_PROFILE_ID) {
-      if (launchOverrides?.workingDirPath) {
+      if (
+        launchOverrides?.workingDirPath ||
+        launchOverrides?.resourceIds !== undefined
+      ) {
         throw new AgentNodeCreationError(
           'invalid_launch_overrides',
-          'workingDirPath is not supported by the Huabu Agent Profile',
+          'External Agent launch overrides are not supported by the Huabu Agent Profile',
         );
       }
       binding = { kind: 'internal' };

@@ -21,8 +21,10 @@ import { mountAgentTeamRegistry } from './agent-team-mount.js';
 import { getDaemonAuth } from './daemon-auth.js';
 import { getDaemonSupervisor } from './daemon-supervisor.js';
 import { mountAgentletGateway } from './gateway-mount.js';
+import { mountResourceRegistry } from './resource-registry-mount.js';
 
 import type { MountAgentTeamOptions } from './agent-team-mount.js';
+import type { MountResourceRegistryOptions } from './resource-registry-mount.js';
 import type {
   AgentletConnection,
   AgentletGateway,
@@ -38,6 +40,7 @@ export function getSupervisedAgentletId(): string {
 }
 
 export { getAgentTeamRegistry } from './agent-team-mount.js';
+export { getResourceRegistry } from './resource-registry-mount.js';
 export {
   ACP_UPGRADE_PATH,
   getAgentletGateway,
@@ -53,6 +56,7 @@ export { getDaemonAuth, _resetDaemonAuthForTests } from './daemon-auth.js';
 
 export type { AttachOptions } from './daemon-supervisor.js';
 export type { MountAgentTeamOptions } from './agent-team-mount.js';
+export type { MountResourceRegistryOptions } from './resource-registry-mount.js';
 export type {
   MountAcpOptions,
   MountAgentletGatewayOptions,
@@ -75,7 +79,11 @@ export type {
   AgentProfile,
   AgentTeamManifestProfile,
   AgentTeamRegistry,
+  AgentResourceValidationPort,
 } from '@agenetes/agent-team';
+export type { AgentResource } from '@agenetes/protocol';
+export type { ResourceRegistry } from '@agenetes/resource-registry';
+export { ResourceRegistryError } from '@agenetes/resource-registry';
 
 /** Host-injected configuration for {@link mountAgenetes}. */
 export interface MountAgenetesOptions {
@@ -108,6 +116,11 @@ export interface MountAgenetesOptions {
   hostEnvPrefix?: string;
   hostEnvAllowlist?: readonly string[];
   /**
+   * Exact host variables that must never reach the daemon or spawned agents,
+   * including provider credentials outside the host namespace.
+   */
+  hostEnvDenylist?: readonly string[];
+  /**
    * Override the Gateway authenticator. Defaults to the
    * connection-token validator in {@link getDaemonAuth}.
    */
@@ -117,6 +130,8 @@ export interface MountAgenetesOptions {
    * Gateway is connected internally and is never supplied by the host.
    */
   agentTeam?: MountAgentTeamOptions;
+  /** Optional durable, host-populated Agent Resource catalogue. */
+  resources?: MountResourceRegistryOptions;
 }
 
 /**
@@ -142,6 +157,10 @@ export function mountAgenetes(
     authenticate: opts.authenticate,
   });
 
+  if (opts.resources) {
+    mountResourceRegistry(app, opts.resources);
+  }
+
   if (opts.agentTeam) {
     mountAgentTeamRegistry(app, opts.agentTeam, gateway);
   }
@@ -152,6 +171,7 @@ export function mountAgenetes(
     agentletId,
     hostEnvPrefix: opts.hostEnvPrefix,
     hostEnvAllowlist: opts.hostEnvAllowlist,
+    hostEnvDenylist: opts.hostEnvDenylist,
   });
 
   return gateway;

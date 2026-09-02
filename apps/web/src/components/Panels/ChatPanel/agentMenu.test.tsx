@@ -29,10 +29,12 @@ vi.mock('../../Common/Button', () => ({
 
 const profiles: AgentProfileView[] = [
   {
+    schemaVersion: 2,
     id: 'team-ready',
     alias: 'Ready Team',
     agentletId: 'machine-a',
     workingDirPath: '/work/ready',
+    resourceIds: [],
     launch: {
       kind: 'agent-team-manifest',
       manifestPath: '/teams/ready/agentlet.yaml',
@@ -41,10 +43,12 @@ const profiles: AgentProfileView[] = [
     preparation: { status: 'ready', completedAt: 1 },
   },
   {
+    schemaVersion: 2,
     id: 'team-pending',
     alias: 'Pending Team',
     agentletId: 'machine-a',
     workingDirPath: '/work/pending',
+    resourceIds: [],
     launch: {
       kind: 'agent-team-manifest',
       manifestPath: '/teams/pending/agentlet.yaml',
@@ -53,10 +57,12 @@ const profiles: AgentProfileView[] = [
     preparation: { status: 'not_prepared' },
   },
   {
+    schemaVersion: 2,
     id: 'command',
     alias: 'External Command',
     agentletId: 'machine-a',
     workingDirPath: '/work/command',
+    resourceIds: [],
     launch: { kind: 'acp-command', command: 'copilot --acp' },
   },
 ];

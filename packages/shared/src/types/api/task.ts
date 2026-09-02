@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { resourceIdListSchema } from '@agenetes/protocol';
 import { z } from 'zod';
 
 const pointSchema = z.object({
@@ -106,6 +107,11 @@ export const startTaskRunRequestSchema = z.object({
     .optional()
     .describe(
       'Optional absolute working directory for the new root Agent thread.',
+    ),
+  resourceIds: resourceIdListSchema
+    .optional()
+    .describe(
+      'Optional complete replacement for the root Profile selectable resources.',
     ),
   additionalInitialPreamble: z
     .string()

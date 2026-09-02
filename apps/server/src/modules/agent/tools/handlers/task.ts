@@ -36,6 +36,9 @@ export async function handleStartTaskRun(
     ...(args.workingDirPath !== undefined
       ? { workingDirPath: args.workingDirPath }
       : {}),
+    ...(args.resourceIds !== undefined
+      ? { resourceIds: args.resourceIds }
+      : {}),
     ...(args.additionalInitialPreamble !== undefined
       ? { additionalInitialPreamble: args.additionalInitialPreamble }
       : {}),

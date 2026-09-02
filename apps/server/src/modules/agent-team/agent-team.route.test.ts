@@ -14,10 +14,12 @@ import type { FastifyInstance } from 'fastify';
 
 function profile() {
   return {
+    schemaVersion: 2 as const,
     id: 'profile-1',
     alias: 'Reviewer',
     agentletId: 'machine-a',
     workingDirPath: '/teams/reviewer/workspaces/copilot',
+    resourceIds: [],
     launch: {
       kind: 'agent-team-manifest' as const,
       manifestPath: '/teams/reviewer/agentlet.yaml',

@@ -133,6 +133,13 @@ export const routes = {
   acpAgentCli: '/acp/agent-cli',
   // Profiles (loopback-only) — user-managed spawn recipes.
   acpProfiles: '/acp/profiles',
+  acpResources: '/acp/resources',
+  acpResourceImportScan: '/acp/resources/import/scan',
+  acpResourceImport: '/acp/resources/import',
+  acpResourceItem: (id: string) => `/acp/resources/${enc(id)}`,
+  acpResourceRefreshScan: (id: string) =>
+    `/acp/resources/${enc(id)}/refresh/scan`,
+  acpResourceRefresh: (id: string) => `/acp/resources/${enc(id)}/refresh`,
   acpProfileItem: (id: string) => `/acp/profiles/${enc(id)}`,
   // Embedded agentlet daemon — health + manual restart.
   acpAgentlet: '/acp/agentlet',

@@ -16,6 +16,21 @@ describe('filterHostNamespacedEnv', () => {
     expect(out).toEqual({ PATH: '/usr/bin', HOME: '/home/agent' });
   });
 
+  it('drops exact non-namespaced host secrets from the denylist', () => {
+    const out = filterHostNamespacedEnv(
+      {
+        PATH: '/bin',
+        TAVILY_API_KEY: 'secret',
+        AZURE_OPENAI_API_ENDPOINT: 'https://example.test',
+      },
+      'HUABU_',
+      [],
+      ['TAVILY_API_KEY', 'AZURE_OPENAI_API_ENDPOINT'],
+    );
+
+    expect(out).toEqual({ PATH: '/bin' });
+  });
+
   it('keeps only allow-listed host-namespaced vars', () => {
     const out = filterHostNamespacedEnv(base, 'HUABU_', ['HUABU_RFS_URL']);
     expect(out).toEqual({

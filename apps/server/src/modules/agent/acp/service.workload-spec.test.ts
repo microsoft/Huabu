@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
         alias: string;
         agentletId: string;
         workingDirPath: string;
+        resourceIds: string[];
         launch:
           | { kind: 'acp-command'; command: string }
           | {
@@ -25,6 +26,16 @@ vi.mock('@agenetes/agentlet-host', () => ({
   getAgentTeamRegistry: () => ({
     getProfile: () => mocks.profile,
   }),
+  getResourceRegistry: () => ({
+    get: (id: string) => ({
+      schemaVersion: 2,
+      id,
+      name: id,
+      provider: 'huabu',
+      sourceContent: id,
+      userContent: '',
+    }),
+  }),
   getSupervisedAgentletId: () => 'supervised-agentlet',
 }));
 
@@ -34,6 +45,7 @@ vi.mock('../agenetes/drivers.js', () => ({
 }));
 
 vi.mock('../../../prompt/external-agent/system-preamble.js', () => ({
+  DEFAULT_HUABU_RESOURCE_IDS: ['huabu-access', 'local-resource-management'],
   renderExternalAgentSystemPreamble: () => 'Mandatory preamble',
 }));
 
@@ -58,6 +70,7 @@ describe('buildAcpWorkloadSpec', () => {
       alias: 'Researcher',
       agentletId: 'agentlet-a',
       workingDirPath: '/profile/work',
+      resourceIds: ['web-search'],
       launch: { kind: 'acp-command', command: 'copilot --acp' },
     };
 
@@ -76,6 +89,7 @@ describe('buildAcpWorkloadSpec', () => {
 
     expect(workload.spec).toMatchObject({
       cwd: '/task/work',
+      resourceIds: ['huabu-access', 'local-resource-management', 'web-search'],
       initialPreamble: ['Mandatory preamble', 'Task-specific constraints'],
       recipe: {
         command: 'copilot --acp',
@@ -90,6 +104,7 @@ describe('buildAcpWorkloadSpec', () => {
       alias: 'Reviewer',
       agentletId: 'agentlet-a',
       workingDirPath: '/profile/work',
+      resourceIds: [],
       launch: {
         kind: 'agent-team-manifest',
         manifestPath: '/team/agentlet.yaml',

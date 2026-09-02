@@ -7,6 +7,7 @@ export type AgentTeamErrorCode =
   | 'invalid_config_value'
   | 'invalid_profile_kind'
   | 'invalid_profile_patch'
+  | 'invalid_resource_ids'
   | 'invalid_root'
   | 'invalid_setup_transition'
   | 'invalid_working_directory'

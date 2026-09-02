@@ -163,6 +163,16 @@ export interface AcpSpec {
   /** External binding (alias + profileId) for the thread. */
   readonly binding: { readonly alias: string; readonly profileId: string };
   /**
+   * Effective Agent Resource IDs snapshotted when the workload is first
+   * compiled. Optional only for legacy persisted workloads.
+   */
+  readonly resourceIds?: readonly string[];
+  /** Non-secret trusted scope used by the host to mint runtime-only grants. */
+  readonly resourceScope?: {
+    readonly canvasId: string;
+    readonly threadId: string;
+  };
+  /**
    * Explicit execution-node placement. Optional only when reading legacy
    * persisted specs; newly compiled specs must always provide it.
    */

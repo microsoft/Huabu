@@ -12,10 +12,19 @@ const mocks = vi.hoisted(() => ({
     listSelectableProfileIds: vi.fn(),
     createProfile: vi.fn(),
   },
+  resourceRegistry: {
+    list: vi.fn(),
+  },
+  gateway: {
+    getAgentlet: vi.fn(),
+    listManagedResources: vi.fn(),
+  },
 }));
 
 vi.mock('@agenetes/agentlet-host', () => ({
   getAgentTeamRegistry: () => mocks.registry,
+  getResourceRegistry: () => mocks.resourceRegistry,
+  getAgentletGateway: () => mocks.gateway,
   getDaemonSupervisor: () => ({
     getStatus: () => ({ online: true, restartAttempt: 0 }),
   }),
@@ -33,18 +42,22 @@ vi.mock('./profile-schema-cache.js', () => ({
 }));
 
 const commandProfile = {
+  schemaVersion: 2,
   id: 'command-1',
   alias: 'Copilot',
   agentletId: 'machine-a',
   workingDirPath: '/work/project',
+  resourceIds: [],
   launch: { kind: 'acp-command' as const, command: 'copilot --acp' },
 };
 
 const manifestProfile = {
+  schemaVersion: 2,
   id: 'team-1',
   alias: 'Reviewer',
   agentletId: 'machine-b',
   workingDirPath: '/teams/reviewer/workspaces/claude',
+  resourceIds: [],
   launch: {
     kind: 'agent-team-manifest' as const,
     manifestPath: '/teams/reviewer/agentlet.yaml',
@@ -85,9 +98,61 @@ describe('ACP Profile catalog routes', () => {
       agentletId: 'machine-a',
       command: 'copilot --acp',
       workingDirPath: '/work/project',
+      resourceIds: [],
       metadata: { cliId: 'copilot' },
     });
+
     expect(response.json()).toEqual(commandProfile);
+  });
+
+  it('lists the owner-facing Agent Resource catalogue', async () => {
+    const resources = [
+      {
+        schemaVersion: 2,
+        id: 'huabu-access',
+        name: 'Huabu Access',
+        provider: 'huabu',
+        sourceContent: 'Fetch $HUABU_RFS_URL/skill.',
+        userContent: '',
+      },
+    ];
+    mocks.resourceRegistry.list.mockReturnValue(resources);
+    mocks.gateway.getAgentlet.mockReturnValue({ status: 'connected' });
+    mocks.gateway.listManagedResources.mockResolvedValue({ ids: ['slides'] });
+    app = Fastify({ logger: false });
+    await app.register(acpProfilesRoutes, { prefix: '/api/acp' });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/acp/resources',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      resources,
+      manageableResourceIds: ['slides'],
+    });
+  });
+
+  it('lists resources without management actions when Agentlet lookup fails', async () => {
+    mocks.resourceRegistry.list.mockReturnValue([]);
+    mocks.gateway.getAgentlet.mockReturnValue({ status: 'connected' });
+    mocks.gateway.listManagedResources.mockRejectedValue(
+      new Error('connection lost'),
+    );
+    app = Fastify({ logger: false });
+    await app.register(acpProfilesRoutes, { prefix: '/api/acp' });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/acp/resources',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      resources: [],
+      manageableResourceIds: [],
+    });
   });
 
   it('lists every Profile but selects only runtime-ready resources', async () => {

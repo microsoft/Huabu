@@ -33,6 +33,12 @@ import type {
   AcpPermissionDecisionResponse,
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
+  AgentResourceListResponse,
+  AgentResourceMutationResponse,
+  ImportAgentResourceBody,
+  PatchAgentResourceBody,
+  ScanAgentResourcesBody,
+  ScanAgentResourcesResponse,
   CreateAcpCommandProfileBody,
   PatchAgentProfileBody,
   AcpThreadCachedMetaResponse,
@@ -60,6 +66,7 @@ export type {
   CreateAcpCommandProfileBody,
   PatchAgentProfileBody,
   AgentProfileView,
+  AgentResourceListResponse,
   AcpSessionConfigOption,
   AcpSessionMetaSnapshot,
   AcpSessionMode,
@@ -94,6 +101,78 @@ export async function listAcpAgentClis(): Promise<AcpAgentCliListResponse> {
 export async function listAcpProfiles(): Promise<AcpProfilesListResponse> {
   return apiFetch<AcpProfilesListResponse>(routes.acpProfiles, {
     fallbackMessage: 'Failed to list agent profiles',
+  });
+}
+
+export async function listAcpResources(): Promise<AgentResourceListResponse> {
+  return apiFetch<AgentResourceListResponse>(routes.acpResources, {
+    fallbackMessage: 'Failed to list agent resources',
+  });
+}
+
+export async function scanAcpResources(
+  payload: ScanAgentResourcesBody,
+): Promise<ScanAgentResourcesResponse> {
+  return apiFetch<ScanAgentResourcesResponse>(routes.acpResourceImportScan, {
+    method: 'POST',
+    json: payload,
+    fallbackMessage: 'Failed to scan agent resources',
+  });
+}
+
+export async function importAcpResource(
+  payload: ImportAgentResourceBody,
+): Promise<AgentResourceMutationResponse> {
+  return apiFetch<AgentResourceMutationResponse>(routes.acpResourceImport, {
+    method: 'POST',
+    json: payload,
+    fallbackMessage: 'Failed to import agent resource',
+  });
+}
+
+export async function updateAcpResource(
+  id: string,
+  payload: PatchAgentResourceBody,
+): Promise<AgentResourceMutationResponse> {
+  return apiFetch<AgentResourceMutationResponse>(routes.acpResourceItem(id), {
+    method: 'PATCH',
+    json: payload,
+    fallbackMessage: 'Failed to update agent resource',
+  });
+}
+
+export async function scanAcpResourceRefresh(
+  id: string,
+): Promise<ScanAgentResourcesResponse> {
+  return apiFetch<ScanAgentResourcesResponse>(
+    routes.acpResourceRefreshScan(id),
+    {
+      method: 'POST',
+      fallbackMessage: 'Failed to scan resource source',
+    },
+  );
+}
+
+export async function refreshAcpResource(
+  id: string,
+  expectedRevision: string,
+): Promise<AgentResourceMutationResponse> {
+  return apiFetch<AgentResourceMutationResponse>(
+    routes.acpResourceRefresh(id),
+    {
+      method: 'POST',
+      json: { expectedRevision },
+      fallbackMessage: 'Failed to refresh agent resource',
+    },
+  );
+}
+
+export async function deleteAcpResource(
+  id: string,
+): Promise<{ removed: boolean }> {
+  return apiFetch<{ removed: boolean }>(routes.acpResourceItem(id), {
+    method: 'DELETE',
+    fallbackMessage: 'Failed to delete agent resource',
   });
 }
 

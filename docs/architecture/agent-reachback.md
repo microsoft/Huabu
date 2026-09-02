@@ -13,6 +13,8 @@ External agent
   ├─ query ──────────────> canonical SpaceQuery dispatcher
   ├─ query SNAPSHOT_NODES ──> shared snapshot renderer ──> PNG artifact
   ├─ execute ────────────> agent command preparation ──> CanvasCommand engine
+  ├─ resources ──────────> Agent Resource catalogue + local receipt management
+  ├─ resource invoke ────> runtime grant ──> hosted capability service
   └─ agent ──────────────> internal Huabu agent ──> CanvasCommand engine
 ```
 
@@ -22,23 +24,27 @@ The shipped design record is [`agent-reachback-rfs.md`](../proposals/agent-reach
 
 All endpoints are mounted under `/api/rfs/:canvasId`; `HUABU_RFS_URL` already contains that canvas-scoped base.
 
-| Endpoint                           | Responsibility                                                                              |
-| ---------------------------------- | ------------------------------------------------------------------------------------------- |
-| `GET /skill`                       | Return the public bundled root guide, or an authenticated canvas-specific root override.    |
-| `GET /skill/:skillId`              | Return an authenticated advanced guide: `layout`, `tasks`, or `agents`.                     |
-| `GET /download/<path>`             | Stream a known node, artifact, or staged-upload file.                                       |
-| `POST /upload/<name>`              | Stage bytes in the canvas `.upload/` directory without creating a node.                     |
-| `DELETE /upload/<name>`            | Remove one exact staged upload.                                                             |
-| `POST /agent`                      | Create a visible Agent Node and optionally start its first turn.                            |
-| `POST /agent/:threadId/prompt`     | Submit a turn to an existing Agent conversation over SSE.                                   |
-| `GET /agent/profiles`              | Return available Agent Profile IDs and aliases, including the default `huabu` Profile.      |
-| `POST /task/create`                | Create a durable Task and its static Task Note.                                             |
-| `POST /task/:taskId/run/create`    | Create a Run, its visible root Agent Node, and start the first turn.                        |
-| `GET /capabilities`                | Report the direct-operation protocol, limits, semantics, and supported operation types.     |
-| `GET /capabilities/queries/:type`  | Return one query's generated JSON Schema, constraints, result description, and examples.    |
-| `GET /capabilities/commands/:type` | Return one command's generated JSON Schema, constraints, result description, and examples.  |
-| `POST /query`                      | Validate and execute one bounded `SpaceQuery`, returning a query-discriminated JSON result. |
-| `POST /execute`                    | Validate and execute an ordered batch of agent-allowed `CanvasCommand` variants.            |
+| Endpoint                                       | Responsibility                                                                              |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `GET /skill`                                   | Return the public bundled root guide, or an authenticated canvas-specific root override.    |
+| `GET /skill/:skillId`                          | Return an authenticated advanced guide: `layout`, `tasks`, or `agents`.                     |
+| `GET /download/<path>`                         | Stream a known node, artifact, or staged-upload file.                                       |
+| `POST /upload/<name>`                          | Stage bytes in the canvas `.upload/` directory without creating a node.                     |
+| `DELETE /upload/<name>`                        | Remove one exact staged upload.                                                             |
+| `POST /agent`                                  | Create a visible Agent Node and optionally start its first turn.                            |
+| `POST /agent/:threadId/prompt`                 | Submit a turn to an existing Agent conversation over SSE.                                   |
+| `GET /agent/profiles`                          | Return available Agent Profile IDs and aliases, including the default `huabu` Profile.      |
+| `GET /resources`                               | Return Huabu and current-machine Agent Resource catalogue records.                          |
+| `POST /resources/local/receipts`               | Validate one installed local resource receipt and refresh the machine projection.           |
+| `DELETE /resources/local/receipts/:resourceId` | Remove one local receipt and refresh the machine projection.                                |
+| `POST /resources/:resourceId/invoke`           | Invoke a selected Huabu-hosted capability with a runtime resource grant.                    |
+| `POST /task/create`                            | Create a durable Task and its static Task Note.                                             |
+| `POST /task/:taskId/run/create`                | Create a Run, its visible root Agent Node, and start the first turn.                        |
+| `GET /capabilities`                            | Report the direct-operation protocol, limits, semantics, and supported operation types.     |
+| `GET /capabilities/queries/:type`              | Return one query's generated JSON Schema, constraints, result description, and examples.    |
+| `GET /capabilities/commands/:type`             | Return one command's generated JSON Schema, constraints, result description, and examples.  |
+| `POST /query`                                  | Validate and execute one bounded `SpaceQuery`, returning a query-discriminated JSON result. |
+| `POST /execute`                                | Validate and execute an ordered batch of agent-allowed `CanvasCommand` variants.            |
 
 There is no directory-listing endpoint. External agents receive exact node paths in selected-node context or ask the internal agent to discover relevant files.
 
@@ -92,7 +98,7 @@ Parent lineage is best effort. The route resolves `parentThreadId` or `X-Huabu-H
 
 ## External-agent bootstrap
 
-Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent environment. Every external-agent Deployment persists the bootstrap as its initial preamble, including Deployments first created by mode, model, or configuration control requests; startup repair backfills older undelivered records that omitted it. The preamble owns the authentication contract and curl header setup because every external Agent needs them before loading any Skill. The complete basic guide is loaded without credentials from `GET /skill`; advanced layout, Task, recursive-Agent, and Interactive View procedures are loaded on demand from authenticated `GET /skill/layout`, `/skill/tasks`, `/skill/agents`, and `/skill/interactive-views`.
+Huabu injects `HUABU_RFS_URL` and `AGENTLET_TOKEN` into the external agent environment. Every external-agent Deployment persists the bootstrap as its initial preamble, including Deployments first created by mode, model, or configuration control requests; startup repair backfills older undelivered records that omitted it. The preamble owns the authentication contract, effective Agent Resource IDs, and catalogue bootstrap because every external Agent needs them before loading any Skill. The complete basic guide is loaded without credentials from `GET /skill`; advanced layout, Task, recursive-Agent, Interactive View, and Local Resource Management procedures are loaded on demand from authenticated focused Skill endpoints.
 
 Skills explain when and how to compose workflows, but they do not duplicate the wire protocol. `GET /capabilities` and its per-operation endpoints remain the canonical, schema-derived source for current query and command fields, limits, and semantics.
 
@@ -112,15 +118,25 @@ An external agent runs as an untrusted third-party CLI. It must receive its Huab
 
 1. **Namespace strip at the transport boundary.** When the server forks the embedded agentlet daemon, the entire `HUABU_` namespace is stripped from the inherited environment (`mountAgenetes({ hostEnvPrefix: 'HUABU_', hostEnvAllowlist: [] })`). The daemon needs none of it, so its allowlist is empty; because every agent is spawned by that daemon, the agents inherit an already-clean environment. Non-namespaced OS/toolchain variables (`PATH`, `HOME`, `TMPDIR`, …) always pass through so the agent CLI still runs. The mechanism (`filterHostNamespacedEnv`) is host-agnostic — the prefix and allowlist are Huabu policy passed in by `apps/server`.
 
-2. **Explicit reachback injection.** The only `HUABU_*` values an agent legitimately sees are re-added per-spawn by `buildReachbackEnv()`: `HUABU_RFS_URL` and `HUABU_THREAD_ID`. Anything an agent should see in future must be added to that injection point — inheritance is not a supported channel.
+2. **Explicit reachback injection.** The only `HUABU_*` values an agent legitimately sees are re-added through explicit runtime composition: `buildReachbackEnv()` provides `HUABU_RFS_URL` and `HUABU_THREAD_ID`, and the ACP runtime resource policy provides the opaque `HUABU_RESOURCE_GRANT`. Agentlet also explicitly provides `AGENT_RESOURCE_DIR`. Anything an agent should see in future must be added to an explicit injection point — inheritance is not a supported channel.
 
-**Consequence for adding env vars:** a new `HUABU_*` variable is denied to agents by default. To expose one, add it to `buildReachbackEnv()` (for agents) or to `hostEnvAllowlist` (for the daemon). A host secret such as `HUABU_SECRET_KEY` must never be added to either; it is additionally scrubbed from `process.env` after `initializeSecretStore()` consumes it (see [`credential-storage.md`](./credential-storage.md)). This isolation only covers the `HUABU_` namespace — non-namespaced secrets a deployment exports into the server's own environment (e.g. provider API keys) are not filtered and should not be relied upon as agent-invisible.
+**Consequence for adding env vars:** a new `HUABU_*` variable is denied to agents by default. To expose one, add it to the applicable explicit runtime injection or to `hostEnvAllowlist` for the daemon. A host secret such as `HUABU_SECRET_KEY` must never be added to either; it is additionally scrubbed from `process.env` after `initializeSecretStore()` consumes it (see [`credential-storage.md`](./credential-storage.md)). Huabu also supplies an exact hosted-provider denylist for `TAVILY_API_KEY`, `RAPIDAPI_KEY`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_ENDPOINT`, and `AZURE_OPENAI_API_DEPLOYMENT_NAME`, preventing those non-namespaced provider values from reaching the daemon or spawned agents while preserving unrelated environment credentials required by external ACP CLIs.
+
+## Agent Resource discovery and invocation
+
+External Agent Profiles select optional resources, Huabu unions required `huabu-access` and `local-resource-management`, and a new ACP workload snapshots the effective IDs. The durable preamble names those IDs and directs the Agent to `GET /resources`; catalogue visibility is descriptive and does not authorize hosted invocation.
+
+At spawn or resume, Huabu mints an opaque `HUABU_RESOURCE_GRANT` bound to Agentlet, Profile, Canvas, thread, selected IDs, expiry, and policy version. A hosted request presents it through `X-Huabu-Resource-Grant`. The server derives all trusted scope from the grant, rejects unselected resources and cross-Canvas use, enforces per-grant concurrency and provider deadlines, and logs sanitized trusted audit fields. Request disconnect propagates cancellation to the provider.
+
+The Local Resource Management Skill uses the required grant to submit or remove validated Agentlet receipts after an approved installation operation under `AGENT_RESOURCE_DIR`. Receipt writes cannot choose their provider or installation timestamp; Huabu stamps both and refreshes the current machine projection. Owner Settings uses a separate owner-only HTTP adapter and authenticated Agentlet Gateway RPC for read-only Skill discovery and confirmed import, refresh, and deletion; Huabu never scans the source folder directly. See [`agent-resources.md`](./agent-resources.md).
 
 ## Code entry points
 
 | File/dir                                                                                                                                       | Responsibility                                                                                            |
 | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | [`apps/server/src/modules/remote_fs/rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts)                                       | Canvas-scoped file, capability, direct-operation, and ask-agent routes.                                   |
+| [`apps/server/src/modules/agent/hosted-capabilities/`](../../apps/server/src/modules/agent/hosted-capabilities/)                               | Runtime resource grants and shared hosted capability services.                                            |
+| [`docs/architecture/agent-resources.md`](./agent-resources.md)                                                                                 | Resource registry, Profile composition, local receipts, and hosted invocation architecture.               |
 | [`apps/server/src/modules/remote_fs/space-capabilities.ts`](../../apps/server/src/modules/remote_fs/space-capabilities.ts)                     | Compact capability handshake and schema-derived per-operation descriptions.                               |
 | [`apps/server/src/modules/remote_fs/space-execute.ts`](../../apps/server/src/modules/remote_fs/space-execute.ts)                               | Agent-friendly projection over canonical command preparation and execution.                               |
 | [`apps/server/src/modules/canvas/space-query.ts`](../../apps/server/src/modules/canvas/space-query.ts)                                         | Canonical query dispatcher over spatial and search services.                                              |

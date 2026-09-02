@@ -29,6 +29,8 @@ The renderer never receives plaintext credentials. Existing HTTP read models con
 
 Settings API updates for optional capability credentials use an explicit three-state patch contract: omitting a key preserves the persisted value, a non-empty string sets or replaces it, and `null` removes the value stored by Huabu. Removing a persisted key preserves non-secret provider configuration and does not alter deployment-owned environment variables; an environment fallback may therefore keep the capability available at runtime.
 
+Huabu-hosted external-Agent capabilities resolve these same credentials only inside the shared server-side web-search and image-generation services. Resource catalogue records, Profile selections, durable ACP workloads, runtime grants, prompts, and HTTP results never contain secret values or SecretStore identifiers. Before spawning Agentlet, Huabu strips the full `HUABU_` namespace and exactly denies its hosted-provider fallback variables (`TAVILY_API_KEY`, `RAPIDAPI_KEY`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_ENDPOINT`, and `AZURE_OPENAI_API_DEPLOYMENT_NAME`); unrelated external-CLI credentials remain available because command-backed ACP harnesses may need them. See [`agent-resources.md`](./agent-resources.md).
+
 ## Electron encrypted store
 
 The encrypted file is versioned JSON whose values are Base64 representations of buffers returned by `safeStorage.encryptString()`; Base64 is transport encoding, while the security comes from the platform backend used by Electron.
@@ -63,3 +65,4 @@ The deployment readiness endpoint exposes only whether the selected backend is w
 | [`apps/server/src/modules/agent/llm.ts`](../../apps/server/src/modules/agent/llm.ts)                                       | Chat, utility, and image API-key resolution.                                  |
 | [`apps/server/src/modules/agent/oauth.ts`](../../apps/server/src/modules/agent/oauth.ts)                                   | Copilot OAuth credential persistence.                                         |
 | [`apps/server/src/modules/integrations/integrations.ts`](../../apps/server/src/modules/integrations/integrations.ts)       | Tavily and RapidAPI credential persistence.                                   |
+| [`apps/server/src/modules/agent/hosted-capabilities/`](../../apps/server/src/modules/agent/hosted-capabilities/)           | Server-side credential use and sanitized hosted capability adapters.          |

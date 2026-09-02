@@ -22,6 +22,8 @@ export * from './preprocessing.js';
 export * from './agent.js';
 export * from './artifact.js';
 export * from './acp.js';
+export * from './agent-resource.js';
+export * from './hosted-capability.js';
 export * from './acp-tool.js';
 export * from './skills.js';
 export * from './rfs.js';

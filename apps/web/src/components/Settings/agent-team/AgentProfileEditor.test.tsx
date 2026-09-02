@@ -21,11 +21,13 @@ const apiMocks = vi.hoisted(() => ({
   setupManifest: vi.fn(),
   patchManifest: vi.fn(),
   listClis: vi.fn(),
+  listResources: vi.fn(async () => ({ resources: [] })),
 }));
 
 vi.mock('@/api/acp', () => ({
   createAcpProfile: apiMocks.createCommand,
   listAcpAgentClis: apiMocks.listClis,
+  listAcpResources: apiMocks.listResources,
   updateAcpProfile: vi.fn(),
 }));
 
@@ -125,11 +127,11 @@ const members: ManifestMemberGroup[] = [
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
-function renderFlow() {
+async function renderFlow() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() =>
+  await act(async () => {
     root?.render(
       <AgentProfileEditor
         mode="create"
@@ -142,15 +144,16 @@ function renderFlow() {
         onManifestCreated={vi.fn()}
         applyMemberDetail={vi.fn()}
       />,
-    ),
-  );
+    );
+    await Promise.resolve();
+  });
 }
 
-function renderManifestEditor(onClose = vi.fn()) {
+async function renderManifestEditor(onClose = vi.fn()) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() =>
+  await act(async () => {
     root?.render(
       <AgentProfileEditor
         mode="edit-manifest"
@@ -158,10 +161,12 @@ function renderManifestEditor(onClose = vi.fn()) {
           member: members[0].member,
           config: members[0].config,
           profile: {
+            schemaVersion: 2,
             id: 'profile-1',
             alias: 'Reviewer',
             agentletId: 'machine-a',
             workingDirPath: 'C:\\work\\project',
+            resourceIds: [],
             launch: {
               kind: 'agent-team-manifest',
               manifestPath: 'C:\\templates\\reviewer\\agentlet.yaml',
@@ -176,8 +181,9 @@ function renderManifestEditor(onClose = vi.fn()) {
         applyMemberDetail={vi.fn()}
         onAliasSaved={vi.fn()}
       />,
-    ),
-  );
+    );
+    await Promise.resolve();
+  });
 }
 
 afterEach(() => {
@@ -189,8 +195,8 @@ afterEach(() => {
 });
 
 describe('AgentProfileEditor (create)', () => {
-  it('defaults to no Template and lists missing Agents before Custom command', () => {
-    renderFlow();
+  it('defaults to no Template and lists missing Agents before Custom command', async () => {
+    await renderFlow();
 
     const selects = container?.querySelectorAll('select');
     expect(selects?.[0]?.value).toBe('');
@@ -204,7 +210,7 @@ describe('AgentProfileEditor (create)', () => {
   });
 
   it('filters a Template to supported Agents and disables missing ones', async () => {
-    renderFlow();
+    await renderFlow();
     const templateSelect = container?.querySelector('select');
     await act(async () => {
       if (!templateSelect) return;
@@ -227,7 +233,7 @@ describe('AgentProfileEditor (create)', () => {
     apiMocks.listClis.mockResolvedValue({ agents });
     apiMocks.createManifest.mockResolvedValue({ id: 'profile-1' });
     apiMocks.setupManifest.mockResolvedValue({ id: 'profile-1' });
-    renderFlow();
+    await renderFlow();
     const templateSelect = container?.querySelector('select');
     await act(async () => {
       if (!templateSelect) return;
@@ -264,6 +270,7 @@ describe('AgentProfileEditor (create)', () => {
     expect(apiMocks.createManifest).toHaveBeenCalledWith({
       alias: 'Reviewer (project)',
       agentletId: 'machine-a',
+      resourceIds: [],
       workingDirectory: {
         kind: 'custom',
         path: 'C:\\work\\project',
@@ -287,7 +294,7 @@ describe('AgentProfileEditor (create)', () => {
     apiMocks.listClis.mockResolvedValue({ agents });
     apiMocks.createManifest.mockResolvedValue({ id: 'profile-default' });
     apiMocks.setupManifest.mockResolvedValue({ id: 'profile-default' });
-    renderFlow();
+    await renderFlow();
     const templateSelect = container?.querySelector('select');
     await act(async () => {
       if (!templateSelect) return;
@@ -311,6 +318,7 @@ describe('AgentProfileEditor (create)', () => {
     expect(apiMocks.createManifest).toHaveBeenCalledWith({
       alias: 'Reviewer',
       agentletId: 'machine-a',
+      resourceIds: [],
       workingDirectory: { kind: 'default' },
       launch: {
         kind: 'agent-team-manifest',
@@ -331,7 +339,7 @@ describe('AgentProfileEditor (edit manifest)', () => {
   it('uses the shared editor fields and saves explicitly', async () => {
     apiMocks.patchManifest.mockResolvedValue(undefined);
     const onClose = vi.fn();
-    renderManifestEditor(onClose);
+    await renderManifestEditor(onClose);
 
     expect(container?.textContent).toContain('Reviewer');
     expect(container?.textContent).toContain('GitHub Copilot');

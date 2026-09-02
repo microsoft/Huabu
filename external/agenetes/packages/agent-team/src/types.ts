@@ -74,11 +74,28 @@ export type AgentTeamPreparation =
   | { status: 'ready'; completedAt: number }
   | { status: 'error'; failedAt: number; error: AgentTeamSetupError };
 
+/**
+ * Current Agent Profile record schema version (docs/proposals/agent-resource-registry.md
+ * §9, §15). A persisted record with no `schemaVersion` is legacy v1: the
+ * store accepts it only as v1, migrates it to v2 with `resourceIds: []`,
+ * and rewrites it explicitly. Application code (registry, driver) only ever
+ * sees v2 — compatibility parsing lives at the store boundary.
+ */
+export const AGENT_PROFILE_SCHEMA_VERSION = 2;
+
 export interface AgentProfileBase {
+  schemaVersion: typeof AGENT_PROFILE_SCHEMA_VERSION;
   id: string;
   alias: string;
   agentletId: string;
   workingDirPath: string;
+  /**
+   * The Profile's selectable resource IDs (§9), first-class and generic
+   * rather than Huabu-owned `customData`. A host unions its own required
+   * defaults with this list at realization; Agenetes never hard-codes
+   * default resource IDs itself.
+   */
+  resourceIds: string[];
   /**
    * Caller-owned, opaque bag of JSON data. agenetes persists it verbatim and
    * never reads or interprets its contents; embedding hosts use it to attach
@@ -113,6 +130,15 @@ export interface AgentProfileSnapshot {
   profileId: string;
   agentletId: string;
   workingDirPath: string;
+  /**
+   * The effective resource IDs snapshotted at first realization
+   * (docs/proposals/agent-resource-registry.md §9, §15). Backward-compatible
+   * addition to Agent Profile driver workload v1: optional-on-read (an
+   * existing snapshot without the field reads as `[]`) and explicit-on-write
+   * for every newly created workload. The driver `schemaVersion` therefore
+   * stays 1 — this is an additive field, not a driver contract change.
+   */
+  resourceIds: string[];
   launch: AgentProfile['launch'];
 }
 
@@ -228,6 +254,8 @@ export interface CreateAgentTeamManifestProfileInput {
   manifestPath: string;
   harness: string;
   workingDirPath: string;
+  /** Optional resources beyond any host-applied required defaults; defaults to `[]`. */
+  resourceIds?: string[];
   customData?: Record<string, JsonValue>;
 }
 
@@ -237,6 +265,8 @@ export interface CreateAcpCommandProfileInput {
   agentletId: string;
   command: string;
   workingDirPath: string;
+  /** Optional resources beyond any host-applied required defaults; defaults to `[]`. */
+  resourceIds?: string[];
   metadata?: {
     cliId?: string;
   };
@@ -261,6 +291,40 @@ export interface PatchAgentProfileInput {
    * object replaces the whole bag.
    */
   customData?: Record<string, JsonValue> | null;
+  /**
+   * `undefined` leaves the Profile's `resourceIds` untouched; a present array
+   * completely replaces it, including an empty array (§9: "Profile patch
+   * replaces the complete list").
+   */
+  resourceIds?: string[];
+}
+
+/**
+ * Context a resource-ID validation seam receives alongside the candidate
+ * IDs: enough to enforce placement (a machine-local resource is eligible
+ * only when its `provider` equals the Profile's `agentletId`) without this
+ * package depending on the Resource Registry package itself.
+ */
+export interface AgentResourceValidationContext {
+  agentletId: string;
+}
+
+/**
+ * Injectable seam validating that a Profile's candidate `resourceIds` are
+ * known to the registry and eligible for its placement (§9). Kept as a
+ * narrow port rather than a direct `@agenetes/resource-registry` dependency
+ * so this package stays usable without pulling in the registry package; a
+ * host composes a real implementation over its own Resource Registry
+ * instance. When no port is supplied, the registry only enforces the
+ * bounded shape of `resourceIds` (trimmed, unique, within the canonical
+ * bound) and skips existence/eligibility checks.
+ */
+export interface AgentResourceValidationPort {
+  /** Throws for any ID that is unknown to the registry or ineligible for `context`. */
+  validateResourceIds(
+    resourceIds: readonly string[],
+    context: AgentResourceValidationContext,
+  ): void;
 }
 
 export interface AgentTeamMemberSummary {

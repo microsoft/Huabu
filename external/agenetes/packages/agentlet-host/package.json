@@ -24,6 +24,7 @@
     "@agenetes/agent-team": "workspace:*",
     "@agenetes/agentlet-gateway": "workspace:*",
     "@agenetes/protocol": "workspace:*",
+    "@agenetes/resource-registry": "workspace:*",
     "@agentlet/protocol": "workspace:*"
   },
   "peerDependencies": {

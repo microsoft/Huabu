@@ -114,6 +114,7 @@ const badRequestCodes = new Set([
   'invalid_config_value',
   'invalid_profile_kind',
   'invalid_profile_patch',
+  'invalid_resource_ids',
   'invalid_root',
   'invalid_working_directory',
   'unsupported_harness',
@@ -267,6 +268,7 @@ export function createAgentTeamRoutes(
           alias: parsed.data.alias,
           agentletId: parsed.data.agentletId,
           workingDirPath,
+          resourceIds: parsed.data.resourceIds,
           manifestPath: parsed.data.launch.manifestPath,
           harness: parsed.data.launch.harness,
           ...(parsed.data.customData === undefined

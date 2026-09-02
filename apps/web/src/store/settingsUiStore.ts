@@ -19,7 +19,7 @@ import { create } from 'zustand';
  * open and then cleared so a later plain `open()` reopens on the last
  * tab the user was viewing rather than snapping back.
  */
-export type SettingsTabId = 'general' | 'huabuAgent' | 'agents';
+export type SettingsTabId = 'general' | 'huabuAgent' | 'agents' | 'resources';
 
 interface SettingsUiState {
   isOpen: boolean;

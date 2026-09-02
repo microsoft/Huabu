@@ -49,6 +49,7 @@ import { AgentTeamConfigs } from './AgentTeamConfigs';
 import { ProfileEditActions } from './ProfileEditActions';
 import { ProfileEditFields } from './ProfileEditFields';
 import { ProfileFormFooter } from './ProfileFormFooter';
+import { ProfileResourceField } from './ProfileResourceField';
 
 import type {
   ManifestMemberGroup,
@@ -122,6 +123,7 @@ function CreateManifestProfileForm({
   const [workingDirPath, setWorkingDirPath] = useState('');
   const [alias, setAlias] = useState('');
   const [icon, setIcon] = useState<AgentIconValue>(() => randomAgentIcon());
+  const [resourceIds, setResourceIds] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
@@ -186,6 +188,7 @@ function CreateManifestProfileForm({
           harness: agentId,
         },
         customData: withAgentIcon(undefined, icon),
+        resourceIds,
       };
       const profile: CreateAgentTeamProfileBody = useDefaultWorkingDir
         ? {
@@ -236,6 +239,7 @@ function CreateManifestProfileForm({
     icon,
     onClose,
     onCreated,
+    resourceIds,
     t,
     tAgent,
     useDefaultWorkingDir,
@@ -361,6 +365,12 @@ function CreateManifestProfileForm({
         disabled={creating}
       />
 
+      <ProfileResourceField
+        selectedIds={resourceIds}
+        onChange={setResourceIds}
+        disabled={creating}
+      />
+
       <ProfileFormFooter>
         <Button
           variant="outline"
@@ -409,6 +419,7 @@ function EditManifestProfileForm({
     readAgentIcon(profile),
   );
   const [saving, setSaving] = useState(false);
+  const [resourceIds, setResourceIds] = useState(profile.resourceIds);
   // Resolve the harness id to the same display name the list uses (e.g.
   // "GitHub Copilot") so both views read consistently; fall back to the raw
   // id when detection hasn't surfaced the CLI.
@@ -423,7 +434,10 @@ function EditManifestProfileForm({
     const current = readAgentIcon(profile);
     const iconChanged =
       icon.shape !== current.shape || icon.color !== current.color;
-    if (!aliasChanged && !iconChanged) {
+    const resourcesChanged =
+      resourceIds.length !== profile.resourceIds.length ||
+      resourceIds.some((id, index) => id !== profile.resourceIds[index]);
+    if (!aliasChanged && !iconChanged && !resourcesChanged) {
       onClose();
       return;
     }
@@ -434,6 +448,7 @@ function EditManifestProfileForm({
         ...(iconChanged
           ? { customData: withAgentIcon(profile.customData, icon) }
           : {}),
+        ...(resourcesChanged ? { resourceIds } : {}),
       });
       await onAliasSaved();
       toast(t('settings.profileUpdated'), { tone: 'success' });
@@ -485,6 +500,11 @@ function EditManifestProfileForm({
         value={icon}
         onChange={setIcon}
         alias={alias || profile.alias}
+        disabled={saving}
+      />
+      <ProfileResourceField
+        selectedIds={resourceIds}
+        onChange={setResourceIds}
         disabled={saving}
       />
       <ProfileEditActions

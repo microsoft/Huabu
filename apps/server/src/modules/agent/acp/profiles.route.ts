@@ -26,8 +26,11 @@
  */
 
 import {
+  AgentTeamError,
+  getAgentletGateway,
   getAgentTeamRegistry,
   getDaemonSupervisor,
+  getResourceRegistry,
   getSupervisedAgentletId,
 } from '@agenetes/agentlet-host';
 
@@ -41,12 +44,14 @@ import {
   deleteProfile as deleteLegacyProfile,
   getProfile as getLegacyProfile,
 } from './profile-store.js';
+import { ResourceRegistryUnavailableError } from './resources.js';
 import { isOwnerRequest } from '../../security/owner.js';
 
 import type { AcpCommandProfile, AgentProfile } from '@agenetes/agentlet-host';
 import type {
   AcpProfileMutationResponse,
   AcpProfilesListResponse,
+  AgentResourceListResponse,
   ApiResult,
 } from '@huabu/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
@@ -64,6 +69,28 @@ function isCommandProfile(profile: AgentProfile): profile is AcpCommandProfile {
   return profile.launch.kind === 'acp-command';
 }
 
+function sendProfileError(error: unknown, reply: FastifyReply): FastifyReply {
+  if (error instanceof ResourceRegistryUnavailableError) {
+    return reply.status(503).send({
+      message: error.message,
+      code: 'resource_registry_unavailable',
+    });
+  }
+  if (error instanceof AgentTeamError) {
+    const status =
+      error.code === 'invalid_resource_ids'
+        ? 400
+        : error.code === 'profile_not_found'
+          ? 404
+          : 409;
+    return reply.status(status).send({
+      message: error.message,
+      code: error.code,
+    });
+  }
+  throw error;
+}
+
 const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
   // ── List ─────────────────────────────────────────────────────────────
   app.get<{ Reply: ApiResult<AcpProfilesListResponse> }>(
@@ -76,6 +103,40 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         profiles,
         selectableProfileIds: registry?.listSelectableProfileIds() ?? [],
         agentlet: getDaemonSupervisor().getStatus(),
+      };
+    },
+  );
+
+  app.get<{ Reply: ApiResult<AgentResourceListResponse> }>(
+    '/resources',
+    async (request, reply) => {
+      if (denyRemote(request, reply)) return;
+      const registry = getResourceRegistry();
+      if (!registry) {
+        return reply.status(503).send({
+          message: 'Agent Resource Registry is not ready',
+          code: 'resource_registry_unavailable',
+        });
+      }
+      const resources = registry.list();
+      const agentletId = getSupervisedAgentletId();
+      const gateway = getAgentletGateway();
+      let manageableResourceIds: string[] = [];
+      if (gateway?.getAgentlet(agentletId)?.status === 'connected') {
+        try {
+          manageableResourceIds = (
+            await gateway.listManagedResources(agentletId)
+          ).ids;
+        } catch (error) {
+          request.log.warn(
+            { err: error, agentletId },
+            'Failed to list Agentlet-managed resources',
+          );
+        }
+      }
+      return {
+        resources,
+        manageableResourceIds,
       };
     },
   );
@@ -99,17 +160,23 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           code: 'profile_registry_unavailable',
         });
       }
-      const created = registry.createProfile({
-        launchKind: 'acp-command',
-        alias: parsed.data.alias,
-        agentletId: getSupervisedAgentletId(),
-        command: parsed.data.launch.command,
-        workingDirPath: parsed.data.workingDirPath,
-        ...(parsed.data.metadata && { metadata: parsed.data.metadata }),
-        ...(parsed.data.customData === undefined
-          ? {}
-          : { customData: parsed.data.customData }),
-      });
+      let created: AgentProfile;
+      try {
+        created = registry.createProfile({
+          launchKind: 'acp-command',
+          alias: parsed.data.alias,
+          agentletId: getSupervisedAgentletId(),
+          command: parsed.data.launch.command,
+          workingDirPath: parsed.data.workingDirPath,
+          resourceIds: parsed.data.resourceIds,
+          ...(parsed.data.metadata && { metadata: parsed.data.metadata }),
+          ...(parsed.data.customData === undefined
+            ? {}
+            : { customData: parsed.data.customData }),
+        });
+      } catch (error) {
+        return sendProfileError(error, reply);
+      }
       if (!isCommandProfile(created)) {
         throw new Error('Agent Profile registry returned an invalid kind');
       }
@@ -155,15 +222,25 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
     if (!registry) {
       throw new Error('Agent Profile registry became unavailable');
     }
-    const updated = registry.patchProfile(request.params.id, {
-      ...(parsed.data.alias === undefined ? {} : { alias: parsed.data.alias }),
-      ...(parsed.data.customData === undefined
-        ? {}
-        : { customData: parsed.data.customData }),
-      ...(parsed.data.metadata === undefined
-        ? {}
-        : { metadata: parsed.data.metadata }),
-    });
+    let updated: AgentProfile;
+    try {
+      updated = registry.patchProfile(request.params.id, {
+        ...(parsed.data.alias === undefined
+          ? {}
+          : { alias: parsed.data.alias }),
+        ...(parsed.data.customData === undefined
+          ? {}
+          : { customData: parsed.data.customData }),
+        ...(parsed.data.metadata === undefined
+          ? {}
+          : { metadata: parsed.data.metadata }),
+        ...(parsed.data.resourceIds === undefined
+          ? {}
+          : { resourceIds: parsed.data.resourceIds }),
+      });
+    } catch (error) {
+      return sendProfileError(error, reply);
+    }
     if (!isCommandProfile(updated)) {
       throw new Error('Agent Profile registry returned an invalid kind');
     }

@@ -184,6 +184,9 @@ importers:
       '@agentlet/protocol':
         specifier: workspace:*
         version: link:../../external/agentlet/packages/protocol
+      '@agentlet/resources':
+        specifier: workspace:*
+        version: link:../../external/agentlet/packages/resources
       '@earendil-works/pi-agent-core':
         specifier: ^0.81.1
         version: 0.81.1(ws@8.21.0)(zod@4.4.3)
@@ -562,6 +565,9 @@ importers:
       '@agenetes/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@agenetes/resource-registry':
+        specifier: workspace:*
+        version: link:../resource-registry
       '@agentlet/protocol':
         specifier: workspace:*
         version: link:../../../agentlet/packages/protocol
@@ -619,6 +625,25 @@ importers:
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.1.8(@opentelemetry/api@1.9.0)(@types/node@24.13.3)(happy-dom@20.11.1)(vite@7.3.5(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  external/agenetes/packages/resource-registry:
+    dependencies:
+      '@agenetes/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.0
+        version: 22.19.21
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.1.8(@opentelemetry/api@1.9.0)(@types/node@22.19.21)(happy-dom@20.11.1)(vite@7.3.5(@types/node@22.19.21)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)(yaml@2.9.0))
 
   external/agenetes/packages/runtime:
     dependencies:
@@ -663,6 +688,9 @@ importers:
       '@agentlet/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@agentlet/resources':
+        specifier: workspace:*
+        version: link:../resources
       commander:
         specifier: ^13.0.0
         version: 13.1.0
@@ -679,6 +707,15 @@ importers:
 
   external/agentlet/packages/protocol:
     devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
+  external/agentlet/packages/resources:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.21
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
@@ -6184,7 +6221,7 @@ packages:
     resolution: {integrity: sha512-2Ac2RgzDe/cn48GvOe3M+o82pEFewD3UPbyoUHHdKasHwJKjds4fLXWf/Ux5kATBKN20oaFGu+jbElp1pos0mg==}
 
   tslib@2.8.1:
-    resolution: {integrity: sha1-YS7+TtI11Wfoq6Xypfq3AoCt6D8=, tarball: https://ms-feed-12.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/tslib/-/tslib-2.8.1.tgz}
+    resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
   tsup@8.5.1:
     resolution: {integrity: sha512-xtgkqwdhpKWr3tKPmCkvYmS9xnQK3m3XgxZHwSUjvfTjp7YfXe5tT3GgWi0F2N+ZSMsOeWeZFh7ZZFg5iPhing==}

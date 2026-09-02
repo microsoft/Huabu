@@ -31,6 +31,12 @@ export const ServerMethods = {
   AGENT_TEAM_SETUP: 'agent-team/setup',
   AGENT_TEAM_SETUP_CANCEL: 'agent-team/setup-cancel',
   AGENT_TEAM_VALIDATE: 'agent-team/validate',
+  RESOURCE_SCAN: 'resource/scan',
+  RESOURCE_LIST_MANAGED: 'resource/list-managed',
+  RESOURCE_IMPORT: 'resource/import',
+  RESOURCE_REFRESH_SCAN: 'resource/refresh-scan',
+  RESOURCE_REFRESH: 'resource/refresh',
+  RESOURCE_DELETE: 'resource/delete',
 } as const
 
 /** Error codes used in agent/hello rejection */

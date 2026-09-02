@@ -678,6 +678,7 @@ export type AgentBindingPolicy = 'selectable' | 'fixed';
 /** Bounded per-thread overrides applied when an external Agent is realized. */
 export interface AgentLaunchOverrides {
   workingDirPath?: string;
+  resourceIds?: string[];
   additionalInitialPreamble?: string;
 }
 

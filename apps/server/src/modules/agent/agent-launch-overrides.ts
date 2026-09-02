@@ -3,6 +3,8 @@
 
 import path from 'node:path';
 
+import { resourceIdListSchema } from '@agenetes/protocol';
+
 import type { AgentLaunchOverrides } from '@huabu/shared';
 
 export const MAX_AGENT_WORKING_DIR_PATH_LENGTH = 4096;
@@ -36,7 +38,10 @@ export function parseAgentLaunchOverrides(
 
   const record = value as Record<string, unknown>;
   const unknownKeys = Object.keys(record).filter(
-    (key) => key !== 'workingDirPath' && key !== 'additionalInitialPreamble',
+    (key) =>
+      key !== 'workingDirPath' &&
+      key !== 'resourceIds' &&
+      key !== 'additionalInitialPreamble',
   );
   if (unknownKeys.length > 0) {
     throw new InvalidAgentLaunchOverridesError(
@@ -71,11 +76,25 @@ export function parseAgentLaunchOverrides(
     );
   }
 
-  if (workingDirPath === undefined && additionalInitialPreamble === undefined) {
+  const parsedResourceIds = resourceIdListSchema.safeParse(record.resourceIds);
+  if (record.resourceIds !== undefined && !parsedResourceIds.success) {
+    throw new InvalidAgentLaunchOverridesError(
+      'resourceIds must be a bounded list of unique resource ids',
+    );
+  }
+
+  if (
+    workingDirPath === undefined &&
+    record.resourceIds === undefined &&
+    additionalInitialPreamble === undefined
+  ) {
     return undefined;
   }
   return {
     ...(typeof workingDirPath === 'string' ? { workingDirPath } : {}),
+    ...(record.resourceIds === undefined
+      ? {}
+      : { resourceIds: parsedResourceIds.data }),
     ...(typeof additionalInitialPreamble === 'string'
       ? { additionalInitialPreamble }
       : {}),

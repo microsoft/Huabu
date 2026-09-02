@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
+import { resourceIdListSchema } from '@agenetes/protocol';
+
 import { AgentTeamError } from './errors.js';
 import {
   agentTeamMemberKey,
@@ -12,6 +14,7 @@ import type {
   AcpCommandProfile,
   AgentProfile,
   AgentProfileSnapshot,
+  AgentResourceValidationPort,
   AgentTeamControlPort,
   AgentTeamManifestProfile,
   AgentTeamManifestRuntime,
@@ -98,6 +101,7 @@ export class AgentTeamRegistry {
     private readonly generateId: () => string = randomUUID,
     private readonly secretStore?: AgentTeamSecretStore,
     private readonly controlPort?: AgentTeamControlPort,
+    private readonly resourceValidationPort?: AgentResourceValidationPort,
   ) {
     this.state = store.load();
     this.recoverInterruptedSetups();
@@ -470,11 +474,16 @@ export class AgentTeamRegistry {
         : input.customData === null
           ? { customData: undefined }
           : { customData: input.customData };
+    const resourceIds =
+      input.resourceIds === undefined
+        ? current.resourceIds
+        : this.validateResourceIds(input.resourceIds, current.agentletId);
     const next: AgentProfile =
       current.launch.kind === 'acp-command'
         ? {
             ...current,
             alias: input.alias ?? current.alias,
+            resourceIds,
             ...(input.metadata === undefined
               ? {}
               : input.metadata === null
@@ -485,6 +494,7 @@ export class AgentTeamRegistry {
         : {
             ...current,
             alias: input.alias ?? current.alias,
+            resourceIds,
             ...customDataPatch,
           };
     this.persistProfile(next);
@@ -951,10 +961,15 @@ export class AgentTeamRegistry {
     this.assertHarnessSupported(member, input.harness);
     this.assertWorkingDirPath(input.workingDirPath);
     const profile: AgentTeamManifestProfile = {
+      schemaVersion: 2,
       id: this.allocateProfileId(input.id),
       alias: this.assertAlias(input.alias),
       agentletId: input.agentletId,
       workingDirPath: input.workingDirPath,
+      resourceIds: this.validateResourceIds(
+        input.resourceIds ?? [],
+        input.agentletId,
+      ),
       ...(input.customData === undefined
         ? {}
         : { customData: input.customData }),
@@ -989,10 +1004,15 @@ export class AgentTeamRegistry {
       );
     }
     const profile: AcpCommandProfile = {
+      schemaVersion: 2,
       id: this.allocateProfileId(input.id),
       alias: this.assertAlias(input.alias),
       agentletId: input.agentletId,
       workingDirPath: input.workingDirPath,
+      resourceIds: this.validateResourceIds(
+        input.resourceIds ?? [],
+        input.agentletId,
+      ),
       launch: { kind: 'acp-command', command: input.command },
       ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       ...(input.customData === undefined
@@ -1013,6 +1033,7 @@ export class AgentTeamRegistry {
         'Generated Agent Profile ID must be non-empty without surrounding whitespace',
       );
     }
+
     if (this.state.profiles.some((profile) => profile.id === id)) {
       throw new AgentTeamError(
         'profile_conflict',
@@ -1020,6 +1041,23 @@ export class AgentTeamRegistry {
       );
     }
     return id;
+  }
+
+  private validateResourceIds(
+    resourceIds: readonly string[],
+    agentletId: string,
+  ): string[] {
+    const parsed = resourceIdListSchema.safeParse(resourceIds);
+    if (!parsed.success) {
+      throw new AgentTeamError(
+        'invalid_resource_ids',
+        'Agent Profile resourceIds must be a bounded list of unique resource ids',
+      );
+    }
+    this.resourceValidationPort?.validateResourceIds(parsed.data, {
+      agentletId,
+    });
+    return parsed.data;
   }
 
   private requireProfile(id: string): AgentProfile {

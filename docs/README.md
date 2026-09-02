@@ -48,6 +48,7 @@ docs/
 | [agent-architecture.md](./architecture/agent-architecture.md)                   | Server-side agent runtime, tools, skills, SSE protocol.                                                  |
 | [agent-context.md](./architecture/agent-context.md)                             | How canvas state gets shaped into `AgentChatContext` and reaches the model.                              |
 | [agent-reachback.md](./architecture/agent-reachback.md)                         | Huabu Reachback Tool (HRT) — how external agents read/write the Space out-of-band.                       |
+| [agent-resources.md](./architecture/agent-resources.md)                         | External Agent resource catalogue, Profile composition, local resources, and hosted capabilities.        |
 | [agent-teams-as-extensions.md](./architecture/agent-teams-as-extensions.md)     | Product/vision: managed Agent Teams as Huabu's "plugin system".                                          |
 | [api-design.md](./architecture/api-design.md)                                   | **Authoritative** rules for every HTTP / SSE endpoint, zod-first wire contracts.                         |
 | [canvas-command-architecture.md](./architecture/canvas-command-architecture.md) | `CanvasUiIntent` / `CanvasCommand` / `CanvasExecution` three-layer model.                                |
@@ -81,6 +82,7 @@ docs/
 | -------------------------------------------------------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------- |
 | [active-space-external-note-watcher.md](./proposals/active-space-external-note-watcher.md)         | Proposed       | Scope external-note watchers to Spaces with active SSE subscribers.                    |
 | [agent-node-freshness-cas-plan.md](./proposals/agent-node-freshness-cas-plan.md)                   | In-Progress    | Read/write revision freshness across agent and web paths.                              |
+| [agent-resource-registry.md](./proposals/agent-resource-registry.md)                               | Accepted       | Agenetes resource catalogue, Profile composition, and external Agent capabilities.     |
 | [agent-turn-realtime-sync.md](./proposals/agent-turn-realtime-sync.md)                             | Proposed       | Live attachment and durable event replay for UI, RFS, and Headless turns.              |
 | [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                 | Proposed       | Canvas checkpoint and restoration design.                                              |
 | [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                           | In-Progress    | Roadmap from multi-agent sync to multi-user co-editing.                                |

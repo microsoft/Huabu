@@ -19,6 +19,15 @@ import {
   type JsonRpcError,
   type JsonRpcMessage,
   type SendResourceParams,
+  type ResourceScanParams,
+  type ResourceScanResult,
+  type ResourceImportParams,
+  type ResourceMutationResult,
+  type ResourceManagedListResult,
+  type ResourceRefreshScanParams,
+  type ResourceRefreshParams,
+  type ResourceDeleteParams,
+  type ResourceDeleteResult,
   type SpawnParams,
   type SpawnResult,
   type StopParams,
@@ -209,6 +218,69 @@ export class AgentletGateway {
     }>;
   }> {
     return this.sendControlRequest(agentletId, ServerMethods.LIST, {});
+  }
+
+  scanResources(
+    agentletId: string,
+    params: ResourceScanParams,
+  ): Promise<ResourceScanResult> {
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.RESOURCE_SCAN,
+      params,
+    );
+  }
+
+  listManagedResources(agentletId: string): Promise<ResourceManagedListResult> {
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.RESOURCE_LIST_MANAGED,
+      {},
+    );
+  }
+
+  importResource(
+    agentletId: string,
+    params: ResourceImportParams,
+  ): Promise<ResourceMutationResult> {
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.RESOURCE_IMPORT,
+      params,
+    );
+  }
+
+  scanResourceRefresh(
+    agentletId: string,
+    params: ResourceRefreshScanParams,
+  ): Promise<ResourceScanResult> {
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.RESOURCE_REFRESH_SCAN,
+      params,
+    );
+  }
+
+  refreshResource(
+    agentletId: string,
+    params: ResourceRefreshParams,
+  ): Promise<ResourceMutationResult> {
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.RESOURCE_REFRESH,
+      params,
+    );
+  }
+
+  deleteResource(
+    agentletId: string,
+    params: ResourceDeleteParams,
+  ): Promise<ResourceDeleteResult> {
+    return this.sendControlRequest(
+      agentletId,
+      ServerMethods.RESOURCE_DELETE,
+      params,
+    );
   }
 
   scanAgentTeams(

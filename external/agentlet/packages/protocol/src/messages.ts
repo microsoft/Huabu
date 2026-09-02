@@ -254,6 +254,73 @@ export interface SendResourceParams {
   content: string
 }
 
+// ─── Local Resource Control ─────────────────────────────────────────────────
+
+export interface ResourceScanParams {
+  rootPath: string
+}
+
+export interface ResourceImportCandidate {
+  id: string
+  name: string
+  sourcePath: string
+  sourceContent: string
+  sourceRevision: string
+}
+
+export interface ResourceScanDiagnostic {
+  path: string
+  code: 'skill_unreadable' | 'skill_invalid'
+  message: string
+}
+
+export interface ResourceScanResult {
+  rootPath: string
+  candidates: ResourceImportCandidate[]
+  diagnostics: ResourceScanDiagnostic[]
+}
+
+export interface ResourceImportParams {
+  id: string
+  sourcePath: string
+  expectedRevision: string
+}
+
+export interface LocalResourceRecord {
+  schemaVersion: 2
+  id: string
+  name: string
+  provider: string
+  sourceContent: string
+  userContent: string
+}
+
+export interface ResourceMutationResult {
+  resource: LocalResourceRecord
+  created?: boolean
+}
+
+export interface ResourceManagedListResult {
+  ids: string[]
+}
+
+export interface ResourceRefreshScanParams {
+  id: string
+}
+
+export interface ResourceRefreshParams {
+  id: string
+  expectedRevision: string
+}
+
+export interface ResourceDeleteParams {
+  id: string
+}
+
+export interface ResourceDeleteResult {
+  removed: boolean
+}
+
 // ─── Agent Team Control ──────────────────────────────────────────────────────
 
 /** Host-configurable environment field exposed by an Agent Team manifest. */

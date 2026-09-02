@@ -21,6 +21,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AGENT_CANVAS_COMMAND_TYPES,
+  RESOURCE_GRANT_ENV,
+  RESOURCE_GRANT_HEADER,
   rfsCapabilitiesResponseSchema,
   rfsExecuteResponseSchema,
   rfsOperationCapabilityResponseSchema,
@@ -33,6 +35,35 @@ const agentMocks = vi.hoisted(() => ({
   record: vi.fn(),
   get: vi.fn(),
   handleRun: vi.fn(),
+}));
+const resourceMocks = vi.hoisted(() => ({
+  assertLocalId: vi.fn(),
+  list: vi.fn(),
+  refresh: vi.fn(),
+}));
+const hostedMocks = vi.hoisted(() => ({
+  webSearch: vi.fn(),
+  generateImage: vi.fn(),
+}));
+
+vi.mock('@agenetes/agentlet-host', async (importOriginal) => ({
+  ...(await importOriginal<typeof AgentletHostModule>()),
+  getSupervisedAgentletId: () => 'machine-a',
+}));
+
+vi.mock('../agent/acp/resources.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof AgentResourcesModule>()),
+  assertLocalResourceIdAvailable: resourceMocks.assertLocalId,
+  listResourcesForAgentlet: resourceMocks.list,
+  refreshLocalAgentResources: resourceMocks.refresh,
+}));
+
+vi.mock('../agent/hosted-capabilities/web-search.service.js', () => ({
+  invokeWebSearch: hostedMocks.webSearch,
+}));
+
+vi.mock('../agent/hosted-capabilities/image-generation.service.js', () => ({
+  invokeImageGeneration: hostedMocks.generateImage,
 }));
 
 vi.mock('../agent/agent.service.js', () => ({
@@ -55,6 +86,10 @@ import {
   AgentThreadBusyError,
   agentThreadService,
 } from '../agent/agent-thread.service.js';
+import {
+  issueResourceGrant,
+  resetResourceGrantsForTests,
+} from '../agent/hosted-capabilities/resource-grant.js';
 import * as selectableProfiles from '../agent/selectable-agent-profile.js';
 import { getCanvasStore, resetStorageCache, space } from '../storage/index.js';
 import {
@@ -65,7 +100,9 @@ import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
 import { taskService } from '../task/task.service.js';
 import { setWorkspacePath } from '../workspace.js';
 
+import type * as AgentResourcesModule from '../agent/acp/resources.js';
 import type { FixedAgentNodeTarget } from '../agent/agent-thread-resolver.js';
+import type * as AgentletHostModule from '@agenetes/agentlet-host';
 import type { CanvasNodeId } from '@huabu/shared';
 
 /**
@@ -123,6 +160,12 @@ beforeEach(() => {
   agentMocks.record.mockReset();
   agentMocks.get.mockReset();
   agentMocks.handleRun.mockReset();
+  hostedMocks.webSearch.mockReset();
+  hostedMocks.generateImage.mockReset();
+  resourceMocks.refresh.mockReset();
+  resourceMocks.assertLocalId.mockReset();
+  resetResourceGrantsForTests();
+  vi.stubEnv('AGENT_RESOURCE_DIR', join(tmp, 'agent-resources'));
   agentMocks.runAgent.mockImplementation(async function* () {
     yield { type: 'done', data: { message: 'first answer' } };
     return [];
@@ -130,6 +173,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
   rmSync(tmp, { recursive: true, force: true });
 });
@@ -254,6 +298,148 @@ describe('GET /api/rfs/:canvasId/agent/profiles', () => {
           { id: 'profile-b', alias: 'Builder' },
         ],
       });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('GET /api/rfs/:canvasId/resources', () => {
+  it('returns the Agentlet-visible resource catalogue', async () => {
+    resourceMocks.list.mockReturnValue([
+      {
+        schemaVersion: 2,
+        id: 'huabu-access',
+        name: 'Huabu Access',
+        provider: 'huabu',
+        sourceContent: 'Access the Space. Fetch the Skill.',
+        userContent: '',
+      },
+    ]);
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/resources',
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(resourceMocks.list).toHaveBeenCalledWith('machine-a');
+      expect(response.json().resources[0].id).toBe('huabu-access');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('requires a scoped grant to invoke a selected hosted resource', async () => {
+    hostedMocks.webSearch.mockResolvedValue({
+      query: 'Huabu',
+      results: [],
+    });
+    const token = issueResourceGrant({
+      agentletId: 'machine-a',
+      profileId: 'profile-a',
+      canvasId: 'c1',
+      threadId: 'thread-a',
+      allowedResourceIds: ['web-search'],
+    })[RESOURCE_GRANT_ENV];
+    const app = await buildApp();
+    try {
+      const forbidden = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/resources/web-search/invoke',
+        payload: {
+          schemaVersion: 1,
+          input: { query: 'Huabu' },
+        },
+      });
+      expect(forbidden.statusCode).toBe(403);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/resources/web-search/invoke',
+        headers: { [RESOURCE_GRANT_HEADER]: token },
+        payload: {
+          schemaVersion: 1,
+          correlationId: 'request-a',
+          input: { query: 'Huabu' },
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(hostedMocks.webSearch).toHaveBeenCalledWith(
+        { query: 'Huabu' },
+        { signal: expect.any(AbortSignal) },
+      );
+      expect(response.json()).toEqual({
+        schemaVersion: 1,
+        resourceId: 'web-search',
+        correlationId: 'request-a',
+        result: { query: 'Huabu', results: [] },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('validates local receipts through Agentlet and refreshes the catalogue', async () => {
+    const resourceDir = process.env.AGENT_RESOURCE_DIR;
+    if (!resourceDir) throw new Error('AGENT_RESOURCE_DIR is not set');
+    const entrypoint = join(resourceDir, 'skills', 'example-skill', 'SKILL.md');
+    mkdirSync(join(entrypoint, '..'), { recursive: true });
+    writeFileSync(entrypoint, '# Example Skill\n');
+    resourceMocks.refresh.mockReturnValue({
+      records: [
+        {
+          schemaVersion: 2,
+          id: 'example-skill',
+          name: 'Example Skill',
+          provider: 'machine-a',
+          sourceContent:
+            'An example local Skill.\n\nRead the Skill file before use.',
+          userContent: '',
+        },
+      ],
+      diagnostics: [],
+    });
+    const token = issueResourceGrant({
+      agentletId: 'machine-a',
+      profileId: 'profile-a',
+      canvasId: 'c1',
+      threadId: 'thread-a',
+      allowedResourceIds: ['local-resource-management'],
+    })[RESOURCE_GRANT_ENV];
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/resources/local/receipts',
+        headers: { [RESOURCE_GRANT_HEADER]: token },
+        payload: {
+          id: 'example-skill',
+          kind: 'skill',
+          name: 'Example Skill',
+          sourceContent:
+            'An example local Skill.\n\nRead the Skill file before use.',
+          entrypoint: 'skills/example-skill/SKILL.md',
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().resource).toMatchObject({
+        id: 'example-skill',
+        provider: 'machine-a',
+      });
+      expect(resourceMocks.refresh).toHaveBeenCalledOnce();
+
+      const removal = await app.inject({
+        method: 'DELETE',
+        url: '/rfs/c1/resources/local/receipts/example-skill',
+        headers: { [RESOURCE_GRANT_HEADER]: token },
+      });
+      expect(removal.statusCode).toBe(200);
+      expect(removal.json()).toEqual({ removed: true });
+      expect(resourceMocks.refresh).toHaveBeenCalledTimes(2);
     } finally {
       await app.close();
     }

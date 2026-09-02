@@ -1,5 +1,6 @@
 import {
   agentSpecSchema,
+  resourceIdListSchema,
   sessionIdSchema,
   type AgentSubmission,
 } from '@agenetes/protocol';
@@ -54,6 +55,14 @@ export const acpSpecSchema = agentSpecSchema.extend({
     alias: z.string(),
     profileId: z.string(),
   }),
+  resourceIds: resourceIdListSchema.default([]),
+  resourceScope: z
+    .object({
+      canvasId: z.string(),
+      threadId: z.string(),
+    })
+    .strict()
+    .optional(),
   agentletId: z.string().optional(),
   cwd: z.string().optional(),
   recipe: acpBindingRecipeSchema.nullable().optional(),

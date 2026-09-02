@@ -34,6 +34,7 @@ import { AgentIconField } from './AgentIconField';
 import { ProfileEditActions } from './ProfileEditActions';
 import { ProfileEditFields } from './ProfileEditFields';
 import { ProfileFormFooter } from './ProfileFormFooter';
+import { ProfileResourceField } from './ProfileResourceField';
 import { ReadOnlyField } from './ReadOnlyField';
 
 import type { AgentIconValue } from '@/components/Common/AgentIcon';
@@ -81,6 +82,7 @@ interface CommandProfileFormState {
    */
   customCommand: string;
   cwd: string;
+  resourceIds: string[];
 }
 
 const EMPTY_FORM: CommandProfileFormState = {
@@ -89,6 +91,7 @@ const EMPTY_FORM: CommandProfileFormState = {
   allowAll: false,
   customCommand: '',
   cwd: '',
+  resourceIds: [],
 };
 
 /**
@@ -253,6 +256,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
         allowAll: parsed.allowAll,
         customCommand: parsed.customCommand,
         cwd: editing.workingDirPath,
+        resourceIds: editing.resourceIds,
       });
       setIcon(readAgentIcon(editing));
     } else {
@@ -336,6 +340,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
           ...(icon
             ? { customData: withAgentIcon(editing.customData, icon) }
             : {}),
+          resourceIds: form.resourceIds,
         });
         toast(t('settings.profileUpdated'), { tone: 'success' });
         await onSaved();
@@ -386,6 +391,7 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
         launch: { kind: 'acp-command', command },
         metadata: { cliId: form.cliId },
         customData: withAgentIcon(undefined, icon),
+        resourceIds: form.resourceIds,
       };
       await createAcpProfile(payload);
       toast(t('settings.profileCreated'), { tone: 'success' });
@@ -522,6 +528,13 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
           value={icon}
           onChange={setIcon}
           alias={form.displayName || editing.alias}
+          disabled={saving}
+        />
+        <ProfileResourceField
+          selectedIds={form.resourceIds}
+          onChange={(resourceIds) =>
+            setForm((previous) => ({ ...previous, resourceIds }))
+          }
           disabled={saving}
         />
         <ProfileEditActions
@@ -670,6 +683,14 @@ export const CommandProfileForm: React.FC<CommandProfileFormProps> = ({
         value={icon}
         onChange={setIcon}
         alias={form.displayName || defaultDisplayName}
+        disabled={saving}
+      />
+
+      <ProfileResourceField
+        selectedIds={form.resourceIds}
+        onChange={(resourceIds) =>
+          setForm((previous) => ({ ...previous, resourceIds }))
+        }
         disabled={saving}
       />
 

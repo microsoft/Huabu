@@ -99,7 +99,10 @@ describe('agentProfileDriverFactory', () => {
           launch: { kind: 'acp-command', command: 'reviewer --acp' },
         },
       }),
-    ).toMatchObject({ binding: { alias: 'reviewer' } });
+    ).toMatchObject({
+      binding: { alias: 'reviewer' },
+      profile: { resourceIds: [] },
+    });
     expect(driver.initialState()).toEqual({});
     expect(() =>
       driver.validateSpec({
@@ -144,6 +147,7 @@ describe('agentProfileDriverFactory', () => {
       profileId: 'profile-1',
       agentletId: 'machine-b',
       workingDirPath: '/work/reviewer',
+      resourceIds: [],
       launch: {
         kind: 'agent-team-manifest',
         manifestPath: '/teams/reviewer/agentlet.yaml',
