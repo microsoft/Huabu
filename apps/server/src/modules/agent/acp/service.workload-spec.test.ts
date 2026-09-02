@@ -28,12 +28,12 @@ vi.mock('@agenetes/agentlet-host', () => ({
   }),
   getResourceRegistry: () => ({
     get: (id: string) => ({
-      schemaVersion: 1,
+      schemaVersion: 2,
       id,
       name: id,
       provider: 'huabu',
-      description: id,
-      instructions: id,
+      sourceContent: id,
+      userContent: '',
     }),
   }),
   getSupervisedAgentletId: () => 'supervised-agentlet',

@@ -27,6 +27,7 @@
 
 import {
   AgentTeamError,
+  getAgentletGateway,
   getAgentTeamRegistry,
   getDaemonSupervisor,
   getResourceRegistry,
@@ -117,7 +118,26 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           code: 'resource_registry_unavailable',
         });
       }
-      return { resources: registry.list() };
+      const resources = registry.list();
+      const agentletId = getSupervisedAgentletId();
+      const gateway = getAgentletGateway();
+      let manageableResourceIds: string[] = [];
+      if (gateway?.getAgentlet(agentletId)?.status === 'connected') {
+        try {
+          manageableResourceIds = (
+            await gateway.listManagedResources(agentletId)
+          ).ids;
+        } catch (error) {
+          request.log.warn(
+            { err: error, agentletId },
+            'Failed to list Agentlet-managed resources',
+          );
+        }
+      }
+      return {
+        resources,
+        manageableResourceIds,
+      };
     },
   );
 

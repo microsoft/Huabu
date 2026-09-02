@@ -54,12 +54,13 @@ export function ProfileResourceField({
       ...selectedIds
         .filter((id) => !knownIds.has(id))
         .map((id) => ({
-          schemaVersion: 1 as const,
+          schemaVersion: 2 as const,
           id,
           name: id,
+          displayName: undefined,
           provider: '',
-          description: t('settings.resourceUnavailable'),
-          instructions: '',
+          sourceContent: t('settings.resourceUnavailable'),
+          userContent: '',
         })),
     ];
   }, [resources, selectedIds, t]);
@@ -87,7 +88,9 @@ export function ProfileResourceField({
                 htmlFor={inputId}
                 className="border-edge-default flex gap-2 border-b px-2 py-1.5 last:border-b-0"
               >
-                <span className="sr-only">{resource.name}</span>
+                <span className="sr-only">
+                  {resource.displayName ?? resource.name}
+                </span>
                 <input
                   id={inputId}
                   type="checkbox"
@@ -104,11 +107,11 @@ export function ProfileResourceField({
                 />
                 <span className="min-w-0" aria-hidden="true">
                   <span className="text-fg-default block text-xs">
-                    {resource.name}
+                    {resource.displayName ?? resource.name}
                     {required ? ` · ${t('settings.resourceRequired')}` : ''}
                   </span>
                   <span className="text-fg-subtle block text-[11px]">
-                    {resource.description}
+                    {resource.sourceContent.split(/\r?\n/, 1)[0]}
                   </span>
                 </span>
               </label>

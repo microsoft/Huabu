@@ -24,42 +24,40 @@ export class ResourceRegistryUnavailableError extends Error {
 
 export const HUABU_RESOURCES: readonly AgentResource[] = [
   {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'huabu-access',
     name: 'Huabu Access',
     provider: 'huabu',
-    description: 'Read and update the active Huabu Space through RFS.',
-    instructions:
-      'Fetch $HUABU_RFS_URL/skill with Authorization: Bearer $AGENTLET_TOKEN and follow the returned guide.',
+    sourceContent:
+      'Read and update the active Huabu Space through RFS. Fetch $HUABU_RFS_URL/skill with the injected Agentlet token and follow the returned guide.',
+    userContent: '',
   },
   {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'local-resource-management',
     name: 'Local Resource Management',
     provider: 'huabu',
-    description:
-      'Safely install and manage machine-local Skills, tools, and connectors.',
-    instructions:
-      'Fetch $HUABU_RFS_URL/skill/local-resource-management with Authorization: Bearer $AGENTLET_TOKEN before changing local resources.',
+    sourceContent:
+      'Safely install and manage machine-local Skills, tools, and connectors. Fetch $HUABU_RFS_URL/skill/local-resource-management with the injected Agentlet token before changing local resources.',
+    userContent: '',
   },
   {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'web-search',
     name: 'Web Search',
     provider: 'huabu',
-    description: 'Search the web through Huabu-managed provider credentials.',
-    instructions:
-      'POST {"schemaVersion":1,"input":{"query":"..."}} to $HUABU_RFS_URL/resources/web-search/invoke with Authorization: Bearer $AGENTLET_TOKEN and X-Huabu-Resource-Grant: $HUABU_RESOURCE_GRANT.',
+    sourceContent:
+      'Search the web through Huabu-managed provider credentials. POST {"schemaVersion":1,"input":{"query":"..."}} to $HUABU_RFS_URL/resources/web-search/invoke with the injected Agentlet token and X-Huabu-Resource-Grant: $HUABU_RESOURCE_GRANT.',
+    userContent: '',
   },
   {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: 'generate-image',
     name: 'Generate Image',
     provider: 'huabu',
-    description:
-      'Generate an image through Huabu and store it in the active Space.',
-    instructions:
-      'POST {"schemaVersion":1,"input":{"prompt":"..."}} to $HUABU_RFS_URL/resources/generate-image/invoke with Authorization: Bearer $AGENTLET_TOKEN and X-Huabu-Resource-Grant: $HUABU_RESOURCE_GRANT.',
+    sourceContent:
+      'Generate an image through Huabu and store it in the active Space. POST {"schemaVersion":1,"input":{"prompt":"..."}} to $HUABU_RFS_URL/resources/generate-image/invoke with the injected Agentlet token and X-Huabu-Resource-Grant: $HUABU_RESOURCE_GRANT.',
+    userContent: '',
   },
 ];
 

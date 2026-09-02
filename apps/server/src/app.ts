@@ -22,6 +22,7 @@ import {
   acpAgentCliRoutes,
   acpAgentletRoutes,
   acpProfilesRoutes,
+  acpResourceRoutes,
   acpThreadsRoutes,
   externalAgentRuntimeConfigRoutes,
   getAgentTeamRegistry,
@@ -414,6 +415,7 @@ app.addHook('onListen', async () => {
 // (M3). See modules/agent/acp/profile-cache-port.ts.
 installAcpProfileCachePort();
 app.register(acpProfilesRoutes, { prefix: '/api/acp' });
+app.register(acpResourceRoutes, { prefix: '/api/acp' });
 app.register(acpAgentletRoutes, { prefix: '/api/acp' });
 app.register(acpAgentCliRoutes, { prefix: '/api/acp' });
 app.register(acpThreadsRoutes, { prefix: '/api/acp' });

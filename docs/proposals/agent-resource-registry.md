@@ -2,7 +2,7 @@
 
 Status: Accepted
 
-Last updated: 2026-08-31
+Last updated: 2026-09-02
 
 Tracking issues: [#120](https://github.com/microsoft/Huabu/issues/120), [#110](https://github.com/microsoft/Huabu/issues/110)
 
@@ -21,6 +21,22 @@ Delivery is split into three phases:
 3. Phase 3 converts bundled Agent Team presets into ordinary External Agent Profiles composed from registry resources and eventually replaces the current Agent Team Setup flow with agent-assisted local resource installation.
 
 Phase 1 and Phase 2 are planned for one implementation pull request. Phase 3 remains a separate migration because it removes an existing preparation and security boundary.
+
+The first management increment after Phases 1 and 2 adds explicit Skill-folder import without extending the deprecated Agent Team scanner or Setup path. Import is a user-initiated `Scan → Preview → Import` operation executed by the target Agentlet. Imported source text and user-authored text have separate ownership:
+
+```ts
+interface AgentResource {
+  schemaVersion: 2;
+  id: string;
+  provider: string;
+  name: string;
+  displayName?: string;
+  sourceContent: string;
+  userContent: string;
+}
+```
+
+`name` and `sourceContent` are refreshed from the imported source. `displayName` and `userContent` are global Resource customization owned by the user and survive refresh. Profile-specific role or task instructions remain Profile content rather than becoming metadata on a Profile–Resource association.
 
 ## 2. Problem
 
@@ -69,6 +85,9 @@ The current Agent Team model packages these concerns together. This works for fi
 - Requiring MCP as the initial transport.
 - Defining a general machine-executable resource access protocol.
 - Persisting or synchronizing resource availability in the catalogue.
+- Automatically deduplicating the same Skill across Agentlets or source folders.
+- Modeling missing, damaged, stale, or unavailable local installations in the first import-management increment.
+- Preventing deletion while a Profile still references the Resource in the first import-management increment.
 
 ## 5. Ownership
 
@@ -76,7 +95,7 @@ Agenetes owns the `AgentResource` contract, Resource Registry service and persis
 
 Huabu Server mounts the Agenetes Resource Registry and Agent Profile services into authenticated HTTP routes, registers Huabu Skills and hosted capability records, defines Huabu-required default resources, applies host authorization policy, and projects catalogue records through the canvas-scoped RFS adapter.
 
-Agentlet owns the physical machine resource root, installation receipts, executable resolution, and the process environment supplied to agents on that machine. It registers or withdraws machine-local catalogue records through the Agenetes service without making the catalogue responsible for installation state.
+Agentlet owns the physical machine resource root, installation receipts, Skill-folder scanning, source revision calculation, import and refresh file operations, executable resolution, and the process environment supplied to agents on that machine. Machine operations are exposed through the authenticated Agentlet Gateway control channel; Huabu does not scan arbitrary machine paths directly.
 
 Existing subsystems remain authoritative for their own facts:
 
@@ -94,33 +113,35 @@ Existing subsystems remain authoritative for their own facts:
 
 The registry is a simple resource catalogue. It intentionally avoids discriminated resource kinds and separate models for placement, availability, requirements, observations, connectors, secrets, or access protocols.
 
-Every record has the same shape:
+Every current record has the same shape:
 
 ```ts
 interface AgentResource {
-  schemaVersion: 1;
+  schemaVersion: 2;
   id: string;
-  name: string;
   provider: string;
-  description: string;
-  instructions: string;
+  name: string;
+  displayName?: string;
+  sourceContent: string;
+  userContent: string;
 }
 ```
 
 The fields have narrow meanings:
 
-| Field           | Meaning                                                                                          |
-| --------------- | ------------------------------------------------------------------------------------------------ |
-| `schemaVersion` | Version of the `AgentResource` record format                                                     |
-| `id`            | Stable, globally unique, human-readable kebab-case identifier                                    |
-| `name`          | Human-facing display name                                                                        |
-| `provider`      | Stable authority ID publishing the record; Phase 1 uses `huabu` or the exact Agentlet machine ID |
-| `description`   | Short catalogue summary used for browsing and Profile selection                                  |
-| `instructions`  | Natural-language directions telling the agent how to access and use the resource                 |
+| Field           | Meaning                                                                                            |
+| --------------- | -------------------------------------------------------------------------------------------------- |
+| `schemaVersion` | Version of the `AgentResource` record format                                                       |
+| `id`            | Stable, globally unique, human-readable kebab-case identifier                                      |
+| `provider`      | Stable authority ID publishing the record; initial providers are `huabu` or an Agentlet machine ID |
+| `name`          | Source-owned canonical name                                                                        |
+| `displayName`   | Optional user-owned presentation name                                                              |
+| `sourceContent` | Source-owned agent-readable text                                                                   |
+| `userContent`   | User-owned global instructions appended to the source text for every Profile using the Resource    |
 
-`instructions` combines the former structured access and inline content concepts. It may reference an RFS URL, an `AGENT_RESOURCE_DIR` path, an HTTP method, or an injected credential variable, but it never contains a secret value. For example, the Huabu Access record can direct the agent to fetch `$HUABU_RFS_URL/skill` with a bearer token read from the `AGENTLET_TOKEN` environment variable.
+The agent-facing text is deterministic: source content first, followed by a clearly delimited user-content section when `userContent` is non-empty. Neither field contains secret values. For example, the Huabu Access source content can direct the agent to fetch `$HUABU_RFS_URL/skill` with a bearer token read from the `AGENTLET_TOKEN` environment variable.
 
-The catalogue is agent-readable rather than a machine-executable protocol. Huabu and Agentlet do not parse `instructions` to infer authorization, availability, installation state, capability schemas, or command execution. Those concerns remain with the owning subsystem and are checked when the resource is resolved or used.
+The catalogue is agent-readable rather than a machine-executable protocol. Huabu and Agentlet do not parse the textual fields to infer authorization, availability, installation state, capability schemas, or command execution. Those concerns remain with the owning subsystem and are checked when the resource is resolved or used.
 
 `schemaVersion` versions only this common record format. A hosted API contract, Skill revision, CLI version, installation receipt, or policy version is independently owned and versioned outside the catalogue.
 
@@ -128,11 +149,11 @@ The Agenetes registry provides framework-independent operations to list, look up
 
 Withdrawing a record does not cascade into Profiles or durable workloads. A Profile may temporarily retain an unresolved resource ID when a provider disconnects or a resource is removed; editing and realization surface that condition explicitly.
 
-Resource IDs are unique across the registry. Registration of an existing ID succeeds only as an explicit replacement by the same provider; a different provider receives a conflict. Records, descriptions, and instructions are bounded by the canonical Agenetes schemas, and list order is stable by resource ID.
+Resource IDs are unique across the registry. Registration of an existing ID succeeds only as an explicit replacement by the same provider; a different provider receives a conflict. Records and textual fields are bounded by the canonical Agenetes schemas, and list order is stable by resource ID.
 
 Registration is a privileged provider operation. Third-party `instructions` are selected user-facing resource content, not host policy, and are never promoted into the mandatory Huabu system preamble; that preamble contains only effective resource IDs and the authenticated catalogue bootstrap.
 
-The first persistent store uses its own versioned `resources.json` envelope under the Agenetes host storage directory, atomic replacement, and owner-only file permissions where supported. Unknown store or record schema versions fail explicitly. This store is independent from the current Agent Team `registry.json`.
+The first persistent store uses its own versioned `resources.json` envelope under the Agenetes host storage directory, atomic replacement, and owner-only file permissions where supported. The store migrates v1 records by preserving `name`, combining their former description and instructions into `sourceContent`, and initializing `userContent` to an empty string. Unknown newer store or record schema versions fail explicitly. This store is independent from the current Agent Team `registry.json`.
 
 ## 7. Initial registry
 
@@ -178,6 +199,10 @@ The Local Resource Management Skill explains how an external agent:
 The Skill is procedural guidance, not an authorization mechanism. Installation remains subject to the external harness permission flow and host policy.
 
 An agent cannot establish installation or trust by editing catalogue state. Agentlet validates local paths and receipts when projecting a local record and again when resolving the resource for a workload. These checks do not add an availability field to the catalogue.
+
+Owner Settings also supports importing existing Skills without asking an agent to install them. The user supplies a folder on the target machine, Huabu sends the request over the Agenetes Resource control port and Agentlet Gateway, and Agentlet performs a read-only recursive discovery of standards-compliant `SKILL.md` files. Scan returns candidates and diagnostics without changing files or registry state. Import copies the selected Skill directory under `$AGENT_RESOURCE_DIR/skills`, writes a receipt, and returns its machine record for Huabu to register.
+
+Refresh repeats discovery against the receipt's source path, previews the new source revision, and on confirmation replaces the imported files plus source-owned `name` and `sourceContent`. It preserves Resource ID and Profile references and merges the refreshed source fields with the latest `displayName` and `userContent`. Agentlet uses a transaction marker and receipt revision to complete or roll back interrupted promotion. The manageable set is enumerated from validated imported-Skill receipt provenance, rather than inferred from provider identity alone. Delete removes the managed copy and receipt and withdraws the Resource; the first increment does not inspect or rewrite Profile references.
 
 ## 9. Profile resource composition and overrides
 
@@ -241,9 +266,15 @@ Huabu mounts the Agenetes catalogue for Settings:
 
 ```text
 GET /api/acp/resources
+POST /api/acp/resources/import/scan
+POST /api/acp/resources/import
+PATCH /api/acp/resources/:resourceId
+POST /api/acp/resources/:resourceId/refresh/scan
+POST /api/acp/resources/:resourceId/refresh
+DELETE /api/acp/resources/:resourceId
 ```
 
-This owner-only endpoint returns the global catalogue used by the External Agent Profile create/edit resource picker. Profile create and patch requests carry `resourceIds`; Huabu validates the wire contract and delegates storage and resource-reference validation to Agenetes.
+These owner-only endpoints return the global catalogue, manage global user customization, and adapt machine operations to the Agentlet control channel. Profile create and patch requests carry `resourceIds`; Huabu validates the wire contract and delegates storage and resource-reference validation to Agenetes.
 
 RFS exposes a canvas-scoped catalogue projection:
 

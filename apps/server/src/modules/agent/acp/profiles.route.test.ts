@@ -15,11 +15,16 @@ const mocks = vi.hoisted(() => ({
   resourceRegistry: {
     list: vi.fn(),
   },
+  gateway: {
+    getAgentlet: vi.fn(),
+    listManagedResources: vi.fn(),
+  },
 }));
 
 vi.mock('@agenetes/agentlet-host', () => ({
   getAgentTeamRegistry: () => mocks.registry,
   getResourceRegistry: () => mocks.resourceRegistry,
+  getAgentletGateway: () => mocks.gateway,
   getDaemonSupervisor: () => ({
     getStatus: () => ({ online: true, restartAttempt: 0 }),
   }),
@@ -103,15 +108,17 @@ describe('ACP Profile catalog routes', () => {
   it('lists the owner-facing Agent Resource catalogue', async () => {
     const resources = [
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: 'huabu-access',
         name: 'Huabu Access',
         provider: 'huabu',
-        description: 'Access the Space',
-        instructions: 'Fetch $HUABU_RFS_URL/skill.',
+        sourceContent: 'Fetch $HUABU_RFS_URL/skill.',
+        userContent: '',
       },
     ];
     mocks.resourceRegistry.list.mockReturnValue(resources);
+    mocks.gateway.getAgentlet.mockReturnValue({ status: 'connected' });
+    mocks.gateway.listManagedResources.mockResolvedValue({ ids: ['slides'] });
     app = Fastify({ logger: false });
     await app.register(acpProfilesRoutes, { prefix: '/api/acp' });
 
@@ -121,7 +128,31 @@ describe('ACP Profile catalog routes', () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ resources });
+    expect(response.json()).toEqual({
+      resources,
+      manageableResourceIds: ['slides'],
+    });
+  });
+
+  it('lists resources without management actions when Agentlet lookup fails', async () => {
+    mocks.resourceRegistry.list.mockReturnValue([]);
+    mocks.gateway.getAgentlet.mockReturnValue({ status: 'connected' });
+    mocks.gateway.listManagedResources.mockRejectedValue(
+      new Error('connection lost'),
+    );
+    app = Fastify({ logger: false });
+    await app.register(acpProfilesRoutes, { prefix: '/api/acp' });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/acp/resources',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      resources: [],
+      manageableResourceIds: [],
+    });
   });
 
   it('lists every Profile but selects only runtime-ready resources', async () => {

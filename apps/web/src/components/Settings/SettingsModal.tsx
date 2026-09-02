@@ -18,13 +18,14 @@ import {
   type ExternalAgentsNavigation,
 } from './agent-team/ExternalAgentsSettings';
 import { DeploymentReadinessNotice } from './DeploymentReadinessNotice';
+import { AgentResourcesSettings } from './sections/AgentResourcesSettings';
 import { GeneralSettings } from './sections/GeneralSettings';
 import { ImageProviderSettings } from './sections/ImageProviderSettings';
 import { IntegrationsSettings } from './sections/IntegrationsSettings';
 import { LLMSettings } from './sections/LLMSettings';
 
 /** Identifiers for the settings tabs (left-nav order). */
-type SettingsTab = 'general' | 'huabuAgent' | 'agents';
+type SettingsTab = 'general' | 'huabuAgent' | 'agents' | 'resources';
 
 interface TabDef {
   id: SettingsTab;
@@ -32,12 +33,14 @@ interface TabDef {
   labelKey:
     | 'settings.general'
     | 'settings.huabuAgent'
-    | 'settings.externalAgents';
+    | 'settings.externalAgents'
+    | 'settings.agentResources';
 }
 
 const TABS: TabDef[] = [
   { id: 'huabuAgent', labelKey: 'settings.huabuAgent' },
   { id: 'agents', labelKey: 'settings.externalAgents' },
+  { id: 'resources', labelKey: 'settings.agentResources' },
   { id: 'general', labelKey: 'settings.general' },
 ];
 
@@ -265,6 +268,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onNavigationChange={handleExternalAgentsNavigationChange}
               />
             )}
+            {activeTab === 'resources' && <AgentResourcesSettings />}
           </div>
         </div>
       </div>

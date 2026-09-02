@@ -128,7 +128,7 @@ External Agent Profiles select optional resources, Huabu unions required `huabu-
 
 At spawn or resume, Huabu mints an opaque `HUABU_RESOURCE_GRANT` bound to Agentlet, Profile, Canvas, thread, selected IDs, expiry, and policy version. A hosted request presents it through `X-Huabu-Resource-Grant`. The server derives all trusted scope from the grant, rejects unselected resources and cross-Canvas use, enforces per-grant concurrency and provider deadlines, and logs sanitized trusted audit fields. Request disconnect propagates cancellation to the provider.
 
-The Local Resource Management Skill uses the required grant to submit or remove validated Agentlet receipts after an approved installation operation under `AGENT_RESOURCE_DIR`. Receipt writes cannot choose their provider or installation timestamp; Huabu stamps both and refreshes the current machine projection. See [`agent-resources.md`](./agent-resources.md).
+The Local Resource Management Skill uses the required grant to submit or remove validated Agentlet receipts after an approved installation operation under `AGENT_RESOURCE_DIR`. Receipt writes cannot choose their provider or installation timestamp; Huabu stamps both and refreshes the current machine projection. Owner Settings uses a separate owner-only HTTP adapter and authenticated Agentlet Gateway RPC for read-only Skill discovery and confirmed import, refresh, and deletion; Huabu never scans the source folder directly. See [`agent-resources.md`](./agent-resources.md).
 
 ## Code entry points
 

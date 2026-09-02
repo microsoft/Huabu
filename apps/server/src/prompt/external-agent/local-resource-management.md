@@ -47,11 +47,11 @@ curl -fsS -X POST \
   -H "Authorization: ******" \
   -H "X-Huabu-Resource-Grant: $HUABU_RESOURCE_GRANT" \
   -H "Content-Type: application/json" \
-  --data '{"id":"example-skill","kind":"skill","name":"Example Skill","description":"...","instructions":"...","entrypoint":"skills/example-skill/SKILL.md","source":"https://github.com/owner/repository/tree/COMMIT/path"}' \
+  --data '{"id":"example-skill","kind":"skill","name":"Example Skill","sourceContent":"Complete agent-readable source instructions","entrypoint":"skills/example-skill/SKILL.md","source":"https://github.com/owner/repository/tree/COMMIT/path"}' \
   "$HUABU_RFS_URL/resources/local/receipts"
 ```
 
-7. Fetch the catalogue again and confirm that the resulting record has the expected ID, provider, description, and instructions.
+7. Fetch the catalogue again and confirm that the resulting record has the expected ID, provider, name, and source content.
 
 ## Update and removal
 

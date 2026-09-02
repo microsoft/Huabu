@@ -30,7 +30,6 @@ import {
 } from '@huabu/shared';
 import { getNodeDefaultSize } from '@huabu/shared/canvas-engine';
 
-
 const agentMocks = vi.hoisted(() => ({
   runAgent: vi.fn(),
   record: vi.fn(),
@@ -309,12 +308,12 @@ describe('GET /api/rfs/:canvasId/resources', () => {
   it('returns the Agentlet-visible resource catalogue', async () => {
     resourceMocks.list.mockReturnValue([
       {
-        schemaVersion: 1,
+        schemaVersion: 2,
         id: 'huabu-access',
         name: 'Huabu Access',
         provider: 'huabu',
-        description: 'Access the Space',
-        instructions: 'Fetch the Skill.',
+        sourceContent: 'Access the Space. Fetch the Skill.',
+        userContent: '',
       },
     ]);
     const app = await buildApp();
@@ -392,12 +391,13 @@ describe('GET /api/rfs/:canvasId/resources', () => {
     resourceMocks.refresh.mockReturnValue({
       records: [
         {
-          schemaVersion: 1,
+          schemaVersion: 2,
           id: 'example-skill',
           name: 'Example Skill',
           provider: 'machine-a',
-          description: 'An example local Skill.',
-          instructions: 'Read the Skill file before use.',
+          sourceContent:
+            'An example local Skill.\n\nRead the Skill file before use.',
+          userContent: '',
         },
       ],
       diagnostics: [],
@@ -419,8 +419,8 @@ describe('GET /api/rfs/:canvasId/resources', () => {
           id: 'example-skill',
           kind: 'skill',
           name: 'Example Skill',
-          description: 'An example local Skill.',
-          instructions: 'Read the Skill file before use.',
+          sourceContent:
+            'An example local Skill.\n\nRead the Skill file before use.',
           entrypoint: 'skills/example-skill/SKILL.md',
         },
       });
