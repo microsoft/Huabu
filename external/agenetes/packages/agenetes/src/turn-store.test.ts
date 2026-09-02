@@ -6,7 +6,7 @@
 // resumes from), on-disk round-trip + tolerance (a corrupt tail line never
 // bricks a read), and per-`(namespace, threadId)` isolation.
 
-import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -110,6 +110,42 @@ describe.each<[string, () => TurnStore]>([
     expect(store.list(a, 'missing')).toEqual([]);
     expect(store.fence(a, 'missing')).toBe(0);
   });
+
+  it('replace() overwrites the whole log and reseeds count()/fence() (the rehome() move primitive)', () => {
+    const store = make();
+    const source = ns('canvas-1');
+    const target = ns('canvas-2');
+    store.append(source, 'thread-1', persisted('a', 1, 3));
+    store.append(source, 'thread-1', persisted('b', 4, 7));
+    const snapshot = store.list(source, 'thread-1');
+
+    store.replace(target, 'thread-1', snapshot);
+    expect(store.list(target, 'thread-1')).toEqual(snapshot);
+    expect(store.count(target, 'thread-1')).toBe(2);
+    expect(store.fence(target, 'thread-1')).toBe(7);
+
+    // A second replace() overwrites in full rather than appending.
+    store.replace(target, 'thread-1', [snapshot[0]!]);
+    expect(store.list(target, 'thread-1')).toEqual([snapshot[0]]);
+    expect(store.count(target, 'thread-1')).toBe(1);
+    expect(store.fence(target, 'thread-1')).toBe(3);
+  });
+
+  it('delete() removes a log entirely and idempotently', () => {
+    const store = make();
+    const n = ns('canvas-1');
+    store.append(n, 'thread-1', persisted('a', 1, 3));
+    store.delete(n, 'thread-1');
+    expect(store.list(n, 'thread-1')).toEqual([]);
+    expect(store.count(n, 'thread-1')).toBe(0);
+    expect(store.fence(n, 'thread-1')).toBe(0);
+    // Deleting an already-missing log is a no-op, not an error.
+    expect(() => store.delete(n, 'thread-1')).not.toThrow();
+    // A fresh append after delete starts a clean log, not one that merges
+    // with stale cached metadata for the deleted path.
+    store.append(n, 'thread-1', persisted('fresh', 1, 1));
+    expect(store.count(n, 'thread-1')).toBe(1);
+  });
 });
 
 describe('FileTurnStore — on-disk specifics', () => {
@@ -137,5 +173,35 @@ describe('FileTurnStore — on-disk specifics', () => {
     const list = store.list(n, 'thread-1');
     expect(list.map((p) => p.seqEnd)).toEqual([3, 7]);
     expect(store.fence(n, 'thread-1')).toBe(7);
+  });
+
+  it('replace() writes the target file and a fresh store instance reads it back', () => {
+    const source = ns('canvas-1');
+    const target = ns('canvas-2');
+    const writer = new FileTurnStore();
+    writer.append(source, 'thread-1', persisted('a', 1, 3));
+    writer.append(source, 'thread-1', persisted('b', 4, 7));
+    const snapshot = writer.list(source, 'thread-1');
+
+    writer.replace(target, 'thread-1', snapshot);
+    expect(existsSync(turnFilePath(target, 'thread-1'))).toBe(true);
+
+    const restarted = new FileTurnStore();
+    expect(restarted.list(target, 'thread-1')).toEqual(snapshot);
+    expect(restarted.fence(target, 'thread-1')).toBe(7);
+  });
+
+  it('delete() removes the on-disk file so a fresh store observes an empty log', () => {
+    const n = ns('canvas-1');
+    const writer = new FileTurnStore();
+    writer.append(n, 'thread-1', persisted('a', 1, 3));
+    expect(existsSync(turnFilePath(n, 'thread-1'))).toBe(true);
+
+    writer.delete(n, 'thread-1');
+    expect(existsSync(turnFilePath(n, 'thread-1'))).toBe(false);
+
+    const restarted = new FileTurnStore();
+    expect(restarted.list(n, 'thread-1')).toEqual([]);
+    expect(restarted.count(n, 'thread-1')).toBe(0);
   });
 });
