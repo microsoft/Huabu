@@ -424,8 +424,8 @@ describe('ACP durable history recovery', () => {
     }
 
     expect(prompt.mock.calls[1]?.[1]).toEqual([
-      { type: 'text', text: 'SYSTEM' },
       { type: 'text', text: 'hello' },
+      { type: 'text', text: 'SYSTEM' },
     ]);
     expect(entry.initialPreambleDelivered).toBe(true);
     expect(sessionMocks.reportEntryState).toHaveBeenCalledTimes(4);

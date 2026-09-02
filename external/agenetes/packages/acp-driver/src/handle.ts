@@ -485,12 +485,23 @@ export class AcpAgentHandle<
       preamble.length > 0 &&
       !entry.initialPreambleDelivered &&
       !lowered.isCommand;
+    // The user's actual request leads, the host preamble trails. ACP has
+    // no separate system-role channel, so this one-shot preamble is just
+    // more text in the same first `session/prompt` message — but several
+    // external agents (Copilot CLI observed so far) title a session from
+    // the leading characters of that first message. The identical static
+    // preamble always starting the message meant every externally-bound
+    // Huabu session showed the same uninformative title in the agent's
+    // own session list (e.g. its VS Code picker), no matter what the user
+    // actually asked. Putting the per-session task first gives those
+    // heuristics something meaningful and unique to key off, while the
+    // agent still reads the full preamble before responding either way.
     const rendered: LoweredAcpPrompt = {
       serialized: includedPreamble
-        ? `${preamble}\n\n${lowered.serialized}`
+        ? `${lowered.serialized}\n\n${preamble}`
         : lowered.serialized,
       blocks: includedPreamble
-        ? [{ type: 'text', text: preamble }, ...lowered.blocks]
+        ? [...lowered.blocks, { type: 'text', text: preamble }]
         : lowered.blocks,
       includedPreamble,
     };
