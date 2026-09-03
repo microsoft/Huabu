@@ -12,7 +12,11 @@ import path from 'node:path';
 
 import { SPACE_JSON_FILENAME, WORLD_CANVAS_DIR_NAME } from './layout.js';
 import { NameIndex, type NameIndexResult } from './name-index.js';
-import { readJsonStrict, sanitizeId } from '../../../../utils/fs.js';
+import {
+  readJsonStrict,
+  resolveDirectChildPath,
+  sanitizeId,
+} from '../../../../utils/fs.js';
 import {
   dedupeName,
   normalizeForCompare,
@@ -245,13 +249,12 @@ function renameWorkspaceChild(
   fromName: string,
   toName: string,
 ): Extract<CanvasDirRenameResult, { ok: false; reason: 'fs-error' }> | null {
-  const workspaceRoot = path.resolve(workspacePath);
-  const from = path.resolve(workspaceRoot, fromName);
-  const to = path.resolve(workspaceRoot, toName);
-  if (
-    path.dirname(from) !== workspaceRoot ||
-    path.dirname(to) !== workspaceRoot
-  ) {
+  let from: string;
+  let to: string;
+  try {
+    from = resolveDirectChildPath(workspacePath, fromName);
+    to = resolveDirectChildPath(workspacePath, toName);
+  } catch {
     return {
       ok: false,
       reason: 'fs-error',
