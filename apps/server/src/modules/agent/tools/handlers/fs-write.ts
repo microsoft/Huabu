@@ -135,6 +135,7 @@ function resolveTarget(
         space(args.canvasId).memory,
         SPACE_MEMORY_BLOB_NAME,
         rel,
+        args.canvasId,
       ),
       path: rel,
     };

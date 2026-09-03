@@ -453,6 +453,77 @@ describe('handleFsWrite — replace_string', () => {
   });
 });
 
+// ─── Concurrent edits ──────────────────────────────────────────────────────
+
+describe('handleFsWrite — concurrent edits', () => {
+  it('keeps both edits when two turns edit one Space body at once', async () => {
+    await handleFsWrite({
+      path: 'memory/space.md',
+      mode: 'overwrite',
+      body: '- alpha\n- beta',
+      canvasId,
+    } as never);
+
+    // Both halves of a replace_string are awaited, so two turns started
+    // together interleave: each reads the same body, and without a lock the
+    // later write discards the earlier edit while both report success.
+    const [first, second] = (
+      await Promise.all([
+        handleFsWrite({
+          path: 'memory/space.md',
+          mode: 'replace_string',
+          oldString: '- alpha',
+          newString: '- ALPHA',
+          canvasId,
+        } as never),
+        handleFsWrite({
+          path: 'memory/space.md',
+          mode: 'replace_string',
+          oldString: '- beta',
+          newString: '- BETA',
+          canvasId,
+        } as never),
+      ])
+    ).map(parse);
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    const body = readFileSync(memoryBlobFile(canvasId), 'utf8');
+    expect(body).toContain('- ALPHA');
+    expect(body).toContain('- BETA');
+  });
+
+  it('keeps both edits when two Spaces are edited at once', async () => {
+    // The lock is per document: a second Space must not be serialised behind
+    // the first, and must not be mistaken for it either.
+    const otherId = 'cv-fs-write-other';
+    const created = await createSpace(otherId, otherId);
+    if (!created.ok) throw new Error('Expected to create the Space');
+
+    await Promise.all([
+      handleFsWrite({
+        path: 'memory/space.md',
+        mode: 'overwrite',
+        body: '- from first',
+        canvasId,
+      } as never),
+      handleFsWrite({
+        path: 'memory/space.md',
+        mode: 'overwrite',
+        body: '- from second',
+        canvasId: otherId,
+      } as never),
+    ]);
+
+    expect(readFileSync(memoryBlobFile(canvasId), 'utf8')).toContain(
+      '- from first',
+    );
+    expect(readFileSync(memoryBlobFile(otherId), 'utf8')).toContain(
+      '- from second',
+    );
+  });
+});
+
 // ─── Mode validation ───────────────────────────────────────────────────────
 
 describe('handleFsWrite — mode validation', () => {
