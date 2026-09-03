@@ -5,7 +5,9 @@ export type AgenetesErrorCode =
   | 'invalid_driver_spec'
   | 'invalid_driver_state'
   | 'invalid_driver_definition'
-  | 'invalid_persisted_record';
+  | 'invalid_persisted_record'
+  | 'rehome_conflict'
+  | 'rehome_unknown_outcome';
 
 /** Structured synchronous failure surfaced by the Agenetes control plane. */
 export class AgenetesError extends Error {

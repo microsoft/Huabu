@@ -12,7 +12,11 @@ import path from 'node:path';
 
 import { SPACE_JSON_FILENAME, WORLD_CANVAS_DIR_NAME } from './layout.js';
 import { NameIndex, type NameIndexResult } from './name-index.js';
-import { readJsonStrict, sanitizeId } from '../../../../utils/fs.js';
+import {
+  readJsonStrict,
+  resolveDirectChildPath,
+  sanitizeId,
+} from '../../../../utils/fs.js';
 import {
   dedupeName,
   normalizeForCompare,
@@ -240,6 +244,35 @@ export type CanvasDirRenameResult =
   | { ok: false; reason: 'not-found' }
   | { ok: false; reason: 'fs-error'; message: string };
 
+function renameWorkspaceChild(
+  workspacePath: string,
+  fromName: string,
+  toName: string,
+): Extract<CanvasDirRenameResult, { ok: false; reason: 'fs-error' }> | null {
+  let from: string;
+  let to: string;
+  try {
+    from = resolveDirectChildPath(workspacePath, fromName);
+    to = resolveDirectChildPath(workspacePath, toName);
+  } catch {
+    return {
+      ok: false,
+      reason: 'fs-error',
+      message: 'Space directory rename must remain within the Workspace root',
+    };
+  }
+  try {
+    renameSync(from, to);
+    return null;
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'fs-error',
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 /**
  * Rename a canvas directory both on disk and in the index. Same-slot
  * renames (case-only) update the stored casing without touching the
@@ -269,17 +302,8 @@ export function renameCanvasDirOnDisk(
       // filesystems (APFS / NTFS) `renameSync` updates the casing in
       // place; on case-sensitive ones it's a regular rename.
       const ws = getWorkspacePath();
-      const from = path.join(ws, entry.filename);
-      const to = path.join(ws, newDirName);
-      try {
-        renameSync(from, to);
-      } catch (err) {
-        return {
-          ok: false,
-          reason: 'fs-error',
-          message: err instanceof Error ? err.message : String(err),
-        };
-      }
+      const renameError = renameWorkspaceChild(ws, entry.filename, newDirName);
+      if (renameError) return renameError;
       index.rename(canvasId, newDirName);
     }
     return { ok: true, dirName: newDirName };
@@ -291,17 +315,8 @@ export function renameCanvasDirOnDisk(
   }
 
   const ws = getWorkspacePath();
-  const from = path.join(ws, entry.filename);
-  const to = path.join(ws, newDirName);
-  try {
-    renameSync(from, to);
-  } catch (err) {
-    return {
-      ok: false,
-      reason: 'fs-error',
-      message: err instanceof Error ? err.message : String(err),
-    };
-  }
+  const renameError = renameWorkspaceChild(ws, entry.filename, newDirName);
+  if (renameError) return renameError;
 
   index.rename(canvasId, newDirName);
   return { ok: true, dirName: newDirName };

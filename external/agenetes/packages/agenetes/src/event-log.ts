@@ -24,7 +24,13 @@
 // handles the live fan-out. All of this is L2-internal — the sequence
 // numbers, the pub/sub, and the file layout never leak to L1 (I9.8).
 
-import { appendJsonLine, readJsonLines, sanitizeId } from './io.js';
+import {
+  appendJsonLine,
+  readJsonLines,
+  removeFileIfExists,
+  sanitizeId,
+  writeJsonLines,
+} from './io.js';
 
 import type {
   AgentSubmission,
@@ -108,6 +114,24 @@ export interface EventLogStore {
   ): EventLogRecord[];
   /** The highest `seq` persisted for a thread, or `0` when the log is empty. */
   maxSeq(namespace: Namespace, threadId: string): number;
+  /**
+   * Overwrite a thread's ENTIRE Tier-1 log with `records` (already-sequenced,
+   * in original order), replacing whatever the target held before. A narrow
+   * capability reserved for the `rehome()` durable-move primitive — it
+   * writes the destination log wholesale from a source snapshot, never for
+   * incremental/streaming writes (those stay on `append`/`appendTurnStart`).
+   */
+  replace(
+    namespace: Namespace,
+    threadId: string,
+    records: readonly EventLogRecord[],
+  ): void;
+  /**
+   * Remove a thread's Tier-1 log entirely (idempotent). Reserved for the
+   * `rehome()` primitive: dropping the source log after its target twin is
+   * durable, or compensating a target log written during a failed rehome.
+   */
+  delete(namespace: Namespace, threadId: string): void;
 }
 
 /** Defensive shape-check for a persisted entry read back from disk. */
@@ -149,12 +173,17 @@ function isRecord(value: unknown): value is EventLogRecord {
 export class InMemoryEventLogStore implements EventLogStore {
   readonly #byNamespace = new Map<string, Map<string, EventLogRecord[]>>();
 
-  #log(namespace: Namespace, threadId: string): EventLogRecord[] {
+  #scope(namespace: Namespace): Map<string, EventLogRecord[]> {
     let scope = this.#byNamespace.get(namespace.name);
     if (!scope) {
       scope = new Map();
       this.#byNamespace.set(namespace.name, scope);
     }
+    return scope;
+  }
+
+  #log(namespace: Namespace, threadId: string): EventLogRecord[] {
+    const scope = this.#scope(namespace);
     let log = scope.get(threadId);
     if (!log) {
       log = [];
@@ -208,6 +237,18 @@ export class InMemoryEventLogStore implements EventLogStore {
   maxSeq(namespace: Namespace, threadId: string): number {
     const log = this.#byNamespace.get(namespace.name)?.get(threadId);
     return log && log.length > 0 ? log[log.length - 1]!.seq : 0;
+  }
+
+  replace(
+    namespace: Namespace,
+    threadId: string,
+    records: readonly EventLogRecord[],
+  ): void {
+    this.#scope(namespace).set(threadId, [...records]);
+  }
+
+  delete(namespace: Namespace, threadId: string): void {
+    this.#byNamespace.get(namespace.name)?.delete(threadId);
   }
 }
 
@@ -304,6 +345,29 @@ export class FileEventLogStore implements EventLogStore {
   maxSeq(namespace: Namespace, threadId: string): number {
     return this.#lastSeq(this.#path(namespace, threadId));
   }
+
+  replace(
+    namespace: Namespace,
+    threadId: string,
+    records: readonly EventLogRecord[],
+  ): void {
+    const filePath = this.#path(namespace, threadId);
+    writeJsonLines(filePath, records);
+    // Reseed the cached last-seq from the just-written content — writing
+    // bypasses `append`'s incremental counter, so a stale cache would hand
+    // out a colliding `seq` on the very next append.
+    const max = records.reduce((acc, entry) => Math.max(acc, entry.seq), 0);
+    this.#seqByPath.set(filePath, max);
+  }
+
+  delete(namespace: Namespace, threadId: string): void {
+    const filePath = this.#path(namespace, threadId);
+    removeFileIfExists(filePath);
+    // Drop the cached counter so a future write to this path (e.g. a new
+    // thread reusing the same id after this log was rehomed away) reseeds
+    // from disk instead of resuming the stale in-process count.
+    this.#seqByPath.delete(filePath);
+  }
 }
 
 /** A live-tail subscriber: invoked for every entry appended after it subscribes. */
@@ -377,6 +441,28 @@ export class EventLog {
   /** The highest persisted `seq` for a thread (the fence), or `0` when empty. */
   maxSeq(namespace: Namespace, threadId: string): number {
     return this.#store.maxSeq(namespace, threadId);
+  }
+
+  /**
+   * Overwrite a thread's whole Tier-1 log durably; see
+   * {@link EventLogStore.replace}. Reserved for `rehome()`'s destination
+   * write — it carries no live fan-out because a rehome target never has
+   * subscribers yet (its thread does not exist before the move).
+   */
+  replace(
+    namespace: Namespace,
+    threadId: string,
+    records: readonly EventLogRecord[],
+  ): void {
+    this.#store.replace(namespace, threadId, records);
+  }
+
+  /**
+   * Remove a thread's Tier-1 log entirely; see {@link EventLogStore.delete}.
+   * Reserved for `rehome()`'s source cleanup / target compensation.
+   */
+  delete(namespace: Namespace, threadId: string): void {
+    this.#store.delete(namespace, threadId);
   }
 
   /**

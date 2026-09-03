@@ -8,7 +8,7 @@
 // and the EventLog live pub/sub (append fans out to subscribers; read is
 // the caller's backfill).
 
-import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -125,6 +125,43 @@ describe.each<[string, () => EventLogStore]>([
     expect(store.maxSeq(n, 'nope')).toBe(0);
     expect(store.read(n, 'nope')).toEqual([]);
   });
+
+  it('replace() overwrites the whole log and reseeds maxSeq (the rehome() move primitive)', () => {
+    const store = make();
+    const source = ns('canvas-1');
+    const target = ns('canvas-2');
+    store.append(source, 'thread-1', text('a'));
+    store.append(source, 'thread-1', text('b'));
+    const snapshot = store.readRecords(source, 'thread-1');
+
+    store.replace(target, 'thread-1', snapshot);
+    expect(store.readRecords(target, 'thread-1')).toEqual(snapshot);
+    expect(store.maxSeq(target, 'thread-1')).toBe(2);
+    // The next append after a replace continues from the replaced content,
+    // not from a stale cached counter.
+    const next = store.append(target, 'thread-1', text('c'));
+    expect(next.seq).toBe(3);
+
+    // A second replace() overwrites in full rather than appending.
+    store.replace(target, 'thread-1', [snapshot[0]!]);
+    expect(store.readRecords(target, 'thread-1')).toEqual([snapshot[0]]);
+    expect(store.maxSeq(target, 'thread-1')).toBe(1);
+  });
+
+  it('delete() removes a log entirely and idempotently', () => {
+    const store = make();
+    const n = ns('canvas-1');
+    store.append(n, 'thread-1', text('a'));
+    store.delete(n, 'thread-1');
+    expect(store.readRecords(n, 'thread-1')).toEqual([]);
+    expect(store.maxSeq(n, 'thread-1')).toBe(0);
+    // Deleting an already-missing log is a no-op, not an error.
+    expect(() => store.delete(n, 'thread-1')).not.toThrow();
+    // A fresh append after delete restarts sequencing from 1, not from a
+    // stale cached counter for the deleted path.
+    const first = store.append(n, 'thread-1', text('fresh'));
+    expect(first.seq).toBe(1);
+  });
 });
 
 describe('FileEventLogStore — on-disk specifics', () => {
@@ -153,6 +190,36 @@ describe('FileEventLogStore — on-disk specifics', () => {
     const fresh = new FileEventLogStore();
     const entries = fresh.read(n, 'thread-1');
     expect(entries.map((e) => e.seq)).toEqual([1]);
+  });
+
+  it('replace() writes the target file and a fresh store instance reads it back', () => {
+    const source = ns('canvas-1');
+    const target = ns('canvas-2');
+    const writer = new FileEventLogStore();
+    writer.append(source, 'thread-1', text('a'));
+    writer.append(source, 'thread-1', text('b'));
+    const snapshot = writer.readRecords(source, 'thread-1');
+
+    writer.replace(target, 'thread-1', snapshot);
+    expect(existsSync(eventFilePath(target, 'thread-1'))).toBe(true);
+
+    const restarted = new FileEventLogStore();
+    expect(restarted.readRecords(target, 'thread-1')).toEqual(snapshot);
+    expect(restarted.append(target, 'thread-1', text('c')).seq).toBe(3);
+  });
+
+  it('delete() removes the on-disk file so a fresh store observes an empty log', () => {
+    const n = ns('canvas-1');
+    const writer = new FileEventLogStore();
+    writer.append(n, 'thread-1', text('a'));
+    expect(existsSync(eventFilePath(n, 'thread-1'))).toBe(true);
+
+    writer.delete(n, 'thread-1');
+    expect(existsSync(eventFilePath(n, 'thread-1'))).toBe(false);
+
+    const restarted = new FileEventLogStore();
+    expect(restarted.readRecords(n, 'thread-1')).toEqual([]);
+    expect(restarted.append(n, 'thread-1', text('fresh')).seq).toBe(1);
   });
 });
 

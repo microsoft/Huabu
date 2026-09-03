@@ -117,9 +117,15 @@ Artifacts are canvas-owned, so a paste into a different Canvas than the one the 
 
 The Markdown walk is what keeps images inside a `note` alive across Canvases — they live in the body string, not in `data.src`. It is scoped by node type (`markdownArtifactFields`) because `content` also exists on `text` and `question` nodes, whose bodies are plain prose that must not be rewritten. `parseArtifactRef` decides what is cloneable: bare keys and legacy canvas-scoped URLs are, while `data:`, `blob:`, and external `http(s)` sources are left verbatim. Clones are deduplicated per `(source canvas, key)` for the whole paste, and a failed clone falls back to the original key so the node renders the server's missing-artifact placeholder instead of blocking the paste. Because the clone round-trips are async, the result is dropped if the user has navigated to a different Canvas by the time they settle. Same-canvas pastes keep sharing the original artifact and stay on the synchronous fast path.
 
+### Moving a selection between Spaces
+
+Move is an explicit server-coordinated action rather than a clipboard operation. The single-node and multi-selection floating toolbars open one Canvas-level `MoveSelectionModal`, which lets the user choose an existing ordinary Space or enter the name of a new Space, and provides a default-enabled checkbox for leaving a source `spacePreview` breadcrumb. The modal resets that choice to enabled each time it opens, drains pending Canvas saves, and submits the selected node ids, Preview choice, and current source version to `POST /api/canvas/:canvasId/move-selection`. A successful toast reports the durable outcome and links to the destination; typed server failures are shown without applying optimistic local mutations. Managed reference nodes do not expose the action.
+
 ## Workspace routes and World
 
 `/` is the workspace landing redirect. When the persisted World setting is enabled it redirects to the hidden World through `/canvas/:worldCanvasId`; otherwise it redirects to `/spaces`. The ordinary Space List remains a sibling page at `/spaces`, and every Canvas scope, including World, continues to use the existing `CanvasPage` and `/canvas/:canvasId` route.
+
+Primary navigation between the Space List and an ordinary Space uses React Router links rather than button-owned `navigate(...)` calls. An ordinary click therefore stays within the current tab and passes through the router's pending-save blocker, while Ctrl/Cmd-click, middle-click, keyboard activation, assistive-technology link discovery, and browser context-menu actions retain native anchor behavior. The Space Preview and legacy Portal interaction model is intentionally separate from this list-to-Space contract.
 
 The World setting defaults to disabled. Enabling it exposes the World navigation entry and changes subsequent workspace landing to World without deleting or resetting `.world`.
 

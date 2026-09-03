@@ -27,6 +27,8 @@ import type {
   RevealNodesFolderResponse,
   PostCanvasExecuteRequest,
   PostCanvasExecuteResponse,
+  MoveSelectionBody,
+  MoveSelectionResponse,
 } from '@huabu/shared';
 
 /**
@@ -163,6 +165,17 @@ export async function postCanvasExecute(
     method: 'POST',
     json: request,
     fallbackMessage: 'Failed to execute Space command',
+  });
+}
+
+export async function moveCanvasSelection(
+  canvasId: string,
+  request: MoveSelectionBody,
+): Promise<MoveSelectionResponse> {
+  return apiFetch<MoveSelectionResponse>(routes.canvasMoveSelection(canvasId), {
+    method: 'POST',
+    json: request,
+    fallbackMessage: 'Failed to move selection',
   });
 }
 
