@@ -17,7 +17,7 @@ import {
   takeExternalNote,
 } from './external-watcher.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
-import { space } from '../storage/index.js';
+import { space, unavailableCapabilityMessage } from '../storage/index.js';
 
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -100,7 +100,9 @@ const externalRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
     // application, and no database backend has such an arrival path.
     const tree = space(canvasId).diskTree;
     if (!tree) {
-      return reply.code(404).send({ message: 'External note not found' });
+      return reply.code(400).send({
+        message: unavailableCapabilityMessage('external-note-discovery'),
+      });
     }
     const abs = path.join(tree.directory(), item.relativePath);
     let raw: string;

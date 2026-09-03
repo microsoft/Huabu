@@ -46,9 +46,13 @@ import { withSpaceDirHandlesReleased } from '../storage/backends/disk/space-dir-
 import { createCanvas, deleteCanvas } from '../storage/compatibility/canvas.js';
 import {
   space,
+  composeStorage,
   getCanvasStore,
+  getStorage,
   getStructuredStore,
   resetStorageCache,
+  setStorageForTesting,
+  unavailableCapabilityMessage,
 } from '../storage/index.js';
 import { changesPath } from '../storage/paths.js';
 import { setWorkspacePath } from '../workspace.js';
@@ -682,6 +686,78 @@ describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
       });
 
       expect(res.statusCode).toBe(500);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+/**
+ * Serve the real Disk stores under a profile that claims to keep Spaces in
+ * tables, so `diskTree` is absent while every record still reads back.
+ *
+ * The alternative — waiting for a second adapter — would leave the declared
+ * refusals unexercised on the only profile that exists.
+ */
+function useTablesProfile(): () => void {
+  const real = getStorage();
+  return setStorageForTesting(
+    composeStorage(
+      { ...real.profile, structured: { kind: 'sqlite' } },
+      real.structured,
+      real.blobs,
+    ),
+  );
+}
+
+describe('Disk-only capability refusals', () => {
+  it('refuses in the same words the profile declared at startup', async () => {
+    createCanvas('c1', 'Tables Space');
+    const restore = useTablesProfile();
+    const app = await buildApp();
+    try {
+      const exported = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/export',
+      });
+      expect(exported.statusCode).toBe(400);
+      expect((exported.json() as { message: string }).message).toBe(
+        unavailableCapabilityMessage('space-bundle-export'),
+      );
+
+      const revealed = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/reveal-nodes',
+      });
+      expect(revealed.statusCode).toBe(400);
+      expect((revealed.json() as { message: string }).message).toBe(
+        unavailableCapabilityMessage('reveal-space-folder'),
+      );
+    } finally {
+      await app.close();
+      restore();
+    }
+  });
+
+  it('still reports a missing folder as missing on Disk', async () => {
+    // The refusal above must not swallow the other failure: on Disk the
+    // capability is present, so a Space whose directory is gone is data
+    // trouble, not a profile limitation.
+    createCanvas('c2', 'Vanished Space');
+    const tree = space('c2').diskTree;
+    if (!tree) throw new Error('Expected the Disk backend in this test');
+    rmSync(tree.directory(), { recursive: true, force: true });
+
+    const app = await buildApp();
+    try {
+      const exported = await app.inject({
+        method: 'GET',
+        url: '/canvas/c2/export',
+      });
+      expect(exported.statusCode).toBe(404);
+      expect((exported.json() as { message: string }).message).toMatch(
+        /not found/i,
+      );
     } finally {
       await app.close();
     }

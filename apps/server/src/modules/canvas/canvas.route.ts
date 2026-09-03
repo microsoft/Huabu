@@ -1584,8 +1584,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
     // Disk-only, declared as `reveal-space-folder`: the feature *is* "show me
     // this in Finder", so a backend without a folder has nothing to show.
-    const dir = handle.diskTree?.nodesDirectory();
-    if (dir === undefined || !existsSync(dir)) {
+    // A profile that cannot serve the feature and a Space whose folder is
+    // missing are different problems with different remedies, so they get
+    // different answers — the first repeats the matrix sentence the operator
+    // read when they chose the profile.
+    const tree = handle.diskTree;
+    if (!tree) {
+      return reply.code(400).send({
+        message: unavailableCapabilityMessage('reveal-space-folder'),
+      });
+    }
+    const dir = tree.nodesDirectory();
+    if (!existsSync(dir)) {
       return reply.code(404).send({ message: 'Nodes folder not found' });
     }
     // Fire-and-forget: `openInFileManager` is best-effort and never
@@ -1622,10 +1632,16 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     // Disk-only, declared as `space-bundle-export` in the capability matrix;
     // a portable export generated from records plus reachable blob references
-    // is a separate later design.
+    // is a separate later design. Refuse in the matrix's own words, and keep
+    // that distinct from a Space whose directory has gone missing.
     const tree = handle.diskTree;
-    const canvasDir = tree?.directory();
-    if (canvasDir === undefined || !existsSync(canvasDir)) {
+    if (!tree) {
+      return reply.code(400).send({
+        message: unavailableCapabilityMessage('space-bundle-export'),
+      });
+    }
+    const canvasDir = tree.directory();
+    if (!existsSync(canvasDir)) {
       return reply.code(404).send({ message: 'Canvas directory not found' });
     }
 
