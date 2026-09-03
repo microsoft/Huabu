@@ -4,7 +4,7 @@
 import { Download, Plus, Trash2, Upload } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 
 import { listCanvases, exportCanvas, deleteCanvasById } from '../api/canvas';
 import { Button } from '../components/Common/Button';
@@ -37,7 +37,6 @@ export default function CanvasListPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const confirmDeleteButtonRef = useRef<HTMLButtonElement>(null);
-  const navigate = useNavigate();
   const {
     create: handleCreate,
     isCreating,
@@ -77,10 +76,6 @@ export default function CanvasListPage() {
     window.addEventListener('workspace-changed', handler);
     return () => window.removeEventListener('workspace-changed', handler);
   }, [fetchCanvases]);
-
-  const handleOpen = (canvasId: string) => {
-    navigate(`/canvas/${canvasId}`);
-  };
 
   const handleExport = async (canvasId: string) => {
     setExportingId(canvasId);
@@ -336,8 +331,8 @@ export default function CanvasListPage() {
                   key={canvas.canvasId}
                   className="group border-edge-default bg-surface hover:border-edge-default relative flex flex-col rounded-xl border p-5 text-left transition-all hover:shadow-md"
                 >
-                  <button
-                    onClick={() => handleOpen(canvas.canvasId)}
+                  <Link
+                    to={`/canvas/${canvas.canvasId}`}
                     className="flex flex-1 flex-col text-left"
                   >
                     <h3 className="text-fg-default group-hover:text-fg-default truncate text-sm font-semibold">
@@ -353,7 +348,7 @@ export default function CanvasListPage() {
                         date: formatDate(canvas.updatedAt),
                       })}
                     </div>
-                  </button>
+                  </Link>
                   {/* Export button */}
                   <Button
                     variant="ghost"
