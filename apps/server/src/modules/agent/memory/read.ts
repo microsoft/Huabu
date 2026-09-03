@@ -41,10 +41,17 @@ export function readWorkspaceMemory(): string | null {
 export async function readCanvasMemory(
   canvasId: string,
 ): Promise<string | null> {
-  const bytes = await space(canvasId).memory.read(SPACE_MEMORY_BLOB_NAME);
-  if (bytes === null) return null;
-  const raw = bytes.toString('utf8');
-  return raw.trim().length === 0 ? null : raw;
+  const memory = space(canvasId).memory;
+  try {
+    const bytes = await memory.read(SPACE_MEMORY_BLOB_NAME);
+    if (bytes === null) return null;
+    const raw = bytes.toString('utf8');
+    return raw.trim().length === 0 ? null : raw;
+  } catch {
+    // Memory is optional context. Preserve the pre-blob behavior: an
+    // unreadable document is absence, not a reason to fail the agent turn.
+    return null;
+  }
 }
 
 function readNonEmpty(file: string): string | null {

@@ -147,6 +147,10 @@ const PROMPT_LOG_NAMESPACE = 'huabu.prompt.log';
  */
 let appendTail: Promise<void> = Promise.resolve();
 
+type SubstrateResolution =
+  | { readonly ok: true; readonly substrate: SpaceSubstrate | null }
+  | { readonly ok: false; readonly error: unknown };
+
 /** Where this module keeps one log per thread on a Disk substrate. */
 function diskLogPath(substrate: SpaceSubstrate, threadId: string): string {
   return path.join(
@@ -190,11 +194,23 @@ export function dumpAssembledPrompt(params: DumpPromptParams): void {
     out.push('', '');
 
     const block = out.join('\n');
+    // Resolve against the Workspace handling this turn now, before an older
+    // queued append can delay us past a Workspace switch. Convert rejection to
+    // data immediately so a slow append ahead of us cannot leave an unhandled
+    // rejection while this resolution waits for its turn.
+    const substrateResolution: Promise<SubstrateResolution> = space(canvasId)
+      .extension(PROMPT_LOG_NAMESPACE)
+      .then(
+        (substrate) => ({ ok: true, substrate }),
+        (error: unknown) => ({ ok: false, error }),
+      );
     appendTail = appendTail
       .then(async () => {
         // A Space deleted mid-turn has no substrate, and this is the last
         // thing that should recreate one for a debug file.
-        const substrate = await space(canvasId).extension(PROMPT_LOG_NAMESPACE);
+        const resolved = await substrateResolution;
+        if (!resolved.ok) throw resolved.error;
+        const { substrate } = resolved;
         if (!substrate) return;
         appendFileSync(diskLogPath(substrate, params.threadId), block, 'utf-8');
       })
