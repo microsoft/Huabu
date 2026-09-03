@@ -47,7 +47,7 @@ export class SpaceMovePlanError extends Error {
 export interface SpaceMovePlan {
   commands: CanvasCommand[];
   sourceCommands: CanvasCommand[];
-  sourcePreviewNodeId: CanvasNodeId;
+  sourcePreviewNodeId: CanvasNodeId | null;
   rootIds: string[];
   movedIds: Set<string>;
   nodeIdMap: Map<string, CanvasNodeId>;
@@ -151,6 +151,7 @@ export function buildSpaceMovePlan(input: {
   destinationNodes: readonly CanvasNode[];
   selectedNodeIds: readonly string[];
   destinationCanvasId: string;
+  createSourcePreview: boolean;
 }): SpaceMovePlan {
   const {
     sourceNodes,
@@ -158,6 +159,7 @@ export function buildSpaceMovePlan(input: {
     destinationNodes,
     selectedNodeIds,
     destinationCanvasId,
+    createSourcePreview,
   } = input;
   assertAcyclic(sourceNodes);
   const byId = new Map(sourceNodes.map((node) => [node.id, node]));
@@ -293,54 +295,61 @@ export function buildSpaceMovePlan(input: {
   const commands: CanvasCommand[] = [{ type: 'CREATE_NODES', nodes: creates }];
   if (edges.length > 0) commands.push({ type: 'CONNECT_NODES', edges });
 
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const nodeId of movedIds) {
-    const node = byId.get(nodeId);
-    const position = getAbsolutePosition(sourceNodes as NestableNode[], nodeId);
-    if (!node || !position) {
-      throw new SpaceMovePlanError('invalid-hierarchy', nodeId);
+  const sourceCommands: CanvasCommand[] = [
+    {
+      type: 'DELETE_NODES',
+      nodeIds: rootIds.map((nodeId) => nodeId as CanvasNodeId),
+    },
+  ];
+  let sourcePreviewNodeId: CanvasNodeId | null = null;
+  if (createSourcePreview) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const nodeId of movedIds) {
+      const node = byId.get(nodeId);
+      const position = getAbsolutePosition(
+        sourceNodes as NestableNode[],
+        nodeId,
+      );
+      if (!node || !position) {
+        throw new SpaceMovePlanError('invalid-hierarchy', nodeId);
+      }
+      const size = occupiedSize(node);
+      minX = Math.min(minX, position.x);
+      minY = Math.min(minY, position.y);
+      maxX = Math.max(maxX, position.x + size.width);
+      maxY = Math.max(maxY, position.y + size.height);
     }
-    const size = occupiedSize(node);
-    minX = Math.min(minX, position.x);
-    minY = Math.min(minY, position.y);
-    maxX = Math.max(maxX, position.x + size.width);
-    maxY = Math.max(maxY, position.y + size.height);
+    sourcePreviewNodeId = createId('node');
+    sourceCommands.push({
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          id: sourcePreviewNodeId,
+          nodeType: 'spacePreview',
+          data: { targetCanvasId: destinationCanvasId },
+          position: { x: minX, y: minY },
+          size: {
+            width: Math.min(
+              PREVIEW_MAX_WIDTH,
+              Math.max(PREVIEW_MIN_WIDTH, maxX - minX),
+            ),
+            height: Math.min(
+              PREVIEW_MAX_HEIGHT,
+              Math.max(PREVIEW_MIN_HEIGHT, maxY - minY),
+            ),
+          },
+          selectOnCreate: false,
+        },
+      ],
+    });
   }
-  const sourcePreviewNodeId = createId('node');
 
   return {
     commands,
-    sourceCommands: [
-      {
-        type: 'DELETE_NODES',
-        nodeIds: rootIds.map((nodeId) => nodeId as CanvasNodeId),
-      },
-      {
-        type: 'CREATE_NODES',
-        nodes: [
-          {
-            id: sourcePreviewNodeId,
-            nodeType: 'spacePreview',
-            data: { targetCanvasId: destinationCanvasId },
-            position: { x: minX, y: minY },
-            size: {
-              width: Math.min(
-                PREVIEW_MAX_WIDTH,
-                Math.max(PREVIEW_MIN_WIDTH, maxX - minX),
-              ),
-              height: Math.min(
-                PREVIEW_MAX_HEIGHT,
-                Math.max(PREVIEW_MIN_HEIGHT, maxY - minY),
-              ),
-            },
-            selectOnCreate: false,
-          },
-        ],
-      },
-    ],
+    sourceCommands,
     sourcePreviewNodeId,
     rootIds,
     movedIds,

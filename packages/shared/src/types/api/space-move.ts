@@ -20,6 +20,7 @@ export const moveSelectionBodySchema = z
         })
         .strict(),
     ]),
+    createSourcePreview: z.boolean(),
     expectedSourceVersion: z.number().int().nonnegative(),
   })
   .strict();
@@ -81,7 +82,7 @@ export const moveSelectionResponseSchema = z
         created: z.boolean(),
       })
       .strict(),
-    sourcePreviewNodeId: z.string().min(1),
+    sourcePreviewNodeId: z.string().min(1).nullable(),
     sourceVersion: z.number().int().nonnegative(),
     destinationVersion: z.number().int().nonnegative(),
     roots: z.array(movedRootSchema),

@@ -257,6 +257,7 @@ export async function moveCanvasSelection(
             destinationNodes: hydratedDestination,
             selectedNodeIds: input.selectedNodeIds,
             destinationCanvasId,
+            createSourcePreview: input.createSourcePreview,
           });
         } catch (error) {
           if (error instanceof SpaceMovePlanError) {
@@ -345,6 +346,7 @@ export async function moveCanvasSelection(
             destinationNodes: hydratedDestination,
             selectedNodeIds: input.selectedNodeIds,
             destinationCanvasId,
+            createSourcePreview: input.createSourcePreview,
           });
 
           const destinationWrite = await executeOnServerAlreadyLocked({

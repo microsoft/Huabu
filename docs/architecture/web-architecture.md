@@ -119,7 +119,7 @@ The Markdown walk is what keeps images inside a `note` alive across Canvases —
 
 ### Moving a selection between Spaces
 
-Move is an explicit server-coordinated action rather than a clipboard operation. The single-node and multi-selection floating toolbars open one Canvas-level `MoveSelectionModal`, which lets the user choose an existing ordinary Space or enter the name of a new Space, drains pending Canvas saves, and submits the selected node ids plus the current source version to `POST /api/canvas/:canvasId/move-selection`. A successful toast reports the durable outcome and links to the destination; typed server failures are shown without applying optimistic local mutations. The source keeps a `spacePreview` breadcrumb at the moved set's former absolute bounds. Managed reference nodes do not expose the action.
+Move is an explicit server-coordinated action rather than a clipboard operation. The single-node and multi-selection floating toolbars open one Canvas-level `MoveSelectionModal`, which lets the user choose an existing ordinary Space or enter the name of a new Space, and provides a default-enabled checkbox for leaving a source `spacePreview` breadcrumb. The modal resets that choice to enabled each time it opens, drains pending Canvas saves, and submits the selected node ids, Preview choice, and current source version to `POST /api/canvas/:canvasId/move-selection`. A successful toast reports the durable outcome and links to the destination; typed server failures are shown without applying optimistic local mutations. Managed reference nodes do not expose the action.
 
 ## Workspace routes and World
 

@@ -6,7 +6,7 @@ Last updated: 2026-09-01
 
 Tracking issue: [#142](https://github.com/microsoft/Huabu/issues/142)
 
-> **Scope.** This proposal adds the smallest complete user-facing operation for moving selected Canvas nodes and Frame subtrees between existing or newly created ordinary Spaces in the active Workspace and leaving a source `spacePreview` breadcrumb. It includes moving an eligible Agent Node's existing conversation identity instead of resetting or copying it. It deliberately does not introduce a general multi-Space transaction API, filesystem WAL, crash recovery, Blob reference counting, garbage collection, or multi-backend transaction protocol.
+> **Scope.** This proposal adds the smallest complete user-facing operation for moving selected Canvas nodes and Frame subtrees between existing or newly created ordinary Spaces in the active Workspace, with an optional source `spacePreview` breadcrumb. It includes moving an eligible Agent Node's existing conversation identity instead of resetting or copying it. It deliberately does not introduce a general multi-Space transaction API, filesystem WAL, crash recovery, Blob reference counting, garbage collection, or multi-backend transaction protocol.
 
 > **Reliability boundary.** The operation provides user-visible all-or-compensated behavior while the Server process continues running and returns a determinate result. Process termination, power loss, and an unknown remote-backend outcome remain outside #142, matching the current `SpaceHandle.write()` contract.
 
@@ -31,7 +31,7 @@ If a determinate failure occurs after the destination write, the service compens
 ## 3. Goals
 
 - Move one or more selected ordinary Canvas nodes into an existing or newly created ordinary Space.
-- Leave one `spacePreview` breadcrumb at the moved set's former source bounds.
+- Offer a default-enabled choice to leave one `spacePreview` breadcrumb at the moved set's former source bounds.
 - Treat selected Frames as subtree roots and preserve every descendant exactly once.
 - Preserve parent-child hierarchy, parent-local child geometry, root-to-root relative geometry, node style, Frame layout data, and internal edge style.
 - Omit edges that cross the transfer boundary and report them explicitly.
@@ -174,6 +174,7 @@ interface MoveSelectionRequest {
   destination:
     | { kind: 'existing'; canvasId: string }
     | { kind: 'new'; title: string };
+  createSourcePreview: boolean;
   expectedSourceVersion: number;
 }
 ```
@@ -190,7 +191,7 @@ The response contains:
 interface MoveSelectionResponse {
   transferId: string;
   destination: { canvasId: string; title: string | null; created: boolean };
-  sourcePreviewNodeId: string;
+  sourcePreviewNodeId: string | null;
   sourceVersion: number;
   destinationVersion: number;
   roots: Array<{
@@ -362,7 +363,7 @@ The expected implementation size is approximately 700–1,000 production lines a
 - Single and multi-selection toolbars open the same modal.
 - Existing and new destination modes submit their strict discriminated request variants.
 - A request-created destination is removed when later validation or execution fails.
-- The source replacement leaves one correctly targeted preview at the authoritative moved bounds and clamps extreme dimensions.
+- The default-enabled source Preview choice leaves one correctly targeted preview at the authoritative moved bounds and clamps extreme dimensions; disabling it leaves no preview.
 - The confirmation shows normalized roots, descendants, preserved edges, omitted edges, and moved Agent conversation count.
 - Ineligible Agent selections disable confirmation and explain the blocking reason.
 - Pending writes drain before submission.

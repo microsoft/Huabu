@@ -41,7 +41,7 @@
     "targetsUnavailable": "Destination Spaces could not be loaded.",
     "noTargets": "Create another Space before moving this selection.",
     "boundaryNotice": "Connections to nodes outside the selection will be removed.",
-    "previewNotice": "A preview linking to the destination will remain in the original location."
+    "createSourcePreview": "Leave a preview linking to the destination in the original location."
   },
   "canvasControls": {
     "resetZoom": "Reset zoom to 100%",

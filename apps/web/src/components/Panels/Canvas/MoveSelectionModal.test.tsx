@@ -9,8 +9,9 @@ import useCanvasStore from '@/store/canvasStore';
 
 import { MoveSelectionModal } from './MoveSelectionModal';
 
-const { listCanvases, translate } = vi.hoisted(() => ({
+const { listCanvases, moveCanvasSelection, translate } = vi.hoisted(() => ({
   listCanvases: vi.fn(),
+  moveCanvasSelection: vi.fn(),
   translate: (key: string) => key,
 }));
 
@@ -26,7 +27,7 @@ vi.mock('react-router-dom', () => ({
 vi.mock('@/api/canvas', async (importOriginal) => ({
   ...(await importOriginal()),
   listCanvases,
-  moveCanvasSelection: vi.fn(),
+  moveCanvasSelection,
 }));
 
 let root: Root | undefined;
@@ -44,6 +45,7 @@ afterEach(() => {
     pendingSave: false,
   });
   listCanvases.mockReset();
+  moveCanvasSelection.mockReset();
 });
 
 describe('MoveSelectionModal', () => {
@@ -109,5 +111,36 @@ describe('MoveSelectionModal', () => {
         'input[aria-label="moveSelection.newSpaceName"]',
       ),
     ).not.toBeNull();
+  });
+
+  it('defaults the source Preview checkbox on and allows disabling it', async () => {
+    listCanvases.mockResolvedValue({
+      canvases: [{ canvasId: 'destination', title: 'Destination' }],
+    });
+    useCanvasStore.setState({
+      canvasId: 'source',
+      version: 3,
+      nodes: [
+        {
+          id: 'node-selected',
+          type: 'note',
+          position: { x: 0, y: 0 },
+          data: { label: 'Selected' },
+          selected: true,
+        },
+      ],
+      moveSelectionDialogOpen: true,
+    });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => root?.render(<MoveSelectionModal />));
+    const checkbox = document.querySelector<HTMLInputElement>(
+      'input[type="checkbox"]',
+    );
+    expect(checkbox?.checked).toBe(true);
+    act(() => checkbox?.click());
+    expect(checkbox?.checked).toBe(false);
   });
 });

@@ -41,7 +41,7 @@
     "targetsUnavailable": "无法加载目标 Space。",
     "noTargets": "请先创建另一个 Space，再移动所选内容。",
     "boundaryNotice": "与所选内容之外节点的连接将被移除。",
-    "previewNotice": "原位置将保留一个指向目标 Space 的预览。"
+    "createSourcePreview": "在原位置保留一个指向目标 Space 的预览。"
   },
   "canvasControls": {
     "resetZoom": "重置缩放至 100%",

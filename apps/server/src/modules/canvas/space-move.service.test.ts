@@ -91,6 +91,7 @@ describe('moveCanvasSelection', () => {
     const result = await moveCanvasSelection('source', {
       selectedNodeIds: ['node-frame'],
       destination: { kind: 'existing', canvasId: 'destination' },
+      createSourcePreview: true,
       expectedSourceVersion: seeded.toVersion,
     });
 
@@ -134,6 +135,7 @@ describe('moveCanvasSelection', () => {
       moveCanvasSelection('source', {
         selectedNodeIds: ['node-frame'],
         destination: { kind: 'existing', canvasId: 'destination' },
+        createSourcePreview: true,
         expectedSourceVersion: 0,
       }),
     ).rejects.toMatchObject({
@@ -169,6 +171,7 @@ describe('moveCanvasSelection', () => {
     await moveCanvasSelection('source', {
       selectedNodeIds: ['node-image'],
       destination: { kind: 'existing', canvasId: 'destination' },
+      createSourcePreview: true,
       expectedSourceVersion: seeded.toVersion,
     });
 
@@ -207,6 +210,7 @@ describe('moveCanvasSelection', () => {
     const result = await moveCanvasSelection('source', {
       selectedNodeIds: ['node-wide'],
       destination: { kind: 'new', title: 'Moved work' },
+      createSourcePreview: true,
       expectedSourceVersion: seeded.toVersion,
     });
 
@@ -234,6 +238,7 @@ describe('moveCanvasSelection', () => {
       moveCanvasSelection('source', {
         selectedNodeIds: ['missing'],
         destination: { kind: 'new', title: 'Temporary destination' },
+        createSourcePreview: true,
         expectedSourceVersion: 0,
       }),
     ).rejects.toMatchObject({ code: 'MOVE_SOURCE_NODE_MISSING' });
@@ -243,5 +248,22 @@ describe('moveCanvasSelection', () => {
         (candidate) => candidate.title === 'Temporary destination',
       ),
     ).toBe(false);
+  });
+
+  it('moves without leaving a source Preview when it is disabled', async () => {
+    const seeded = await seedSource();
+
+    const result = await moveCanvasSelection('source', {
+      selectedNodeIds: ['node-frame'],
+      destination: { kind: 'existing', canvasId: 'destination' },
+      createSourcePreview: false,
+      expectedSourceVersion: seeded.toVersion,
+    });
+
+    expect(result.sourcePreviewNodeId).toBeNull();
+    expect((await space('source').read())?.state.nodes).toEqual([
+      expect.objectContaining({ id: 'node-outside' }),
+    ]);
+    expect((await space('destination').read())?.state.nodes).toHaveLength(2);
   });
 });

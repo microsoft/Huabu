@@ -26,6 +26,7 @@ export function MoveSelectionModal() {
     'existing',
   );
   const [newSpaceTitle, setNewSpaceTitle] = useState('');
+  const [createSourcePreview, setCreateSourcePreview] = useState(true);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -34,6 +35,10 @@ export function MoveSelectionModal() {
     () => nodes.filter((node) => node.selected).map((node) => node.id),
     [nodes],
   );
+
+  useEffect(() => {
+    if (isOpen) setCreateSourcePreview(true);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -91,6 +96,7 @@ export function MoveSelectionModal() {
           destinationKind === 'existing'
             ? { kind: 'existing', canvasId: destinationCanvasId }
             : { kind: 'new', title },
+        createSourcePreview,
         expectedSourceVersion,
       });
       setOpen(false);
@@ -198,9 +204,16 @@ export function MoveSelectionModal() {
         <p className="text-fg-subtle mt-3 text-xs">
           {t('moveSelection.boundaryNotice')}
         </p>
-        <p className="text-fg-subtle mt-1 text-xs">
-          {t('moveSelection.previewNotice')}
-        </p>
+        <label className="text-fg-default mt-3 flex cursor-pointer items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="accent-info mt-0.5 h-4 w-4 shrink-0 cursor-pointer"
+            checked={createSourcePreview}
+            onChange={(event) => setCreateSourcePreview(event.target.checked)}
+            disabled={submitting}
+          />
+          <span>{t('moveSelection.createSourcePreview')}</span>
+        </label>
       </div>
     </Modal>
   );

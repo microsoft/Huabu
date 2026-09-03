@@ -34,6 +34,7 @@ describe('buildSpaceMovePlan', () => {
       destinationNodes: [],
       selectedNodeIds: [frame.id, child.id],
       destinationCanvasId: 'destination',
+      createSourcePreview: true,
     });
 
     expect(plan.rootIds).toEqual([frame.id]);
@@ -83,6 +84,7 @@ describe('buildSpaceMovePlan', () => {
       destinationNodes: [],
       selectedNodeIds: [first.id, second.id],
       destinationCanvasId: 'destination',
+      createSourcePreview: true,
     });
 
     expect(plan.commands[1]).toMatchObject({
@@ -112,6 +114,7 @@ describe('buildSpaceMovePlan', () => {
       destinationNodes: [],
       selectedNodeIds: [agent.id],
       destinationCanvasId: 'destination',
+      createSourcePreview: true,
     });
 
     expect(plan.movedThreadIds).toEqual(['thread-agent']);
@@ -133,6 +136,7 @@ describe('buildSpaceMovePlan', () => {
         destinationNodes: [],
         selectedNodeIds: ['node-ref'],
         destinationCanvasId: 'destination',
+        createSourcePreview: true,
       }),
     ).toThrow(SpaceMovePlanError);
   });
@@ -147,6 +151,7 @@ describe('buildSpaceMovePlan', () => {
       destinationNodes: [],
       selectedNodeIds: [large.id],
       destinationCanvasId: 'destination',
+      createSourcePreview: true,
     });
 
     expect(plan.sourceCommands[1]).toMatchObject({
@@ -158,5 +163,22 @@ describe('buildSpaceMovePlan', () => {
         },
       ],
     });
+  });
+
+  it('omits the source Preview when it is not requested', () => {
+    const moved = node('node-a', 'note', 10, 20);
+    const plan = buildSpaceMovePlan({
+      sourceNodes: [moved],
+      sourceEdges: [],
+      destinationNodes: [],
+      selectedNodeIds: [moved.id],
+      destinationCanvasId: 'destination',
+      createSourcePreview: false,
+    });
+
+    expect(plan.sourcePreviewNodeId).toBeNull();
+    expect(plan.sourceCommands).toEqual([
+      { type: 'DELETE_NODES', nodeIds: [moved.id] },
+    ]);
   });
 });
