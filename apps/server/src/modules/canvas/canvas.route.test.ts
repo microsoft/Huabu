@@ -3,7 +3,13 @@
 
 /** Route coverage for repository-backed storage consumers and lifecycle. */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -683,6 +689,61 @@ describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
 });
 
 describe('Space export/import persistence', () => {
+  it('omits prompt logs but preserves other extension state without history', async () => {
+    createCanvas('c1', 'Private Export');
+    const promptStore = await space('c1').extension('huabu.prompt.log');
+    const memoryStore = await space('c1').extension('huabu.memory');
+    if (!promptStore || !memoryStore) throw new Error('Expected Disk stores');
+    writeFileSync(
+      join(promptStore.directory, 'thread.prompt.log'),
+      'private system and user prompt',
+      'utf8',
+    );
+    writeFileSync(
+      join(memoryStore.directory, 'state.json'),
+      JSON.stringify({ counter: 17 }),
+      'utf8',
+    );
+
+    const app = await buildApp();
+    try {
+      const exported = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/export?includeHistory=false',
+      });
+      expect(exported.statusCode).toBe(200);
+
+      const upload = multipartBody(
+        'private-export.huabu.zip',
+        'application/zip',
+        exported.rawPayload,
+      );
+      const imported = await app.inject({
+        method: 'POST',
+        url: '/canvas/import',
+        payload: upload.payload,
+        headers: upload.headers,
+      });
+      expect(imported.statusCode).toBe(200);
+      const importedId = (imported.json() as { canvasId: string }).canvasId;
+
+      const importedPrompt =
+        await space(importedId).extension('huabu.prompt.log');
+      const importedMemory = await space(importedId).extension('huabu.memory');
+      if (!importedPrompt || !importedMemory) {
+        throw new Error('Expected imported Disk stores');
+      }
+      expect(
+        existsSync(join(importedPrompt.directory, 'thread.prompt.log')),
+      ).toBe(false);
+      expect(
+        readFileSync(join(importedMemory.directory, 'state.json'), 'utf8'),
+      ).toContain('17');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('round-trips topology, sidecars, history, and blobs after a cache reopen', async () => {
     createCanvas('c1', 'Round Trip');
     const store = getCanvasStore('c1');

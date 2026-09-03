@@ -112,6 +112,12 @@ interface NodeLike {
   [key: string]: unknown;
 }
 
+/** Disk paths that carry conversational history outside `.history/`. */
+const HISTORY_EXPORT_IGNORE = [
+  '.history/**',
+  '.ext/huabu.prompt.log/**',
+] as const;
+
 function nowMs(): number {
   return Date.now();
 }
@@ -1654,12 +1660,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     archive.append(JSON.stringify(manifest, null, 2), {
       name: 'manifest.json',
     });
-    // dot:true so the hidden `.artifacts/` directory is always included;
-    // `.history/` is opted out unless the caller explicitly requests it.
+    // dot:true so hidden durable data such as `.artifacts/` is included.
+    // Conversational history is opted out across both the legacy history tier
+    // and the prompt logger's namespaced extension store.
     archive.glob('**/*', {
       cwd: canvasDir,
       dot: true,
-      ignore: includeHistory ? [] : ['.history/**'],
+      ignore: includeHistory ? [] : [...HISTORY_EXPORT_IGNORE],
     });
 
     void archive.finalize();
