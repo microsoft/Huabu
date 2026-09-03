@@ -324,7 +324,9 @@ forEachProductProfile((profile: StorageProfile, label: string) => {
       const m = await seedSpace(canvasId);
       const handle = m.storage.space(canvasId);
       await handle.artifacts.put('artifact.bin', Buffer.from('bytes'));
+      await handle.guide.put(SPACE_GUIDE_SKILL_NAME, Buffer.from('# guide'));
       await handle.memory.put(SPACE_MEMORY_BLOB_NAME, Buffer.from('# memory'));
+      await handle.uploads.put('upload.bin', Buffer.from('scratch'));
 
       await expect(deleteSpace(canvasId)).resolves.toEqual({
         ok: true,
@@ -334,10 +336,14 @@ forEachProductProfile((profile: StorageProfile, label: string) => {
       const after = m.storage.space(canvasId);
       await expect(after.read()).resolves.toBeNull();
       await expect(after.nodes.list()).resolves.toEqual(new Map());
-      // Every area, not only artifacts: an unswept one is an orphan on a
-      // backend where dropping the record does not remove the area.
+      // Every area, and named one by one: an unswept one is an orphan on a
+      // backend where dropping the record does not remove the area, and a
+      // criterion that checked a subset would pass an adapter that left the
+      // rest behind.
       expect(await after.artifacts.read('artifact.bin')).toBeNull();
+      expect(await after.guide.read(SPACE_GUIDE_SKILL_NAME)).toBeNull();
       expect(await after.memory.read(SPACE_MEMORY_BLOB_NAME)).toBeNull();
+      expect(await after.uploads.read('upload.bin')).toBeNull();
       await expect(m.storage.structured.spaces().list()).resolves.toEqual([]);
     });
 
