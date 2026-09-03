@@ -2497,7 +2497,7 @@ production module outside `storage/` imports a Disk layout symbol or a legacy
 `CanvasStore` symbol, enforced import-level and symbol-level, migrations and
 tests exempt. **One handle:** every storage capability for one Space is
 reached through `space(canvasId)`, and the five consumers still holding
-`diskTree` are the two the matrix declares Disk-only (the file-tool sandbox,
+`diskTree` are the three the matrix declares Disk-only (the file-tool sandbox,
 bundle export, external-note claim), RFS's sidecar-to-record mapping (**B**,
 deferred until a second backend has a file plane at all), and the ACP session
 path that leaves with the Agenetes `Namespace` change.

@@ -9,15 +9,17 @@
  *
  *   - Workspace-level, no canvasId: `setting/` and the user memory file.
  *     Untouched by a backend switch.
- *   - Per-Space state owned by *other* domains — the memory body and ACP
- *     sessions — which need a materialized directory but not the Disk record
- *     layout. They anchor on the Space's Disk tree from the storage facade,
- *     so they no longer consult the Disk name index (§12.5.4).
+ *   - Per-Space state owned by *another* domain — ACP sessions, now the only
+ *     one — which needs a materialized directory but not the Disk record
+ *     layout. It anchors on the Space's Disk tree from the storage facade, so
+ *     it no longer consults the Disk name index (§12.5.4).
  *
- * Two families have already left: memory-worker bookkeeping and the debug
- * prompt log now build their own stores on the storage extension substrate
- * (§6.4.4), which is a place rather than a path. The memory body follows as a
- * blob, and ACP sessions with phase 6.
+ * Three families have already left. Memory-worker bookkeeping and the debug
+ * prompt log build their own stores on the storage extension substrate
+ * (§6.4.4), which is a place rather than a path; the Space memory body is a
+ * blob under the Space's own scope (§6.4.3, disposition D), so neither its
+ * placement nor its name is named here any more. ACP sessions leave with
+ * phase 6.
  *
  * The Disk record and blob layout moved to `storage/backends/disk/layout.ts`.
  *
@@ -27,8 +29,6 @@
  *     user.md                       user memory (preferences)
  *     skills/<id>/SKILL.md          user / memory-agent authored skills
  *   <spaceDir>/
- *     .memory/                      Space-scoped memory (AI-private)
- *       space.md                    Space memory body
  *     .history/
  *       acp-sessions.json           per-thread ACP sessionId map (optional)
  *
@@ -54,11 +54,10 @@ const LEGACY_HISTORY_DIR_NAME = '.history';
 /**
  * The Space's real directory, or a refusal.
  *
- * Every path this module builds is for a family Phase 4.6 relocates — memory
- * state and the debug prompt log to the extension substrate, the memory body
- * to a blob, ACP sessions with phase 6 (proposal §6.4.3). Until then they are
- * bare files, so one branch here says once what each of them would otherwise
- * repeat: these paths exist only where the backend has a tree.
+ * The one family left here is ACP sessions, which phase 6 relocates with the
+ * Agenetes `Namespace` change (proposal §6.4.3). Until then it is a bare
+ * file, and this branch says once what its callers would otherwise repeat:
+ * these paths exist only where the backend has a tree.
  */
 function spaceRoot(canvasId: string): string {
   const tree = space(canvasId).diskTree;
@@ -77,12 +76,9 @@ function legacyHistoryDir(canvasId: string): string {
 
 // ─── Memory module paths ───────────────────────────────────────────────────
 //
-// Two scopes:
-//   - User memory (`<workspace>/setting/user.md`):
-//     cross-Space user preferences / profile. User-editable.
-//   - Space memory (`<spaceDir>/.memory/`): hidden,
-//     AI-private working notes for *this* Space. The leading `.` puts
-//     it in the same hidden tier as `.history/` and `.artifacts/`.
+// One scope left: user memory (`<workspace>/setting/user.md`), the
+// cross-Space, user-editable preferences file. A Space's own AI-private body
+// is a blob the storage facade places, not a path this module builds.
 
 /** Workspace memory — cross-canvas user preferences: `<workspace>/setting/user.md`. */
 export function workspaceMemoryPath(): string {
