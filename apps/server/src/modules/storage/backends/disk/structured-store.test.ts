@@ -1,7 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -88,6 +94,35 @@ describeSpaceLogsContract('Disk Space logs', () => {
       rmSync(root, { recursive: true, force: true });
     },
   };
+});
+
+describe('Disk Space extension workspace binding', () => {
+  it('resolves atomically in the Workspace where the operation began', async () => {
+    const firstRoot = freshWorkspace('huabu-extension-workspace-a-');
+    seedSpace(firstRoot, 'shared-id', 'First');
+    const retained = new DiskStructuredStore().space('shared-id');
+
+    // Start the operation in A, then switch before its Promise continuation.
+    // The result must stay in A rather than using B's process-global layout.
+    const pending = retained.extension('test.owner');
+    const secondRoot = freshWorkspace('huabu-extension-workspace-b-');
+    refreshCanvasDirIndex();
+
+    try {
+      const substrate = await pending;
+      expect(substrate?.kind).toBe('disk');
+      expect(substrate?.directory.startsWith(`${firstRoot}${path.sep}`)).toBe(
+        true,
+      );
+      expect(readdirSync(secondRoot)).toEqual([]);
+    } finally {
+      workspaceState.path = firstRoot;
+      resetStorageCache();
+      refreshCanvasDirIndex();
+      rmSync(firstRoot, { recursive: true, force: true });
+      rmSync(secondRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('Disk Space Tasks', () => {

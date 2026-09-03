@@ -19,7 +19,9 @@
 import path from 'node:path';
 
 import { canvasRoot } from './layout.js';
+import { readDiskSpaceRecord } from './space-record.js';
 import { mkdirp } from '../../../../utils/fs.js';
+import { getWorkspacePath } from '../../../workspace.js';
 import { assertValidNamespace } from '../../ports/namespace.js';
 
 import type { CanvasStore } from './legacy/canvas-store.js';
@@ -30,18 +32,32 @@ export const EXTENSIONS_DIR_NAME = '.ext';
 
 export function createDiskSpaceExtension(
   store: CanvasStore,
-  readRecord: SpaceHandle['read'],
 ): SpaceHandle['extension'] {
+  const workspacePath = path.resolve(getWorkspacePath());
+
+  function assertActiveWorkspace(): void {
+    if (path.resolve(getWorkspacePath()) !== workspacePath) {
+      throw new Error(
+        `Space extension(${store.canvasId}) belongs to an inactive workspace. ` +
+          'Resolve a fresh Space handle after workspace activation.',
+      );
+    }
+  }
+
   return async function extension(
     namespace: string,
   ): Promise<SpaceSubstrate | null> {
     assertValidNamespace(namespace);
+    assertActiveWorkspace();
     // The existence check is the point, not a courtesy. Owners write through
     // ordinary filesystem calls, so handing back a path for a Space that was
     // just deleted would let the first write recreate its directory as a stub
     // holding nothing but bookkeeping. Every owner used to carry its own guard
     // against that; this is the one place that can state it.
-    if ((await readRecord()) === null) return null;
+    // Keep the check and path resolution in one synchronous turn. Awaiting the
+    // asynchronous port-shaped `read()` here lets a Workspace switch occur
+    // between validating A and resolving `canvasRoot()` against B.
+    if (readDiskSpaceRecord(store) === null) return null;
 
     const directory = path.join(
       canvasRoot(store.canvasId),

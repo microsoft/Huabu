@@ -64,9 +64,7 @@ export class DiskStructuredStore implements StructuredStore {
       changes,
       tasks: new DiskSpaceTasks(store),
       events,
-      // Shares the handle's own record read, so the existence check that
-      // guards a substrate is the same one every other member answers to.
-      extension: createDiskSpaceExtension(store, read),
+      extension: createDiskSpaceExtension(store),
     };
   }
 }
