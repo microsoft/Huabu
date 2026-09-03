@@ -240,30 +240,11 @@ export type CanvasDirRenameResult =
   | { ok: false; reason: 'not-found' }
   | { ok: false; reason: 'fs-error'; message: string };
 
-function isDirectWorkspaceChildName(name: string): boolean {
-  if (!name || name === '.' || name === '..') return false;
-  if (path.basename(name) !== name) return false;
-  if (name.includes(path.sep)) return false;
-  if (path.sep !== '/' && name.includes('/')) return false;
-  if (path.sep !== '\\' && name.includes('\\')) return false;
-  return true;
-}
-
 function renameWorkspaceChild(
   workspacePath: string,
   fromName: string,
   toName: string,
 ): Extract<CanvasDirRenameResult, { ok: false; reason: 'fs-error' }> | null {
-  if (
-    !isDirectWorkspaceChildName(fromName) ||
-    !isDirectWorkspaceChildName(toName)
-  ) {
-    return {
-      ok: false,
-      reason: 'fs-error',
-      message: 'Space directory rename requires direct Workspace child names',
-    };
-  }
   const workspaceRoot = path.resolve(workspacePath);
   const from = path.resolve(workspaceRoot, fromName);
   const to = path.resolve(workspaceRoot, toName);
