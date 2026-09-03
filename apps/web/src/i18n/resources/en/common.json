@@ -23,6 +23,26 @@
     "lock": "Lock",
     "unlock": "Unlock"
   },
+  "moveSelection": {
+    "action": "Move to Space",
+    "title": "Move to Space",
+    "description": "Move {{count}} selected node(s), including Frame descendants.",
+    "selectDestination": "Select destination Space",
+    "destinationKind": "Destination type",
+    "existingDestination": "Existing Space",
+    "newDestination": "New Space",
+    "newSpaceName": "New Space name",
+    "untitledSpace": "Untitled Space",
+    "confirm": "Move",
+    "moving": "Moving…",
+    "success": "Moved {{count}} node(s) and {{conversations}} conversation(s).",
+    "openDestination": "Open destination",
+    "failed": "Failed to move the selection.",
+    "targetsUnavailable": "Destination Spaces could not be loaded.",
+    "noTargets": "Create another Space before moving this selection.",
+    "boundaryNotice": "Connections to nodes outside the selection will be removed.",
+    "createSourcePreview": "Leave a preview linking to the destination in the original location."
+  },
   "canvasControls": {
     "resetZoom": "Reset zoom to 100%",
     "zoomAria": "Canvas zoom {{percentage}}%. Reset to 100%"

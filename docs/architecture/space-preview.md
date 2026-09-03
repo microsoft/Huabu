@@ -37,6 +37,8 @@ Explicit Open Space navigation is the only Phase 1 entry transition. Gesture-dri
 
 Ordinary Spaces expose Add Space Preview from the Canvas toolbar's Add Content dropdown. World omits this action because its preview membership is server-managed.
 
+Moving content between Spaces can also create an ordinary source-owned `spacePreview` breadcrumb when the default-enabled Move option remains selected. It occupies the moved set's former absolute top-left and derives its width and height from the authoritative deduplicated transfer bounds, clamped to `480 × 320` minimum and `2400 × 1600` maximum. It is created in the same source executor batch that deletes the moved roots, and a later move to the same target creates another breadcrumb rather than reusing one at a different historical location. Disabling the option leaves no breadcrumb and does not change boundary-edge removal or compensation.
+
 ## Code entry points
 
 | File                                                                                                                   | Responsibility                                                            |

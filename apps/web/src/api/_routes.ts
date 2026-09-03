@@ -54,6 +54,8 @@ export const routes = {
   canvasImport: '/canvas/import',
   canvas: (canvasId: string) => `/canvas/${enc(canvasId)}`,
   canvasExecute: (canvasId: string) => `/canvas/${enc(canvasId)}/execute`,
+  canvasMoveSelection: (canvasId: string) =>
+    `/canvas/${enc(canvasId)}/move-selection`,
   canvasReferences: (canvasId: string) => `/canvas/${enc(canvasId)}/references`,
   canvasPreviewScene: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/preview-scene`,

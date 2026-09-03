@@ -36,6 +36,27 @@ export async function withCanvasMutex<T>(
   }
 }
 
+/**
+ * Acquire several Canvas mutexes in stable order.
+ *
+ * Sorting prevents two cross-Canvas operations from waiting on each other
+ * while each holds the opposite first lock.
+ */
+export async function withCanvasMutexes<T>(
+  canvasIds: readonly string[],
+  task: () => Promise<T>,
+): Promise<T> {
+  const ordered = [...new Set(canvasIds)].sort();
+
+  const acquire = async (index: number): Promise<T> => {
+    const canvasId = ordered[index];
+    if (!canvasId) return task();
+    return withCanvasMutex(canvasId, () => acquire(index + 1));
+  };
+
+  return acquire(0);
+}
+
 type NodeRejection = Exclude<
   Extract<NodePutResult, { ok: false }>,
   { reason: 'revision-conflict' | 'write-suppressed' }
