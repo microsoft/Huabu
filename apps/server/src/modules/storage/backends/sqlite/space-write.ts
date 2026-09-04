@@ -99,10 +99,7 @@ export function createSqliteSpaceWrite(
       const current = readSpaceRow(database, canvasId);
       if (current === null) {
         if (!input.allowCreate) {
-          return {
-            result: { ok: false, reason: 'not-found' } as const,
-            tombstones: new Map<string, boolean>(),
-          };
+          return { ok: false, reason: 'not-found' } as const;
         }
         if (input.expectedVersion !== 0) {
           throw new Error(
@@ -124,21 +121,15 @@ export function createSqliteSpaceWrite(
           { ...input.nextRecord, title: identity.title },
           identity.collisionKey,
         );
-        return {
-          result: { ok: true } as const,
-          tombstones: new Map<string, boolean>(),
-        };
+        return { ok: true } as const;
       }
 
       if (current.record.version !== input.expectedVersion) {
         return {
-          result: {
-            ok: false,
-            reason: 'version-conflict',
-            actualVersion: current.record.version,
-          } as const,
-          tombstones: new Map<string, boolean>(),
-        };
+          ok: false,
+          reason: 'version-conflict',
+          actualVersion: current.record.version,
+        } as const;
       }
       if (input.nextRecord.createdAt !== current.record.createdAt) {
         throw new Error(`SpaceWrite(${canvasId}) refusing to change createdAt`);
@@ -150,38 +141,20 @@ export function createSqliteSpaceWrite(
         );
       }
 
-      const tombstones = new Map<string, boolean>();
-      const tombstoned = (nodeId: string): boolean =>
-        tombstones.get(nodeId) ?? context.isNodeTombstoned(canvasId, nodeId);
-
       for (const mutation of input.nodeMutations) {
         if (mutation.kind === 'delete') {
-          const deleted = Number(
-            database
-              .prepare('DELETE FROM nodes WHERE canvas_id = ? AND node_id = ?')
-              .run(canvasId, mutation.nodeId).changes,
-          );
-          if (deleted === 1) tombstones.set(mutation.nodeId, true);
+          database
+            .prepare('DELETE FROM nodes WHERE canvas_id = ? AND node_id = ?')
+            .run(canvasId, mutation.nodeId);
           continue;
         }
 
-        const result = putSqliteNodeInTransaction(
-          database,
-          canvasId,
-          {
-            nodeId: mutation.nodeId,
-            record: mutation.record,
-            strictLabel: mutation.strictLabel,
-          },
-          {
-            tombstoned: tombstoned(mutation.nodeId),
-            bypassTombstone: mutation.authoritativeInsert === true,
-          },
-        );
+        const result = putSqliteNodeInTransaction(database, canvasId, {
+          nodeId: mutation.nodeId,
+          record: mutation.record,
+          strictLabel: mutation.strictLabel,
+        });
         if (!result.ok) throw mutationError(mutation, result);
-        if (mutation.authoritativeInsert === true) {
-          tombstones.set(mutation.nodeId, false);
-        }
       }
 
       if (
@@ -201,14 +174,8 @@ export function createSqliteSpaceWrite(
             stringifyJson(input.delta, `Space ${canvasId} delta`),
           );
       }
-      return { result: { ok: true } as const, tombstones };
+      return { ok: true } as const;
     });
-
-    if (completed.result.ok) {
-      for (const [nodeId, present] of completed.tombstones) {
-        context.setNodeTombstone(canvasId, nodeId, present);
-      }
-    }
-    return completed.result;
+    return completed;
   };
 }

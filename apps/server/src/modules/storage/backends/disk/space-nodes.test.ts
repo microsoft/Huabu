@@ -57,9 +57,9 @@ describeSpaceNodesContract('Disk', async () => {
   const space = store.space('node-space');
   return {
     repository: space.nodes,
-    space,
     missingRepository: store.space('missing-node-space').nodes,
     expectedCanvasId: 'node-space',
+    deletedNodePut: 'write-suppressed',
     cleanup: () => {
       vi.restoreAllMocks();
       resetStorageCache();

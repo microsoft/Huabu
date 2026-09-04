@@ -37,9 +37,9 @@ const AVAILABLE_STRUCTURED: readonly RequestedStructuredKind[] = [
 /**
  * Backends whose complete capability matrix is safe for production use.
  *
- * SQLite deliberately stays out while physical Disk reads, World bootstrap,
- * Blob placement, import/export, and Workspace remounting still have one
- * authority only in the Disk profile.
+ * SQLite deliberately stays out while product composition, Blob placement,
+ * Disk-only capabilities, and Workspace remounting still have one authority
+ * only in the Disk profile.
  */
 const SELECTABLE_STRUCTURED: readonly RequestedStructuredKind[] = ['disk'];
 const IMPLEMENTED_BLOBS: readonly BlobBackendKind[] = ['disk'];
@@ -94,10 +94,11 @@ export function parseStorageProfile(
 /**
  * Reject profiles that cannot serve correctly, before any connection opens.
  *
- * Today that means "named but not implemented". This is also where
- * cross-axis rules belong as backends land — for example, Postgres paired
- * with a node-local disk blob root is unsafe across replicas unless the
- * path is a deliberately shared filesystem.
+ * Today that means either "named but not implemented" or "implemented only as
+ * an isolated preview". This is also where cross-axis rules belong as
+ * backends land — for example, Postgres paired with a node-local disk blob
+ * root is unsafe across replicas unless the path is a deliberately shared
+ * filesystem.
  *
  * A profile that merely offers *fewer features* is not rejected here. Those
  * are stated limitations rather than misconfigurations, and they are declared

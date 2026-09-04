@@ -23,7 +23,7 @@ CREATE TABLE nodes (
   canvas_id TEXT NOT NULL,
   node_id TEXT NOT NULL,
   record_json TEXT NOT NULL CHECK (json_valid(record_json)),
-  revision INTEGER NOT NULL CHECK (revision > 0),
+  revision TEXT NOT NULL CHECK (length(revision) > 0),
   label_collision_key TEXT NOT NULL,
   PRIMARY KEY (canvas_id, node_id),
   UNIQUE (canvas_id, label_collision_key),
@@ -54,6 +54,14 @@ CREATE TABLE tasks (
   FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
 ) STRICT;
 
+CREATE TABLE space_extensions (
+  extension_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  canvas_id TEXT NOT NULL,
+  namespace TEXT NOT NULL,
+  UNIQUE (canvas_id, namespace),
+  FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+) STRICT;
+
 CREATE TABLE delta_log (
   canvas_id TEXT NOT NULL,
   version INTEGER NOT NULL,
@@ -66,7 +74,7 @@ INSERT INTO spaces (
   canvas_id, title, collision_key, version, state_json,
   created_at, updated_at, is_world
 ) VALUES (
-  'fixture-world', 'World', 'world', 0,
+  'fixture-world', 'World', '.world', 0,
   '{"nodes":[],"edges":[]}', 1, 1, 1
 );
 
@@ -84,7 +92,7 @@ INSERT INTO nodes (
 ) VALUES (
   'fixture-space', 'fixture-node',
   '{"nodeId":"fixture-node","type":"note","label":"Fixture Node","content":"fixture body"}',
-  7, 'fixture node'
+  'fixture-revision', 'fixture node'
 );
 
 INSERT INTO events (canvas_id, event_json) VALUES (

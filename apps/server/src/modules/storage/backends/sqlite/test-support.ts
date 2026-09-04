@@ -30,6 +30,11 @@ export interface OpenSqliteTestStore extends SqliteTestFile {
   readonly cleanup: () => Promise<void>;
 }
 
+export interface EmptySqliteTestStore extends SqliteTestFile {
+  readonly store: SqliteStructuredStore;
+  readonly cleanup: () => Promise<void>;
+}
+
 export function createSqliteTestFile(prefix = 'huabu-sqlite-'): SqliteTestFile {
   const directory = mkdtempSync(path.join(tmpdir(), prefix));
   const filename = path.join(directory, 'structured.sqlite');
@@ -111,6 +116,29 @@ export async function openSqliteTestStore(
       ...file,
       store,
       world,
+      cleanup: async () => {
+        await store.close();
+        file.remove();
+      },
+    };
+  } catch (error) {
+    await store.close();
+    file.remove();
+    throw error;
+  }
+}
+
+export async function openEmptySqliteTestStore(
+  prefix = 'huabu-sqlite-empty-',
+  now?: () => number,
+): Promise<EmptySqliteTestStore> {
+  const file = createSqliteTestFile(prefix);
+  const store = new SqliteStructuredStore(file.filename, now);
+  try {
+    await store.init();
+    return {
+      ...file,
+      store,
       cleanup: async () => {
         await store.close();
         file.remove();

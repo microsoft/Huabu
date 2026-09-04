@@ -1,11 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { randomUUID } from 'node:crypto';
+
 import { withImmediateTransaction } from './database.js';
 import { allocateNodeIdentity } from './identity.js';
 import {
   decodeNodeRecord,
-  requirePositiveRevision,
+  requireRevision,
   stringifyJson,
   validateNodeContent,
 } from './rows.js';
@@ -17,13 +19,14 @@ import type {
   NodePutInput,
   NodePutResult,
   NodeSnapshot,
+  NodeStreamOptions,
   SpaceNodes,
 } from '../../ports/structured.js';
 import type { DatabaseSync } from 'node:sqlite';
 
 interface NodeRow {
   readonly record: NodeSnapshot['record'];
-  readonly revision: number;
+  readonly revision: string;
   readonly collisionKey: string;
 }
 
@@ -40,7 +43,7 @@ function decodeNodeRow(value: unknown, nodeId: string): NodeRow {
   }
   return {
     record: decodeNodeRecord(row['record_json'], nodeId),
-    revision: requirePositiveRevision(row['revision'], nodeId),
+    revision: requireRevision(row['revision'], nodeId),
     collisionKey,
   };
 }
@@ -81,28 +84,19 @@ function validatePut(input: NodePutInput): string {
   return nodeId;
 }
 
-export interface SqliteNodePutOptions {
-  readonly tombstoned: boolean;
-  readonly bypassTombstone?: boolean;
-}
-
 /** Apply one node put inside the caller's active transaction. */
 export function putSqliteNodeInTransaction(
   database: DatabaseSync,
   canvasId: string,
   input: NodePutInput,
-  options: SqliteNodePutOptions,
 ): NodePutResult {
   const nodeId = validatePut(input);
-  if (options.tombstoned && options.bypassTombstone !== true) {
-    return { ok: false, reason: 'write-suppressed' };
-  }
   if (!spaceExists(database, canvasId)) {
     return { ok: false, reason: 'not-found' };
   }
 
   const current = readNodeRow(database, canvasId, nodeId);
-  const currentRevision = current === null ? null : String(current.revision);
+  const currentRevision = current?.revision ?? null;
   if (
     input.expectedRevision !== undefined &&
     input.expectedRevision !== currentRevision
@@ -164,10 +158,7 @@ export function putSqliteNodeInTransaction(
     }
   }
 
-  const revision = (current?.revision ?? 0) + 1;
-  if (!Number.isSafeInteger(revision)) {
-    throw new Error(`Node ${JSON.stringify(nodeId)} revision overflow`);
-  }
+  const revision = randomUUID();
   database
     .prepare(
       `INSERT INTO nodes (
@@ -188,7 +179,7 @@ export function putSqliteNodeInTransaction(
   return {
     ok: true,
     record: allocation.record,
-    revision: String(revision),
+    revision,
   };
 }
 
@@ -211,20 +202,71 @@ export class SqliteSpaceNodes implements SpaceNodes {
     );
     return current === null
       ? null
-      : { record: current.record, revision: String(current.revision) };
+      : { record: current.record, revision: current.revision };
+  }
+
+  async readMany(
+    nodeIds: readonly string[],
+  ): Promise<Map<string, NodeSnapshot>> {
+    const database = this.#context.database();
+    const snapshots = new Map<string, NodeSnapshot>();
+    for (const nodeIdInput of new Set(nodeIds)) {
+      const nodeId = sanitizeId(nodeIdInput, 'nodeId');
+      const row = readNodeRow(database, this.canvasId, nodeId);
+      if (row !== null) {
+        snapshots.set(nodeId, {
+          record: row.record,
+          revision: row.revision,
+        });
+      }
+    }
+    return snapshots;
+  }
+
+  async list(): Promise<Map<string, NodeSnapshot>> {
+    const rows = this.#context
+      .database()
+      .prepare(
+        `SELECT node_id, record_json, revision, label_collision_key
+         FROM nodes
+         WHERE canvas_id = ?`,
+      )
+      .all(this.canvasId);
+    const snapshots = new Map<string, NodeSnapshot>();
+    for (const value of rows) {
+      const nodeId = value['node_id'];
+      if (typeof nodeId !== 'string') {
+        throw new SyntaxError('Invalid node_id in persisted SQLite Node');
+      }
+      const row = decodeNodeRow(value, nodeId);
+      snapshots.set(nodeId, {
+        record: row.record,
+        revision: row.revision,
+      });
+    }
+    return snapshots;
+  }
+
+  async stream(
+    onNode: (snapshot: NodeSnapshot) => void,
+    options?: NodeStreamOptions,
+  ): Promise<Map<string, NodeSnapshot>> {
+    const snapshots = await this.list();
+    const delivered = new Map<string, NodeSnapshot>();
+    for (const [nodeId, snapshot] of snapshots) {
+      if (options?.signal?.aborted) break;
+      onNode(snapshot);
+      delivered.set(nodeId, snapshot);
+    }
+    return delivered;
   }
 
   async put(input: NodePutInput): Promise<NodePutResult> {
-    const nodeId = validatePut(input);
+    validatePut(input);
     this.#context.assertMutationAllowed(this.canvasId);
-    if (this.#context.isNodeTombstoned(this.canvasId, nodeId)) {
-      return { ok: false, reason: 'write-suppressed' };
-    }
     const database = this.#context.database();
     return withImmediateTransaction(database, () =>
-      putSqliteNodeInTransaction(database, this.canvasId, input, {
-        tombstoned: false,
-      }),
+      putSqliteNodeInTransaction(database, this.canvasId, input),
     );
   }
 
@@ -232,9 +274,8 @@ export class SqliteSpaceNodes implements SpaceNodes {
     const nodeId = sanitizeId(nodeIdInput, 'nodeId');
     this.#context.assertMutationAllowed(this.canvasId);
     const database = this.#context.database();
-    const result = withImmediateTransaction(database, () => {
-      if (!spaceExists(database, this.canvasId))
-        return 'missing-space' as const;
+    return withImmediateTransaction(database, () => {
+      if (!spaceExists(database, this.canvasId)) return 'absent' as const;
       const deleted = Number(
         database
           .prepare('DELETE FROM nodes WHERE canvas_id = ? AND node_id = ?')
@@ -242,10 +283,5 @@ export class SqliteSpaceNodes implements SpaceNodes {
       );
       return deleted === 1 ? ('deleted' as const) : ('absent' as const);
     });
-    if (result === 'missing-space') return 'absent';
-    if (result === 'deleted') {
-      this.#context.setNodeTombstone(this.canvasId, nodeId, true);
-    }
-    return result;
   }
 }

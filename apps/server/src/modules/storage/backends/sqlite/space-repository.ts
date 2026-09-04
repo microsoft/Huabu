@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { randomUUID } from 'node:crypto';
+
 import { withImmediateTransaction } from './database.js';
 import { allocateSpaceIdentity, collisionKeyForTitle } from './identity.js';
 import {
@@ -70,6 +72,43 @@ export class SqliteSpaceRepository implements SpaceRepository {
     const world = decodeSpaceRow(rows[0]);
     if (!world.isWorld) throw new Error('SQLite World Space is malformed');
     return sanitizeId(world.record.canvasId, 'world canvasId');
+  }
+
+  async ensureWorld(): Promise<string> {
+    const database = this.#context.database();
+    return withImmediateTransaction(database, () => {
+      const existing = database
+        .prepare(`SELECT ${SPACE_COLUMNS} FROM spaces WHERE is_world = 1`)
+        .all();
+      if (existing.length > 1) {
+        throw new Error('SQLite namespace has multiple World Spaces');
+      }
+      if (existing.length === 1) {
+        const world = decodeSpaceRow(existing[0]);
+        if (!world.isWorld) throw new Error('SQLite World Space is malformed');
+        return sanitizeId(world.record.canvasId, 'world canvasId');
+      }
+
+      const canvasId = randomUUID();
+      const timestamp = this.#context.now();
+      if (!Number.isFinite(timestamp)) {
+        throw new TypeError('SQLite Space clock returned a non-finite value');
+      }
+      insertSpaceRow(
+        database,
+        {
+          canvasId,
+          title: 'World',
+          version: 0,
+          state: { nodes: [], edges: [] },
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+        '',
+        true,
+      );
+      return canvasId;
+    });
   }
 
   async create(input: SpaceCreateInput): Promise<SpaceCreateResult> {
@@ -152,10 +191,8 @@ export class SqliteSpaceRepository implements SpaceRepository {
               );
               return { deleted: deleted === 1 };
             });
-            if (result.deleted) {
-              this.#context.clearCanvasTombstones(canvasId);
+            if (result.deleted)
               return { ok: true as const, reason: 'deleted' as const };
-            }
             return { ok: false as const, reason: 'not-found' as const };
           } finally {
             close();

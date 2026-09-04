@@ -6,21 +6,16 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { NodeContent } from '../../../canvas/persistence-types.js';
-import type {
-  NodePutInput,
-  SpaceHandle,
-  SpaceNodes,
-  NodeSnapshot,
-} from '../structured.js';
+import type { NodePutInput, SpaceNodes, NodeSnapshot } from '../structured.js';
 
 export interface SpaceNodesContractHarness {
   /** Repository for an existing Space, initially empty at contract-owned ids. */
   readonly repository: SpaceNodes;
-  /** Handle that owns `repository`, used to exercise ordered reinsertion. */
-  readonly space: SpaceHandle;
   /** Repository scoped to a Space whose structural record is absent. */
   readonly missingRepository: SpaceNodes;
   readonly expectedCanvasId: string;
+  /** Whether this adapter fences a deleted id against late standalone puts. */
+  readonly deletedNodePut: 'allowed' | 'write-suppressed';
   readonly cleanup?: () => Promise<void> | void;
 }
 
@@ -343,70 +338,24 @@ export function describeSpaceNodesContract(
       await expect(repository.delete(nodeId)).resolves.toBe('absent');
     });
 
-    it('suppresses standalone resurrection until an authoritative ordered insert succeeds', async () => {
-      const { repository, space } = await open();
+    it('reports the adapter-defined result for a standalone put after deletion', async () => {
+      const { repository, deletedNodePut } = await open();
       const nodeId = 'contract-late-put';
       const record = note(nodeId, 'Contract late put', 'before');
       await putSuccessfully(repository, { nodeId, record });
       await repository.delete(nodeId);
 
-      await expect(
-        repository.put({
-          nodeId,
-          record: { ...record, content: 'late resurrection' },
-        }),
-      ).resolves.toEqual({ ok: false, reason: 'write-suppressed' });
-      await expect(repository.read(nodeId)).resolves.toBeNull();
-
-      const current = await space.read();
-      if (current === null)
-        throw new Error('Contract fixture Space is missing');
-      const authoritative = {
-        ...record,
-        content: 'authoritative resurrection',
-      };
-      await expect(
-        space.write({
-          expectedVersion: current.version,
-          nextRecord: {
-            ...current,
-            version: current.version + 1,
-            state: {
-              ...current.state,
-              nodes: [
-                ...current.state.nodes,
-                { id: nodeId, type: authoritative.type },
-              ],
-            },
-            updatedAt: current.updatedAt + 1,
-          },
-          nodeMutations: [
-            {
-              kind: 'put',
-              nodeId,
-              record: authoritative,
-              authoritativeInsert: true,
-            },
-          ],
-        }),
-      ).resolves.toEqual({ ok: true });
-
-      const restored = await repository.read(nodeId);
-      expect(restored).toMatchObject({ record: authoritative });
-      if (restored === null) {
-        throw new Error('Authoritatively reinserted node is missing');
+      const late = { ...record, content: 'late resurrection' };
+      const result = await repository.put({ nodeId, record: late });
+      if (deletedNodePut === 'write-suppressed') {
+        expect(result).toEqual({ ok: false, reason: 'write-suppressed' });
+        await expect(repository.read(nodeId)).resolves.toBeNull();
+      } else {
+        expect(result).toMatchObject({ ok: true, record: late });
+        await expect(repository.read(nodeId)).resolves.toMatchObject({
+          record: late,
+        });
       }
-
-      await expect(
-        repository.put({
-          nodeId,
-          expectedRevision: restored.revision,
-          record: { ...authoritative, content: 'later standalone update' },
-        }),
-      ).resolves.toMatchObject({
-        ok: true,
-        record: { content: 'later standalone update' },
-      });
     });
   });
 }

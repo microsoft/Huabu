@@ -22,6 +22,7 @@ import type {
   DeltaLogEntry,
   NodeContent,
 } from '../../../canvas/persistence-types.js';
+import type { NodeSnapshot } from '../../ports/structured.js';
 import type { TaskRecord } from '@huabu/shared';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
@@ -99,6 +100,9 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
     await expect(
       Promise.resolve().then(() => store.space('lifecycle-space').read()),
     ).rejects.toThrow(/not initialized/);
+    await expect(
+      store.space('lifecycle-space').nodes.readMany([]),
+    ).rejects.toThrow(/not initialized/);
 
     await expect(store.init()).resolves.toBeUndefined();
     await expect(store.init()).resolves.toBeUndefined();
@@ -113,6 +117,9 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
     ).rejects.toThrow(/closed/);
     await expect(
       Promise.resolve().then(() => store.space('lifecycle-space').read()),
+    ).rejects.toThrow(/closed/);
+    await expect(
+      store.space('lifecycle-space').nodes.readMany([]),
     ).rejects.toThrow(/closed/);
     await expect(store.init()).rejects.toThrow(/closed/);
   });
@@ -131,6 +138,7 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
         'delta_log',
         'events',
         'nodes',
+        'space_extensions',
         'spaces',
         'tasks',
       ];
@@ -195,7 +203,7 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
     });
     await expect(space.nodes.read('fixture-node')).resolves.toEqual({
       record: note('fixture-node', 'Fixture Node', 'fixture body'),
-      revision: '7',
+      revision: 'fixture-revision',
     });
     await expect(space.events.read()).resolves.toEqual([
       {
@@ -294,7 +302,7 @@ describe('SqliteStructuredStore persistence and transactions', () => {
     ).resolves.toEqual(put.ok ? { record, revision: put.revision } : null);
   });
 
-  it('rolls node, record, delta, and tombstone state back on a real trigger abort', async () => {
+  it('rolls node, record, and delta state back on a real trigger abort', async () => {
     const harness = await trackedOpenStore('huabu-sqlite-trigger-rollback-');
     const canvasId = 'trigger-rollback-space';
     const baseline = await createSpace(
@@ -382,6 +390,56 @@ describe('SqliteStructuredStore persistence and transactions', () => {
       record,
       revision: baseline.revision,
     });
+  });
+
+  it('recovers malformed stored Node content through every read shape', async () => {
+    const harness = await trackedOpenStore('huabu-sqlite-node-recovery-');
+    const canvasId = 'node-recovery-space';
+    await createSpace(harness.store, canvasId, 'Node Recovery Space');
+    const nodes = harness.store.space(canvasId).nodes;
+    const record = note('recoverable-node', 'Recoverable Node', 'before');
+    const baseline = await nodes.put({ nodeId: record.nodeId, record });
+    if (!baseline.ok) throw new Error('Could not seed recoverable Node');
+
+    withTestDatabase(harness.filename, (database) => {
+      database
+        .prepare(
+          `UPDATE nodes
+           SET record_json = ?
+           WHERE canvas_id = ? AND node_id = ?`,
+        )
+        .run('{"content":"recoverable body"}', canvasId, record.nodeId);
+    });
+
+    const recovered: NodeSnapshot = {
+      record: {
+        nodeId: record.nodeId,
+        type: 'note',
+        label: null,
+        content: 'recoverable body',
+      },
+      revision: baseline.revision,
+    };
+    await expect(nodes.read(record.nodeId)).resolves.toEqual(recovered);
+    await expect(nodes.readMany([record.nodeId])).resolves.toEqual(
+      new Map([[record.nodeId, recovered]]),
+    );
+    await expect(nodes.list()).resolves.toEqual(
+      new Map([[record.nodeId, recovered]]),
+    );
+    const delivered: NodeSnapshot[] = [];
+    await expect(
+      nodes.stream((snapshot) => delivered.push(snapshot)),
+    ).resolves.toEqual(new Map([[record.nodeId, recovered]]));
+    expect(delivered).toEqual([recovered]);
+
+    await expect(
+      nodes.put({
+        nodeId: record.nodeId,
+        expectedRevision: baseline.revision,
+        record: { ...record, content: 'repaired' },
+      }),
+    ).resolves.toMatchObject({ ok: true });
   });
 
   it('releases deletion admission when post-acquire Space setup throws', async () => {
@@ -533,7 +591,7 @@ describe('SqliteStructuredStore persistence and transactions', () => {
     await expect(handle.read()).resolves.toBeNull();
   });
 
-  it('does not create a tombstone when deleting an already absent node', async () => {
+  it('allows a first write after deleting an already absent node', async () => {
     const harness = await trackedOpenStore('huabu-sqlite-absent-delete-');
     const canvasId = 'absent-delete-space';
     await createSpace(harness.store, canvasId, 'Absent Delete Space');
@@ -546,25 +604,44 @@ describe('SqliteStructuredStore persistence and transactions', () => {
     ).resolves.toMatchObject({ ok: true, record });
   });
 
-  it('forgets a successful node deletion tombstone after close and reopen', async () => {
-    const harness = await trackedOpenStore('huabu-sqlite-tombstone-reopen-');
+  it('allows immediate reuse of a deleted primary key across reopen', async () => {
+    const harness = await trackedOpenStore('huabu-sqlite-delete-reopen-');
     const canvasId = 'tombstone-reopen-space';
     await createSpace(harness.store, canvasId, 'Tombstone Reopen Space');
     const record = note('tombstoned-node', 'Tombstoned Node', 'before');
     const nodes = harness.store.space(canvasId).nodes;
-    await nodes.put({ nodeId: record.nodeId, record });
+    const initial = await nodes.put({ nodeId: record.nodeId, record });
+    if (!initial.ok) throw new Error('Could not create initial test Node');
 
     await expect(nodes.delete(record.nodeId)).resolves.toBe('deleted');
+    const recreated = await nodes.put({
+      nodeId: record.nodeId,
+      record: { ...record, content: 'immediate replacement' },
+    });
+    if (!recreated.ok) throw new Error('Could not recreate test Node');
+    expect(recreated.record).toEqual({
+      ...record,
+      content: 'immediate replacement',
+    });
+    expect(recreated.revision).not.toBe(initial.revision);
     await expect(
       nodes.put({
         nodeId: record.nodeId,
-        record: { ...record, content: 'late stale write' },
+        expectedRevision: initial.revision,
+        record: { ...record, content: 'stale replacement' },
       }),
-    ).resolves.toEqual({ ok: false, reason: 'write-suppressed' });
+    ).resolves.toEqual({
+      ok: false,
+      reason: 'revision-conflict',
+      currentRevision: recreated.revision,
+    });
 
     await harness.store.close();
     const reopened = trackedStore(harness.filename);
     await reopened.init();
+    await expect(
+      reopened.space(canvasId).nodes.delete(record.nodeId),
+    ).resolves.toBe('deleted');
     await expect(
       reopened.space(canvasId).nodes.put({
         nodeId: record.nodeId,

@@ -58,7 +58,7 @@ describe('storage capability matrix', () => {
     expect(describeUnavailableCapabilities(DISK)).toEqual([]);
   });
 
-  it('answers for a backend that has no adapter yet', () => {
+  it('answers for a backend whose adapter is not selectable yet', () => {
     const missing = unavailableCapabilities(TABLES);
 
     // Every entry is Disk-only today, so a structured backend that is not
@@ -75,13 +75,12 @@ describe('storage capability matrix', () => {
     expect(hasStorageCapability(TABLES, 'something-portable')).toBe(true);
   });
 
-  it('states a limitation without making it a misconfiguration', () => {
-    // A profile that merely offers fewer features must not fail validation —
-    // that is reserved for a backend that cannot serve at all. `sqlite` has
-    // no adapter yet, so it does fail; the distinction is which check
-    // rejects it.
+  it('reports capability gaps separately from profile selectability', () => {
+    // The matrix describes what SQLite lacks regardless of whether the
+    // preview can be selected. Validation rejects it at the separate
+    // production-readiness gate.
     expect(describeUnavailableCapabilities(TABLES).length).toBeGreaterThan(0);
-    expect(() => validateStorageProfile(TABLES)).toThrow(/not implemented/);
+    expect(() => validateStorageProfile(TABLES)).toThrow(/not selectable yet/);
     expect(() => validateStorageProfile(DISK)).not.toThrow();
   });
 

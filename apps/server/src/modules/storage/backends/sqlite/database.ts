@@ -3,6 +3,11 @@
 
 import { DatabaseSync } from 'node:sqlite';
 
+import {
+  assertSpaceMutationAllowed,
+  beginSpaceDeleteAdmission,
+} from '../../space-lifecycle-admission.js';
+
 import type { StorageHealth } from '../../ports/common.js';
 
 export const SQLITE_SCHEMA_VERSION = 1;
@@ -28,7 +33,7 @@ const SCHEMA_V1 = `
     canvas_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
     record_json TEXT NOT NULL CHECK (json_valid(record_json)),
-    revision INTEGER NOT NULL CHECK (revision > 0),
+    revision TEXT NOT NULL CHECK (length(revision) > 0),
     label_collision_key TEXT NOT NULL,
     PRIMARY KEY (canvas_id, node_id),
     UNIQUE (canvas_id, label_collision_key),
@@ -56,6 +61,14 @@ const SCHEMA_V1 = `
   CREATE TABLE tasks (
     canvas_id TEXT PRIMARY KEY,
     snapshot_json TEXT NOT NULL CHECK (json_valid(snapshot_json)),
+    FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+  ) STRICT;
+
+  CREATE TABLE space_extensions (
+    extension_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    canvas_id TEXT NOT NULL,
+    namespace TEXT NOT NULL,
+    UNIQUE (canvas_id, namespace),
     FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
   ) STRICT;
 
@@ -133,114 +146,17 @@ export function applySqliteMigrations(
   }
 }
 
-function reserveWorldCollisionKey(database: DatabaseSync): void {
-  withImmediateTransaction(database, () => {
-    const world = database
-      .prepare('SELECT canvas_id, collision_key FROM spaces WHERE is_world = 1')
-      .get();
-    if (world === undefined) return;
-
-    const canvasId = world['canvas_id'];
-    const collisionKey = world['collision_key'];
-    if (typeof canvasId !== 'string' || typeof collisionKey !== 'string') {
-      throw new SyntaxError('SQLite World Space has malformed identity fields');
-    }
-    if (collisionKey === SQLITE_WORLD_COLLISION_KEY) return;
-
-    const conflict = database
-      .prepare(
-        `SELECT canvas_id
-         FROM spaces
-         WHERE collision_key = ? AND canvas_id <> ?`,
-      )
-      .get(SQLITE_WORLD_COLLISION_KEY, canvasId);
-    if (conflict !== undefined) {
-      throw new Error(
-        `Cannot reserve SQLite World collision slot ${JSON.stringify(
-          SQLITE_WORLD_COLLISION_KEY,
-        )}: it is already occupied`,
-      );
-    }
-
-    const result = database
-      .prepare(
-        `UPDATE spaces
-         SET collision_key = ?
-         WHERE canvas_id = ? AND is_world = 1`,
-      )
-      .run(SQLITE_WORLD_COLLISION_KEY, canvasId);
-    if (Number(result.changes) !== 1) {
-      throw new Error('Could not reserve the SQLite World collision slot');
-    }
-  });
-}
-
-type DeleteAdmission = {
-  readonly resolve: (release: () => void) => void;
-  readonly reject: (error: Error) => void;
-};
-
-class SpaceDeleteGate {
-  #active = false;
-  #closed = false;
-  readonly #waiting: DeleteAdmission[] = [];
-
-  get pending(): boolean {
-    return this.#active || this.#waiting.length > 0;
-  }
-
-  get idle(): boolean {
-    return !this.#active && this.#waiting.length === 0;
-  }
-
-  acquire(): Promise<() => void> {
-    if (this.#closed) {
-      return Promise.reject(new Error('SQLite store is closed'));
-    }
-    if (!this.#active) {
-      this.#active = true;
-      return Promise.resolve(this.#releaseFunction());
-    }
-    return new Promise((resolve, reject) => {
-      this.#waiting.push({ resolve, reject });
-    });
-  }
-
-  close(): void {
-    if (this.#closed) return;
-    this.#closed = true;
-    const error = new Error('SQLite store is closed');
-    for (const admission of this.#waiting.splice(0)) {
-      admission.reject(error);
-    }
-  }
-
-  #releaseFunction(): () => void {
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      this.#active = false;
-      if (this.#closed) return;
-      const next = this.#waiting.shift();
-      if (!next) return;
-      this.#active = true;
-      next.resolve(this.#releaseFunction());
-    };
-  }
-}
-
 /** One connection and all adapter-lifetime process-local state. */
 export class SqliteStoreContext {
   readonly now: () => number;
 
   readonly #database: DatabaseSync;
-  readonly #deleteGates = new Map<string, SpaceDeleteGate>();
-  readonly #nodeTombstones = new Set<string>();
+  readonly #admissionScope: string;
   #state: 'new' | 'open' | 'closed' = 'new';
 
   constructor(filename: string, now: () => number) {
     this.now = now;
+    this.#admissionScope = `sqlite:${filename}`;
     this.#database = new DatabaseSync(filename, { open: false });
   }
 
@@ -260,7 +176,6 @@ export class SqliteStoreContext {
         throw new Error('Could not enable SQLite foreign key enforcement');
       }
       applySqliteMigrations(this.#database);
-      reserveWorldCollisionKey(this.#database);
       this.#state = 'open';
     } catch (error) {
       if (this.#database.isOpen) this.#database.close();
@@ -288,8 +203,6 @@ export class SqliteStoreContext {
   close(): void {
     if (this.#state === 'closed') return;
     this.#state = 'closed';
-    for (const gate of this.#deleteGates.values()) gate.close();
-    this.#deleteGates.clear();
     if (this.#database.isOpen) this.#database.close();
   }
 
@@ -310,58 +223,22 @@ export class SqliteStoreContext {
 
   assertMutationAllowed(canvasId: string): void {
     this.assertOpen();
-    if (this.#deleteGates.get(canvasId)?.pending) {
-      throw new Error(
-        `Cannot mutate Space "${canvasId}" while deletion is pending`,
-      );
-    }
+    assertSpaceMutationAllowed(this.#admissionScope, canvasId);
   }
 
   async acquireDelete(canvasId: string): Promise<() => void> {
     this.assertOpen();
-    let gate = this.#deleteGates.get(canvasId);
-    if (!gate) {
-      gate = new SpaceDeleteGate();
-      this.#deleteGates.set(canvasId, gate);
-    }
-    const releaseGate = await gate.acquire();
+    const releaseGate = await beginSpaceDeleteAdmission(
+      this.#admissionScope,
+      canvasId,
+    );
     try {
       this.assertOpen();
     } catch (error) {
       releaseGate();
       throw error;
     }
-
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      releaseGate();
-      if (gate?.idle && this.#deleteGates.get(canvasId) === gate) {
-        this.#deleteGates.delete(canvasId);
-      }
-    };
-  }
-
-  isNodeTombstoned(canvasId: string, nodeId: string): boolean {
-    return this.#nodeTombstones.has(this.#nodeKey(canvasId, nodeId));
-  }
-
-  setNodeTombstone(canvasId: string, nodeId: string, present: boolean): void {
-    const key = this.#nodeKey(canvasId, nodeId);
-    if (present) this.#nodeTombstones.add(key);
-    else this.#nodeTombstones.delete(key);
-  }
-
-  clearCanvasTombstones(canvasId: string): void {
-    const prefix = `${canvasId}\0`;
-    for (const key of this.#nodeTombstones) {
-      if (key.startsWith(prefix)) this.#nodeTombstones.delete(key);
-    }
-  }
-
-  #nodeKey(canvasId: string, nodeId: string): string {
-    return `${canvasId}\0${nodeId}`;
+    return releaseGate;
   }
 }
 

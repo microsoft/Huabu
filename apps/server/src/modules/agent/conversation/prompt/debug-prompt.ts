@@ -153,6 +153,9 @@ type SubstrateResolution =
 
 /** Where this module keeps one log per thread on a Disk substrate. */
 function diskLogPath(substrate: SpaceSubstrate, threadId: string): string {
+  if (substrate.kind !== 'disk') {
+    throw new Error('Debug prompt logs require a Disk extension substrate');
+  }
   return path.join(
     substrate.directory,
     `${sanitizeId(threadId, 'threadId')}.prompt.log`,

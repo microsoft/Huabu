@@ -3,6 +3,7 @@
 
 import { SqliteStoreContext } from './database.js';
 import { readSpaceRow } from './rows.js';
+import { createSqliteSpaceExtension } from './space-extension.js';
 import { createSqliteSpaceLogs } from './space-logs.js';
 import { SqliteSpaceNodes } from './space-nodes.js';
 import { SqliteSpaceRepository } from './space-repository.js';
@@ -17,7 +18,7 @@ import type {
   StructuredStore,
 } from '../../ports/structured.js';
 
-/** Production structured-store adapter backed by one node:sqlite connection. */
+/** Isolated structured-store adapter backed by one node:sqlite connection. */
 export class SqliteStructuredStore implements StructuredStore {
   readonly kind = 'sqlite' as const;
 
@@ -63,6 +64,7 @@ export class SqliteStructuredStore implements StructuredStore {
       changes,
       tasks,
       events,
+      extension: createSqliteSpaceExtension(this.#context, canvasId),
     });
   }
 }

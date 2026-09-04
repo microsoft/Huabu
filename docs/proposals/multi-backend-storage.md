@@ -1,7 +1,7 @@
 # Multi-Backend Storage
 
-Status: Phases 1–4.5 and §§12.6–12.8 implemented
-Last updated: 2026-08-24
+Status: Phases 1–5 implemented; SQLite remains a contract preview
+Last updated: 2026-09-04
 
 > **Scope and decision confidence.** This proposal records the two-port
 > `StructuredStore` / `BlobStore` split and their target backend families as
@@ -48,8 +48,7 @@ Last updated: 2026-08-24
 > review are recorded in place, including the CAS race ordering (§12.2.5),
 > log-family interface segregation (§12.2.6), and retained-handle Workspace
 > guards (§12.2.4). Remaining Disk-only read and physical capabilities still
-> keep non-Disk profiles unselectable. No SQLite, Postgres, or Azure adapter
-> exists.
+> keep non-Disk profiles unselectable.
 >
 > Phase 4.5 moved storage-owned Disk layout behind the storage boundary in
 > PR #93. What remains between the portable contracts and a second structured
@@ -59,6 +58,11 @@ Last updated: 2026-08-24
 > **implemented**), and §12.8 (the dispositions and the product-level
 > harness, **implemented**). §12 is the authoritative plan;
 > the decision table in §2 marks what each step has actually settled.
+>
+> Phase 5 is specified in §12.9 and is **implemented by this branch** as an
+> isolated SQLite structured-store preview. It exercises the portable
+> contracts with real SQLite files but is deliberately absent from runtime
+> composition; Postgres and Azure adapters do not exist.
 
 ---
 
@@ -1817,11 +1821,12 @@ put outcome remain in the portable shapes. At this phase boundary, both
 existed for Disk's in-memory deletion fence and a second adapter was still
 needed to establish their shared meaning.
 
-**Superseded by Phase 5:** the SQLite contract preview supplies that second
-adapter and confirms the portable rule as a connection-lifetime
-anti-resurrection fence: after deletion, standalone puts are suppressed until
-an ordered authoritative insert commits (§12.6.2). The outcome is therefore
-no longer merely adapter-shaped.
+**Resolved by Phase 5:** the SQLite contract preview supplies that second
+adapter and confirms that these outcomes are adapter-shaped. Disk keeps its
+process-local anti-resurrection fence and uses `authoritativeInsert` to lift
+it. SQLite deletion is final at transaction commit, permits immediate reuse of
+the primary key, and issues a fresh opaque revision so a token from the
+deleted row cannot win a later compare-and-swap (§12.9.2).
 
 The review also asked composition to move default-title allocation
 ("Untitled", "Untitled (1)", …) into `create`, which would have removed the
@@ -2488,14 +2493,15 @@ temporary Workspace through the production lifecycle — prepared Workspace,
 opened connections, `ensureWorld()` — rather than swapping in a stub. A stub
 proves the application talks to an interface; only a real backend proves one
 serves the product, which is the half that decides whether a second adapter
-works. `product-boundary.test.ts` runs the criterion against every profile in
-`PRODUCT_STORAGE_PROFILES`, naming no directory, filename, or `space.json`;
-Phase 5 adds one entry to that list and the same behaviours are covered for
-SQLite. A guard reads the suite's own source and rejects a directory, a
+works. `product-boundary.test.ts` runs the criterion against every selectable
+profile in `PRODUCT_STORAGE_PROFILES`, naming no directory, filename, or
+`space.json`. A guard reads the suite's own source and rejects a directory, a
 filename, or a `readFileSync` appearing in it, because the failure mode here
 is a helpful-looking assertion someone adds later. The records the suite reads
 back are built through the write engine, because a fixture that skips the
-engine asserts nothing about what the product actually stores.
+engine asserts nothing about what the product actually stores. The isolated
+Phase 5 adapter runs the lower-level portable contracts; it does not enter
+this product-profile harness until it becomes selectable.
 
 `closeStorage()` arrives with it, registered on graceful Server shutdown and
 used by the harness between profiles. On Disk it is close to a no-op — which
@@ -2513,15 +2519,81 @@ bundle export, external-note claim), RFS's sidecar-to-record mapping (**B**,
 deferred until a second backend has a file plane at all), and the ACP session
 path that leaves with the Agenetes `Namespace` change.
 
-Out of scope, unchanged: a SQLite adapter or schema, Disk→SQLite data
-migration, SQLite profile registration, Postgres/Azure, the portable
+Out of scope, unchanged: SQLite runtime composition and profile selection,
+Disk→SQLite data migration, Postgres/Azure, the portable
 change-notification capability, RFS's backend-neutral path vocabulary, ACP
 session relocation, the rest of the Agenetes persistence migration, the
 portable export format, a writable general-purpose virtual filesystem or OS
 mount, protocol or UI changes, and stronger crash/distributed transaction
 guarantees.
 
-### 12.9 Later phases — provisional
+### 12.9 Phase 5 — SQLite contract preview — **implemented**
+
+Phase 5 adds one non-Disk structured adapter to test whether the boundary
+survives a database implementation. It is an isolated implementation and test
+target, not a product profile. The composition root does not construct or
+export it, and `HUABU_STRUCTURED_BACKEND=sqlite` continues to fail during
+profile validation with a preview-specific diagnostic.
+
+#### 12.9.1 Scope and lifecycle
+
+- The adapter uses built-in `node:sqlite`, owns one explicit database filename
+  and connection, and adds no package or native-addon dependency.
+- Retained handles stay bound to that connection. `init`, `health`, and
+  `close` are real lifecycle operations; Workspace remounting and production
+  factory registration remain selectability work.
+- The current portable surface is implemented: Space listing/lifecycle and
+  `ensureWorld`, record read/write, node read/readMany/list/stream and
+  mutations, events, changes, Tasks/Runs including atomic completion, and the
+  extension substrate.
+- Postgres, Azure Blob, Disk-to-SQLite migration, RFS/file tools, external-note
+  watching, import/export, client/API changes, and product UI remain outside
+  this phase.
+
+#### 12.9.2 Schema and behavior
+
+Schema versioning uses `PRAGMA user_version`; migrations run transactionally,
+reject databases from the future, and create `STRICT` tables with foreign keys
+enabled. Version 1 stores Space records and World membership, complete node
+JSON with opaque revision tokens, ordered events, coalesced changes,
+Task/Run snapshots, extension namespaces, and the private delta journal.
+
+Every ordered Space write applies node mutations, record replacement, and the
+optional delta insert in one immediate transaction. Same-baseline writers have
+one winner. Space deletion uses the shared process-local admission coordinator
+under a database-specific scope: reads remain available, mutations reject,
+concurrent deletion sessions queue, and `finish()` removes all owned rows by
+foreign-key cascade. No SQL transaction remains open across blob cleanup, and
+no multi-process deletion fence is promised.
+
+SQLite does not emulate Disk's node tombstones. A committed delete immediately
+frees the `(canvas_id, node_id)` key. Every successful put receives a new UUID
+revision token, including a delete/recreate cycle, so a stale token from the
+old row cannot match the replacement. `write-suppressed` and
+`authoritativeInsert` remain valid adapter-specific parts of the common shape
+for Disk rather than requirements every SQL adapter must reproduce.
+
+The extension substrate returns the shared connection plus a stable,
+Space-owned namespace id. Owner tables can reference that id with
+`ON DELETE CASCADE`, preserving namespace isolation and cleanup without
+putting a generic key/value API in the storage port.
+
+#### 12.9.3 Proof
+
+The reusable structured contracts run against Disk and real temporary SQLite
+files. They cover fresh World bootstrap, store lifecycle, Space deletion
+admission, node CAS and read shapes, ordered transactional writes, event/change
+ordering, Task/Run completion, and extension isolation and cleanup. SQLite
+integration tests additionally cover strict schema creation, close/reopen
+persistence, an immutable v1 fixture, future-version rejection, migration
+rollback, SQL fault injection, foreign-key cascades, and revision safety across
+delete/recreate.
+
+The preview changes only the storage implementation, contracts, focused type
+narrowing for the new substrate union, and this documentation. Runtime
+composition and product capability owners remain unchanged.
+
+### 12.10 Later phases — provisional
 
 6. Migrate the currently synchronous Agenetes persistence ports without
    changing their persist-before-notify, sequence, and fencing semantics.
@@ -2742,7 +2814,7 @@ Before a new backend is production-ready:
 
 | File/dir                                                                                                                                     | Responsibility                                                                                                                                                                                                       |
 | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`apps/server/src/modules/storage/`](../../apps/server/src/modules/storage/)                                                                 | Ports, composition, adapters, compatibility, tests, and three forwarding shims — the canonical Phase-1–5 tree (§§12.1–12.6), guarded by `module-boundaries.test.ts`.                                                 |
+| [`apps/server/src/modules/storage/`](../../apps/server/src/modules/storage/)                                                                 | Ports, composition, adapters, compatibility, tests, and three forwarding shims — the canonical Phase-1–5 tree (§§12.1–12.9), guarded by `module-boundaries.test.ts`.                                                 |
 | [`apps/server/src/modules/storage/ports/`](../../apps/server/src/modules/storage/ports/)                                                     | The two ports; reusable suites live in `ports/contracts/`. `blob.ts` is normative (§7.1); `structured.ts` owns the Space collection and the per-Space handle: record read/write, nodes, changes, Tasks, and history. |
 | [`apps/server/src/modules/storage/storage.ts`](../../apps/server/src/modules/storage/storage.ts)                                             | Composition root: maps profiles to adapters, guards blob puts, and holds a lifecycle deletion session across the blob-first cleanup saga.                                                                            |
 | [`.../storage/backends/disk/legacy/canvas-store-cache.ts`](../../apps/server/src/modules/storage/backends/disk/legacy/canvas-store-cache.ts) | Bounded LRU of legacy Disk Space objects. The single owner both the adapter and the facade resolve through, and the real limit of `space(id)` identity (§12.2.4).                                                    |

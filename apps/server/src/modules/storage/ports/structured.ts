@@ -52,6 +52,7 @@ import type {
   TaskStoreSnapshot,
 } from '@huabu/shared';
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
+import type { DatabaseSync } from 'node:sqlite';
 
 /**
  * Backends with a structured adapter today.
@@ -299,14 +300,23 @@ export interface SpaceHandle {
  *
  * One member per backend that exists, like {@link StructuredBackendKind} and
  * for the same reason: a union that named `sqlite` today would advertise a
- * substrate no adapter can supply. It grows with each adapter — a table prefix
- * for SQLite, a schema for Postgres — and an owner switches on `kind`.
+ * substrate no adapter can supply. It grows with each adapter — a scoped
+ * connection and parent id for SQLite, a schema for Postgres — and an owner
+ * switches on `kind`.
  */
-export type SpaceSubstrate = {
-  readonly kind: 'disk';
-  /** A directory reserved for this namespace, created and ready to write. */
-  readonly directory: string;
-};
+export type SpaceSubstrate =
+  | {
+      readonly kind: 'disk';
+      /** A directory reserved for this namespace, created and ready to write. */
+      readonly directory: string;
+    }
+  | {
+      readonly kind: 'sqlite';
+      /** The adapter connection on which the owner creates its own tables. */
+      readonly database: DatabaseSync;
+      /** Stable parent row for owner tables to reference with ON DELETE CASCADE. */
+      readonly extensionId: number;
+    };
 
 // ─── The ordered Space write ─────────────────────────────────────────────────
 
@@ -325,17 +335,12 @@ export type SpaceNodeMutation =
       /**
        * Marks an executor-authoritative INSERT.
        *
-       * After {@link SpaceNodes.delete} removes an existing id, standalone
-       * puts for that id must return `write-suppressed` within the same running
-       * {@link StructuredStore}. A successful ordered put carrying this flag
-       * is the portable signal that the id is intentionally being reinserted;
-       * it admits the write and clears that suppression for later standalone
-       * puts. It is intentionally batch-only so a late direct write cannot
-       * claim authority for itself.
-       *
-       * This is an in-memory connection-lifetime guarantee, not restart
-       * durability. Closing or recreating the StructuredStore may discard the
-       * deletion fence.
+       * **Adapter-shaped**, like {@link NodePutResult}'s `write-suppressed`.
+       * It exists for a backend that suppresses writes to a recently deleted
+       * id, and lets such an adapter distinguish a real re-insertion from a
+       * late direct write that should stay suppressed. It is intentionally
+       * batch-only. An adapter whose deletes are immediately final — a SQL
+       * table with a unique key — can ignore it.
        */
       readonly authoritativeInsert?: boolean;
     }
@@ -534,19 +539,19 @@ export type NodeDeleteResult = 'deleted' | 'absent';
  * {@link SpaceNodes.readMany}, {@link SpaceNodes.list}, and
  * {@link SpaceNodes.stream}.
  *
- * One mutation outcome is **adapter-shaped** and optional:
+ * Two mutation outcomes are **adapter-shaped** and optional:
  *
  * - `duplicate-node`, for adapters that can observe conflicting physical
  *   representations of one stable id. Such an adapter may return one readable
  *   representative from `read` so a caller can construct the attempted
  *   update, but it must refuse the `put` rather than overwrite an arbitrary
  *   representation.
+ * - `write-suppressed`, for adapters that keep a deleted id fenced against
+ *   late in-flight writes. See {@link SpaceNodeMutation}'s
+ *   `authoritativeInsert`, which is how a batch re-insertion is distinguished
+ *   from such a late write.
  *
- * `write-suppressed` is portable anti-resurrection behavior. After a
- * successful delete of an existing node, standalone puts for that id are
- * suppressed for the lifetime of the running {@link StructuredStore} until a
- * successful ordered put marks the id as an `authoritativeInsert`. The fence
- * need not survive closing or recreating the store.
+ * A SQL adapter with a unique key produces neither.
  */
 export interface SpaceNodes {
   /**

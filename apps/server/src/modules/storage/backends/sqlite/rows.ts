@@ -6,8 +6,9 @@
  *
  * Every column this backend stores is either JSON text or a scalar, so the
  * codecs here are the single place that decides what a well-formed stored
- * value looks like. Reads validate on the way out: a row that no longer
- * matches the domain shape is a corruption report, not a silent default.
+ * value looks like. Space and log reads reject malformed domain values. Node
+ * reads preserve the port's repair path by recovering malformed JSON values
+ * into a valid record whose content still exposes the stored value.
  */
 
 import { SQLITE_WORLD_COLLISION_KEY } from './database.js';
@@ -269,21 +270,30 @@ export function decodeNodeRecord(
   const parsed = parseJson(value, `Node ${JSON.stringify(expectedNodeId)}`);
   try {
     validateNodeContent(parsed as NodeContent, expectedNodeId);
-  } catch (error) {
-    throw new SyntaxError(
-      `Invalid persisted Node ${JSON.stringify(expectedNodeId)}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+    return parsed as NodeContent;
+  } catch {
+    // A valid JSON value can still have a damaged Node shape after an
+    // out-of-band database edit. Keep it reachable so a normal put can repair
+    // it, matching the lenient content rule used by the Disk adapter.
+    const fields =
+      typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    return {
+      ...fields,
+      nodeId: expectedNodeId,
+      type: typeof fields['type'] === 'string' ? fields['type'] : 'note',
+      label: typeof fields['label'] === 'string' ? fields['label'] : null,
+      content:
+        typeof fields['content'] === 'string'
+          ? fields['content']
+          : stringifyJson(parsed, `Malformed Node ${expectedNodeId}`),
+    } as NodeContent;
   }
-  return parsed as NodeContent;
 }
 
-export function requirePositiveRevision(
-  value: unknown,
-  nodeId: string,
-): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+export function requireRevision(value: unknown, nodeId: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
     throw new SyntaxError(
       `Invalid persisted revision for Node ${JSON.stringify(nodeId)}`,
     );

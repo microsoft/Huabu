@@ -112,6 +112,8 @@ describe('Disk Space extension workspace binding', () => {
     try {
       const substrate = await pending;
       expect(substrate?.kind).toBe('disk');
+      if (substrate?.kind !== 'disk')
+        throw new Error('Expected Disk substrate');
       expect(substrate?.directory.startsWith(`${firstRoot}${path.sep}`)).toBe(
         true,
       );
@@ -124,6 +126,30 @@ describe('Disk Space extension workspace binding', () => {
       rmSync(secondRoot, { recursive: true, force: true });
     }
   });
+});
+
+describeSpaceTasksContract('Disk', () => {
+  const root = freshWorkspace('huabu-task-contract-');
+  seedSpace(root, 'canvas-task', 'Canvas Task');
+  const store = new DiskStructuredStore();
+  return {
+    tasks: store.space('canvas-task').tasks,
+    concurrent: store.space('canvas-task').tasks,
+    canvasId: 'canvas-task',
+    missing: store.space('missing-canvas').tasks,
+    missingCanvasId: 'missing-canvas',
+    beginDelete: async () => {
+      const result = await store.spaces().beginDelete({
+        canvasId: 'canvas-task',
+      });
+      if (!result.ok) throw new Error('Ordinary Space must be deletable');
+      return result.session;
+    },
+    cleanup: () => {
+      resetStorageCache();
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
 });
 
 describe('Disk Space Tasks', () => {
