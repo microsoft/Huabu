@@ -29,6 +29,7 @@ import {
   forgetCanvasStore,
   getCanvasStore,
 } from './legacy/canvas-store-cache.js';
+import { clearSpaceNodeTombstones } from './legacy/node-tombstones.js';
 import { withSpaceDirHandlesReleased } from './space-dir-handles.js';
 import { readValidCanvasFile } from './space-record-validation.js';
 import { readDiskSpaceRecord } from './space-record.js';
@@ -160,11 +161,22 @@ export class DiskSpaceRepository implements SpaceRepository {
       return { ok: false, reason: 'world-forbidden' };
     }
 
-    const store = getCanvasStore(canvasId);
     const release = await beginSpaceDeleteAdmission(
       this.#workspacePath,
       canvasId,
     );
+    let store: ReturnType<typeof getCanvasStore> | null;
+    try {
+      this.#assertActiveWorkspace();
+      refreshCanvasDirIndex();
+      const existed = listAllCanvasDirEntries().some(
+        (entry) => entry.id === canvasId,
+      );
+      store = existed ? getCanvasStore(canvasId) : null;
+    } catch (error) {
+      release();
+      throw error;
+    }
     let state: 'open' | 'finishing' | 'closed' = 'open';
     const close = (): void => {
       if (state === 'closed') return;
@@ -178,6 +190,11 @@ export class DiskSpaceRepository implements SpaceRepository {
         }
         state = 'finishing';
         try {
+          if (!store) {
+            forgetCanvasStore(canvasId);
+            clearSpaceNodeTombstones(this.#workspacePath, canvasId);
+            return { ok: false as const, reason: 'not-found' as const };
+          }
           const deleted = await withSpaceDirHandlesReleased(canvasId, () =>
             store.destroy(),
           );

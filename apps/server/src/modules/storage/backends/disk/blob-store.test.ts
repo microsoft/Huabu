@@ -3,10 +3,13 @@
 
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -133,4 +136,26 @@ describe('DiskBlobStore temp file hygiene', () => {
       rmSync(otherRoot, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses to delete blobs through a symlinked scope root',
+    async () => {
+      const target = mkdtempSync(path.join(tmpdir(), 'huabu-blob-outside-'));
+      const artifact = path.join(target, '.artifacts', 'keep.bin');
+      mkdirSync(path.dirname(artifact), { recursive: true });
+      writeFileSync(artifact, 'bytes');
+      symlinkSync(target, path.join(root, 'symlink-canvas'), 'dir');
+
+      try {
+        const scope = new DiskBlobStore().scope({
+          kind: 'canvas',
+          canvasId: 'symlink-canvas',
+        });
+        await expect(scope.deleteAll()).rejects.toThrow(/symbolic link/i);
+        expect(existsSync(artifact)).toBe(true);
+      } finally {
+        rmSync(target, { recursive: true, force: true });
+      }
+    },
+  );
 });

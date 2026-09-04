@@ -21,6 +21,7 @@ vi.mock('../../../workspace.js', () => ({
 
 import {
   canvasDirName,
+  destructiveCanvasDirName,
   getWorldCanvasId,
   isWorldCanvasId,
   listAllCanvasDirEntries,
@@ -136,5 +137,37 @@ describe('World canvas directory indexing', () => {
     expect(() => getWorldCanvasId()).toThrow(
       'World canvas is missing or malformed',
     );
+  });
+
+  it('resolves destructive fallbacks by stable ownership and disk filename', () => {
+    writeCanvas(
+      workspaceState.path,
+      'Alias_Victim',
+      'canvas-alias',
+      'Alias/Victim',
+    );
+
+    expect(destructiveCanvasDirName('canvas-alias')).toEqual({
+      kind: 'owned',
+      filename: 'Alias_Victim',
+    });
+    expect(destructiveCanvasDirName('Alias_Victim')).toBeNull();
+    expect(destructiveCanvasDirName('SETTING')).toBeNull();
+    expect(destructiveCanvasDirName('canvas-orphan')).toEqual({
+      kind: 'orphan',
+      filename: 'canvas-orphan',
+    });
+  });
+
+  it('refreshes a warm index before authorizing a destructive fallback', () => {
+    expect(listCanvasDirEntries()).toHaveLength(1);
+    writeCanvas(
+      workspaceState.path,
+      'FreshAlias',
+      'canvas-fresh',
+      'FreshAlias',
+    );
+
+    expect(destructiveCanvasDirName('FreshAlias')).toBeNull();
   });
 });

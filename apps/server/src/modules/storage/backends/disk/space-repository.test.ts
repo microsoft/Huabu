@@ -257,6 +257,31 @@ describe('DiskSpaceRepository membership', () => {
     await expect(held.worldId()).rejects.toThrow(/inactive workspace/i);
     await expect(new DiskSpaceRepository().worldId()).resolves.toBe('world-b');
   });
+
+  it('releases deletion admission when a queued session resumes in another Workspace', async () => {
+    const firstRoot = makeWorkspace('huabu-space-delete-release-a-');
+    seedWorld(firstRoot, 'world-a');
+    seedSpace(firstRoot, 'canvas-a', 'Alpha');
+    const spaces = new DiskSpaceRepository();
+    const first = await spaces.beginDelete({ canvasId: 'canvas-a' });
+    if (!first.ok) throw new Error('Expected ordinary Space deletion session');
+
+    const queued = spaces.beginDelete({ canvasId: 'canvas-a' });
+    await Promise.resolve();
+    const secondRoot = makeWorkspace('huabu-space-delete-release-b-');
+    seedWorld(secondRoot, 'world-b');
+    await first.session.abort();
+
+    await expect(queued).rejects.toThrow(/inactive workspace/i);
+
+    workspaceState.path = firstRoot;
+    resetStorageCache();
+    refreshCanvasDirIndex();
+    const retry = await spaces.beginDelete({ canvasId: 'canvas-a' });
+    if (!retry.ok)
+      throw new Error('Expected deletion admission to be released');
+    await retry.session.abort();
+  });
 });
 
 describe('DiskSpaceRepository lifecycle', () => {

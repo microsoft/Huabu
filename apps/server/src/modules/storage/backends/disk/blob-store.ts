@@ -14,7 +14,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
+import {
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  lstatSync,
+} from 'node:fs';
 import {
   mkdir,
   readdir,
@@ -26,7 +31,12 @@ import {
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
-import { artifactsDir } from './layout.js';
+import { destructiveCanvasDirName } from './canvas-dirs.js';
+import {
+  artifactsDir,
+  ARTIFACTS_DIR_NAME,
+  SPACE_JSON_FILENAME,
+} from './layout.js';
 import { renameOverWithRetry } from '../../../../utils/fs.js';
 import { getWorkspacePath } from '../../../workspace.js';
 import { createBlobLease, normalizeBlobName } from '../../ports/blob.js';
@@ -92,6 +102,43 @@ class DiskBlobScope implements BlobScope {
     // that operation is derived from this absolute directory, so a workspace
     // switch cannot combine a temp in A with a destination in B.
     return scopeDir(this.#ref);
+  }
+
+  #resolveDeleteDir(): string | null {
+    const active = path.resolve(getWorkspacePath());
+    if (active !== this.#workspacePath) {
+      throw new Error(
+        `DiskBlobScope(${this.#ref.canvasId}) belongs to an inactive workspace. ` +
+          `Resolve a fresh scope after workspace activation.`,
+      );
+    }
+    const target = destructiveCanvasDirName(this.#ref.canvasId);
+    if (target === null) return null;
+    const root = path.resolve(this.#workspacePath, target.filename);
+    const resolved = path.join(root, ARTIFACTS_DIR_NAME);
+    if (!resolved.startsWith(`${this.#workspacePath}${path.sep}`)) {
+      throw new Error(
+        `Blob scope escapes the active Workspace: "${this.#ref.canvasId}"`,
+      );
+    }
+    try {
+      if (lstatSync(root).isSymbolicLink()) {
+        throw new Error(
+          `Refusing to delete blobs through a symbolic link: "${root}"`,
+        );
+      }
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+    // A Space may have appeared in a previously orphaned directory after the
+    // fresh scan. Refuse before the first await instead of deleting its blobs.
+    if (
+      target.kind === 'orphan' &&
+      existsSync(path.join(root, SPACE_JSON_FILENAME))
+    ) {
+      return null;
+    }
+    return resolved;
   }
 
   async #headAt(dir: string, name: string): Promise<BlobInfo | null> {
@@ -229,7 +276,9 @@ class DiskBlobScope implements BlobScope {
   }
 
   async deleteAll(): Promise<void> {
-    await rm(this.#resolveDir(), { recursive: true, force: true });
+    const dir = this.#resolveDeleteDir();
+    if (dir === null) return;
+    await rm(dir, { recursive: true, force: true });
   }
 }
 

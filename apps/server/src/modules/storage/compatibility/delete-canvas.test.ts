@@ -255,6 +255,69 @@ describe('deleteSpace composition', () => {
     });
   });
 
+  it.each(['cold', 'warm'] as const)(
+    'does not resolve an absent id through another Space directory (%s index)',
+    async (indexState) => {
+      const victimRoot = path.join(workspaceState.path, 'AliasVictim');
+      const victimRecord = path.join(victimRoot, 'space.json');
+      const victimArtifact = path.join(victimRoot, '.artifacts', 'keep-me.bin');
+      writeCanvas('AliasVictim', 'canvas-victim', 'AliasVictim');
+      mkdirSync(path.dirname(victimArtifact), { recursive: true });
+      writeFileSync(victimArtifact, 'bytes');
+      if (indexState === 'warm') {
+        await new DiskStructuredStore().spaces().list();
+      } else {
+        refreshCanvasDirIndex();
+      }
+
+      await expect(deleteSpace('AliasVictim')).resolves.toEqual({
+        ok: false,
+        reason: 'not-found',
+      });
+
+      expect(existsSync(victimRecord)).toBe(true);
+      expect(existsSync(victimArtifact)).toBe(true);
+    },
+  );
+
+  it('does not delete the workspace setting directory for an absent id', async () => {
+    const settingFile = path.join(workspaceState.path, 'setting', 'user.md');
+    const settingArtifact = path.join(
+      workspaceState.path,
+      'setting',
+      '.artifacts',
+      'keep-me.bin',
+    );
+    mkdirSync(path.dirname(settingArtifact), { recursive: true });
+    writeFileSync(settingFile, 'preference');
+    writeFileSync(settingArtifact, 'bytes');
+
+    await expect(deleteSpace('setting')).resolves.toEqual({
+      ok: false,
+      reason: 'not-found',
+    });
+
+    expect(existsSync(settingFile)).toBe(true);
+    expect(existsSync(settingArtifact)).toBe(true);
+  });
+
+  it('sweeps orphan blobs without treating their directory as a Space', async () => {
+    const orphanRoot = path.join(workspaceState.path, 'canvas-orphan');
+    const orphanArtifact = path.join(orphanRoot, '.artifacts', 'orphan.bin');
+    const unrelatedFile = path.join(orphanRoot, 'unrelated.txt');
+    mkdirSync(path.dirname(orphanArtifact), { recursive: true });
+    writeFileSync(orphanArtifact, 'bytes');
+    writeFileSync(unrelatedFile, 'keep');
+
+    await expect(deleteSpace('canvas-orphan')).resolves.toEqual({
+      ok: false,
+      reason: 'not-found',
+    });
+
+    expect(existsSync(orphanArtifact)).toBe(false);
+    expect(existsSync(unrelatedFile)).toBe(true);
+  });
+
   it('refuses the World canvas without touching its blobs', async () => {
     mkdirSync(path.dirname(artifactPath('canvas-world', 'art_w.png')), {
       recursive: true,

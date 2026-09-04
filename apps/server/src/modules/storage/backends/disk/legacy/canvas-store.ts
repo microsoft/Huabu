@@ -63,6 +63,7 @@ import {
   eventsPath,
   nodeFilePath,
   nodesDir,
+  SPACE_JSON_FILENAME,
 } from '../layout.js';
 import { NameIndex } from '../name-index.js';
 import { readValidCanvasFile } from '../space-record-validation.js';
@@ -1515,11 +1516,16 @@ export class CanvasStore {
   /** Recursively delete the entire canvas directory. */
   destroy(): boolean {
     this.assertActiveWorkspace();
+    refreshCanvasDirIndex();
     if (isWorldCanvasId(this.canvasId)) {
       throw new Error('World canvas cannot be deleted');
     }
     const root = canvasRoot(this.canvasId);
-    if (!existsSync(root)) {
+    const record = readValidCanvasFile(
+      path.join(root, SPACE_JSON_FILENAME),
+      this.canvasId,
+    );
+    if (record === null) {
       unregisterCanvasDir(this.canvasId);
       this.invalidateNodeIndex();
       clearSpaceNodeTombstones(this.#workspacePath, this.canvasId);
