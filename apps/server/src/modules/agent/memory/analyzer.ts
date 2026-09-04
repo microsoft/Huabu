@@ -33,11 +33,9 @@ import {
   type CanvasFile,
   type SpaceHandle,
 } from '../../storage/index.js';
-import {
-  canvasMemoryPath,
-  workspaceMemoryPath,
-} from '../../workspace/paths.js';
+import { workspaceMemoryPath } from '../../workspace/paths.js';
 import { runAgent } from '../agent.service.js';
+import { readCanvasMemory } from './read.js';
 
 import type { MemoryLogger } from './index.js';
 import type { WriteResult } from './writers.js';
@@ -197,7 +195,7 @@ async function assembleContext(
     parts.push(`${events.count} ops`);
   }
 
-  const memorySnapshot = readMemorySnapshot(canvasId);
+  const memorySnapshot = await readMemorySnapshot(canvasId);
   messages.push({
     role: 'user',
     content: `[SYSTEM Current memory]\n${memorySnapshot}`,
@@ -279,14 +277,14 @@ function readEventsDigest(events: readonly CanvasEvent[]): EventsDigest | null {
   return { text: summaries.join('\n'), count: events.length };
 }
 
-function readMemorySnapshot(canvasId: string): string {
+async function readMemorySnapshot(canvasId: string): Promise<string> {
   const parts: string[] = [];
 
   const longTerm = readFileSafe(workspaceMemoryPath());
   parts.push('## Long-term memory');
   parts.push(longTerm.trim().length > 0 ? longTerm.trim() : '(empty)');
 
-  const canvas = readFileSafe(canvasMemoryPath(canvasId));
+  const canvas = (await readCanvasMemory(canvasId)) ?? '';
   parts.push('');
   parts.push('## Canvas memory');
   parts.push(canvas.trim().length > 0 ? canvas.trim() : '(empty)');

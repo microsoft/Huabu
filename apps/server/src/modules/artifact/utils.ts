@@ -56,7 +56,7 @@ export async function resolveArtifactImageUrl(
   if (!canvasId || !filename) return url;
 
   try {
-    const buffer = await space(canvasId).blobs.read(filename);
+    const buffer = await space(canvasId).artifacts.read(filename);
     if (!buffer) return url;
     const ext = path.extname(filename).toLowerCase();
     // Never guess `image/png` for an unknown extension: callers forward this

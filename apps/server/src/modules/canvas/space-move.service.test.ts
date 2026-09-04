@@ -148,7 +148,10 @@ describe('moveCanvasSelection', () => {
   it('copies and rewrites required artifacts before deleting the source node', async () => {
     createCanvas('source', 'Source');
     createCanvas('destination', 'Destination');
-    await space('source').blobs.put('artifact-old.png', Buffer.from('image'));
+    await space('source').artifacts.put(
+      'artifact-old.png',
+      Buffer.from('image'),
+    );
     const seeded = await executeOnServer({
       canvasId: 'source',
       originator: { source: 'ui' },
@@ -179,9 +182,9 @@ describe('moveCanvasSelection', () => {
     expect(record?.record.src).toMatch(/^artifact-.+\.png$/);
     expect(record?.record.src).not.toBe('artifact-old.png');
     expect(
-      await space('destination').blobs.read(record?.record.src ?? ''),
+      await space('destination').artifacts.read(record?.record.src ?? ''),
     ).toEqual(Buffer.from('image'));
-    expect(await space('source').blobs.read('artifact-old.png')).toEqual(
+    expect(await space('source').artifacts.read('artifact-old.png')).toEqual(
       Buffer.from('image'),
     );
   });

@@ -15,10 +15,8 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 
-import {
-  workspaceMemoryPath,
-  canvasMemoryPath,
-} from '../../workspace/paths.js';
+import { space, SPACE_MEMORY_BLOB_NAME } from '../../storage/index.js';
+import { workspaceMemoryPath } from '../../workspace/paths.js';
 
 /**
  * Read the user memory body.
@@ -34,12 +32,26 @@ export function readWorkspaceMemory(): string | null {
 }
 
 /**
- * Read the per-canvas canvas memory body.
+ * Read the per-Space memory body.
  *
- * Same null-on-empty contract as {@link readWorkspaceMemory}.
+ * Same null-on-empty contract as {@link readWorkspaceMemory}. A blob under the
+ * Space's own memory scope (proposal §6.4.3, disposition D) — unlike the
+ * Workspace memory above, which is not scoped to a Space and stays a file.
  */
-export function readCanvasMemory(canvasId: string): string | null {
-  return readNonEmpty(canvasMemoryPath(canvasId));
+export async function readCanvasMemory(
+  canvasId: string,
+): Promise<string | null> {
+  const memory = space(canvasId).memory;
+  try {
+    const bytes = await memory.read(SPACE_MEMORY_BLOB_NAME);
+    if (bytes === null) return null;
+    const raw = bytes.toString('utf8');
+    return raw.trim().length === 0 ? null : raw;
+  } catch {
+    // Memory is optional context. Preserve the pre-blob behavior: an
+    // unreadable document is absence, not a reason to fail the agent turn.
+    return null;
+  }
 }
 
 function readNonEmpty(file: string): string | null {

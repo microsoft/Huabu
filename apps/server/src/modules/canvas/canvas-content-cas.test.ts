@@ -531,7 +531,12 @@ describe('artifact presence hydration', () => {
         return { ok: true, kind: 'disk' };
       },
       async close() {},
-      scope: () => scope,
+      space: () => ({
+        artifacts: scope,
+        guide: scope,
+        memory: scope,
+        uploads: scope,
+      }),
     };
   }
 

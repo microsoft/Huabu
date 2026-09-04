@@ -270,7 +270,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       const { canvasId } = request.params;
       try {
         const guide = request.headers.authorization
-          ? resolveCanvasSkill(canvasId)
+          ? await resolveCanvasSkill(canvasId)
           : resolveBundledRootSkill();
         return reply
           .header('Content-Type', 'text/markdown; charset=utf-8')

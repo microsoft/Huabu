@@ -15,19 +15,38 @@
  *                       legacy chat digest. Existing state files preserve it,
  *                       but current analysis passes do not advance it.
  *
- * Persisted at `<canvasDir>/.memory/state.json` so the counter
- * survives process restarts. The file is kept tiny (<128 B) and
- * atomic-written; read / write failures are reported but never thrown
- * — losing this state at worst means we miss or duplicate one
- * analysis pass, which is harmless.
+ * Persisted on the storage extension substrate under the `huabu.memory`
+ * namespace, so the counter survives process restarts. Storage hands this
+ * module a place and nothing else — it never sees these three fields, and this
+ * module owns the format, one small store per backend kind (proposal §6.4.4).
+ * The state is kept tiny (<128 B) and atomic-written; read / write failures are
+ * reported but never thrown — losing it at worst means we miss or duplicate
+ * one analysis pass, which is harmless.
  */
 
-import { existsSync } from 'node:fs';
+import path from 'node:path';
 
-import { atomicWriteJson, mkdirp, readJson } from '../../../utils/fs.js';
+import { atomicWriteJson, readJson } from '../../../utils/fs.js';
 import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
 import { space } from '../../storage/index.js';
-import { memoryStatePath, canvasMemoryDir } from '../../workspace/paths.js';
+
+import type { SpaceSubstrate } from '../../storage/index.js';
+
+/** This module's namespace on the substrate. */
+const MEMORY_NAMESPACE = 'huabu.memory';
+
+/**
+ * Where this module keeps its state on a Disk substrate.
+ *
+ * The whole store, because the state is one whole-value rewrite. A key/value
+ * member on the port would have covered exactly this and nothing else, for
+ * every owner forever — which is why the port hands over a place instead
+ * (§6.4.4). An owner that later wants the same shape extracts a helper *over*
+ * the substrate, never a port member.
+ */
+function diskStatePath(substrate: SpaceSubstrate): string {
+  return path.join(substrate.directory, 'state.json');
+}
 
 /** Op-count threshold that triggers a memory analysis pass. */
 export const OP_THRESHOLD = 50;
@@ -59,9 +78,10 @@ const EMPTY_STATE: MemoryState = {
  * we'd rather miscount a few ops than crash the request pipeline on
  * a corrupted bookkeeping file.
  */
-export function readMemoryState(canvasId: string): MemoryState {
-  if (!existsSync(memoryStatePath(canvasId))) return { ...EMPTY_STATE };
-  const raw = readJson<Partial<MemoryState>>(memoryStatePath(canvasId));
+export async function readMemoryState(canvasId: string): Promise<MemoryState> {
+  const substrate = await space(canvasId).extension(MEMORY_NAMESPACE);
+  if (!substrate) return { ...EMPTY_STATE };
+  const raw = readJson<Partial<MemoryState>>(diskStatePath(substrate));
   if (!raw || typeof raw !== 'object') return { ...EMPTY_STATE };
   return {
     counter: typeof raw.counter === 'number' ? raw.counter : 0,
@@ -74,23 +94,24 @@ export function readMemoryState(canvasId: string): MemoryState {
   };
 }
 
-/** Atomic write of the memory state, creating `.memory/` on demand. */
-export function writeMemoryState(canvasId: string, state: MemoryState): void {
-  // Resurrection guard: the op-counter `onResponse` hook fires
-  // *after* DELETE /api/canvas/:id has rm -rf'd the canvas dir, and
-  // would otherwise mkdirp `.memory/` + drop a fresh `state.json`
-  // here \u2014 leaving behind a stub canvas dir containing only that
-  // file. Same hazard for any in-flight memory worker that calls
-  // `markAnalyzed` post-delete. Skip the write when the canvas root
-  // is gone; losing one bookkeeping write is harmless.
-  // Disk-only by construction: the hazard is an ad-hoc file write
-  // recreating a directory the delete removed, and a backend with no
-  // directory has no such hazard. Phase 4.6 retires the guard entirely when
-  // this state moves onto the extension substrate (proposal §12.6.3).
-  const tree = space(canvasId).diskTree;
-  if (tree && !existsSync(tree.directory())) return;
-  mkdirp(canvasMemoryDir(canvasId));
-  atomicWriteJson(memoryStatePath(canvasId), state);
+/**
+ * Atomic write of the memory state.
+ *
+ * No resurrection guard of its own. The op-counter `onResponse` hook fires
+ * *after* DELETE /api/canvas/:id has removed the Space, and this module used
+ * to check the Space directory itself before writing — otherwise it would drop
+ * a fresh `state.json` into a directory the delete had just removed, leaving a
+ * stub Space behind. `extension()` refuses a substrate for a Space that is
+ * gone, so the guard now lives in the one place that can state it for every
+ * owner rather than being re-derived by each (proposal §12.6.3).
+ */
+export async function writeMemoryState(
+  canvasId: string,
+  state: MemoryState,
+): Promise<void> {
+  const substrate = await space(canvasId).extension(MEMORY_NAMESPACE);
+  if (!substrate) return;
+  atomicWriteJson(diskStatePath(substrate), state);
 }
 
 /**
@@ -112,16 +133,16 @@ export async function bumpOpCounter(
   delta: number,
 ): Promise<boolean> {
   if (!Number.isFinite(delta) || delta <= 0) return false;
-  return stateLock(canvasId, () => {
-    const state = readMemoryState(canvasId);
+  return stateLock(canvasId, async () => {
+    const state = await readMemoryState(canvasId);
     state.counter += delta;
     if (state.counter < OP_THRESHOLD) {
-      writeMemoryState(canvasId, state);
+      await writeMemoryState(canvasId, state);
       return false;
     }
     // Threshold crossed: reset and signal.
     state.counter = 0;
-    writeMemoryState(canvasId, state);
+    await writeMemoryState(canvasId, state);
     return true;
   });
 }
@@ -144,12 +165,12 @@ export async function markAnalyzed(
     lastSeenThreadCursor?: number;
   } = {},
 ): Promise<void> {
-  await stateLock(canvasId, () => {
-    const state = readMemoryState(canvasId);
+  await stateLock(canvasId, async () => {
+    const state = await readMemoryState(canvasId);
     state.lastAnalyzedAt = Date.now();
     if (opts.lastSeenThreadCursor !== undefined) {
       state.lastSeenThreadCursor = opts.lastSeenThreadCursor;
     }
-    writeMemoryState(canvasId, state);
+    await writeMemoryState(canvasId, state);
   });
 }

@@ -177,7 +177,7 @@ export async function handleRead(
           'memory/space.md is Space-scoped but no canvasId is bound to this request',
         );
       }
-      content = readCanvasMemory(args.canvasId);
+      content = await readCanvasMemory(args.canvasId);
     } else {
       throw new Error(
         `Unknown memory path "${rel}". Valid: memory/user.md, memory/space.md`,

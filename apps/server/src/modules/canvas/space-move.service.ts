@@ -44,7 +44,6 @@ import { acquireAgentTurn } from '../agent/turn-lease.js';
 import {
   createSpace,
   deleteSpace,
-  getBlobStore,
   isWorldCanvasId,
   space,
 } from '../storage/index.js';
@@ -99,11 +98,7 @@ async function cloneArtifacts(
   destinationCanvasId: string,
   nodes: readonly CanvasNode[],
 ): Promise<CanvasNode[]> {
-  const blobs = getBlobStore();
-  const destination = blobs.scope({
-    kind: 'canvas',
-    canvasId: destinationCanvasId,
-  });
+  const destination = space(destinationCanvasId).artifacts;
   const cloned = new Map<string, string>();
 
   const cloneRef = async (raw: unknown): Promise<string | undefined> => {
@@ -114,9 +109,7 @@ async function cloneArtifacts(
     const cacheKey = `${owner}/${ref.key}`;
     const existing = cloned.get(cacheKey);
     if (existing) return existing;
-    const body = await blobs
-      .scope({ kind: 'canvas', canvasId: owner })
-      .read(ref.key);
+    const body = await space(owner).artifacts.read(ref.key);
     if (!body) {
       throw new SpaceMoveError(
         'MOVE_ARTIFACT_MISSING',

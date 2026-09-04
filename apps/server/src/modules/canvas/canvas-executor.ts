@@ -368,7 +368,7 @@ async function aspectHeightForWidth(
   width: number,
 ): Promise<number | null> {
   try {
-    const dim = await readImageDimensions(space(canvasId).blobs, src);
+    const dim = await readImageDimensions(space(canvasId).artifacts, src);
     if (!dim?.width || !dim?.height || dim.width <= 0 || dim.height <= 0) {
       return null;
     }

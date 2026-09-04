@@ -17,9 +17,10 @@
 import { appendFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { mkdirp } from '../../../../utils/fs.js';
-import { chatPromptLogPath } from '../../../workspace/paths.js';
+import { sanitizeId } from '../../../../utils/fs.js';
+import { space } from '../../../storage/index.js';
 
+import type { SpaceSubstrate } from '../../../storage/index.js';
 import type { Context } from '@earendil-works/pi-ai';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -133,10 +134,35 @@ export interface DumpPromptParams {
   logger: FastifyBaseLogger;
 }
 
+/** This module's namespace on the storage extension substrate. */
+const PROMPT_LOG_NAMESPACE = 'huabu.prompt.log';
+
+/**
+ * Appends chained so turns land in the log in the order they were dumped.
+ *
+ * Resolving a substrate is asynchronous while the call site is a synchronous
+ * driver callback, so the write cannot happen inline any more. Each turn's
+ * text is still rendered synchronously — a snapshot of the messages as they
+ * were — and only the append is deferred.
+ */
+let appendTail: Promise<void> = Promise.resolve();
+
+type SubstrateResolution =
+  | { readonly ok: true; readonly substrate: SpaceSubstrate | null }
+  | { readonly ok: false; readonly error: unknown };
+
+/** Where this module keeps one log per thread on a Disk substrate. */
+function diskLogPath(substrate: SpaceSubstrate, threadId: string): string {
+  return path.join(
+    substrate.directory,
+    `${sanitizeId(threadId, 'threadId')}.prompt.log`,
+  );
+}
+
 /**
  * Append a readable dump of the assembled prompt for one turn. No-op
- * unless `HUABU_DEBUG_PROMPT` is set or `canvasId` is missing (the log
- * lives under the canvas chat dir). Never throws.
+ * unless `HUABU_DEBUG_PROMPT` is set, or `canvasId` is missing (the log is
+ * per-Space state). Never throws, and never blocks the turn.
  */
 export function dumpAssembledPrompt(params: DumpPromptParams): void {
   if (!isPromptDebugEnabled()) return;
@@ -167,13 +193,37 @@ export function dumpAssembledPrompt(params: DumpPromptParams): void {
     });
     out.push('', '');
 
-    const logPath = chatPromptLogPath(canvasId, params.threadId);
-    mkdirp(path.dirname(logPath));
-    appendFileSync(logPath, out.join('\n'), 'utf-8');
+    const block = out.join('\n');
+    // Resolve against the Workspace handling this turn now, before an older
+    // queued append can delay us past a Workspace switch. Convert rejection to
+    // data immediately so a slow append ahead of us cannot leave an unhandled
+    // rejection while this resolution waits for its turn.
+    const substrateResolution: Promise<SubstrateResolution> = space(canvasId)
+      .extension(PROMPT_LOG_NAMESPACE)
+      .then(
+        (substrate) => ({ ok: true, substrate }),
+        (error: unknown) => ({ ok: false, error }),
+      );
+    appendTail = appendTail
+      .then(async () => {
+        // A Space deleted mid-turn has no substrate, and this is the last
+        // thing that should recreate one for a debug file.
+        const resolved = await substrateResolution;
+        if (!resolved.ok) throw resolved.error;
+        const { substrate } = resolved;
+        if (!substrate) return;
+        appendFileSync(diskLogPath(substrate, params.threadId), block, 'utf-8');
+      })
+      .catch((err: unknown) => {
+        params.logger.warn(
+          { err: String(err) },
+          'dumpAssembledPrompt: failed to write prompt debug log',
+        );
+      });
   } catch (err) {
     params.logger.warn(
       { err: String(err) },
-      'dumpAssembledPrompt: failed to write prompt debug log',
+      'dumpAssembledPrompt: failed to render prompt debug log',
     );
   }
 }

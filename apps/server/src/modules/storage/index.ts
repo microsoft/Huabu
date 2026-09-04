@@ -72,6 +72,7 @@ export type {
 
 export {
   adoptWorkspaceDirectory,
+  closeStorage,
   composeStorage,
   createSpace,
   createStorage,
@@ -97,8 +98,27 @@ export {
   StorageProfileError,
   validateStorageProfile,
 } from './profile.js';
+export {
+  describeUnavailableCapabilities,
+  hasStorageCapability,
+  STORAGE_CAPABILITIES,
+  unavailableCapabilities,
+  unavailableCapabilityMessage,
+} from './capabilities.js';
+export type { StorageCapability } from './capabilities.js';
 export type { StorageProfile } from './profile.js';
-export { BlobNameError, normalizeBlobName } from './ports/blob.js';
+export {
+  assertValidNamespace,
+  SpaceNamespaceError,
+} from './ports/namespace.js';
+export {
+  BlobNameError,
+  normalizeBlobName,
+  SPACE_GUIDE_BLOB_NAMES,
+  SPACE_GUIDE_SKILL_NAME,
+  SPACE_MEMORY_BLOB_NAME,
+  spaceBlobAreas,
+} from './ports/blob.js';
 export type {
   BlobBackendKind,
   BlobInfo,
@@ -106,8 +126,8 @@ export type {
   BlobRange,
   BlobRead,
   BlobScope,
-  BlobScopeRef,
   BlobStore,
+  SpaceBlobs,
 } from './ports/blob.js';
 export type { StorageHealth } from './ports/common.js';
 export type {
@@ -135,6 +155,7 @@ export type {
   SpaceRenameInput,
   SpaceRenameResult,
   SpaceRepository,
+  SpaceSubstrate,
   SpaceTaskRuns,
   SpaceTasks,
   SpaceWriteInput,

@@ -4,9 +4,9 @@
 /**
  * Disk implementation of the blob port.
  *
- * Maps a canvas scope to `<canvasDir>/.artifacts/`, preserving the layout
- * the workspace format has always used: one file per blob, named by the
- * URL key, no manifest indirection.
+ * Maps each area of a Space to a directory under its Space folder, preserving
+ * the layout the workspace format has always used: one file per blob, named by
+ * the URL key, no manifest indirection.
  *
  * Each scope is bound to the workspace active when it is created. A fresh
  * scope follows a free-mode workspace switch; a retained scope rejects the
@@ -26,10 +26,20 @@ import {
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
-import { artifactsDir } from './layout.js';
+import {
+  artifactsDir,
+  canvasRoot,
+  spaceMemoryDir,
+  spaceUploadDir,
+} from './layout.js';
 import { renameOverWithRetry } from '../../../../utils/fs.js';
 import { getWorkspacePath } from '../../../workspace.js';
-import { createBlobLease, normalizeBlobName } from '../../ports/blob.js';
+import {
+  BlobNameError,
+  createBlobLease,
+  normalizeBlobName,
+  SPACE_GUIDE_BLOB_NAMES,
+} from '../../ports/blob.js';
 
 import type {
   BlobInfo,
@@ -37,8 +47,8 @@ import type {
   BlobRange,
   BlobRead,
   BlobScope,
-  BlobScopeRef,
   BlobStore,
+  SpaceBlobs,
 } from '../../ports/blob.js';
 import type { StorageHealth } from '../../ports/common.js';
 import type { Readable } from 'node:stream';
@@ -56,9 +66,37 @@ function isTempEntry(entry: string): boolean {
   return entry.startsWith(TEMP_PREFIX);
 }
 
-/** Resolve a scope to its backing directory. */
-function scopeDir(ref: BlobScopeRef): string {
-  return artifactsDir(ref.canvasId);
+/** The areas of a Space, as this adapter places them. */
+type SpaceBlobArea = keyof SpaceBlobs;
+
+/**
+ * Where one area's bytes sit, and which names it owns there.
+ *
+ * `members: null` means the directory *is* the area — everything in it
+ * belongs. A name list means the area is bounded by its members instead, for
+ * a directory shared with files that are not blobs at all.
+ */
+interface ScopePlacement {
+  readonly directory: string;
+  readonly members: readonly string[] | null;
+}
+
+function scopePlacement(area: SpaceBlobArea, canvasId: string): ScopePlacement {
+  switch (area) {
+    case 'artifacts':
+      return { directory: artifactsDir(canvasId), members: null };
+    case 'memory':
+      return { directory: spaceMemoryDir(canvasId), members: null };
+    case 'uploads':
+      return { directory: spaceUploadDir(canvasId), members: null };
+    case 'guide':
+      // The Space root, which also holds `space.json` and every node
+      // directory — so this area is the guide names, not the folder.
+      return {
+        directory: canvasRoot(canvasId),
+        members: SPACE_GUIDE_BLOB_NAMES,
+      };
+  }
 }
 
 /** Resolve one blob beneath an already-bound scope directory. */
@@ -72,26 +110,62 @@ function isMissing(err: unknown): boolean {
 }
 
 class DiskBlobScope implements BlobScope {
-  readonly #ref: BlobScopeRef;
+  readonly #area: SpaceBlobArea;
+  readonly #canvasId: string;
   readonly #workspacePath: string;
 
-  constructor(ref: BlobScopeRef) {
-    this.#ref = ref;
+  constructor(area: SpaceBlobArea, canvasId: string) {
+    this.#area = area;
+    this.#canvasId = canvasId;
     this.#workspacePath = path.resolve(getWorkspacePath());
   }
 
-  #resolveDir(): string {
+  #placement(): ScopePlacement {
     const active = path.resolve(getWorkspacePath());
     if (active !== this.#workspacePath) {
       throw new Error(
-        `DiskBlobScope(${this.#ref.canvasId}) belongs to an inactive workspace. ` +
+        `DiskBlobScope(${this.#canvasId}) belongs to an inactive workspace. ` +
           `Resolve a fresh scope after workspace activation.`,
       );
     }
     // Resolve once per operation, before its first await. Every later path in
     // that operation is derived from this absolute directory, so a workspace
     // switch cannot combine a temp in A with a destination in B.
-    return scopeDir(this.#ref);
+    return scopePlacement(this.#area, this.#canvasId);
+  }
+
+  /** Names this scope owns in `dir`, given what is actually there. */
+  async #entries(placement: ScopePlacement): Promise<string[]> {
+    if (placement.members) {
+      // A member-bounded scope never reads the directory: everything else in
+      // it belongs to someone else, and listing it would claim otherwise.
+      const present = await Promise.all(
+        placement.members.map(async (name) =>
+          (await this.#headAt(placement.directory, name)) ? name : null,
+        ),
+      );
+      return present.filter((name): name is string => name !== null);
+    }
+    try {
+      return (await readdir(placement.directory)).filter(
+        (entry) => !isTempEntry(entry),
+      );
+    } catch (err) {
+      if (isMissing(err)) return [];
+      throw err;
+    }
+  }
+
+  /** Refuse a name this scope does not own, before it reaches the filesystem. */
+  #assertMember(placement: ScopePlacement, name: string): string {
+    const safe = normalizeBlobName(name);
+    if (placement.members && !placement.members.includes(safe)) {
+      throw new BlobNameError(
+        `"${safe}" is not a member of the ${this.#area} area. ` +
+          `It holds: ${placement.members.join(', ')}.`,
+      );
+    }
+    return safe;
   }
 
   async #headAt(dir: string, name: string): Promise<BlobInfo | null> {
@@ -122,8 +196,9 @@ class DiskBlobScope implements BlobScope {
    * no per-key delete to clean up.
    */
   async put(name: string, body: Readable | Buffer): Promise<BlobInfo> {
-    const safe = normalizeBlobName(name);
-    const dir = this.#resolveDir();
+    const placement = this.#placement();
+    const safe = this.#assertMember(placement, name);
+    const dir = placement.directory;
     await mkdir(dir, { recursive: true });
 
     const full = blobPath(dir, safe);
@@ -152,12 +227,17 @@ class DiskBlobScope implements BlobScope {
   }
 
   async head(name: string): Promise<BlobInfo | null> {
-    return this.#headAt(this.#resolveDir(), name);
+    const placement = this.#placement();
+    return this.#headAt(
+      placement.directory,
+      this.#assertMember(placement, name),
+    );
   }
 
   async open(name: string, range?: BlobRange): Promise<BlobRead | null> {
-    const dir = this.#resolveDir();
-    const info = await this.#headAt(dir, name);
+    const placement = this.#placement();
+    const dir = placement.directory;
+    const info = await this.#headAt(dir, this.#assertMember(placement, name));
     if (!info) return null;
     // `info.size` stays the full blob size; the range only bounds the body.
     const body = createReadStream(blobPath(dir, info.name), {
@@ -168,9 +248,10 @@ class DiskBlobScope implements BlobScope {
   }
 
   async read(name: string): Promise<Buffer | null> {
-    const dir = this.#resolveDir();
+    const placement = this.#placement();
+    const safe = this.#assertMember(placement, name);
     try {
-      return await readFile(blobPath(dir, name));
+      return await readFile(blobPath(placement.directory, safe));
     } catch (err) {
       if (isMissing(err)) return null;
       throw err;
@@ -178,48 +259,32 @@ class DiskBlobScope implements BlobScope {
   }
 
   async hasMany(names: readonly string[]): Promise<ReadonlySet<string>> {
-    const dir = this.#resolveDir();
+    const placement = this.#placement();
     const requested = new Set(names.map(normalizeBlobName));
     if (requested.size === 0) return new Set();
 
-    let entries: string[];
-    try {
-      entries = await readdir(dir);
-    } catch (err) {
-      if (isMissing(err)) return new Set();
-      throw err;
-    }
-
-    const candidates = entries.filter(
-      (entry) => !isTempEntry(entry) && requested.has(entry),
+    const entries = (await this.#entries(placement)).filter((entry) =>
+      requested.has(entry),
     );
     const infos = await Promise.all(
-      candidates.map((entry) => this.#headAt(dir, entry)),
+      entries.map((entry) => this.#headAt(placement.directory, entry)),
     );
     return new Set(infos.flatMap((info) => (info === null ? [] : [info.name])));
   }
 
   async list(): Promise<BlobInfo[]> {
-    const dir = this.#resolveDir();
-    let entries: string[];
-    try {
-      entries = await readdir(dir);
-    } catch (err) {
-      if (isMissing(err)) return [];
-      throw err;
-    }
-
+    const placement = this.#placement();
+    const entries = await this.#entries(placement);
     const infos = await Promise.all(
-      entries
-        .filter((entry) => !isTempEntry(entry))
-        .map((entry) => this.#headAt(dir, entry)),
+      entries.map((entry) => this.#headAt(placement.directory, entry)),
     );
     return infos.filter((info): info is BlobInfo => info !== null);
   }
 
   async materialize(name: string): Promise<BlobLease | null> {
-    const dir = this.#resolveDir();
-    const info = await this.#headAt(dir, name);
+    const placement = this.#placement();
+    const dir = placement.directory;
+    const info = await this.#headAt(dir, this.#assertMember(placement, name));
     if (!info) return null;
     // Disk already *is* a filesystem: hand back the real path and make
     // release a no-op. No copy, so this costs nothing today. The lease
@@ -229,7 +294,18 @@ class DiskBlobScope implements BlobScope {
   }
 
   async deleteAll(): Promise<void> {
-    await rm(this.#resolveDir(), { recursive: true, force: true });
+    const placement = this.#placement();
+    if (!placement.members) {
+      await rm(placement.directory, { recursive: true, force: true });
+      return;
+    }
+    // Removing the directory would take the Space with it. Only the members
+    // are this area's to delete.
+    await Promise.all(
+      placement.members.map((name) =>
+        rm(blobPath(placement.directory, name), { force: true }),
+      ),
+    );
   }
 }
 
@@ -237,7 +313,7 @@ export class DiskBlobStore implements BlobStore {
   readonly kind = 'disk' as const;
 
   async init(): Promise<void> {
-    // Scope directories are created on first write; nothing to prepare.
+    // Area directories are created on first write; nothing to prepare.
   }
 
   async health(): Promise<StorageHealth> {
@@ -246,7 +322,12 @@ export class DiskBlobStore implements BlobStore {
 
   async close(): Promise<void> {}
 
-  scope(ref: BlobScopeRef): BlobScope {
-    return new DiskBlobScope(ref);
+  space(canvasId: string): SpaceBlobs {
+    return {
+      artifacts: new DiskBlobScope('artifacts', canvasId),
+      guide: new DiskBlobScope('guide', canvasId),
+      memory: new DiskBlobScope('memory', canvasId),
+      uploads: new DiskBlobScope('uploads', canvasId),
+    };
   }
 }

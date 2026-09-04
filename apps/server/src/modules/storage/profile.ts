@@ -89,6 +89,13 @@ export function parseStorageProfile(
  * cross-axis rules belong as backends land — for example, Postgres paired
  * with a node-local disk blob root is unsafe across replicas unless the
  * path is a deliberately shared filesystem.
+ *
+ * A profile that merely offers *fewer features* is not rejected here. Those
+ * are stated limitations rather than misconfigurations, and they are declared
+ * in `capabilities.ts` and reported at startup — see
+ * {@link describeUnavailableCapabilities}. Conflating the two would either
+ * refuse a legitimate deployment or let a real misconfiguration through as a
+ * warning.
  */
 export function validateStorageProfile(profile: StorageProfile): void {
   if (!IMPLEMENTED_STRUCTURED.includes(profile.structured.kind)) {

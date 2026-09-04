@@ -86,9 +86,8 @@ function installDeleteBlock(canvasId: string): {
     init: () => current.blobs.init(),
     health: () => current.blobs.health(),
     close: () => current.blobs.close(),
-    scope(ref) {
-      const delegate = current.blobs.scope(ref);
-      return {
+    space(id) {
+      const observe = (delegate: BlobScope): BlobScope => ({
         put(name, body) {
           putCalls += 1;
           return delegate.put(name, body);
@@ -100,12 +99,19 @@ function installDeleteBlock(canvasId: string): {
         list: () => delegate.list(),
         materialize: (name) => delegate.materialize(name),
         async deleteAll() {
-          if (ref.canvasId === canvasId) {
+          if (id === canvasId) {
             started.resolve();
             await release.promise;
           }
           await delegate.deleteAll();
         },
+      });
+      const areas = current.blobs.space(id);
+      return {
+        artifacts: observe(areas.artifacts),
+        guide: observe(areas.guide),
+        memory: observe(areas.memory),
+        uploads: observe(areas.uploads),
       };
     },
   };
@@ -194,7 +200,7 @@ describe('artifact route', () => {
     });
 
     expect(upload.statusCode).toBe(500);
-    expect(await space('missing').blobs.list()).toEqual([]);
+    expect(await space('missing').artifacts.list()).toEqual([]);
     await app.close();
   });
 
@@ -234,7 +240,7 @@ describe('artifact route', () => {
       const upload = await uploading;
       expect(upload.statusCode).toBe(500);
       expect(blocker.putCalls()).toBe(0);
-      expect(await space('c1').blobs.list()).toEqual([]);
+      expect(await space('c1').artifacts.list()).toEqual([]);
     } finally {
       blocker.releaseDelete();
       blocker.restore();
@@ -244,7 +250,7 @@ describe('artifact route', () => {
 
   it('serves a byte range so media nodes can seek', async () => {
     const app = await buildApp();
-    await space('c1').blobs.put('a.png', png);
+    await space('c1').artifacts.put('a.png', png);
 
     const res = await app.inject({
       method: 'GET',
@@ -260,7 +266,7 @@ describe('artifact route', () => {
 
   it('answers 304 for an unchanged artifact', async () => {
     const app = await buildApp();
-    await space('c1').blobs.put('a.png', png);
+    await space('c1').artifacts.put('a.png', png);
 
     const first = await app.inject({
       method: 'GET',
@@ -295,12 +301,18 @@ describe('artifact route', () => {
         return { ok: false, kind: 'disk' };
       },
       async close() {},
-      scope() {
-        return {
+      space() {
+        const unavailable = {
           async head() {
             throw new Error('blob backend unavailable');
           },
         } as unknown as BlobScope;
+        return {
+          artifacts: unavailable,
+          guide: unavailable,
+          memory: unavailable,
+          uploads: unavailable,
+        };
       },
     };
     const restore = setStorageForTesting({ ...current, blobs: failingBlobs });
@@ -332,7 +344,7 @@ describe('artifact route', () => {
 
   it('clones an artifact into another canvas under a fresh key', async () => {
     const app = await buildApp();
-    await space('src-canvas').blobs.put('a.png', png);
+    await space('src-canvas').artifacts.put('a.png', png);
 
     const res = await app.inject({
       method: 'POST',
@@ -346,8 +358,8 @@ describe('artifact route', () => {
     expect(uri).toMatch(/\.png$/);
 
     // Destination owns its own copy; the source is untouched.
-    expect(await space('dst-canvas').blobs.read(uri)).toEqual(png);
-    expect(await space('src-canvas').blobs.read('a.png')).toEqual(png);
+    expect(await space('dst-canvas').artifacts.read(uri)).toEqual(png);
+    expect(await space('src-canvas').artifacts.read('a.png')).toEqual(png);
 
     await app.close();
   });

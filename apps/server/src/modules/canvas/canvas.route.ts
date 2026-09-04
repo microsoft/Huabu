@@ -58,6 +58,7 @@ import {
   createSpace,
   deleteSpace,
   stageSpaceImport,
+  unavailableCapabilityMessage,
   getStructuredStore,
   type CanvasFile,
   type NodeContent,
@@ -113,6 +114,12 @@ interface NodeLike {
   data?: Record<string, unknown>;
   [key: string]: unknown;
 }
+
+/** Disk paths that carry conversational history outside `.history/`. */
+const HISTORY_EXPORT_IGNORE = [
+  '.history/**',
+  '.ext/huabu.prompt.log/**',
+] as const;
 
 function nowMs(): number {
   return Date.now();
@@ -337,7 +344,7 @@ async function singleArtifactProbe(
 ): Promise<(key: string) => boolean> {
   const key = extractArtifactKey(src);
   if (!key) return () => false;
-  const exists = (await space(canvasId).blobs.hasMany([key])).has(key);
+  const exists = (await space(canvasId).artifacts.hasMany([key])).has(key);
   return (candidate) => candidate === key && exists;
 }
 
@@ -520,7 +527,7 @@ async function hydrateNodeContent(
   const present =
     referenced.size === 0
       ? new Set<string>()
-      : await handle.blobs.hasMany([...referenced]);
+      : await handle.artifacts.hasMany([...referenced]);
   const artifactExists = (key: string): boolean => present.has(key);
 
   return nodes.map((node) => {
@@ -1606,8 +1613,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
     // Disk-only, declared as `reveal-space-folder`: the feature *is* "show me
     // this in Finder", so a backend without a folder has nothing to show.
-    const dir = handle.diskTree?.nodesDirectory();
-    if (dir === undefined || !existsSync(dir)) {
+    // A profile that cannot serve the feature and a Space whose folder is
+    // missing are different problems with different remedies, so they get
+    // different answers — the first repeats the matrix sentence the operator
+    // read when they chose the profile.
+    const tree = handle.diskTree;
+    if (!tree) {
+      return reply.code(400).send({
+        message: unavailableCapabilityMessage('reveal-space-folder'),
+      });
+    }
+    const dir = tree.nodesDirectory();
+    if (!existsSync(dir)) {
       return reply.code(404).send({ message: 'Nodes folder not found' });
     }
     // Fire-and-forget: `openInFileManager` is best-effort and never
@@ -1642,12 +1659,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
 
-    // The Space bundle is a Disk projection (proposal §6.4.3, disposition
-    // A); a portable export generated from records plus reachable blob
-    // references is a separate later design.
+    // Disk-only, declared as `space-bundle-export` in the capability matrix;
+    // a portable export generated from records plus reachable blob references
+    // is a separate later design. Refuse in the matrix's own words, and keep
+    // that distinct from a Space whose directory has gone missing.
     const tree = handle.diskTree;
-    const canvasDir = tree?.directory();
-    if (canvasDir === undefined || !existsSync(canvasDir)) {
+    if (!tree) {
+      return reply.code(400).send({
+        message: unavailableCapabilityMessage('space-bundle-export'),
+      });
+    }
+    const canvasDir = tree.directory();
+    if (!existsSync(canvasDir)) {
       return reply.code(404).send({ message: 'Canvas directory not found' });
     }
 
@@ -1682,12 +1705,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     archive.append(JSON.stringify(manifest, null, 2), {
       name: 'manifest.json',
     });
-    // dot:true so the hidden `.artifacts/` directory is always included;
-    // `.history/` is opted out unless the caller explicitly requests it.
+    // dot:true so hidden durable data such as `.artifacts/` is included.
+    // Conversational history is opted out across both the legacy history tier
+    // and the prompt logger's namespaced extension store.
     archive.glob('**/*', {
       cwd: canvasDir,
       dot: true,
-      ignore: includeHistory ? [] : ['.history/**'],
+      ignore: includeHistory ? [] : [...HISTORY_EXPORT_IGNORE],
     });
 
     void archive.finalize();
@@ -1713,11 +1737,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       // format and nothing else (proposal §12.6.2).
       const staged = stageSpaceImport(targetCanvasId);
       if (!staged) {
-        // Phrased here only until the capability matrix owns the wording
-        // (§12.8), so a Disk-only refusal reads the same everywhere.
         return reply.code(400).send({
-          message:
-            'Space bundle import is not available on this storage backend.',
+          message: unavailableCapabilityMessage('space-bundle-import'),
         });
       }
       const stagingDir = staged.stagingDirectory;
