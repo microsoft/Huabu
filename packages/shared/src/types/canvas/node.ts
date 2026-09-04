@@ -104,6 +104,27 @@ export function normalizeOrigin(raw: unknown): NodeOrigin | undefined {
 /** Who set the node label — controls whether auto-title may overwrite it */
 export type LabelSource = 'auto' | 'user' | 'agent';
 
+/**
+ * Whether a Frame label opts into Space-level agent instructions.
+ *
+ * Prompt Frames are intentionally label-based in the first version so users
+ * and agents can create them through existing canvas operations.
+ */
+export function isPromptFrameLabel(label: unknown): boolean {
+  return (
+    typeof label === 'string' &&
+    /^prompt(?:\s*:\s*\S[\s\S]*)?$/i.test(label.trim().normalize('NFC'))
+  );
+}
+
+/** Only explicitly authored labels may activate Prompt Frame semantics. */
+export function isPromptFrame(label: unknown, labelSource: unknown): boolean {
+  return (
+    (labelSource === 'user' || labelSource === 'agent') &&
+    isPromptFrameLabel(label)
+  );
+}
+
 /** Font family logical names. CSS font stacks are resolved on the UI side. */
 export const NODE_FONT_FAMILIES = ['default', 'serif', 'mono', 'hand'] as const;
 export type NodeFontFamily = (typeof NODE_FONT_FAMILIES)[number];

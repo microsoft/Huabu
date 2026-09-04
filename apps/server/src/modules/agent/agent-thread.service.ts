@@ -16,12 +16,14 @@ import { runAgent } from './agent.service.js';
 import { envelopeHasImage } from './conversation/envelope.js';
 import { readWorkspaceMemory } from './memory/index.js';
 import { planSkillDispatch } from './skill-model-routing.js';
+import { resolveSpacePrompt } from './space-prompt.js';
 import { acquireAgentTurn, waitForAgentTurnRelease } from './turn-lease.js';
 import { loadAgent } from '../../prompt/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { HuabuSubmission } from './agenetes/handle.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
+import type { RenderedSpacePrompt } from './space-prompt.js';
 import type {
   AgentBinding,
   AgentMode,
@@ -39,6 +41,11 @@ interface AgentThreadServiceDependencies {
     canvasId: string,
     threadId: string,
   ) => Extract<AgentBinding, { kind: 'external' }> | null;
+  resolvePersistedSpacePrompt: (
+    canvasId: string,
+    threadId: string,
+  ) => { realised: boolean; markdown?: string };
+  collectSpacePrompt: (canvasId: string) => Promise<RenderedSpacePrompt | null>;
   waitForTurnRelease: typeof waitForAgentTurnRelease;
   acquireTurn: typeof acquireAgentTurn;
   startLifecycle: typeof agentNodeLifecycle.start;
@@ -62,6 +69,22 @@ export function externalBindingFromWorkloadSpec(
   return parsed.success && parsed.data.kind === 'external' ? parsed.data : null;
 }
 
+export function spacePromptFromWorkloadSpec(spec: unknown): string | undefined {
+  if (!spec || typeof spec !== 'object') return undefined;
+  const value = spec as Record<string, unknown>;
+  const hostContext = value.hostContext;
+  if (hostContext && typeof hostContext === 'object') {
+    const prompt = (hostContext as Record<string, unknown>).spacePrompt;
+    if (typeof prompt === 'string') return prompt;
+  }
+  const preamble = value.initialPreamble;
+  if (!Array.isArray(preamble)) return undefined;
+  return preamble.find(
+    (entry): entry is string =>
+      typeof entry === 'string' && entry.startsWith('<space_prompt>'),
+  );
+}
+
 const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
   resolveFixedAgentNode: (canvasId, threadId) =>
     agentThreadResolver.resolveFixedAgentNode(canvasId, threadId),
@@ -70,6 +93,13 @@ const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
     if (!record || record.spec.kind !== EXTERNAL_DRIVER_KIND) return null;
     return externalBindingFromWorkloadSpec(record.spec.spec);
   },
+  resolvePersistedSpacePrompt: (canvasId, threadId) => {
+    const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
+    if (!record) return { realised: false };
+    const markdown = spacePromptFromWorkloadSpec(record.spec.spec);
+    return markdown ? { realised: true, markdown } : { realised: true };
+  },
+  collectSpacePrompt: resolveSpacePrompt,
   waitForTurnRelease: waitForAgentTurnRelease,
   acquireTurn: acquireAgentTurn,
   startLifecycle: agentNodeLifecycle.start.bind(agentNodeLifecycle),
@@ -112,7 +142,7 @@ export interface AgentThreadInvocationOptions {
 type EffectiveAgentThreadInvocationOptions = Omit<
   AgentThreadInvocationOptions,
   'signal'
-> & { signal: AbortSignal };
+> & { signal: AbortSignal; spacePrompt?: string };
 
 export interface AgentThreadInvocation {
   binding: AgentBinding;
@@ -138,15 +168,16 @@ function buildAgentSystemPrompt(params: {
   canvasId: string | undefined;
   mode: Parameters<typeof loadAgent>[0];
   additionalInitialPreamble?: string;
+  spacePrompt?: string;
 }): string {
   const agentCfg = loadAgent(params.mode, { canvasId: params.canvasId });
   const workspaceMemory = readWorkspaceMemory();
   const base = workspaceMemory
     ? `${agentCfg.systemPrompt}\n\n<workspace_memory>\n${workspaceMemory}\n</workspace_memory>`
     : agentCfg.systemPrompt;
-  return params.additionalInitialPreamble
-    ? `${base}\n\n${params.additionalInitialPreamble}`
-    : base;
+  return [base, params.spacePrompt, params.additionalInitialPreamble]
+    .filter((part): part is string => Boolean(part))
+    .join('\n\n');
 }
 
 function errorMessage(error: unknown): string {
@@ -222,7 +253,38 @@ export class AgentThreadService {
     };
     this.activeInvocations.set(options.threadId, active);
 
+    let spacePrompt: string | undefined;
     try {
+      if (fixedTarget && options.canvasId) {
+        const persisted = this.dependencies.resolvePersistedSpacePrompt(
+          options.canvasId,
+          options.threadId,
+        );
+        if (persisted.realised) {
+          spacePrompt = persisted.markdown;
+        } else {
+          const collected = await this.dependencies.collectSpacePrompt(
+            options.canvasId,
+          );
+          spacePrompt = collected?.markdown;
+          if (
+            collected &&
+            (collected.diagnostics.truncated ||
+              collected.diagnostics.omittedUnsupportedIds.length > 0 ||
+              collected.diagnostics.omittedEmptyTextIds.length > 0 ||
+              collected.diagnostics.omittedMissingIds.length > 0)
+          ) {
+            options.logger.warn(
+              {
+                canvasId: options.canvasId,
+                threadId: options.threadId,
+                spacePromptDiagnostics: collected.diagnostics,
+              },
+              'Space Prompt collection completed with diagnostics',
+            );
+          }
+        }
+      }
       if (fixedTarget) {
         await this.dependencies.startLifecycle(fixedTarget, options.content);
       }
@@ -238,6 +300,7 @@ export class AgentThreadService {
     const effectiveOptions: EffectiveAgentThreadInvocationOptions = {
       ...options,
       signal,
+      spacePrompt,
     };
 
     let settled = false;
@@ -370,6 +433,7 @@ export class AgentThreadService {
         ...(fixedTarget?.launchOverrides
           ? { launchOverrides: fixedTarget.launchOverrides }
           : {}),
+        spacePrompt: options.spacePrompt,
         signal: options.signal,
         logger: options.logger,
         debugPrompt: options.debugPrompt,
@@ -399,11 +463,13 @@ export class AgentThreadService {
           mode: options.mode,
           additionalInitialPreamble:
             fixedTarget?.launchOverrides?.additionalInitialPreamble,
+          spacePrompt: options.spacePrompt,
         }),
         messages: [],
         tools: [],
       },
       modelId: options.modelId,
+      spacePrompt: options.spacePrompt,
       reasoningEffort: options.reasoningEffort,
       maxIterations: 20,
       signal: options.signal,

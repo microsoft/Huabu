@@ -103,6 +103,8 @@ export interface RunAcpAgentOptions {
   cwd?: string;
   /** Per-node spawn overrides applied when the workload is first created. */
   launchOverrides?: AgentLaunchOverrides;
+  /** Frozen Space Prompt captured when a fixed Agent Node is first realised. */
+  spacePrompt?: string;
   /** Cancellation signal \u2014 wired through to `session/cancel`. */
   signal?: AbortSignal;
   logger: FastifyBaseLogger;
@@ -196,7 +198,12 @@ function applyWorkingDirectoryOverride(
 export function buildAcpWorkloadSpec(
   opts: Pick<
     RunAcpAgentOptions,
-    'binding' | 'threadId' | 'canvasId' | 'cwd' | 'launchOverrides'
+    | 'binding'
+    | 'threadId'
+    | 'canvasId'
+    | 'cwd'
+    | 'launchOverrides'
+    | 'spacePrompt'
   >,
 ): AcpWorkloadSpec {
   const { binding, threadId } = opts;
@@ -244,6 +251,7 @@ export function buildAcpWorkloadSpec(
     spec: {
       initialPreamble: [
         renderExternalAgentSystemPreamble(),
+        ...(opts.spacePrompt ? [opts.spacePrompt] : []),
         ...(opts.launchOverrides?.additionalInitialPreamble
           ? [opts.launchOverrides.additionalInitialPreamble]
           : []),

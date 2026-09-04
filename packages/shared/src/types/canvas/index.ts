@@ -100,6 +100,8 @@ export {
   isQuestionNode,
   getQuestionNodeStatus,
   normalizeOrigin,
+  isPromptFrameLabel,
+  isPromptFrame,
 } from './node.js';
 
 // Edge types

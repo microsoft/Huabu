@@ -43,7 +43,7 @@ POST /api/agent (agent.route.ts)
 
 ---
 
-## 3. Prompt-level injection: workspace memory + skills
+## 3. Prompt-level injection: workspace memory + skills + Space Prompt
 
 These two are **cross-turn-stable** system-prompt injections (they don't change per turn), kept separate from the per-turn focus signals in §4.
 
@@ -61,6 +61,20 @@ Skills are **not tools**; they reach the prompt via two complementary paths:
 | **invoked (explicit)**    | user `/cmd`   | the skill's **entire body** is inlined as an `<invoked_skills>` block (authoritative for this turn)                                                | [prompt/invoked-skills.ts](../../apps/server/src/modules/agent/conversation/prompt/invoked-skills.ts) |
 
 The catalogue is filtered by the agent's frontmatter `skillScope` (ask/operate/external); a `null` scope injects no catalogue. The difference: catalogue is "a menu you pull from on demand", invoked is "the user named it, full body forced into this turn".
+
+### 3.3 Space Prompt Frames
+
+A fixed Agent Node receives Space-wide user instructions from root or nested Frames whose trimmed, NFC-normalized label matches `prompt` or `prompt: <name>` case-insensitively and whose `labelSource` is explicitly `user` or `agent`. Auto-generated, missing, or invalid label provenance never activates Prompt Frame behavior; `prompt:` without a non-whitespace suffix is also not recognized. The shared `isPromptFrame()` predicate in [node.ts](../../packages/shared/src/types/canvas/node.ts) is the canonical recognizer.
+
+[space-prompt.ts](../../apps/server/src/modules/agent/space-prompt.ts) scans the complete Space topology and canonical node records when a fixed Agent Node is first realized. Prompt Frames are ordered by world `y`, world `x`, then stable Frame id. Only direct children participate; children are ordered by Frame-local `y`, Frame-local `x`, then stable node id, with Text and Note nodes left interleaved in that order.
+
+Text bodies are injected eagerly and in full subject to the total budget. Notes are injected only as lazy `<note id label file rev />` catalogue references; their bodies remain available through the RFS/read surface and should be read only when Prompt Frame Text, the agent's role, or the current task makes them relevant. Empty Text is omitted, unsupported direct-child types and missing canonical records are omitted with diagnostics, and nested descendants do not participate. Locked nodes remain eligible because locking constrains editing and layout rather than visibility; Huabu currently has no node-level private/hidden permission state to bypass.
+
+The complete rendered `<space_prompt>` fragment, including stable template prose and diagnostics, is capped at 16 KiB UTF-8. Truncation is code-point-safe and emits an explicit diagnostic. A full-Space collection failure rejects first realization instead of silently producing an incomplete instruction set.
+
+Space Prompt is captured only for fixed Agent Nodes (`agentBindingPolicy: "fixed"`). Ordinary Canvas Chat, selectable Question Nodes, node-less ACP sessions, and the Memory Agent do not receive it. The captured fragment is persisted in the durable WorkloadSpec and reused on later turns, so editing Prompt Frames affects newly realized Agent Nodes but does not mutate existing conversations. Built-in agents place it after their trusted AGENT.md/workspace context and before node-specific initial instructions; external ACP agents place it after Huabu's mandatory bootstrap and before node-specific initial instructions. It remains user-authored context subordinate to system, developer, host-policy, and tool instructions, and it coexists with per-turn selection and neighbourhood context rather than replacing them.
+
+Space Prompt and the Huabu Skill intentionally use separate channels. Prompt Frames state what agents in this Space should do, while `GET /skill` explains how an external agent operates Huabu and accesses the Space. They share prompt rendering infrastructure but Prompt Frames neither become Skills nor replace the existing authenticated Space-specific `skill.md` override in this version.
 
 ---
 
