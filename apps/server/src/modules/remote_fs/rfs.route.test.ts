@@ -116,6 +116,55 @@ function seedNote(
   return `nodes/${toSafeFilename(label, id)}.md`;
 }
 
+function seedInstructionFrame(
+  canvasId: string,
+  kind: 'prompt' | 'skill',
+  content: string,
+): void {
+  const frameId = `frame-${kind}`;
+  const textId = `text-${kind}`;
+  const label = `${kind}: Workspace`;
+  const store = getCanvasStore(canvasId);
+  store.write({
+    canvasId,
+    title: null,
+    version: 1,
+    state: {
+      nodes: [
+        {
+          id: frameId,
+          type: 'frame',
+          position: { x: 0, y: 0 },
+          data: { label },
+        },
+        {
+          id: textId,
+          type: 'text',
+          parentId: frameId,
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+      ],
+      edges: [],
+    },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
+  store.writeNode(frameId, {
+    nodeId: frameId,
+    type: 'frame',
+    label,
+    labelSource: 'user',
+    content: '',
+  });
+  store.writeNode(textId, {
+    nodeId: textId,
+    type: 'text',
+    label: null,
+    content,
+  });
+}
+
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'huabu-rfs-'));
   setWorkspacePath(tmp);
@@ -164,6 +213,23 @@ describe('GET /api/rfs/:canvasId/skill', () => {
     }
   });
 
+  it('keeps the authenticated root guide available for a missing Space', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/rfs/missing/skill',
+        headers: { authorization: '******' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toMatch(/Accessing this Huabu Space/i);
+      expect(response.body).not.toContain('# Space-specific Skills');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('returns only the bundled root guide without authorization', async () => {
     seedNote('c1', 'node-1', 'Anchor', 'content');
     writeFileSync(
@@ -186,6 +252,54 @@ describe('GET /api/rfs/:canvasId/skill', () => {
       expect(anonymous.body).toMatch(/Accessing this Huabu Space/);
       expect(anonymous.body).not.toContain('Private Space Override');
       expect(authenticated.body).toContain('Private Space Override');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('appends live Skill Frames to the authenticated Space guide only', async () => {
+    seedInstructionFrame('c1', 'skill', 'Prefer primary sources.');
+    const app = await buildApp();
+    try {
+      const anonymous = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill',
+      });
+      const authenticated = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill',
+        headers: { authorization: '******' },
+      });
+
+      expect(anonymous.body).toMatch(/Accessing this Huabu Space/);
+      expect(anonymous.body).not.toContain('Prefer primary sources.');
+      expect(authenticated.body).toMatch(/Accessing this Huabu Space/);
+      expect(authenticated.body).toContain('# Space-specific Skills');
+      expect(authenticated.body).toContain('Prefer primary sources.');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('appends Skill Frames after a legacy Space guide override', async () => {
+    seedInstructionFrame('c1', 'skill', 'Use the team glossary.');
+    writeFileSync(
+      join(diskDirOf('c1'), 'skill.md'),
+      '# Legacy Space Guide',
+      'utf8',
+    );
+    const app = await buildApp();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill',
+        headers: { authorization: '******' },
+      });
+
+      expect(response.body).toContain('# Legacy Space Guide');
+      expect(response.body).toContain('# Space-specific Skills');
+      expect(response.body).toContain('Use the team glossary.');
+      expect(response.body).not.toMatch(/Accessing this Huabu Space/i);
     } finally {
       await app.close();
     }

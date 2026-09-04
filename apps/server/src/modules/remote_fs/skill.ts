@@ -12,10 +12,13 @@
  */
 
 import { renderPromptFile } from '../../prompt/agents/loader.js';
+import { getLogger } from '../../utils/logger.js';
+import { resolveSpaceSkill } from '../agent/space-instruction-frames.js';
 import { space, SPACE_GUIDE_SKILL_NAME } from '../storage/index.js';
 
 /** PROMPT-ROOT-relative path of the bundled access guide. */
 const ACCESS_GUIDE_TEMPLATE = 'external-agent/access-huabu.md';
+const logger = getLogger('rfs-skill');
 
 const FOCUSED_SKILL_TEMPLATES = {
   layout: 'external-agent/layout.md',
@@ -41,10 +44,19 @@ export async function resolveCanvasSkill(canvasId: string): Promise<string> {
   // (proposal §6.4.3, disposition D). The scope is the Space root bounded to
   // the guide names, so the file a user authors is exactly where they left it
   // and this no longer assembles a path.
-  const override = await space(canvasId).guide.read(SPACE_GUIDE_SKILL_NAME);
-  return override === null
-    ? resolveBundledRootSkill()
-    : override.toString('utf8');
+  const [override, frameSkill] = await Promise.all([
+    space(canvasId).guide.read(SPACE_GUIDE_SKILL_NAME),
+    resolveSpaceSkill(canvasId).catch((error: unknown) => {
+      logger.warn(
+        { err: error, canvasId },
+        'Space Skill Frame collection failed; serving the root guide only',
+      );
+      return null;
+    }),
+  ]);
+  const guide =
+    override === null ? resolveBundledRootSkill() : override.toString('utf8');
+  return frameSkill ? `${guide}\n\n${frameSkill.markdown}` : guide;
 }
 
 /** Resolve one fixed, authenticated advanced guide. */

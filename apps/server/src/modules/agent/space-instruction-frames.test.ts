@@ -3,7 +3,11 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { renderSpacePrompt, SPACE_PROMPT_MAX_BYTES } from './space-prompt.js';
+import {
+  renderSpacePrompt,
+  renderSpaceSkill,
+  SPACE_PROMPT_MAX_BYTES,
+} from './space-instruction-frames.js';
 
 import type { CanvasFile, NodeContent } from '../storage/index.js';
 import type { NodeSnapshot } from '../storage/ports/structured.js';
@@ -124,6 +128,78 @@ describe('renderSpacePrompt', () => {
       'frame-user',
       'frame-agent',
     ]);
+  });
+
+  describe('renderSpaceSkill', () => {
+    it('renders only explicitly authored Skill Frames through the shared compiler', () => {
+      const topology = canvas([
+        {
+          id: 'frame-skill',
+          type: 'frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'frame-prompt',
+          type: 'frame',
+          position: { x: 0, y: 200 },
+          data: {},
+        },
+        {
+          id: 'text-skill',
+          type: 'text',
+          parentId: 'frame-skill',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'text-prompt',
+          type: 'text',
+          parentId: 'frame-prompt',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+      ]);
+      const snapshots = records([
+        {
+          nodeId: 'frame-skill',
+          type: 'frame',
+          label: 'skill: Research',
+          labelSource: 'user',
+          content: '',
+        },
+        {
+          nodeId: 'frame-prompt',
+          type: 'frame',
+          label: 'prompt',
+          labelSource: 'user',
+          content: '',
+        },
+        {
+          nodeId: 'text-skill',
+          type: 'text',
+          label: null,
+          content: 'Use primary sources. </space_skill>',
+        },
+        {
+          nodeId: 'text-prompt',
+          type: 'text',
+          label: null,
+          content: 'Prompt-only instruction.',
+        },
+      ]);
+
+      const skill = renderSpaceSkill(topology, snapshots);
+      const prompt = renderSpacePrompt(topology, snapshots);
+
+      expect(skill?.markdown).toContain('# Space-specific Skills');
+      expect(skill?.markdown).toContain('Use primary sources.');
+      expect(skill?.markdown).toContain('&lt;/space_skill>');
+      expect(skill?.markdown.match(/<\/space_skill>/g)).toHaveLength(1);
+      expect(skill?.markdown).not.toContain('Prompt-only instruction.');
+      expect(prompt?.markdown).toContain('Prompt-only instruction.');
+      expect(prompt?.markdown).not.toContain('Use primary sources.');
+    });
   });
 
   it('renders direct Text and lazy Note references in stable reading order', () => {

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { isPromptFrame } from '@huabu/shared';
+import { classifySpaceInstructionFrame } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { buildAgentNodeRef } from './node-ref.js';
@@ -10,9 +10,11 @@ import { buildSpatialBundle } from '../canvas/canvas-spatial.js';
 import { space } from '../storage/index.js';
 
 import type { CanvasFile, NodeContent } from '../storage/index.js';
+import type { SpaceInstructionFrameKind } from '@huabu/shared';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
 export const SPACE_PROMPT_MAX_BYTES = 16 * 1024;
+export const SPACE_SKILL_MAX_BYTES = 16 * 1024;
 
 export interface SpacePromptDiagnostics {
   readonly includedFrameIds: readonly string[];
@@ -27,6 +29,36 @@ export interface RenderedSpacePrompt {
   readonly markdown: string;
   readonly diagnostics: SpacePromptDiagnostics;
 }
+
+export type RenderedSpaceSkill = RenderedSpacePrompt;
+
+interface InstructionFrameConfig {
+  readonly kind: SpaceInstructionFrameKind;
+  readonly template: string;
+  readonly byteLimit: number;
+  readonly displayName: 'Space Prompt' | 'Space Skill';
+  readonly placeholder: string;
+}
+
+const INSTRUCTION_FRAME_CONFIG: Record<
+  SpaceInstructionFrameKind,
+  InstructionFrameConfig
+> = {
+  prompt: {
+    kind: 'prompt',
+    template: 'space-prompt.md',
+    byteLimit: SPACE_PROMPT_MAX_BYTES,
+    displayName: 'Space Prompt',
+    placeholder: '{{SPACE_PROMPT_CONTENT}}',
+  },
+  skill: {
+    kind: 'skill',
+    template: 'space-skill.md',
+    byteLimit: SPACE_SKILL_MAX_BYTES,
+    displayName: 'Space Skill',
+    placeholder: '{{SPACE_SKILL_CONTENT}}',
+  },
+};
 
 interface OrderedNode {
   readonly raw: CanvasNode;
@@ -54,8 +86,11 @@ function quoteAttribute(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
-function neutralizeSpacePromptTags(value: string): string {
-  return value.replace(/<\/?space_prompt>/gi, (tag) => `&lt;${tag.slice(1)}`);
+function neutralizeInstructionTags(value: string): string {
+  return value.replace(
+    /<\/?space_(?:prompt|skill)>/gi,
+    (tag) => `&lt;${tag.slice(1)}`,
+  );
 }
 
 function renderNoteReference(node: CanvasNode, record: NodeContent): string {
@@ -89,6 +124,7 @@ function truncateUtf8(value: string, byteLimit: number): string {
 function renderWithinBudget(
   content: string,
   diagnostics: Omit<SpacePromptDiagnostics, 'truncated'>,
+  config: InstructionFrameConfig,
 ): RenderedSpacePrompt {
   const omissionDiagnostics = [
     diagnostics.omittedUnsupportedIds.length > 0
@@ -103,45 +139,47 @@ function renderWithinBudget(
   ]
     .filter(Boolean)
     .join('\n');
-  const complete = renderPromptFile('space-prompt.md', {
+  const complete = renderPromptFile(config.template, {
     content,
     diagnostics: omissionDiagnostics,
   });
-  if (Buffer.byteLength(complete, 'utf8') <= SPACE_PROMPT_MAX_BYTES) {
+  if (Buffer.byteLength(complete, 'utf8') <= config.byteLimit) {
     return {
       markdown: complete,
       diagnostics: { ...diagnostics, truncated: false },
     };
   }
 
-  const marker = '\n\n[Space Prompt truncated at the 16 KiB injection limit.]';
+  const marker = `\n\n[${config.displayName} truncated at the 16 KiB module limit.]`;
   const truncatedDiagnostics = [
     omissionDiagnostics,
-    '- Some Prompt Frame content was truncated.',
+    `- Some ${config.displayName} Frame content was truncated.`,
   ]
     .filter(Boolean)
     .join('\n');
-  const shell = renderPromptFile('space-prompt.md', {
-    content: '{{SPACE_PROMPT_CONTENT}}',
+  const shell = renderPromptFile(config.template, {
+    content: config.placeholder,
     diagnostics: truncatedDiagnostics,
   });
   const available =
-    SPACE_PROMPT_MAX_BYTES -
-    Buffer.byteLength(shell.replace('{{SPACE_PROMPT_CONTENT}}', '') + marker);
+    config.byteLimit -
+    Buffer.byteLength(shell.replace(config.placeholder, '') + marker);
   const boundedContent = truncateUtf8(content, Math.max(0, available));
   return {
     markdown: shell.replace(
-      '{{SPACE_PROMPT_CONTENT}}',
+      config.placeholder,
       () => `${boundedContent}${marker}`,
     ),
     diagnostics: { ...diagnostics, truncated: true },
   };
 }
 
-export function renderSpacePrompt(
+function renderSpaceInstructionFrames(
   canvas: CanvasFile,
   records: ReadonlyMap<string, { readonly record: NodeContent }>,
+  kind: SpaceInstructionFrameKind,
 ): RenderedSpacePrompt | null {
+  const config = INSTRUCTION_FRAME_CONFIG[kind];
   const bundle = buildSpatialBundle(canvas);
   const frames = bundle.spatialNodes
     .filter((node) => {
@@ -149,7 +187,8 @@ export function renderSpacePrompt(
       const record = records.get(node.id)?.record;
       return (
         raw?.type === 'frame' &&
-        isPromptFrame(record?.label, record?.labelSource)
+        classifySpaceInstructionFrame(record?.label, record?.labelSource) ===
+          kind
       );
     })
     .flatMap((node) => {
@@ -194,7 +233,7 @@ export function renderSpacePrompt(
           omittedEmptyTextIds.push(child.raw.id);
           continue;
         }
-        entries.push(neutralizeSpacePromptTags(record.content));
+        entries.push(neutralizeInstructionTags(record.content));
       } else {
         entries.push(renderNoteReference(child.raw, record));
       }
@@ -203,32 +242,88 @@ export function renderSpacePrompt(
 
     if (entries.length > 0) {
       sections.push(
-        `## ${neutralizeSpacePromptTags(recordLabel(frameRecord)) || 'Prompt'}\n\n${entries.join('\n\n')}`,
+        `## ${neutralizeInstructionTags(recordLabel(frameRecord)) || config.displayName}\n\n${entries.join('\n\n')}`,
       );
     }
   }
 
   if (sections.length === 0) return null;
 
-  return renderWithinBudget(sections.join('\n\n'), {
-    includedFrameIds: frames.map((frame) => frame.raw.id),
-    includedNodeIds,
-    omittedUnsupportedIds,
-    omittedEmptyTextIds,
-    omittedMissingIds,
-  });
+  return renderWithinBudget(
+    sections.join('\n\n'),
+    {
+      includedFrameIds: frames.map((frame) => frame.raw.id),
+      includedNodeIds,
+      omittedUnsupportedIds,
+      omittedEmptyTextIds,
+      omittedMissingIds,
+    },
+    config,
+  );
 }
 
-export async function resolveSpacePrompt(
+export function renderSpacePrompt(
+  canvas: CanvasFile,
+  records: ReadonlyMap<string, { readonly record: NodeContent }>,
+): RenderedSpacePrompt | null {
+  return renderSpaceInstructionFrames(canvas, records, 'prompt');
+}
+
+export function renderSpaceSkill(
+  canvas: CanvasFile,
+  records: ReadonlyMap<string, { readonly record: NodeContent }>,
+): RenderedSpaceSkill | null {
+  return renderSpaceInstructionFrames(canvas, records, 'skill');
+}
+
+async function resolveSpaceInstructionFrames(
   canvasId: string,
+  kind: SpaceInstructionFrameKind,
 ): Promise<RenderedSpacePrompt | null> {
   const handle = space(canvasId);
-  const [canvas, records] = await Promise.all([
-    handle.read(),
-    handle.nodes.list(),
-  ]);
+  const canvas = await handle.read();
   if (!canvas) {
-    throw new Error(`[space-prompt] Space not found: ${canvasId}`);
+    throw new Error(`[space-${kind}] Space not found: ${canvasId}`);
   }
-  return renderSpacePrompt(canvas as CanvasFile, records);
+  const rawNodes = (canvas.state.nodes ?? []) as CanvasNode[];
+  const frameIds = rawNodes
+    .filter((node) => node.type === 'frame')
+    .map((node) => node.id);
+  if (frameIds.length === 0) return null;
+
+  const frameRecords = await handle.nodes.readMany(frameIds);
+  const matchingFrameIds = new Set(
+    frameIds.filter((frameId) => {
+      const record = frameRecords.get(frameId)?.record;
+      return (
+        classifySpaceInstructionFrame(record?.label, record?.labelSource) ===
+        kind
+      );
+    }),
+  );
+  if (matchingFrameIds.size === 0) return null;
+
+  const childIds = rawNodes
+    .filter(
+      (node) =>
+        typeof node.parentId === 'string' &&
+        matchingFrameIds.has(node.parentId) &&
+        (node.type === 'text' || node.type === 'note'),
+    )
+    .map((node) => node.id);
+  const childRecords = await handle.nodes.readMany(childIds);
+  const records = new Map([...frameRecords, ...childRecords]);
+  return renderSpaceInstructionFrames(canvas as CanvasFile, records, kind);
+}
+
+export function resolveSpacePrompt(
+  canvasId: string,
+): Promise<RenderedSpacePrompt | null> {
+  return resolveSpaceInstructionFrames(canvasId, 'prompt');
+}
+
+export function resolveSpaceSkill(
+  canvasId: string,
+): Promise<RenderedSpaceSkill | null> {
+  return resolveSpaceInstructionFrames(canvasId, 'skill');
 }

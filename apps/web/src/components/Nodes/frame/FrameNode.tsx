@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import {
   FRAME_GRID_MAX_COUNT,
   FRAME_GRID_MIN_COUNT,
+  classifySpaceInstructionFrame,
   type FrameLayoutMode,
 } from '@huabu/shared';
 import { clampGridCount } from '@huabu/shared/canvas-engine';
@@ -21,6 +22,7 @@ import { NodeWrapper } from '@/components/Nodes/NodeWrapper.tsx';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { shouldPreserveFrameAspectRatio } from './frameResizePolicy.ts';
+import { InstructionFrameBadge } from './InstructionFrameBadge.tsx';
 
 import type { CanvasFrameNodeData } from '@/components/Nodes/types.ts';
 import type { Node, NodeProps } from '@xyflow/react';
@@ -30,6 +32,7 @@ export type FrameNodeType = Node<CanvasFrameNodeData, 'frame'>;
 const LABEL_MIN_VERTICAL_GAP = 22;
 const LABEL_COLLISION_HYSTERESIS = 4;
 const LABEL_MIN_SCREEN_WIDTH = 48;
+const INSTRUCTION_LABEL_MIN_SCREEN_WIDTH = 112;
 
 function shouldShowNestedLabel(
   ancestorGap: number | null,
@@ -414,6 +417,10 @@ export const FrameNode = memo(
       const trimmed = raw.trim();
       return trimmed.length > 0 ? trimmed : t('layers.filterLabels.frame');
     }, [data.label, t]);
+    const instructionFrameKind = classifySpaceInstructionFrame(
+      data.label,
+      data.labelSource,
+    );
 
     const [isEditingLabel, setIsEditingLabel] = useState(false);
     const [draftLabel, setDraftLabel] = useState(label);
@@ -496,53 +503,58 @@ export const FrameNode = memo(
 
     // Rendered in the zoom-invariant overlay so the label keeps a fixed screen size
     const labelOverlay = (
-      <div className="relative inline-grid max-w-full min-w-0 items-center">
-        <span className="invisible col-start-1 row-start-1 min-w-0 truncate px-1.5 text-xs font-medium whitespace-pre">
-          {draftLabel || ' '}
-        </span>
+      <div className="inline-flex max-w-full min-w-0 items-center gap-1">
+        {instructionFrameKind ? (
+          <InstructionFrameBadge kind={instructionFrameKind} />
+        ) : null}
+        <div className="relative inline-grid min-w-0 flex-1 items-center">
+          <span className="invisible col-start-1 row-start-1 min-w-0 truncate px-1.5 text-xs font-medium whitespace-pre">
+            {draftLabel || ' '}
+          </span>
 
-        <Input
-          ref={labelInputRef}
-          value={draftLabel}
-          readOnly={!isEditingLabel}
-          title={t('node.editFrameName')}
-          wrapperClassName="col-start-1 row-start-1 min-w-0 w-full"
-          tooltipOffset={0}
-          size={1}
-          className={clsx(
-            // `text-ellipsis` only paints on an unfocused input, so the
-            // idle label shows "…" while editing still scrolls normally.
-            'nodrag col-start-1 row-start-1 w-full min-w-0! bg-transparent px-1.5 text-xs font-medium text-ellipsis outline-none',
-            isEditingLabel
-              ? 'text-fg-default cursor-text'
-              : 'text-fg-muted hover:text-fg-default cursor-pointer',
-          )}
-          onChange={(e) => {
-            if (!isEditingLabel) return;
-            setDraftLabel(e.target.value);
-          }}
-          onClick={() => {
-            if (isEditingLabel) return;
-            setIsEditingLabel(true);
-          }}
-          onBlur={() => {
-            if (!isEditingLabel) return;
-            commitLabel();
-          }}
-          onKeyDown={(e) => {
-            if (!isEditingLabel) return;
-            e.stopPropagation();
-            if (e.key === 'Enter') {
-              e.preventDefault();
+          <Input
+            ref={labelInputRef}
+            value={draftLabel}
+            readOnly={!isEditingLabel}
+            title={t('node.editFrameName')}
+            wrapperClassName="col-start-1 row-start-1 min-w-0 w-full"
+            tooltipOffset={0}
+            size={1}
+            className={clsx(
+              // `text-ellipsis` only paints on an unfocused input, so the
+              // idle label shows "…" while editing still scrolls normally.
+              'nodrag col-start-1 row-start-1 w-full min-w-0! bg-transparent px-1.5 text-xs font-medium text-ellipsis outline-none',
+              isEditingLabel
+                ? 'text-fg-default cursor-text'
+                : 'text-fg-muted hover:text-fg-default cursor-pointer',
+            )}
+            onChange={(e) => {
+              if (!isEditingLabel) return;
+              setDraftLabel(e.target.value);
+            }}
+            onClick={() => {
+              if (isEditingLabel) return;
+              setIsEditingLabel(true);
+            }}
+            onBlur={() => {
+              if (!isEditingLabel) return;
               commitLabel();
-            }
-            if (e.key === 'Escape') {
-              e.preventDefault();
-              setDraftLabel(label);
-              setIsEditingLabel(false);
-            }
-          }}
-        />
+            }}
+            onKeyDown={(e) => {
+              if (!isEditingLabel) return;
+              e.stopPropagation();
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitLabel();
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setDraftLabel(label);
+                setIsEditingLabel(false);
+              }
+            }}
+          />
+        </div>
       </div>
     );
 
@@ -557,7 +569,12 @@ export const FrameNode = memo(
         overlayOffsetY={-24}
         overlayVisible={labelSemanticallyVisible}
         overlayInteractionPriority={isEditingLabel ? 3 : selected ? 2 : 0}
-        overlayMaxWidth={Math.max(LABEL_MIN_SCREEN_WIDTH, nodeWidth * zoom)}
+        overlayMaxWidth={Math.max(
+          instructionFrameKind
+            ? INSTRUCTION_LABEL_MIN_SCREEN_WIDTH
+            : LABEL_MIN_SCREEN_WIDTH,
+          nodeWidth * zoom,
+        )}
         keepAspectRatio={shouldPreserveFrameAspectRatio({
           sizing: data.sizing,
           hasMediaChild,
