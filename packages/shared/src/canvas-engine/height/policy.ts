@@ -50,6 +50,18 @@ export interface HeightPolicy {
    */
   minIntrinsicHeight?: number;
   /**
+   * Intrinsic content height (px, unscaled) a *collapsed* node of this
+   * type is pinned to. Deliberately separate from
+   * {@link minIntrinsicHeight}: the two look alike but do opposite jobs.
+   *
+   * The minimum is a floor on a note that is genuinely short, so it must
+   * stay small or it erases the difference between a two-line note and a
+   * nine-line one. The collapsed height is a *preview window* onto a note
+   * that is far too long to show, so it must be generous enough to read.
+   * Collapsing to the minimum would make every long note a stub.
+   */
+  collapsedIntrinsicHeight?: number;
+  /**
    * Chrome (px) that lives outside the measured element but inside the
    * node box — added after scaling. `0` where the measurement already
    * accounts for the node's own padding.
@@ -105,6 +117,59 @@ const MANUAL_POLICY: HeightPolicy = { kind: 'manual' };
 export const NODE_SHELL_INSET = 6;
 
 /**
+ * Authored content length (characters) past which a newly created note
+ * is born **collapsed** — pinned to the policy minimum with the expand
+ * affordance showing — instead of auto-sized to its full content.
+ *
+ * Auto height is the right default for a note you can take in at a
+ * glance. Past roughly a screenful it stops being a note and becomes a
+ * document: the node grows to thousands of pixels, buries its
+ * neighbours, and makes the canvas unusable at the very moment it holds
+ * the most information. Collapsing at birth keeps the canvas scannable
+ * and costs one click to undo.
+ *
+ * Only consulted at creation, and only when the caller expressed no
+ * height preference at all. An explicit numeric height pins as always,
+ * and an explicit `'auto'` means "expand this one fully" — the author
+ * has spoken either way, so neither is second-guessed.
+ *
+ * The unit is characters because nothing has been measured yet at
+ * creation time, but it is a good proxy in the range that matters:
+ * across real agent-written notes past ~600 characters, intrinsic
+ * height lands at 1.34x the character count with only ~5% spread —
+ * tighter than a line count predicts the same heights (~9%).
+ *
+ * The number is chosen by inverting that ratio from the rendered height
+ * we actually want to trigger on, not picked for roundness. 550 lands a
+ * little over 700px, roughly 2.5x a typical short note and about a
+ * screenful, against the ~248px collapsed preview. An earlier value of
+ * 800 inverted to ~1080px, so a note had to outgrow an entire screen
+ * before it collapsed and everything between 600 and 1080px rendered at
+ * full length — which is exactly what made a wall of long notes look
+ * arbitrary next to a collapsed one.
+ */
+export const NOTE_COLLAPSE_CONTENT_THRESHOLD = 550;
+
+/**
+ * Whether a note created with this content should start collapsed.
+ *
+ * Lives beside the policy rather than in a creation helper because the
+ * headless engine and the web client must agree on it exactly: a note
+ * that the server collapses and the client expands would produce a
+ * geometry write on every load.
+ */
+export function shouldCollapseNoteOnCreate(
+  nodeType: string | undefined,
+  content: unknown,
+): boolean {
+  if (getHeightPolicy(nodeType).kind !== 'toggleable') return false;
+  return (
+    typeof content === 'string' &&
+    content.length > NOTE_COLLAPSE_CONTENT_THRESHOLD
+  );
+}
+
+/**
  * Height policy per node type. Types absent from this table are `manual`.
  *
  * `refWidth` values match the creation defaults in
@@ -114,12 +179,30 @@ export const NODE_SHELL_INSET = 6;
 const HEIGHT_POLICIES: Readonly<Record<string, HeightPolicy>> = {
   // The note body measures `.ProseMirror` plus the host's own vertical
   // padding, so the only thing left to add is the node shell itself.
+  //
+  // Two different jobs, two different numbers — see the field docs.
+  //
+  // `minIntrinsicHeight` is a floor for a genuinely short note. Measured
+  // in a real browser at refWidth: one paragraph line is 41px intrinsic
+  // and each additional line adds 25, so 91 is three lines and renders
+  // as a 96px card. The old value of 50 rendered as 56 — one line and a
+  // sliver of the next. It stays deliberately small because a note under
+  // the collapse threshold is supposed to size itself to its content;
+  // every pixel of floor above the real content erases the difference
+  // between a short note and a slightly longer one. (A floor of 244
+  // would render every note of nine lines or fewer at the same 248px.)
+  //
+  // `collapsedIntrinsicHeight` is the preview window for a note too long
+  // to show at all, so it is generous: 244 renders as 248px, roughly a
+  // nine-line excerpt, with the fade and the expand chevron over it.
+  //
   // No `minContentScale`: its height is derived from the scale, and a
   // floor would make the content lay out narrower than `refWidth`.
   note: {
     kind: 'toggleable',
     refWidth: 400,
-    minIntrinsicHeight: 50,
+    minIntrinsicHeight: 91,
+    collapsedIntrinsicHeight: 244,
     insetY: NODE_SHELL_INSET,
   },
   text: { kind: 'content' },

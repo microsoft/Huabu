@@ -63,7 +63,7 @@ describe('renderTemplate {{include}}', () => {
 
     expect(out).toContain('nearNode: { id: "<anchorId>"');
     expect(out).toContain('omit `size`');
-    expect(out).toContain('Reserve `height: "auto"` for short Notes');
+    expect(out).toContain("**Never pin a `note`'s height.**");
   });
 
   it('throws when the included path escapes PROMPT_ROOT', () => {

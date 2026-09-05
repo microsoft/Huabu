@@ -122,7 +122,9 @@ export {
   HEIGHT_LAYOUT_VERSION,
   HEIGHT_QUANTIZATION_STEP,
   NODE_SHELL_INSET,
+  NOTE_COLLAPSE_CONTENT_THRESHOLD,
   autoHeightKey,
+  collapsedLayoutHeight,
   contentScaleFor,
   getHeightPolicy,
   getHeightRefWidth,
@@ -135,6 +137,7 @@ export {
   readAutoHeightHint,
   resolveAutoLayoutHeight,
   resolveHeightMode,
+  shouldCollapseNoteOnCreate,
 } from './height/index.js';
 export {
   getNodeDefaultSize,

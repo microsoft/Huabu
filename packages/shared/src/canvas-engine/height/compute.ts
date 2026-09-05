@@ -106,3 +106,25 @@ export function intrinsicToLayoutHeight(
   const scaled = clamped * contentScaleFor(policy, width);
   return quantizeHeight(scaled + (policy.insetY ?? 0));
 }
+
+/**
+ * Layout height a *collapsed* node occupies: the type's collapsed
+ * preview height, converted for the node's own width.
+ *
+ * Runs through {@link intrinsicToLayoutHeight} rather than returning a
+ * literal so it scales with the node's width exactly like a measured
+ * height does. Types without a collapsed height fall through to their
+ * minimum, which is also what the clamp inside that function guarantees:
+ * a collapsed node can never end up shorter than a short one.
+ */
+export function collapsedLayoutHeight(
+  nodeType: string | undefined,
+  width: number | undefined,
+): number {
+  const policy = getHeightPolicy(nodeType);
+  return intrinsicToLayoutHeight(
+    policy.collapsedIntrinsicHeight ?? 0,
+    nodeType,
+    width,
+  );
+}

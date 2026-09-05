@@ -18,15 +18,18 @@ export {
   type HeightMode,
   type HeightPolicy,
   NODE_SHELL_INSET,
+  NOTE_COLLAPSE_CONTENT_THRESHOLD,
   getHeightPolicy,
   getHeightRefWidth,
   isAlwaysAutoHeightType,
   isAutoHeightByDefaultType,
   resolveHeightMode,
+  shouldCollapseNoteOnCreate,
 } from './policy.js';
 
 export {
   HEIGHT_QUANTIZATION_STEP,
+  collapsedLayoutHeight,
   contentScaleFor,
   intrinsicToLayoutHeight,
   quantizeHeight,

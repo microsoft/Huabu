@@ -439,6 +439,8 @@
   },
   "node": {
     "untitled": "Untitled",
+    "showFullNote": "Show the whole note",
+    "collapseNote": "Collapse this note",
     "rename": "Rename node",
     "preview": "Preview",
     "navigateUpstream": "Navigate to a source node ({{shortcut}})",

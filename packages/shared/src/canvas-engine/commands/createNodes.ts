@@ -3,8 +3,12 @@
 
 import { noop, type CommandDefinition } from './types.js';
 import { createId, type CanvasCommand } from '../../index.js';
+import { collapsedLayoutHeight } from '../height/compute.js';
 import { materializeAutoHeight } from '../height/materialize.js';
-import { getHeightPolicy } from '../height/policy.js';
+import {
+  getHeightPolicy,
+  shouldCollapseNoteOnCreate,
+} from '../height/policy.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
 import {
   getNodeCreationStyle,
@@ -119,8 +123,23 @@ const createNodes: CommandDefinition<Cmd> = {
       // that number as a pinned height on the next load.
       const isToggleableHeight =
         getHeightPolicy(nodeType).kind === 'toggleable';
+
+      // A note long enough to bury its neighbours starts collapsed at
+      // the policy minimum rather than auto-sized to its full content.
+      // Only when the caller expressed no height preference at all: a
+      // number pins as always, and an explicit `'auto'` is the author
+      // saying "expand this one", which outranks the heuristic.
+      const collapseOnCreate =
+        explicitSize?.height === undefined &&
+        shouldCollapseNoteOnCreate(nodeType, inputData.content);
+
+      const collapsedHeight = collapseOnCreate
+        ? collapsedLayoutHeight(nodeType, geometryStyle.width)
+        : undefined;
+
       const heightMode = isToggleableHeight
-        ? typeof geometryStyle.height === 'number'
+        ? typeof geometryStyle.height === 'number' ||
+          collapsedHeight !== undefined
           ? 'fixed'
           : 'auto'
         : undefined;
@@ -138,7 +157,10 @@ const createNodes: CommandDefinition<Cmd> = {
           label,
           type: nodeType,
         },
-        style: geometryStyle,
+        style:
+          collapsedHeight !== undefined
+            ? { ...geometryStyle, height: collapsedHeight }
+            : geometryStyle,
       };
 
       // Materialize immediately so the node has a real footprint before
