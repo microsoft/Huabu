@@ -36,7 +36,12 @@ import {
 } from './canvasInputPolicy.ts';
 import { NODE_ICON } from '../../../config/nodeIcons.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
-import { detectNodeType, detectOfficeFormat } from '../../../utils/io/media.ts';
+import {
+  detectNodeType,
+  detectOfficeFormat,
+  getImageDimensionsFromBlob,
+  getVideoDimensionsFromBlob,
+} from '../../../utils/io/media.ts';
 import { Button } from '../../Common/Button.tsx';
 import { Modal } from '../../Common/Modal.tsx';
 import { Popover } from '../../Common/Popover.tsx';
@@ -259,34 +264,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     return { x: rect.left, y: rect.top };
   };
 
-  const getImageDimensions = (
-    file: File,
-  ): Promise<{ width: number; height: number }> => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.src = URL.createObjectURL(file);
-      img.onload = () => {
-        resolve({ width: img.naturalWidth, height: img.naturalHeight });
-        URL.revokeObjectURL(img.src);
-      };
-      img.onerror = reject;
-    });
-  };
-
-  const getVideoDimensions = (
-    file: File,
-  ): Promise<{ width: number; height: number }> => {
-    return new Promise((resolve, reject) => {
-      const video = document.createElement('video');
-      video.src = URL.createObjectURL(file);
-      video.onloadedmetadata = () => {
-        resolve({ width: video.videoWidth, height: video.videoHeight });
-        URL.revokeObjectURL(video.src);
-      };
-      video.onerror = reject;
-    });
-  };
-
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -307,14 +284,16 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             if (type === 'image') {
               const [uploadedUrl, dims] = await Promise.all([
                 uploadImage(file, canvasId),
-                getImageDimensions(file),
+                getImageDimensionsFromBlob(file).catch(() => undefined),
               ]);
               url = uploadedUrl;
               naturalDimensions = dims;
             } else if (type === 'video') {
               const [uploadedUrl, dims] = await Promise.all([
                 uploadVideo(file, canvasId),
-                getVideoDimensions(file),
+                // A codec the browser cannot decode still deserves a node — it
+                // just falls back to the default size.
+                getVideoDimensionsFromBlob(file).catch(() => undefined),
               ]);
               url = uploadedUrl;
               naturalDimensions = dims;

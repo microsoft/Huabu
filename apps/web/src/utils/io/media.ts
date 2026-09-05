@@ -118,3 +118,28 @@ export const getImageDimensionsFromBlob = (
     };
     img.src = url;
   });
+
+/**
+ * Get intrinsic dimensions of a video from a Blob/File.
+ *
+ * Only the container metadata is needed, hence `preload = 'metadata'`.
+ * Callers use this to size a new video node to the real aspect ratio —
+ * without it the node falls back to the generic 4:3 default.
+ */
+export const getVideoDimensionsFromBlob = (
+  blob: Blob,
+): Promise<{ width: number; height: number }> =>
+  new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      resolve({ width: video.videoWidth, height: video.videoHeight });
+      URL.revokeObjectURL(url);
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load video'));
+    };
+    video.src = url;
+  });
