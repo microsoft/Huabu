@@ -13,7 +13,8 @@ import type { CanvasFile, NodeContent } from '../storage/index.js';
 import type { SpaceInstructionFrameKind } from '@huabu/shared';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
-export const SPACE_PROMPT_MAX_BYTES = 16 * 1024;
+export const SPACE_PROMPT_MAX_BYTES = 32 * 1024;
+export const SPACE_PROMPT_NOTE_MAX_BYTES = 10 * 1024;
 export const SPACE_SKILL_MAX_BYTES = 16 * 1024;
 
 export interface SpacePromptDiagnostics {
@@ -22,6 +23,8 @@ export interface SpacePromptDiagnostics {
   readonly omittedUnsupportedIds: readonly string[];
   readonly omittedEmptyTextIds: readonly string[];
   readonly omittedMissingIds: readonly string[];
+  readonly omittedBudgetNodeIds: readonly string[];
+  readonly truncatedNoteIds: readonly string[];
   readonly truncated: boolean;
 }
 
@@ -38,6 +41,7 @@ interface InstructionFrameConfig {
   readonly byteLimit: number;
   readonly displayName: 'Space Prompt' | 'Space Skill';
   readonly placeholder: string;
+  readonly noteRendering: 'inline' | 'reference';
 }
 
 const INSTRUCTION_FRAME_CONFIG: Record<
@@ -50,6 +54,7 @@ const INSTRUCTION_FRAME_CONFIG: Record<
     byteLimit: SPACE_PROMPT_MAX_BYTES,
     displayName: 'Space Prompt',
     placeholder: '{{SPACE_PROMPT_CONTENT}}',
+    noteRendering: 'inline',
   },
   skill: {
     kind: 'skill',
@@ -57,6 +62,7 @@ const INSTRUCTION_FRAME_CONFIG: Record<
     byteLimit: SPACE_SKILL_MAX_BYTES,
     displayName: 'Space Skill',
     placeholder: '{{SPACE_SKILL_CONTENT}}',
+    noteRendering: 'reference',
   },
 };
 
@@ -64,6 +70,21 @@ interface OrderedNode {
   readonly raw: CanvasNode;
   readonly x: number;
   readonly y: number;
+}
+
+interface RenderedEntry {
+  readonly nodeId: string;
+  readonly markdown: string;
+}
+
+interface RenderedSection {
+  readonly heading: string;
+  readonly entries: readonly RenderedEntry[];
+}
+
+interface EntryRange {
+  readonly nodeId: string;
+  readonly start: number;
 }
 
 function compareReadingOrder(a: OrderedNode, b: OrderedNode): number {
@@ -89,6 +110,13 @@ function quoteAttribute(value: string): string {
 function neutralizeInstructionTags(value: string): string {
   return value.replace(
     /<\/?space_(?:prompt|skill)>/gi,
+    (tag) => `&lt;${tag.slice(1)}`,
+  );
+}
+
+function neutralizeNoteTags(value: string): string {
+  return value.replace(
+    /<\/?note(?:\s[^>]*)?>/gi,
     (tag) => `&lt;${tag.slice(1)}`,
   );
 }
@@ -121,24 +149,65 @@ function truncateUtf8(value: string, byteLimit: number): string {
   return output;
 }
 
+function renderPromptNote(
+  node: CanvasNode,
+  record: NodeContent,
+): { markdown: string; truncated: boolean } {
+  const ref = buildAgentNodeRef({
+    id: node.id,
+    type: 'note',
+    label: recordLabel(record),
+  });
+  const rev = nodeRevisionOf({
+    content: record.content,
+    ...(typeof record.src === 'string' ? { src: record.src } : {}),
+  });
+  const content = neutralizeNoteTags(neutralizeInstructionTags(record.content));
+  const bounded = truncateUtf8(content, SPACE_PROMPT_NOTE_MAX_BYTES);
+  const truncated = bounded !== content;
+  const marker = truncated
+    ? '\n\n[Note truncated at the 10 KiB per-note limit.]'
+    : '';
+  return {
+    markdown: `<note id="${quoteAttribute(ref.id)}" label="${quoteAttribute(
+      ref.label ?? '',
+    )}" file="${quoteAttribute(ref.filename)}" rev="${quoteAttribute(
+      rev,
+    )}">\n${bounded}${marker}\n</note>`,
+    truncated,
+  };
+}
+
 function renderWithinBudget(
   content: string,
-  diagnostics: Omit<SpacePromptDiagnostics, 'truncated'>,
+  entryRanges: readonly EntryRange[],
+  diagnostics: Omit<
+    SpacePromptDiagnostics,
+    'omittedBudgetNodeIds' | 'truncated'
+  >,
   config: InstructionFrameConfig,
 ): RenderedSpacePrompt {
-  const omissionDiagnostics = [
-    diagnostics.omittedUnsupportedIds.length > 0
-      ? `- Omitted unsupported direct children: ${diagnostics.omittedUnsupportedIds.length}.`
-      : '',
-    diagnostics.omittedEmptyTextIds.length > 0
-      ? `- Omitted empty Text nodes: ${diagnostics.omittedEmptyTextIds.length}.`
-      : '',
-    diagnostics.omittedMissingIds.length > 0
-      ? `- Omitted missing node records: ${diagnostics.omittedMissingIds.length}.`
-      : '',
-  ]
-    .filter(Boolean)
-    .join('\n');
+  const renderDiagnostics = (omittedBudgetNodeIds: readonly string[]) =>
+    [
+      diagnostics.omittedUnsupportedIds.length > 0
+        ? `- Omitted unsupported direct children: ${diagnostics.omittedUnsupportedIds.length}.`
+        : '',
+      diagnostics.omittedEmptyTextIds.length > 0
+        ? `- Omitted empty Text nodes: ${diagnostics.omittedEmptyTextIds.length}.`
+        : '',
+      diagnostics.omittedMissingIds.length > 0
+        ? `- Omitted missing node records: ${diagnostics.omittedMissingIds.length}.`
+        : '',
+      diagnostics.truncatedNoteIds.length > 0
+        ? `- Truncated Note nodes at the 10 KiB per-note limit: ${diagnostics.truncatedNoteIds.join(', ')}.`
+        : '',
+      omittedBudgetNodeIds.length > 0
+        ? `- Omitted nodes after the total budget was exhausted: ${omittedBudgetNodeIds.join(', ')}.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  const omissionDiagnostics = renderDiagnostics([]);
   const complete = renderPromptFile(config.template, {
     content,
     diagnostics: omissionDiagnostics,
@@ -146,13 +215,45 @@ function renderWithinBudget(
   if (Buffer.byteLength(complete, 'utf8') <= config.byteLimit) {
     return {
       markdown: complete,
-      diagnostics: { ...diagnostics, truncated: false },
+      diagnostics: {
+        ...diagnostics,
+        omittedBudgetNodeIds: [],
+        truncated: false,
+      },
     };
   }
 
-  const marker = `\n\n[${config.displayName} truncated at the 16 KiB module limit.]`;
+  const marker = `\n\n[${config.displayName} truncated at the ${config.byteLimit / 1024} KiB module limit.]`;
+  let omittedBudgetNodeIds: string[] = [];
+  let boundedContent = '';
+  for (let attempt = 0; attempt <= entryRanges.length; attempt += 1) {
+    const truncatedDiagnostics = [
+      renderDiagnostics(omittedBudgetNodeIds),
+      `- Some ${config.displayName} Frame content was truncated.`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const shell = renderPromptFile(config.template, {
+      content: config.placeholder,
+      diagnostics: truncatedDiagnostics,
+    });
+    const available =
+      config.byteLimit -
+      Buffer.byteLength(shell.replace(config.placeholder, '') + marker);
+    boundedContent = truncateUtf8(content, Math.max(0, available));
+    const nextOmitted = entryRanges
+      .filter((range) => range.start >= boundedContent.length)
+      .map((range) => range.nodeId);
+    if (
+      nextOmitted.length === omittedBudgetNodeIds.length &&
+      nextOmitted.every((id, index) => id === omittedBudgetNodeIds[index])
+    ) {
+      break;
+    }
+    omittedBudgetNodeIds = nextOmitted;
+  }
   const truncatedDiagnostics = [
-    omissionDiagnostics,
+    renderDiagnostics(omittedBudgetNodeIds),
     `- Some ${config.displayName} Frame content was truncated.`,
   ]
     .filter(Boolean)
@@ -161,17 +262,41 @@ function renderWithinBudget(
     content: config.placeholder,
     diagnostics: truncatedDiagnostics,
   });
-  const available =
-    config.byteLimit -
-    Buffer.byteLength(shell.replace(config.placeholder, '') + marker);
-  const boundedContent = truncateUtf8(content, Math.max(0, available));
   return {
     markdown: shell.replace(
       config.placeholder,
       () => `${boundedContent}${marker}`,
     ),
-    diagnostics: { ...diagnostics, truncated: true },
+    diagnostics: {
+      ...diagnostics,
+      includedNodeIds: diagnostics.includedNodeIds.filter(
+        (id) => !omittedBudgetNodeIds.includes(id),
+      ),
+      omittedBudgetNodeIds,
+      truncated: true,
+    },
   };
+}
+
+function renderSections(sections: readonly RenderedSection[]): {
+  content: string;
+  entryRanges: EntryRange[];
+} {
+  let content = '';
+  const entryRanges: EntryRange[] = [];
+  const append = (value: string) => {
+    content += value;
+  };
+  for (const [sectionIndex, section] of sections.entries()) {
+    if (sectionIndex > 0) append('\n\n');
+    append(`## ${section.heading}`);
+    for (const entry of section.entries) {
+      append('\n\n');
+      entryRanges.push({ nodeId: entry.nodeId, start: content.length });
+      append(entry.markdown);
+    }
+  }
+  return { content, entryRanges };
 }
 
 function renderSpaceInstructionFrames(
@@ -203,7 +328,8 @@ function renderSpaceInstructionFrames(
   const omittedUnsupportedIds: string[] = [];
   const omittedEmptyTextIds: string[] = [];
   const omittedMissingIds: string[] = [];
-  const sections: string[] = [];
+  const truncatedNoteIds: string[] = [];
+  const sections: RenderedSection[] = [];
 
   for (const frame of frames) {
     const frameRecord = records.get(frame.raw.id)?.record;
@@ -216,7 +342,7 @@ function renderSpaceInstructionFrames(
         y: raw.position.y,
       }))
       .sort(compareReadingOrder);
-    const entries: string[] = [];
+    const entries: RenderedEntry[] = [];
 
     for (const child of children) {
       if (child.raw.type !== 'text' && child.raw.type !== 'note') {
@@ -233,30 +359,51 @@ function renderSpaceInstructionFrames(
           omittedEmptyTextIds.push(child.raw.id);
           continue;
         }
-        entries.push(neutralizeInstructionTags(record.content));
+        entries.push({
+          nodeId: child.raw.id,
+          markdown: neutralizeInstructionTags(record.content),
+        });
       } else {
-        entries.push(renderNoteReference(child.raw, record));
+        if (config.noteRendering === 'inline') {
+          const rendered = renderPromptNote(child.raw, record);
+          entries.push({
+            nodeId: child.raw.id,
+            markdown: rendered.markdown,
+          });
+          if (rendered.truncated) truncatedNoteIds.push(child.raw.id);
+        } else {
+          entries.push({
+            nodeId: child.raw.id,
+            markdown: renderNoteReference(child.raw, record),
+          });
+        }
       }
       includedNodeIds.push(child.raw.id);
     }
 
     if (entries.length > 0) {
-      sections.push(
-        `## ${neutralizeInstructionTags(recordLabel(frameRecord)) || config.displayName}\n\n${entries.join('\n\n')}`,
-      );
+      sections.push({
+        heading:
+          neutralizeInstructionTags(recordLabel(frameRecord)) ||
+          config.displayName,
+        entries,
+      });
     }
   }
 
   if (sections.length === 0) return null;
+  const rendered = renderSections(sections);
 
   return renderWithinBudget(
-    sections.join('\n\n'),
+    rendered.content,
+    rendered.entryRanges,
     {
       includedFrameIds: frames.map((frame) => frame.raw.id),
       includedNodeIds,
       omittedUnsupportedIds,
       omittedEmptyTextIds,
       omittedMissingIds,
+      truncatedNoteIds,
     },
     config,
   );

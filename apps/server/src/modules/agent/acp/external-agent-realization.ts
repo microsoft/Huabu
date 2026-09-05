@@ -250,6 +250,7 @@ export class ExternalAgentRealizationService {
     if (
       collected &&
       (collected.diagnostics.truncated ||
+        collected.diagnostics.truncatedNoteIds.length > 0 ||
         collected.diagnostics.omittedUnsupportedIds.length > 0 ||
         collected.diagnostics.omittedEmptyTextIds.length > 0 ||
         collected.diagnostics.omittedMissingIds.length > 0)

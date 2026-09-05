@@ -64,6 +64,8 @@ function createHarness(options?: {
       omittedUnsupportedIds: string[];
       omittedEmptyTextIds: string[];
       omittedMissingIds: string[];
+      omittedBudgetNodeIds: string[];
+      truncatedNoteIds: string[];
       truncated: boolean;
     };
   } | null>;
@@ -127,6 +129,8 @@ function createHarness(options?: {
         omittedUnsupportedIds: [],
         omittedEmptyTextIds: [],
         omittedMissingIds: [],
+        omittedBudgetNodeIds: [],
+        truncatedNoteIds: [],
         truncated: false,
       },
     });
@@ -325,6 +329,8 @@ describe('ExternalAgentRealizationService', () => {
           omittedUnsupportedIds: [],
           omittedEmptyTextIds: [],
           omittedMissingIds: [],
+          omittedBudgetNodeIds: [],
+          truncatedNoteIds: [],
           truncated: false,
         },
       };

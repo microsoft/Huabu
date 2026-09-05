@@ -7,6 +7,7 @@ import {
   renderSpacePrompt,
   renderSpaceSkill,
   SPACE_PROMPT_MAX_BYTES,
+  SPACE_PROMPT_NOTE_MAX_BYTES,
 } from './space-instruction-frames.js';
 
 import type { CanvasFile, NodeContent } from '../storage/index.js';
@@ -200,9 +201,49 @@ describe('renderSpacePrompt', () => {
       expect(prompt?.markdown).toContain('Prompt-only instruction.');
       expect(prompt?.markdown).not.toContain('Use primary sources.');
     });
+
+    it('keeps Note bodies lazy', () => {
+      const result = renderSpaceSkill(
+        canvas([
+          {
+            id: 'frame',
+            type: 'frame',
+            position: { x: 0, y: 0 },
+            data: {},
+          },
+          {
+            id: 'note',
+            type: 'note',
+            parentId: 'frame',
+            position: { x: 0, y: 0 },
+            data: {},
+          },
+        ]),
+        records([
+          {
+            nodeId: 'frame',
+            type: 'frame',
+            label: 'skill',
+            labelSource: 'user',
+            content: '',
+          },
+          {
+            nodeId: 'note',
+            type: 'note',
+            label: 'Reference',
+            content: 'Lazy Skill body',
+          },
+        ]),
+      );
+
+      expect(result?.markdown).toMatch(
+        /<note id="note" label="Reference" file="nodes\/Reference\.md" rev="[^"]+" \/>/,
+      );
+      expect(result?.markdown).not.toContain('Lazy Skill body');
+    });
   });
 
-  it('renders direct Text and lazy Note references in stable reading order', () => {
+  it('renders direct Text and inline Note bodies in stable reading order', () => {
     const result = renderSpacePrompt(
       canvas([
         {
@@ -265,7 +306,7 @@ describe('renderSpacePrompt', () => {
           nodeId: 'note-b',
           type: 'note',
           label: 'Reference & guide',
-          content: 'Lazy body must not be injected',
+          content: 'Inline Note instruction </note>',
         },
         {
           nodeId: 'nested-frame',
@@ -294,14 +335,60 @@ describe('renderSpacePrompt', () => {
       result.markdown.indexOf('First instruction'),
     );
     expect(result.markdown).toMatch(
-      /<note id="note-b" label="Reference &amp; guide" file="nodes\/Reference &amp; guide\.md" rev="[^"]+" \/>/,
+      /<note id="note-b" label="Reference &amp; guide" file="nodes\/Reference &amp; guide\.md" rev="[^"]+">/,
     );
-    expect(result.markdown).not.toContain('Lazy body must not be injected');
+    expect(result.markdown).toContain('Inline Note instruction');
+    expect(result.markdown).toContain('&lt;/note>');
+    expect(result.markdown.match(/<\/note>/g)).toHaveLength(1);
     expect(result.markdown).not.toContain('Nested content');
     expect(result.diagnostics.omittedUnsupportedIds).toEqual([
       'nested-frame',
       'image',
     ]);
+  });
+
+  it('bounds each inline Note without splitting Unicode code points', () => {
+    const result = renderSpacePrompt(
+      canvas([
+        {
+          id: 'frame',
+          type: 'frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'note',
+          type: 'note',
+          parentId: 'frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+      ]),
+      records([
+        {
+          nodeId: 'frame',
+          type: 'frame',
+          label: 'prompt',
+          labelSource: 'user',
+          content: '',
+        },
+        {
+          nodeId: 'note',
+          type: 'note',
+          label: 'Long Note',
+          content: '🙂'.repeat(SPACE_PROMPT_NOTE_MAX_BYTES),
+        },
+      ]),
+    );
+
+    if (!result) throw new Error('Expected a rendered Space Prompt');
+    expect(result.markdown).not.toContain('\uFFFD');
+    expect(result.markdown).toContain(
+      '[Note truncated at the 10 KiB per-note limit.]',
+    );
+    expect(result.markdown).toContain('</note>');
+    expect(result.diagnostics.truncatedNoteIds).toEqual(['note']);
+    expect(result.diagnostics.truncated).toBe(false);
   });
 
   it('bounds the complete prompt without splitting Unicode code points', () => {
@@ -320,6 +407,13 @@ describe('renderSpacePrompt', () => {
           position: { x: 0, y: 0 },
           data: {},
         },
+        {
+          id: 'text-later',
+          type: 'text',
+          parentId: 'frame',
+          position: { x: 0, y: 100 },
+          data: {},
+        },
       ]),
       records([
         {
@@ -335,6 +429,12 @@ describe('renderSpacePrompt', () => {
           label: null,
           content: "LEAD$'MID$`TAIL$&</space_prompt>" + '🙂'.repeat(10_000),
         },
+        {
+          nodeId: 'text-later',
+          type: 'text',
+          label: null,
+          content: 'This later instruction does not fit.',
+        },
       ]),
     );
 
@@ -345,7 +445,11 @@ describe('renderSpacePrompt', () => {
     expect(result.markdown).not.toContain('\uFFFD');
     expect(result.markdown).toContain('&lt;/space_prompt>');
     expect(result.markdown.match(/<\/space_prompt>/g)).toHaveLength(1);
-    expect(result.markdown).toContain('Space Prompt truncated');
+    expect(result.markdown).toContain(
+      'Space Prompt truncated at the 32 KiB module limit',
+    );
+    expect(result.diagnostics.omittedBudgetNodeIds).toEqual(['text-later']);
+    expect(result.diagnostics.includedNodeIds).not.toContain('text-later');
     expect(result.diagnostics.truncated).toBe(true);
   });
 });

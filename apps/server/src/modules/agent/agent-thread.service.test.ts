@@ -127,6 +127,8 @@ function createHarness(options?: {
       omittedUnsupportedIds: [],
       omittedEmptyTextIds: [],
       omittedMissingIds: [],
+      omittedBudgetNodeIds: [],
+      truncatedNoteIds: [],
       truncated: false,
     },
   });
