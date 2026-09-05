@@ -5,7 +5,7 @@ Last updated: 2026-09-05
 
 ## Context
 
-Issue [#160](https://github.com/microsoft/Huabu/issues/160) adds Space Prompt Frames whose content is frozen into a fixed Agent Node's durable WorkloadSpec when that Agent is first realized.
+Issue [#160](https://github.com/microsoft/Huabu/issues/160) adds Space Prompt Frames whose content is frozen into an Agent Node's durable WorkloadSpec when that Agent is first realized.
 
 Issue [#162](https://github.com/microsoft/Huabu/issues/162) removes UI-triggered ACP warm sessions and replaces them with GET-only Profile/Harness capability discovery.
 
@@ -31,7 +31,7 @@ Huabu will separate capability discovery, workload realization, and live ACP ses
 - Preserve immediate UI rendering from cached commands and selector catalogues when prior observations exist.
 - Allow a cold cache to degrade to empty/default UI without blocking the first user message.
 - Ensure a first control and a first user message produce the same canonical WorkloadSpec.
-- Snapshot the Space Prompt at the first explicit interaction for fixed Agent Nodes.
+- Snapshot the Space Prompt at the first explicit interaction for Agent Nodes.
 - Keep the existing Agenetes persisted-spec-authoritative invariant.
 - Reconcile cached UI state with live agent reports after a real session starts.
 - Keep permission-expanding selections safe when only stale or cross-thread observations exist.
@@ -138,7 +138,7 @@ Realization creates one complete immutable WorkloadSpec containing:
 - reachback environment
 - effective working directory
 - mandatory Huabu bootstrap
-- frozen Space Prompt for a fixed Agent Node
+- frozen Space Prompt for an Agent Node
 - node-specific additional initial instructions
 - complete launch overrides
 - no bootstrap-only or preparatory record
@@ -149,7 +149,7 @@ The initial implementation does not add a driver-schema field solely as a realiz
 
 For a fixed Agent Node, the server resolves the node by `(canvasId, threadId)` and treats its binding and launch overrides as authoritative. Client-supplied Profile and working-directory values are consistency hints only. A mismatch returns an explicit conflict response and does not create a workload.
 
-For a non-fixed external thread, the server uses the schema-validated requested binding and supported request configuration. It does not collect or inject a Space Prompt.
+For a non-fixed external Agent Node, the server uses the schema-validated requested binding and supported request configuration while still collecting and injecting the Space Prompt. A node-less external thread does not receive a Space Prompt.
 
 ### Shared entry point
 
@@ -280,7 +280,7 @@ Issue #162 is the implementation prerequisite for the #160 correction, but both 
 - Subsequent controls mutate driver state without changing the WorkloadSpec.
 - Concurrent first control and message requests create one canonical workload.
 - Fixed binding mismatch is rejected without persisting a workload.
-- Non-fixed external threads realize without a Space Prompt.
+- Selectable external Agent Nodes realize with a Space Prompt, while node-less external threads do not.
 - Permission-expanding cached observations are not presented as confirmed current-thread state.
 
 ## Code entry points
@@ -289,11 +289,11 @@ Issue #162 is the implementation prerequisite for the #160 correction, but both 
 | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
 | [`apps/server/src/modules/agent/acp/external-agent-realization.ts`](../../apps/server/src/modules/agent/acp/external-agent-realization.ts) | Shared first-message/first-control realization, conflict validation, session ensure, and namespace/thread single-flight.    |
 | [`apps/server/src/modules/agent/agent-thread.service.ts`](../../apps/server/src/modules/agent/agent-thread.service.ts)                     | Message lifecycle and dispatch through the shared external realization boundary.                                            |
-| [`apps/server/src/modules/agent/agent-thread-resolver.ts`](../../apps/server/src/modules/agent/agent-thread-resolver.ts)                   | Canonical fixed Agent Node lookup and launch-override validation.                                                           |
+| [`apps/server/src/modules/agent/agent-thread-resolver.ts`](../../apps/server/src/modules/agent/agent-thread-resolver.ts)                   | Canonical Agent Node lookup plus fixed binding and launch-override validation.                                              |
 | [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                       | Canonical ACP WorkloadSpec builder and message execution.                                                                   |
 | [`apps/server/src/modules/agent/acp/threads.route.ts`](../../apps/server/src/modules/agent/acp/threads.route.ts)                           | Current session metadata and control routes; reduced spec creation and warm-session endpoints are removed from normal flow. |
 | [`apps/server/src/modules/agent/acp/profile-schema-cache.ts`](../../apps/server/src/modules/agent/acp/profile-schema-cache.ts)             | Existing Profile-associated capability observation cache.                                                                   |
-| [`apps/server/src/modules/agent/space-instruction-frames.ts`](../../apps/server/src/modules/agent/space-instruction-frames.ts)             | Deterministic Space Prompt collection used during fixed-node realization.                                                   |
+| [`apps/server/src/modules/agent/space-instruction-frames.ts`](../../apps/server/src/modules/agent/space-instruction-frames.ts)             | Deterministic Space Prompt collection used during Agent Node realization.                                                   |
 | [`apps/web/src/hooks/useAcpSessionMeta.ts`](../../apps/web/src/hooks/useAcpSessionMeta.ts)                                                 | Selector catalogue cache read and live-session reconciliation.                                                              |
 | [`apps/web/src/hooks/useAcpSlashCommands.ts`](../../apps/web/src/hooks/useAcpSlashCommands.ts)                                             | Slash-command cache read without session creation.                                                                          |
 | [`external/agenetes/packages/acp-driver/src/handle.ts`](../../external/agenetes/packages/acp-driver/src/handle.ts)                         | ACP session creation, control/run behavior, and one-shot preamble delivery.                                                 |

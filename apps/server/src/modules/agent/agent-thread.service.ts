@@ -11,6 +11,7 @@ import { agenetes, EXTERNAL_DRIVER_KIND } from './agenetes/drivers.js';
 import { agentNodeLifecycle } from './agent-node-lifecycle.js';
 import {
   agentThreadResolver,
+  type AgentNodeTarget,
   type FixedAgentNodeTarget,
 } from './agent-thread-resolver.js';
 import { runAgent } from './agent.service.js';
@@ -38,6 +39,10 @@ import type {
 import type { FastifyBaseLogger } from 'fastify';
 
 interface AgentThreadServiceDependencies {
+  resolveAgentNode: (
+    canvasId: string,
+    threadId: string,
+  ) => Promise<AgentNodeTarget | null>;
   resolveFixedAgentNode: (
     canvasId: string,
     threadId: string,
@@ -89,6 +94,8 @@ export function spacePromptFromWorkloadSpec(spec: unknown): string | undefined {
 }
 
 const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
+  resolveAgentNode: (canvasId, threadId) =>
+    agentThreadResolver.resolveAgentNode(canvasId, threadId),
   resolveFixedAgentNode: (canvasId, threadId) =>
     agentThreadResolver.resolveFixedAgentNode(canvasId, threadId),
   resolvePersistedExternalBinding: (canvasId, threadId) => {
@@ -130,6 +137,7 @@ export interface AgentThreadInvocationOptions {
   /** Canonical durable submission; ordinary chat callers omit it. */
   submission?: HuabuSubmission;
   requestBinding?: AgentBinding;
+  agentTarget?: AgentNodeTarget | null;
   fixedTarget?: FixedAgentNodeTarget | null;
   modelId?: string;
   reasoningEffort?: ReasoningEffort;
@@ -238,6 +246,16 @@ export class AgentThreadService {
       options.fixedTarget === undefined
         ? await this.resolveFixedTarget(options.canvasId, options.threadId)
         : options.fixedTarget;
+    const agentTarget =
+      options.agentTarget === undefined
+        ? (fixedTarget ??
+          (options.canvasId
+            ? await this.dependencies.resolveAgentNode(
+                options.canvasId,
+                options.threadId,
+              )
+            : null))
+        : options.agentTarget;
     const persistedExternalBinding =
       !fixedTarget && options.canvasId
         ? this.dependencies.resolvePersistedExternalBinding(
@@ -257,6 +275,7 @@ export class AgentThreadService {
               options.requestBinding?.kind === 'external'
                 ? options.requestBinding
                 : undefined,
+            agentTarget,
             fixedTarget,
             logger: options.logger,
           })
@@ -285,7 +304,7 @@ export class AgentThreadService {
 
     let spacePrompt: string | undefined;
     try {
-      if (fixedTarget && options.canvasId && binding.kind !== 'external') {
+      if (agentTarget && options.canvasId && binding.kind !== 'external') {
         const persisted = this.dependencies.resolvePersistedSpacePrompt(
           options.canvasId,
           options.threadId,

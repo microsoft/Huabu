@@ -14,7 +14,10 @@ import { ExternalAgentRealizationService } from './external-agent-realization.js
 
 import type { ExternalAgentRealizationError } from './external-agent-realization.js';
 import type { AcpHandle, AcpWorkloadSpec } from '../agenetes/drivers.js';
-import type { FixedAgentNodeTarget } from '../agent-thread-resolver.js';
+import type {
+  AgentNodeTarget,
+  FixedAgentNodeTarget,
+} from '../agent-thread-resolver.js';
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type { ThreadRecord } from '@agenetes/agenetes';
 import type { CanvasNodeId } from '@huabu/shared';
@@ -44,8 +47,14 @@ const targetBinding = target.agentBinding as Extract<
   typeof target.agentBinding,
   { kind: 'external' }
 >;
+const selectableTarget: AgentNodeTarget = {
+  canvasId: target.canvasId,
+  nodeId: 'node-selectable' as CanvasNodeId,
+  threadId: target.threadId,
+};
 
 function createHarness(options?: {
+  agentTarget?: AgentNodeTarget | null;
   record?: ThreadRecord;
   collect?: () => Promise<{
     markdown: string;
@@ -122,6 +131,13 @@ function createHarness(options?: {
       },
     });
   const service = new ExternalAgentRealizationService({
+    resolveAgentNode: vi
+      .fn()
+      .mockResolvedValue(
+        options && 'agentTarget' in options
+          ? (options.agentTarget ?? null)
+          : target,
+      ),
     resolveFixedAgentNode: vi.fn().mockResolvedValue(target),
     collectSpacePrompt,
     readRecord: vi.fn(() => options?.record),
@@ -171,6 +187,45 @@ describe('ExternalAgentRealizationService', () => {
     });
     expect(harness.ensureSession).toHaveBeenCalledWith(realized, logger);
     expect(harness.handle.control).toHaveBeenCalledOnce();
+  });
+
+  it('captures the Space Prompt for a selectable Agent Node', async () => {
+    const harness = createHarness({ agentTarget: selectableTarget });
+    const realized = await harness.service.realize({
+      threadId: 'thread-1',
+      canvasId: 'canvas-1',
+      requestedBinding: {
+        kind: 'external',
+        alias: 'Selectable Agent',
+        profileId: 'profile-selectable',
+      },
+      fixedTarget: null,
+      logger,
+    });
+
+    expect(harness.collectSpacePrompt).toHaveBeenCalledWith('canvas-1');
+    expect(realized.spec.spec.initialPreamble).toEqual([
+      'Huabu bootstrap',
+      '<space_prompt>Space rules</space_prompt>',
+    ]);
+  });
+
+  it('does not capture a Space Prompt for a node-less external thread', async () => {
+    const harness = createHarness({ agentTarget: null });
+    const realized = await harness.service.realize({
+      threadId: 'thread-1',
+      canvasId: 'canvas-1',
+      requestedBinding: {
+        kind: 'external',
+        alias: 'Standalone Agent',
+        profileId: 'profile-standalone',
+      },
+      fixedTarget: null,
+      logger,
+    });
+
+    expect(harness.collectSpacePrompt).not.toHaveBeenCalled();
+    expect(realized.spec.spec.initialPreamble).toEqual(['Huabu bootstrap']);
   });
 
   it('rejects a fixed Profile mismatch before creating a workload', async () => {

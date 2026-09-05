@@ -16,7 +16,10 @@ import {
 } from './agent-thread.service.js';
 
 import type { AcpHandle, AcpWorkloadSpec } from './agenetes/drivers.js';
-import type { FixedAgentNodeTarget } from './agent-thread-resolver.js';
+import type {
+  AgentNodeTarget,
+  FixedAgentNodeTarget,
+} from './agent-thread-resolver.js';
 import type { runAgent } from './agent.service.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type {
@@ -56,6 +59,12 @@ const TARGET: FixedAgentNodeTarget = {
   content: '',
 };
 
+const SELECTABLE_TARGET: AgentNodeTarget = {
+  canvasId: 'canvas-a',
+  nodeId: 'node-selectable' as CanvasNodeId,
+  threadId: 'thread-a',
+};
+
 const logger = {
   debug: vi.fn(),
   info: vi.fn(),
@@ -75,6 +84,7 @@ async function* events(
 }
 
 function createHarness(options?: {
+  agentTarget?: AgentNodeTarget | null;
   target?: FixedAgentNodeTarget | null;
   busy?: boolean;
   externalEvents?: AgentStreamEvent[];
@@ -125,6 +135,7 @@ function createHarness(options?: {
       requestedBinding,
       fixedTarget,
     }: {
+      agentTarget?: AgentNodeTarget | null;
       requestedBinding?: Extract<AgentBinding, { kind: 'external' }>;
       fixedTarget?: FixedAgentNodeTarget | null;
     }) => {
@@ -142,6 +153,10 @@ function createHarness(options?: {
     },
   );
   const service = new AgentThreadService({
+    resolveAgentNode: async () =>
+      options && 'agentTarget' in options
+        ? (options.agentTarget ?? null)
+        : (options?.target ?? TARGET),
     resolveFixedAgentNode: async () =>
       options && 'target' in options ? (options.target ?? null) : TARGET,
     resolvePersistedExternalBinding: () =>
@@ -353,10 +368,59 @@ describe('AgentThreadService', () => {
     );
   });
 
-  it('does not collect a Space Prompt for a non-fixed thread', async () => {
-    const harness = createHarness({ target: null });
+  it('collects a Space Prompt for a selectable built-in Agent Node', async () => {
+    const harness = createHarness({
+      agentTarget: SELECTABLE_TARGET,
+      target: null,
+    });
     const invocation = await harness.service.invoke({
       ...invocationOptions(),
+      requestBinding: { kind: 'internal' },
+      agentTarget: SELECTABLE_TARGET,
+      fixedTarget: null,
+    });
+
+    for await (const _event of invocation.events) {
+      // Drain the canonical invocation stream.
+    }
+
+    expect(harness.collectSpacePrompt).toHaveBeenCalledWith('canvas-a');
+    expect(harness.runInternal).toHaveBeenCalledWith(
+      expect.objectContaining({ spacePrompt: 'Space prompt' }),
+    );
+    expect(harness.startLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('passes a selectable Agent Node to external realization', async () => {
+    const harness = createHarness({
+      agentTarget: SELECTABLE_TARGET,
+      target: null,
+    });
+    const invocation = await harness.service.invoke({
+      ...invocationOptions(),
+      agentTarget: SELECTABLE_TARGET,
+      fixedTarget: null,
+    });
+
+    for await (const _event of invocation.events) {
+      // Drain the canonical invocation stream.
+    }
+
+    expect(harness.realizeExternal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentTarget: SELECTABLE_TARGET,
+        fixedTarget: null,
+      }),
+    );
+    expect(harness.startLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('does not collect a Space Prompt for a node-less thread', async () => {
+    const harness = createHarness({ agentTarget: null, target: null });
+    const invocation = await harness.service.invoke({
+      ...invocationOptions(),
+      requestBinding: { kind: 'internal' },
+      agentTarget: null,
       fixedTarget: null,
     });
 
@@ -436,6 +500,7 @@ describe('AgentThreadService', () => {
       return events([{ type: 'done', data: { message: 'Done' } }]);
     });
     const service = new AgentThreadService({
+      resolveAgentNode: async () => TARGET,
       resolveFixedAgentNode: async () => TARGET,
       resolvePersistedExternalBinding: () => null,
       resolvePersistedSpacePrompt: () => ({ realised: false }),

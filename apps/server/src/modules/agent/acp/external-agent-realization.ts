@@ -17,6 +17,7 @@ import {
 } from '../agenetes/drivers.js';
 import {
   agentThreadResolver,
+  type AgentNodeTarget,
   type FixedAgentNodeTarget,
 } from '../agent-thread-resolver.js';
 import { resolveSpacePrompt } from '../space-instruction-frames.js';
@@ -52,6 +53,7 @@ export interface RealizeExternalAgentThreadOptions {
   canvasId?: string;
   requestedBinding?: ExternalBinding;
   requestedCwd?: string;
+  agentTarget?: AgentNodeTarget | null;
   fixedTarget?: FixedAgentNodeTarget | null;
   logger: FastifyBaseLogger;
 }
@@ -64,6 +66,10 @@ export interface RealizedExternalAgentThread {
 }
 
 interface RealizationDependencies {
+  resolveAgentNode: (
+    canvasId: string,
+    threadId: string,
+  ) => Promise<AgentNodeTarget | null>;
   resolveFixedAgentNode: (
     canvasId: string,
     threadId: string,
@@ -124,6 +130,8 @@ async function ensureSessionFromCanonicalSpec(
 }
 
 const DEFAULT_DEPENDENCIES: RealizationDependencies = {
+  resolveAgentNode: (canvasId, threadId) =>
+    agentThreadResolver.resolveAgentNode(canvasId, threadId),
   resolveFixedAgentNode: (canvasId, threadId) =>
     agentThreadResolver.resolveFixedAgentNode(canvasId, threadId),
   collectSpacePrompt: resolveSpacePrompt,
@@ -183,6 +191,16 @@ export class ExternalAgentRealizationService {
             )
           : null
         : options.fixedTarget;
+    const agentTarget =
+      options.agentTarget === undefined
+        ? (fixedTarget ??
+          (options.canvasId
+            ? await this.dependencies.resolveAgentNode(
+                options.canvasId,
+                options.threadId,
+              )
+            : null))
+        : options.agentTarget;
     const record = this.dependencies.readRecord(namespace, options.threadId);
 
     if (record) {
@@ -226,8 +244,8 @@ export class ExternalAgentRealizationService {
       );
     }
 
-    const collected = fixedTarget
-      ? await this.dependencies.collectSpacePrompt(fixedTarget.canvasId)
+    const collected = agentTarget
+      ? await this.dependencies.collectSpacePrompt(agentTarget.canvasId)
       : null;
     if (
       collected &&
@@ -238,7 +256,7 @@ export class ExternalAgentRealizationService {
     ) {
       options.logger.warn(
         {
-          canvasId: fixedTarget?.canvasId,
+          canvasId: agentTarget?.canvasId,
           threadId: options.threadId,
           spacePromptDiagnostics: collected.diagnostics,
         },

@@ -27,10 +27,13 @@ interface ResolverDependencies {
   readNodeContent: (canvasId: string, nodeId: string) => Promise<string | null>;
 }
 
-export interface FixedAgentNodeTarget {
+export interface AgentNodeTarget {
   canvasId: string;
   nodeId: CanvasNodeId;
   threadId: string;
+}
+
+export interface FixedAgentNodeTarget extends AgentNodeTarget {
   agentBinding: AgentBinding;
   launchOverrides?: AgentLaunchOverrides;
   status: QuestionNodeStatus;
@@ -64,7 +67,7 @@ const DEFAULT_DEPENDENCIES: ResolverDependencies = {
 };
 
 /**
- * Resolve the current Canvas-backed fixed Agent Node for one thread.
+ * Resolve the current Canvas-backed Agent Node for one thread.
  *
  * This intentionally stays thin: issue #60 replaces only its storage lookup
  * with the future Workspace-global thread index.
@@ -94,6 +97,34 @@ export class AgentThreadResolver {
     }
     const node = matches[0];
     return node?.type === 'question' ? (node.id as CanvasNodeId) : null;
+  }
+
+  async resolveAgentNode(
+    canvasId: string,
+    threadId: string,
+  ): Promise<AgentNodeTarget | null> {
+    const nodes = await this.dependencies.readCanvasNodes(canvasId);
+    if (!nodes) {
+      throw new AgentThreadResolutionError(
+        'canvas_not_found',
+        `Canvas ${canvasId} does not exist`,
+      );
+    }
+    const matches = nodes.filter((node) => node.data?.threadId === threadId);
+    if (matches.length > 1) {
+      throw new AgentThreadResolutionError(
+        'duplicate_thread',
+        `Thread ${threadId} is bound to multiple Canvas nodes`,
+      );
+    }
+    const node = matches[0];
+    if (!node || node.type !== 'question') return null;
+
+    return {
+      canvasId,
+      nodeId: node.id as CanvasNodeId,
+      threadId,
+    };
   }
 
   async resolveFixedAgentNode(
