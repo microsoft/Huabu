@@ -26,7 +26,7 @@ function note(overrides: Partial<Node> = {}): Node {
     id: 'n1',
     type: 'note',
     position: { x: 0, y: 0 },
-    style: { width: 400, height: 56 },
+    style: { width: 400, height: 88 },
     data: { type: 'note', content: CONTENT, heightMode: 'auto' },
     ...overrides,
   } as Node;
@@ -138,8 +138,8 @@ describe('warmupNodeHeights', () => {
 
     const warmedChild = result.nodes.find((node) => node.id === 'n1');
     const fittedFrame = result.nodes.find((node) => node.id === 'f1');
-    expect(warmedChild?.style?.height).toBe(264);
-    expect(fittedFrame?.style?.height).toBeGreaterThan(264);
+    expect(warmedChild?.style?.height).toBe(296);
+    expect(fittedFrame?.style?.height).toBeGreaterThan(296);
     expect(fittedFrame?.style?.height).not.toBe(120);
   });
 });
