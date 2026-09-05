@@ -5,6 +5,7 @@ import { emptyAcpOverlay } from '@agenetes/acp-driver';
 
 import { AGENT_SSE_EVENTS, agentBindingSchema } from '@huabu/shared';
 
+import { externalAgentRealization } from './acp/external-agent-realization.js';
 import { runAcpAgent } from './acp/service.js';
 import { agenetes, EXTERNAL_DRIVER_KIND } from './agenetes/drivers.js';
 import { agentNodeLifecycle } from './agent-node-lifecycle.js';
@@ -21,6 +22,10 @@ import { acquireAgentTurn, waitForAgentTurnRelease } from './turn-lease.js';
 import { loadAgent } from '../../prompt/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
+import type {
+  RealizedExternalAgentThread,
+  RealizeExternalAgentThreadOptions,
+} from './acp/external-agent-realization.js';
 import type { HuabuSubmission } from './agenetes/handle.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type { RenderedSpacePrompt } from './space-instruction-frames.js';
@@ -46,6 +51,9 @@ interface AgentThreadServiceDependencies {
     threadId: string,
   ) => { realised: boolean; markdown?: string };
   collectSpacePrompt: (canvasId: string) => Promise<RenderedSpacePrompt | null>;
+  realizeExternal: (
+    options: RealizeExternalAgentThreadOptions,
+  ) => Promise<RealizedExternalAgentThread>;
   waitForTurnRelease: typeof waitForAgentTurnRelease;
   acquireTurn: typeof acquireAgentTurn;
   startLifecycle: typeof agentNodeLifecycle.start;
@@ -77,12 +85,7 @@ export function spacePromptFromWorkloadSpec(spec: unknown): string | undefined {
     const prompt = (hostContext as Record<string, unknown>).spacePrompt;
     if (typeof prompt === 'string') return prompt;
   }
-  const preamble = value.initialPreamble;
-  if (!Array.isArray(preamble)) return undefined;
-  return preamble.find(
-    (entry): entry is string =>
-      typeof entry === 'string' && entry.startsWith('<space_prompt>'),
-  );
+  return undefined;
 }
 
 const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
@@ -100,6 +103,7 @@ const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
     return markdown ? { realised: true, markdown } : { realised: true };
   },
   collectSpacePrompt: resolveSpacePrompt,
+  realizeExternal: (options) => externalAgentRealization.realize(options),
   waitForTurnRelease: waitForAgentTurnRelease,
   acquireTurn: acquireAgentTurn,
   startLifecycle: agentNodeLifecycle.start.bind(agentNodeLifecycle),
@@ -142,7 +146,11 @@ export interface AgentThreadInvocationOptions {
 type EffectiveAgentThreadInvocationOptions = Omit<
   AgentThreadInvocationOptions,
   'signal'
-> & { signal: AbortSignal; spacePrompt?: string };
+> & {
+  signal: AbortSignal;
+  spacePrompt?: string;
+  externalRealization?: RealizedExternalAgentThread;
+};
 
 export interface AgentThreadInvocation {
   binding: AgentBinding;
@@ -230,8 +238,30 @@ export class AgentThreadService {
       options.fixedTarget === undefined
         ? await this.resolveFixedTarget(options.canvasId, options.threadId)
         : options.fixedTarget;
-    const binding: AgentBinding = fixedTarget?.agentBinding ??
+    const persistedExternalBinding =
+      !fixedTarget && options.canvasId
+        ? this.dependencies.resolvePersistedExternalBinding(
+            options.canvasId,
+            options.threadId,
+          )
+        : null;
+    let binding: AgentBinding = fixedTarget?.agentBinding ??
+      persistedExternalBinding ??
       options.requestBinding ?? { kind: 'internal' };
+    const externalRealization =
+      binding.kind === 'external'
+        ? await this.dependencies.realizeExternal({
+            threadId: options.threadId,
+            canvasId: options.canvasId,
+            requestedBinding:
+              options.requestBinding?.kind === 'external'
+                ? options.requestBinding
+                : undefined,
+            fixedTarget,
+            logger: options.logger,
+          })
+        : undefined;
+    if (externalRealization) binding = externalRealization.binding;
 
     await this.dependencies.waitForTurnRelease(options.threadId);
     const releaseTurn = this.dependencies.acquireTurn(options.threadId);
@@ -255,7 +285,7 @@ export class AgentThreadService {
 
     let spacePrompt: string | undefined;
     try {
-      if (fixedTarget && options.canvasId) {
+      if (fixedTarget && options.canvasId && binding.kind !== 'external') {
         const persisted = this.dependencies.resolvePersistedSpacePrompt(
           options.canvasId,
           options.threadId,
@@ -301,6 +331,7 @@ export class AgentThreadService {
       ...options,
       signal,
       spacePrompt,
+      externalRealization,
     };
 
     let settled = false;
@@ -423,17 +454,19 @@ export class AgentThreadService {
     onTurnStarted: () => void,
   ): AsyncGenerator<AgentStreamEvent, unknown> {
     if (binding.kind === 'external') {
+      if (!options.externalRealization) {
+        throw new Error(
+          `External thread ${options.threadId} was not canonically realized`,
+        );
+      }
       return this.dependencies.runExternal({
+        handle: options.externalRealization.handle,
         binding,
         threadId: options.threadId,
         canvasId: options.canvasId,
         envelope: options.envelope,
         submission: options.submission,
         overlay: emptyAcpOverlay(),
-        ...(fixedTarget?.launchOverrides
-          ? { launchOverrides: fixedTarget.launchOverrides }
-          : {}),
-        spacePrompt: options.spacePrompt,
         signal: options.signal,
         logger: options.logger,
         debugPrompt: options.debugPrompt,

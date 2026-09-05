@@ -1,6 +1,6 @@
 # External Agent Capability Cache and Canonical Realization
 
-Status: Accepted
+Status: Shipped
 Last updated: 2026-09-05
 
 ## Context
@@ -141,9 +141,9 @@ Realization creates one complete immutable WorkloadSpec containing:
 - frozen Space Prompt for a fixed Agent Node
 - node-specific additional initial instructions
 - complete launch overrides
-- a versioned Huabu realization marker
+- no bootstrap-only or preparatory record
 
-The marker distinguishes a canonical workload from any future preparatory record without inspecting conversation logs or preamble contents.
+The initial implementation does not add a driver-schema field solely as a realization marker. Canonicality is structural because every Huabu ACP `agenetes.create()` call for user threads goes through the one realization service and this change intentionally carries no bootstrap-only compatibility records. If a future design introduces preparatory records, it must add an explicit versioned marker before those records coexist; it must not infer lifecycle from logs or preamble contents.
 
 ### Fixed and non-fixed threads
 
@@ -251,7 +251,7 @@ Issue #162 is the implementation prerequisite for the #160 correction, but both 
 - Extract the shared external-thread realization pipeline.
 - Resolve fixed targets from server-side Canvas state.
 - Collect Space Prompt and apply launch overrides exactly once.
-- Add a versioned realization marker to the canonical ACP host context.
+- Keep canonicality structural for this first shipped version; require an explicit marker before any future preparatory record is introduced.
 - Add a namespace-and-thread realization gate.
 
 ### Phase 3: Unify interactions
@@ -285,15 +285,16 @@ Issue #162 is the implementation prerequisite for the #160 correction, but both 
 
 ## Code entry points
 
-| File/dir                                                                                                                       | Responsibility                                                                                                              |
-| ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| [`apps/server/src/modules/agent/agent-thread.service.ts`](../../apps/server/src/modules/agent/agent-thread.service.ts)         | Current message-side fixed-target and Space Prompt orchestration; source for the shared realization boundary.               |
-| [`apps/server/src/modules/agent/agent-thread-resolver.ts`](../../apps/server/src/modules/agent/agent-thread-resolver.ts)       | Canonical fixed Agent Node lookup and launch-override validation.                                                           |
-| [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                           | Canonical ACP WorkloadSpec builder and message execution.                                                                   |
-| [`apps/server/src/modules/agent/acp/threads.route.ts`](../../apps/server/src/modules/agent/acp/threads.route.ts)               | Current session metadata and control routes; reduced spec creation and warm-session endpoints are removed from normal flow. |
-| [`apps/server/src/modules/agent/acp/profile-schema-cache.ts`](../../apps/server/src/modules/agent/acp/profile-schema-cache.ts) | Existing Profile-associated capability observation cache.                                                                   |
-| [`apps/server/src/modules/agent/space-instruction-frames.ts`](../../apps/server/src/modules/agent/space-instruction-frames.ts) | Deterministic Space Prompt collection used during fixed-node realization.                                                   |
-| [`apps/web/src/hooks/useAcpSessionMeta.ts`](../../apps/web/src/hooks/useAcpSessionMeta.ts)                                     | Selector catalogue cache read and live-session reconciliation.                                                              |
-| [`apps/web/src/hooks/useAcpSlashCommands.ts`](../../apps/web/src/hooks/useAcpSlashCommands.ts)                                 | Slash-command cache read without session creation.                                                                          |
-| [`external/agenetes/packages/acp-driver/src/handle.ts`](../../external/agenetes/packages/acp-driver/src/handle.ts)             | ACP session creation, control/run behavior, and one-shot preamble delivery.                                                 |
-| [`external/agenetes/packages/agenetes/src/instance.ts`](../../external/agenetes/packages/agenetes/src/instance.ts)             | Immutable persisted-spec and live-handle lifecycle.                                                                         |
+| File/dir                                                                                                                                   | Responsibility                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| [`apps/server/src/modules/agent/acp/external-agent-realization.ts`](../../apps/server/src/modules/agent/acp/external-agent-realization.ts) | Shared first-message/first-control realization, conflict validation, session ensure, and namespace/thread single-flight.    |
+| [`apps/server/src/modules/agent/agent-thread.service.ts`](../../apps/server/src/modules/agent/agent-thread.service.ts)                     | Message lifecycle and dispatch through the shared external realization boundary.                                            |
+| [`apps/server/src/modules/agent/agent-thread-resolver.ts`](../../apps/server/src/modules/agent/agent-thread-resolver.ts)                   | Canonical fixed Agent Node lookup and launch-override validation.                                                           |
+| [`apps/server/src/modules/agent/acp/service.ts`](../../apps/server/src/modules/agent/acp/service.ts)                                       | Canonical ACP WorkloadSpec builder and message execution.                                                                   |
+| [`apps/server/src/modules/agent/acp/threads.route.ts`](../../apps/server/src/modules/agent/acp/threads.route.ts)                           | Current session metadata and control routes; reduced spec creation and warm-session endpoints are removed from normal flow. |
+| [`apps/server/src/modules/agent/acp/profile-schema-cache.ts`](../../apps/server/src/modules/agent/acp/profile-schema-cache.ts)             | Existing Profile-associated capability observation cache.                                                                   |
+| [`apps/server/src/modules/agent/space-instruction-frames.ts`](../../apps/server/src/modules/agent/space-instruction-frames.ts)             | Deterministic Space Prompt collection used during fixed-node realization.                                                   |
+| [`apps/web/src/hooks/useAcpSessionMeta.ts`](../../apps/web/src/hooks/useAcpSessionMeta.ts)                                                 | Selector catalogue cache read and live-session reconciliation.                                                              |
+| [`apps/web/src/hooks/useAcpSlashCommands.ts`](../../apps/web/src/hooks/useAcpSlashCommands.ts)                                             | Slash-command cache read without session creation.                                                                          |
+| [`external/agenetes/packages/acp-driver/src/handle.ts`](../../external/agenetes/packages/acp-driver/src/handle.ts)                         | ACP session creation, control/run behavior, and one-shot preamble delivery.                                                 |
+| [`external/agenetes/packages/agenetes/src/instance.ts`](../../external/agenetes/packages/agenetes/src/instance.ts)                         | Immutable persisted-spec and live-handle lifecycle.                                                                         |

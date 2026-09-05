@@ -26,14 +26,12 @@ import {
 } from '@agenetes/agentlet-host';
 
 import { renderExternalAgentInputs } from './preprocessor.js';
-import { ensureProfileCacheSubscription } from './profile-cache-port.js';
 import { getProfileSessionPreferences } from './profile-session-preferences.js';
 import { getProfile as getLegacyProfile } from './profile-store.js';
 import { buildReachbackEnv } from './reachback-env.js';
 import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import {
-  agenetes,
   EXTERNAL_DRIVER_KIND,
   type AcpHandle,
   type AcpWorkloadSpec,
@@ -49,6 +47,8 @@ import type { AgentLaunchOverrides, AgentStreamEvent } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 export interface RunAcpAgentOptions {
+  /** Canonically realized handle shared by message and control paths. */
+  handle: AcpHandle;
   /**
    * External binding for the active thread. `profileId` references a
    * user-configured spawn recipe (see `./profile-store.ts`); the
@@ -101,10 +101,6 @@ export interface RunAcpAgentOptions {
    * stranded at the filesystem root).
    */
   cwd?: string;
-  /** Per-node spawn overrides applied when the workload is first created. */
-  launchOverrides?: AgentLaunchOverrides;
-  /** Frozen Space Prompt captured when a fixed Agent Node is first realised. */
-  spacePrompt?: string;
   /** Cancellation signal \u2014 wired through to `session/cancel`. */
   signal?: AbortSignal;
   logger: FastifyBaseLogger;
@@ -195,16 +191,17 @@ function applyWorkingDirectoryOverride(
   };
 }
 
+export interface BuildAcpWorkloadSpecOptions {
+  binding: { alias: string; profileId: string };
+  threadId: string;
+  canvasId?: string;
+  cwd?: string;
+  launchOverrides?: AgentLaunchOverrides;
+  spacePrompt?: string;
+}
+
 export function buildAcpWorkloadSpec(
-  opts: Pick<
-    RunAcpAgentOptions,
-    | 'binding'
-    | 'threadId'
-    | 'canvasId'
-    | 'cwd'
-    | 'launchOverrides'
-    | 'spacePrompt'
-  >,
+  opts: BuildAcpWorkloadSpecOptions,
 ): AcpWorkloadSpec {
   const { binding, threadId } = opts;
   const canvasId = opts.canvasId ?? '';
@@ -269,7 +266,7 @@ export function buildAcpWorkloadSpec(
 export async function* runAcpAgent(
   opts: RunAcpAgentOptions,
 ): AsyncGenerator<AgentStreamEvent, void> {
-  const { binding, threadId, overlay, signal, logger } = opts;
+  const { binding, overlay, signal, logger, handle } = opts;
   const canvasId = opts.canvasId ?? '';
   const submission =
     opts.submission ??
@@ -282,13 +279,6 @@ export async function* runAcpAgent(
         logger,
       }),
     );
-
-  // Bake this thread's WorkloadSpec (I9.6). The ACP handle self-resolves
-  // (opens or reuses) its live session per turn from these fields — L1 no
-  // longer opens the session out-of-band. Agenetes keeps an existing
-  // persisted spec authoritative when recovering a previously created
-  // workload.
-  const spec = buildAcpWorkloadSpec(opts);
 
   // Optional developer aid: dump the exact text payload handed to ACP
   // `session/prompt` (the serialized prompt, NOT pi-ai messages — the
@@ -313,15 +303,9 @@ export async function* runAcpAgent(
       }
     : undefined;
 
-  // Get-or-create the long-lived ACP handle for this thread (I9.3) and
-  // drive one turn. The handle self-resolves its session inside `run`, so
-  // session-open failures surface on the generator's first `next()`.
-  // Static DriverMap construction guarantees that `external` is ACP.
-  const handle = agenetes.create(spec) as AcpHandle;
-  // Fold this thread's up-reported metadata into the L1 profile cache
-  // (I9.7). Idempotent per thread — subscribing before `run()` so the
-  // handle's initial state up-report is captured.
-  ensureProfileCacheSubscription(threadId, binding.profileId);
+  // The shared realization service has already created the complete durable
+  // workload and subscribed its metadata before either message or control
+  // dispatch reaches this point.
   const iterator = handle.run(submission, {
     overlay,
     signal,

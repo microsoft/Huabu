@@ -7,22 +7,17 @@
  *
  * ### Motivation
  *
- * The per-`(canvasId, threadId)` cache in `session-store` requires
- * spawning the agent at least once per thread before the toolbar
- * selectors (model / mode / config option) can populate. But for any
- * given profile (e.g. "Copilot @ ~/projects/foo"), the schema portion
- * of the meta — `availableModels`, `availableModes`, `configOptions`
- * shape — is **identical across every thread bound to that profile**.
+ * The per-thread durable snapshot exists only after realization. This cache
+ * lets unopened threads render the last observed Profile capability catalogue
+ * without spawning ACP or creating a WorkloadSpec.
  * The `current*` values are per-thread state and are retained only so an
  * already-associated thread snapshot can be reconstructed elsewhere. They
  * are never authoritative for a brand-new thread.
  *
- * By caching the most recent push from any session of a profile, the
- * cache can still identify a known profile catalogue. A brand-new command
- * thread opens a real session before rendering active values; a manifest
- * thread waits for its first unified turn. This prevents another thread's
- * last-known auto-approve value from being presented as the new session's
- * effective policy.
+ * By caching the most recent push from any session of a Profile, the cache can
+ * identify a known catalogue. Mode/model values may be displayed as last
+ * observed, while generic config-option values remain unconfirmed until the
+ * current thread reports them or records a successful explicit selection.
  *
  * ### What gets cached
  *
@@ -36,7 +31,7 @@
  * agent's slash-command catalogue is effectively static per profile
  * (e.g. Copilot CLI advertises the same ~34 commands across every
  * session), so caching the last-seen list lets a brand-new thread
- * paint its `/` menu instantly on warm spawn. The agent's authoritative
+ * paint its `/` menu without a warm spawn. The agent's authoritative
  * `available_commands_update` push silently overwrites the cached
  * list once it arrives, so any per-session drift (e.g. a `/load`
  * variant exposed only on resumed sessions) self-corrects on the
@@ -315,8 +310,8 @@ export function invalidateProfileSchemaCache(profileId: string): void {
  * `available_commands_update` replaces the cached list wholesale on the
  * next session, so any per-session drift self-corrects.
  *
- * The cache is what `/cached-meta` falls back to when a brand-new thread
- * has no per-thread durable record — see `threads.route.ts`.
+ * The cache is what the GET-only `/cached-meta` route falls back to when a
+ * brand-new thread has no per-thread durable record.
  */
 export function foldMetadataIntoProfileCache(
   profileId: string,

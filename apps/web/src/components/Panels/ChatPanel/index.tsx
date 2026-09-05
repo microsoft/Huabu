@@ -240,10 +240,6 @@ export const ChatPanel = ({
     refresh: refreshAcpProfiles,
     loaded: acpProfilesLoaded,
   } = useAcpProfiles();
-  const activeExternalProfile =
-    agentBinding.kind === 'external'
-      ? acpProfiles.find((profile) => profile.id === agentBinding.profileId)
-      : undefined;
 
   useEffect(() => {
     if (!fixedAgentBinding || bindingsEqual(agentBinding, fixedAgentBinding)) {
@@ -306,8 +302,7 @@ export const ChatPanel = ({
   // own binding recipe (see server's session-store `bindingRecipe`),
   // so a deleted-profile thread still has a usable transport. If the
   // server can't resolve a recipe (orphan v2 record with no profile)
-  // the ensure-session call surfaces a clear error and the badge flips
-  // to `failed` — that's the right channel for it.
+  // the first explicit interaction surfaces a clear error.
   const acpExternalReachable = agentBinding.kind === 'external';
 
   // Slash commands have two independent sources depending on the
@@ -372,17 +367,16 @@ export const ChatPanel = ({
   // instead of looking inert.
   const {
     meta: acpSessionMeta,
+    source: acpSessionMetaSource,
     loading: acpSessionMetaLoading,
     error: acpSessionMetaError,
-    errorCode: acpSessionMetaErrorCode,
+    refresh: refreshAcpSessionMeta,
     applyOptimistic: applyAcpSessionMetaOptimistic,
   } = useAcpSessionMeta({
     threadId,
     binding: agentBinding,
     canvasId: ownerCanvasId,
     enabled: ownerScopeReady && acpExternalReachable,
-    autoEnsureOnCacheMiss:
-      activeExternalProfile?.launch.kind !== 'agent-team-manifest',
   });
 
   // Keep a ref to the latest snapshot so the optimistic handlers can
@@ -413,10 +407,8 @@ export const ChatPanel = ({
   // The badge only deviates from `connected` when there is positive
   // evidence of trouble:
   //
-  //   connecting: a real `ensureAcpSession` (refresh / set-RPC) is
-  //               currently in flight
-  //   failed:     the last `ensureAcpSession` rejected AND we have
-  //               no cached snapshot to fall back on (`updatedAt === 0`)
+  //   connecting: the GET-only capability cache read is in flight
+  //   failed:     the cache read failed and there is no cached snapshot
   //   connected:  everything else — cache hit, post-success steady
   //               state, or transient ensure failure that still leaves
   //               us with a valid (if possibly stale) snapshot. We
@@ -449,12 +441,12 @@ export const ChatPanel = ({
   // Spawn context threaded into every set-RPC: the selector dropdowns
   // are seeded from the no-spawn cached-meta snapshot, so the user can
   // switch a value before the session has ever been opened. Passing
-  // `{ profileId, canvasId }` lets the server open the session
+  // `{ binding, canvasId }` lets the server realize the complete workload
+  // and open its session
   // on-demand instead of rejecting the switch with `session_not_found`.
-  const acpSetRpcSpawnCtx = useMemo(
+  const acpControlTarget = useMemo(
     () => ({
-      profileId:
-        agentBinding.kind === 'external' ? agentBinding.profileId : undefined,
+      binding: agentBinding.kind === 'external' ? agentBinding : undefined,
       canvasId: ownerCanvasId ?? undefined,
     }),
     [agentBinding, ownerCanvasId],
@@ -477,7 +469,13 @@ export const ChatPanel = ({
         selection: { id: MODE_SELECTION_ID, value: modeId },
       });
       try {
-        await setAcpSessionMode(threadId, { modeId, ...acpSetRpcSpawnCtx });
+        if (!acpControlTarget.binding) return;
+        await setAcpSessionMode(threadId, {
+          modeId,
+          binding: acpControlTarget.binding,
+          canvasId: acpControlTarget.canvasId,
+        });
+        await refreshAcpSessionMeta();
         onCommit?.();
       } catch (err) {
         applyAcpSessionMetaOptimistic({
@@ -491,7 +489,14 @@ export const ChatPanel = ({
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, onCommit, t],
+    [
+      threadId,
+      applyAcpSessionMetaOptimistic,
+      acpControlTarget,
+      refreshAcpSessionMeta,
+      onCommit,
+      t,
+    ],
   );
 
   const handleAcpSelectModel = useCallback(
@@ -503,7 +508,13 @@ export const ChatPanel = ({
         selection: { id: MODEL_SELECTION_ID, value: modelId },
       });
       try {
-        await setAcpSessionModel(threadId, { modelId, ...acpSetRpcSpawnCtx });
+        if (!acpControlTarget.binding) return;
+        await setAcpSessionModel(threadId, {
+          modelId,
+          binding: acpControlTarget.binding,
+          canvasId: acpControlTarget.canvasId,
+        });
+        await refreshAcpSessionMeta();
         onCommit?.();
       } catch (err) {
         applyAcpSessionMetaOptimistic({
@@ -517,7 +528,14 @@ export const ChatPanel = ({
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, onCommit, t],
+    [
+      threadId,
+      applyAcpSessionMetaOptimistic,
+      acpControlTarget,
+      refreshAcpSessionMeta,
+      onCommit,
+      t,
+    ],
   );
 
   const handleAcpSelectConfigOption = useCallback(
@@ -528,11 +546,14 @@ export const ChatPanel = ({
         selection: { id: optionId, value },
       });
       try {
+        if (!acpControlTarget.binding) return;
         await setAcpSessionConfigOption(threadId, {
           configOptionId: optionId,
           value,
-          ...acpSetRpcSpawnCtx,
+          binding: acpControlTarget.binding,
+          canvasId: acpControlTarget.canvasId,
         });
+        await refreshAcpSessionMeta();
         onCommit?.();
       } catch (err) {
         applyAcpSessionMetaOptimistic({
@@ -546,7 +567,14 @@ export const ChatPanel = ({
         );
       }
     },
-    [threadId, applyAcpSessionMetaOptimistic, acpSetRpcSpawnCtx, onCommit, t],
+    [
+      threadId,
+      applyAcpSessionMetaOptimistic,
+      acpControlTarget,
+      refreshAcpSessionMeta,
+      onCommit,
+      t,
+    ],
   );
 
   // Question thread replay mode
@@ -807,7 +835,6 @@ export const ChatPanel = ({
                 status={acpConnectionStatus}
                 alias={agentBinding.alias}
                 errorMessage={acpSessionMetaError?.message ?? null}
-                errorCode={acpSessionMetaErrorCode}
               />
             )}
           </span>
@@ -906,6 +933,7 @@ export const ChatPanel = ({
                 agentBinding.kind === 'external' ? (
                   <AcpSessionSelectors
                     meta={acpSessionMeta}
+                    source={acpSessionMetaSource}
                     loading={acpSessionMetaLoading}
                     onSelectMode={handleAcpSelectMode}
                     onSelectModel={handleAcpSelectModel}
