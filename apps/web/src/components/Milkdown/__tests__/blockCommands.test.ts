@@ -14,7 +14,7 @@ let roots: HTMLElement[] = [];
 
 async function mount(
   markdown: string,
-  overrides?: { editable?: boolean },
+  overrides?: { editable?: boolean; previewMode?: boolean },
 ): Promise<MilkdownInstance> {
   const root = document.createElement('div');
   document.body.appendChild(root);
@@ -491,11 +491,28 @@ describe('Milkdown block commands', () => {
     expect(open).not.toHaveBeenCalled();
   });
 
-  it('opens a link on modifier-click in a read-only surface', async () => {
+  it('opens a link on plain click in a read-only surface', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
     await mount('see [docs](https://example.com) here', { editable: false });
 
-    clickLink({ modifier: true });
+    const event = clickLink({ modifier: false });
+
+    expect(open).toHaveBeenCalledWith(
+      'https://example.com',
+      '_blank',
+      'noopener,noreferrer',
+    );
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('opens a link on plain click in a drag-only preview', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    await mount('see [docs](https://example.com) here', {
+      editable: true,
+      previewMode: true,
+    });
+
+    clickLink({ modifier: false });
 
     expect(open).toHaveBeenCalledWith(
       'https://example.com',
