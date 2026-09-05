@@ -68,7 +68,7 @@ export default function ExternalAgents() {
       <ol className="list-decimal space-y-2 pl-5 text-[15px] leading-relaxed text-gray-700">
         <li>
           <strong>Install an ACP-compatible agent.</strong> Huabu automatically
-          detects these nine ACP-capable agent commands or adapters after
+          detects these ten ACP-capable agent commands or adapters after
           installation:{' '}
           <DocLink href="https://www.npmjs.com/package/@github/copilot">
             GitHub Copilot
@@ -96,6 +96,10 @@ export default function ExternalAgents() {
           , <DocLink href="https://opencode.ai/docs/">OpenCode</DocLink>,{' '}
           <DocLink href="https://cursor.com/docs/cli/installation">
             Cursor
+          </DocLink>
+          ,{' '}
+          <DocLink href="https://www.npmjs.com/package/@tencent-ai/codebuddy-code">
+            CodeBuddy
           </DocLink>
           , and{' '}
           <DocLink href="https://hermes-agent.nousresearch.com/docs/user-guide/features/acp">
