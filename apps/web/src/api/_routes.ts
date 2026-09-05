@@ -140,12 +140,6 @@ export const routes = {
   acpAgentlet: '/acp/agentlet',
   acpAgentletRestart: '/acp/agentlet/restart',
   acpRuntimeConfig: '/acp/runtime-config',
-  acpThreadSession: (threadId: string) =>
-    `/acp/threads/${enc(threadId)}/session`,
-  acpThreadCommands: (threadId: string, canvasId?: string) => {
-    const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
-    return `/acp/threads/${enc(threadId)}/commands${params}`;
-  },
   acpThreadCachedMeta: (
     threadId: string,
     canvasId?: string,

@@ -43,7 +43,7 @@ POST /api/agent (agent.route.ts)
 
 ---
 
-## 3. Prompt-level injection: workspace memory + skills
+## 3. Prompt-level injection: workspace memory + skills + Space Prompt
 
 These two are **cross-turn-stable** system-prompt injections (they don't change per turn), kept separate from the per-turn focus signals in §4.
 
@@ -61,6 +61,22 @@ Skills are **not tools**; they reach the prompt via two complementary paths:
 | **invoked (explicit)**    | user `/cmd`   | the skill's **entire body** is inlined as an `<invoked_skills>` block (authoritative for this turn)                                                | [prompt/invoked-skills.ts](../../apps/server/src/modules/agent/conversation/prompt/invoked-skills.ts) |
 
 The catalogue is filtered by the agent's frontmatter `skillScope` (ask/operate/external); a `null` scope injects no catalogue. The difference: catalogue is "a menu you pull from on demand", invoked is "the user named it, full body forced into this turn".
+
+### 3.3 Space instruction Frames
+
+Space instruction Frames use two channels: Prompt Frames inject instructions into Agent Nodes, while Skill Frames extend the authenticated guide returned by `GET /skill`. Their trimmed, NFC-normalized labels match `prompt`, `prompt: <name>`, `skill`, or `skill: <name>` case-insensitively and require `labelSource` to be explicitly `user` or `agent`. Auto-generated, missing, or invalid label provenance never activates instruction Frame behavior; a colon without a non-whitespace suffix is also not recognized. The shared `classifySpaceInstructionFrame()` predicate in [node.ts](../../packages/shared/src/types/canvas/node.ts) is the canonical recognizer used by the server and the Frame badges.
+
+[space-instruction-frames.ts](../../apps/server/src/modules/agent/space-instruction-frames.ts) scans the complete Space topology and canonical node records. Instruction Frames are ordered by world `y`, world `x`, then stable Frame id. Only direct children participate; children are ordered by Frame-local `y`, Frame-local `x`, then stable node id, with Text and Note nodes left interleaved in that order.
+
+Prompt Frames inject Text bodies and Note bodies eagerly in the same stable reading order. Each Note is wrapped in a source-attributed `<note id label file rev>` boundary and its body is capped at 10 KiB UTF-8 before entering the total Prompt budget; per-Note truncation is code-point-safe and reported by node id. Skill Frames keep Notes as lazy self-closing `<note id label file rev />` catalogue references whose bodies remain available through the RFS/download surface. Empty Text is omitted, unsupported direct-child types and missing canonical records are omitted with diagnostics, and nested descendants do not participate. Locked nodes remain eligible because locking constrains editing and layout rather than visibility; Huabu currently has no node-level private/hidden permission state to bypass.
+
+The complete rendered `<space_prompt>` fragment, including stable template prose and diagnostics, is capped at 32 KiB UTF-8. Total-budget truncation is code-point-safe, reports that the budget was exhausted, and lists later nodes omitted completely from the rendered fragment. The live `<space_skill>` module remains capped at 16 KiB. A full-Space collection failure rejects first realization instead of silently producing an incomplete instruction set.
+
+Space Prompt is captured for every Canvas-backed Agent Node, independently of whether its pre-first-turn binding policy is `selectable` or `fixed`. Ordinary node-less Canvas Chat, node-less ACP sessions, and the Memory Agent do not receive it. For an external Agent Node, capture occurs at the first explicit interaction, whether that interaction is a message or a mode/model/config control; GET-only capability reads do not realize the thread. The captured fragment is persisted in the complete durable WorkloadSpec and reused on later turns, so editing Prompt Frames affects newly realized Agent Nodes but does not mutate existing conversations. Built-in agents place it after their trusted AGENT.md/workspace context and before node-specific initial instructions; external ACP agents place it after Huabu's mandatory bootstrap and before node-specific initial instructions. It remains user-authored context subordinate to system, developer, host-policy, and tool instructions, and it coexists with per-turn selection and neighbourhood context rather than replacing them.
+
+Space Prompt and the Huabu Skill intentionally use separate delivery channels while sharing discovery, ordering, and diagnostics but applying channel-specific Note rendering and byte budgets. Prompt Frames state what Agent Nodes in this Space should do, inline their Note bodies, and are captured once. Skill Frames retain lazy Note references, are resolved live on every authenticated `GET /skill`, append after the current root guide, and never enter Agent Node preambles. Anonymous `GET /skill` continues to return only the bundled public guide. A legacy Space-specific `skill.md` remains the root-guide override; when present, live Skill Frames append after that override so existing behavior and new modular customization coexist. Skill Frame collection is additive: if topology or node records cannot be read, the failure is logged and the root guide is still served.
+
+Recognized Prompt and Skill Frames carry a zoom-invariant solid badge beside the editable Frame label. Prompt uses the semantic info tone and Skill uses the semantic success tone; the badge is non-interactive, participates in the existing label width cap and collision visibility, and uses the same shared classifier as delivery.
 
 ---
 
@@ -162,4 +178,5 @@ Skills are not tools (injection in §3.2). Spatial geometry primitives are in [c
 | Tool defs / executor    | [tools/definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts) · [tools/executor.ts](../../apps/server/src/modules/agent/tools/executor.ts)                                                                                                                                                          |
 | System prompts          | [prompt/agents/](../../apps/server/src/prompt/agents) (ask / operate / memory each an AGENT.md, loaded by loader.ts)                                                                                                                                                                                                   |
 | Skill injection         | [skills/catalogue.ts](../../apps/server/src/prompt/skills/catalogue.ts) (catalogue) · [conversation/prompt/invoked-skills.ts](../../apps/server/src/modules/agent/conversation/prompt/invoked-skills.ts) (invoked)                                                                                                     |
+| External realization    | [external-agent-realization.ts](../../apps/server/src/modules/agent/acp/external-agent-realization.ts) (first interaction) · [space-instruction-frames.ts](../../apps/server/src/modules/agent/space-instruction-frames.ts) (Prompt collection)                                                                        |
 | Spatial / neighbourhood | [canvas-spatial.ts](../../apps/server/src/modules/canvas/canvas-spatial.ts) · [node-neighbourhood.ts](../../apps/server/src/modules/canvas/node-neighbourhood.ts)                                                                                                                                                      |

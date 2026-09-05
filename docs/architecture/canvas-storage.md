@@ -24,7 +24,7 @@ Runtime Home-folder activation reserves the namespace switch before preparing an
     skills/<id>/SKILL.md          # user / memory-agent authored skills
   <canvasDir>/                    # dir name = safe(title)
     space.json                   # { canvasId, title, version, state:{nodes,edges,...}, createdAt, updatedAt }
-    skill.md                      # optional per-Space RFS access guide (blob area `guide`)
+    skill.md                      # optional legacy per-Space RFS root-guide override (blob area `guide`)
     nodes/
       <safe(label)>.md            # frontmatter: id/type/label/src/... + content(markdown body)
     .artifacts/                   # Disk BlobStore mapping for this Space

@@ -125,6 +125,8 @@ export interface AgentRunOptions {
   modelRole?: ModelRole;
   /** Whether this workload may send image content to the selected model. */
   hasImage?: boolean;
+  /** Frozen Space Prompt captured when a fixed Agent Node is first realised. */
+  spacePrompt?: string;
   /**
    * Per-thread model override id carried with this turn (built-in chat).
    * Applied to the thread before the run, so a model picked before the
@@ -201,6 +203,7 @@ export async function* runAgent(
     origin,
     modelRole,
     hasImage,
+    spacePrompt,
     modelId,
     reasoningEffort,
     maxIterations,
@@ -275,6 +278,7 @@ export async function* runAgent(
     origin,
     modelRole,
     hasImage,
+    spacePrompt,
   });
 
   // Static DriverMap construction guarantees that `internal` is the

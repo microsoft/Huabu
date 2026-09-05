@@ -8,12 +8,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useAcpSessionMeta } from './useAcpSessionMeta';
 
 const apiMocks = vi.hoisted(() => ({
-  ensure: vi.fn(),
   getCached: vi.fn(),
 }));
 
 vi.mock('@/api/acp', () => ({
-  ensureAcpSession: apiMocks.ensure,
   getAcpThreadCachedMeta: apiMocks.getCached,
 }));
 
@@ -27,13 +25,14 @@ const EMPTY_META = {
   availableModels: [],
   currentModelId: null,
   configOptions: [],
+  selections: {},
   sessionInfo: null,
   usage: null,
   updatedAt: 0,
 };
 
-function Harness({ autoEnsure }: { autoEnsure: boolean }) {
-  const { loading, error } = useAcpSessionMeta({
+function Harness() {
+  const { loading, source, meta } = useAcpSessionMeta({
     threadId: 'thread-1',
     binding: {
       kind: 'external',
@@ -41,9 +40,12 @@ function Harness({ autoEnsure }: { autoEnsure: boolean }) {
       alias: 'Profile',
     },
     canvasId: 'canvas-1',
-    autoEnsureOnCacheMiss: autoEnsure,
   });
-  return <span>{loading ? 'loading' : error ? 'error' : 'idle'}</span>;
+  return (
+    <span>
+      {loading ? 'loading' : `${source}:${meta.configOptions.length}`}
+    </span>
+  );
 }
 
 let root: Root | undefined;
@@ -54,58 +56,43 @@ afterEach(() => {
   container?.remove();
   root = undefined;
   container = undefined;
-  apiMocks.ensure.mockReset();
   apiMocks.getCached.mockReset();
 });
 
-async function renderHarness(autoEnsure: boolean): Promise<void> {
+async function renderHarness(): Promise<void> {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
   await act(async () => {
-    root?.render(<Harness autoEnsure={autoEnsure} />);
+    root?.render(<Harness />);
     await Promise.resolve();
     await Promise.resolve();
   });
 }
 
 describe('useAcpSessionMeta', () => {
-  it('does not send manifest Profiles through command-session auto-ensure', async () => {
+  it('uses a GET-only cold cache result without starting a session', async () => {
     apiMocks.getCached.mockResolvedValue({
       source: 'none',
+      availableCommands: [],
+      commandsUpdatedAt: 0,
       sessionMeta: EMPTY_META,
     });
 
-    await renderHarness(false);
-
+    await renderHarness();
     expect(apiMocks.getCached).toHaveBeenCalledOnce();
-    expect(apiMocks.ensure).not.toHaveBeenCalled();
-    expect(container?.textContent).toBe('idle');
+    expect(apiMocks.getCached).toHaveBeenCalledOnce();
+    expect(container?.textContent).toBe('none:0');
   });
 
-  it('keeps auto-ensure enabled for command and unknown Profiles', async () => {
-    apiMocks.getCached.mockResolvedValue({
-      source: 'none',
-      sessionMeta: EMPTY_META,
-    });
-    apiMocks.ensure.mockResolvedValue({
-      sessionMeta: {
-        ...EMPTY_META,
-        availableModes: [{ id: 'default', name: 'Default' }],
-        updatedAt: 1,
-      },
-    });
-
-    await renderHarness(true);
-
-    expect(apiMocks.ensure).toHaveBeenCalledOnce();
-  });
-
-  it('ensures a real command session when only profile defaults are cached', async () => {
+  it('renders a Profile capability observation without warming a thread', async () => {
     apiMocks.getCached.mockResolvedValue({
       source: 'profile',
+      availableCommands: [{ name: 'help', description: 'Help' }],
+      commandsUpdatedAt: 1,
       sessionMeta: {
         ...EMPTY_META,
+        currentModelId: 'model-1',
         configOptions: [
           {
             id: 'allow_all',
@@ -117,23 +104,14 @@ describe('useAcpSessionMeta', () => {
         updatedAt: 1,
       },
     });
-    apiMocks.ensure.mockResolvedValue({
-      sessionMeta: {
-        ...EMPTY_META,
-        configOptions: [
-          {
-            id: 'allow_all',
-            name: 'Auto approve',
-            type: 'boolean',
-            currentValue: false,
-          },
-        ],
-        updatedAt: 2,
-      },
-    });
 
-    await renderHarness(true);
+    await renderHarness();
 
-    expect(apiMocks.ensure).toHaveBeenCalledOnce();
+    expect(apiMocks.getCached).toHaveBeenCalledWith(
+      'thread-1',
+      'canvas-1',
+      'profile-1',
+    );
+    expect(container?.textContent).toBe('profile:1');
   });
 });

@@ -21,7 +21,7 @@ import { HISTORY_LOAD_SANITY_LIMIT } from './history-replay.js';
 import { huabuPiDriverPorts } from './pi-driver.js';
 import { getExternalAgentRuntimeConfig } from '../acp/runtime-config.js';
 
-import type { AcpSpec } from '@agenetes/acp-driver';
+import type { AcpRuntimePolicy, AcpSpec } from '@agenetes/acp-driver';
 import type { Agenetes } from '@agenetes/agenetes';
 import type { PiWorkloadSpec } from '@agenetes/pi-driver';
 import type { AgentHandle as RuntimeAgentHandle } from '@agenetes/runtime';
@@ -36,7 +36,7 @@ export type AcpHandle = AgentHandle<void, AcpTurnCtx>;
 export type BuiltinHandle = AgentHandle<Message[], PiTurnCtx>;
 export type AgenetesHandle = RuntimeAgentHandle;
 
-const externalDriver = acpDriverFactory({
+export const acpRuntimePolicy: AcpRuntimePolicy = {
   getIdleTimeoutSecs: () => getExternalAgentRuntimeConfig().idleTimeoutSecs,
   resolveRuntimeEnvironment: async (spec: AcpSpec) => {
     const agentTeam = spec.recipe?.agentTeam;
@@ -55,7 +55,9 @@ const externalDriver = acpDriverFactory({
     });
     return runtime.environment;
   },
-});
+};
+
+const externalDriver = acpDriverFactory(acpRuntimePolicy);
 
 export const agenetes: Agenetes = mountAgenetes({
   drivers: {

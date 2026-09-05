@@ -71,6 +71,7 @@ export type {
   QuestionNodeData,
   QuestionNodeStatus,
   LabelSource,
+  SpaceInstructionFrameKind,
   NodeData,
 } from './node.js';
 
@@ -100,6 +101,12 @@ export {
   isQuestionNode,
   getQuestionNodeStatus,
   normalizeOrigin,
+  classifySpaceInstructionFrameLabel,
+  classifySpaceInstructionFrame,
+  isPromptFrameLabel,
+  isPromptFrame,
+  isSkillFrameLabel,
+  isSkillFrame,
 } from './node.js';
 
 // Edge types

@@ -5,23 +5,31 @@ import { emptyAcpOverlay } from '@agenetes/acp-driver';
 
 import { AGENT_SSE_EVENTS, agentBindingSchema } from '@huabu/shared';
 
+import { externalAgentRealization } from './acp/external-agent-realization.js';
 import { runAcpAgent } from './acp/service.js';
 import { agenetes, EXTERNAL_DRIVER_KIND } from './agenetes/drivers.js';
 import { agentNodeLifecycle } from './agent-node-lifecycle.js';
 import {
   agentThreadResolver,
+  type AgentNodeTarget,
   type FixedAgentNodeTarget,
 } from './agent-thread-resolver.js';
 import { runAgent } from './agent.service.js';
 import { envelopeHasImage } from './conversation/envelope.js';
 import { readWorkspaceMemory } from './memory/index.js';
 import { planSkillDispatch } from './skill-model-routing.js';
+import { resolveSpacePrompt } from './space-instruction-frames.js';
 import { acquireAgentTurn, waitForAgentTurnRelease } from './turn-lease.js';
 import { loadAgent } from '../../prompt/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
+import type {
+  RealizedExternalAgentThread,
+  RealizeExternalAgentThreadOptions,
+} from './acp/external-agent-realization.js';
 import type { HuabuSubmission } from './agenetes/handle.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
+import type { RenderedSpacePrompt } from './space-instruction-frames.js';
 import type {
   AgentBinding,
   AgentMode,
@@ -31,6 +39,10 @@ import type {
 import type { FastifyBaseLogger } from 'fastify';
 
 interface AgentThreadServiceDependencies {
+  resolveAgentNode: (
+    canvasId: string,
+    threadId: string,
+  ) => Promise<AgentNodeTarget | null>;
   resolveFixedAgentNode: (
     canvasId: string,
     threadId: string,
@@ -39,6 +51,14 @@ interface AgentThreadServiceDependencies {
     canvasId: string,
     threadId: string,
   ) => Extract<AgentBinding, { kind: 'external' }> | null;
+  resolvePersistedSpacePrompt: (
+    canvasId: string,
+    threadId: string,
+  ) => { realised: boolean; markdown?: string };
+  collectSpacePrompt: (canvasId: string) => Promise<RenderedSpacePrompt | null>;
+  realizeExternal: (
+    options: RealizeExternalAgentThreadOptions,
+  ) => Promise<RealizedExternalAgentThread>;
   waitForTurnRelease: typeof waitForAgentTurnRelease;
   acquireTurn: typeof acquireAgentTurn;
   startLifecycle: typeof agentNodeLifecycle.start;
@@ -62,7 +82,20 @@ export function externalBindingFromWorkloadSpec(
   return parsed.success && parsed.data.kind === 'external' ? parsed.data : null;
 }
 
+export function spacePromptFromWorkloadSpec(spec: unknown): string | undefined {
+  if (!spec || typeof spec !== 'object') return undefined;
+  const value = spec as Record<string, unknown>;
+  const hostContext = value.hostContext;
+  if (hostContext && typeof hostContext === 'object') {
+    const prompt = (hostContext as Record<string, unknown>).spacePrompt;
+    if (typeof prompt === 'string') return prompt;
+  }
+  return undefined;
+}
+
 const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
+  resolveAgentNode: (canvasId, threadId) =>
+    agentThreadResolver.resolveAgentNode(canvasId, threadId),
   resolveFixedAgentNode: (canvasId, threadId) =>
     agentThreadResolver.resolveFixedAgentNode(canvasId, threadId),
   resolvePersistedExternalBinding: (canvasId, threadId) => {
@@ -70,6 +103,14 @@ const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
     if (!record || record.spec.kind !== EXTERNAL_DRIVER_KIND) return null;
     return externalBindingFromWorkloadSpec(record.spec.spec);
   },
+  resolvePersistedSpacePrompt: (canvasId, threadId) => {
+    const record = agenetes.record(canvasAcpNamespace(canvasId), threadId);
+    if (!record) return { realised: false };
+    const markdown = spacePromptFromWorkloadSpec(record.spec.spec);
+    return markdown ? { realised: true, markdown } : { realised: true };
+  },
+  collectSpacePrompt: resolveSpacePrompt,
+  realizeExternal: (options) => externalAgentRealization.realize(options),
   waitForTurnRelease: waitForAgentTurnRelease,
   acquireTurn: acquireAgentTurn,
   startLifecycle: agentNodeLifecycle.start.bind(agentNodeLifecycle),
@@ -96,6 +137,7 @@ export interface AgentThreadInvocationOptions {
   /** Canonical durable submission; ordinary chat callers omit it. */
   submission?: HuabuSubmission;
   requestBinding?: AgentBinding;
+  agentTarget?: AgentNodeTarget | null;
   fixedTarget?: FixedAgentNodeTarget | null;
   modelId?: string;
   reasoningEffort?: ReasoningEffort;
@@ -112,7 +154,11 @@ export interface AgentThreadInvocationOptions {
 type EffectiveAgentThreadInvocationOptions = Omit<
   AgentThreadInvocationOptions,
   'signal'
-> & { signal: AbortSignal };
+> & {
+  signal: AbortSignal;
+  spacePrompt?: string;
+  externalRealization?: RealizedExternalAgentThread;
+};
 
 export interface AgentThreadInvocation {
   binding: AgentBinding;
@@ -138,15 +184,16 @@ function buildAgentSystemPrompt(params: {
   canvasId: string | undefined;
   mode: Parameters<typeof loadAgent>[0];
   additionalInitialPreamble?: string;
+  spacePrompt?: string;
 }): string {
   const agentCfg = loadAgent(params.mode, { canvasId: params.canvasId });
   const workspaceMemory = readWorkspaceMemory();
   const base = workspaceMemory
     ? `${agentCfg.systemPrompt}\n\n<workspace_memory>\n${workspaceMemory}\n</workspace_memory>`
     : agentCfg.systemPrompt;
-  return params.additionalInitialPreamble
-    ? `${base}\n\n${params.additionalInitialPreamble}`
-    : base;
+  return [base, params.spacePrompt, params.additionalInitialPreamble]
+    .filter((part): part is string => Boolean(part))
+    .join('\n\n');
 }
 
 function errorMessage(error: unknown): string {
@@ -199,8 +246,41 @@ export class AgentThreadService {
       options.fixedTarget === undefined
         ? await this.resolveFixedTarget(options.canvasId, options.threadId)
         : options.fixedTarget;
-    const binding: AgentBinding = fixedTarget?.agentBinding ??
+    const agentTarget =
+      options.agentTarget === undefined
+        ? (fixedTarget ??
+          (options.canvasId
+            ? await this.dependencies.resolveAgentNode(
+                options.canvasId,
+                options.threadId,
+              )
+            : null))
+        : options.agentTarget;
+    const persistedExternalBinding =
+      !fixedTarget && options.canvasId
+        ? this.dependencies.resolvePersistedExternalBinding(
+            options.canvasId,
+            options.threadId,
+          )
+        : null;
+    let binding: AgentBinding = fixedTarget?.agentBinding ??
+      persistedExternalBinding ??
       options.requestBinding ?? { kind: 'internal' };
+    const externalRealization =
+      binding.kind === 'external'
+        ? await this.dependencies.realizeExternal({
+            threadId: options.threadId,
+            canvasId: options.canvasId,
+            requestedBinding:
+              options.requestBinding?.kind === 'external'
+                ? options.requestBinding
+                : undefined,
+            agentTarget,
+            fixedTarget,
+            logger: options.logger,
+          })
+        : undefined;
+    if (externalRealization) binding = externalRealization.binding;
 
     await this.dependencies.waitForTurnRelease(options.threadId);
     const releaseTurn = this.dependencies.acquireTurn(options.threadId);
@@ -222,7 +302,39 @@ export class AgentThreadService {
     };
     this.activeInvocations.set(options.threadId, active);
 
+    let spacePrompt: string | undefined;
     try {
+      if (agentTarget && options.canvasId && binding.kind !== 'external') {
+        const persisted = this.dependencies.resolvePersistedSpacePrompt(
+          options.canvasId,
+          options.threadId,
+        );
+        if (persisted.realised) {
+          spacePrompt = persisted.markdown;
+        } else {
+          const collected = await this.dependencies.collectSpacePrompt(
+            options.canvasId,
+          );
+          spacePrompt = collected?.markdown;
+          if (
+            collected &&
+            (collected.diagnostics.truncated ||
+              collected.diagnostics.truncatedNoteIds.length > 0 ||
+              collected.diagnostics.omittedUnsupportedIds.length > 0 ||
+              collected.diagnostics.omittedEmptyTextIds.length > 0 ||
+              collected.diagnostics.omittedMissingIds.length > 0)
+          ) {
+            options.logger.warn(
+              {
+                canvasId: options.canvasId,
+                threadId: options.threadId,
+                spacePromptDiagnostics: collected.diagnostics,
+              },
+              'Space Prompt collection completed with diagnostics',
+            );
+          }
+        }
+      }
       if (fixedTarget) {
         await this.dependencies.startLifecycle(fixedTarget, options.content);
       }
@@ -238,6 +350,8 @@ export class AgentThreadService {
     const effectiveOptions: EffectiveAgentThreadInvocationOptions = {
       ...options,
       signal,
+      spacePrompt,
+      externalRealization,
     };
 
     let settled = false;
@@ -360,16 +474,19 @@ export class AgentThreadService {
     onTurnStarted: () => void,
   ): AsyncGenerator<AgentStreamEvent, unknown> {
     if (binding.kind === 'external') {
+      if (!options.externalRealization) {
+        throw new Error(
+          `External thread ${options.threadId} was not canonically realized`,
+        );
+      }
       return this.dependencies.runExternal({
+        handle: options.externalRealization.handle,
         binding,
         threadId: options.threadId,
         canvasId: options.canvasId,
         envelope: options.envelope,
         submission: options.submission,
         overlay: emptyAcpOverlay(),
-        ...(fixedTarget?.launchOverrides
-          ? { launchOverrides: fixedTarget.launchOverrides }
-          : {}),
         signal: options.signal,
         logger: options.logger,
         debugPrompt: options.debugPrompt,
@@ -399,11 +516,13 @@ export class AgentThreadService {
           mode: options.mode,
           additionalInitialPreamble:
             fixedTarget?.launchOverrides?.additionalInitialPreamble,
+          spacePrompt: options.spacePrompt,
         }),
         messages: [],
         tools: [],
       },
       modelId: options.modelId,
+      spacePrompt: options.spacePrompt,
       reasoningEffort: options.reasoningEffort,
       maxIterations: 20,
       signal: options.signal,

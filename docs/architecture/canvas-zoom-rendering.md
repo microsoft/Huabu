@@ -84,7 +84,7 @@ Because the geometry is exact every frame, the overlay simply re-renders at the 
 
 Frame geometry always remains full canvas-space content. A frame does not use `SemanticPlaceholder` because its border and containment boundary are structural information even when zoomed out.
 
-The editable frame name is different: [`FrameNode`](../../apps/web/src/components/Nodes/frame/FrameNode.tsx) sends it through the screen-space overlay owned by [`NodeWrapper`](../../apps/web/src/components/Nodes/NodeWrapper.tsx), positioned 24 px above the transformed frame top. Its `text-xs` typography therefore remains readable instead of shrinking with the frame.
+The editable frame name is different: [`FrameNode`](../../apps/web/src/components/Nodes/frame/FrameNode.tsx) sends it through the screen-space overlay owned by [`NodeWrapper`](../../apps/web/src/components/Nodes/NodeWrapper.tsx), positioned 24 px above the transformed frame top. Its `text-xs` typography therefore remains readable instead of shrinking with the frame. Frames recognized as Space instruction channels place a non-interactive solid pill in the same overlay: Prompt uses the semantic info tone with a quote icon, while Skill uses the semantic success tone with a book icon. The shared server/Web classifier requires an explicitly user- or agent-authored `prompt` / `prompt: ...` / `skill` / `skill: ...` label, so the visual signal cannot drift from delivery behavior.
 
 Fixed screen-space labels can overlap when nested frame top edges converge during zoom-out. `FrameNode` compares the vertical screen-space gap to the nearest frame ancestor and hides the nested label below 22 px, with a 4 px hysteresis buffer around subsequent hide/reveal transitions.
 
@@ -102,7 +102,7 @@ When frame labels collide, the higher-priority label wins:
 
 The first three interaction states force the affected label to remain visible and use matching overlay layers in descending order. With no interaction, the outer frame wins because zoomed-out views prioritize structural context over nested detail; the inner label returns after sufficient screen-space separation.
 
-Frame label width is capped to the transformed frame width with a 48 px usability floor. An overflowing name truncates with an ellipsis so the clipped remainder is visible as such; the ellipsis disappears while the label is being edited, where the input scrolls instead.
+Frame label width is capped to the transformed frame width with a 48 px usability floor, raised to 112 px when an instruction badge is present so the badge cannot collapse the editable name hit target. The badge remains visible while the remaining name width shrinks; an overflowing name truncates with an ellipsis so the clipped remainder is visible as such. The ellipsis disappears while the label is being edited, where the input scrolls instead.
 
 `FrameNode` owns the hierarchy and collision policy because it is frame-specific. `NodeWrapper` remains generic: it converts node coordinates to screen coordinates, applies owner-provided semantic visibility and width, handles interaction reveal, and performs opacity/FLIP transitions.
 

@@ -104,6 +104,50 @@ export function normalizeOrigin(raw: unknown): NodeOrigin | undefined {
 /** Who set the node label — controls whether auto-title may overwrite it */
 export type LabelSource = 'auto' | 'user' | 'agent';
 
+export type SpaceInstructionFrameKind = 'prompt' | 'skill';
+
+/**
+ * Classify a label that opts a Frame into a Space-level instruction channel.
+ *
+ * Instruction Frames are intentionally label-based so users and agents can
+ * create them through existing canvas operations.
+ */
+export function classifySpaceInstructionFrameLabel(
+  label: unknown,
+): SpaceInstructionFrameKind | null {
+  if (typeof label !== 'string') return null;
+  const match = /^(prompt|skill)(?:\s*:\s*\S[\s\S]*)?$/i.exec(
+    label.trim().normalize('NFC'),
+  );
+  const kind = match?.[1]?.toLowerCase();
+  return kind === 'prompt' || kind === 'skill' ? kind : null;
+}
+
+/** Only explicitly authored labels may activate instruction Frame semantics. */
+export function classifySpaceInstructionFrame(
+  label: unknown,
+  labelSource: unknown,
+): SpaceInstructionFrameKind | null {
+  if (labelSource !== 'user' && labelSource !== 'agent') return null;
+  return classifySpaceInstructionFrameLabel(label);
+}
+
+export function isPromptFrameLabel(label: unknown): boolean {
+  return classifySpaceInstructionFrameLabel(label) === 'prompt';
+}
+
+export function isPromptFrame(label: unknown, labelSource: unknown): boolean {
+  return classifySpaceInstructionFrame(label, labelSource) === 'prompt';
+}
+
+export function isSkillFrameLabel(label: unknown): boolean {
+  return classifySpaceInstructionFrameLabel(label) === 'skill';
+}
+
+export function isSkillFrame(label: unknown, labelSource: unknown): boolean {
+  return classifySpaceInstructionFrame(label, labelSource) === 'skill';
+}
+
 /** Font family logical names. CSS font stacks are resolved on the UI side. */
 export const NODE_FONT_FAMILIES = ['default', 'serif', 'mono', 'hand'] as const;
 export type NodeFontFamily = (typeof NODE_FONT_FAMILIES)[number];

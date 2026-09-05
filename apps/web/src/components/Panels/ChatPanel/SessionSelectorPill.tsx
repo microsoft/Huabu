@@ -33,6 +33,8 @@ interface SessionSelectorPillProps<T extends string> {
   disabled?: boolean;
   /** Tooltip / accessible name for the trigger. */
   title?: string;
+  /** Placeholder shown when no current value is authoritative. */
+  placeholder?: string;
   /** Extra trigger classes, appended to the shared compact class. */
   className?: string;
 }
@@ -43,6 +45,7 @@ export function SessionSelectorPill<T extends string = string>({
   onChange,
   disabled = false,
   title,
+  placeholder,
   className,
 }: SessionSelectorPillProps<T>) {
   return (
@@ -52,6 +55,7 @@ export function SessionSelectorPill<T extends string = string>({
       onChange={onChange}
       disabled={disabled}
       title={title}
+      placeholder={placeholder}
       variant="ghost"
       shape="pill"
       tone="neutral"

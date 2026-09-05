@@ -12,9 +12,14 @@ import {
   AgentThreadBusyError,
   AgentThreadService,
   externalBindingFromWorkloadSpec,
+  spacePromptFromWorkloadSpec,
 } from './agent-thread.service.js';
 
-import type { FixedAgentNodeTarget } from './agent-thread-resolver.js';
+import type { AcpHandle, AcpWorkloadSpec } from './agenetes/drivers.js';
+import type {
+  AgentNodeTarget,
+  FixedAgentNodeTarget,
+} from './agent-thread-resolver.js';
 import type { runAgent } from './agent.service.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type {
@@ -54,6 +59,12 @@ const TARGET: FixedAgentNodeTarget = {
   content: '',
 };
 
+const SELECTABLE_TARGET: AgentNodeTarget = {
+  canvasId: 'canvas-a',
+  nodeId: 'node-selectable' as CanvasNodeId,
+  threadId: 'thread-a',
+};
+
 const logger = {
   debug: vi.fn(),
   info: vi.fn(),
@@ -73,12 +84,15 @@ async function* events(
 }
 
 function createHarness(options?: {
+  agentTarget?: AgentNodeTarget | null;
   target?: FixedAgentNodeTarget | null;
   busy?: boolean;
   externalEvents?: AgentStreamEvent[];
   startError?: Error;
   finishError?: Error;
   persistedBinding?: Extract<AgentBinding, { kind: 'external' }> | null;
+  persistedSpacePrompt?: { realised: boolean; markdown?: string };
+  collectedSpacePrompt?: string;
 }) {
   const release = vi.fn();
   const startLifecycle = options?.startError
@@ -105,13 +119,56 @@ function createHarness(options?: {
     }
     return emptyInternalStream();
   });
+  const collectSpacePrompt = vi.fn().mockResolvedValue({
+    markdown: options?.collectedSpacePrompt ?? 'Space prompt',
+    diagnostics: {
+      includedFrameIds: ['frame-prompt'],
+      includedNodeIds: ['text-prompt'],
+      omittedUnsupportedIds: [],
+      omittedEmptyTextIds: [],
+      omittedMissingIds: [],
+      omittedBudgetNodeIds: [],
+      truncatedNoteIds: [],
+      truncated: false,
+    },
+  });
+  const realizeExternal = vi.fn(
+    async ({
+      requestedBinding,
+      fixedTarget,
+    }: {
+      agentTarget?: AgentNodeTarget | null;
+      requestedBinding?: Extract<AgentBinding, { kind: 'external' }>;
+      fixedTarget?: FixedAgentNodeTarget | null;
+    }) => {
+      const binding =
+        fixedTarget?.agentBinding.kind === 'external'
+          ? fixedTarget.agentBinding
+          : requestedBinding;
+      if (!binding) throw new Error('Missing external binding');
+      return {
+        binding,
+        fixedTarget: fixedTarget ?? null,
+        spec: {} as AcpWorkloadSpec,
+        handle: {} as AcpHandle,
+      };
+    },
+  );
   const service = new AgentThreadService({
+    resolveAgentNode: async () =>
+      options && 'agentTarget' in options
+        ? (options.agentTarget ?? null)
+        : (options?.target ?? TARGET),
     resolveFixedAgentNode: async () =>
       options && 'target' in options ? (options.target ?? null) : TARGET,
     resolvePersistedExternalBinding: () =>
       options && 'persistedBinding' in options
         ? (options.persistedBinding ?? null)
         : null,
+    resolvePersistedSpacePrompt: () =>
+      options?.persistedSpacePrompt ?? { realised: false },
+    collectSpacePrompt,
+    realizeExternal,
     waitForTurnRelease: vi.fn().mockResolvedValue(undefined),
     acquireTurn: vi.fn(() => (options?.busy ? null : release)),
     startLifecycle,
@@ -129,6 +186,8 @@ function createHarness(options?: {
     failLifecycle,
     runExternal,
     runInternal,
+    collectSpacePrompt,
+    realizeExternal,
   };
 }
 
@@ -161,7 +220,30 @@ describe('AgentThreadService', () => {
       profileId: 'profile-a',
       alias: 'Researcher',
     });
+
     expect(externalBindingFromWorkloadSpec({ binding: {} })).toBeNull();
+  });
+
+  it('reads built-in Space Prompt snapshots without inferring from ACP preambles', () => {
+    expect(
+      spacePromptFromWorkloadSpec({
+        hostContext: {
+          spacePrompt: '<space_prompt>Internal</space_prompt>',
+        },
+      }),
+    ).toBe('<space_prompt>Internal</space_prompt>');
+    expect(
+      spacePromptFromWorkloadSpec({
+        initialPreamble: [
+          'Bootstrap',
+          '<space_prompt>External</space_prompt>',
+          'Node constraints',
+        ],
+      }),
+    ).toBeUndefined();
+    expect(
+      spacePromptFromWorkloadSpec({ initialPreamble: ['Bootstrap'] }),
+    ).toBeUndefined();
   });
 
   it('resolves a persisted external Thread without a fixed Agent Node', async () => {
@@ -208,8 +290,8 @@ describe('AgentThreadService', () => {
     expect(emitted.map((event) => event.type)).toEqual(['text_delta', 'done']);
     expect(harness.runExternal).toHaveBeenCalledWith(
       expect.objectContaining({
+        handle: expect.any(Object),
         binding: TARGET.agentBinding,
-        launchOverrides: TARGET.launchOverrides,
       }),
     );
     expect(harness.finishLifecycle).toHaveBeenCalledWith(TARGET);
@@ -283,8 +365,72 @@ describe('AgentThreadService', () => {
             'Review before making changes.',
           ),
         }),
+        spacePrompt: 'Space prompt',
       }),
     );
+  });
+
+  it('collects a Space Prompt for a selectable built-in Agent Node', async () => {
+    const harness = createHarness({
+      agentTarget: SELECTABLE_TARGET,
+      target: null,
+    });
+    const invocation = await harness.service.invoke({
+      ...invocationOptions(),
+      requestBinding: { kind: 'internal' },
+      agentTarget: SELECTABLE_TARGET,
+      fixedTarget: null,
+    });
+
+    for await (const _event of invocation.events) {
+      // Drain the canonical invocation stream.
+    }
+
+    expect(harness.collectSpacePrompt).toHaveBeenCalledWith('canvas-a');
+    expect(harness.runInternal).toHaveBeenCalledWith(
+      expect.objectContaining({ spacePrompt: 'Space prompt' }),
+    );
+    expect(harness.startLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('passes a selectable Agent Node to external realization', async () => {
+    const harness = createHarness({
+      agentTarget: SELECTABLE_TARGET,
+      target: null,
+    });
+    const invocation = await harness.service.invoke({
+      ...invocationOptions(),
+      agentTarget: SELECTABLE_TARGET,
+      fixedTarget: null,
+    });
+
+    for await (const _event of invocation.events) {
+      // Drain the canonical invocation stream.
+    }
+
+    expect(harness.realizeExternal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentTarget: SELECTABLE_TARGET,
+        fixedTarget: null,
+      }),
+    );
+    expect(harness.startLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('does not collect a Space Prompt for a node-less thread', async () => {
+    const harness = createHarness({ agentTarget: null, target: null });
+    const invocation = await harness.service.invoke({
+      ...invocationOptions(),
+      requestBinding: { kind: 'internal' },
+      agentTarget: null,
+      fixedTarget: null,
+    });
+
+    for await (const _event of invocation.events) {
+      // Drain the canonical invocation stream.
+    }
+
+    expect(harness.collectSpacePrompt).not.toHaveBeenCalled();
   });
 
   it('does not dispatch when the start lifecycle patch fails', async () => {
@@ -356,8 +502,17 @@ describe('AgentThreadService', () => {
       return events([{ type: 'done', data: { message: 'Done' } }]);
     });
     const service = new AgentThreadService({
+      resolveAgentNode: async () => TARGET,
       resolveFixedAgentNode: async () => TARGET,
       resolvePersistedExternalBinding: () => null,
+      resolvePersistedSpacePrompt: () => ({ realised: false }),
+      collectSpacePrompt: vi.fn().mockResolvedValue(undefined),
+      realizeExternal: vi.fn().mockResolvedValue({
+        binding: TARGET.agentBinding,
+        fixedTarget: TARGET,
+        spec: {} as AcpWorkloadSpec,
+        handle: {} as AcpHandle,
+      }),
       waitForTurnRelease: vi.fn().mockResolvedValue(undefined),
       acquireTurn: vi.fn(() => vi.fn()),
       startLifecycle,

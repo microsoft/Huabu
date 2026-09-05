@@ -44,17 +44,20 @@ vi.mock('../../Common/Select', () => ({
     value,
     onChange,
     title,
+    placeholder,
   }: {
     options: Array<{ value: string; label: string }>;
     value: string;
     onChange: (value: string) => void;
     title?: string;
+    placeholder?: string;
   }) => (
     <select
       aria-label={title}
       value={value}
       onChange={(event) => onChange(event.target.value)}
     >
+      {value === '' && <option value="">{placeholder}</option>}
       {options.map((option) => (
         <option key={option.value} value={option.value}>
           {option.label}
@@ -346,5 +349,40 @@ describe('AcpSessionSelectors channel routing', () => {
     });
 
     expect(onSelectConfigOption).toHaveBeenCalledWith('allow_all', true);
+  });
+});
+
+describe('AcpSessionSelectors Profile observations', () => {
+  it('shows generic config catalogues without claiming another thread value', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => {
+      root?.render(
+        <AcpSessionSelectors
+          source="profile"
+          meta={{
+            ...meta,
+            configOptions: [
+              {
+                id: 'allow_all',
+                name: 'Auto approve',
+                type: 'boolean',
+                currentValue: true,
+              },
+            ],
+          }}
+          onSelectMode={vi.fn()}
+          onSelectModel={vi.fn()}
+          onSelectConfigOption={vi.fn()}
+        />,
+      );
+    });
+
+    const permissionSelect = document.querySelector<HTMLSelectElement>(
+      'select[aria-label="Auto approve"]',
+    );
+    expect(permissionSelect?.value).toBe('');
+    expect(permissionSelect?.textContent).toContain('Auto approve');
   });
 });

@@ -40,6 +40,7 @@ const FULL_ACCESS_VALUE = 'agent-full-access';
 
 interface AcpSessionSelectorsProps {
   meta: AcpSessionMetaSnapshot;
+  source?: 'thread' | 'profile' | 'none';
   /**
    * Whether the parent thread is currently streaming. Selectors stay
    * interactive during a turn (mid-turn mode/model switches are a
@@ -65,6 +66,7 @@ interface AcpSessionSelectorsProps {
 
 export const AcpSessionSelectors = ({
   meta,
+  source = 'thread',
   disabled = false,
   loading = false,
   onSelectMode,
@@ -144,21 +146,38 @@ export const AcpSessionSelectors = ({
         ref={selectorRowRef}
         className="flex min-w-0 shrink items-center overflow-hidden"
       >
-        {selectors.map((selector) =>
-          selector.kind === 'boolean' ? (
-            <SessionSelectorPill<'true' | 'false'>
+        {selectors.map((selector) => {
+          const isUnconfirmedProfileOption =
+            source === 'profile' &&
+            selector.channel === 'config-option' &&
+            selector.category !== 'mode' &&
+            selector.category !== 'model' &&
+            selector.source !== 'user';
+          const label = labelOf(selector);
+          return selector.kind === 'boolean' ? (
+            <SessionSelectorPill<string>
               key={selector.id}
               options={booleanOptions}
-              value={selector.currentValue ? 'true' : 'false'}
+              value={
+                isUnconfirmedProfileOption
+                  ? ''
+                  : selector.currentValue
+                    ? 'true'
+                    : 'false'
+              }
+              placeholder={isUnconfirmedProfileOption ? label : undefined}
               onChange={(next) => void commit(selector, next === 'true')}
               disabled={disabled}
-              title={labelOf(selector)}
+              title={label}
             />
           ) : (
             <SessionSelectorPill<string>
               key={selector.id}
               options={selector.options}
-              value={String(selector.currentValue)}
+              value={
+                isUnconfirmedProfileOption ? '' : String(selector.currentValue)
+              }
+              placeholder={isUnconfirmedProfileOption ? label : undefined}
               onChange={(next) => {
                 if (
                   selector.category === 'mode' &&
@@ -187,10 +206,10 @@ export const AcpSessionSelectors = ({
                 void commit(selector, next);
               }}
               disabled={disabled}
-              title={labelOf(selector)}
+              title={label}
             />
-          ),
-        )}
+          );
+        })}
       </div>
       {pendingFullAccess && (
         <Popover
