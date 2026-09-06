@@ -14,6 +14,8 @@ export interface SpaceNodesContractHarness {
   /** Repository scoped to a Space whose structural record is absent. */
   readonly missingRepository: SpaceNodes;
   readonly expectedCanvasId: string;
+  /** Whether this adapter fences a deleted id against late standalone puts. */
+  readonly deletedNodePut: 'allowed' | 'write-suppressed';
   readonly cleanup?: () => Promise<void> | void;
 }
 
@@ -336,20 +338,24 @@ export function describeSpaceNodesContract(
       await expect(repository.delete(nodeId)).resolves.toBe('absent');
     });
 
-    it('suppresses a late standalone put after deletion', async () => {
-      const { repository } = await open();
+    it('reports the adapter-defined result for a standalone put after deletion', async () => {
+      const { repository, deletedNodePut } = await open();
       const nodeId = 'contract-late-put';
       const record = note(nodeId, 'Contract late put', 'before');
       await putSuccessfully(repository, { nodeId, record });
       await repository.delete(nodeId);
 
-      await expect(
-        repository.put({
-          nodeId,
-          record: { ...record, content: 'late resurrection' },
-        }),
-      ).resolves.toEqual({ ok: false, reason: 'write-suppressed' });
-      await expect(repository.read(nodeId)).resolves.toBeNull();
+      const late = { ...record, content: 'late resurrection' };
+      const result = await repository.put({ nodeId, record: late });
+      if (deletedNodePut === 'write-suppressed') {
+        expect(result).toEqual({ ok: false, reason: 'write-suppressed' });
+        await expect(repository.read(nodeId)).resolves.toBeNull();
+      } else {
+        expect(result).toMatchObject({ ok: true, record: late });
+        await expect(repository.read(nodeId)).resolves.toMatchObject({
+          record: late,
+        });
+      }
     });
   });
 }

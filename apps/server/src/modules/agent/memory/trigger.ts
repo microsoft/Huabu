@@ -45,6 +45,9 @@ const MEMORY_NAMESPACE = 'huabu.memory';
  * the substrate, never a port member.
  */
 function diskStatePath(substrate: SpaceSubstrate): string {
+  if (substrate.kind !== 'disk') {
+    throw new Error('Memory state requires a Disk extension substrate');
+  }
   return path.join(substrate.directory, 'state.json');
 }
 

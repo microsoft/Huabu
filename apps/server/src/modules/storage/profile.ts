@@ -28,11 +28,20 @@ export interface StorageProfile {
   blobs: { kind: BlobBackendKind };
 }
 
+/** Backends with an adapter implementation, selectable or otherwise. */
+const AVAILABLE_STRUCTURED: readonly RequestedStructuredKind[] = [
+  'disk',
+  'sqlite',
+];
+
 /**
- * Backends that exist today. Naming one that is not written yet must fail
- * loudly rather than half-work.
+ * Backends whose complete capability matrix is safe for production use.
+ *
+ * SQLite deliberately stays out while product composition, Blob placement,
+ * Disk-only capabilities, and Workspace remounting still have one authority
+ * only in the Disk profile.
  */
-const IMPLEMENTED_STRUCTURED: readonly RequestedStructuredKind[] = ['disk'];
+const SELECTABLE_STRUCTURED: readonly RequestedStructuredKind[] = ['disk'];
 const IMPLEMENTED_BLOBS: readonly BlobBackendKind[] = ['disk'];
 
 const STRUCTURED_KINDS: readonly RequestedStructuredKind[] = [
@@ -85,10 +94,11 @@ export function parseStorageProfile(
 /**
  * Reject profiles that cannot serve correctly, before any connection opens.
  *
- * Today that means "named but not implemented". This is also where
- * cross-axis rules belong as backends land — for example, Postgres paired
- * with a node-local disk blob root is unsafe across replicas unless the
- * path is a deliberately shared filesystem.
+ * Today that means either "named but not implemented" or "implemented only as
+ * an isolated preview". This is also where cross-axis rules belong as
+ * backends land — for example, Postgres paired with a node-local disk blob
+ * root is unsafe across replicas unless the path is a deliberately shared
+ * filesystem.
  *
  * A profile that merely offers *fewer features* is not rejected here. Those
  * are stated limitations rather than misconfigurations, and they are declared
@@ -98,10 +108,17 @@ export function parseStorageProfile(
  * warning.
  */
 export function validateStorageProfile(profile: StorageProfile): void {
-  if (!IMPLEMENTED_STRUCTURED.includes(profile.structured.kind)) {
+  if (!AVAILABLE_STRUCTURED.includes(profile.structured.kind)) {
     throw new StorageProfileError(
       `Structured backend "${profile.structured.kind}" is not implemented yet. ` +
-        `Available: ${IMPLEMENTED_STRUCTURED.join(', ')}.`,
+        `Adapters available: ${AVAILABLE_STRUCTURED.join(', ')}.`,
+    );
+  }
+  if (!SELECTABLE_STRUCTURED.includes(profile.structured.kind)) {
+    throw new StorageProfileError(
+      `Structured backend "${profile.structured.kind}" has a preview adapter ` +
+        `but is not selectable yet. Required application capabilities still ` +
+        `depend on Disk. Selectable: ${SELECTABLE_STRUCTURED.join(', ')}.`,
     );
   }
   if (!IMPLEMENTED_BLOBS.includes(profile.blobs.kind)) {

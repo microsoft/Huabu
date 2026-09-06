@@ -769,7 +769,9 @@ describe('Space export/import persistence', () => {
     createCanvas('c1', 'Private Export');
     const promptStore = await space('c1').extension('huabu.prompt.log');
     const memoryStore = await space('c1').extension('huabu.memory');
-    if (!promptStore || !memoryStore) throw new Error('Expected Disk stores');
+    if (promptStore?.kind !== 'disk' || memoryStore?.kind !== 'disk') {
+      throw new Error('Expected Disk stores');
+    }
     writeFileSync(
       join(promptStore.directory, 'thread.prompt.log'),
       'private system and user prompt',
@@ -806,7 +808,7 @@ describe('Space export/import persistence', () => {
       const importedPrompt =
         await space(importedId).extension('huabu.prompt.log');
       const importedMemory = await space(importedId).extension('huabu.memory');
-      if (!importedPrompt || !importedMemory) {
+      if (importedPrompt?.kind !== 'disk' || importedMemory?.kind !== 'disk') {
         throw new Error('Expected imported Disk stores');
       }
       expect(

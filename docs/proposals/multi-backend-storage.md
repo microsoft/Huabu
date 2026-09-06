@@ -1,7 +1,7 @@
 # Multi-Backend Storage
 
-Status: Phases 1–4.5 and §§12.6–12.8 implemented
-Last updated: 2026-08-24
+Status: Phases 1–5 implemented; SQLite remains a contract preview
+Last updated: 2026-09-04
 
 > **Scope and decision confidence.** This proposal records the two-port
 > `StructuredStore` / `BlobStore` split and their target backend families as
@@ -48,8 +48,7 @@ Last updated: 2026-08-24
 > review are recorded in place, including the CAS race ordering (§12.2.5),
 > log-family interface segregation (§12.2.6), and retained-handle Workspace
 > guards (§12.2.4). Remaining Disk-only read and physical capabilities still
-> keep non-Disk profiles unselectable. No SQLite, Postgres, or Azure adapter
-> exists.
+> keep non-Disk profiles unselectable.
 >
 > Phase 4.5 moved storage-owned Disk layout behind the storage boundary in
 > PR #93. What remains between the portable contracts and a second structured
@@ -59,6 +58,11 @@ Last updated: 2026-08-24
 > **implemented**), and §12.8 (the dispositions and the product-level
 > harness, **implemented**). §12 is the authoritative plan;
 > the decision table in §2 marks what each step has actually settled.
+>
+> Phase 5 is specified in §12.9 and is **implemented by this branch** as an
+> isolated SQLite structured-store preview. It exercises the portable
+> contracts with real SQLite files but is deliberately absent from runtime
+> composition; Postgres and Azure adapters do not exist.
 
 ---
 
@@ -88,7 +92,7 @@ built above these ports, but its form is intentionally unresolved here.
 | Topic                                                  | Status                    | Current position                                                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------------------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Separate authoritative structured and blob ports       | **Accepted** (P1, merged) | Storage is composed from `StructuredStore` and `BlobStore`; there is no single backend interface that mixes both concerns.                                                                                                                                                                                                                                                                 |
-| Structured backend family                              | **Settled direction**     | Support Disk, SQLite, and Postgres implementations. Only Disk exists.                                                                                                                                                                                                                                                                                                                      |
+| Structured backend family                              | **Settled direction**     | Support Disk, SQLite, and Postgres implementations. Disk is selectable; SQLite has an isolated contract-preview adapter but is not selectable; Postgres has no adapter.                                                                                                                                                                                                                    |
 | Blob backend family                                    | **Settled direction**     | Support Disk and Azure Blob implementations. Only Disk exists.                                                                                                                                                                                                                                                                                                                             |
 | Independent composition                                | **Accepted** (P1, merged) | `StorageProfile` has two env-parsed axes; `validateStorageProfile` fails fast on unimplemented kinds and is the extension point for combination rules. The lazy `getStorage()` path now rejects profiles whose adapters require awaited initialization (§12.1.1).                                                                                                                          |
 | Blob port contract                                     | **Accepted** (P1, merged) | Connection → scope, stream-oriented, no permanent absolute path in the common contract; `materialize()` returns a bounded lease for the one consumer needing a file. Replacement atomicity and post-release lease semantics are contract terms, not adapter accidents (§6.2, §12.1.1).                                                                                                     |
@@ -144,8 +148,9 @@ external-note discovery watches `nodes/`, and export archives the entire Space
 directory. Therefore wrapping `CanvasStore` in a database adapter would not by
 itself make the application backend-neutral.
 
-Canvas/Space persistence is currently Disk-only. SQLite, Postgres, and Azure
-Blob adapters for this data do not yet exist.
+Runtime Canvas/Space persistence remains Disk-only. An isolated SQLite
+structured adapter exists for contract and integration tests, while Postgres
+and Azure Blob adapters do not yet exist.
 
 ## 4. Goals
 
@@ -166,7 +171,9 @@ Blob adapters for this data do not yet exist.
 
 ## 5. Non-goals
 
-- Selecting an ORM, SQL query builder, Postgres driver, or SQLite driver.
+- Selecting a production ORM, SQL query builder, Postgres driver, or final
+  SQLite driver. The isolated Phase 5 preview uses built-in `node:sqlite`
+  without making that production choice.
 - Defining the final relational schema or migration framework.
 - Choosing a VFS, FUSE, materialization, cache, or write-back design.
 - Replacing RFS or the canonical `SpaceQuery` / `CanvasCommand` contracts in
@@ -175,9 +182,9 @@ Blob adapters for this data do not yet exist.
   their product semantics are defined.
 - Implementing online backend migration, replication, backup, or disaster
   recovery.
-- Shipping any non-Disk adapter. The phases in §12 remove reasons why SQLite,
-  Postgres, and Azure _cannot_ be implemented; that is not the same as
-  implementing them.
+- Making a non-Disk adapter runtime-selectable. Phase 5 proves an isolated
+  adapter against the contracts without registering it in composition or
+  changing product capabilities.
 
 ## 6. Settled backend split and implemented minimum contracts
 
@@ -301,8 +308,9 @@ into place makes the failed write invisible instead of unremovable.
 
 ### 6.3 Composition
 
-Configuration has two axes. The current shape carries only a backend kind per
-axis, because no adapter yet needs more:
+Configuration has two axes. The runtime-selectable profile carries only a
+backend kind per axis. The isolated SQLite preview receives its explicit
+database filename directly and is not constructed from this profile:
 
 ```ts
 interface StorageProfile {
@@ -325,7 +333,8 @@ node-local DiskBlob implementation is unsafe in a multi-replica deployment
 unless the path is a deliberately shared and supported filesystem. SQLite on a
 network filesystem has different correctness and availability constraints from
 local SQLite. `validateStorageProfile()` is where such rules live; today it
-rejects kinds that are named but not implemented, so an unsupported profile
+rejects recognized kinds that are unavailable or deliberately unselectable,
+including SQLite's preview-specific diagnostic, so an unsupported profile
 fails at startup with an actionable message rather than nondeterministically
 while serving data.
 
@@ -684,7 +693,7 @@ exceptions: one names what it returns, the other opens a session.
 
 ```ts
 interface StructuredStore {
-  readonly kind: StructuredBackendKind; // 'disk' — implemented adapters only
+  readonly kind: StructuredBackendKind; // 'disk' | 'sqlite'; only Disk is selectable
 
   init(): Promise<void>;
   health(): Promise<StorageHealth>;
@@ -746,7 +755,7 @@ interface SpaceChanges {
 interface SpaceTasks {
   read(): Promise<TaskStoreSnapshot>; // Tasks and Runs in one snapshot
   create(task: TaskRecord): Promise<void>;
-  readonly runs: SpaceTaskRuns; // create(run), update(runId, patch)
+  readonly runs: SpaceTaskRuns; // create, update, and atomic complete
 }
 ```
 
@@ -943,9 +952,10 @@ explicitly:
 
 ## 12. Migration plan
 
-Phases 1–4 are implemented and specified below. Phase 5 onward keeps the
-provisional character of the original outline: those entries record intended
-order, not approved designs.
+Phases 1–4.5 are implemented and merged. Phase 5 is implemented by this
+isolated contract preview. Phase 6 onward keeps the provisional character of
+the original outline: those entries record intended order, not approved
+designs.
 
 The current on-disk format remains readable throughout port extraction. A
 database adapter must not require Disk consumers to simulate tables, and the
@@ -1807,12 +1817,16 @@ justify.
    footing and was left alone as Phase-1 surface.
 
 Not changed, deliberately: `authoritativeInsert` and the `write-suppressed`
-put outcome remain in the portable shapes. Both exist for Disk's in-memory
-deletion fence, and neither has a portable meaning a SQL adapter would
-produce. They are now documented as adapter-shaped, the way `duplicate-node`
-already was, rather than renamed or pushed behind the adapter — the honest
-resolution needs a second adapter to say what the shared abstraction is, and
-inventing one now would be the same speculative move this trim is undoing.
+put outcome remain in the portable shapes. At this phase boundary, both
+existed for Disk's in-memory deletion fence and a second adapter was still
+needed to establish their shared meaning.
+
+**Resolved by Phase 5:** the SQLite contract preview supplies that second
+adapter and confirms that these outcomes are adapter-shaped. Disk keeps its
+process-local anti-resurrection fence and uses `authoritativeInsert` to lift
+it. SQLite deletion is final at transaction commit, permits immediate reuse of
+the primary key, and issues a fresh opaque revision so a token from the
+deleted row cannot win a later compare-and-swap (§12.9.2).
 
 The review also asked composition to move default-title allocation
 ("Untitled", "Untitled (1)", …) into `create`, which would have removed the
@@ -1961,10 +1975,11 @@ bearing: change-review records and Tasks are not history, whatever Disk's
 arrives, the group comes back — and `events` is where it was before, so
 nothing else has to move.
 
-### 12.5 Phase 4.5 — storage-owned layout moves inside the boundary — **implemented**
+### 12.5 Phase 4.5 — storage-owned layout moves inside the boundary — **merged**
 
-Phase 5 adds a second structured backend. Before it does, the layout knowledge
-that belongs to the _Disk_ backend has to stop living outside `storage/`.
+Phase 5 would introduce a second structured backend. Before that work, the
+layout knowledge that belongs to the _Disk_ backend had to stop living outside
+`storage/`.
 Otherwise every later backend inherits a module named `disk` as the ambient
 description of where Spaces are, and each one pays to migrate the same callers
 again.
@@ -2047,11 +2062,11 @@ substrate-specific but fails the test for the same reason — it exists so
 Windows can rename a Space _directory_ safely, and under SQLite there is no
 such rename.
 
-`naming.ts` is misfiled in a different way: pure string logic with no I/O,
-already re-exported rather than owned. It passes the test trivially (a second
-backend needs the identical rules) but has no business behind a `disk`
-segment. Phase 5 extracts it to `utils/naming.ts` as a side effect of needing
-it twice; that extraction belongs here, where it is the point.
+`naming.ts` was misfiled in a different way: pure string logic with no I/O,
+already re-exported rather than owned. It passed the test trivially (a second
+backend needs the identical rules) but had no business behind a `disk`
+segment. Phase 4.5 extracted it to `utils/naming.ts`, where the shared rule has
+a backend-neutral owner.
 
 Because the residue that survives the test is three setting helpers and
 `getWorkspacePath()` itself — none of it filesystem-specific — the target is a
@@ -2128,8 +2143,9 @@ boundary test; behavior parity is asserted by the existing Disk suites, which
 must pass unchanged — a diff that alters a Disk test's expectations is out of
 scope by definition.
 
-Phase 5 rebases onto this and drops its `utils/naming.ts` extraction, its
-`workspace/disk/naming.ts` shim, and the corresponding roadmap edits.
+Phase 5 builds on this merged result and carries none of its former
+`utils/naming.ts` extraction, `workspace/disk/naming.ts` shim, or parallel
+roadmap edits.
 
 **Landed for the Workspace-to-storage substrate move.** `modules/workspace/`
 is flat and holds `paths.ts` plus `migrations/`; the Disk record layout, blob
@@ -2477,14 +2493,15 @@ temporary Workspace through the production lifecycle — prepared Workspace,
 opened connections, `ensureWorld()` — rather than swapping in a stub. A stub
 proves the application talks to an interface; only a real backend proves one
 serves the product, which is the half that decides whether a second adapter
-works. `product-boundary.test.ts` runs the criterion against every profile in
-`PRODUCT_STORAGE_PROFILES`, naming no directory, filename, or `space.json`;
-Phase 5 adds one entry to that list and the same behaviours are covered for
-SQLite. A guard reads the suite's own source and rejects a directory, a
+works. `product-boundary.test.ts` runs the criterion against every selectable
+profile in `PRODUCT_STORAGE_PROFILES`, naming no directory, filename, or
+`space.json`. A guard reads the suite's own source and rejects a directory, a
 filename, or a `readFileSync` appearing in it, because the failure mode here
 is a helpful-looking assertion someone adds later. The records the suite reads
 back are built through the write engine, because a fixture that skips the
-engine asserts nothing about what the product actually stores.
+engine asserts nothing about what the product actually stores. The isolated
+Phase 5 adapter runs the lower-level portable contracts; it does not enter
+this product-profile harness until it becomes selectable.
 
 `closeStorage()` arrives with it, registered on graceful Server shutdown and
 used by the harness between profiles. On Disk it is close to a no-op — which
@@ -2502,21 +2519,82 @@ bundle export, external-note claim), RFS's sidecar-to-record mapping (**B**,
 deferred until a second backend has a file plane at all), and the ACP session
 path that leaves with the Agenetes `Namespace` change.
 
-Out of scope, unchanged: a SQLite adapter or schema, Disk→SQLite data
-migration, SQLite profile registration, Postgres/Azure, the portable
+Out of scope, unchanged: SQLite runtime composition and profile selection,
+Disk→SQLite data migration, Postgres/Azure, the portable
 change-notification capability, RFS's backend-neutral path vocabulary, ACP
 session relocation, the rest of the Agenetes persistence migration, the
 portable export format, a writable general-purpose virtual filesystem or OS
 mount, protocol or UI changes, and stronger crash/distributed transaction
 guarantees.
 
-### 12.9 Later phases — provisional
+### 12.9 Phase 5 — SQLite contract preview — **implemented**
 
-5. Add one new adapter at a time — SQLite, then Postgres, then Azure Blob —
-   running the same contract suites, migration fixtures, failure injection,
-   and concurrency tests against each. An adapter may exist for isolated
-   testing before its backend profile is selectable; profile validation keeps
-   rejecting it until the required capability matrix is satisfied.
+Phase 5 adds one non-Disk structured adapter to test whether the boundary
+survives a database implementation. It is an isolated implementation and test
+target, not a product profile. The composition root does not construct or
+export it, and `HUABU_STRUCTURED_BACKEND=sqlite` continues to fail during
+profile validation with a preview-specific diagnostic.
+
+#### 12.9.1 Scope and lifecycle
+
+- The adapter uses built-in `node:sqlite`, owns one explicit database filename
+  and connection, and adds no package or native-addon dependency.
+- Retained handles stay bound to that connection. `init`, `health`, and
+  `close` are real lifecycle operations; Workspace remounting and production
+  factory registration remain selectability work.
+- The current portable surface is implemented: Space listing/lifecycle and
+  `ensureWorld`, record read/write, node read/readMany/list/stream and
+  mutations, events, changes, Tasks/Runs including atomic completion, and the
+  extension substrate.
+- Postgres, Azure Blob, Disk-to-SQLite migration, RFS/file tools, external-note
+  watching, import/export, client/API changes, and product UI remain outside
+  this phase.
+
+#### 12.9.2 Schema and behavior
+
+Schema versioning uses `PRAGMA user_version`; migrations run transactionally,
+reject databases from the future, and create `STRICT` tables with foreign keys
+enabled. Version 1 stores Space records and World membership, complete node
+JSON with opaque revision tokens, ordered events, coalesced changes,
+Task/Run snapshots, extension namespaces, and the private delta journal.
+
+Every ordered Space write applies node mutations, record replacement, and the
+optional delta insert in one immediate transaction. Same-baseline writers have
+one winner. Space deletion uses the shared process-local admission coordinator
+under a database-specific scope: reads remain available, mutations reject,
+concurrent deletion sessions queue, and `finish()` removes all owned rows by
+foreign-key cascade. No SQL transaction remains open across blob cleanup, and
+no multi-process deletion fence is promised.
+
+SQLite does not emulate Disk's node tombstones. A committed delete immediately
+frees the `(canvas_id, node_id)` key. Every successful put receives a new UUID
+revision token, including a delete/recreate cycle, so a stale token from the
+old row cannot match the replacement. `write-suppressed` and
+`authoritativeInsert` remain valid adapter-specific parts of the common shape
+for Disk rather than requirements every SQL adapter must reproduce.
+
+The extension substrate returns the shared connection plus a stable,
+Space-owned namespace id. Owner tables can reference that id with
+`ON DELETE CASCADE`, preserving namespace isolation and cleanup without
+putting a generic key/value API in the storage port.
+
+#### 12.9.3 Proof
+
+The reusable structured contracts run against Disk and real temporary SQLite
+files. They cover fresh World bootstrap, store lifecycle, Space deletion
+admission, node CAS and read shapes, ordered transactional writes, event/change
+ordering, Task/Run completion, and extension isolation and cleanup. SQLite
+integration tests additionally cover strict schema creation, close/reopen
+persistence, an immutable v1 fixture, future-version rejection, migration
+rollback, SQL fault injection, foreign-key cascades, and revision safety across
+delete/recreate.
+
+The preview changes only the storage implementation, contracts, focused type
+narrowing for the new substrate union, and this documentation. Runtime
+composition and product capability owners remain unchanged.
+
+### 12.10 Later phases — provisional
+
 6. Migrate the currently synchronous Agenetes persistence ports without
    changing their persist-before-notify, sequence, and fencing semantics.
 7. Refactor RFS and built-in file tools only after a logical file-view contract
@@ -2730,18 +2808,19 @@ Before a new backend is production-ready:
   persistence ownership, namespace, sequence, and replay invariants.
 - [Agenetes-Agentlet Gateway Consolidation](./agenetes-agentlet-gateway-consolidation.md)
   — records removal of the old Agentlet SQLite session store; it must not be
-  confused with the proposed SQLite structured backend.
+  confused with the SQLite structured contract-preview backend.
 
 ## 17. Code entry points
 
 | File/dir                                                                                                                                     | Responsibility                                                                                                                                                                                                       |
 | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`apps/server/src/modules/storage/`](../../apps/server/src/modules/storage/)                                                                 | Ports, composition, adapters, compatibility, tests, and three forwarding shims — the canonical Phase-1–4 tree (§§12.1–12.4), guarded by `module-boundaries.test.ts`.                                                 |
+| [`apps/server/src/modules/storage/`](../../apps/server/src/modules/storage/)                                                                 | Ports, composition, adapters, compatibility, tests, and three forwarding shims — the canonical Phase-1–5 tree (§§12.1–12.9), guarded by `module-boundaries.test.ts`.                                                 |
 | [`apps/server/src/modules/storage/ports/`](../../apps/server/src/modules/storage/ports/)                                                     | The two ports; reusable suites live in `ports/contracts/`. `blob.ts` is normative (§7.1); `structured.ts` owns the Space collection and the per-Space handle: record read/write, nodes, changes, Tasks, and history. |
 | [`apps/server/src/modules/storage/storage.ts`](../../apps/server/src/modules/storage/storage.ts)                                             | Composition root: maps profiles to adapters, guards blob puts, and holds a lifecycle deletion session across the blob-first cleanup saga.                                                                            |
 | [`.../storage/backends/disk/legacy/canvas-store-cache.ts`](../../apps/server/src/modules/storage/backends/disk/legacy/canvas-store-cache.ts) | Bounded LRU of legacy Disk Space objects. The single owner both the adapter and the facade resolve through, and the real limit of `space(id)` identity (§12.2.4).                                                    |
 | [`apps/server/src/modules/storage/profile.ts`](../../apps/server/src/modules/storage/profile.ts)                                             | Two-axis backend selection from env, and the fail-fast validation hook for unsupported combinations.                                                                                                                 |
 | [`apps/server/src/modules/storage/backends/disk/`](../../apps/server/src/modules/storage/backends/disk/)                                     | Every Disk implementation: blob/structured stores, the Space collection, and the per-Space record, node, log, and Task adapters, in-process batch restoration, and the legacy class under `legacy/`.                 |
+| [`apps/server/src/modules/storage/backends/sqlite/`](../../apps/server/src/modules/storage/backends/sqlite/)                                 | Isolated `node:sqlite` structured adapter, strict schema and migrations, transaction-backed writes, and real-file contract/integration tests; available for proof but not runtime-selectable.                        |
 | [`.../storage/compatibility/canvas.ts`](../../apps/server/src/modules/storage/compatibility/canvas.ts)                                       | Residual Disk read surface plus direct-module lifecycle test fixtures; production structured mutations enumerated in §12.4 use the portable ports.                                                                   |
 | [`apps/server/src/modules/agent/memory/analyzer.ts`](../../apps/server/src/modules/agent/memory/analyzer.ts)                                 | P3 repository consumer for strict Space existence, bounded action events, and intent episodes; physical chat and memory files remain Disk-specific.                                                                  |
 | [`apps/server/src/modules/canvas/write-coordinator.ts`](../../apps/server/src/modules/canvas/write-coordinator.ts)                           | Canvas mutation coordinator and per-Space write lock, held across asynchronous node read, revision CAS, and put.                                                                                                     |

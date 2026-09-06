@@ -64,7 +64,16 @@ describe('validateStorageProfile', () => {
         structured: { kind: 'postgres' },
         blobs: { kind: 'disk' },
       }),
-    ).toThrow(/not implemented yet.*disk/s);
+    ).toThrow(/not implemented yet.*disk, sqlite/s);
+  });
+
+  it('rejects an available preview adapter that is not selectable', () => {
+    expect(() =>
+      validateStorageProfile({
+        structured: { kind: 'sqlite' },
+        blobs: { kind: 'disk' },
+      }),
+    ).toThrow(/preview adapter.*not selectable yet.*Selectable: disk/s);
   });
 
   it('rejects a known but unimplemented blob backend', () => {

@@ -52,6 +52,7 @@ import type {
   TaskStoreSnapshot,
 } from '@huabu/shared';
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
+import type { DatabaseSync } from 'node:sqlite';
 
 /**
  * Backends with a structured adapter today.
@@ -61,7 +62,7 @@ import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
  * that are configurable but unimplemented — belongs to `profile.ts`, which
  * owns rejecting them with an actionable message.
  */
-export type StructuredBackendKind = 'disk';
+export type StructuredBackendKind = 'disk' | 'sqlite';
 
 /** A connection to a structured backend. Process-wide; handles are derived. */
 export interface StructuredStore {
@@ -299,14 +300,23 @@ export interface SpaceHandle {
  *
  * One member per backend that exists, like {@link StructuredBackendKind} and
  * for the same reason: a union that named `sqlite` today would advertise a
- * substrate no adapter can supply. It grows with each adapter — a table prefix
- * for SQLite, a schema for Postgres — and an owner switches on `kind`.
+ * substrate no adapter can supply. It grows with each adapter — a scoped
+ * connection and parent id for SQLite, a schema for Postgres — and an owner
+ * switches on `kind`.
  */
-export type SpaceSubstrate = {
-  readonly kind: 'disk';
-  /** A directory reserved for this namespace, created and ready to write. */
-  readonly directory: string;
-};
+export type SpaceSubstrate =
+  | {
+      readonly kind: 'disk';
+      /** A directory reserved for this namespace, created and ready to write. */
+      readonly directory: string;
+    }
+  | {
+      readonly kind: 'sqlite';
+      /** The adapter connection on which the owner creates its own tables. */
+      readonly database: DatabaseSync;
+      /** Stable parent row for owner tables to reference with ON DELETE CASCADE. */
+      readonly extensionId: number;
+    };
 
 // ─── The ordered Space write ─────────────────────────────────────────────────
 
