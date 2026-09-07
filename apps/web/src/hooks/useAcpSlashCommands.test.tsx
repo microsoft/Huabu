@@ -79,6 +79,33 @@ describe('useAcpSlashCommands', () => {
     expect(container?.textContent).toBe('');
   });
 
+  it('falls back to an empty list when the response omits availableCommands', async () => {
+    // A live ACP session entry that hasn't populated `availableCommands` yet
+    // is serialized without the field entirely (JSON drops `undefined`),
+    // even though the response type declares it non-optional. Regression
+    // test for #164: this must not leave `commands` as `undefined`.
+    apiMocks.getCached.mockResolvedValue({
+      source: 'thread',
+      commandsUpdatedAt: 0,
+      sessionMeta: {
+        availableModes: [],
+        currentModeId: null,
+        availableModels: [],
+        currentModelId: null,
+        configOptions: [],
+        selections: {},
+        sessionInfo: null,
+        usage: null,
+        updatedAt: 0,
+      },
+    });
+
+    await renderHarness();
+
+    expect(apiMocks.getCached).toHaveBeenCalledOnce();
+    expect(container?.textContent).toBe('');
+  });
+
   it('refreshes the GET cache on later slash-menu intent', async () => {
     apiMocks.getCached
       .mockResolvedValueOnce({

@@ -70,7 +70,12 @@ export function useAcpSlashCommands({
         profileId,
       );
       if (!isCurrent()) return;
-      setCommands(response.availableCommands);
+      // `availableCommands` is dropped from the JSON body entirely when the
+      // server's live session entry hasn't populated it yet, so `response`
+      // can arrive without the field despite the response type saying
+      // otherwise. Falling back to `[]` keeps `commands` an array so every
+      // downstream `.length` read stays safe.
+      setCommands(response.availableCommands ?? []);
       setError(null);
       lastFetchedAtRef.current = Date.now();
     } catch (value) {
