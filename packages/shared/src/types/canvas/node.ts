@@ -148,6 +148,47 @@ export function isSkillFrame(label: unknown, labelSource: unknown): boolean {
   return classifySpaceInstructionFrame(label, labelSource) === 'skill';
 }
 
+interface AgentNodeCandidate {
+  readonly id: string;
+  readonly type?: unknown;
+  readonly data?: unknown;
+}
+
+interface EdgeCandidate {
+  readonly source: string;
+  readonly target: string;
+}
+
+/** Agent Nodes are Question Nodes that already own a durable thread identity. */
+export function isAgentNode(node: AgentNodeCandidate): boolean {
+  if (node.type !== 'question') return false;
+  if (!node.data || typeof node.data !== 'object') return false;
+  const threadId = (node.data as { threadId?: unknown }).threadId;
+  return typeof threadId === 'string' && threadId.length > 0;
+}
+
+/** Return valid Agent Nodes joined directly to a Frame, ignoring edge styling. */
+export function directAgentNodeIdsForFrame(
+  nodes: readonly AgentNodeCandidate[],
+  edges: readonly EdgeCandidate[],
+  frameId: string,
+): ReadonlySet<string> {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const agentNodeIds = new Set<string>();
+  for (const edge of edges) {
+    const otherId =
+      edge.source === frameId && edge.target !== frameId
+        ? edge.target
+        : edge.target === frameId && edge.source !== frameId
+          ? edge.source
+          : null;
+    if (!otherId) continue;
+    const node = nodeById.get(otherId);
+    if (node && isAgentNode(node)) agentNodeIds.add(otherId);
+  }
+  return agentNodeIds;
+}
+
 /** Font family logical names. CSS font stacks are resolved on the UI side. */
 export const NODE_FONT_FAMILIES = ['default', 'serif', 'mono', 'hand'] as const;
 export type NodeFontFamily = (typeof NODE_FONT_FAMILIES)[number];

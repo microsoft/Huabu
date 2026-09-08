@@ -207,7 +207,10 @@ describe('ExternalAgentRealizationService', () => {
       logger,
     });
 
-    expect(harness.collectSpacePrompt).toHaveBeenCalledWith('canvas-1');
+    expect(harness.collectSpacePrompt).toHaveBeenCalledWith(
+      'canvas-1',
+      selectableTarget.nodeId,
+    );
     expect(realized.spec.spec.initialPreamble).toEqual([
       'Huabu bootstrap',
       '<space_prompt>Space rules</space_prompt>',

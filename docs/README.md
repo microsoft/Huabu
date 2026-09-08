@@ -99,6 +99,7 @@ docs/
 | [multi-backend-storage.md](./proposals/multi-backend-storage.md)                                                     | Partly shipped | Phases 1–3: Blob, structured repositories, catalogue, and bounded reads.               |
 | [note-auto-height-stable-geometry.md](./proposals/note-auto-height-stable-geometry.md)                               | Proposed       | Revision-aware offscreen Note measurement and stable auto-height geometry.             |
 | [space-preview-and-world-redesign.md](./proposals/space-preview-and-world-redesign.md)                               | In-Progress    | View-only Space previews, a preview-based World, and deferred zoom-through navigation. |
+| [space-prompt-topology-scoping.md](./proposals/space-prompt-topology-scoping.md)                                     | Shipped        | Topology-derived global/direct-Agent targeting for Prompt Frames.                      |
 
 ### Shipped
 

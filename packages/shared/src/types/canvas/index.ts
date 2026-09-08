@@ -103,6 +103,8 @@ export {
   normalizeOrigin,
   classifySpaceInstructionFrameLabel,
   classifySpaceInstructionFrame,
+  isAgentNode,
+  directAgentNodeIdsForFrame,
   isPromptFrameLabel,
   isPromptFrame,
   isSkillFrameLabel,

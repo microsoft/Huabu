@@ -1448,6 +1448,7 @@ describe('POST /api/rfs/:canvasId/agent', () => {
       profileId: 'profile-child',
       parentConnection: 'connected',
     });
+    const invoke = vi.spyOn(agentThreadService, 'invoke');
 
     const app = await buildApp();
     try {
@@ -1488,6 +1489,7 @@ describe('POST /api/rfs/:canvasId/agent', () => {
           additionalInitialPreamble: 'Review the implementation.',
         },
       });
+      expect(invoke).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }
@@ -1635,6 +1637,13 @@ describe('POST /api/rfs/:canvasId/agent', () => {
           canvasId: 'c1',
           profileId: 'huabu',
         }),
+      );
+      expect(agentThreadService.invoke).toHaveBeenCalledOnce();
+      expect(
+        vi.mocked(agentNodeService.create).mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        vi.mocked(agentThreadService.invoke).mock.invocationCallOrder[0] ??
+          Infinity,
       );
     } finally {
       await app.close();

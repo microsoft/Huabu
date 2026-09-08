@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { classifySpaceInstructionFrame } from '@huabu/shared';
+import {
+  classifySpaceInstructionFrame,
+  directAgentNodeIdsForFrame,
+} from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { buildAgentNodeRef } from './node-ref.js';
@@ -303,18 +306,30 @@ function renderSpaceInstructionFrames(
   canvas: CanvasFile,
   records: ReadonlyMap<string, { readonly record: NodeContent }>,
   kind: SpaceInstructionFrameKind,
+  targetAgentNodeId?: string,
 ): RenderedSpacePrompt | null {
   const config = INSTRUCTION_FRAME_CONFIG[kind];
   const bundle = buildSpatialBundle(canvas);
+  const rawNodes = [...bundle.rawById.values()];
   const frames = bundle.spatialNodes
     .filter((node) => {
       const raw = bundle.rawById.get(node.id);
       const record = records.get(node.id)?.record;
-      return (
-        raw?.type === 'frame' &&
-        classifySpaceInstructionFrame(record?.label, record?.labelSource) ===
+      if (
+        raw?.type !== 'frame' ||
+        classifySpaceInstructionFrame(record?.label, record?.labelSource) !==
           kind
+      ) {
+        return false;
+      }
+      if (kind !== 'prompt') return true;
+      if (!targetAgentNodeId) return false;
+      const agentNodeIds = directAgentNodeIdsForFrame(
+        rawNodes,
+        bundle.rawEdges,
+        raw.id,
       );
+      return agentNodeIds.size === 0 || agentNodeIds.has(targetAgentNodeId);
     })
     .flatMap((node) => {
       const raw = bundle.rawById.get(node.id);
@@ -412,8 +427,14 @@ function renderSpaceInstructionFrames(
 export function renderSpacePrompt(
   canvas: CanvasFile,
   records: ReadonlyMap<string, { readonly record: NodeContent }>,
+  targetAgentNodeId: string,
 ): RenderedSpacePrompt | null {
-  return renderSpaceInstructionFrames(canvas, records, 'prompt');
+  return renderSpaceInstructionFrames(
+    canvas,
+    records,
+    'prompt',
+    targetAgentNodeId,
+  );
 }
 
 export function renderSpaceSkill(
@@ -426,13 +447,16 @@ export function renderSpaceSkill(
 async function resolveSpaceInstructionFrames(
   canvasId: string,
   kind: SpaceInstructionFrameKind,
+  targetAgentNodeId?: string,
 ): Promise<RenderedSpacePrompt | null> {
   const handle = space(canvasId);
   const canvas = await handle.read();
   if (!canvas) {
     throw new Error(`[space-${kind}] Space not found: ${canvasId}`);
   }
-  const rawNodes = (canvas.state.nodes ?? []) as CanvasNode[];
+  const canvasFile = canvas as CanvasFile;
+  const bundle = buildSpatialBundle(canvasFile);
+  const rawNodes = [...bundle.rawById.values()];
   const frameIds = rawNodes
     .filter((node) => node.type === 'frame')
     .map((node) => node.id);
@@ -449,24 +473,47 @@ async function resolveSpaceInstructionFrames(
     }),
   );
   if (matchingFrameIds.size === 0) return null;
+  const applicableFrameIds =
+    kind === 'prompt'
+      ? new Set(
+          [...matchingFrameIds].filter((frameId) => {
+            if (!targetAgentNodeId) return false;
+            const agentNodeIds = directAgentNodeIdsForFrame(
+              rawNodes,
+              bundle.rawEdges,
+              frameId,
+            );
+            return (
+              agentNodeIds.size === 0 || agentNodeIds.has(targetAgentNodeId)
+            );
+          }),
+        )
+      : matchingFrameIds;
+  if (applicableFrameIds.size === 0) return null;
 
   const childIds = rawNodes
     .filter(
       (node) =>
         typeof node.parentId === 'string' &&
-        matchingFrameIds.has(node.parentId) &&
+        applicableFrameIds.has(node.parentId) &&
         (node.type === 'text' || node.type === 'note'),
     )
     .map((node) => node.id);
   const childRecords = await handle.nodes.readMany(childIds);
   const records = new Map([...frameRecords, ...childRecords]);
-  return renderSpaceInstructionFrames(canvas as CanvasFile, records, kind);
+  return renderSpaceInstructionFrames(
+    canvasFile,
+    records,
+    kind,
+    targetAgentNodeId,
+  );
 }
 
 export function resolveSpacePrompt(
   canvasId: string,
+  targetAgentNodeId: string,
 ): Promise<RenderedSpacePrompt | null> {
-  return resolveSpaceInstructionFrames(canvasId, 'prompt');
+  return resolveSpaceInstructionFrames(canvasId, 'prompt', targetAgentNodeId);
 }
 
 export function resolveSpaceSkill(

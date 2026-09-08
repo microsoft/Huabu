@@ -13,6 +13,8 @@ These changes share one lifecycle problem. Huabu currently starts an ACP session
 
 The root problem is not Prompt Frame discovery and not ACP session creation itself. The system currently lets metadata discovery, live-session creation, mutable control state, and immutable workload realization overlap without one explicit ownership boundary.
 
+Issue [#166](https://github.com/microsoft/Huabu/issues/166) later extends Prompt selection with topology-derived global/local scope while preserving this proposal's first-explicit-interaction realization and immutable WorkloadSpec boundary; see [space-prompt-topology-scoping.md](./space-prompt-topology-scoping.md).
+
 ## Decision
 
 Huabu will separate capability discovery, workload realization, and live ACP session state.

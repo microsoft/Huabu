@@ -13,12 +13,15 @@ import {
 import type { CanvasFile, NodeContent } from '../storage/index.js';
 import type { NodeSnapshot } from '../storage/ports/structured.js';
 
-function canvas(nodes: CanvasFile['state']['nodes']): CanvasFile {
+function canvas(
+  nodes: CanvasFile['state']['nodes'],
+  edges: CanvasFile['state']['edges'] = [],
+): CanvasFile {
   return {
     canvasId: 'canvas-a',
     title: 'Canvas A',
     version: 2,
-    state: { nodes, edges: [] },
+    state: { nodes, edges },
     createdAt: 1,
     updatedAt: 2,
   } as CanvasFile;
@@ -120,6 +123,7 @@ describe('renderSpacePrompt', () => {
           content: 'Must not appear',
         },
       ]),
+      'agent-target',
     );
 
     expect(result?.markdown).toContain('User module');
@@ -191,7 +195,7 @@ describe('renderSpacePrompt', () => {
       ]);
 
       const skill = renderSpaceSkill(topology, snapshots);
-      const prompt = renderSpacePrompt(topology, snapshots);
+      const prompt = renderSpacePrompt(topology, snapshots, 'agent-target');
 
       expect(skill?.markdown).toContain('# Space-specific Skills');
       expect(skill?.markdown).toContain('Use primary sources.');
@@ -327,6 +331,7 @@ describe('renderSpacePrompt', () => {
           content: '',
         },
       ]),
+      'agent-target',
     );
 
     expect(result).not.toBeNull();
@@ -379,6 +384,7 @@ describe('renderSpacePrompt', () => {
           content: '🙂'.repeat(SPACE_PROMPT_NOTE_MAX_BYTES),
         },
       ]),
+      'agent-target',
     );
 
     if (!result) throw new Error('Expected a rendered Space Prompt');
@@ -436,6 +442,7 @@ describe('renderSpacePrompt', () => {
           content: 'This later instruction does not fit.',
         },
       ]),
+      'agent-target',
     );
 
     if (!result) throw new Error('Expected a rendered Space Prompt');
@@ -451,5 +458,180 @@ describe('renderSpacePrompt', () => {
     expect(result.diagnostics.omittedBudgetNodeIds).toEqual(['text-later']);
     expect(result.diagnostics.includedNodeIds).not.toContain('text-later');
     expect(result.diagnostics.truncated).toBe(true);
+  });
+
+  it('derives global and direct-Agent scope from current topology', () => {
+    const topology = canvas(
+      [
+        {
+          id: 'global-frame',
+          type: 'frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'local-frame',
+          type: 'frame',
+          position: { x: 0, y: 200 },
+          data: {},
+        },
+        {
+          id: 'global-text',
+          type: 'text',
+          parentId: 'global-frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'local-text',
+          type: 'text',
+          parentId: 'local-frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'agent-a',
+          type: 'question',
+          position: { x: 400, y: 0 },
+          data: { threadId: 'thread-a' },
+        },
+        {
+          id: 'agent-b',
+          type: 'question',
+          position: { x: 400, y: 200 },
+          data: { threadId: 'thread-b' },
+        },
+        {
+          id: 'draft-question',
+          type: 'question',
+          position: { x: 400, y: 400 },
+          data: {},
+        },
+      ],
+      [
+        {
+          id: 'edge-local',
+          source: 'agent-a',
+          target: 'local-frame',
+          data: {
+            edgeStyle: {
+              direction: 'backward',
+              lineStyle: 'dashed',
+              label: 'targets',
+            },
+          },
+        },
+        {
+          id: 'edge-draft',
+          source: 'global-frame',
+          target: 'draft-question',
+        },
+      ],
+    );
+    const snapshots = records([
+      {
+        nodeId: 'global-frame',
+        type: 'frame',
+        label: 'prompt: Global',
+        labelSource: 'user',
+        content: '',
+      },
+      {
+        nodeId: 'local-frame',
+        type: 'frame',
+        label: 'prompt: Local',
+        labelSource: 'user',
+        content: '',
+      },
+      {
+        nodeId: 'global-text',
+        type: 'text',
+        label: null,
+        content: 'Global instruction',
+      },
+      {
+        nodeId: 'local-text',
+        type: 'text',
+        label: null,
+        content: 'Local instruction',
+      },
+    ]);
+
+    const agentA = renderSpacePrompt(topology, snapshots, 'agent-a');
+    const agentB = renderSpacePrompt(topology, snapshots, 'agent-b');
+
+    expect(agentA?.markdown).toContain('Global instruction');
+    expect(agentA?.markdown).toContain('Local instruction');
+    expect(agentB?.markdown).toContain('Global instruction');
+    expect(agentB?.markdown).not.toContain('Local instruction');
+  });
+
+  it('does not traverse Agent or Frame connections', () => {
+    const topology = canvas(
+      [
+        {
+          id: 'frame',
+          type: 'frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'text',
+          type: 'text',
+          parentId: 'frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'agent-a',
+          type: 'question',
+          position: { x: 300, y: 0 },
+          data: { threadId: 'thread-a' },
+        },
+        {
+          id: 'agent-b',
+          type: 'question',
+          position: { x: 600, y: 0 },
+          data: { threadId: 'thread-b' },
+        },
+        {
+          id: 'container',
+          type: 'frame',
+          position: { x: 300, y: 300 },
+          data: {},
+        },
+        {
+          id: 'nested-agent',
+          type: 'question',
+          parentId: 'container',
+          position: { x: 0, y: 0 },
+          data: { threadId: 'thread-nested' },
+        },
+      ],
+      [
+        { id: 'edge-a', source: 'frame', target: 'agent-a' },
+        { id: 'edge-b', source: 'agent-a', target: 'agent-b' },
+        { id: 'edge-container', source: 'frame', target: 'container' },
+      ],
+    );
+    const snapshots = records([
+      {
+        nodeId: 'frame',
+        type: 'frame',
+        label: 'prompt',
+        labelSource: 'user',
+        content: '',
+      },
+      {
+        nodeId: 'text',
+        type: 'text',
+        label: null,
+        content: 'Direct only',
+      },
+    ]);
+
+    expect(renderSpacePrompt(topology, snapshots, 'agent-a')).not.toBeNull();
+    expect(renderSpacePrompt(topology, snapshots, 'agent-b')).toBeNull();
+    expect(renderSpacePrompt(topology, snapshots, 'nested-agent')).toBeNull();
   });
 });

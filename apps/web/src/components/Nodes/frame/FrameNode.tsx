@@ -11,6 +11,7 @@ import {
   FRAME_GRID_MAX_COUNT,
   FRAME_GRID_MIN_COUNT,
   classifySpaceInstructionFrame,
+  directAgentNodeIdsForFrame,
   type FrameLayoutMode,
 } from '@huabu/shared';
 import { clampGridCount } from '@huabu/shared/canvas-engine';
@@ -104,6 +105,15 @@ export const FrameNode = memo(
           node.parentId === id &&
           (node.type === 'image' || node.type === 'video'),
       ),
+    );
+    const instructionFrameKind = classifySpaceInstructionFrame(
+      data.label,
+      data.labelSource,
+    );
+    const directAgentCount = useCanvasStore((state) =>
+      instructionFrameKind === 'prompt'
+        ? directAgentNodeIdsForFrame(state.nodes, state.edges, id).size
+        : 0,
     );
 
     const layoutMode: FrameLayoutMode = data.layoutMode ?? 'free';
@@ -417,11 +427,6 @@ export const FrameNode = memo(
       const trimmed = raw.trim();
       return trimmed.length > 0 ? trimmed : t('layers.filterLabels.frame');
     }, [data.label, t]);
-    const instructionFrameKind = classifySpaceInstructionFrame(
-      data.label,
-      data.labelSource,
-    );
-
     const [isEditingLabel, setIsEditingLabel] = useState(false);
     const [draftLabel, setDraftLabel] = useState(label);
     const labelInputRef = useRef<HTMLInputElement>(null);
@@ -505,7 +510,10 @@ export const FrameNode = memo(
     const labelOverlay = (
       <div className="inline-flex max-w-full min-w-0 items-center gap-1">
         {instructionFrameKind ? (
-          <InstructionFrameBadge kind={instructionFrameKind} />
+          <InstructionFrameBadge
+            kind={instructionFrameKind}
+            directAgentCount={directAgentCount}
+          />
         ) : null}
         <div className="relative inline-grid min-w-0 flex-1 items-center">
           <span className="invisible col-start-1 row-start-1 min-w-0 truncate px-1.5 text-xs font-medium whitespace-pre">

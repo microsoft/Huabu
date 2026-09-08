@@ -245,7 +245,10 @@ export class ExternalAgentRealizationService {
     }
 
     const collected = agentTarget
-      ? await this.dependencies.collectSpacePrompt(agentTarget.canvasId)
+      ? await this.dependencies.collectSpacePrompt(
+          agentTarget.canvasId,
+          agentTarget.nodeId,
+        )
       : null;
     if (
       collected &&

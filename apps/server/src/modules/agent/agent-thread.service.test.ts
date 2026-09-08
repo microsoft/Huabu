@@ -386,7 +386,10 @@ describe('AgentThreadService', () => {
       // Drain the canonical invocation stream.
     }
 
-    expect(harness.collectSpacePrompt).toHaveBeenCalledWith('canvas-a');
+    expect(harness.collectSpacePrompt).toHaveBeenCalledWith(
+      'canvas-a',
+      SELECTABLE_TARGET.nodeId,
+    );
     expect(harness.runInternal).toHaveBeenCalledWith(
       expect.objectContaining({ spacePrompt: 'Space prompt' }),
     );

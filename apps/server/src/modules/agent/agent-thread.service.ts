@@ -55,7 +55,10 @@ interface AgentThreadServiceDependencies {
     canvasId: string,
     threadId: string,
   ) => { realised: boolean; markdown?: string };
-  collectSpacePrompt: (canvasId: string) => Promise<RenderedSpacePrompt | null>;
+  collectSpacePrompt: (
+    canvasId: string,
+    targetAgentNodeId: string,
+  ) => Promise<RenderedSpacePrompt | null>;
   realizeExternal: (
     options: RealizeExternalAgentThreadOptions,
   ) => Promise<RealizedExternalAgentThread>;
@@ -314,6 +317,7 @@ export class AgentThreadService {
         } else {
           const collected = await this.dependencies.collectSpacePrompt(
             options.canvasId,
+            agentTarget.nodeId,
           );
           spacePrompt = collected?.markdown;
           if (
