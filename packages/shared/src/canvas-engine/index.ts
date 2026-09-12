@@ -121,6 +121,8 @@ export {
   type HeightPolicy,
   HEIGHT_LAYOUT_VERSION,
   HEIGHT_QUANTIZATION_STEP,
+  NOTE_MIN_HEIGHT,
+  NOTE_TITLE_HEIGHT,
   NODE_SHELL_INSET,
   autoHeightKey,
   contentScaleFor,

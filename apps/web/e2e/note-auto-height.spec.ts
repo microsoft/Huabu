@@ -3,7 +3,12 @@
 
 import { test, expect, type Page } from '@playwright/test';
 
-import { openNewCanvas, paneCenter } from './helpers';
+import {
+  openNewCanvas,
+  paneCenter,
+  readViewportTransform,
+  scaleOf,
+} from './helpers';
 
 /**
  * The auto-height invariant, asserted in a real browser.
@@ -100,6 +105,43 @@ async function createAgentNote(
   ]);
 }
 
+async function zoomCanvasToAtMost(page: Page, target: number): Promise<number> {
+  const centre = await paneCenter(page);
+  await page.mouse.move(centre.x, centre.y);
+  await page.keyboard.down('Control');
+  try {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const zoom = scaleOf(await readViewportTransform(page));
+      if (zoom <= target) return zoom;
+      await page.mouse.wheel(0, 20);
+      await page.waitForTimeout(20);
+    }
+  } finally {
+    await page.keyboard.up('Control');
+  }
+  throw new Error(`canvas did not zoom out to ${target}`);
+}
+
+async function zoomCanvasToAtLeast(
+  page: Page,
+  target: number,
+): Promise<number> {
+  const centre = await paneCenter(page);
+  await page.mouse.move(centre.x, centre.y);
+  await page.keyboard.down('Control');
+  try {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const zoom = scaleOf(await readViewportTransform(page));
+      if (zoom >= target) return zoom;
+      await page.mouse.wheel(0, -20);
+      await page.waitForTimeout(20);
+    }
+  } finally {
+    await page.keyboard.up('Control');
+  }
+  throw new Error(`canvas did not zoom in to ${target}`);
+}
+
 /**
  * For every mounted note, how many pixels its content overflows the box
  * it was given. The reader mirrors `readNoteIntrinsicHeight`: measure
@@ -160,6 +202,142 @@ async function pasteAllFixtures(page: Page): Promise<string[]> {
 }
 
 test.describe('note auto height', () => {
+  test('the note title remains visible across widths and LOD levels', async ({
+    page,
+  }) => {
+    await openNewCanvas(page);
+    await executeAgentCommands(page, [
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            nodeType: 'note',
+            data: {
+              label: 'Narrow note title',
+              content:
+                '# Narrow note title\n\nBody content must not stand in for the node title.',
+            },
+            position: { x: 100, y: 100 },
+            size: { width: 300, height: 'auto' },
+          },
+          {
+            nodeType: 'note',
+            data: {
+              label: 'Wide note title',
+              content:
+                '# Wide note title\n\nDifferent body content makes the label observable.',
+            },
+            position: { x: 500, y: 100 },
+            size: { width: 400, height: 'auto' },
+          },
+        ],
+      },
+    ]);
+    await expect(page.locator('.react-flow__node-note')).toHaveCount(2);
+    await expect(
+      page.locator('[data-note-content-host] .ProseMirror'),
+    ).toHaveCount(2);
+
+    const narrow = page.locator('.react-flow__node-note').filter({
+      hasText: 'Body content must not stand in for the node title.',
+    });
+    const wide = page.locator('.react-flow__node-note').filter({
+      hasText: 'Different body content makes the label observable.',
+    });
+    await expect(narrow.locator('[data-note-title]')).toHaveText(
+      'Narrow note title',
+    );
+    await expect(wide.locator('[data-note-title]')).toHaveText(
+      'Wide note title',
+    );
+
+    const boundaryZoom = await zoomCanvasToAtMost(page, 0.44);
+    expect(boundaryZoom).toBeGreaterThanOrEqual(0.4);
+    await expect(narrow.locator('.semantic-lod-node')).toHaveAttribute(
+      'data-lod',
+      'minimal',
+    );
+    await expect(wide.locator('.semantic-lod-node')).toHaveAttribute(
+      'data-lod',
+      'full',
+    );
+    await expect(narrow.locator('.semantic-lod-placeholder')).toBeVisible();
+    await expect(narrow.locator('.semantic-lod-placeholder')).toContainText(
+      'Narrow note title',
+    );
+    await expect(wide.locator('[data-note-title]')).toBeVisible();
+
+    await zoomCanvasToAtMost(page, 0.32);
+    await expect(wide.locator('.semantic-lod-node')).toHaveAttribute(
+      'data-lod',
+      'minimal',
+    );
+    await expect(wide.locator('.semantic-lod-placeholder')).toBeVisible();
+    await expect(wide.locator('.semantic-lod-placeholder')).toContainText(
+      'Wide note title',
+    );
+
+    await zoomCanvasToAtLeast(page, 0.56);
+    await expect(narrow.locator('.semantic-lod-node')).toHaveAttribute(
+      'data-lod',
+      'full',
+    );
+    await expect(wide.locator('.semantic-lod-node')).toHaveAttribute(
+      'data-lod',
+      'full',
+    );
+    await expect(narrow.locator('[data-note-title]')).toBeVisible();
+    await expect(wide.locator('[data-note-title]')).toBeVisible();
+  });
+
+  test('a fixed-height note preserves its title before its body', async ({
+    page,
+  }) => {
+    await openNewCanvas(page);
+    const content = Array.from(
+      { length: 8 },
+      (_, index) => `Body paragraph ${index + 1} must be clipped first.`,
+    ).join('\n\n');
+    await executeAgentCommands(page, [
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            nodeType: 'note',
+            data: { label: 'Persistent title', content },
+            position: { x: 100, y: 100 },
+            size: { width: 400, height: 80 },
+          },
+        ],
+      },
+    ]);
+
+    const note = page.locator('.react-flow__node-note');
+    const title = note.locator('[data-note-title]');
+    const body = note.locator('[data-note-content-host]');
+    await expect(title).toBeVisible();
+    await expect(body.locator('.ProseMirror')).toHaveCount(1);
+
+    const geometry = await note.evaluate((element) => {
+      const titleElement = element.querySelector(
+        '[data-note-title]',
+      ) as HTMLElement;
+      const bodyElement = element.querySelector(
+        '[data-note-content-host]',
+      ) as HTMLElement;
+      const noteRect = element.getBoundingClientRect();
+      const titleRect = titleElement.getBoundingClientRect();
+      return {
+        titleInside:
+          titleRect.top >= noteRect.top && titleRect.bottom <= noteRect.bottom,
+        bodyTruncated: bodyElement.scrollHeight > bodyElement.clientHeight,
+      };
+    });
+
+    expect(geometry.titleInside).toBe(true);
+    expect(geometry.bodyTruncated).toBe(true);
+  });
+
   test('an agent-created long note replaces its initial height hint', async ({
     page,
   }) => {
@@ -258,6 +436,7 @@ test.describe('note auto height', () => {
       parseFloat((element as HTMLElement).style.height),
     );
 
+    await page.getByRole('button', { name: 'Expand', exact: true }).click();
     const editor = page.locator(
       '[data-search-scope="node"] .ProseMirror[contenteditable="true"]',
     );
@@ -269,7 +448,7 @@ test.describe('note auto height', () => {
         `Section ${index + 1}. This manually edited paragraph is long enough to wrap and must expand the mounted note.`,
     ).join('\n\n');
     await editor.fill(longContent);
-    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.getByRole('button', { name: /^Close (?!Chat$).+/ }).click();
 
     await expect
       .poll(() =>

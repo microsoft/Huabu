@@ -13,13 +13,13 @@ The governing rule is that **rendering never causes a geometry change**. Zoom, p
 
 ## 2. The three heights
 
-| Concept              | Definition                                                              | Where it lives                                             |
-| -------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------- |
-| **Intrinsic height** | Content height at the node type's reference width, unscaled, no chrome. | `data.autoHeight.intrinsicHeight` — the persisted truth.   |
-| **Layout height**    | The number every geometry consumer uses.                                | `style.height` — materialized from the intrinsic height.   |
-| **Rendered height**  | The DOM's actual box.                                                   | `measured.height`, a mirror; and the source of a proposal. |
+| Concept              | Definition                                                                                   | Where it lives                                             |
+| -------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| **Intrinsic height** | Markdown body height at the node type's reference width, unscaled, no title or shell chrome. | `data.autoHeight.intrinsicHeight` — the persisted truth.   |
+| **Layout height**    | The number every geometry consumer uses.                                                     | `style.height` — materialized from the intrinsic height.   |
+| **Rendered height**  | The DOM's actual box.                                                                        | `measured.height`, a mirror; and the source of a proposal. |
 
-Intrinsic → layout is one pure function, [`intrinsicToLayoutHeight`](../../packages/shared/src/canvas-engine/height/compute.ts): clamp to the type's minimum, scale by the node's width, add the node shell's chrome, quantize to a 4 px step. The order mirrors the DOM — the minimum applies unscaled, the chrome is outside the scaled container and so is added after.
+Intrinsic → layout is one pure function, [`intrinsicToLayoutHeight`](../../packages/shared/src/canvas-engine/height/compute.ts): clamp to the type's minimum, scale by the node's width, add fixed canvas-space chrome, then quantize to a 4 px step. For a note that chrome is the 32 px non-shrinking title row plus the 6 px node shell. The order mirrors the DOM — the minimum applies to the Markdown body, while the title and shell live outside its scaled container and are added afterward.
 
 The scale divides the node's **content** width, its box minus the shell border, so the logical layout width lands on `refWidth` exactly at every node size. That is the premise the whole hint cache rests on: content measured at one node width wraps identically at any other. A legibility floor on the scale would break it — once engaged, the content stops shrinking and starts laying out _narrower_ than the reference, so `note` deliberately has none. Semantic zoom already replaces a tiny note's body with a placeholder long before its text would become unreadable. `HeightPolicy.minContentScale` carries the floor for the `manual` types, whose box is the user's and whose scale is therefore purely a rendering decision.
 
@@ -115,7 +115,7 @@ Derived geometry is **not yet isolated from the sync path** — see §11.
 
 ## 10. The invariant, and how it is checked
 
-An auto note that does not fit its content is a defect report, not a cosmetic complaint: the box was derived from the measurement, so content that overflows means the two disagree. Truncation on a _pinned_ note is normal — the user chose a smaller box.
+An auto note that does not fit its content is a defect report, not a cosmetic complaint: the box was derived from the measurement, so content that overflows means the two disagree. Truncation on a _pinned_ note is normal — the user chose a smaller box. The title is never part of that sacrifice: the full card reserves its row first and gives the remaining height to the body, so body content clips before the label can disappear.
 
 Two layers assert it. [`useAutoHeightInvariant`](../../apps/web/src/components/Nodes/note/useAutoHeightInvariant.ts) warns in dev once the commit queue has settled, re-reading the DOM after a delay rather than firing on the first short-looking render. [`note-auto-height.spec.ts`](../../apps/web/e2e/note-auto-height.spec.ts) drives a real browser with fixtures chosen for the shapes that have broken it — a leading heading whose margin can escape the measured box, a heading mid-document whose margin cannot, wrapping prose, a list — and asserts both the geometry and that the dev hook stayed silent.
 

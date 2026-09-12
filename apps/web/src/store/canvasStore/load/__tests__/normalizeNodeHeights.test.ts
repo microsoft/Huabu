@@ -53,8 +53,8 @@ describe('normalizeNodeHeights', () => {
         },
       }),
     ]);
-    // 260 content, scaled by 394/400, plus 6px shell chrome, quantized.
-    expect((result.style as { height?: number }).height).toBe(264);
+    // 260 content, scaled by 394/400, plus title and shell chrome, quantized.
+    expect((result.style as { height?: number }).height).toBe(296);
   });
 
   it('never fabricates a hint, not even from the legacy measured height', () => {

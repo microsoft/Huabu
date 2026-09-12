@@ -29,7 +29,7 @@ import type { Node } from '@xyflow/react';
  * measurement rule itself. Every stored hint becomes `stale` on the next
  * load, which costs one re-measurement per node and nothing else.
  */
-export const HEIGHT_LAYOUT_VERSION = 4;
+export const HEIGHT_LAYOUT_VERSION = 5;
 
 /**
  * Identity of the thing an intrinsic height was measured against.

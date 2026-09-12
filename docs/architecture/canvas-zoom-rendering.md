@@ -16,6 +16,7 @@ The governing rule is semantic priority rather than uniform scaling: structural 
 | Surface                                  | Coordinate/scale policy                  | Visibility policy                                                      |
 | ---------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
 | Note, PDF, web node body                 | Canvas space                             | Switches between `full` and `minimal` LOD from screen-space width      |
+| Full note title                          | Canvas space                             | Always occupies a non-shrinking row while full LOD is visible          |
 | Other node bodies                        | Canvas space                             | Always full rendering unless explicitly added to the LOD configuration |
 | Minimal node label                       | Canvas-space tiered typography           | Wraps and clamps inside the node; naturally scales with the viewport   |
 | Frame body                               | Canvas space                             | Always full rendering                                                  |
@@ -29,7 +30,7 @@ The governing rule is semantic priority rather than uniform scaling: structural 
 
 [`SEMANTIC_ZOOM_CONFIG`](../../apps/web/src/config/semanticZoom.ts) opts `note`, `pdf`, and `web` into the two-level `full → minimal` pipeline. Unlisted node types remain `full` at every zoom. The `question` node deliberately does **not** use this binary boundary — it uses the continuous zoom takeover described in §3.1.
 
-Participating binary types render the generic tier-sized title label in `minimal`.
+Participating binary types render the generic tier-sized title label in `minimal`. A note also renders the same `data.label` in a fixed-height, non-shrinking title row in `full`, so crossing the LOD boundary never removes the node's identity; constrained full-detail notes clip their Markdown body first.
 
 PDF rendering has a second cost boundary in the expanded preview. The canvas node lazy-loads pdf.js only when it needs an uncached first-page thumbnail, while the expanded preview keeps a lightweight aspect-ratio placeholder for every page and mounts the expensive canvas and text layer only within one scroll viewport of the visible area. A six-page LRU retains recently visited renders to avoid churn during short reverse scrolls; older pages are unmounted so canvas memory remains bounded.
 

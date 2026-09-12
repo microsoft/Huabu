@@ -105,6 +105,17 @@ const MANUAL_POLICY: HeightPolicy = { kind: 'manual' };
 export const NODE_SHELL_INSET = 6;
 
 /**
+ * Fixed canvas-space height reserved for a note's identity row.
+ *
+ * The title lives outside the width-scaled Markdown body so it remains
+ * available before body content at every full-detail size.
+ */
+export const NOTE_TITLE_HEIGHT = 32;
+
+/** Smallest note box that can still contain its title and shell. */
+export const NOTE_MIN_HEIGHT = NOTE_TITLE_HEIGHT + NODE_SHELL_INSET;
+
+/**
  * Height policy per node type. Types absent from this table are `manual`.
  *
  * `refWidth` values match the creation defaults in
@@ -120,7 +131,7 @@ const HEIGHT_POLICIES: Readonly<Record<string, HeightPolicy>> = {
     kind: 'toggleable',
     refWidth: 400,
     minIntrinsicHeight: 50,
-    insetY: NODE_SHELL_INSET,
+    insetY: NODE_SHELL_INSET + NOTE_TITLE_HEIGHT,
   },
   text: { kind: 'content' },
   question: { kind: 'content' },
