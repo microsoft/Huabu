@@ -32,6 +32,7 @@ import {
   removeProfiles as removeLegacyAcpProfiles,
 } from './modules/agent/acp/profile-store.js';
 import agentRoutes from './modules/agent/agent.route.js';
+import agentChangeReviewConfigRoutes from './modules/agent/change-review-config.route.js';
 import llmRoutes from './modules/agent/llm.route.js';
 import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js';
 import skillsRoutes from './modules/agent/skills.route.js';
@@ -265,6 +266,9 @@ app.addHook('preHandler', async (request, reply) => {
 });
 
 app.register(agentRoutes, { prefix: '/api/agent' });
+app.register(agentChangeReviewConfigRoutes, {
+  prefix: '/api/agent-change-review',
+});
 app.register(canvasRoutes, { prefix: '/api/canvas' });
 app.register(externalNoteRoutes, { prefix: '/api/canvas' });
 app.register(syncRoutes, { prefix: '/api/canvas' });

@@ -141,10 +141,7 @@ generic operation — no per-command inverse logic:
   regenerating `label` / `summary`, a re-measure) therefore never falsely block
   revert. Structural (create/delete/connect/…) records are existence-based.
 
-Records are persisted per thread in a mutable sidecar
-(`<threadId>.changes.json`, coalesced on read) and reach the frontend two ways:
-`load()` on thread open, and `replaceFromBroadcast()` (the broadcast carries the
-thread's full coalesced list, so the client replaces rather than appends).
+Records are persisted per thread in a mutable sidecar (`<threadId>.changes.json`, coalesced on read) and reach the frontend two ways: `load()` on thread open, and `replaceFromBroadcast()` (the broadcast carries the thread's full coalesced list, so the client replaces rather than appends). The global Settings → General preference **Automatically accept Agent Space changes** suppresses computation and persistence of new records for successful Agent batches when enabled; existing records remain available, and Canvas delta broadcast and current-session undo snapshots are unchanged.
 
 The [ChangeReviewCard](../../apps/web/src/components/Panels/ChatPanel/ChangeReviewCard.tsx)
 above the chat input renders the thread's records with per-item and bulk
@@ -179,10 +176,7 @@ To attach a canvas change to the right conversation's card, the initiating
   header is distinct from the thread ID in `/agent/:threadId/prompt` (which continues an
   internal built-in-agent turn — a different thread space).
 
-`executeOnServer` computes review records only when `computeChanges` is set
-(i.e. thread-attributed batches), so untagged writers pay no cost. When a
-`threadId` is present the batch's records are folded into the thread's coalesced
-sidecar and that full list is broadcast as `changes`.
+`executeOnServer` computes review records only when `computeChanges` is set (i.e. thread-attributed batches) and the global Agent Change Review configuration does not auto-accept Agent writes, so untagged and auto-accepted writers pay no extraction cost. When a `threadId` is present and explicit review is enabled, the batch's records are folded into the thread's coalesced sidecar and that full list is broadcast as `changes`.
 
 ## Preprocessing cost dedup
 

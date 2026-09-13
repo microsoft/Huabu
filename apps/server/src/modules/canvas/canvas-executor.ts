@@ -63,6 +63,7 @@ import {
   assertWorldPortalResultAllowed,
 } from './world-portal-policy.js';
 import { getLogger } from '../../utils/logger.js';
+import { getAgentChangeReviewConfig } from '../agent/change-review-config.js';
 import {
   space,
   withCanvasMutex,
@@ -1035,8 +1036,14 @@ export async function executeOnServerAlreadyLocked(
 
   // Derive review records (ACP change cards) only when asked. Edge
   // endpoint labels are resolved against the post-state nodes.
+  const shouldComputeChanges =
+    input.computeChanges === true &&
+    !(
+      originator.source === 'agent' &&
+      getAgentChangeReviewConfig().autoAcceptSpaceChanges
+    );
   let changes: CanvasChangeRecord[] | undefined;
-  if (input.computeChanges) {
+  if (shouldComputeChanges) {
     const labelById = new Map<string, string>();
     for (const node of finalNodes) {
       const lbl = (node.data as Record<string, unknown> | undefined)?.['label'];

@@ -13,6 +13,8 @@ The owner may perform Settings, OAuth, credential, External Agent, and Agent Tea
 
 The connection token is a separate machine credential used by RFS and the embedded Agentlet transport. Its generation and injection are independent of browser owner authentication.
 
+The global Agent Change Review configuration follows the same owner boundary. `GET` and `PUT /api/agent-change-review/config` are available only to loopback or Basic-authenticated owner requests; possession of the RFS connection token does not authorize reading or changing the automatic-acceptance policy.
+
 ## Bind and authentication policy
 
 `HUABU_BIND_HOST` defaults to `127.0.0.1`. A non-loopback bind requires all of `HUABU_ALLOWED_HOSTS`, `HUABU_BASIC_AUTH_USER`, and `HUABU_BASIC_AUTH_PASS`; the server fails before listening when any requirement is missing. A partial Basic Auth pair also fails on loopback because silently disabling authentication is more dangerous than rejecting an invalid deployment.
@@ -44,6 +46,7 @@ Production HTTPS termination belongs to deployment infrastructure such as Caddy,
 | [`apps/server/src/modules/security/deployment-config.ts`](../../apps/server/src/modules/security/deployment-config.ts)                   | Resolve and fail closed on invalid bind, allowed-host, and Basic Auth combinations. |
 | [`apps/server/src/modules/security/owner.ts`](../../apps/server/src/modules/security/owner.ts)                                           | Recognize the loopback or Basic-authenticated single owner.                         |
 | [`apps/server/src/modules/security/deployment.route.ts`](../../apps/server/src/modules/security/deployment.route.ts)                     | Serve the redacted readiness model.                                                 |
+| [`apps/server/src/modules/agent/change-review-config.route.ts`](../../apps/server/src/modules/agent/change-review-config.route.ts)       | Enforce owner-only access to the global Agent Change Review configuration.          |
 | [`apps/server/src/app.ts`](../../apps/server/src/app.ts)                                                                                 | Apply Host, Origin, Basic Auth, and route composition.                              |
 | [`apps/web/vite.config.ts`](../../apps/web/vite.config.ts)                                                                               | Gate non-loopback development clients before assets and API proxying.               |
 | [`apps/web/src/components/Settings/DeploymentReadinessNotice.tsx`](../../apps/web/src/components/Settings/DeploymentReadinessNotice.tsx) | Explain readiness warnings in Settings.                                             |

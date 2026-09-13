@@ -130,6 +130,7 @@ export const routes = {
     const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
     return `/agent/context-tokens/${enc(threadId)}${params}`;
   },
+  agentChangeReviewConfig: '/agent-change-review/config',
 
   // ── ACP (external agent bridge) ───────────────────────────────────
   acpAgentCli: '/acp/agent-cli',
