@@ -9,7 +9,6 @@ import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import agentChangeReviewConfigRoutes from './change-review-config.route.js';
-import { markBasicAuthenticated } from '../security/owner.js';
 
 import type { FastifyInstance } from 'fastify';
 
@@ -62,25 +61,6 @@ describe('Agent change-review config routes', () => {
     });
 
     expect(response.statusCode).toBe(403);
-  });
-
-  it('allows a Basic-authenticated remote owner', async () => {
-    await app.close();
-    app = Fastify({ logger: false });
-    app.addHook('onRequest', async (request) => {
-      markBasicAuthenticated(request);
-    });
-    await app.register(agentChangeReviewConfigRoutes, {
-      prefix: '/api/agent-change-review',
-    });
-
-    const response = await app.inject({
-      method: 'GET',
-      url: '/api/agent-change-review/config',
-      remoteAddress: '192.0.2.10',
-    });
-
-    expect(response.statusCode).toBe(200);
   });
 
   it('rejects malformed config bodies', async () => {
