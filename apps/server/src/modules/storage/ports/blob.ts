@@ -34,7 +34,7 @@ import type { Readable } from 'node:stream';
  * structured backend is never asked to hold them — which is what lets a
  * deployment pair SQL records with ordinary files (proposal §6.2).
  */
-export type BlobBackendKind = 'disk';
+export type BlobBackendKind = 'disk' | 'azure';
 
 /**
  * Every area of one Space that holds bytes.

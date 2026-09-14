@@ -204,7 +204,7 @@ export function dumpAssembledPrompt(params: DumpPromptParams): void {
         if (!resolved.ok) throw resolved.error;
         const { substrate } = resolved;
         if (!substrate) return;
-        appendSubstrateLog(substrate, params.threadId, LOG_SUFFIX, block);
+        await appendSubstrateLog(substrate, params.threadId, LOG_SUFFIX, block);
       })
       .catch((err: unknown) => {
         params.logger.warn(

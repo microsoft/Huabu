@@ -56,6 +56,9 @@ jobs:
       - name: Unit tests
         run: pnpm -r --if-present --no-bail run test
 
+      - name: Storage backend contracts (PostgreSQL and Azurite)
+        run: pnpm run test:storage-backends
+
       - name: i18n parity
         run: pnpm run check:i18n
 

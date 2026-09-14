@@ -53,6 +53,7 @@ import type {
 } from '@huabu/shared';
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 import type { DatabaseSync } from 'node:sqlite';
+import type { Pool } from 'pg';
 
 /**
  * Backends with a structured adapter today.
@@ -62,7 +63,7 @@ import type { DatabaseSync } from 'node:sqlite';
  * that are configurable but unimplemented — belongs to `profile.ts`, which
  * owns rejecting them with an actionable message.
  */
-export type StructuredBackendKind = 'disk' | 'sqlite';
+export type StructuredBackendKind = 'disk' | 'sqlite' | 'postgres';
 
 /** A connection to a structured backend. Process-wide; handles are derived. */
 export interface StructuredStore {
@@ -305,6 +306,11 @@ export interface SpaceHandle {
  * switches on `kind`.
  */
 export type SpaceSubstrate =
+  | {
+      readonly kind: 'postgres';
+      readonly database: Pool;
+      readonly extensionId: number;
+    }
   | {
       readonly kind: 'disk';
       /** A directory reserved for this namespace, created and ready to write. */
